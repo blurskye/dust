@@ -1,0 +1,1765 @@
+# Every shipped logical key binding is declared here. Rust code implements commands,
+# never a second default key table.
+
+# Normal mode motions.
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "h"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "left"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "j"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "down"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "k"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "up"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "l"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "right"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "0"
+command = "input.zero"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "home"
+command = "input.motion"
+arguments = { motion = "line_start", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "^"
+command = "input.motion"
+arguments = { motion = "first_nonblank", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "$"
+command = "input.motion"
+arguments = { motion = "line_end", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "end"
+command = "input.motion"
+arguments = { motion = "line_end", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "w"
+command = "input.motion"
+arguments = { motion = "word_forward", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "W"
+command = "input.motion"
+arguments = { motion = "big_word_forward", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "b"
+command = "input.motion"
+arguments = { motion = "word_backward", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "B"
+command = "input.motion"
+arguments = { motion = "big_word_backward", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "e"
+command = "input.motion"
+arguments = { motion = "word_end", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "E"
+command = "input.motion"
+arguments = { motion = "big_word_end", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "%"
+command = "input.motion"
+arguments = { motion = "matching_pair", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "G"
+command = "input.motion"
+arguments = { motion = "document_end", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "g"
+command = "input.prefix.begin"
+
+# Counts and register/operator grammar.
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "1"
+command = "input.count"
+arguments = { digit = 1 }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "2"
+command = "input.count"
+arguments = { digit = 2 }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "3"
+command = "input.count"
+arguments = { digit = 3 }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "4"
+command = "input.count"
+arguments = { digit = 4 }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "5"
+command = "input.count"
+arguments = { digit = 5 }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "6"
+command = "input.count"
+arguments = { digit = 6 }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "7"
+command = "input.count"
+arguments = { digit = 7 }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "8"
+command = "input.count"
+arguments = { digit = 8 }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "9"
+command = "input.count"
+arguments = { digit = 9 }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "\""
+command = "input.register.begin"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "d"
+command = "input.operator.begin"
+arguments = { operator = "delete" }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "c"
+command = "input.operator.begin"
+arguments = { operator = "change" }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "y"
+command = "input.operator.begin"
+arguments = { operator = "yank" }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = ">"
+command = "input.operator.begin"
+arguments = { operator = "indent" }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "<"
+command = "input.operator.begin"
+arguments = { operator = "unindent" }
+
+# Normal-mode direct commands and transitions.
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "i"
+command = "mode.insert"
+arguments = { placement = "before" }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "I"
+command = "mode.insert"
+arguments = { placement = "line_start" }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "a"
+command = "mode.insert"
+arguments = { placement = "after" }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "A"
+command = "mode.insert"
+arguments = { placement = "line_end" }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "o"
+command = "mode.insert"
+arguments = { placement = "open_below" }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "O"
+command = "mode.insert"
+arguments = { placement = "open_above" }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "x"
+command = "edit.delete_char"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "delete"
+command = "edit.delete_char"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "X"
+command = "edit.delete_backward"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "s"
+command = "edit.substitute"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "S"
+command = "edit.operator"
+arguments = { operator = "change", motion = "line", linewise = true }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "r"
+command = "input.replace.begin"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "J"
+command = "edit.join_lines"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "~"
+command = "edit.toggle_case"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "p"
+command = "edit.put"
+arguments = { before = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "P"
+command = "edit.put"
+arguments = { before = true }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "u"
+command = "history.undo"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "ctrl-r"
+command = "history.redo"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "."
+command = "edit.repeat_last"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "v"
+command = "mode.visual_char"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "V"
+command = "mode.visual_line"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = ":"
+command = "command_line.open"
+arguments = { kind = "command" }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "/"
+command = "command_line.open"
+arguments = { kind = "search_forward" }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "?"
+command = "command_line.open"
+arguments = { kind = "search_backward" }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "n"
+command = "search.repeat"
+arguments = { reverse = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "N"
+command = "search.repeat"
+arguments = { reverse = true }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "*"
+command = "search.word"
+arguments = { forward = true }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "#"
+command = "search.word"
+arguments = { forward = false }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "q"
+command = "input.macro.record.toggle"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "@"
+command = "input.macro.replay.begin"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "ctrl-f"
+command = "view.scroll"
+arguments = { kind = "page_down" }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "ctrl-b"
+command = "view.scroll"
+arguments = { kind = "page_up" }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "ctrl-d"
+command = "view.scroll"
+arguments = { kind = "half_down" }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "ctrl-u"
+command = "view.scroll"
+arguments = { kind = "half_up" }
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "escape"
+command = "input.cancel"
+
+# Insert mode special keys. Ordinary committed characters use the configured text command.
+[[keymap]]
+context = "editor"
+mode = "insert"
+keys = "escape"
+command = "input.cancel"
+[[keymap]]
+context = "editor"
+mode = "insert"
+keys = "backspace"
+command = "edit.backspace"
+[[keymap]]
+context = "editor"
+mode = "insert"
+keys = "delete"
+command = "edit.delete_char"
+[[keymap]]
+context = "editor"
+mode = "insert"
+keys = "enter"
+command = "edit.insert_text"
+arguments = { text = "\n" }
+[[keymap]]
+context = "editor"
+mode = "insert"
+keys = "tab"
+command = "edit.insert_text"
+arguments = { text = "\t" }
+[[keymap]]
+context = "editor"
+mode = "insert"
+keys = "left"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "insert"
+keys = "right"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "insert"
+keys = "up"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "insert"
+keys = "down"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+
+# Operator-pending grammar.
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "escape"
+command = "input.cancel"
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "d"
+command = "input.operator.repeat"
+arguments = { operator = "delete" }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "c"
+command = "input.operator.repeat"
+arguments = { operator = "change" }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "y"
+command = "input.operator.repeat"
+arguments = { operator = "yank" }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = ">"
+command = "input.operator.repeat"
+arguments = { operator = "indent" }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "<"
+command = "input.operator.repeat"
+arguments = { operator = "unindent" }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "w"
+command = "input.motion"
+arguments = { motion = "word_forward", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "W"
+command = "input.motion"
+arguments = { motion = "big_word_forward", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "b"
+command = "input.motion"
+arguments = { motion = "word_backward", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "B"
+command = "input.motion"
+arguments = { motion = "big_word_backward", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "e"
+command = "input.motion"
+arguments = { motion = "word_end", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "E"
+command = "input.motion"
+arguments = { motion = "big_word_end", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "$"
+command = "input.motion"
+arguments = { motion = "line_end", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "h"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "l"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "g"
+command = "input.prefix.begin"
+
+# Visual contexts.
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "escape"
+command = "input.cancel"
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "v"
+command = "mode.normal"
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "d"
+command = "input.visual.operator"
+arguments = { operator = "delete", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "c"
+command = "input.visual.operator"
+arguments = { operator = "change", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "y"
+command = "input.visual.operator"
+arguments = { operator = "yank", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "escape"
+command = "input.cancel"
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "V"
+command = "mode.normal"
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "d"
+command = "input.visual.operator"
+arguments = { operator = "delete", linewise = true }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "c"
+command = "input.visual.operator"
+arguments = { operator = "change", linewise = true }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "y"
+command = "input.visual.operator"
+arguments = { operator = "yank", linewise = true }
+
+# Shared visual motions.
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "h"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "j"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "k"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "l"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "h"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "j"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "k"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "l"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+
+# Prefix and pending-character contexts.
+[[keymap]]
+context = "prefix"
+keys = "g"
+command = "input.motion"
+arguments = { motion = "document_start", linewise = false }
+[[keymap]]
+context = "prefix"
+keys = "escape"
+command = "input.cancel"
+[[keymap]]
+context = "register"
+keys = "escape"
+command = "input.cancel"
+[[keymap]]
+context = "replace"
+keys = "escape"
+command = "input.cancel"
+[[keymap]]
+context = "macro_record"
+keys = "escape"
+command = "input.cancel"
+[[keymap]]
+context = "macro_replay"
+keys = "escape"
+command = "input.cancel"
+
+# Dashboard.
+[[keymap]]
+context = "dashboard"
+keys = ":"
+command = "command_line.open"
+arguments = { kind = "command" }
+[[keymap]]
+context = "dashboard"
+keys = "/"
+command = "command_line.open"
+arguments = { kind = "search_forward" }
+[[keymap]]
+context = "dashboard"
+keys = "?"
+command = "command_line.open"
+arguments = { kind = "search_backward" }
+[[keymap]]
+context = "dashboard"
+keys = "q"
+command = "editor.quit"
+arguments = { force = false }
+[[keymap]]
+context = "dashboard"
+keys = "n"
+command = "file.new"
+[[keymap]]
+context = "dashboard"
+keys = "e"
+command = "workspace.file.find"
+
+# Command/search prompt controls.
+[[keymap]]
+context = "command_prompt"
+keys = "escape"
+command = "command_line.cancel"
+[[keymap]]
+context = "command_prompt"
+keys = "enter"
+command = "command_line.submit"
+[[keymap]]
+context = "command_prompt"
+keys = "backspace"
+command = "command_line.backspace"
+[[keymap]]
+context = "command_prompt"
+keys = "left"
+command = "command_line.move_left"
+[[keymap]]
+context = "command_prompt"
+keys = "right"
+command = "command_line.move_right"
+[[keymap]]
+context = "command_prompt"
+keys = "home"
+command = "command_line.move_home"
+[[keymap]]
+context = "command_prompt"
+keys = "end"
+command = "command_line.move_end"
+[[keymap]]
+context = "command_prompt"
+keys = "up"
+command = "command_line.history.previous"
+[[keymap]]
+context = "command_prompt"
+keys = "down"
+command = "command_line.history.next"
+[[keymap]]
+context = "command_prompt"
+keys = "tab"
+command = "command_line.complete.next"
+[[keymap]]
+context = "command_prompt"
+keys = "shift-tab"
+command = "command_line.complete.previous"
+
+[[keymap]]
+context = "search_prompt"
+keys = "escape"
+command = "command_line.cancel"
+[[keymap]]
+context = "search_prompt"
+keys = "enter"
+command = "command_line.submit"
+[[keymap]]
+context = "search_prompt"
+keys = "backspace"
+command = "command_line.backspace"
+[[keymap]]
+context = "search_prompt"
+keys = "left"
+command = "command_line.move_left"
+[[keymap]]
+context = "search_prompt"
+keys = "right"
+command = "command_line.move_right"
+[[keymap]]
+context = "search_prompt"
+keys = "home"
+command = "command_line.move_home"
+[[keymap]]
+context = "search_prompt"
+keys = "end"
+command = "command_line.move_end"
+[[keymap]]
+context = "search_prompt"
+keys = "up"
+command = "command_line.history.previous"
+[[keymap]]
+context = "search_prompt"
+keys = "down"
+command = "command_line.history.next"
+
+# Explorer controls.
+[[keymap]]
+context = "explorer"
+keys = "escape"
+command = "explorer.close"
+[[keymap]]
+context = "explorer"
+keys = "j"
+command = "explorer.next"
+[[keymap]]
+context = "explorer"
+keys = "k"
+command = "explorer.previous"
+[[keymap]]
+context = "explorer"
+keys = "h"
+command = "explorer.parent"
+[[keymap]]
+context = "explorer"
+keys = "l"
+command = "explorer.toggle"
+[[keymap]]
+context = "explorer"
+keys = "enter"
+command = "explorer.file.open"
+[[keymap]]
+context = "explorer"
+keys = "s"
+command = "explorer.file.split_open"
+[[keymap]]
+context = "explorer"
+keys = "r"
+command = "explorer.refresh"
+[[keymap]]
+context = "explorer"
+keys = "."
+command = "explorer.hidden.toggle"
+[[keymap]]
+context = "explorer"
+keys = "i"
+command = "explorer.ignored.toggle"
+[[keymap]]
+context = "explorer_mouse"
+keys = "mouse-left-down"
+command = "explorer.mouse.select"
+
+# Trust confirmation is sensitivity-aware: no history or completion bindings.
+[[keymap]]
+context = "workspace_trust_prompt"
+keys = "escape"
+command = "command_line.cancel"
+[[keymap]]
+context = "workspace_trust_prompt"
+keys = "enter"
+command = "command_line.submit"
+[[keymap]]
+context = "workspace_trust_prompt"
+keys = "backspace"
+command = "command_line.backspace"
+[[keymap]]
+context = "workspace_trust_prompt"
+keys = "left"
+command = "command_line.move_left"
+[[keymap]]
+context = "workspace_trust_prompt"
+keys = "right"
+command = "command_line.move_right"
+[[keymap]]
+context = "workspace_trust_prompt"
+keys = "home"
+command = "command_line.move_home"
+[[keymap]]
+context = "workspace_trust_prompt"
+keys = "end"
+command = "command_line.move_end"
+
+# Operator-pending counts and explicit register selection remain configurable.
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "0"
+command = "input.zero"
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "1"
+command = "input.count"
+arguments = { digit = 1 }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "2"
+command = "input.count"
+arguments = { digit = 2 }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "3"
+command = "input.count"
+arguments = { digit = 3 }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "4"
+command = "input.count"
+arguments = { digit = 4 }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "5"
+command = "input.count"
+arguments = { digit = 5 }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "6"
+command = "input.count"
+arguments = { digit = 6 }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "7"
+command = "input.count"
+arguments = { digit = 7 }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "8"
+command = "input.count"
+arguments = { digit = 8 }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "9"
+command = "input.count"
+arguments = { digit = 9 }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "\""
+command = "input.register.begin"
+
+# Focus and mouse are independent configurable event contexts.
+[[keymap]]
+context = "focus"
+keys = "focus-lost"
+command = "input.mapping.cancel"
+
+# Configured motion coverage shared by Visual modes.
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "left"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "right"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "up"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "down"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "home"
+command = "input.motion"
+arguments = { motion = "line_start", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "^"
+command = "input.motion"
+arguments = { motion = "first_nonblank", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "$"
+command = "input.motion"
+arguments = { motion = "line_end", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "end"
+command = "input.motion"
+arguments = { motion = "line_end", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "w"
+command = "input.motion"
+arguments = { motion = "word_forward", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "W"
+command = "input.motion"
+arguments = { motion = "big_word_forward", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "b"
+command = "input.motion"
+arguments = { motion = "word_backward", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "B"
+command = "input.motion"
+arguments = { motion = "big_word_backward", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "e"
+command = "input.motion"
+arguments = { motion = "word_end", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "E"
+command = "input.motion"
+arguments = { motion = "big_word_end", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "%"
+command = "input.motion"
+arguments = { motion = "matching_pair", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "left"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "right"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "up"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "down"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "home"
+command = "input.motion"
+arguments = { motion = "line_start", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "^"
+command = "input.motion"
+arguments = { motion = "first_nonblank", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "$"
+command = "input.motion"
+arguments = { motion = "line_end", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "end"
+command = "input.motion"
+arguments = { motion = "line_end", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "w"
+command = "input.motion"
+arguments = { motion = "word_forward", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "W"
+command = "input.motion"
+arguments = { motion = "big_word_forward", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "b"
+command = "input.motion"
+arguments = { motion = "word_backward", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "B"
+command = "input.motion"
+arguments = { motion = "big_word_backward", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "e"
+command = "input.motion"
+arguments = { motion = "word_end", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "E"
+command = "input.motion"
+arguments = { motion = "big_word_end", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "%"
+command = "input.motion"
+arguments = { motion = "matching_pair", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "left"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "right"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "up"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "down"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "home"
+command = "input.motion"
+arguments = { motion = "line_start", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "^"
+command = "input.motion"
+arguments = { motion = "first_nonblank", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "end"
+command = "input.motion"
+arguments = { motion = "line_end", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "operator_pending"
+keys = "%"
+command = "input.motion"
+arguments = { motion = "matching_pair", linewise = false }
+
+# Mouse gestures are normalized and resolved like logical keyboard events.
+[[keymap]]
+context = "editor_mouse"
+keys = "mouse-scroll-up"
+command = "view.scroll"
+arguments = { kind = "half_up", at_mouse = true }
+
+[[keymap]]
+context = "editor_mouse"
+keys = "mouse-scroll-down"
+command = "view.scroll"
+arguments = { kind = "half_down", at_mouse = true }
+
+[[keymap]]
+context = "editor_mouse"
+keys = "mouse-left-down"
+command = "view.cursor.place_mouse"
+
+[[keymap]]
+context = "editor_mouse"
+keys = "mouse-left-drag"
+command = "view.selection.extend_mouse"
+
+# Replace mode and blockwise Visual are real editing modes. Their defaults use
+# the same declarative compiler as every other context.
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "R"
+command = "mode.replace"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "ctrl-v"
+command = "mode.visual_block"
+
+[[keymap]]
+context = "editor"
+mode = "replace"
+keys = "escape"
+command = "input.cancel"
+[[keymap]]
+context = "editor"
+mode = "replace"
+keys = "backspace"
+command = "edit.replace_backspace"
+[[keymap]]
+context = "editor"
+mode = "replace"
+keys = "enter"
+command = "edit.replace_text"
+arguments = { text = "\n" }
+[[keymap]]
+context = "editor"
+mode = "replace"
+keys = "left"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "replace"
+keys = "right"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "replace"
+keys = "up"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "replace"
+keys = "down"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+
+[[keymap]]
+context = "editor"
+mode = "visual_block"
+keys = "escape"
+command = "input.cancel"
+[[keymap]]
+context = "editor"
+mode = "visual_block"
+keys = "ctrl-v"
+command = "mode.normal"
+[[keymap]]
+context = "editor"
+mode = "visual_block"
+keys = "d"
+command = "input.visual.operator"
+arguments = { operator = "delete", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_block"
+keys = "c"
+command = "input.visual.operator"
+arguments = { operator = "change", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_block"
+keys = "y"
+command = "input.visual.operator"
+arguments = { operator = "yank", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_block"
+keys = "h"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_block"
+keys = "j"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_block"
+keys = "k"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_block"
+keys = "l"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_block"
+keys = "left"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_block"
+keys = "down"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_block"
+keys = "up"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+context = "editor"
+mode = "visual_block"
+keys = "right"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+
+# Pane and tab layout commands.
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "ctrl-w s"
+command = "pane.split.vertical"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "ctrl-w v"
+command = "pane.split.horizontal"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "ctrl-w q"
+command = "pane.close"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "ctrl-w w"
+command = "pane.focus.next"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "ctrl-w W"
+command = "pane.focus.previous"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "g t"
+command = "tab.next"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "g T"
+command = "tab.previous"
+
+[[keymap]]
+context = "dashboard"
+keys = "r"
+command = "recovery.inspect"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "ctrl-w +"
+command = "pane.resize.grow"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "ctrl-w _"
+command = "pane.resize.shrink"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "] b"
+command = "buffer.next"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "[ b"
+command = "buffer.previous"
+
+# Focused terminal input remains typed and configurable.
+[[keymap]]
+context = "terminal"
+keys = "escape"
+command = "terminal.unfocus"
+[[keymap]]
+context = "terminal"
+keys = "enter"
+command = "terminal.send"
+arguments = { text = "\r" }
+[[keymap]]
+context = "terminal"
+keys = "tab"
+command = "terminal.send"
+arguments = { text = "\t" }
+[[keymap]]
+context = "terminal"
+keys = "backspace"
+command = "terminal.send"
+arguments = { text = "\u007f" }
+[[keymap]]
+context = "terminal"
+keys = "up"
+command = "terminal.send"
+arguments = { text = "\u001b[A" }
+[[keymap]]
+context = "terminal"
+keys = "down"
+command = "terminal.send"
+arguments = { text = "\u001b[B" }
+[[keymap]]
+context = "terminal"
+keys = "right"
+command = "terminal.send"
+arguments = { text = "\u001b[C" }
+[[keymap]]
+context = "terminal"
+keys = "left"
+command = "terminal.send"
+arguments = { text = "\u001b[D" }
+[[keymap]]
+context = "terminal"
+keys = "ctrl-c"
+command = "terminal.send"
+arguments = { text = "\u0003" }
+[[keymap]]
+context = "terminal"
+keys = "ctrl-d"
+command = "terminal.send"
+arguments = { text = "\u0004" }
+[[keymap]]
+context = "terminal"
+keys = "ctrl-z"
+command = "terminal.send"
+arguments = { text = "\u001a" }
+
+[[keymap]]
+context = "tool_manager"
+keys = "j"
+command = "tools.menu.next"
+
+[[keymap]]
+context = "tool_manager"
+keys = "down"
+command = "tools.menu.next"
+
+[[keymap]]
+context = "tool_manager"
+keys = "k"
+command = "tools.menu.previous"
+
+[[keymap]]
+context = "tool_manager"
+keys = "up"
+command = "tools.menu.previous"
+
+[[keymap]]
+context = "tool_manager"
+keys = "tab"
+command = "tools.category.next"
+
+[[keymap]]
+context = "tool_manager"
+keys = "shift-tab"
+command = "tools.category.previous"
+
+[[keymap]]
+context = "tool_manager"
+keys = "enter"
+command = "tools.activate"
+
+[[keymap]]
+context = "tool_manager"
+keys = "r"
+command = "tools.refresh"
+
+[[keymap]]
+context = "tool_manager"
+keys = "escape"
+command = "tools.menu.close"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "K"
+command = "lsp.hover"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "space d s"
+command = "dap.session.start"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "space d c"
+command = "dap.session.continue"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "space d n"
+command = "dap.session.next"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "space d i"
+command = "dap.session.step_in"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "space d o"
+command = "dap.session.step_out"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "space d q"
+command = "dap.session.stop"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "g d"
+command = "lsp.definition"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "g D"
+command = "lsp.declaration"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "g r"
+command = "lsp.references"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "space l f"
+command = "lsp.format"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "space l a"
+command = "lsp.code_action"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "space l s"
+command = "lsp.document_symbols"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "ctrl-space"
+command = "lsp.completion.trigger"
+
+[[keymap]]
+context = "completion"
+keys = "tab"
+command = "completion.select_next"
+
+[[keymap]]
+context = "completion"
+keys = "down"
+command = "completion.select_next"
+
+[[keymap]]
+context = "completion"
+keys = "shift-tab"
+command = "completion.select_previous"
+
+[[keymap]]
+context = "completion"
+keys = "up"
+command = "completion.select_previous"
+
+[[keymap]]
+context = "completion"
+keys = "enter"
+command = "completion.accept"
+
+[[keymap]]
+context = "completion"
+keys = "escape"
+command = "completion.cancel"
+
+[[keymap]]
+context = "completion"
+keys = "backspace"
+command = "edit.backspace"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "] d"
+command = "diagnostic.next"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "[ d"
+command = "diagnostic.previous"
+
+[[keymap]]
+context = "editor"
+mode = "insert"
+keys = "ctrl-space"
+command = "lsp.completion.trigger"
+
+[[keymap]]
+context = "picker"
+keys = "j"
+command = "picker.next"
+
+[[keymap]]
+context = "picker"
+keys = "down"
+command = "picker.next"
+
+[[keymap]]
+context = "picker"
+keys = "k"
+command = "picker.previous"
+
+[[keymap]]
+context = "picker"
+keys = "up"
+command = "picker.previous"
+
+[[keymap]]
+context = "picker"
+keys = "enter"
+command = "picker.accept"
+
+[[keymap]]
+context = "picker"
+keys = "escape"
+command = "picker.cancel"
+
+[[keymap]]
+context = "picker"
+keys = "backspace"
+command = "picker.backspace"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "space f b"
+command = "buffer.picker.open"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "space f c"
+command = "command_palette.open"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "space f g"
+command = "workspace.search.prompt"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "space f r"
+command = "workspace.replace.prompt"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "space w r"
+command = "workspace.root.list"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "space f e"
+command = "explorer.open"
+
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "space x x"
+command = "diagnostic.open"
+
+[[keymap]]
+context = "workspace_edit"
+keys = "j"
+command = "picker.next"
+
+[[keymap]]
+context = "workspace_edit"
+keys = "down"
+command = "picker.next"
+
+[[keymap]]
+context = "workspace_edit"
+keys = "k"
+command = "picker.previous"
+
+[[keymap]]
+context = "workspace_edit"
+keys = "up"
+command = "picker.previous"
+
+[[keymap]]
+context = "workspace_edit"
+keys = "space"
+command = "workspace.edit.toggle"
+
+[[keymap]]
+context = "workspace_edit"
+keys = "enter"
+command = "workspace.edit.accept"
+
+[[keymap]]
+context = "workspace_edit"
+keys = "escape"
+command = "workspace.edit.reject"

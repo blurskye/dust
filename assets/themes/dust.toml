@@ -1,0 +1,76 @@
+name = "dust"
+
+[styles.default]
+foreground = "reset"
+background = "reset"
+attributes = []
+
+[styles.muted]
+foreground = "dark_grey"
+background = "reset"
+attributes = []
+
+[styles.accent]
+foreground = "cyan"
+background = "reset"
+attributes = ["bold"]
+
+[styles.status]
+foreground = "grey"
+background = "dark_grey"
+attributes = []
+
+[styles.status_accent]
+foreground = "black"
+background = "cyan"
+attributes = ["bold"]
+
+[styles.selection]
+foreground = "white"
+background = "dark_blue"
+attributes = []
+
+[styles.search]
+foreground = "black"
+background = "yellow"
+attributes = []
+
+[styles.error]
+foreground = "red"
+background = "reset"
+attributes = ["bold"]
+
+[styles.border]
+foreground = "cyan"
+background = "reset"
+attributes = []
+
+[styles.syntax_comment]
+foreground = "dark_grey"
+background = "reset"
+attributes = ["italic"]
+
+[styles.syntax_string]
+foreground = "green"
+background = "reset"
+attributes = []
+
+[styles.syntax_number]
+foreground = "magenta"
+background = "reset"
+attributes = []
+
+[styles.syntax_keyword]
+foreground = "blue"
+background = "reset"
+attributes = ["bold"]
+
+[styles.syntax_type]
+foreground = "cyan"
+background = "reset"
+attributes = []
+
+[styles.syntax_variable]
+foreground = "reset"
+background = "reset"
+attributes = []

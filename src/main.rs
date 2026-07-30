@@ -1,0 +1,389 @@
+#![forbid(unsafe_code)]
+
+use crossterm::{
+    cursor::Show,
+    execute,
+    terminal::{LeaveAlternateScreen, disable_raw_mode},
+};
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
+
+use clap::Parser;
+use dust::application::{resolve_startup, run_interactive};
+use dust::configuration::{load_bundled_config, load_user_config};
+
+#[derive(Debug, Parser)]
+#[command(name = "dust", version, about = "Dust modal terminal IDE")]
+struct Cli {
+    /// Files or one directory to open.
+    #[arg(value_name = "PATH")]
+    paths: Vec<PathBuf>,
+
+    /// Print the resolved startup surface/root without starting a UI.
+    #[arg(long)]
+    print_startup: bool,
+
+    /// Ignore user configuration and use compiled defaults.
+    #[arg(long)]
+    clean: bool,
+
+    /// Disable plugins, project execution, and session restoration.
+    #[arg(long)]
+    safe_mode: bool,
+
+    /// Validate configuration and exit without opening the terminal UI.
+    #[arg(long)]
+    check_config: bool,
+
+    /// Print bounded runtime and state-directory health information.
+    #[arg(long)]
+    health: bool,
+
+    /// Print version, toolchain target, and enabled runtime features.
+    #[arg(long)]
+    verbose_version: bool,
+
+    /// Print the machine-readable public API/schema manifest.
+    #[arg(long)]
+    api_manifest: bool,
+
+    /// Audit source-owned architecture and ambient-authority rules.
+    #[arg(long)]
+    architecture_check: bool,
+
+    /// Generate a canonical release manifest for a built binary.
+    #[arg(long, value_name = "BINARY")]
+    release_manifest: Option<PathBuf>,
+
+    /// Build a deterministic Linux tar archive for a built binary.
+    #[arg(long, value_name = "BINARY")]
+    release_archive: Option<PathBuf>,
+
+    /// Check a saved API manifest against this build.
+    #[arg(long, value_name = "MANIFEST")]
+    check_api_compatibility: Option<PathBuf>,
+
+    /// Atomically install or update this Dust binary under --install-prefix.
+    #[arg(long, value_name = "BINARY", requires = "install_prefix")]
+    install_binary: Option<PathBuf>,
+    #[arg(long, value_name = "DIR")]
+    install_prefix: Option<PathBuf>,
+    #[arg(long, value_name = "SHA256", requires = "install_binary")]
+    install_sha256: Option<String>,
+    #[arg(long, requires = "install_prefix")]
+    rollback_install: bool,
+    #[arg(long, requires = "install_prefix")]
+    uninstall: bool,
+
+    /// Output path for generated metadata.
+    #[arg(long, value_name = "PATH")]
+    output: Option<PathBuf>,
+
+    /// Preview migration of a configuration TOML file.
+    #[arg(long, value_name = "PATH")]
+    migrate_config: Option<PathBuf>,
+
+    /// Atomically apply --migrate-config instead of printing it.
+    #[arg(long, requires = "migrate_config")]
+    apply_migration: bool,
+
+    /// Verify a package lock and content-addressed store.
+    #[arg(long, value_name = "LOCK")]
+    verify_package_lock: Option<PathBuf>,
+
+    /// Content-addressed package store used with --verify-package-lock.
+    #[arg(long, value_name = "DIR", requires = "verify_package_lock")]
+    package_store: Option<PathBuf>,
+
+    /// Package manager state root for transactional package operations.
+    #[arg(long, value_name = "DIR")]
+    package_root: Option<PathBuf>,
+    /// Install a verified local component described by this JSON manifest.
+    #[arg(long, value_name = "MANIFEST", requires = "package_root")]
+    package_install: Option<PathBuf>,
+    /// Component bytes for --package-install.
+    #[arg(long, value_name = "COMPONENT", requires = "package_install")]
+    package_component: Option<PathBuf>,
+    /// Remove a package from the active lock.
+    #[arg(long, value_name = "NAME", requires = "package_root")]
+    package_remove: Option<String>,
+    /// Restore the previous package lock.
+    #[arg(long, requires = "package_root")]
+    package_rollback: bool,
+    /// Print the active package lock.
+    #[arg(long, requires = "package_root")]
+    package_list: bool,
+}
+
+fn main() -> ExitCode {
+    install_crash_hook();
+    match run(Cli::parse()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("dust: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    if cli.architecture_check {
+        let audit = dust::architecture::audit_source(Path::new(env!("CARGO_MANIFEST_DIR")))?;
+        println!("{}", serde_json::to_string_pretty(&audit)?);
+        return Ok(());
+    }
+    if let Some(path) = &cli.check_api_compatibility {
+        let report = dust::api::check_compatibility(path, 1024 * 1024)?;
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        if !report.compatible {
+            return Err("API manifest is incompatible".into());
+        }
+        return Ok(());
+    }
+    if let Some(binary) = &cli.release_archive {
+        let output = cli
+            .output
+            .as_ref()
+            .ok_or("--output is required with --release-archive")?;
+        let archive = dust::release::write_deterministic_archive(
+            binary,
+            Path::new(env!("CARGO_MANIFEST_DIR")),
+            output,
+        )?;
+        println!("{}", serde_json::to_string_pretty(&archive)?);
+        return Ok(());
+    }
+    if let Some(prefix) = &cli.install_prefix {
+        if let Some(binary) = &cli.install_binary {
+            let target =
+                dust::release::install_binary(binary, prefix, cli.install_sha256.as_deref())?;
+            println!("installed {}", target.display());
+            return Ok(());
+        }
+        if cli.rollback_install {
+            let target = dust::release::rollback_install(prefix)?;
+            println!("restored {}", target.display());
+            return Ok(());
+        }
+        if cli.uninstall {
+            dust::release::uninstall(prefix)?;
+            println!("uninstalled Dust from {}", prefix.display());
+            return Ok(());
+        }
+    }
+    if let Some(root) = &cli.package_root {
+        let manager =
+            dust::packages::PackageManager::new(root.clone(), 16 * 1024 * 1024, 64 * 1024 * 1024)?;
+        if let Some(path) = &cli.package_install {
+            let source = fs::read(path)?;
+            if source.len() > 1024 * 1024 {
+                return Err("package manifest exceeds ceiling".into());
+            }
+            let manifest: dust::packages::PackageManifest = serde_json::from_slice(&source)?;
+            let component_path = cli
+                .package_component
+                .as_ref()
+                .ok_or("--package-component is required")?;
+            if fs::metadata(component_path)?.len() > 64 * 1024 * 1024 {
+                return Err("package component exceeds ceiling".into());
+            }
+            let component = fs::read(component_path)?;
+            let _ = (manifest, component);
+            return Err("headless local package installation cannot prove persistent runtime activation; use the trusted in-app package.install workflow".into());
+        }
+        if let Some(name) = &cli.package_remove {
+            let lock = manager.remove(name)?;
+            println!("removed {name}; {} package(s) remain", lock.packages.len());
+            return Ok(());
+        }
+        if cli.package_rollback {
+            let lock = manager.rollback()?;
+            println!("restored {} package(s)", lock.packages.len());
+            return Ok(());
+        }
+        if cli.package_list {
+            println!("{}", serde_json::to_string_pretty(&manager.read_lock()?)?);
+            return Ok(());
+        }
+    }
+    if let Some(lock) = &cli.verify_package_lock {
+        let store = cli
+            .package_store
+            .as_ref()
+            .ok_or("--package-store is required")?;
+        let count = dust::packages::verify_lock_store(lock, store, 16 * 1024 * 1024)?;
+        println!("verified {count} package(s)");
+        return Ok(());
+    }
+    if let Some(path) = &cli.migrate_config {
+        let metadata = fs::metadata(path)?;
+        if metadata.len() > 16 * 1024 * 1024 {
+            return Err("configuration exceeds migration ceiling".into());
+        }
+        let source = fs::read_to_string(path)?;
+        let (migrated, changed) = dust::configuration::migrate_config_source(&source)
+            .map_err(|error| format!("migration failed: {error}"))?;
+        if cli.apply_migration && changed {
+            let temp = path.with_extension(format!("migrate.{}.tmp", std::process::id()));
+            let mut options = fs::OpenOptions::new();
+            options.create_new(true).write(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = options.open(&temp)?;
+            file.write_all(migrated.as_bytes())?;
+            file.sync_all()?;
+            fs::rename(temp, path)?;
+        } else {
+            print!("{migrated}");
+        }
+        return Ok(());
+    }
+    if cli.api_manifest {
+        println!("{}", serde_json::to_string_pretty(&dust::api::manifest()?)?);
+        return Ok(());
+    }
+    if let Some(binary) = &cli.release_manifest {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let manifest = dust::release::build(binary, root)?;
+        if let Some(output) = &cli.output {
+            dust::release::write_canonical(output, &manifest)?;
+        } else {
+            println!("{}", serde_json::to_string_pretty(&manifest)?);
+        }
+        return Ok(());
+    }
+    if cli.verbose_version {
+        println!(
+            "dust {} {}-{} component-model=true",
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        );
+        return Ok(());
+    }
+    let config = if cli.clean {
+        load_bundled_config()
+    } else {
+        load_user_config()
+    };
+    if cli.check_config {
+        dust::application::validate_loaded_configuration(config.clone())?;
+        println!("configuration valid");
+        return Ok(());
+    }
+    if cli.health {
+        let state = dust::configuration::user_state_directory();
+        let mut snapshot = dust::observability::HealthSnapshot {
+            config_degraded: config.diagnostic.is_some(),
+            ..Default::default()
+        };
+        snapshot.safe_mode =
+            cli.safe_mode || previous_crash_count(&state.join("last-crash.json")) >= 2;
+        snapshot
+            .notes
+            .push(format!("state_directory={}", state.display()));
+        snapshot
+            .notes
+            .push(format!("state_directory_present={}", state.is_dir()));
+        snapshot.notes.push(format!(
+            "previous_crash={}",
+            state.join("last-crash.json").is_file()
+        ));
+        println!("{}", serde_json::to_string_pretty(&snapshot)?);
+        return Ok(());
+    }
+    let current_directory = std::env::current_dir()?;
+    let startup = resolve_startup(&cli.paths, &current_directory)?;
+    if cli.print_startup {
+        println!("{}", startup.describe());
+        return Ok(());
+    }
+    let safe_mode = cli.safe_mode
+        || previous_crash_count(
+            &dust::configuration::user_state_directory().join("last-crash.json"),
+        ) >= 2;
+    run_interactive(startup, config, safe_mode)?;
+    Ok(())
+}
+
+fn previous_crash_count(path: &Path) -> u64 {
+    let Ok(metadata) = fs::metadata(path) else {
+        return 0;
+    };
+    if metadata.len() > 1024 * 1024 {
+        return 0;
+    }
+    let Ok(bytes) = fs::read(path) else { return 0 };
+    serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .and_then(|value| value.get("crash_count").and_then(serde_json::Value::as_u64))
+        .unwrap_or(1)
+}
+
+fn install_crash_hook() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = disable_raw_mode();
+        let _ = execute!(std::io::stderr(), LeaveAlternateScreen, Show);
+        let state = dust::configuration::user_state_directory();
+        let _ = fs::create_dir_all(&state);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&state, fs::Permissions::from_mode(0o700));
+        }
+        let target = state.join("last-crash.json");
+        let temp = state.join(format!(".crash-{}.tmp", std::process::id()));
+        let location = info
+            .location()
+            .map(|location| {
+                format!(
+                    "{}:{}:{}",
+                    location.file(),
+                    location.line(),
+                    location.column()
+                )
+            })
+            .unwrap_or_else(|| "unknown".into());
+        let crash_count = previous_crash_count(&target)
+            .saturating_add(1)
+            .min(1_000_000);
+        let live_path = state.join("live-health.json");
+        let live_state = fs::symlink_metadata(&live_path)
+            .ok()
+            .filter(|metadata| {
+                metadata.file_type().is_file()
+                    && !metadata.file_type().is_symlink()
+                    && metadata.len() <= 64 * 1024
+            })
+            .and_then(|_| fs::read(&live_path).ok())
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+        let bytes=serde_json::to_vec(&serde_json::json!({"version":env!("CARGO_PKG_VERSION"),"platform":format!("{}-{}",std::env::consts::OS,std::env::consts::ARCH),"location":location,"crash_count":crash_count,"pid":std::process::id(),"live_state":live_state})).unwrap_or_default();
+        let mut options = fs::OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        if let Ok(mut file) = options.open(&temp) {
+            if file
+                .write_all(&bytes)
+                .and_then(|()| file.sync_all())
+                .is_ok()
+            {
+                let _ = fs::rename(&temp, &target);
+            } else {
+                let _ = fs::remove_file(&temp);
+            }
+        }
+        previous(info);
+    }));
+}

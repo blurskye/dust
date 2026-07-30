@@ -1,0 +1,38 @@
+name: signed-linux-release
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  build-sign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --locked
+      - name: Build deterministic tar.zst
+        run: |
+          target/release/dust --release-archive "$PWD/target/release/dust" \
+            --output "$PWD/target/dust-linux-x86_64.tar.zst" \
+            > "$PWD/target/dust-linux-x86_64.archive.json"
+          sha256sum target/dust-linux-x86_64.tar.zst > target/dust-linux-x86_64.tar.zst.sha256
+      - uses: sigstore/cosign-installer@v3
+      - name: Keyless sign archive
+        run: |
+          cosign sign-blob --yes \
+            --bundle target/dust-linux-x86_64.tar.zst.sigstore.json \
+            target/dust-linux-x86_64.tar.zst
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dust-linux-x86_64-signed
+          if-no-files-found: error
+          path: |
+            target/dust-linux-x86_64.tar.zst
+            target/dust-linux-x86_64.tar.zst.sha256
+            target/dust-linux-x86_64.tar.zst.sigstore.json
+            target/dust-linux-x86_64.archive.json
+# Promotion to https://dust.blurskye.dev/ is intentionally a separate,
+# credentialed release-operator step. This workflow does not claim publication.

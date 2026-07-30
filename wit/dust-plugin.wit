@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0
+// Public plugin ABI; see LICENSES/Apache-2.0.txt.
+package dust:plugin@0.1.0;
+
+interface host {
+  record snapshot { buffer: u64, revision: u64, utf8: string }
+  record edit { start: u64, end: u64, replacement: string }
+  current-buffer: func() -> result<snapshot, string>;
+  propose-edits: func(buffer: u64, revision: u64, edits: list<edit>) -> result<u64, string>;
+  show-message: func(message: string) -> result<_, string>;
+  config-get: func(key: string) -> option<string>;
+}
+
+world editor-plugin {
+  import host;
+  export activate: func() -> result<list<string>, string>;
+  export execute-command: func(command: string, arguments: list<string>) -> result<string, string>;
+}

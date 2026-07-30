@@ -1,0 +1,42 @@
+show_identity = true
+show_version = true
+show_path = true
+identity = "D U S T"
+version_format = "v{version}"
+resize_message = "Dust — resize terminal"
+unbound_label = "unbound"
+key_format = "[{key}]"
+content_width = 70
+minimum_width = 20
+minimum_height = 7
+block_height = 9
+identity_row = 0
+version_row = 1
+path_row = 3
+actions_row = 5
+action_key_width = 12
+action_left_offset = 2
+compact_left = 1
+compact_top = 1
+
+[[action]]
+command = "command_line.open"
+label = "Command"
+arguments = { kind = "command" }
+
+[[action]]
+command = "workspace.file.find"
+label = "Open file"
+
+[[action]]
+command = "file.new"
+label = "New buffer"
+
+[[action]]
+command = "editor.quit"
+label = "Quit"
+arguments = { force = false }
+
+[[action]]
+command = "recovery.inspect"
+label = "Recovery"

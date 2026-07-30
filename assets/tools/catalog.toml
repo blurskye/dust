@@ -1,0 +1,103 @@
+[[tool]]
+id = "rust-analyzer"
+name = "rust-analyzer"
+kind = "lsp"
+languages = ["rust"]
+executable = "rust-analyzer"
+install_program = "rustup"
+install_args = ["component", "add", "rust-analyzer"]
+
+[[tool]]
+id = "typescript-language-server"
+name = "typescript-language-server"
+kind = "lsp"
+languages = ["typescript", "typescriptreact", "javascript", "javascriptreact"]
+executable = "typescript-language-server"
+launch_args = ["--stdio"]
+install_program = "npm"
+install_args = ["install", "--global", "typescript@5.9.3", "typescript-language-server@4.3.4"]
+
+[[tool]]
+id = "pyright"
+name = "pyright"
+kind = "lsp"
+languages = ["python"]
+executable = "pyright-langserver"
+launch_args = ["--stdio"]
+install_program = "npm"
+install_args = ["install", "--global", "pyright@1.1.407"]
+
+[[tool]]
+id = "clangd"
+name = "clangd"
+kind = "lsp"
+languages = ["c", "cpp"]
+executable = "clangd"
+
+[[tool]]
+id = "gopls"
+name = "gopls"
+kind = "lsp"
+languages = ["go"]
+executable = "gopls"
+install_program = "go"
+install_args = ["install", "golang.org/x/tools/gopls@v0.20.0"]
+
+[[tool]]
+id = "debugpy"
+name = "debugpy"
+kind = "dap"
+languages = ["python"]
+executable = "debugpy-adapter"
+install_program = "python3"
+install_args = ["-m", "pip", "install", "--user", "debugpy==1.8.17"]
+
+[[tool]]
+id = "lldb-dap"
+name = "lldb-dap"
+kind = "dap"
+languages = ["rust", "c", "cpp"]
+executable = "lldb-dap"
+
+[[tool]]
+id = "js-debug-adapter"
+name = "JavaScript Debug Adapter"
+kind = "dap"
+languages = ["typescript", "typescriptreact", "javascript", "javascriptreact"]
+executable = "js-debug-adapter"
+
+[[tool]]
+id = "rustfmt"
+name = "rustfmt"
+kind = "formatter"
+languages = ["rust"]
+executable = "rustfmt"
+install_program = "rustup"
+install_args = ["component", "add", "rustfmt"]
+
+[[tool]]
+id = "prettier"
+name = "prettier"
+kind = "formatter"
+languages = ["typescript", "typescriptreact", "javascript", "javascriptreact", "json", "css", "html"]
+executable = "prettier"
+install_program = "npm"
+install_args = ["install", "--global", "prettier@3.6.2"]
+
+[[tool]]
+id = "black"
+name = "black"
+kind = "formatter"
+languages = ["python"]
+executable = "black"
+install_program = "python3"
+install_args = ["-m", "pip", "install", "--user", "black==25.1.0"]
+
+[[tool]]
+id = "clippy"
+name = "clippy"
+kind = "linter"
+languages = ["rust"]
+executable = "cargo-clippy"
+install_program = "rustup"
+install_args = ["component", "add", "clippy"]
