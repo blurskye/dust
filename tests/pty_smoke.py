@@ -316,6 +316,35 @@ def main() -> None:
         assert "explorer pty content" in split_screen
         assert_restored(output)
 
+    # Directional focus crosses the persistent explorer/editor boundary using
+    # the terminal's real Ctrl-h/Ctrl-l bytes, not synthetic command calls.
+    with tempfile.TemporaryDirectory() as directory:
+        target = pathlib.Path(directory) / "focus.txt"
+        target.write_text("directional focus\n", encoding="utf-8")
+        code, output, snapshots = run(
+            binary,
+            directory,
+            [str(target)],
+            [
+                (0.7, b":explore\r", None),
+                (0.7, b"", None),
+                (0.1, b"\x0c", None),  # Ctrl-l: explorer -> editor
+                (0.3, b"", None),
+                (0.1, b"\x08", None),  # Ctrl-h: leftmost editor -> explorer
+                (0.3, b"", None),
+                (0.1, b"\x1b", None),
+                (0.2, b":q\r", None),
+            ],
+        )
+        assert code == 0
+        focused_explorer = terminal_screen(snapshots[1]).splitlines()[1]
+        focused_editor = terminal_screen(snapshots[3]).splitlines()[1]
+        refocused_explorer = terminal_screen(snapshots[5]).splitlines()[1]
+        assert focused_explorer.lstrip().startswith(">")
+        assert not focused_editor.lstrip().startswith(">")
+        assert refocused_explorer.lstrip().startswith(">")
+        assert_restored(output)
+
     if shutil.which("rust-analyzer"):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "main.rs"

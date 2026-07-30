@@ -9,6 +9,7 @@ A bounded asynchronous worker atomically maintains user-only `live-health.json` 
 ## Essential controls
 
 - File explorer: normal-mode `Space f e` or `:explore`. It opens as a persistent left-hand tree dock and reflows the editor instead of covering it. The workspace root expands automatically; `Enter`/`s` open files while keeping the dock visible and return focus to the editor. Run `:explore` again to focus it. Use `j/k`, `h/l`, `Enter`, `s`, `r`, `.`, `i`, and `Esc`.
+- Surface focus: `Ctrl-h/j/k/l` moves spatially among editor splits in Normal and Visual modes. `Ctrl-h` from a leftmost editor pane enters the visible explorer; `Ctrl-l` returns to the editor. Directional focus does not wrap, and Insert-mode control characters are unchanged.
 - Workspace trust: run `:trust`, type `trust this workspace` exactly in the confirmation prompt, and press Enter. Trust is identity-bound and persisted; adding or replacing roots revokes it.
 - Rust LSP: after trust, run `:lsp`, select `rust-analyzer`, and press Enter, or run `:lsp.server.start`. The status line shows `LSP rust-analyzer` while selected; `:lsp.server.status` and `:lspsessions` provide details.
 - Command palette: normal-mode `Space f c` or `:commands`.

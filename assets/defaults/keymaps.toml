@@ -1351,6 +1351,104 @@ keys = "right"
 command = "input.motion"
 arguments = { motion = "right", linewise = false }
 
+# Spatial focus uses the same Ctrl-h/j/k/l model across editor and explorer surfaces.
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "ctrl-h"
+command = "surface.focus.left"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "ctrl-j"
+command = "surface.focus.down"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "ctrl-k"
+command = "surface.focus.up"
+[[keymap]]
+context = "editor"
+mode = "normal"
+keys = "ctrl-l"
+command = "surface.focus.right"
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "ctrl-h"
+command = "surface.focus.left"
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "ctrl-j"
+command = "surface.focus.down"
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "ctrl-k"
+command = "surface.focus.up"
+[[keymap]]
+context = "editor"
+mode = "visual_char"
+keys = "ctrl-l"
+command = "surface.focus.right"
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "ctrl-h"
+command = "surface.focus.left"
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "ctrl-j"
+command = "surface.focus.down"
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "ctrl-k"
+command = "surface.focus.up"
+[[keymap]]
+context = "editor"
+mode = "visual_line"
+keys = "ctrl-l"
+command = "surface.focus.right"
+[[keymap]]
+context = "editor"
+mode = "visual_block"
+keys = "ctrl-h"
+command = "surface.focus.left"
+[[keymap]]
+context = "editor"
+mode = "visual_block"
+keys = "ctrl-j"
+command = "surface.focus.down"
+[[keymap]]
+context = "editor"
+mode = "visual_block"
+keys = "ctrl-k"
+command = "surface.focus.up"
+[[keymap]]
+context = "editor"
+mode = "visual_block"
+keys = "ctrl-l"
+command = "surface.focus.right"
+[[keymap]]
+context = "explorer"
+keys = "ctrl-h"
+command = "surface.focus.left"
+[[keymap]]
+context = "explorer"
+keys = "ctrl-j"
+command = "surface.focus.down"
+[[keymap]]
+context = "explorer"
+keys = "ctrl-k"
+command = "surface.focus.up"
+[[keymap]]
+context = "explorer"
+keys = "ctrl-l"
+command = "surface.focus.right"
+
 # Pane and tab layout commands.
 [[keymap]]
 context = "editor"

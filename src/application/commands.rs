@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::editing::{
     ArgumentSchema, ArgumentType, CommandError, CommandOutcome, CommandRegistry, CommandSpec,
-    CommandValue, ContextRequirement,
+    CommandValue, ContextRequirement, FocusDirection,
 };
 use crate::{input::GrammarInput, terminal_ui::PromptKind};
 
@@ -51,6 +51,7 @@ pub enum AppEffect {
     PlaceMouseCursor,
     ExtendMouseSelection,
     Layout(LayoutAction),
+    SurfaceFocus(FocusDirection),
     RepeatLast,
     MacroRecordStart(char),
     MacroRecordStop,
@@ -1845,6 +1846,37 @@ pub fn register_app_commands(
         ArgumentSchema::default(),
         |_| AppEffect::ExtendMouseSelection,
     )?;
+    for (id, title, direction) in [
+        (
+            "surface.focus.left",
+            "Focus surface to the left",
+            FocusDirection::Left,
+        ),
+        (
+            "surface.focus.down",
+            "Focus surface below",
+            FocusDirection::Down,
+        ),
+        (
+            "surface.focus.up",
+            "Focus surface above",
+            FocusDirection::Up,
+        ),
+        (
+            "surface.focus.right",
+            "Focus surface to the right",
+            FocusDirection::Right,
+        ),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::Application,
+            ArgumentSchema::default(),
+            move |_| AppEffect::SurfaceFocus(direction),
+        )?;
+    }
     for (id, title, action) in [
         (
             "pane.split.horizontal",

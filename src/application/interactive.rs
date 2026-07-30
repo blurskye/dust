@@ -16,8 +16,8 @@ use crate::document::{
 use crate::editing::{
     ArgumentSchema, CommandError, CommandId, CommandInvocation, CommandOutcome, CommandRegistry,
     CommandSource, CommandSpec, CommandValue, ContextRequirement, EditorMode, EditorOperation,
-    EditorState, EditorTransaction, InvocationSource, Precondition, TransactionId, UndoPolicy,
-    ViewId, register_builtin_commands,
+    EditorState, EditorTransaction, FocusDirection, InvocationSource, Precondition, TransactionId,
+    UndoPolicy, ViewId, register_builtin_commands,
 };
 use crate::filesystem::{
     CheckedResourceIntent, DirectoryEntryKind, DirectoryService, RecoveryRecord, RequestId,
@@ -80,6 +80,12 @@ use crate::application::{
     AppEffect, ApplicationError, LayoutAction, PickerKind, PromptMove, StartupTarget, build_state,
     register_app_commands,
 };
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FocusSurface {
+    Explorer,
+    Pane(crate::editing::PaneId),
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KeymapInspection {
@@ -9011,6 +9017,7 @@ impl InteractiveApplication {
             AppEffect::PlaceMouseCursor => self.apply_mouse_cursor(false),
             AppEffect::ExtendMouseSelection => self.apply_mouse_cursor(true),
             AppEffect::Layout(action) => self.apply_layout_action(action),
+            AppEffect::SurfaceFocus(direction) => self.focus_surface(direction),
             AppEffect::RepeatLast => self.repeat_last_change(),
             AppEffect::MacroRecordStart(register) => {
                 self.recording_macro = Some((register, Vec::new()));
@@ -10517,6 +10524,50 @@ impl InteractiveApplication {
         self.ui.search_query = Some(source[start..end].to_owned());
         self.last_search_forward = forward;
         self.perform_search(forward);
+    }
+
+    fn current_focus_surface(&self) -> Option<FocusSurface> {
+        if self.ui.explorer.is_some() && self.ui.explorer_focused {
+            return Some(FocusSurface::Explorer);
+        }
+        self.state
+            .active_tab
+            .and_then(|tab| self.state.tabs.get(tab))
+            .map(|tab| FocusSurface::Pane(tab.focused))
+    }
+
+    fn focus_surface(&mut self, direction: FocusDirection) {
+        let target = match self.current_focus_surface() {
+            Some(FocusSurface::Explorer) if direction == FocusDirection::Right => self
+                .state
+                .active_tab
+                .and_then(|tab| self.state.tabs.get(tab))
+                .map(|tab| FocusSurface::Pane(tab.focused)),
+            Some(FocusSurface::Explorer) | None => None,
+            Some(FocusSurface::Pane(_)) => match self.state.directional_pane(direction) {
+                Ok(Some(pane)) => Some(FocusSurface::Pane(pane)),
+                Ok(None) if direction == FocusDirection::Left && self.ui.explorer.is_some() => {
+                    Some(FocusSurface::Explorer)
+                }
+                Ok(None) | Err(_) => None,
+            },
+        };
+        match target {
+            Some(FocusSurface::Explorer) => self.ui.explorer_focused = true,
+            Some(FocusSurface::Pane(pane)) => {
+                let transaction = EditorTransaction::new(self.transaction_id())
+                    .with_operation(EditorOperation::FocusPaneId { pane })
+                    .with_undo_policy(UndoPolicy::Ignore);
+                if let Err(error) = self.state.apply_transaction(&transaction) {
+                    self.show_error(error);
+                    return;
+                }
+                self.ui.explorer_focused = false;
+            }
+            None => return,
+        }
+        self.pending_keymap = None;
+        self.input.cancel_pending();
     }
 
     fn apply_layout_action(&mut self, action: LayoutAction) {
@@ -13549,6 +13600,8 @@ mod tests {
         assert_eq!(app.explorer.visible().len(), 2);
         app.explorer.move_selection(1);
         app.explorer_open_file(false);
+        assert!(app.ui.explorer.is_some());
+        assert!(!app.ui.explorer_focused);
         wait_vfs(&mut app);
         let buffer = app.state.active_buffer_id().expect("opened");
         assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
@@ -13561,6 +13614,40 @@ mod tests {
             ),
             2
         );
+    }
+
+    #[test]
+    fn directional_focus_moves_spatially_then_crosses_the_explorer_boundary() {
+        let mut app = app();
+        app.state
+            .open_text(crate::document::TextBuffer::from_text("focus"), None);
+        app.ui.dashboard = false;
+        app.apply_layout_action(crate::application::LayoutAction::Split(
+            crate::editing::Axis::Horizontal,
+        ));
+        let tab = app.state.active_tab.expect("active tab");
+        let right = app.state.tabs[tab].focused;
+        let left = app
+            .state
+            .directional_pane(crate::editing::FocusDirection::Left)
+            .expect("directional query")
+            .expect("left pane");
+
+        app.open_explorer();
+        assert!(app.ui.explorer_focused);
+        app.handle_configured_key("ctrl-l".parse::<KeyEvent>().expect("Ctrl-l"));
+        assert!(!app.ui.explorer_focused);
+        assert_eq!(app.state.tabs[tab].focused, right);
+
+        app.handle_configured_key("ctrl-h".parse::<KeyEvent>().expect("Ctrl-h"));
+        assert!(!app.ui.explorer_focused);
+        assert_eq!(app.state.tabs[tab].focused, left);
+        app.handle_configured_key("ctrl-h".parse::<KeyEvent>().expect("Ctrl-h"));
+        assert!(app.ui.explorer_focused);
+        assert_eq!(app.state.tabs[tab].focused, left);
+        app.handle_configured_key("ctrl-l".parse::<KeyEvent>().expect("Ctrl-l"));
+        assert!(!app.ui.explorer_focused);
+        assert_eq!(app.state.tabs[tab].focused, left);
     }
 
     fn wait_root_operation(app: &mut InteractiveApplication) {

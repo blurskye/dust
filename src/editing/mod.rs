@@ -15,8 +15,9 @@ pub use command::{
 };
 pub use ids::{BufferId, PaneId, TabId, TransactionId, ViewId};
 pub use state::{
-    Axis, Buffer, EditingPolicy, EditorMode, EditorState, LayoutNode, Pane, RegisterShape,
-    RegisterStore, RegisterValue, ReplaceRecord, Selection, SelectionKind, Tab, View,
+    Axis, Buffer, EditingPolicy, EditorMode, EditorState, FocusDirection, LayoutNode, Pane,
+    RegisterShape, RegisterStore, RegisterValue, ReplaceRecord, Selection, SelectionKind, Tab,
+    View,
 };
 pub use transaction::{
     EditorOperation, EditorTransaction, Precondition, TransactionError, UndoPolicy,

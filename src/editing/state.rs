@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::document::{BufferRevision, ByteOffset, TextBuffer};
-use slotmap::SlotMap;
+use slotmap::{Key, SlotMap};
 
 use crate::editing::{BufferId, CommandInvocation, PaneId, TabId, UndoTree, ViewId};
 
@@ -196,6 +196,14 @@ impl RegisterStore {
 pub enum Axis {
     Horizontal,
     Vertical,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FocusDirection {
+    Left,
+    Down,
+    Up,
+    Right,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -452,6 +460,43 @@ impl EditorState {
         self.set_focused_pane(tab_id, panes[target])
     }
 
+    /// Return the spatially adjacent pane without mutating focus.
+    pub fn directional_pane(
+        &self,
+        direction: FocusDirection,
+    ) -> Result<Option<PaneId>, &'static str> {
+        const EXTENT: u64 = 1_000_000;
+        let tab = self
+            .tabs
+            .get(self.active_tab.ok_or("no active tab")?)
+            .ok_or("active tab is stale")?;
+        let mut rectangles = Vec::new();
+        collect_focus_rectangles(
+            &tab.root,
+            FocusRectangle {
+                x: 0,
+                y: 0,
+                width: EXTENT,
+                height: EXTENT,
+            },
+            &mut rectangles,
+        );
+        let source = rectangles
+            .iter()
+            .find(|(pane, _)| *pane == tab.focused)
+            .map(|(_, rectangle)| *rectangle)
+            .ok_or("focused pane is absent from layout")?;
+        Ok(rectangles
+            .into_iter()
+            .filter(|(pane, _)| *pane != tab.focused)
+            .filter_map(|(pane, candidate)| {
+                focus_score(source, candidate, direction)
+                    .map(|score| (score, pane.data().as_ffi(), pane))
+            })
+            .min_by_key(|(score, stable_id, _)| (*score, *stable_id))
+            .map(|(_, _, pane)| pane))
+    }
+
     pub fn focus_tab(&mut self, offset: isize, wrap: bool) -> Result<(), &'static str> {
         let tabs = self.tabs.keys().collect::<Vec<_>>();
         let active = self.active_tab.ok_or("no active tab")?;
@@ -636,6 +681,118 @@ fn pane_ids(node: &LayoutNode) -> Vec<PaneId> {
             panes
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FocusRectangle {
+    x: u64,
+    y: u64,
+    width: u64,
+    height: u64,
+}
+
+fn collect_focus_rectangles(
+    node: &LayoutNode,
+    rectangle: FocusRectangle,
+    output: &mut Vec<(PaneId, FocusRectangle)>,
+) {
+    match node {
+        LayoutNode::Pane(pane) => output.push((*pane, rectangle)),
+        LayoutNode::Split {
+            axis,
+            ratio,
+            first,
+            second,
+        } => match axis {
+            Axis::Horizontal => {
+                let first_width = rectangle.width.saturating_mul(u64::from(*ratio)) / 1000;
+                collect_focus_rectangles(
+                    first,
+                    FocusRectangle {
+                        width: first_width,
+                        ..rectangle
+                    },
+                    output,
+                );
+                collect_focus_rectangles(
+                    second,
+                    FocusRectangle {
+                        x: rectangle.x.saturating_add(first_width),
+                        width: rectangle.width.saturating_sub(first_width),
+                        ..rectangle
+                    },
+                    output,
+                );
+            }
+            Axis::Vertical => {
+                let first_height = rectangle.height.saturating_mul(u64::from(*ratio)) / 1000;
+                collect_focus_rectangles(
+                    first,
+                    FocusRectangle {
+                        height: first_height,
+                        ..rectangle
+                    },
+                    output,
+                );
+                collect_focus_rectangles(
+                    second,
+                    FocusRectangle {
+                        y: rectangle.y.saturating_add(first_height),
+                        height: rectangle.height.saturating_sub(first_height),
+                        ..rectangle
+                    },
+                    output,
+                );
+            }
+        },
+    }
+}
+
+fn focus_score(
+    source: FocusRectangle,
+    candidate: FocusRectangle,
+    direction: FocusDirection,
+) -> Option<(u8, u64, u64)> {
+    let source_right = source.x.saturating_add(source.width);
+    let source_bottom = source.y.saturating_add(source.height);
+    let candidate_right = candidate.x.saturating_add(candidate.width);
+    let candidate_bottom = candidate.y.saturating_add(candidate.height);
+    let (primary_gap, source_perpendicular, candidate_perpendicular) = match direction {
+        FocusDirection::Left if candidate_right <= source.x => (
+            source.x.saturating_sub(candidate_right),
+            (source.y, source_bottom),
+            (candidate.y, candidate_bottom),
+        ),
+        FocusDirection::Right if candidate.x >= source_right => (
+            candidate.x.saturating_sub(source_right),
+            (source.y, source_bottom),
+            (candidate.y, candidate_bottom),
+        ),
+        FocusDirection::Up if candidate_bottom <= source.y => (
+            source.y.saturating_sub(candidate_bottom),
+            (source.x, source_right),
+            (candidate.x, candidate_right),
+        ),
+        FocusDirection::Down if candidate.y >= source_bottom => (
+            candidate.y.saturating_sub(source_bottom),
+            (source.x, source_right),
+            (candidate.x, candidate_right),
+        ),
+        _ => return None,
+    };
+    let overlaps = source_perpendicular.0 < candidate_perpendicular.1
+        && candidate_perpendicular.0 < source_perpendicular.1;
+    let source_center = source_perpendicular
+        .0
+        .saturating_add(source_perpendicular.1);
+    let candidate_center = candidate_perpendicular
+        .0
+        .saturating_add(candidate_perpendicular.1);
+    Some((
+        u8::from(!overlaps),
+        primary_gap,
+        source_center.abs_diff(candidate_center),
+    ))
 }
 
 fn split_leaf(
@@ -849,6 +1006,55 @@ mod tests {
         assert_eq!(
             state.tabs[first_tab].root,
             super::LayoutNode::Pane(state.tabs[first_tab].focused)
+        );
+    }
+
+    #[test]
+    fn directional_focus_selects_spatial_neighbors_in_a_two_by_two_layout() {
+        let mut state = EditorState::new(PathBuf::from("/directional"));
+        state.open_text(TextBuffer::from_text("seed"), None);
+        let tab = state.active_tab.expect("tab");
+        let top_left = state.tabs[tab].focused;
+        state
+            .split_active(super::Axis::Horizontal, 500)
+            .expect("right split");
+        let top_right = state.tabs[tab].focused;
+        state.focus_pane_id(top_left).expect("focus top left");
+        state
+            .split_active(super::Axis::Vertical, 500)
+            .expect("left lower split");
+        let bottom_left = state.tabs[tab].focused;
+        state.focus_pane_id(top_right).expect("focus top right");
+        state
+            .split_active(super::Axis::Vertical, 500)
+            .expect("right lower split");
+        let bottom_right = state.tabs[tab].focused;
+
+        state.focus_pane_id(top_left).expect("focus top left");
+        assert_eq!(
+            state.directional_pane(super::FocusDirection::Right),
+            Ok(Some(top_right))
+        );
+        assert_eq!(
+            state.directional_pane(super::FocusDirection::Down),
+            Ok(Some(bottom_left))
+        );
+        assert_eq!(
+            state.directional_pane(super::FocusDirection::Left),
+            Ok(None)
+        );
+        assert_eq!(state.directional_pane(super::FocusDirection::Up), Ok(None));
+
+        state
+            .focus_pane_id(bottom_right)
+            .expect("focus bottom right");
+        assert_eq!(
+            state.directional_pane(super::FocusDirection::Left),
+            Ok(Some(bottom_left))
+        );
+        assert_eq!(
+            state.directional_pane(super::FocusDirection::Up),
+            Ok(Some(top_right))
         );
     }
 
