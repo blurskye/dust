@@ -235,6 +235,42 @@ fn queue_style(
     theme: &ThemeConfig,
     tier: ColorTier,
 ) -> io::Result<()> {
+    if let Style::Terminal(pty) = style {
+        let text = &theme.styles.terminal_text;
+        let background = &theme.styles.terminal_background;
+        let foreground = pty.foreground.map_or_else(
+            || {
+                terminal_color(tier_color(
+                    text.foreground,
+                    text.foreground_256,
+                    text.foreground_16,
+                    tier,
+                ))
+            },
+            terminal_ansi_color,
+        );
+        let background = pty.background.map_or_else(
+            || {
+                terminal_color(tier_color(
+                    background.background,
+                    background.background_256,
+                    background.background_16,
+                    tier,
+                ))
+            },
+            terminal_ansi_color,
+        );
+        queue!(
+            writer,
+            SetAttribute(Attribute::Reset),
+            SetForegroundColor(foreground),
+            SetBackgroundColor(background)
+        )?;
+        if pty.bold {
+            queue!(writer, SetAttribute(Attribute::Bold))?;
+        }
+        return Ok(());
+    }
     let configured = match style {
         Style::Default => &theme.styles.default,
         Style::Muted => &theme.styles.muted,
@@ -245,6 +281,35 @@ fn queue_style(
         Style::Search => &theme.styles.search,
         Style::Error => &theme.styles.error,
         Style::Border => &theme.styles.border,
+        Style::KeyHintBackground => &theme.styles.key_hint_background,
+        Style::KeyHintBorder => &theme.styles.key_hint_border,
+        Style::KeyHintKey => &theme.styles.key_hint_key,
+        Style::KeyHintGroup => &theme.styles.key_hint_group,
+        Style::KeyHintCommand => &theme.styles.key_hint_command,
+        Style::KeyHintPrefix => &theme.styles.key_hint_prefix,
+        Style::DocumentationBackground => &theme.styles.documentation_background,
+        Style::DocumentationBorder => &theme.styles.documentation_border,
+        Style::DocumentationTitle => &theme.styles.documentation_title,
+        Style::DocumentationText => &theme.styles.documentation_text,
+        Style::ExplorerBackground => &theme.styles.explorer_background,
+        Style::ExplorerHeader => &theme.styles.explorer_header,
+        Style::ExplorerCount => &theme.styles.explorer_count,
+        Style::ExplorerTree => &theme.styles.explorer_tree,
+        Style::ExplorerIcon => &theme.styles.explorer_icon,
+        Style::ExplorerDirectory => &theme.styles.explorer_directory,
+        Style::ExplorerFile => &theme.styles.explorer_file,
+        Style::ExplorerSymlink => &theme.styles.explorer_symlink,
+        Style::ExplorerGit => &theme.styles.explorer_git,
+        Style::ExplorerDiagnostic => &theme.styles.explorer_diagnostic,
+        Style::ExplorerDecoration => &theme.styles.explorer_decoration,
+        Style::ExplorerSelection => &theme.styles.explorer_selection,
+        Style::ExplorerBorder => &theme.styles.explorer_border,
+        Style::TerminalBackground => &theme.styles.terminal_background,
+        Style::TerminalBorder => &theme.styles.terminal_border,
+        Style::TerminalTitle => &theme.styles.terminal_title,
+        Style::TerminalStatus => &theme.styles.terminal_status,
+        Style::TerminalStatusAccent => &theme.styles.terminal_status_accent,
+        Style::Terminal(_) => unreachable!("terminal cells are handled above"),
         Style::SyntaxComment => &theme.styles.syntax_comment,
         Style::SyntaxString => &theme.styles.syntax_string,
         Style::SyntaxNumber => &theme.styles.syntax_number,
@@ -304,6 +369,27 @@ fn tier_color(
         ColorTier::TrueColor => primary,
         ColorTier::Ansi256 => ansi_256.or(ansi_16).unwrap_or(primary),
         ColorTier::Ansi16 => ansi_16.unwrap_or(primary),
+    }
+}
+
+fn terminal_ansi_color(index: u8) -> Color {
+    match index.min(15) {
+        0 => Color::Black,
+        1 => Color::DarkRed,
+        2 => Color::DarkGreen,
+        3 => Color::DarkYellow,
+        4 => Color::DarkBlue,
+        5 => Color::DarkMagenta,
+        6 => Color::DarkCyan,
+        7 => Color::Grey,
+        8 => Color::DarkGrey,
+        9 => Color::Red,
+        10 => Color::Green,
+        11 => Color::Yellow,
+        12 => Color::Blue,
+        13 => Color::Magenta,
+        14 => Color::Cyan,
+        _ => Color::White,
     }
 }
 
@@ -374,6 +460,17 @@ pub fn normalize_event(event: Event) -> Option<UiEvent> {
     match event {
         Event::Key(key) => {
             let code = match key.code {
+                // Legacy terminal protocols encode Ctrl+\\ as 0x1c and
+                // Ctrl+/ (Ctrl+_) as 0x1f. Crossterm exposes those bytes as
+                // Ctrl+4 and Ctrl+7; restore the conventional logical keys so
+                // configurable bindings behave the same with and without an
+                // enhanced keyboard protocol.
+                CtKeyCode::Char('4') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    KeyCode::Char('\\')
+                }
+                CtKeyCode::Char('7') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    KeyCode::Char('/')
+                }
                 CtKeyCode::Char(character) => KeyCode::Char(character),
                 CtKeyCode::Enter => KeyCode::Enter,
                 CtKeyCode::Esc => KeyCode::Escape,
@@ -510,6 +607,22 @@ mod tests {
                 .expect("ANSI is UTF-8")
                 .contains("38;5;14")
         );
+        let mut pty = Vec::new();
+        queue_style(
+            &mut pty,
+            crate::terminal_ui::Style::Terminal(crate::terminal_ui::PtyStyle {
+                foreground: Some(1),
+                background: Some(4),
+                bold: true,
+            }),
+            &theme,
+            ColorTier::Ansi256,
+        )
+        .expect("queue PTY-owned style");
+        let pty = String::from_utf8(pty).expect("PTY ANSI is UTF-8");
+        assert!(pty.contains("38;5;1"));
+        assert!(pty.contains("48;5;4"));
+        assert!(pty.contains("\u{1b}[1m"));
         assert_eq!(
             configured_color_tier(crate::configuration::ColorMode::Ansi256),
             (ColorTier::Ansi256, "configured")
@@ -550,6 +663,44 @@ mod tests {
             event,
             Some(UiEvent::Key {
                 key: crate::input::KeyEvent::character('R'),
+                kind: KeyInputKind::Press,
+            })
+        );
+    }
+
+    #[test]
+    fn legacy_terminal_control_bytes_normalize_to_slash_and_backslash() {
+        let slash = normalize_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('7'),
+            KeyModifiers::CONTROL,
+        )));
+        let backslash = normalize_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('4'),
+            KeyModifiers::CONTROL,
+        )));
+        assert_eq!(
+            slash,
+            Some(UiEvent::Key {
+                key: crate::input::KeyEvent {
+                    code: DustKeyCode::Char('/'),
+                    modifiers: Modifiers {
+                        control: true,
+                        ..Modifiers::default()
+                    },
+                },
+                kind: KeyInputKind::Press,
+            })
+        );
+        assert_eq!(
+            backslash,
+            Some(UiEvent::Key {
+                key: crate::input::KeyEvent {
+                    code: DustKeyCode::Char('\\'),
+                    modifiers: Modifiers {
+                        control: true,
+                        ..Modifiers::default()
+                    },
+                },
                 kind: KeyInputKind::Press,
             })
         );

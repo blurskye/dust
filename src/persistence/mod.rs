@@ -16,6 +16,7 @@ use std::{
 use thiserror::Error;
 
 pub const STATE_VERSION: u32 = 1;
+const MAXIMUM_SCROLL_COLUMN: usize = 1_000_000_000;
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone, Debug)]
 pub struct PersistencePolicy {
@@ -37,6 +38,7 @@ pub struct PersistedLocation {
     pub byte: usize,
     pub anchor: usize,
     pub scroll_line: usize,
+    pub scroll_column: usize,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -45,6 +47,7 @@ pub struct PersistedPane {
     pub cursor: usize,
     pub anchor: usize,
     pub scroll_line: usize,
+    pub scroll_column: usize,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -166,6 +169,19 @@ impl PersistedState {
             || self.large_file_overrides.iter().any(|entry| {
                 !entry.path.is_absolute() || !matches!(entry.mode.as_str(), "auto" | "on" | "off")
             })
+            || self
+                .marks
+                .iter()
+                .map(|mark| &mark.location)
+                .chain(&self.jumps)
+                .chain(&self.changes)
+                .any(|location| location.scroll_column > MAXIMUM_SCROLL_COLUMN)
+            || self.session.as_ref().is_some_and(|session| {
+                session
+                    .tabs
+                    .iter()
+                    .any(|tab| layout_has_oversized_scroll_column(&tab.layout))
+            })
             || self.breakpoints.iter().any(|breakpoint| {
                 breakpoint.line == 0
                     || [
@@ -183,6 +199,16 @@ impl PersistedState {
         Ok(())
     }
 }
+
+fn layout_has_oversized_scroll_column(layout: &PersistedLayout) -> bool {
+    match layout {
+        PersistedLayout::Pane { pane } => pane.scroll_column > MAXIMUM_SCROLL_COLUMN,
+        PersistedLayout::Split { first, second, .. } => {
+            layout_has_oversized_scroll_column(first) || layout_has_oversized_scroll_column(second)
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct PersistenceId(pub u64);
 #[derive(Debug)]
@@ -389,4 +415,91 @@ pub enum PersistenceError {
     QueueFull,
     #[error("persistence worker stopped")]
     Stopped,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::BTreeMap, fs, path::PathBuf};
+
+    use tempfile::tempdir;
+
+    use super::{
+        PersistedLayout, PersistedLocation, PersistedPane, PersistedSession, PersistedState,
+        PersistedTab, PersistenceError, PersistencePolicy, STATE_VERSION, read_state, write_state,
+    };
+
+    fn state_with_horizontal_offsets() -> PersistedState {
+        PersistedState {
+            version: STATE_VERSION,
+            session: Some(PersistedSession {
+                roots: vec![PathBuf::from("/workspace")],
+                tabs: vec![PersistedTab {
+                    layout: PersistedLayout::Pane {
+                        pane: PersistedPane {
+                            path: PathBuf::from("/workspace/main.rs"),
+                            cursor: 27,
+                            anchor: 27,
+                            scroll_line: 3,
+                            scroll_column: 19,
+                        },
+                    },
+                    focused_path: Some(PathBuf::from("/workspace/main.rs")),
+                }],
+                active_tab: 0,
+            }),
+            jumps: vec![PersistedLocation {
+                path: PathBuf::from("/workspace/main.rs"),
+                byte: 27,
+                anchor: 27,
+                scroll_line: 3,
+                scroll_column: 17,
+            }],
+            metadata: BTreeMap::new(),
+            ..PersistedState::default()
+        }
+    }
+
+    #[test]
+    fn pane_and_navigation_scroll_columns_round_trip_strictly() {
+        let root = tempdir().expect("temporary persistence directory");
+        let path = root.path().join("state.json");
+        let policy = PersistencePolicy::default();
+        write_state(&path, &state_with_horizontal_offsets(), &policy).expect("write state");
+        let restored = read_state(&path, &policy).expect("read state");
+        let pane = match &restored.session.as_ref().expect("session").tabs[0].layout {
+            PersistedLayout::Pane { pane } => pane,
+            PersistedLayout::Split { .. } => panic!("expected pane"),
+        };
+        assert_eq!(pane.scroll_column, 19);
+        assert_eq!(restored.jumps[0].scroll_column, 17);
+    }
+
+    #[test]
+    fn pre_v1_missing_unknown_and_oversized_scroll_columns_are_rejected() {
+        let state = state_with_horizontal_offsets();
+        let mut value = serde_json::to_value(&state).expect("serialize state");
+        value["jumps"][0]
+            .as_object_mut()
+            .expect("jump object")
+            .remove("scroll_column");
+        assert!(serde_json::from_value::<PersistedState>(value).is_err());
+
+        let mut value = serde_json::to_value(&state).expect("serialize state");
+        value["jumps"][0]["legacy_scroll_x"] = serde_json::json!(4);
+        assert!(serde_json::from_value::<PersistedState>(value).is_err());
+
+        let root = tempdir().expect("temporary persistence directory");
+        let path = root.path().join("hostile.json");
+        let mut value = serde_json::to_value(&state).expect("serialize state");
+        value["jumps"][0]["scroll_column"] = serde_json::json!(1_000_000_001_u64);
+        fs::write(
+            &path,
+            serde_json::to_vec(&value).expect("encode hostile state"),
+        )
+        .expect("write hostile state");
+        assert!(matches!(
+            read_state(&path, &PersistencePolicy::default()),
+            Err(PersistenceError::EntryTooLarge)
+        ));
+    }
 }

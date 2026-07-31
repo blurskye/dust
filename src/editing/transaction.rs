@@ -43,6 +43,10 @@ pub enum EditorOperation {
         view: ViewId,
         first_line: usize,
     },
+    SetScrollColumn {
+        view: ViewId,
+        first_column: usize,
+    },
     SetSelection {
         view: ViewId,
         selection: Option<Selection>,
@@ -300,6 +304,13 @@ fn apply_operation(
                 .ok_or(TransactionError::MissingView)?;
             target.scroll_line = *first_line;
         }
+        EditorOperation::SetScrollColumn { view, first_column } => {
+            let target = state
+                .views
+                .get_mut(*view)
+                .ok_or(TransactionError::MissingView)?;
+            target.scroll_column = *first_column;
+        }
         EditorOperation::SetSelection { view, selection } => {
             let target = state
                 .views
@@ -493,10 +504,27 @@ mod tests {
     }
 
     #[test]
+    fn failed_late_operation_rolls_back_scroll_column() {
+        let mut state = EditorState::new(PathBuf::from("/tmp"));
+        let (_, view) = state.open_text(TextBuffer::from_text("abc"), None);
+        let transaction = EditorTransaction::new(TransactionId(2))
+            .with_operation(EditorOperation::SetScrollColumn {
+                view,
+                first_column: 19,
+            })
+            .with_operation(EditorOperation::SetCursor {
+                view,
+                position: ByteOffset(99),
+            });
+        assert!(state.apply_transaction(&transaction).is_err());
+        assert_eq!(state.views[view].scroll_column, 0);
+    }
+
+    #[test]
     fn stale_precondition_changes_nothing() {
         let mut state = EditorState::new(PathBuf::from("/tmp"));
         let (buffer, _) = state.open_text(TextBuffer::from_text("abc"), None);
-        let transaction = EditorTransaction::new(TransactionId(2)).with_precondition(
+        let transaction = EditorTransaction::new(TransactionId(3)).with_precondition(
             Precondition::BufferRevision {
                 buffer,
                 revision: crate::document::BufferRevision(9),

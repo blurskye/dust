@@ -88,7 +88,9 @@ def run(
     return os.waitstatus_to_exitcode(status), output, snapshots
 
 
-def terminal_screen(data: bytes, width: int = 100, height: int = 30) -> str:
+def terminal_projection(
+    data: bytes, width: int = 100, height: int = 30
+) -> tuple[str, tuple[int, int]]:
     source = data.decode("utf-8", "replace")
     grid = [[" "] * width for _ in range(height)]
     x = 0
@@ -129,7 +131,15 @@ def terminal_screen(data: bytes, width: int = 100, height: int = 30) -> str:
         if 0 <= x < width and 0 <= y < height:
             grid[y][x] = character
         x += 2 if unicodedata.east_asian_width(character) in "WF" else 1
-    return "\n".join("".join(row) for row in grid)
+    return "\n".join("".join(row) for row in grid), (x, y)
+
+
+def terminal_screen(data: bytes, width: int = 100, height: int = 30) -> str:
+    return terminal_projection(data, width, height)[0]
+
+
+def terminal_cursor(data: bytes, width: int = 100, height: int = 30) -> tuple[int, int]:
+    return terminal_projection(data, width, height)[1]
 
 
 def assert_restored(output: bytes) -> None:
@@ -304,7 +314,11 @@ def main() -> None:
         assert "Explorer" in terminal_screen(snapshots[1])
         assert "nested" in terminal_screen(snapshots[1])
         assert "inside.txt" in terminal_screen(snapshots[3])
-        assert "explorer pty content" in terminal_screen(snapshots[4])
+        opened_with_dock = terminal_screen(snapshots[4])
+        assert "Explorer" in opened_with_dock
+        assert "inside.txt" in opened_with_dock
+        assert "explorer pty content" in opened_with_dock
+        assert opened_with_dock.splitlines()[0][40] == "⎸"
         assert_restored(output)
 
         code, output, snapshots = run(
@@ -313,7 +327,9 @@ def main() -> None:
         )
         assert code == 0
         split_screen = terminal_screen(snapshots[4])
+        assert "Explorer" in split_screen and "inside.txt" in split_screen
         assert "explorer pty content" in split_screen
+        assert split_screen.splitlines()[0][40] == "⎸"
         assert_restored(output)
 
     # Directional focus crosses the persistent explorer/editor boundary using
@@ -343,6 +359,105 @@ def main() -> None:
         assert focused_explorer.lstrip().startswith(">")
         assert not focused_editor.lstrip().startswith(">")
         assert refocused_explorer.lstrip().startswith(">")
+        assert_restored(output)
+
+    # A real terminal cursor follows a long non-wrapped line through narrow
+    # resize and explorer-dock geometry, then remains in the editor after the
+    # dock is widened again.
+    with tempfile.TemporaryDirectory() as directory:
+        target = pathlib.Path(directory) / "horizontal.txt"
+        target.write_text("0123456789" * 24 + "\n", encoding="utf-8")
+        code, output, snapshots = run(
+            binary,
+            directory,
+            [str(target)],
+            [
+                (0.5, b"$", None),
+                (0.3, b"", (8, 20)),
+                (0.5, b":explore\r", None),
+                (0.8, b"", None),
+                (0.1, b"\x0c", None),  # Ctrl-l: explorer -> editor
+                (0.4, b"", (12, 60)),
+                (0.5, b":q\r", None),
+            ],
+        )
+        assert code == 0
+        initial_cursor = terminal_cursor(snapshots[1], 100, 30)
+        narrow_cursor = terminal_cursor(snapshots[2], 20, 8)
+        explorer_cursor = terminal_cursor(snapshots[3], 20, 8)
+        narrow_editor_cursor = terminal_cursor(snapshots[5], 20, 8)
+        wide_editor_cursor = terminal_cursor(snapshots[6], 60, 12)
+        assert 0 <= initial_cursor[0] < 100 and 0 <= initial_cursor[1] < 29
+        assert 0 <= narrow_cursor[0] < 20 and 0 <= narrow_cursor[1] < 7
+        assert explorer_cursor[0] < 9
+        assert 10 <= narrow_editor_cursor[0] < 20 and narrow_editor_cursor[1] < 7
+        assert 40 <= wide_editor_cursor[0] < 60 and wide_editor_cursor[1] < 11
+        assert_restored(output)
+
+    # A real shell is rendered as a persistent full-width bottom dock. The
+    # editor/explorer remain above it, both default Ctrl+/ and Ctrl+\\ toggles
+    # work through legacy control-byte normalization without hiding it, and
+    # exact resize/refocus/exit paths preserve terminal restoration.
+    with tempfile.TemporaryDirectory() as directory:
+        root = pathlib.Path(directory)
+        target = root / "terminal-dock.txt"
+        target.write_text("EDITOR-TOP\n", encoding="utf-8")
+        config_home = root / "config"
+        config_home.mkdir()
+        (config_home / "config.toml").write_text(
+            "[ui.terminal_panel]\nheight=10\n",
+            encoding="utf-8",
+        )
+        code, output, snapshots = run(
+            binary,
+            directory,
+            [str(target)],
+            [
+                (0.4, b":trust\r", None),
+                (0.2, b"trust this workspace\r", None),
+                (0.5, b":explore\r", None),
+                (0.7, b"\x0c", None),  # explorer -> editor
+                (0.7, b"\x1f", None),  # legacy Ctrl+/ opens bundled shell
+                (0.3, b"stty -echo\r", None),
+                (
+                    1.0,
+                    b"printf '%b' '\\033\\133?2004h\\033\\1331;32mDOCKED-TERMINAL\\033\\1330m\\033\\1350;title\\a\\n'\r",
+                    None,
+                ),
+                (0.6, b"\x1f", None),  # Ctrl+/ returns focus; panel remains
+                (0.3, b"", (20, 60)),
+                (0.7, b"\x1c", None),  # legacy Ctrl+\\ focuses the same PTY
+                (0.4, b"exit\r", None),
+                (0.6, b"\x1b", None),
+                (0.2, b":q\r", None),
+            ],
+            clean=False,
+            config_home=config_home,
+        )
+        assert code == 0
+        focused = terminal_screen(snapshots[7], 100, 30)
+        focused_rows = focused.splitlines()
+        assert "Explorer" in focused and "EDITOR-TOP" in focused
+        assert "TERMINAL #" in focused_rows[20]
+        assert any("DOCKED-TERMINAL" in row for row in focused_rows[21:29])
+        assert "[?2004h" not in focused and "[1;32m" not in focused
+        assert "]0;title" not in focused
+        assert "TERMINAL" in focused_rows[29] and "RUNNING" in focused_rows[29]
+        assert focused_rows[21][40] != "⎸"  # terminal spans beneath explorer
+
+        unfocused = terminal_screen(snapshots[8], 100, 30)
+        assert "TERMINAL #" in unfocused.splitlines()[20]
+        assert "EDITOR" in unfocused.splitlines()[29]
+        assert terminal_cursor(snapshots[8], 100, 30)[1] < 20
+
+        resized = terminal_screen(snapshots[9], 60, 20)
+        assert "TERMINAL #" in resized.splitlines()[10]
+        assert "EDITOR" in resized.splitlines()[19]
+        refocused = terminal_screen(snapshots[10], 60, 20)
+        assert "TERMINAL" in refocused.splitlines()[19]
+        assert terminal_cursor(snapshots[10], 60, 20)[1] >= 11
+        exited = terminal_screen(snapshots[11], 60, 20)
+        assert "EXIT 0" in exited.splitlines()[19]
         assert_restored(output)
 
     if shutil.which("rust-analyzer"):
@@ -556,11 +671,7 @@ def main() -> None:
         (config_home / "keymaps.toml").write_text(
             """
 [[keymap]]
-context = "dashboard"
-keys = "q"
-unmap = true
-
-[[keymap]]
+id = "builtin.dashboard.surface.editor-quit.q"
 context = "dashboard"
 keys = "z"
 command = "editor.quit"
@@ -593,6 +704,144 @@ arguments = { force = false }
         assert code == 0
         clean_screen = terminal_screen(snapshots[0])
         assert "[q]" in clean_screen and "[z]" not in clean_screen
+        assert_restored(output)
+
+    with tempfile.TemporaryDirectory() as directory:
+        config_home = pathlib.Path(directory) / "config"
+        config_home.mkdir()
+        (config_home / "config.toml").write_text(
+            """
+[input.keymaps]
+load_bundled_defaults = false
+leader = ","
+local_leader = ";"
+""".strip(),
+            encoding="utf-8",
+        )
+        (config_home / "keymaps.toml").write_text(
+            """
+[[keymap]]
+id = "user.dashboard.symbolic-quit"
+context = "dashboard"
+keys = "<leader> q"
+command = "editor.quit"
+arguments = { force = false }
+""".strip(),
+            encoding="utf-8",
+        )
+        code, output, snapshots = run(
+            binary,
+            directory,
+            [],
+            [(0.2, b"q", None), (0.2, b",q", None)],
+            clean=False,
+            config_home=config_home,
+        )
+        assert code == 0
+        leader_screen = terminal_screen(snapshots[0])
+        assert "[, q]" in leader_screen and "[q]" not in leader_screen
+        assert pathlib.Path(directory).as_posix() in terminal_screen(snapshots[1])
+        assert_restored(output)
+
+        code, output, snapshots = run(
+            binary,
+            directory,
+            [],
+            [(0.2, b"q", None)],
+            clean=True,
+            config_home=config_home,
+        )
+        assert code == 0
+        clean_leader_screen = terminal_screen(snapshots[0])
+        assert "[q]" in clean_leader_screen and "[, q]" not in clean_leader_screen
+        assert_restored(output)
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = pathlib.Path(directory)
+        path = root / "hints.txt"
+        path.write_text("key hint smoke\n", encoding="utf-8")
+        code, output, snapshots = run(
+            binary,
+            directory,
+            [str(path)],
+            [(0.5, b" ", None), (0.45, b"\x1b", None), (0.1, b":q\r", None)],
+            clean=True,
+        )
+        assert code == 0
+        hint_screen = terminal_screen(snapshots[1])
+        assert "Files" in hint_screen
+        assert "Diagnostics" in hint_screen
+        assert "Language" in hint_screen
+        assert "space" in hint_screen
+        assert_restored(output)
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = pathlib.Path(directory)
+        path = root / "custom-hints.txt"
+        path.write_text("custom key hint smoke\n", encoding="utf-8")
+        config_home = root / "config"
+        config_home.mkdir()
+        (config_home / "config.toml").write_text(
+            """
+[ui.key_hints]
+delay_ms = 50
+
+[input.keymaps]
+leader = ","
+""".strip(),
+            encoding="utf-8",
+        )
+        (config_home / "keymaps.toml").write_text(
+            """
+[[key_group]]
+id = "builtin.editor.normal.group.files"
+context = "editor"
+mode = "normal"
+prefix = "<leader> f"
+label = "Project files"
+icon = "F"
+order = 1
+""".strip(),
+            encoding="utf-8",
+        )
+        code, output, snapshots = run(
+            binary,
+            directory,
+            [str(path)],
+            [(0.5, b",", None), (0.2, b"\x1b", None), (0.1, b":q\r", None)],
+            clean=False,
+            config_home=config_home,
+        )
+        assert code == 0
+        custom_hint_screen = terminal_screen(snapshots[1])
+        assert "Project files" in custom_hint_screen
+        assert "Files" not in custom_hint_screen.replace("Project files", "")
+        assert "," in custom_hint_screen
+        assert_restored(output)
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = pathlib.Path(directory)
+        path = root / "disabled-hints.txt"
+        path.write_text("disabled hint smoke\n", encoding="utf-8")
+        config_home = root / "config"
+        config_home.mkdir()
+        (config_home / "config.toml").write_text(
+            "[ui.key_hints]\nenabled = false\ndelay_ms = 0\n",
+            encoding="utf-8",
+        )
+        code, output, snapshots = run(
+            binary,
+            directory,
+            [str(path)],
+            [(0.5, b" ", None), (0.2, b"\x1b", None), (0.1, b":q\r", None)],
+            clean=False,
+            config_home=config_home,
+        )
+        assert code == 0
+        disabled_hint_screen = terminal_screen(snapshots[1])
+        assert "Files" not in disabled_hint_screen
+        assert "Diagnostics" not in disabled_hint_screen
+        assert "Language" not in disabled_hint_screen
         assert_restored(output)
 
     with tempfile.TemporaryDirectory() as directory:
@@ -658,18 +907,21 @@ arguments = { force = false }
         (config_home / "keymaps.toml").write_text(
             """
 [[keymap]]
+id = "user.dashboard.console"
 context = "dashboard"
 keys = "p"
 command = "command_line.open"
 arguments = { kind = "command" }
 
 [[keymap]]
+id = "builtin.dashboard.surface.editor-quit.q"
 context = "dashboard"
 keys = "z"
 command = "editor.quit"
 arguments = { force = false }
 
 [[keymap]]
+id = "user.editor.normal.quit-z"
 context = "editor"
 mode = "normal"
 keys = "z"
@@ -682,8 +934,8 @@ arguments = { force = false }
         custom_theme = (repository / "assets/themes/dust.toml").read_text(encoding="utf-8")
         custom_theme = custom_theme.replace('name = "dust"', 'name = "custom"')
         custom_theme = custom_theme.replace(
-            '[styles.accent]\nforeground = "cyan"',
-            '[styles.accent]\nforeground = "indexed:201"\nforeground_16 = "cyan"',
+            '[styles.accent]\nforeground = "#58a6ff"\nbackground = "#0d1117"\nforeground_256 = "indexed:75"',
+            '[styles.accent]\nforeground = "indexed:201"\nbackground = "#0d1117"\nforeground_256 = "indexed:201"',
         )
         (config_home / "themes/custom.toml").write_text(custom_theme, encoding="utf-8")
 
@@ -743,13 +995,13 @@ arguments = { force = false }
         watched_theme = (repository / "assets/themes/dust.toml").read_text(encoding="utf-8")
         watched_theme = watched_theme.replace('name = "dust"', 'name = "watched"')
         watched_theme = watched_theme.replace(
-            '[styles.accent]\nforeground = "cyan"',
-            '[styles.accent]\nforeground = "indexed:202"\nforeground_16 = "cyan"',
+            '[styles.accent]\nforeground = "#58a6ff"\nbackground = "#0d1117"\nforeground_256 = "indexed:75"',
+            '[styles.accent]\nforeground = "indexed:202"\nbackground = "#0d1117"\nforeground_256 = "indexed:202"',
         )
         (themes / "watched.toml").write_text(watched_theme, encoding="utf-8")
         (config_home / "keymaps.toml").write_text(
-            "[[keymap]]\ncontext='editor'\nmode='normal'\nkeys='z'\ncommand='editor.quit'\narguments={force=false}\n"
-            "[[keymap]]\ncontext='dashboard'\nkeys='z'\ncommand='editor.quit'\narguments={force=false}\n",
+            "[[keymap]]\nid='user.watch.editor-quit'\ncontext='editor'\nmode='normal'\nkeys='z'\ncommand='editor.quit'\narguments={force=false}\n"
+            "[[keymap]]\nid='user.watch.dashboard-quit'\ncontext='dashboard'\nkeys='z'\ncommand='editor.quit'\narguments={force=false}\n",
             encoding="utf-8",
         )
 
@@ -780,8 +1032,8 @@ arguments = { force = false }
                 watched_dashboard, encoding="utf-8"
             )
             (config_home / "keymaps.toml").write_text(
-                "[[keymap]]\ncontext='editor'\nmode='normal'\nkeys='y'\ncommand='editor.quit'\narguments={force=false}\n"
-                "[[keymap]]\ncontext='dashboard'\nkeys='y'\ncommand='editor.quit'\narguments={force=false}\n",
+                "[[keymap]]\nid='user.watch.editor-quit'\ncontext='editor'\nmode='normal'\nkeys='y'\ncommand='editor.quit'\narguments={force=false}\n"
+                "[[keymap]]\nid='user.watch.dashboard-quit'\ncontext='dashboard'\nkeys='y'\ncommand='editor.quit'\narguments={force=false}\n",
                 encoding="utf-8",
             )
 

@@ -42,7 +42,8 @@ impl HeadlessEditor {
             ambiguous_width_wide: loaded.config.editor.ambiguous_width
                 == crate::configuration::AmbiguousWidth::Wide,
         };
-        let (keymaps, diagnostic) = compile_keymaps(&registry, &loaded.keymaps);
+        let (keymaps, diagnostic) =
+            compile_keymaps(&registry, &loaded.keymaps, &loaded.config.input.keymaps);
         assert!(diagnostic.is_none(), "bundled keymaps must compile");
         Self {
             state,

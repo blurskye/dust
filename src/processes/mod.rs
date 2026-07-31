@@ -514,7 +514,7 @@ pub enum PtyEvent {
     },
     Output {
         id: PtyId,
-        text: String,
+        bytes: Vec<u8>,
         truncated: bool,
     },
     Exited {
@@ -714,14 +714,11 @@ fn spawn_pty(
                     let allowed = read.min(ceiling.saturating_sub(total));
                     total = total.saturating_add(allowed);
                     if allowed > 0 {
-                        let text = sanitize_pty(&buffer[..allowed]);
-                        if !text.is_empty() {
-                            let _ = output_events.try_send(PtyEvent::Output {
-                                id,
-                                text,
-                                truncated: allowed < read,
-                            });
-                        }
+                        let _ = output_events.try_send(PtyEvent::Output {
+                            id,
+                            bytes: buffer[..allowed].to_vec(),
+                            truncated: allowed < read,
+                        });
                     }
                     if allowed < read || total >= ceiling {
                         break;
@@ -781,15 +778,6 @@ fn spawn_pty(
         })
         .map_err(|error| PtyError::Spawn(error.to_string()))?;
     Ok(control_tx)
-}
-fn sanitize_pty(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes)
-        .chars()
-        .filter(|character| {
-            !character.is_control() || matches!(character, '\n' | '\r' | '\t' | '\u{8}')
-        })
-        .take(64 * 1024)
-        .collect()
 }
 fn pty_queue(error: std::sync::mpsc::TrySendError<PtyRequestMessage>) -> PtyError {
     match error {

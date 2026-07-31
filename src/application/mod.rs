@@ -4,7 +4,8 @@ mod commands;
 mod interactive;
 pub use interactive::{
     ConfigurationSources, KeymapInspection, ResolvedConfiguration, ResolvedKeymaps,
-    compile_keymaps, reload_keymaps, validate_loaded_configuration,
+    compile_keymaps, compile_keymaps_with_plugin_catalog, compile_keymaps_with_plugin_index,
+    reload_keymaps, validate_loaded_configuration,
 };
 mod startup;
 

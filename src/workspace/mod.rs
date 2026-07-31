@@ -652,6 +652,9 @@ pub struct ExplorerState {
     by_path: HashMap<PathBuf, ExplorerNodeId>,
     roots: Vec<ExplorerNodeId>,
     selected: Option<ExplorerNodeId>,
+    visible_nodes: Vec<ExplorerNodeId>,
+    visible_positions: HashMap<ExplorerNodeId, usize>,
+    projection_generation: u64,
     next_id: u64,
     pub root_revision: u64,
 }
@@ -689,11 +692,21 @@ impl ExplorerState {
             .filter(|id| self.nodes.contains_key(id))
             .or(self.roots.first().copied());
         self.root_revision = root_revision;
+        self.rebuild_visible_projection();
     }
 
     fn allocate(&mut self) -> ExplorerNodeId {
         self.next_id = self.next_id.saturating_add(1);
         ExplorerNodeId(self.next_id)
+    }
+
+    fn remove_subtree(&mut self, id: ExplorerNodeId) {
+        if let Some(node) = self.nodes.remove(&id) {
+            for child in node.children {
+                self.remove_subtree(child);
+            }
+            self.by_path.remove(&node.path);
+        }
     }
 
     pub fn begin_load(&mut self, node: ExplorerNodeId, generation: u64) -> bool {
@@ -704,6 +717,7 @@ impl ExplorerState {
             return false;
         }
         node.load = ExplorerLoadState::Loading(generation);
+        self.rebuild_visible_projection();
         true
     }
 
@@ -722,22 +736,21 @@ impl ExplorerState {
         {
             return false;
         }
-        let (root, depth_parent_path) = {
-            let parent = &self.nodes[&node];
-            (parent.root, parent.path.clone())
-        };
+        let root = self.nodes[&node].root;
         let old_children = self.nodes[&node].children.clone();
+        let old_ids_by_path = old_children
+            .iter()
+            .filter_map(|id| self.nodes.get(id).map(|child| (child.path.clone(), *id)))
+            .collect::<HashMap<_, _>>();
         for child in old_children {
-            if let Some(old) = self.nodes.remove(&child) {
-                self.by_path.remove(&old.path);
-            }
+            self.remove_subtree(child);
         }
         let mut ids = Vec::new();
         for child in children {
-            let id = self
-                .by_path
+            let id = old_ids_by_path
                 .get(&child.path)
                 .copied()
+                .or_else(|| self.by_path.get(&child.path).copied())
                 .unwrap_or_else(|| self.allocate());
             self.by_path.insert(child.path.clone(), id);
             self.nodes.insert(
@@ -761,23 +774,33 @@ impl ExplorerState {
             parent.load = ExplorerLoadState::Loaded;
             parent.expanded = true;
         }
-        let _ = depth_parent_path;
+        self.rebuild_visible_projection();
         true
     }
 
     pub fn set_error(&mut self, node: ExplorerNodeId, generation: u64) {
+        let mut changed = false;
         if let Some(node) = self.nodes.get_mut(&node)
             && node.load == ExplorerLoadState::Loading(generation)
         {
             node.load = ExplorerLoadState::Error;
+            changed = true;
+        }
+        if changed {
+            self.rebuild_visible_projection();
         }
     }
 
     pub fn toggle_loaded(&mut self, id: ExplorerNodeId) {
+        let mut changed = false;
         if let Some(node) = self.nodes.get_mut(&id)
             && node.load == ExplorerLoadState::Loaded
         {
             node.expanded = !node.expanded;
+            changed = true;
+        }
+        if changed {
+            self.rebuild_visible_projection();
         }
     }
 
@@ -798,19 +821,10 @@ impl ExplorerState {
         self.selected
     }
 
+    /// Return whether each node in the root-to-row lineage is its parent's last child.
+    /// Presentation owners turn this structural data into configured tree glyphs.
     #[must_use]
-    pub fn depth(&self, mut id: ExplorerNodeId) -> usize {
-        let mut depth = 0;
-        while let Some(parent) = self.nodes.get(&id).and_then(|node| node.parent) {
-            depth += 1;
-            id = parent;
-        }
-        depth
-    }
-
-    /// Draw a stable tree connector prefix for a docked explorer row.
-    #[must_use]
-    pub fn tree_prefix(&self, id: ExplorerNodeId, indent_width: usize) -> String {
+    pub fn tree_lineage(&self, id: ExplorerNodeId) -> Vec<bool> {
         let mut lineage = Vec::new();
         let mut current = id;
         while let Some(parent) = self.nodes.get(&current).and_then(|node| node.parent) {
@@ -823,21 +837,7 @@ impl ExplorerState {
             current = parent;
         }
         lineage.reverse();
-        let segment_width = indent_width.max(1);
-        let mut prefix = String::new();
-        for (index, is_last) in lineage.iter().enumerate() {
-            let final_segment = index + 1 == lineage.len();
-            if final_segment {
-                prefix.push(if *is_last { '└' } else { '├' });
-                prefix.push_str(&"─".repeat(segment_width.saturating_sub(1)));
-            } else if *is_last {
-                prefix.push_str(&" ".repeat(segment_width));
-            } else {
-                prefix.push('│');
-                prefix.push_str(&" ".repeat(segment_width.saturating_sub(1)));
-            }
-        }
-        prefix
+        lineage
     }
 
     #[must_use]
@@ -850,33 +850,73 @@ impl ExplorerState {
     }
     #[must_use]
     pub fn visible(&self) -> Vec<&ExplorerNode> {
-        let mut out = Vec::new();
-        for root in &self.roots {
-            self.collect(*root, &mut out);
-        }
-        out
+        self.visible_nodes
+            .iter()
+            .filter_map(|id| self.nodes.get(id))
+            .collect()
     }
-    fn collect<'a>(&'a self, id: ExplorerNodeId, out: &mut Vec<&'a ExplorerNode>) {
+    #[must_use]
+    pub fn visible_ids(&self) -> &[ExplorerNodeId] {
+        &self.visible_nodes
+    }
+    #[must_use]
+    pub fn visible_index(&self, id: ExplorerNodeId) -> Option<usize> {
+        self.visible_positions.get(&id).copied()
+    }
+    #[must_use]
+    pub const fn projection_generation(&self) -> u64 {
+        self.projection_generation
+    }
+    fn rebuild_visible_projection(&mut self) {
+        let mut visible = Vec::new();
+        for root in &self.roots {
+            self.collect_visible_ids(*root, &mut visible);
+        }
+        self.visible_positions.clear();
+        self.visible_positions
+            .extend(visible.iter().enumerate().map(|(index, id)| (*id, index)));
+        self.visible_nodes = visible;
+        self.projection_generation = self.projection_generation.saturating_add(1);
+    }
+    fn collect_visible_ids(&self, id: ExplorerNodeId, out: &mut Vec<ExplorerNodeId>) {
         if let Some(node) = self.nodes.get(&id) {
-            out.push(node);
+            out.push(id);
             if node.expanded {
                 for child in &node.children {
-                    self.collect(*child, out);
+                    self.collect_visible_ids(*child, out);
                 }
             }
         }
     }
     pub fn move_selection(&mut self, delta: isize) {
-        let ids = self.visible().into_iter().map(|n| n.id).collect::<Vec<_>>();
-        if ids.is_empty() {
+        self.move_selection_from(delta, 0);
+    }
+    pub fn move_selection_from(&mut self, delta: isize, first_presented: usize) {
+        if first_presented >= self.visible_nodes.len() {
             return;
         }
         let current = self
             .selected
-            .and_then(|id| ids.iter().position(|v| *v == id))
-            .unwrap_or(0);
-        let next = (current as isize + delta).clamp(0, ids.len() as isize - 1) as usize;
-        self.selected = Some(ids[next]);
+            .and_then(|id| self.visible_positions.get(&id).copied())
+            .unwrap_or(first_presented)
+            .max(first_presented);
+        let next = (current as isize + delta).clamp(
+            first_presented as isize,
+            self.visible_nodes.len() as isize - 1,
+        ) as usize;
+        self.selected = Some(self.visible_nodes[next]);
+    }
+    pub fn ensure_selection_from(&mut self, first_presented: usize) {
+        if first_presented >= self.visible_nodes.len() {
+            return;
+        }
+        let selected_is_presented = self
+            .selected
+            .and_then(|id| self.visible_positions.get(&id))
+            .is_some_and(|index| *index >= first_presented);
+        if !selected_is_presented {
+            self.selected = Some(self.visible_nodes[first_presented]);
+        }
     }
     pub fn select(&mut self, id: ExplorerNodeId) {
         if self.nodes.contains_key(&id) {
@@ -884,12 +924,21 @@ impl ExplorerState {
         }
     }
     pub fn collapse_or_parent(&mut self) {
+        self.collapse_or_parent_from(0);
+    }
+    pub fn collapse_or_parent_from(&mut self, first_presented: usize) {
         let Some(id) = self.selected else { return };
         if self.nodes.get(&id).is_some_and(|n| n.expanded) {
             if let Some(n) = self.nodes.get_mut(&id) {
-                n.expanded = false
+                n.expanded = false;
+                self.rebuild_visible_projection();
             }
-        } else if let Some(parent) = self.nodes.get(&id).and_then(|n| n.parent) {
+        } else if let Some(parent) = self.nodes.get(&id).and_then(|n| n.parent)
+            && self
+                .visible_positions
+                .get(&parent)
+                .is_some_and(|index| *index >= first_presented)
+        {
             self.selected = Some(parent)
         }
     }
@@ -1837,10 +1886,15 @@ mod tests {
         let workspace = workspace(root.path());
         let mut explorer = ExplorerState::default();
         explorer.reset_roots(workspace.roots(), 3);
+        let root_generation = explorer.projection_generation();
         let root_id = explorer.selected_node().expect("selected root").id;
+        assert_eq!(explorer.visible_ids(), &[root_id]);
         assert!(explorer.begin_load(root_id, 9));
+        let loading_generation = explorer.projection_generation();
+        assert!(loading_generation > root_generation);
         assert!(!explorer.apply_load(root_id, 8, 3, Vec::new()));
         assert!(!explorer.apply_load(root_id, 9, 2, Vec::new()));
+        assert_eq!(explorer.projection_generation(), loading_generation);
         let child_path = root.path().join("child");
         assert!(explorer.apply_load(
             root_id,
@@ -1853,12 +1907,85 @@ mod tests {
             }]
         ));
         assert_eq!(explorer.visible().len(), 2);
-        let child_id = explorer.visible()[1].id;
+        assert!(explorer.projection_generation() > loading_generation);
+        let child_id = explorer.visible_ids()[1];
+        assert!(explorer.begin_load(root_id, 10));
+        assert!(explorer.apply_load(
+            root_id,
+            10,
+            3,
+            vec![ExplorerChild {
+                path: child_path,
+                name: "child".into(),
+                kind: ExplorerKind::Directory,
+            }]
+        ));
+        assert_eq!(explorer.visible_ids()[1], child_id, "stable path ID");
+        let loaded_generation = explorer.projection_generation();
+        assert!(explorer.begin_load(child_id, 11));
+        assert!(explorer.apply_load(
+            child_id,
+            11,
+            3,
+            vec![ExplorerChild {
+                path: root.path().join("child/nested"),
+                name: "nested".into(),
+                kind: ExplorerKind::File,
+            }]
+        ));
+        let nested_id = explorer.visible_ids()[2];
         explorer.select(child_id);
-        explorer.collapse_or_parent();
-        assert_eq!(explorer.selected_node().map(|node| node.id), Some(root_id));
+        let nested_generation = explorer.projection_generation();
+        explorer.move_selection_from(-1, 1);
+        assert_eq!(explorer.selected_id(), Some(child_id));
+        assert_eq!(explorer.projection_generation(), nested_generation);
+
+        explorer.select(nested_id);
+        explorer.collapse_or_parent_from(1);
+        assert_eq!(explorer.selected_id(), Some(child_id));
+        explorer.collapse_or_parent_from(1);
+        let collapsed_generation = explorer.projection_generation();
+        assert_eq!(explorer.selected_id(), Some(child_id));
+        assert_eq!(explorer.visible_ids(), &[root_id, child_id]);
+        explorer.collapse_or_parent_from(1);
+        assert_eq!(explorer.selected_id(), Some(child_id));
+        assert_eq!(explorer.projection_generation(), collapsed_generation);
+
+        explorer.select(root_id);
+        explorer.toggle_loaded(root_id);
+        assert!(explorer.projection_generation() > loaded_generation);
+        assert_eq!(explorer.visible_ids(), &[root_id]);
+        explorer.toggle_loaded(root_id);
         explorer.reset_roots(workspace.roots(), 4);
         assert_eq!(explorer.selected_node().map(|node| node.id), Some(root_id));
+    }
+
+    #[test]
+    fn explorer_presented_range_hides_single_root_but_keeps_multi_roots_selectable() {
+        let first = tempdir().expect("first");
+        let second = tempdir().expect("second");
+        let workspace = WorkspaceState::new(
+            WorkspaceId(9),
+            [
+                (
+                    "first".into(),
+                    RootIdentity::capture(first.path()).expect("first identity"),
+                ),
+                (
+                    "second".into(),
+                    RootIdentity::capture(second.path()).expect("second identity"),
+                ),
+            ],
+        )
+        .expect("workspace");
+        let mut explorer = ExplorerState::default();
+        explorer.reset_roots(workspace.roots(), workspace.root_revision());
+        let roots = explorer.visible_ids().to_vec();
+        assert_eq!(roots.len(), 2);
+        explorer.move_selection_from(1, 0);
+        assert_eq!(explorer.selected_id(), Some(roots[1]));
+        explorer.move_selection_from(-1, 0);
+        assert_eq!(explorer.selected_id(), Some(roots[0]));
     }
 
     #[test]

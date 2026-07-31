@@ -33,8 +33,15 @@ pub fn parse_ex(
         match parts.next() {
             Some("inspect") => {
                 let mut invocation = command("keymap.inspect")?;
-                if let Some(key) = parts.next() {
-                    invocation = invocation.with_argument("key", CommandValue::String(key.into()));
+                if let Some(key_or_id) = parts.next() {
+                    invocation = if let Some(id) = key_or_id.strip_prefix("id=") {
+                        if id.is_empty() {
+                            return Err(ExParseError::UnexpectedArguments(arguments.into()));
+                        }
+                        invocation.with_argument("id", CommandValue::String(id.into()))
+                    } else {
+                        invocation.with_argument("key", CommandValue::String(key_or_id.into()))
+                    };
                 }
                 if let Some(context) = parts.next() {
                     invocation =
@@ -83,11 +90,38 @@ pub fn parse_ex(
                 command(command_id)?
                     .with_argument("path", CommandValue::String(arguments.to_owned()))
             }
-            "workspace.root.activate" | "workspace.root.remove" => {
+            "workspace.root.activate" | "workspace.root.remove" | "terminal.focus" => {
                 let id = arguments
                     .parse::<i64>()
                     .map_err(|_| ExParseError::UnexpectedArguments(arguments.into()))?;
                 command(command_id)?.with_argument("id", CommandValue::Integer(id))
+            }
+            "terminal.open" => {
+                let invocation = command(command_id)?;
+                if arguments.is_empty() {
+                    invocation
+                } else {
+                    invocation.with_argument("profile", CommandValue::String(arguments.to_owned()))
+                }
+            }
+            "terminal.send" => {
+                if arguments.is_empty() {
+                    return Err(ExParseError::MissingArgument("text"));
+                }
+                command(command_id)?
+                    .with_argument("text", CommandValue::String(arguments.to_owned()))
+            }
+            "terminal.resize" => {
+                let rows = arguments
+                    .parse::<i64>()
+                    .map_err(|_| ExParseError::UnexpectedArguments(arguments.into()))?;
+                command(command_id)?.with_argument("rows", CommandValue::Integer(rows))
+            }
+            "terminal.cycle" => {
+                let direction = arguments
+                    .parse::<i64>()
+                    .map_err(|_| ExParseError::UnexpectedArguments(arguments.into()))?;
+                command(command_id)?.with_argument("direction", CommandValue::Integer(direction))
             }
             "file.open" => {
                 if arguments.is_empty() {
@@ -243,6 +277,18 @@ mod tests {
                 .as_str(),
             "keymap.conflicts"
         );
+        let inspect = parse_ex(
+            "keymap inspect id=builtin.dashboard.surface.editor-quit.q",
+            &aliases,
+        )
+        .expect("keymap id inspection");
+        assert_eq!(inspect.id.as_str(), "keymap.inspect");
+        assert_eq!(
+            inspect.arguments.get("id"),
+            Some(&CommandValue::String(
+                "builtin.dashboard.surface.editor-quit.q".into()
+            ))
+        );
         let search = parse_ex("workspace.search two words", &aliases).expect("workspace search");
         assert_eq!(
             search.arguments.get("query"),
@@ -260,6 +306,20 @@ mod tests {
         assert_eq!(
             debug.arguments.get("program"),
             Some(&CommandValue::String("target/debug/app".into()))
+        );
+        let terminal = parse_ex("terminal.open shell", &aliases).expect("terminal profile");
+        assert_eq!(terminal.id.as_str(), "terminal.open");
+        assert_eq!(
+            terminal.arguments.get("profile"),
+            Some(&CommandValue::String("shell".into()))
+        );
+        let default_terminal = parse_ex("terminal.open", &aliases).expect("default terminal");
+        assert_eq!(default_terminal.id.as_str(), "terminal.open");
+        assert!(default_terminal.arguments.is_empty());
+        let resize = parse_ex("terminal.resize -1", &aliases).expect("terminal resize");
+        assert_eq!(
+            resize.arguments.get("rows"),
+            Some(&CommandValue::Integer(-1))
         );
     }
 

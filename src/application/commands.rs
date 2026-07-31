@@ -64,6 +64,7 @@ pub enum AppEffect {
     ReloadConfiguration,
     ExplainConfig(String),
     InspectKeymap {
+        id: Option<String>,
         context: Option<String>,
         key: Option<String>,
         command: Option<String>,
@@ -114,9 +115,13 @@ pub enum AppEffect {
     PackageGarbageCollect,
     CrashInspect,
     CrashClear,
-    TerminalOpen(String),
+    TerminalOpen(Option<String>),
+    TerminalToggle,
     TerminalList,
     TerminalFocus(u64),
+    TerminalFocusActive,
+    TerminalCycle(i8),
+    TerminalResize(i16),
     TerminalSend(String),
     TerminalUnfocus,
     TerminalClose,
@@ -184,6 +189,8 @@ pub enum AppEffect {
     LspAttach,
     LspDetach,
     LspRequest(crate::languages::LspFeature),
+    LspDocumentationScroll(isize),
+    LspDocumentationClose,
     LspCompletionMove(i8),
     LspCompletionAccept,
     LspCompletionCancel,
@@ -448,6 +455,21 @@ pub fn register_app_commands(
             "lsp.signature_help",
             "Show signature help",
             AppEffect::LspRequest(crate::languages::LspFeature::SignatureHelp),
+        ),
+        (
+            "lsp.documentation.scroll_up",
+            "Scroll documentation up",
+            AppEffect::LspDocumentationScroll(-1),
+        ),
+        (
+            "lsp.documentation.scroll_down",
+            "Scroll documentation down",
+            AppEffect::LspDocumentationScroll(1),
+        ),
+        (
+            "lsp.documentation.close",
+            "Close documentation",
+            AppEffect::LspDocumentationClose,
         ),
         (
             "lsp.definition",
@@ -1178,12 +1200,20 @@ pub fn register_app_commands(
         "terminal.open",
         "Open terminal profile",
         ContextRequirement::Workspace,
-        ArgumentSchema::default().field("profile", ArgumentType::String, true),
+        ArgumentSchema::default().field("profile", ArgumentType::String, false),
         |invocation| {
             Ok(AppEffect::TerminalOpen(
-                string_arg(invocation, "profile")?.to_owned(),
+                optional_string_arg(invocation, "profile").map(str::to_owned),
             ))
         },
+    )?;
+    register(
+        registry,
+        "terminal.toggle",
+        "Open or toggle focus for the bottom terminal",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::TerminalToggle,
     )?;
     register(
         registry,
@@ -1205,6 +1235,40 @@ pub fn register_app_commands(
                     CommandError::InvalidArguments("terminal id must be non-negative".into())
                 })?,
             ))
+        },
+    )?;
+    register(
+        registry,
+        "terminal.focus_active",
+        "Focus the visible terminal panel",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_| AppEffect::TerminalFocusActive,
+    )?;
+    register(
+        registry,
+        "terminal.cycle",
+        "Cycle the selected terminal",
+        ContextRequirement::Application,
+        ArgumentSchema::default().field("direction", ArgumentType::Integer, true),
+        |invocation| {
+            let direction = i8::try_from(integer_arg(invocation, "direction")?).map_err(|_| {
+                CommandError::InvalidArguments("terminal direction is outside i8 bounds".into())
+            })?;
+            Ok(AppEffect::TerminalCycle(direction))
+        },
+    )?;
+    register(
+        registry,
+        "terminal.resize",
+        "Resize the bottom terminal panel by rows",
+        ContextRequirement::Application,
+        ArgumentSchema::default().field("rows", ArgumentType::Integer, true),
+        |invocation| {
+            let rows = i16::try_from(integer_arg(invocation, "rows")?).map_err(|_| {
+                CommandError::InvalidArguments("terminal resize is outside i16 bounds".into())
+            })?;
+            Ok(AppEffect::TerminalResize(rows))
         },
     )?;
     register(
@@ -1587,10 +1651,12 @@ pub fn register_app_commands(
         "Inspect a resolved keymap binding",
         ContextRequirement::Application,
         ArgumentSchema::default()
+            .field("id", ArgumentType::String, false)
             .field("context", ArgumentType::String, false)
             .field("key", ArgumentType::String, false)
             .field("command", ArgumentType::String, false),
         |invocation| AppEffect::InspectKeymap {
+            id: optional_string_arg(invocation, "id").map(str::to_owned),
             context: optional_string_arg(invocation, "context").map(str::to_owned),
             key: optional_string_arg(invocation, "key").map(str::to_owned),
             command: optional_string_arg(invocation, "command").map(str::to_owned),

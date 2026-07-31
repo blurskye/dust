@@ -7,6 +7,7 @@ use crate::input::KeyEvent;
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum KeymapLayer {
     Global,
+    PluginDefaults,
     Mode,
     Workspace,
     Buffer,
@@ -139,6 +140,11 @@ impl KeymapResolver {
         } else {
             MappingResolution::Replay(last)
         }
+    }
+
+    #[must_use]
+    pub fn pending_sequence(&self) -> &[KeyEvent] {
+        &self.pending
     }
 
     pub fn flush_timeout(&mut self) -> MappingResolution {

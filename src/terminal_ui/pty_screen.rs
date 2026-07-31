@@ -10,12 +10,14 @@ pub struct PtyStyle {
 pub struct PtyCell {
     pub text: String,
     pub style: PtyStyle,
+    pub continuation: bool,
 }
 impl Default for PtyCell {
     fn default() -> Self {
         Self {
             text: " ".into(),
             style: PtyStyle::default(),
+            continuation: false,
         }
     }
 }
@@ -23,7 +25,15 @@ impl Default for PtyCell {
 enum Parser {
     Ground,
     Escape,
-    Csi(String),
+    EscapeIntermediate,
+    Csi {
+        parameters: String,
+        overflowed: bool,
+    },
+    Osc,
+    OscEscape,
+    StringControl,
+    StringControlEscape,
 }
 #[derive(Clone, Debug)]
 pub struct PtyScreen {
@@ -34,6 +44,7 @@ pub struct PtyScreen {
     cells: Vec<Vec<PtyCell>>,
     style: PtyStyle,
     parser: Parser,
+    utf8_pending: Vec<u8>,
     scrollback: Vec<String>,
     maximum_scrollback_lines: usize,
     unsupported_sequences: u64,
@@ -50,6 +61,7 @@ impl PtyScreen {
             cells: vec![vec![PtyCell::default(); columns]; rows],
             style: PtyStyle::default(),
             parser: Parser::Ground,
+            utf8_pending: Vec::new(),
             scrollback: Vec::new(),
             maximum_scrollback_lines: maximum_scrollback_lines.max(1),
             unsupported_sequences: 0,
@@ -71,26 +83,107 @@ impl PtyScreen {
                     character if !character.is_control() => self.put(character),
                     _ => {}
                 },
-                Parser::Escape => {
-                    if character == '[' {
-                        self.parser = Parser::Csi(String::new())
+                Parser::Escape => match character {
+                    '[' => {
+                        self.parser = Parser::Csi {
+                            parameters: String::new(),
+                            overflowed: false,
+                        }
+                    }
+                    ']' => self.parser = Parser::Osc,
+                    'P' | '_' | '^' => self.parser = Parser::StringControl,
+                    '(' | ')' | '*' | '+' => self.parser = Parser::EscapeIntermediate,
+                    _ => self.unsupported_sequences = self.unsupported_sequences.saturating_add(1),
+                },
+                Parser::EscapeIntermediate => {}
+                Parser::Csi {
+                    mut parameters,
+                    mut overflowed,
+                } => {
+                    if ('@'..='~').contains(&character) {
+                        if overflowed {
+                            self.unsupported_sequences =
+                                self.unsupported_sequences.saturating_add(1)
+                        } else {
+                            self.csi(&parameters, character)
+                        }
+                    } else if (' '..='?').contains(&character) {
+                        if parameters.len() < 128 {
+                            parameters.push(character)
+                        } else {
+                            overflowed = true
+                        }
+                        self.parser = Parser::Csi {
+                            parameters,
+                            overflowed,
+                        }
                     } else {
                         self.unsupported_sequences = self.unsupported_sequences.saturating_add(1)
                     }
                 }
-                Parser::Csi(mut parameters) => {
-                    if ('@'..='~').contains(&character) {
-                        self.csi(&parameters, character)
-                    } else if parameters.len() < 128
-                        && (character.is_ascii_digit() || matches!(character, ';' | '?' | ':'))
-                    {
-                        parameters.push(character);
-                        self.parser = Parser::Csi(parameters)
+                Parser::Osc => match character {
+                    '\u{7}' => {}
+                    '\u{1b}' => self.parser = Parser::OscEscape,
+                    _ => self.parser = Parser::Osc,
+                },
+                Parser::OscEscape => {
+                    if character != '\\' {
+                        self.parser = if character == '\u{1b}' {
+                            Parser::OscEscape
+                        } else {
+                            Parser::Osc
+                        }
+                    }
+                }
+                Parser::StringControl => {
+                    self.parser = if character == '\u{1b}' {
+                        Parser::StringControlEscape
                     } else {
-                        self.unsupported_sequences = self.unsupported_sequences.saturating_add(1)
+                        Parser::StringControl
+                    }
+                }
+                Parser::StringControlEscape => {
+                    if character != '\\' {
+                        self.parser = if character == '\u{1b}' {
+                            Parser::StringControlEscape
+                        } else {
+                            Parser::StringControl
+                        }
                     }
                 }
             }
+        }
+    }
+    pub fn feed_bytes(&mut self, bytes: &[u8]) {
+        let mut input = std::mem::take(&mut self.utf8_pending);
+        input.extend_from_slice(bytes);
+        let mut remaining = input.as_slice();
+        while !remaining.is_empty() {
+            match std::str::from_utf8(remaining) {
+                Ok(text) => {
+                    self.feed(text);
+                    break;
+                }
+                Err(error) => {
+                    let valid = error.valid_up_to();
+                    if valid > 0 {
+                        self.feed(std::str::from_utf8(&remaining[..valid]).expect("valid prefix"));
+                    }
+                    if let Some(length) = error.error_len() {
+                        self.feed("\u{fffd}");
+                        remaining = &remaining[valid.saturating_add(length)..];
+                    } else {
+                        self.utf8_pending.extend_from_slice(&remaining[valid..]);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    pub fn finish_bytes(&mut self) {
+        if !self.utf8_pending.is_empty() {
+            self.utf8_pending.clear();
+            self.feed("\u{fffd}");
         }
     }
     pub fn resize(&mut self, columns: u16, rows: u16) {
@@ -116,6 +209,22 @@ impl PtyScreen {
         self.columns = columns;
         self.cursor_row = self.cursor_row.min(rows - 1);
         self.cursor_column = self.cursor_column.min(columns - 1);
+    }
+    #[must_use]
+    pub const fn dimensions(&self) -> (usize, usize) {
+        (self.columns, self.rows)
+    }
+    #[must_use]
+    pub const fn cursor(&self) -> (usize, usize) {
+        (self.cursor_column, self.cursor_row)
+    }
+    #[must_use]
+    pub fn cells(&self) -> &[Vec<PtyCell>] {
+        &self.cells
+    }
+    #[must_use]
+    pub fn scrollback_len(&self) -> usize {
+        self.scrollback.len()
     }
     pub fn lines(&self) -> Vec<String> {
         self.scrollback
@@ -144,11 +253,13 @@ impl PtyScreen {
         self.cells[self.cursor_row][self.cursor_column] = PtyCell {
             text: character.to_string(),
             style: self.style,
+            continuation: false,
         };
         if width == 2 && self.cursor_column + 1 < self.columns {
             self.cells[self.cursor_row][self.cursor_column + 1] = PtyCell {
                 text: String::new(),
                 style: self.style,
+                continuation: true,
             };
         }
         self.cursor_column += width;
@@ -181,6 +292,7 @@ impl PtyScreen {
             .collect::<Vec<_>>();
         let first = parameters.first().copied().unwrap_or(0);
         match final_byte {
+            'h' | 'l' if source == "?2004" => {}
             'A' => self.cursor_row = self.cursor_row.saturating_sub(first.max(1)),
             'B' => self.cursor_row = (self.cursor_row + first.max(1)).min(self.rows - 1),
             'C' => self.cursor_column = (self.cursor_column + first.max(1)).min(self.columns - 1),
@@ -273,4 +385,37 @@ fn render_row(row: &[PtyCell]) -> String {
         output.pop();
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PtyScreen, PtyStyle};
+
+    #[test]
+    fn raw_pty_bytes_preserve_split_utf8_and_consume_shell_controls() {
+        let mut screen = PtyScreen::new(40, 4, 16);
+        screen.feed_bytes(b"\x1b[?2004h\x1b[1;32mgreen \xe7\x95");
+        screen.feed_bytes(b"\x8c\x1b[0m\x1b]0;shell title\x07 ready");
+
+        assert_eq!(screen.lines()[0], "green 界 ready");
+        assert_eq!(
+            screen.cells()[0][0].style,
+            PtyStyle {
+                foreground: Some(2),
+                background: None,
+                bold: true,
+            }
+        );
+        assert!(screen.cells()[0][7].continuation);
+        assert_eq!(screen.unsupported_sequences(), 0);
+    }
+
+    #[test]
+    fn raw_pty_bytes_replace_invalid_or_incomplete_utf8_without_exposing_controls() {
+        let mut screen = PtyScreen::new(20, 2, 4);
+        screen.feed_bytes(b"ok\xff\xe2\x82");
+        screen.finish_bytes();
+        assert_eq!(screen.lines()[0], "ok��");
+        assert!(!screen.lines()[0].contains('\u{1b}'));
+    }
 }

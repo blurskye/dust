@@ -25,7 +25,8 @@ use crate::filesystem::{
     WorkspaceSearchPolicy, WorkspaceSearchService, WriteExpectation,
 };
 use crate::input::{
-    InputAction, KeyEvent, KeymapLayer, KeymapResolver, MappingResolution, ModalResolver, parse_ex,
+    InputAction, InputContextLayer, InputContextRegistry, KeyEvent, KeymapLayer, KeymapResolver,
+    MappingResolution, ModalResolver, parse_ex,
 };
 use crate::languages::{
     LspCapabilities, LspCompletionItem, LspDocument, LspDocumentEdit, LspEvent, LspFeature,
@@ -46,8 +47,8 @@ use crate::persistence::{
     PersistenceEvent, PersistenceId, PersistencePolicy, PersistenceService, STATE_VERSION,
 };
 use crate::plugins::{
-    PluginEvent, PluginExecution, PluginLimits, PluginLoadId, PluginManager, PluginSnapshot,
-    PluginStatus,
+    PluginContributionCatalog, PluginEvent, PluginExecution, PluginLimits, PluginLoadId,
+    PluginManager, PluginSnapshot, PluginStatus,
 };
 use crate::processes::{
     ExecutionPreflightEvent, ExecutionPreflightRequest, ExecutionPreflightService, JobEvent, JobId,
@@ -59,10 +60,14 @@ use crate::syntax::{
     SyntaxSupport, builtin_languages, language_for_path,
 };
 use crate::terminal_ui::{
-    CompletionItem, DashboardAction, KeyInputKind, LanguageCompletionState, PickerRow,
-    PickerUiState, PromptKind, PromptState, PtyScreen, TerminalError, TerminalOptions,
-    TerminalSession, ToolMenuRow, ToolMenuState, UiDiagnostic, UiEvent, UiFold, UiInlayHint,
-    UiState, UiSyntaxSpan, render,
+    CompletionItem, DashboardAction, DocumentationPopupKind, DocumentationPopupState,
+    ExplorerSegmentRole, ExplorerUiRow, ExplorerUiSegment, ExplorerUiState, KeyHintUiRow,
+    KeyHintUiState, KeyInputKind, LanguageCompletionState, PickerRow, PickerUiState, PromptKind,
+    PromptState, PtyScreen, TerminalError, TerminalOptions, TerminalPanelState, TerminalSession,
+    ToolMenuRow, ToolMenuState, UiDiagnostic, UiEvent, UiFold, UiInlayHint, UiState, UiSyntaxSpan,
+    active_pane_viewport, editor_content_width, editor_gutter_width, explorer_panel_width,
+    pane_viewports, render, snap_display_column, snap_display_column_forward,
+    terminal_panel_geometry,
 };
 use crate::workspace::{
     Diagnostic, DiagnosticOwner, DiagnosticSeverity, DiagnosticStore, ExecutionSource,
@@ -87,20 +92,94 @@ enum FocusSurface {
     Pane(crate::editing::PaneId),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KeymapOperation {
+    Command,
+    Unmap,
+    Disable,
+    PassThrough,
+}
+
+impl KeymapOperation {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Command => "command",
+            Self::Unmap => "unmap",
+            Self::Disable => "disable",
+            Self::PassThrough => "pass_through",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KeymapInspection {
+    pub id: String,
     pub context: String,
-    pub command: String,
+    pub contribution_layer: InputContextLayer,
+    pub contribution_owner: Option<String>,
+    pub contribution_generation: u64,
+    pub operation: KeymapOperation,
+    pub command: Option<String>,
     pub arguments: BTreeMap<String, CommandValue>,
+    pub source_keys: String,
     pub keys: String,
     pub source: String,
+}
+
+#[derive(Clone)]
+struct ReverseBinding {
+    id: String,
+    keys: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedKeyGroup {
+    pub id: String,
+    pub context: String,
+    pub contribution_layer: InputContextLayer,
+    pub contribution_owner: Option<String>,
+    pub contribution_generation: u64,
+    pub source_prefix: String,
+    pub prefix: String,
+    pub label: String,
+    pub icon: Option<String>,
+    pub order: i32,
+    pub source: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KeyHintMapping {
+    pub id: String,
+    pub operation: KeymapOperation,
+    pub command: Option<String>,
+    pub source: String,
+    pub remaining_keys: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KeyHintRow {
+    pub next_key: String,
+    pub label: String,
+    pub direct: bool,
+    pub group_id: Option<String>,
+    pub icon: Option<String>,
+    pub order: i32,
+    pub mappings: Vec<KeyHintMapping>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KeyHintProjection {
+    pub context: String,
+    pub prefix: String,
+    pub rows: Vec<KeyHintRow>,
 }
 
 #[derive(Clone, Default)]
 pub struct ResolvedKeymaps {
     resolvers: HashMap<String, KeymapResolver>,
-    reverse: HashMap<(String, String), String>,
+    reverse: HashMap<(String, String), ReverseBinding>,
     inspections: Vec<KeymapInspection>,
+    groups: Vec<ResolvedKeyGroup>,
     conflicts: Vec<String>,
 }
 
@@ -117,6 +196,10 @@ pub struct ResolvedConfiguration {
     pub settings: crate::configuration::Config,
     pub dashboard: crate::configuration::DashboardConfig,
     pub theme: crate::configuration::ThemeConfig,
+    pub raw_keymaps: crate::configuration::LoadedKeymaps,
+    pub base_keymaps: crate::configuration::LoadedKeymaps,
+    pub deferred_plugin_keymaps: bool,
+    pub expected_plugin_indexes: BTreeSet<String>,
     pub keymaps: ResolvedKeymaps,
     pub sources: ConfigurationSources,
     pub user_setting_keys: BTreeSet<String>,
@@ -209,6 +292,12 @@ impl ResolvedKeymaps {
     }
 
     #[must_use]
+    fn pending_prefix(&self, context: &str) -> Option<String> {
+        let sequence = self.resolvers.get(context)?.pending_sequence();
+        (!sequence.is_empty()).then(|| display_key_sequence(sequence))
+    }
+
+    #[must_use]
     pub fn binding_for(&self, context: &str, command: &str) -> Option<&str> {
         self.reverse
             .iter()
@@ -218,34 +307,182 @@ impl ResolvedKeymaps {
                         .strip_prefix(command)
                         .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with('|'))
             })
-            .map(|(_, keys)| keys.as_str())
+            .map(|(_, binding)| binding.keys.as_str())
     }
 
     #[must_use]
     pub fn inspect(&self, context: &str, command: &str) -> Option<KeymapInspection> {
-        self.binding_for(context, command).and_then(|keys| {
-            self.inspections
-                .iter()
-                .find(|inspection| {
-                    inspection.context == context
-                        && inspection.command == command
-                        && inspection.keys == keys
-                })
-                .cloned()
-        })
+        self.reverse
+            .iter()
+            .find(|((mapped_context, fingerprint), _)| {
+                mapped_context == context
+                    && fingerprint
+                        .strip_prefix(command)
+                        .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with('|'))
+            })
+            .and_then(|(_, binding)| self.inspect_id(&binding.id))
+    }
+
+    #[must_use]
+    pub fn inspect_id(&self, id: &str) -> Option<KeymapInspection> {
+        self.inspections
+            .iter()
+            .find(|inspection| inspection.id == id)
+            .cloned()
     }
 
     #[must_use]
     pub fn inspect_key(&self, context: &str, keys: &str) -> Option<KeymapInspection> {
         self.inspections
             .iter()
-            .find(|inspection| inspection.context == context && inspection.keys == keys)
+            .find(|inspection| {
+                inspection.context == context
+                    && (inspection.keys == keys || inspection.source_keys == keys)
+            })
             .cloned()
     }
 
     #[must_use]
     pub fn conflicts(&self) -> &[String] {
         &self.conflicts
+    }
+
+    #[must_use]
+    pub fn groups(&self) -> &[ResolvedKeyGroup] {
+        &self.groups
+    }
+
+    /// Projects reachable continuations from the already-resolved mapping roster.
+    /// This is read-only presentation data, never an alternate dispatch table.
+    #[must_use]
+    pub fn hints_for_prefix(
+        &self,
+        context: &str,
+        effective_prefix: &str,
+        command_labels: &BTreeMap<String, String>,
+    ) -> Option<KeyHintProjection> {
+        let prefix = effective_prefix
+            .split_whitespace()
+            .map(KeyEvent::from_str)
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?;
+        if prefix.is_empty() {
+            return None;
+        }
+        let mut candidates = BTreeMap::<String, Vec<(Vec<KeyEvent>, &KeymapInspection)>>::new();
+        for inspection in &self.inspections {
+            if inspection.context != context
+                || matches!(
+                    inspection.operation,
+                    KeymapOperation::Disable
+                        | KeymapOperation::Unmap
+                        | KeymapOperation::PassThrough
+                )
+            {
+                continue;
+            }
+            let sequence = inspection
+                .keys
+                .split_whitespace()
+                .map(KeyEvent::from_str)
+                .collect::<Result<Vec<_>, _>>()
+                .ok()?;
+            if sequence.len() <= prefix.len() || !sequence.starts_with(&prefix) {
+                continue;
+            }
+            let next_key = sequence[prefix.len()].to_string();
+            candidates
+                .entry(next_key)
+                .or_default()
+                .push((sequence, inspection));
+        }
+        let mut rows = Vec::new();
+        for (next_key, mut mappings) in candidates {
+            mappings.sort_by(|(left_keys, left), (right_keys, right)| {
+                left_keys
+                    .len()
+                    .cmp(&right_keys.len())
+                    .then_with(|| left.id.cmp(&right.id))
+            });
+            let group = self
+                .groups
+                .iter()
+                .filter(|group| group.context == context)
+                .filter_map(|group| {
+                    let sequence = group
+                        .prefix
+                        .split_whitespace()
+                        .map(KeyEvent::from_str)
+                        .collect::<Result<Vec<_>, _>>()
+                        .ok()?;
+                    (sequence.len() == prefix.len() + 1
+                        && sequence.starts_with(&prefix)
+                        && sequence[prefix.len()].to_string() == next_key)
+                        .then_some((sequence, group))
+                })
+                .min_by(|(left_keys, left), (right_keys, right)| {
+                    left_keys
+                        .len()
+                        .cmp(&right_keys.len())
+                        .then_with(|| left.order.cmp(&right.order))
+                        .then_with(|| left.id.cmp(&right.id))
+                });
+            let direct_mapping = mappings
+                .iter()
+                .find(|(keys, _)| keys.len() == prefix.len() + 1)
+                .map(|(_, inspection)| *inspection);
+            let direct = direct_mapping.unwrap_or(mappings[0].1);
+            let (label, group_id, icon, order) = group.map_or_else(
+                || {
+                    let label = direct
+                        .command
+                        .as_ref()
+                        .and_then(|command| command_labels.get(command))
+                        .cloned()
+                        .or_else(|| direct.command.clone())
+                        .unwrap_or_else(|| direct.id.clone());
+                    (label, None, None, i32::MAX)
+                },
+                |(_, group)| {
+                    (
+                        group.label.clone(),
+                        Some(group.id.clone()),
+                        group.icon.clone(),
+                        group.order,
+                    )
+                },
+            );
+            let mapping_rows = mappings
+                .into_iter()
+                .map(|(keys, inspection)| KeyHintMapping {
+                    id: inspection.id.clone(),
+                    operation: inspection.operation,
+                    command: inspection.command.clone(),
+                    source: inspection.source.clone(),
+                    remaining_keys: display_key_sequence(&keys[prefix.len()..]),
+                })
+                .collect();
+            rows.push(KeyHintRow {
+                next_key,
+                label,
+                direct: direct_mapping.is_some(),
+                group_id,
+                icon,
+                order,
+                mappings: mapping_rows,
+            });
+        }
+        rows.sort_by(|left, right| {
+            left.order
+                .cmp(&right.order)
+                .then_with(|| left.next_key.cmp(&right.next_key))
+                .then_with(|| left.label.cmp(&right.label))
+        });
+        (!rows.is_empty()).then_some(KeyHintProjection {
+            context: context.into(),
+            prefix: display_key_sequence(&prefix),
+            rows,
+        })
     }
 
     fn binding_for_action(
@@ -262,7 +499,7 @@ impl ResolvedKeymaps {
         }
         self.reverse
             .get(&(context.to_owned(), invocation_fingerprint(&invocation)))
-            .map(String::as_str)
+            .map(|binding| binding.keys.as_str())
     }
 }
 
@@ -416,6 +653,15 @@ struct RunningTask {
     root: PathBuf,
 }
 
+#[derive(Clone, Debug)]
+struct PendingKeymap {
+    context: String,
+    prefix: String,
+    started_at: Instant,
+    deadline: Instant,
+    configuration_generation: u64,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LargeFileOverride {
     Auto,
@@ -439,7 +685,7 @@ struct InteractiveApplication {
     commands: CommandRegistry<AppEffect>,
     input: ModalResolver,
     configuration: ResolvedConfiguration,
-    pending_keymap: Option<(Instant, String)>,
+    pending_keymap: Option<PendingKeymap>,
     ui: UiState,
     configuration_worker: crate::configuration::ConfigurationWorker,
     configuration_generation: u64,
@@ -562,6 +808,9 @@ struct InteractiveApplication {
     crash_snapshot: CrashSnapshotWriter,
     next_crash_snapshot: Instant,
     plugins: PluginManager,
+    plugin_contributions: PluginContributionCatalog,
+    pending_index_activation: BTreeMap<String, (PluginLoadId, String)>,
+    rejected_plugin_loads: BTreeSet<(String, PluginLoadId)>,
     packages: PackageService,
     registry: RegistryService,
     registry_intents: HashMap<u64, bool>,
@@ -577,6 +826,8 @@ struct InteractiveApplication {
     ptys: PtyService,
     terminals: HashMap<PtyId, TerminalRuntime>,
     active_terminal: Option<PtyId>,
+    terminal_focused: bool,
+    terminal_panel_height: u16,
     execution_preflight: ExecutionPreflightService,
     pending_execution_preflight: HashMap<PreflightId, PendingExecutionPreflight>,
 }
@@ -765,6 +1016,60 @@ enum PendingVfs {
     },
 }
 
+fn plugin_owner_from_id(id: &str) -> Option<&str> {
+    let mut segments = id.split('.');
+    (segments.next()? == "plugin")
+        .then(|| segments.next())
+        .flatten()
+        .filter(|owner| !owner.is_empty())
+}
+
+fn base_safe_keymaps(
+    loaded: &LoadedConfig,
+) -> (crate::configuration::LoadedKeymaps, BTreeSet<String>, bool) {
+    let enabled = loaded
+        .config
+        .plugins
+        .entries
+        .iter()
+        .filter(|(_, entry)| entry.enabled)
+        .map(|(id, _)| id.clone())
+        .collect::<BTreeSet<_>>();
+    let mut base = loaded.keymaps.clone();
+    let mut entries = base.entries[..base.bundled_count].to_vec();
+    let mut spans = Vec::new();
+    let mut deferred = false;
+    for (offset, entry) in base.entries[base.bundled_count..].iter().enumerate() {
+        let owner = plugin_owner_from_id(&entry.id)
+            .or_else(|| entry.command.as_deref().and_then(plugin_owner_from_id));
+        if owner.is_some_and(|owner| enabled.contains(owner)) {
+            deferred = true;
+        } else {
+            entries.push(entry.clone());
+            if let Some(span) = base.user_spans.get(offset) {
+                spans.push(span.clone());
+            }
+        }
+    }
+    let mut groups = base.groups[..base.bundled_group_count].to_vec();
+    let mut group_spans = Vec::new();
+    for (offset, group) in base.groups[base.bundled_group_count..].iter().enumerate() {
+        if plugin_owner_from_id(&group.id).is_some_and(|owner| enabled.contains(owner)) {
+            deferred = true;
+        } else {
+            groups.push(group.clone());
+            if let Some(span) = base.user_group_spans.get(offset) {
+                group_spans.push(span.clone());
+            }
+        }
+    }
+    base.entries = entries;
+    base.groups = groups;
+    base.user_spans = spans;
+    base.user_group_spans = group_spans;
+    (base, enabled, deferred)
+}
+
 fn resolve_configuration(
     commands: &CommandRegistry<AppEffect>,
     loaded: LoadedConfig,
@@ -779,26 +1084,36 @@ fn resolve_configuration(
     if strict && !diagnostics.is_empty() {
         return Err(diagnostics.join("; "));
     }
+    let (base_keymaps, expected_plugin_indexes, deferred_plugin_keymaps) =
+        base_safe_keymaps(&loaded);
     let (keymaps, keymap_diagnostic) = if strict {
+        let (entries, bundled_count, groups, bundled_group_count) =
+            keymap_entries_for_policy(&base_keymaps, &loaded.config.input.keymaps);
         match compile_keymap_entries(
             commands,
-            &loaded.keymaps.entries,
-            loaded.keymaps.bundled_count,
-            &loaded.keymaps.path,
-            &loaded.keymaps.user_spans,
+            entries,
+            bundled_count,
+            groups,
+            bundled_group_count,
+            &base_keymaps.path,
+            &base_keymaps.user_spans,
+            &base_keymaps.user_group_spans,
+            &loaded.config.input.keymaps,
         ) {
             Ok(compiled) => (compiled, None),
             Err(errors) => return Err(errors.join("; ")),
         }
     } else {
-        compile_keymaps(commands, &loaded.keymaps)
+        compile_keymaps(commands, &base_keymaps, &loaded.config.input.keymaps)
     };
     diagnostics.extend(keymap_diagnostic);
     let mut settings = loaded.config;
     for alias in &settings.input.disabled_command_aliases {
         settings.input.command_aliases.remove(alias);
     }
-    let keymap_source = if loaded.keymaps.entries.len() == loaded.keymaps.bundled_count {
+    let keymap_source = if loaded.keymaps.bundled_count > 0
+        && loaded.keymaps.entries.len() == loaded.keymaps.bundled_count
+    {
         PathBuf::from("<bundled:keymaps>")
     } else {
         loaded.keymaps.path.clone()
@@ -807,6 +1122,10 @@ fn resolve_configuration(
         settings,
         dashboard: loaded.dashboard,
         theme: loaded.theme,
+        raw_keymaps: loaded.keymaps,
+        base_keymaps,
+        deferred_plugin_keymaps,
+        expected_plugin_indexes,
         keymaps,
         sources: ConfigurationSources {
             settings: loaded.path,
@@ -951,6 +1270,7 @@ pub fn run_interactive(
     )
     .map_err(|error| InteractiveError::Configuration(error.to_string()))?;
     let pty_queue_capacity = configuration.settings.terminals.queue_capacity;
+    let terminal_panel_height = configuration.settings.ui.terminal_panel.height;
     let mut application = InteractiveApplication {
         state,
         workspace,
@@ -1100,6 +1420,9 @@ pub fn run_interactive(
         ),
         next_crash_snapshot: Instant::now(),
         plugins: PluginManager::start(plugin_queue_capacity),
+        plugin_contributions: PluginContributionCatalog::default(),
+        pending_index_activation: BTreeMap::new(),
+        rejected_plugin_loads: BTreeSet::new(),
         registry,
         registry_intents: HashMap::new(),
         pending_registry_artifact: None,
@@ -1120,6 +1443,8 @@ pub fn run_interactive(
         ptys: PtyService::start(pty_queue_capacity),
         terminals: HashMap::new(),
         active_terminal: None,
+        terminal_focused: false,
+        terminal_panel_height,
         execution_preflight: ExecutionPreflightService::start(process_event_capacity),
         pending_execution_preflight: HashMap::new(),
     };
@@ -1199,6 +1524,7 @@ pub fn run_interactive(
         application.sync_lsp_document();
         application.sync_lsp_status_ui();
         application.flush_keymap_timeout();
+        application.update_key_hint_ui();
         application.update_notification_timer();
         application.update_live_crash_snapshot();
         let frame = render(
@@ -2294,6 +2620,7 @@ impl InteractiveApplication {
     fn clear_lsp_ui_projection(&mut self) {
         self.lsp_completion_items.clear();
         self.ui.language_completion = None;
+        self.ui.documentation_popup = None;
         self.ui.lsp_semantic_spans.clear();
         self.ui.lsp_highlight_spans.clear();
         self.ui.lsp_inlay_hints.clear();
@@ -2340,6 +2667,7 @@ impl InteractiveApplication {
     }
 
     fn request_lsp(&mut self, mut feature: LspFeature) {
+        self.ui.documentation_popup = None;
         let Some(view_id) = self.state.active_view else {
             return;
         };
@@ -2439,6 +2767,34 @@ impl InteractiveApplication {
         }
     }
 
+    fn present_documentation_popup(
+        &mut self,
+        kind: DocumentationPopupKind,
+        title: String,
+        text: String,
+    ) {
+        if !self.configuration.settings.ui.documentation_popup.enabled {
+            self.ui.documentation_popup = None;
+            return;
+        }
+        let lines = text
+            .replace("\r\n", "\n")
+            .replace('\r', "\n")
+            .split('\n')
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        if lines.iter().all(|line| line.trim().is_empty()) {
+            self.ui.documentation_popup = None;
+            return;
+        }
+        self.ui.documentation_popup = Some(DocumentationPopupState {
+            kind,
+            title,
+            lines,
+            scroll: 0,
+        });
+    }
+
     fn present_lsp_result(
         &mut self,
         server: &str,
@@ -2447,15 +2803,19 @@ impl InteractiveApplication {
         result: LspFeatureResult,
     ) {
         match result {
-            LspFeatureResult::Hover(text) | LspFeatureResult::Signature(text) => {
-                self.ui.notification = Some(self.message(
-                    "lsp_hover",
-                    &[
-                        ("server", server.into()),
-                        ("hover", text.replace('\n', " ")),
-                    ],
-                ));
-                self.ui.notification_error = false;
+            LspFeatureResult::Hover(text) => {
+                self.present_documentation_popup(
+                    DocumentationPopupKind::Hover,
+                    self.message("lsp_hover_title", &[("server", server.into())]),
+                    text,
+                );
+            }
+            LspFeatureResult::Signature(text) => {
+                self.present_documentation_popup(
+                    DocumentationPopupKind::Signature,
+                    self.message("lsp_signature_title", &[("server", server.into())]),
+                    text,
+                );
             }
             LspFeatureResult::Completion(items) => {
                 self.lsp_completion_items = items;
@@ -2792,80 +3152,42 @@ impl InteractiveApplication {
         }
     }
 
+    fn explorer_first_presented_index(&self) -> usize {
+        usize::from(
+            self.workspace.roots().len() == 1
+                && self.explorer.visible_ids().first().is_some_and(|id| {
+                    self.explorer
+                        .node(*id)
+                        .is_some_and(|node| node.kind == ExplorerKind::Root)
+                }),
+        )
+    }
+
+    fn move_explorer_selection(&mut self, delta: isize) {
+        let first_presented = self.explorer_first_presented_index();
+        self.explorer.move_selection_from(delta, first_presented);
+        self.sync_explorer_ui();
+    }
+
+    fn explorer_collapse_or_parent(&mut self) {
+        let first_presented = self.explorer_first_presented_index();
+        self.explorer.collapse_or_parent_from(first_presented);
+        self.sync_explorer_ui();
+    }
+
     fn sync_explorer_ui(&mut self) {
         if self.ui.explorer.is_none() {
             return;
         }
-        let hide_single_root = self.workspace.roots().len() == 1;
-        let visible = self
-            .explorer
-            .visible()
-            .into_iter()
-            .filter(|node| !(hide_single_root && node.kind == ExplorerKind::Root))
-            .collect::<Vec<_>>();
-        let selected = self
-            .explorer
-            .selected_id()
-            .and_then(|id| visible.iter().position(|node| node.id == id));
-        let mut rows: Vec<PickerRow> = visible
-            .into_iter()
-            .map(|node| {
-                let marker = match (node.kind, node.load, node.expanded) {
-                    (
-                        ExplorerKind::Root | ExplorerKind::Directory,
-                        ExplorerLoadState::Loading(_),
-                        _,
-                    ) => self.message("explorer_loading_marker", &[]),
-                    (ExplorerKind::Root | ExplorerKind::Directory, _, true) => {
-                        self.message("explorer_expanded_marker", &[])
-                    }
-                    (ExplorerKind::Root | ExplorerKind::Directory, _, false) => {
-                        self.message("explorer_collapsed_marker", &[])
-                    }
-                    (ExplorerKind::File, _, _) => self.message("explorer_file_marker", &[]),
-                    (ExplorerKind::Symlink, _, _) => self.message("explorer_symlink_marker", &[]),
-                };
-                PickerRow {
-                    id: node.id.0.to_string(),
-                    label: self.message(
-                        "explorer_row",
-                        &[
-                            (
-                                "indent",
-                                self.explorer.tree_prefix(
-                                    node.id,
-                                    self.configuration.settings.ui.explorer.indent_width,
-                                ),
-                            ),
-                            ("marker", marker),
-                            ("name", node.name.clone()),
-                        ],
-                    ),
-                    detail: String::new(),
-                    source: String::new(),
-                }
-            })
-            .collect();
-        if !self.explorer_preview_lines.is_empty() {
-            rows.push(PickerRow {
-                id: "explorer-preview-divider".into(),
-                label: self.message("explorer_preview_title", &[]),
-                detail: String::new(),
-                source: String::new(),
-            });
-            rows.extend(
-                self.explorer_preview_lines
-                    .iter()
-                    .enumerate()
-                    .map(|(index, line)| PickerRow {
-                        id: format!("explorer-preview:{index}"),
-                        label: line.clone(),
-                        detail: String::new(),
-                        source: String::new(),
-                    }),
-            );
-        }
-        let viewport_rows = usize::from(self.terminal_height.saturating_sub(4)).max(1);
+        let hidden_root_rows = self.explorer_first_presented_index();
+        self.explorer.ensure_selection_from(hidden_root_rows);
+        let visible_ids = self.explorer.visible_ids();
+        let total = visible_ids.len().saturating_sub(hidden_root_rows);
+        let selected_id = self.explorer.selected_id();
+        let selected = selected_id
+            .and_then(|id| self.explorer.visible_index(id))
+            .and_then(|index| index.checked_sub(hidden_root_rows));
+        let viewport_rows = usize::from(self.workspace_render_height().saturating_sub(4)).max(1);
         let maximum = self
             .configuration
             .settings
@@ -2876,13 +3198,89 @@ impl InteractiveApplication {
         let scroll = selected.map_or(0, |selected| {
             selected.saturating_sub(maximum.saturating_sub(1))
         });
-        self.ui.explorer = Some(PickerUiState {
+        let glyphs = self
+            .configuration
+            .settings
+            .ui
+            .explorer
+            .active_glyphs()
+            .clone();
+        let rows = visible_ids
+            .iter()
+            .skip(hidden_root_rows.saturating_add(scroll))
+            .take(maximum)
+            .filter_map(|id| self.explorer.node(*id))
+            .map(|node| {
+                let lineage = self.explorer.tree_lineage(node.id);
+                let mut tree = String::new();
+                for (index, is_last) in lineage.iter().enumerate() {
+                    let final_segment = index + 1 == lineage.len();
+                    tree.push_str(if final_segment {
+                        if *is_last {
+                            &glyphs.tree_last
+                        } else {
+                            &glyphs.tree_middle
+                        }
+                    } else if *is_last {
+                        &glyphs.tree_space
+                    } else {
+                        &glyphs.tree_vertical
+                    });
+                }
+                let name_role = match node.kind {
+                    ExplorerKind::Root | ExplorerKind::Directory => ExplorerSegmentRole::Directory,
+                    ExplorerKind::File => ExplorerSegmentRole::File,
+                    ExplorerKind::Symlink => ExplorerSegmentRole::Symlink,
+                };
+                let (icon, icon_role) = match (node.kind, node.load, node.expanded) {
+                    (
+                        ExplorerKind::Root | ExplorerKind::Directory,
+                        ExplorerLoadState::Loading(_),
+                        _,
+                    ) => (&glyphs.loading, ExplorerSegmentRole::Loading),
+                    (ExplorerKind::Root | ExplorerKind::Directory, _, true) => {
+                        (&glyphs.directory_open, ExplorerSegmentRole::Icon)
+                    }
+                    (ExplorerKind::Root | ExplorerKind::Directory, _, false) => {
+                        (&glyphs.directory, ExplorerSegmentRole::Icon)
+                    }
+                    (ExplorerKind::File, _, _) => (&glyphs.file, ExplorerSegmentRole::Icon),
+                    (ExplorerKind::Symlink, _, _) => (&glyphs.symlink, ExplorerSegmentRole::Icon),
+                };
+                let mut segments = Vec::with_capacity(4);
+                if !tree.is_empty() {
+                    segments.push(ExplorerUiSegment {
+                        text: tree,
+                        role: ExplorerSegmentRole::Tree,
+                    });
+                }
+                segments.push(ExplorerUiSegment {
+                    text: icon.clone(),
+                    role: icon_role,
+                });
+                segments.push(ExplorerUiSegment {
+                    text: glyphs.icon_spacing.clone(),
+                    role: ExplorerSegmentRole::Tree,
+                });
+                segments.push(ExplorerUiSegment {
+                    text: node.name.clone(),
+                    role: name_role,
+                });
+                ExplorerUiRow {
+                    node_id: node.id.0,
+                    selected: selected_id == Some(node.id),
+                    segments,
+                    right_segments: Vec::new(),
+                }
+            })
+            .collect();
+        self.ui.explorer = Some(ExplorerUiState {
             title: self.message("explorer_title", &[]),
-            query: String::new(),
+            total,
             rows,
-            selected,
             scroll,
             loading: self.explorer_pending.is_some(),
+            preview_lines: self.explorer_preview_lines.clone(),
         });
         self.request_explorer_preview();
     }
@@ -2929,18 +3327,18 @@ impl InteractiveApplication {
 
     fn open_explorer(&mut self) {
         if self.explorer.root_revision != self.workspace.root_revision()
-            || self.explorer.visible().is_empty()
+            || self.explorer.visible_ids().is_empty()
         {
             self.explorer
                 .reset_roots(self.workspace.roots(), self.workspace.root_revision());
         }
-        self.ui.explorer = Some(PickerUiState {
+        self.ui.explorer = Some(ExplorerUiState {
             title: String::new(),
-            query: String::new(),
             rows: Vec::new(),
-            selected: Some(0),
             scroll: 0,
             loading: false,
+            total: 0,
+            preview_lines: Vec::new(),
         });
         self.ui.explorer_focused = true;
         self.sync_explorer_ui();
@@ -2951,6 +3349,7 @@ impl InteractiveApplication {
         if let Some(root) = root_to_load {
             self.load_explorer_node(root);
         }
+        self.ensure_cursor_visible();
     }
 
     fn load_explorer_node(&mut self, node: ExplorerNodeId) {
@@ -3085,14 +3484,8 @@ impl InteractiveApplication {
         let Some(explorer_ui) = self.ui.explorer.as_ref() else {
             return;
         };
-        let index = explorer_ui
-            .scroll
-            .saturating_add(usize::from(row.saturating_sub(3)));
-        let Some(id) = explorer_ui
-            .rows
-            .get(index)
-            .and_then(|row| row.id.parse::<u64>().ok())
-        else {
+        let index = usize::from(row.saturating_sub(3));
+        let Some(id) = explorer_ui.rows.get(index).map(|row| row.node_id) else {
             return;
         };
         self.explorer.select(ExplorerNodeId(id));
@@ -3390,15 +3783,24 @@ impl InteractiveApplication {
                             dap_request,
                         } => {
                             let policy = &self.configuration.settings.terminals;
-                            let columns = config.columns;
-                            let rows = config.rows;
+                            let (columns, rows) = terminal_panel_geometry(
+                                &self.configuration.settings,
+                                self.terminal_height,
+                                self.terminal_panel_height,
+                            )
+                            .map_or(
+                                (config.columns, config.rows),
+                                |geometry| {
+                                    (self.terminal_width.max(1), geometry.body_height.max(1))
+                                },
+                            );
                             let request = PtyRequest {
                                 program: result.executable,
                                 arguments: config.arguments,
                                 cwd: result.cwd,
                                 environment: config.environment,
-                                columns: config.columns,
-                                rows: config.rows,
+                                columns,
+                                rows,
                                 root_revision: result.root_revision,
                                 policy: PtyPolicy {
                                     maximum_output_bytes: policy.maximum_output_bytes,
@@ -3430,10 +3832,13 @@ impl InteractiveApplication {
                                         },
                                     );
                                     self.active_terminal = Some(id);
+                                    self.terminal_focused = true;
                                     if let Some(request) = dap_request {
                                         self.dap_terminal_responses.insert(id, request);
                                     }
                                     self.sync_terminal_panel();
+                                    self.sync_explorer_ui();
+                                    self.ensure_cursor_visible();
                                 }
                                 Err(error) => {
                                     if let Some(request_seq) = dap_request {
@@ -3504,18 +3909,19 @@ impl InteractiveApplication {
                     }
                     PtyEvent::Output {
                         id,
-                        text,
+                        bytes,
                         truncated,
                     } => {
                         if let Some(terminal) = self.terminals.get_mut(&id).filter(|terminal| {
                             terminal.root_revision == self.workspace.root_revision()
                         }) {
-                            terminal.screen.feed(&text);
+                            terminal.screen.feed_bytes(&bytes);
                             terminal.truncated |= truncated;
                         }
                     }
                     PtyEvent::Exited { id, code } => {
                         if let Some(terminal) = self.terminals.get_mut(&id) {
+                            terminal.screen.finish_bytes();
                             terminal.running = false;
                             terminal.exit_code = code;
                         }
@@ -3530,6 +3936,7 @@ impl InteractiveApplication {
                             });
                         }
                         if let Some(terminal) = self.terminals.get_mut(&id) {
+                            terminal.screen.finish_bytes();
                             terminal.running = false;
                         }
                         self.show_error(message);
@@ -3539,66 +3946,81 @@ impl InteractiveApplication {
             self.sync_terminal_panel();
         }
     }
+    fn workspace_render_height(&self) -> u16 {
+        if self.active_terminal.is_some() {
+            terminal_panel_geometry(
+                &self.configuration.settings,
+                self.terminal_height,
+                self.terminal_panel_height,
+            )
+            .map_or(self.terminal_height, |geometry| geometry.top)
+        } else {
+            self.terminal_height
+        }
+    }
+
+    fn terminal_body_dimensions(&self) -> (u16, u16) {
+        terminal_panel_geometry(
+            &self.configuration.settings,
+            self.terminal_height,
+            self.terminal_panel_height,
+        )
+        .map_or((1, 1), |geometry| {
+            (self.terminal_width.max(1), geometry.body_height.max(1))
+        })
+    }
+
+    fn resize_active_terminal_to_panel(&mut self) {
+        let Some(id) = self.active_terminal else {
+            return;
+        };
+        let (columns, rows) = self.terminal_body_dimensions();
+        if self.terminals.get(&id).is_none_or(|terminal| {
+            terminal.screen.dimensions() == (usize::from(columns), usize::from(rows))
+        }) {
+            return;
+        }
+        if let Err(error) = self.ptys.resize(id, columns, rows) {
+            self.show_error(error);
+            return;
+        }
+        if let Some(terminal) = self.terminals.get_mut(&id) {
+            terminal.screen.resize(columns, rows);
+        }
+    }
+
     fn sync_terminal_panel(&mut self) {
         let Some(id) = self.active_terminal else {
+            self.terminal_focused = false;
             self.ui.terminal_panel = None;
             return;
         };
         let Some(terminal) = self.terminals.get(&id) else {
+            self.active_terminal = None;
+            self.terminal_focused = false;
             self.ui.terminal_panel = None;
             return;
         };
-        let screen_lines = terminal.screen.lines();
-        let rows = screen_lines
-            .iter()
-            .rev()
-            .take(500)
-            .rev()
-            .enumerate()
-            .map(|(index, line)| PickerRow {
-                id: format!("terminal:{}:{index}", id.0),
-                label: line.clone(),
-                detail: if terminal.truncated {
-                    self.message("terminal_truncated", &[])
-                } else {
-                    String::new()
-                },
-                source: String::new(),
-            })
-            .collect();
-        self.ui.terminal_panel = Some(PickerUiState {
-            title: self.message(
-                "terminal_title",
-                &[
-                    ("id", id.0.to_string()),
-                    ("profile", terminal.profile.clone()),
-                    (
-                        "status",
-                        if terminal.running {
-                            self.message("terminal_running", &[])
-                        } else {
-                            self.message(
-                                "terminal_exited",
-                                &[(
-                                    "code",
-                                    terminal
-                                        .exit_code
-                                        .map_or_else(|| "signal".into(), |code| code.to_string()),
-                                )],
-                            )
-                        },
-                    ),
-                    (
-                        "unsupported",
-                        terminal.screen.unsupported_sequences().to_string(),
-                    ),
-                ],
-            ),
-            query: String::new(),
-            rows,
-            selected: None,
-            scroll: 0,
-            loading: terminal.running,
+        let (cursor_column, cursor_row) = terminal.screen.cursor();
+        let (columns, rows) = terminal.screen.dimensions();
+        self.ui.terminal_panel = Some(TerminalPanelState {
+            id: id.0,
+            profile: terminal.profile.clone(),
+            running: terminal.running,
+            exit_code: terminal.exit_code,
+            truncated: terminal.truncated,
+            unsupported_sequences: terminal.screen.unsupported_sequences(),
+            focused: self.terminal_focused,
+            columns: u16::try_from(columns).unwrap_or(u16::MAX),
+            rows: u16::try_from(rows).unwrap_or(u16::MAX),
+            cells: terminal.screen.cells().to_vec(),
+            cursor: (columns > 0 && rows > 0).then_some((
+                u16::try_from(cursor_column.min(columns.saturating_sub(1))).unwrap_or(u16::MAX),
+                u16::try_from(cursor_row.min(rows.saturating_sub(1))).unwrap_or(u16::MAX),
+            )),
+            scrollback_lines: terminal.screen.scrollback_len(),
+            scroll_offset: 0,
+            requested_height: self.terminal_panel_height,
         });
     }
 
@@ -3642,7 +4064,7 @@ impl InteractiveApplication {
         };
         let limits = self.plugin_limits();
         for (id, entry) in policy.entries.iter().filter(|(_, entry)| entry.enabled) {
-            if let Err(error) = self.plugins.load_from_store(
+            if let Err(error) = self.plugins.index_from_store(
                 id.clone(),
                 store.clone(),
                 entry.manifest.clone(),
@@ -3664,7 +4086,7 @@ impl InteractiveApplication {
         let mut failed = HashMap::new();
         for (id, load) in managed {
             match self.plugins.unload_generation(&id, load) {
-                Ok(()) => self.commands.unregister_plugin(&id),
+                Ok(()) => self.remove_plugin_contribution_generation(&id, load),
                 Err(error) => {
                     failed.insert(id, load);
                     self.show_error(error);
@@ -3689,8 +4111,21 @@ impl InteractiveApplication {
             return;
         }
         self.plugin_worker_reported = true;
+        self.pending_index_activation.clear();
+        self.rejected_plugin_loads.clear();
         for plugin in self.plugins.statuses.keys().cloned().collect::<Vec<_>>() {
             self.commands.unregister_plugin(&plugin);
+        }
+        self.plugin_contributions = PluginContributionCatalog::default();
+        if let Ok(compiled) = compile_keymaps_with_plugin_catalog(
+            &self.commands,
+            &self.configuration.base_keymaps,
+            &self.plugin_contributions,
+            &self.configuration.settings.input.keymaps,
+        ) {
+            self.cancel_pending_mapping();
+            self.configuration.keymaps = compiled;
+            self.configuration.deferred_plugin_keymaps = true;
         }
         for (plugin, (_, token)) in self.package_prepared.drain() {
             self.commands.unregister_plugin(&plugin);
@@ -3721,6 +4156,163 @@ impl InteractiveApplication {
             &[("diagnostic", error.to_string())],
         ));
     }
+    fn register_indexed_plugin_commands(
+        &mut self,
+        index: &crate::plugins::PluginContributionIndex,
+    ) -> Result<(), String> {
+        let plugin = index.owner.clone();
+        self.commands.unregister_plugin(&plugin);
+        for (command, declaration) in &index.commands {
+            let id = format!("plugin.{plugin}.{command}");
+            let id = CommandId::new(&id).map_err(|error| error.to_string())?;
+            let mut arguments = ArgumentSchema::default();
+            for (name, field) in &declaration.arguments {
+                arguments = arguments.field(
+                    name,
+                    match field.kind {
+                        crate::plugins::PluginArgumentKind::String => {
+                            crate::editing::ArgumentType::String
+                        }
+                        crate::plugins::PluginArgumentKind::Boolean => {
+                            crate::editing::ArgumentType::Bool
+                        }
+                        crate::plugins::PluginArgumentKind::Integer => {
+                            crate::editing::ArgumentType::Integer
+                        }
+                    },
+                    field.required,
+                );
+            }
+            let effect_plugin = plugin.clone();
+            let effect_command = command.clone();
+            let spec = CommandSpec {
+                id,
+                title: declaration.title.clone(),
+                description: declaration.description.clone(),
+                arguments,
+                context: match declaration.context {
+                    crate::plugins::PluginCommandContext::Application => {
+                        ContextRequirement::Application
+                    }
+                    crate::plugins::PluginCommandContext::Workspace => {
+                        ContextRequirement::Workspace
+                    }
+                    crate::plugins::PluginCommandContext::View => ContextRequirement::View,
+                    crate::plugins::PluginCommandContext::Buffer => ContextRequirement::Buffer,
+                    crate::plugins::PluginCommandContext::Selection => {
+                        ContextRequirement::Selection
+                    }
+                },
+                source: CommandSource::Plugin(plugin.clone()),
+            };
+            if let Err(error) = self.commands.register(spec, move |_, _| {
+                Ok(CommandOutcome {
+                    transaction: None,
+                    effects: vec![AppEffect::PluginExecute {
+                        plugin: effect_plugin.clone(),
+                        command: effect_command.clone(),
+                    }],
+                    message: None,
+                    follow_up: Vec::new(),
+                })
+            }) {
+                self.commands.unregister_plugin(&plugin);
+                return Err(error.to_string());
+            }
+        }
+        Ok(())
+    }
+
+    fn recompile_plugin_contributions(&mut self) -> Result<(), String> {
+        let compiled = compile_keymaps_with_plugin_catalog(
+            &self.commands,
+            &self.configuration.raw_keymaps,
+            &self.plugin_contributions,
+            &self.configuration.settings.input.keymaps,
+        )
+        .map_err(|errors| errors.join("; "))?;
+        self.cancel_pending_mapping();
+        self.configuration.keymaps = compiled;
+        Ok(())
+    }
+
+    fn remove_plugin_contribution_generation(&mut self, plugin: &str, load: PluginLoadId) {
+        if self.plugin_contributions.remove_generation(plugin, load.0) {
+            self.commands.unregister_plugin(plugin);
+            if let Err(error) = self.recompile_plugin_contributions() {
+                match compile_keymaps_with_plugin_catalog(
+                    &self.commands,
+                    &self.configuration.base_keymaps,
+                    &self.plugin_contributions,
+                    &self.configuration.settings.input.keymaps,
+                ) {
+                    Ok(compiled) => {
+                        self.cancel_pending_mapping();
+                        self.configuration.keymaps = compiled;
+                        self.configuration.deferred_plugin_keymaps = true;
+                        self.show_error(error);
+                    }
+                    Err(fallback) => self.show_error(fallback.join("; ")),
+                }
+            }
+        }
+    }
+
+    fn abort_pending_index_batch(&mut self, diagnostic: impl std::fmt::Display) {
+        let pending = std::mem::take(&mut self.pending_index_activation);
+        for (owner, (load, _)) in pending {
+            self.rejected_plugin_loads.insert((owner.clone(), load));
+            self.plugin_contributions.remove_generation(&owner, load.0);
+            self.commands.unregister_plugin(&owner);
+            let _ = self.plugins.disable_generation(&owner, load);
+            if let Some((_, token)) = self
+                .package_prepared
+                .remove(&owner)
+                .filter(|(candidate, _)| *candidate == load)
+            {
+                let _ = self.packages.request(PackageOperation::Abort { token });
+            }
+        }
+        if let Ok(compiled) = compile_keymaps_with_plugin_catalog(
+            &self.commands,
+            &self.configuration.base_keymaps,
+            &self.plugin_contributions,
+            &self.configuration.settings.input.keymaps,
+        ) {
+            self.cancel_pending_mapping();
+            self.configuration.keymaps = compiled;
+        }
+        self.show_error(diagnostic);
+    }
+
+    fn abort_expected_index_batch(
+        &mut self,
+        failed_plugin: String,
+        failed_load: PluginLoadId,
+        diagnostic: impl std::fmt::Display,
+    ) {
+        let expected = self
+            .configuration
+            .expected_plugin_indexes
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        for owner in expected {
+            let load = if owner == failed_plugin {
+                Some(failed_load)
+            } else {
+                self.plugins.load_id(&owner)
+            };
+            if let Some(load) = load {
+                self.rejected_plugin_loads.insert((owner.clone(), load));
+                self.pending_index_activation
+                    .entry(owner)
+                    .or_insert_with(|| (load, String::new()));
+            }
+        }
+        self.abort_pending_index_batch(diagnostic);
+    }
+
     fn process_plugin_events(&mut self) {
         let events = match self.plugins.poll() {
             Ok(events) => events,
@@ -3731,8 +4323,83 @@ impl InteractiveApplication {
         };
         for event in events {
             match event {
+                PluginEvent::Indexed {
+                    load,
+                    plugin,
+                    index,
+                } => {
+                    if self.rejected_plugin_loads.remove(&(plugin.clone(), load)) {
+                        let _ = self.plugins.disable_generation(&plugin, load);
+                        continue;
+                    }
+                    let checksum = index.checksum.clone();
+                    let mut accepted = self
+                        .plugin_contributions
+                        .install(index.clone())
+                        .map_err(|error| error.to_string())
+                        .and_then(|()| self.register_indexed_plugin_commands(&index));
+                    self.pending_index_activation
+                        .insert(plugin.clone(), (load, checksum.clone()));
+                    let waiting_for_deferred = self.configuration.deferred_plugin_keymaps
+                        && !self
+                            .configuration
+                            .expected_plugin_indexes
+                            .iter()
+                            .all(|owner| self.plugin_contributions.get(owner).is_some());
+                    if accepted.is_ok() && waiting_for_deferred {
+                        continue;
+                    }
+                    if accepted.is_ok() {
+                        accepted = self.recompile_plugin_contributions();
+                    }
+                    if let Err(error) = accepted {
+                        self.abort_pending_index_batch(error);
+                        continue;
+                    }
+                    let activations = if self.configuration.deferred_plugin_keymaps {
+                        std::mem::take(&mut self.pending_index_activation)
+                    } else {
+                        BTreeMap::from([(plugin.clone(), (load, checksum))])
+                    };
+                    let activation_error =
+                        activations
+                            .into_iter()
+                            .find_map(|(owner, (candidate, checksum))| {
+                                self.plugins
+                                    .activate_indexed(&owner, candidate, checksum)
+                                    .err()
+                                    .map(|error| (owner, candidate, error))
+                            });
+                    if let Some((failed_plugin, failed_load, error)) = activation_error {
+                        self.remove_plugin_contribution_generation(&failed_plugin, failed_load);
+                        let _ = self.plugins.disable_generation(&failed_plugin, failed_load);
+                        if let Some((_, token)) = self
+                            .package_prepared
+                            .remove(&failed_plugin)
+                            .filter(|(candidate, _)| *candidate == failed_load)
+                        {
+                            let _ = self.packages.request(PackageOperation::Abort { token });
+                        }
+                        self.show_error(error);
+                        continue;
+                    }
+                    self.logs.record(
+                        LogLevel::Info,
+                        "plugins",
+                        "indexed-and-accepted",
+                        BTreeMap::from([
+                            ("plugin".into(), plugin),
+                            ("load".into(), load.0.to_string()),
+                            ("contexts".into(), index.contexts.len().to_string()),
+                        ]),
+                    );
+                }
                 PluginEvent::Loaded { load, component } => {
                     let plugin = component.manifest.id.clone();
+                    if self.rejected_plugin_loads.remove(&(plugin.clone(), load)) {
+                        let _ = self.plugins.disable_generation(&plugin, load);
+                        continue;
+                    }
                     let prepared = self
                         .package_prepared
                         .get(&plugin)
@@ -3744,26 +4411,78 @@ impl InteractiveApplication {
                     if self.package_startup_pending.get(&plugin) == Some(&load) {
                         self.package_startup_pending.remove(&plugin);
                     }
+                    if let Some(index) = self
+                        .plugin_contributions
+                        .get(&plugin)
+                        .filter(|index| index.generation == load.0)
+                    {
+                        let declared = index.commands.keys().cloned().collect::<BTreeSet<_>>();
+                        let activated = component
+                            .activated_commands
+                            .iter()
+                            .cloned()
+                            .collect::<BTreeSet<_>>();
+                        if declared != activated {
+                            if let Some(token) = prepared {
+                                let _ = self.packages.request(PackageOperation::Abort { token });
+                            }
+                            self.remove_plugin_contribution_generation(&plugin, load);
+                            let _ = self.plugins.disable_generation(&plugin, load);
+                            self.show_error(crate::plugins::PluginError::UndeclaredCommand);
+                            continue;
+                        }
+                    }
                     self.commands.unregister_plugin(&plugin);
                     for command in &component.activated_commands {
                         let id = format!("plugin.{plugin}.{command}");
                         let Ok(id) = CommandId::new(&id) else {
                             continue;
                         };
-                        let title = component
-                            .manifest
-                            .commands
-                            .get(command)
-                            .cloned()
-                            .unwrap_or_else(|| command.clone());
+                        let Some(declaration) = component.manifest.commands.get(command) else {
+                            continue;
+                        };
+                        let mut arguments = ArgumentSchema::default();
+                        for (name, field) in &declaration.arguments {
+                            arguments = arguments.field(
+                                name,
+                                match field.kind {
+                                    crate::plugins::PluginArgumentKind::String => {
+                                        crate::editing::ArgumentType::String
+                                    }
+                                    crate::plugins::PluginArgumentKind::Boolean => {
+                                        crate::editing::ArgumentType::Bool
+                                    }
+                                    crate::plugins::PluginArgumentKind::Integer => {
+                                        crate::editing::ArgumentType::Integer
+                                    }
+                                },
+                                field.required,
+                            );
+                        }
                         let effect_plugin = plugin.clone();
                         let effect_command = command.clone();
                         let spec = CommandSpec {
                             id,
-                            title,
-                            description: "WASM component command".into(),
-                            arguments: ArgumentSchema::default(),
-                            context: ContextRequirement::Buffer,
+                            title: declaration.title.clone(),
+                            description: declaration.description.clone(),
+                            arguments,
+                            context: match declaration.context {
+                                crate::plugins::PluginCommandContext::Application => {
+                                    ContextRequirement::Application
+                                }
+                                crate::plugins::PluginCommandContext::Workspace => {
+                                    ContextRequirement::Workspace
+                                }
+                                crate::plugins::PluginCommandContext::View => {
+                                    ContextRequirement::View
+                                }
+                                crate::plugins::PluginCommandContext::Buffer => {
+                                    ContextRequirement::Buffer
+                                }
+                                crate::plugins::PluginCommandContext::Selection => {
+                                    ContextRequirement::Selection
+                                }
+                            },
                             source: CommandSource::Plugin(plugin.clone()),
                         };
                         let _ = self.commands.register(spec, move |_, _| {
@@ -3785,7 +4504,7 @@ impl InteractiveApplication {
                             }
                             Err(error) => {
                                 let _ = self.plugins.disable_generation(&plugin, load);
-                                self.commands.unregister_plugin(&plugin);
+                                self.remove_plugin_contribution_generation(&plugin, load);
                                 let _ = self.packages.request(PackageOperation::Abort { token });
                                 self.show_error(error)
                             }
@@ -3810,6 +4529,20 @@ impl InteractiveApplication {
                     plugin,
                     error,
                 } => {
+                    if self.rejected_plugin_loads.remove(&(plugin.clone(), load)) {
+                        continue;
+                    }
+                    if self.configuration.deferred_plugin_keymaps
+                        && self.configuration.expected_plugin_indexes.contains(&plugin)
+                    {
+                        self.abort_expected_index_batch(plugin, load, error);
+                        continue;
+                    }
+                    if self.pending_index_activation.contains_key(&plugin) {
+                        self.rejected_plugin_loads.insert((plugin, load));
+                        self.abort_pending_index_batch(error);
+                        continue;
+                    }
                     let prepared = self
                         .package_prepared
                         .get(&plugin)
@@ -3822,6 +4555,7 @@ impl InteractiveApplication {
                         self.package_startup_pending.remove(&plugin);
                         self.begin_package_activation_rollback();
                     }
+                    self.remove_plugin_contribution_generation(&plugin, load);
                     self.commands.unregister_plugin(&plugin);
                     self.logs.record(
                         LogLevel::Error,
@@ -4119,7 +4853,7 @@ impl InteractiveApplication {
                             let mut failed = HashMap::new();
                             for (id, load) in managed {
                                 match self.plugins.unload_generation(&id, load) {
-                                    Ok(()) => self.commands.unregister_plugin(&id),
+                                    Ok(()) => self.remove_plugin_contribution_generation(&id, load),
                                     Err(error) => {
                                         failed.insert(id, load);
                                         self.show_error(error);
@@ -4190,7 +4924,7 @@ impl InteractiveApplication {
                                 self.package_managed_plugins.remove(&plugin);
                             }
                             let _ = self.plugins.disable_generation(&plugin, load);
-                            self.commands.unregister_plugin(&plugin);
+                            self.remove_plugin_contribution_generation(&plugin, load);
                         }
                         self.logs.record(
                             LogLevel::Error,
@@ -5175,6 +5909,7 @@ impl InteractiveApplication {
         for (canonical, _) in restore.loaded.values() {
             self.record_recent_file(canonical.clone());
         }
+        self.ensure_cursor_visible();
     }
 
     fn fail_session_restore(&mut self) {
@@ -5674,6 +6409,8 @@ impl InteractiveApplication {
             let _ = self.ptys.close(terminal);
         }
         self.active_terminal = None;
+        self.terminal_focused = false;
+        self.terminals.clear();
         self.ui.terminal_panel = None;
         let roots = self
             .workspace
@@ -5708,12 +6445,12 @@ impl InteractiveApplication {
         self.pending_registry_artifact = None;
         for (plugin, (load, token)) in self.package_prepared.drain().collect::<Vec<_>>() {
             let _ = self.plugins.unload_generation(&plugin, load);
-            self.commands.unregister_plugin(&plugin);
+            self.remove_plugin_contribution_generation(&plugin, load);
             let _ = self.packages.request(PackageOperation::Abort { token });
         }
         for (plugin, load) in self.package_commits.values().cloned().collect::<Vec<_>>() {
             let _ = self.plugins.unload_generation(&plugin, load);
-            self.commands.unregister_plugin(&plugin);
+            self.remove_plugin_contribution_generation(&plugin, load);
         }
         let _ = self.dap.stop();
         self.dap_responses.clear();
@@ -5759,6 +6496,7 @@ impl InteractiveApplication {
         self.ui.explorer = None;
         self.ui.explorer_focused = false;
         self.close_picker();
+        self.ensure_cursor_visible();
     }
 
     fn remove_workspace_root(&mut self, id: crate::workspace::RootId) {
@@ -6713,6 +7451,7 @@ impl InteractiveApplication {
                             byte: 0,
                             anchor: 0,
                             scroll_line: 0,
+                            scroll_column: 0,
                         };
                         (
                             PickerItem {
@@ -7010,6 +7749,8 @@ impl InteractiveApplication {
                 .with_undo_policy(UndoPolicy::Ignore);
             if let Err(error) = self.state.apply_transaction(&transaction) {
                 self.show_error(error);
+            } else {
+                self.ensure_cursor_visible();
             }
         }
     }
@@ -7075,6 +7816,8 @@ impl InteractiveApplication {
                 .with_undo_policy(UndoPolicy::Ignore);
             if let Err(error) = self.state.apply_transaction(&transaction) {
                 self.show_error(error);
+            } else {
+                self.ensure_cursor_visible();
             }
         }
     }
@@ -7089,6 +7832,7 @@ impl InteractiveApplication {
                 .selection
                 .map_or(view.cursor.get(), |selection| selection.anchor.get()),
             scroll_line: view.scroll_line,
+            scroll_column: view.scroll_column,
         })
     }
     fn push_change_location(&mut self) {
@@ -8623,16 +9367,11 @@ impl InteractiveApplication {
     fn handle_event(&mut self, event: UiEvent) {
         match event {
             UiEvent::Resize(width, height) => {
-                if let Some(id) = self.active_terminal {
-                    let rows = height.saturating_sub(2);
-                    let _ = self.ptys.resize(id, width, rows);
-                    if let Some(terminal) = self.terminals.get_mut(&id) {
-                        terminal.screen.resize(width, rows);
-                    }
-                    self.sync_terminal_panel();
-                }
                 self.terminal_width = width;
                 self.terminal_height = height;
+                self.resize_active_terminal_to_panel();
+                self.sync_terminal_panel();
+                self.sync_explorer_ui();
                 if self.configuration.settings.ui.keep_cursor_visible_on_resize {
                     self.ensure_cursor_visible();
                 }
@@ -8656,7 +9395,15 @@ impl InteractiveApplication {
             }
             UiEvent::Mouse { key, column, row } => {
                 self.mouse_position = Some((column, row));
-                let over_explorer = self.ui.explorer.is_some()
+                let over_terminal = self.ui.terminal_panel.is_some()
+                    && terminal_panel_geometry(
+                        &self.configuration.settings,
+                        self.terminal_height,
+                        self.terminal_panel_height,
+                    )
+                    .is_some_and(|geometry| row >= geometry.top);
+                let over_explorer = !over_terminal
+                    && self.ui.explorer.is_some()
                     && crate::terminal_ui::explorer_panel_width(
                         &self.configuration.settings,
                         self.terminal_width,
@@ -8668,6 +9415,8 @@ impl InteractiveApplication {
                     "prompt_mouse"
                 } else if self.ui.tool_menu.is_some() {
                     "tool_manager_mouse"
+                } else if over_terminal {
+                    "terminal_mouse"
                 } else if over_explorer {
                     self.ui.explorer_focused = true;
                     "explorer_mouse"
@@ -8693,7 +9442,7 @@ impl InteractiveApplication {
             }
             .into();
         }
-        if self.active_terminal.is_some() {
+        if self.terminal_focused && self.active_terminal.is_some() {
             return "terminal".into();
         }
         if self.workspace_proposal.is_some() {
@@ -8736,7 +9485,15 @@ impl InteractiveApplication {
     }
 
     fn handle_key_in_context(&mut self, context: &str, key: KeyEvent) {
+        self.ui.documentation_popup = None;
         let context = context.to_owned();
+        if self
+            .pending_keymap
+            .as_ref()
+            .is_some_and(|pending| pending.context != context)
+        {
+            self.cancel_pending_mapping();
+        }
         let resolution = self
             .configuration
             .keymaps
@@ -8765,13 +9522,32 @@ impl InteractiveApplication {
             }
             MappingResolution::Disabled => self.pending_keymap = None,
             MappingResolution::Pending | MappingResolution::Ambiguous => {
-                self.pending_keymap = Some((
-                    Instant::now()
+                let now = Instant::now();
+                let prefix = self
+                    .configuration
+                    .keymaps
+                    .pending_prefix(&context)
+                    .expect("pending resolution owns a non-empty resolver sequence");
+                let started_at = self.pending_keymap.as_ref().map_or(now, |pending| {
+                    if pending.context == context
+                        && pending.configuration_generation == self.configuration_generation
+                    {
+                        pending.started_at
+                    } else {
+                        now
+                    }
+                });
+                self.pending_keymap = Some(PendingKeymap {
+                    context,
+                    prefix,
+                    started_at,
+                    deadline: now
                         + Duration::from_millis(
                             self.configuration.settings.input.mapping_timeout_ms,
                         ),
-                    context,
-                ));
+                    configuration_generation: self.configuration_generation,
+                });
+                self.ui.key_hints = None;
                 return;
             }
             MappingResolution::Missing => {
@@ -8817,6 +9593,8 @@ impl InteractiveApplication {
     }
 
     fn handle_configured_paste(&mut self, text: String) {
+        self.ui.documentation_popup = None;
+        self.cancel_pending_mapping();
         let context = self.active_input_context();
         if let Some(command_id) = self
             .configuration
@@ -8827,6 +9605,7 @@ impl InteractiveApplication {
             .cloned()
         {
             self.invoke_text_command(&command_id, text);
+            self.ensure_cursor_visible();
         }
     }
 
@@ -8859,28 +9638,47 @@ impl InteractiveApplication {
     }
 
     fn cancel_pending_mapping(&mut self) {
-        if let Some((_, context)) = self.pending_keymap.take() {
-            if let Some(resolver) = self.configuration.keymaps.resolvers.get_mut(&context) {
-                resolver.cancel();
-            }
+        self.ui.key_hints = None;
+        if let Some(pending) = self.pending_keymap.take()
+            && let Some(resolver) = self
+                .configuration
+                .keymaps
+                .resolvers
+                .get_mut(&pending.context)
+        {
+            resolver.cancel();
         }
     }
 
     fn flush_keymap_timeout(&mut self) {
-        let Some((deadline, context)) = self.pending_keymap.clone() else {
+        let Some(pending) = self.pending_keymap.clone() else {
+            self.ui.key_hints = None;
             return;
         };
-        if Instant::now() < deadline {
+        if Instant::now() < pending.deadline {
             return;
         }
         self.pending_keymap = None;
-        if context != self.active_input_context() {
-            if let Some(resolver) = self.configuration.keymaps.resolvers.get_mut(&context) {
+        self.ui.key_hints = None;
+        if pending.context != self.active_input_context()
+            || pending.configuration_generation != self.configuration_generation
+        {
+            if let Some(resolver) = self
+                .configuration
+                .keymaps
+                .resolvers
+                .get_mut(&pending.context)
+            {
                 resolver.cancel();
             }
             return;
         }
-        if let Some(resolver) = self.configuration.keymaps.resolvers.get_mut(&context) {
+        if let Some(resolver) = self
+            .configuration
+            .keymaps
+            .resolvers
+            .get_mut(&pending.context)
+        {
             if let MappingResolution::Ready(invocation) = resolver.flush_timeout() {
                 self.invoke_mapped(invocation);
                 self.ensure_cursor_visible();
@@ -8888,7 +9686,71 @@ impl InteractiveApplication {
         }
     }
 
+    fn update_key_hint_ui(&mut self) {
+        self.ui.key_hints = None;
+        let Some(pending) = self.pending_keymap.clone() else {
+            return;
+        };
+        if pending.configuration_generation != self.configuration_generation
+            || pending.context != self.active_input_context()
+        {
+            self.cancel_pending_mapping();
+            return;
+        }
+        let policy = &self.configuration.settings.ui.key_hints;
+        let now = Instant::now();
+        if !policy.enabled
+            || self.ui.prompt.is_some()
+            || self.workspace_proposal.is_some()
+            || now >= pending.deadline
+            || now.duration_since(pending.started_at) < Duration::from_millis(policy.delay_ms)
+        {
+            return;
+        }
+        let Some(projection) = self.configuration.keymaps.hints_for_prefix(
+            &pending.context,
+            &pending.prefix,
+            &self.configuration.settings.command_labels,
+        ) else {
+            return;
+        };
+        let rows = projection
+            .rows
+            .into_iter()
+            .filter(|row| {
+                row.mappings
+                    .iter()
+                    .any(|mapping| mapping.operation == KeymapOperation::Command)
+            })
+            .map(|row| {
+                let group = row.group_id.is_some();
+                KeyHintUiRow {
+                    next_key: row.next_key,
+                    label: if group || (row.direct && policy.show_command_titles) {
+                        row.label
+                    } else {
+                        policy.fallback_label.clone()
+                    },
+                    icon: (group && policy.show_group_icons)
+                        .then_some(row.icon)
+                        .flatten(),
+                    group,
+                }
+            })
+            .take(usize::from(policy.max_rows) * usize::from(policy.max_columns))
+            .collect::<Vec<_>>();
+        if !rows.is_empty() {
+            self.ui.key_hints = Some(KeyHintUiState {
+                prefix: projection.prefix,
+                rows,
+            });
+        }
+    }
+
     fn invoke(&mut self, mut invocation: CommandInvocation) {
+        if !invocation.id.as_str().starts_with("lsp.documentation.") {
+            self.ui.documentation_popup = None;
+        }
         if invocation.target.view.is_none() {
             invocation.target.view = self.state.active_view;
         }
@@ -9071,14 +9933,19 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::InspectKeymap {
+                id,
                 context,
                 key,
                 command,
             } => {
                 let context = context.unwrap_or_else(|| self.active_input_context());
-                let inspection = key
+                let inspection = id
                     .as_deref()
-                    .and_then(|keys| self.configuration.keymaps.inspect_key(&context, keys))
+                    .and_then(|id| self.configuration.keymaps.inspect_id(id))
+                    .or_else(|| {
+                        key.as_deref()
+                            .and_then(|keys| self.configuration.keymaps.inspect_key(&context, keys))
+                    })
                     .or_else(|| {
                         command.as_deref().and_then(|command| {
                             self.configuration.keymaps.inspect(&context, command)
@@ -9088,15 +9955,18 @@ impl InteractiveApplication {
                     self.ui.notification = Some(self.message(
                         "keymap_inspection",
                         &[
+                            ("id", inspection.id),
                             ("context", inspection.context),
+                            ("source_keys", inspection.source_keys),
                             ("keys", inspection.keys),
-                            ("command", inspection.command),
+                            ("operation", inspection.operation.as_str().into()),
+                            ("command", inspection.command.unwrap_or_default()),
                             ("arguments", format!("{:?}", inspection.arguments)),
                             ("source", inspection.source),
                         ],
                     ));
                     self.ui.notification_error = false;
-                } else if command.is_none() && key.is_none() {
+                } else if id.is_none() && command.is_none() && key.is_none() {
                     let count = self
                         .configuration
                         .keymaps
@@ -9416,7 +10286,33 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::TerminalOpen(profile) => {
-                self.defer_trusted_execution(DeferredExecution::OpenTerminal(profile))
+                let profile = profile.unwrap_or_else(|| {
+                    self.configuration
+                        .settings
+                        .terminals
+                        .default_profile
+                        .clone()
+                });
+                self.defer_trusted_execution(DeferredExecution::OpenTerminal(profile));
+            }
+            AppEffect::TerminalToggle => {
+                if self.terminal_focused {
+                    self.terminal_focused = false;
+                    self.sync_terminal_panel();
+                    self.ensure_cursor_visible();
+                } else if self.active_terminal.is_some() {
+                    self.terminal_focused = true;
+                    self.resize_active_terminal_to_panel();
+                    self.sync_terminal_panel();
+                } else {
+                    let profile = self
+                        .configuration
+                        .settings
+                        .terminals
+                        .default_profile
+                        .clone();
+                    self.defer_trusted_execution(DeferredExecution::OpenTerminal(profile));
+                }
             }
             AppEffect::TerminalList => {
                 let status = self
@@ -9443,14 +10339,69 @@ impl InteractiveApplication {
                 let id = PtyId(id);
                 if self.terminals.contains_key(&id) {
                     self.active_terminal = Some(id);
+                    self.terminal_focused = true;
+                    self.resize_active_terminal_to_panel();
                     self.sync_terminal_panel();
                 } else {
                     self.show_error(self.message("terminal_missing", &[]));
                 }
             }
+            AppEffect::TerminalFocusActive => {
+                if self.active_terminal.is_some() {
+                    self.terminal_focused = true;
+                    self.resize_active_terminal_to_panel();
+                    self.sync_terminal_panel();
+                } else {
+                    self.show_error(self.message("terminal_missing", &[]));
+                }
+            }
+            AppEffect::TerminalCycle(direction) => {
+                let mut ids = self.terminals.keys().copied().collect::<Vec<_>>();
+                ids.sort_unstable_by_key(|id| id.0);
+                if ids.is_empty() {
+                    self.show_error(self.message("terminal_missing", &[]));
+                } else {
+                    let current = self
+                        .active_terminal
+                        .and_then(|active| ids.iter().position(|id| *id == active))
+                        .unwrap_or(0);
+                    let next = if direction < 0 {
+                        current.checked_sub(1).unwrap_or(ids.len() - 1)
+                    } else {
+                        (current + 1) % ids.len()
+                    };
+                    self.active_terminal = Some(ids[next]);
+                    self.resize_active_terminal_to_panel();
+                    self.sync_terminal_panel();
+                }
+            }
+            AppEffect::TerminalResize(rows) => {
+                if self.active_terminal.is_none() {
+                    self.show_error(self.message("terminal_missing", &[]));
+                } else {
+                    let step = i32::from(rows).saturating_mul(i32::from(
+                        self.configuration.settings.ui.terminal_panel.resize_step,
+                    ));
+                    let policy = &self.configuration.settings.ui.terminal_panel;
+                    self.terminal_panel_height = u16::try_from(
+                        i32::from(self.terminal_panel_height)
+                            .saturating_add(step)
+                            .clamp(
+                                i32::from(policy.minimum_height),
+                                i32::from(policy.maximum_height),
+                            ),
+                    )
+                    .unwrap_or(policy.height);
+                    self.resize_active_terminal_to_panel();
+                    self.sync_terminal_panel();
+                    self.sync_explorer_ui();
+                    self.ensure_cursor_visible();
+                }
+            }
             AppEffect::TerminalUnfocus => {
-                self.active_terminal = None;
-                self.ui.terminal_panel = None;
+                self.terminal_focused = false;
+                self.sync_terminal_panel();
+                self.ensure_cursor_visible();
             }
             AppEffect::TerminalSend(text) => {
                 if let Some(id) = self.active_terminal {
@@ -9466,7 +10417,16 @@ impl InteractiveApplication {
             AppEffect::TerminalClose => {
                 if let Some(id) = self.active_terminal.take() {
                     let _ = self.ptys.close(id);
-                    self.ui.terminal_panel = None;
+                    self.terminals.remove(&id);
+                    self.dap_terminal_responses.remove(&id);
+                    let mut remaining = self.terminals.keys().copied().collect::<Vec<_>>();
+                    remaining.sort_unstable_by_key(|candidate| candidate.0);
+                    self.active_terminal = remaining.first().copied();
+                    self.terminal_focused = self.active_terminal.is_some();
+                    self.resize_active_terminal_to_panel();
+                    self.sync_terminal_panel();
+                    self.sync_explorer_ui();
+                    self.ensure_cursor_visible();
                 }
             }
             AppEffect::PluginValidate => self.load_configured_plugins(),
@@ -9493,15 +10453,27 @@ impl InteractiveApplication {
                 self.install_picker(self.message("plugin_picker_title", &[]), items);
             }
             AppEffect::PluginDisable(id) => {
+                let load = self.plugins.load_id(&id);
                 if let Err(error) = self.plugins.disable(&id) {
                     self.show_error(error)
                 } else {
+                    if let Some(load) = load {
+                        self.remove_plugin_contribution_generation(&id, load);
+                    }
                     self.commands.unregister_plugin(&id);
                     self.ui.notification = Some(self.message("plugin_disabled", &[("id", id)]));
                     self.ui.notification_error = false;
                 }
             }
             AppEffect::PluginExecute { plugin, command } => {
+                let Some(load) = self.plugins.load_id(&plugin) else {
+                    self.show_error(crate::plugins::PluginError::NotActive);
+                    return;
+                };
+                if !self.plugins.is_active_generation(&plugin, load) {
+                    self.show_error(crate::plugins::PluginError::NotActive);
+                    return;
+                }
                 let snapshot = self.state.active_buffer_id().and_then(|id| {
                     self.state.buffers.get(id).map(|buffer| PluginSnapshot {
                         buffer: id.data().as_ffi(),
@@ -9632,15 +10604,12 @@ impl InteractiveApplication {
             AppEffect::ExplorerClose => {
                 self.ui.explorer = None;
                 self.ui.explorer_focused = false;
+                self.ensure_cursor_visible();
             }
             AppEffect::ExplorerMove(delta) => {
-                self.explorer.move_selection(isize::from(delta));
-                self.sync_explorer_ui();
+                self.move_explorer_selection(isize::from(delta));
             }
-            AppEffect::ExplorerParent => {
-                self.explorer.collapse_or_parent();
-                self.sync_explorer_ui();
-            }
+            AppEffect::ExplorerParent => self.explorer_collapse_or_parent(),
             AppEffect::ExplorerChild => {
                 self.explorer.select_first_child();
                 self.sync_explorer_ui();
@@ -9842,6 +10811,32 @@ impl InteractiveApplication {
                 self.ui.notification_error = false;
             }
             AppEffect::LspRequest(feature) => self.request_lsp(feature),
+            AppEffect::LspDocumentationScroll(direction) => {
+                if let Some(popup) = self.ui.documentation_popup.as_mut() {
+                    let page = usize::from(
+                        self.configuration
+                            .settings
+                            .ui
+                            .documentation_popup
+                            .max_height
+                            .saturating_sub(2),
+                    )
+                    .max(1);
+                    let maximum = popup.lines.len().saturating_sub(page);
+                    let step = self
+                        .configuration
+                        .settings
+                        .ui
+                        .documentation_popup
+                        .scroll_step;
+                    popup.scroll = if direction < 0 {
+                        popup.scroll.saturating_sub(step)
+                    } else {
+                        popup.scroll.saturating_add(step).min(maximum)
+                    };
+                }
+            }
+            AppEffect::LspDocumentationClose => self.ui.documentation_popup = None,
             AppEffect::LspCompletionMove(direction) => self.move_lsp_completion(direction),
             AppEffect::DiagnosticNavigate(direction) => self.navigate_diagnostic(direction),
             AppEffect::LspCompletionAccept => self.accept_lsp_completion(),
@@ -10566,8 +11561,9 @@ impl InteractiveApplication {
             }
             None => return,
         }
-        self.pending_keymap = None;
+        self.cancel_pending_mapping();
         self.input.cancel_pending();
+        self.ensure_cursor_visible();
     }
 
     fn apply_layout_action(&mut self, action: LayoutAction) {
@@ -10619,8 +11615,9 @@ impl InteractiveApplication {
             self.show_error(error);
         } else {
             self.ui.dashboard = false;
-            self.pending_keymap = None;
+            self.cancel_pending_mapping();
             self.input.cancel_pending();
+            self.ensure_cursor_visible();
         }
     }
 
@@ -10641,46 +11638,29 @@ impl InteractiveApplication {
             return None;
         }
         let content_width = self.terminal_width.saturating_sub(explorer_offset);
-        let tab = self.state.tabs.get(self.state.active_tab?)?;
-        let tab_line_visible = self.configuration.settings.ui.tab_line.enabled
-            && (!self.configuration.settings.ui.tab_line.hide_when_single
-                || self.state.tabs.len() > 1);
-        let top = u16::from(tab_line_visible);
-        if global_row < top {
-            return None;
-        }
-        let compact_layout;
-        let pane_count = application_layout_pane_count(&tab.root);
-        let layout_height = self
-            .terminal_height
-            .saturating_sub(top)
-            .saturating_sub(u16::from(
-                self.configuration.settings.ui.status_line.enabled,
-            ));
-        let layout = if content_width
-            < self
-                .configuration
-                .settings
-                .ui
-                .panes
-                .minimum_width
-                .saturating_mul(u16::try_from(pane_count).unwrap_or(u16::MAX))
-            || layout_height < self.configuration.settings.ui.panes.minimum_height
-        {
-            compact_layout = crate::editing::LayoutNode::Pane(tab.focused);
-            &compact_layout
-        } else {
-            &tab.root
-        };
-        locate_mouse_pane(
-            layout,
-            explorer_offset,
-            top,
+        let local_column = global_column.saturating_sub(explorer_offset);
+        pane_viewports(
+            &self.state,
+            &self.configuration.settings,
             content_width,
-            layout_height,
-            global_column,
-            global_row,
+            self.workspace_render_height(),
         )
+        .into_iter()
+        .find(|viewport| {
+            local_column >= viewport.x
+                && local_column < viewport.x.saturating_add(viewport.width)
+                && global_row >= viewport.y
+                && global_row < viewport.y.saturating_add(viewport.height)
+        })
+        .map(|viewport| {
+            (
+                viewport.pane,
+                local_column.saturating_sub(viewport.x),
+                global_row.saturating_sub(viewport.y),
+                viewport.width,
+                viewport.height,
+            )
+        })
     }
 
     fn focus_mouse_pane(&mut self) {
@@ -10692,6 +11672,8 @@ impl InteractiveApplication {
             .with_undo_policy(UndoPolicy::Ignore);
         if let Err(error) = self.state.apply_transaction(&transaction) {
             self.show_error(error);
+        } else {
+            self.ensure_cursor_visible();
         }
     }
 
@@ -10712,28 +11694,22 @@ impl InteractiveApplication {
         if row >= body_height {
             return;
         }
-        let digits = buffer.text.len_lines().max(1).to_string().len();
-        let gutter = if self.configuration.settings.editor.line_numbers
-            == crate::configuration::LineNumbers::Off
-        {
-            0
-        } else {
-            u16::try_from(
-                digits
-                    .saturating_add(
-                        self.configuration
-                            .settings
-                            .editor
-                            .line_number_separator
-                            .len(),
-                    )
-                    .saturating_add(usize::from(
-                        self.configuration.settings.editor.gutter_padding,
-                    )),
-            )
-            .unwrap_or(u16::MAX)
-        };
-        let available = usize::from(pane_width.saturating_sub(gutter).max(1));
+        let gutter = editor_gutter_width(
+            &buffer.text,
+            &self.configuration.settings.editor,
+            pane_width,
+        );
+        let available = editor_content_width(
+            &buffer.text,
+            &self.configuration.settings.editor,
+            pane_width,
+        );
+        if available == 0 {
+            return;
+        }
+        let wrap_enabled = self.configuration.settings.editor.wrap
+            && !(self.ui.large_file_buffers.contains(&buffer_id)
+                && self.configuration.settings.editor.large_file.disable_wrap);
         let mut remaining_row = usize::from(row);
         let mut line_index = view.scroll_line;
         let mut wrapped_column = 0_usize;
@@ -10745,13 +11721,13 @@ impl InteractiveApplication {
                 self.configuration.settings.editor.tab_width,
                 self.configuration.settings.editor.ambiguous_width,
             );
-            let rows = if self.configuration.settings.editor.wrap {
+            let rows = if wrap_enabled {
                 columns.max(1).div_ceil(available)
             } else {
                 1
             };
             if remaining_row < rows {
-                wrapped_column = if self.configuration.settings.editor.wrap {
+                wrapped_column = if wrap_enabled {
                     remaining_row.saturating_mul(available)
                 } else {
                     0
@@ -10770,8 +11746,9 @@ impl InteractiveApplication {
             .unwrap_or(ByteOffset(0));
         let line = buffer.text.line(line_index).unwrap_or_default();
         let content = line.strip_suffix('\n').unwrap_or(&line);
-        let target_column =
-            wrapped_column.saturating_add(usize::from(column.saturating_sub(gutter)));
+        let target_column = wrapped_column
+            .saturating_add(usize::from(column.saturating_sub(gutter)))
+            .saturating_add(if wrap_enabled { 0 } else { view.scroll_column });
         let mut display_column = 0_usize;
         let mut byte = 0_usize;
         for (relative, grapheme) in content.grapheme_indices(true) {
@@ -10827,8 +11804,11 @@ impl InteractiveApplication {
         }
         if let Err(error) = self.state.apply_transaction(&transaction) {
             self.show_error(error);
-        } else if !extend_selection {
-            self.mouse_selection_anchor = Some((view_id, position));
+        } else {
+            if !extend_selection {
+                self.mouse_selection_anchor = Some((view_id, position));
+            }
+            self.ensure_cursor_visible();
         }
     }
 
@@ -10838,13 +11818,21 @@ impl InteractiveApplication {
         };
         let view = &self.state.views[view_id];
         let buffer = &self.state.buffers[view.buffer];
-        let body = usize::from(
-            self.terminal_height
-                .saturating_sub(u16::from(
-                    self.configuration.settings.ui.status_line.enabled,
-                ))
-                .max(1),
-        );
+        let explorer_width =
+            self.ui.explorer.as_ref().and_then(|_| {
+                explorer_panel_width(&self.configuration.settings, self.terminal_width)
+            });
+        let content_width = explorer_width.map_or(self.terminal_width, |panel| {
+            self.terminal_width.saturating_sub(panel).saturating_sub(1)
+        });
+        let body = active_pane_viewport(
+            &self.state,
+            &self.configuration.settings,
+            content_width,
+            self.workspace_render_height(),
+        )
+        .filter(|viewport| viewport.view == view_id)
+        .map_or(1, |viewport| usize::from(viewport.height.max(1)));
         let percent = if kind.starts_with("half_") {
             self.configuration.settings.editor.half_page_percent
         } else {
@@ -10890,6 +11878,8 @@ impl InteractiveApplication {
             .with_undo_policy(UndoPolicy::Ignore);
         if let Err(error) = self.state.apply_transaction(&transaction) {
             self.show_error(error);
+        } else {
+            self.ensure_cursor_visible();
         }
     }
 
@@ -11087,10 +12077,26 @@ impl InteractiveApplication {
         loaded: LoadedConfig,
         automatic: bool,
     ) -> Result<(), String> {
-        let candidate = match resolve_configuration(&self.commands, loaded, true) {
+        let mut candidate = match resolve_configuration(&self.commands, loaded, true) {
             Ok((candidate, None)) => candidate,
             Ok((_, Some(diagnostic))) | Err(diagnostic) => return Err(diagnostic),
         };
+        let plugins_changed = candidate.settings.plugins != self.configuration.settings.plugins;
+        if plugins_changed {
+            return Err(
+                "live plugin topology reload is not yet staged; previous configuration retained"
+                    .into(),
+            );
+        }
+        if !plugins_changed {
+            candidate.keymaps = compile_keymaps_with_plugin_catalog(
+                &self.commands,
+                &candidate.raw_keymaps,
+                &self.plugin_contributions,
+                &candidate.settings.input.keymaps,
+            )
+            .map_err(|errors| errors.join("; "))?;
+        }
         self.configuration_worker
             .configure_watch(
                 candidate.settings.config_watch.clone(),
@@ -11166,21 +12172,33 @@ impl InteractiveApplication {
             self.state.open_text(TextBuffer::from_text(""), None);
             self.ui.dashboard = false;
         }
-        let plugins_changed = candidate.settings.plugins != self.configuration.settings.plugins;
         if plugins_changed {
             for (plugin, (load, token)) in self.package_prepared.drain().collect::<Vec<_>>() {
                 let _ = self.plugins.unload_generation(&plugin, load);
+                self.remove_plugin_contribution_generation(&plugin, load);
                 let _ = self.packages.request(PackageOperation::Abort { token });
             }
             self.package_startup_pending.clear();
             self.package_managed_plugins.clear();
             let ids = self.plugins.statuses.keys().cloned().collect::<Vec<_>>();
             for id in ids {
+                let load = self.plugins.load_id(&id);
                 let _ = self.plugins.disable(&id);
-                self.commands.unregister_plugin(&id);
+                if let Some(load) = load {
+                    self.remove_plugin_contribution_generation(&id, load);
+                }
             }
+            self.plugin_contributions = PluginContributionCatalog::default();
         }
+        self.ui.documentation_popup = None;
         self.configuration = candidate;
+        self.terminal_panel_height = self.terminal_panel_height.clamp(
+            self.configuration.settings.ui.terminal_panel.minimum_height,
+            self.configuration.settings.ui.terminal_panel.maximum_height,
+        );
+        self.resize_active_terminal_to_panel();
+        self.sync_terminal_panel();
+        self.sync_explorer_ui();
         if plugins_changed {
             self.load_configured_plugins();
             self.package_startup_rollback_attempted = false;
@@ -11203,6 +12221,7 @@ impl InteractiveApplication {
             self.message("reloaded", &[])
         });
         self.ui.notification_error = false;
+        self.ensure_cursor_visible();
         Ok(())
     }
 
@@ -11601,6 +12620,7 @@ impl InteractiveApplication {
                                         .len_lines()
                                         .saturating_sub(1),
                                 );
+                                self.state.views[view].scroll_column = location.scroll_column;
                                 self.state.views[view].selection =
                                     (anchor != cursor).then_some(crate::editing::Selection {
                                         anchor,
@@ -11640,6 +12660,7 @@ impl InteractiveApplication {
                                     self.show_error(self.message("lsp_invalid_position", &[]));
                                 }
                                 self.ui.dashboard = false;
+                                self.ensure_cursor_visible();
                             }
                             Some(PendingVfs::WorkspaceSearchNavigation { range }) => {
                                 let start = ByteOffset(range.start);
@@ -11664,6 +12685,7 @@ impl InteractiveApplication {
                                     self.show_error(error);
                                 }
                                 self.ui.dashboard = false;
+                                self.ensure_cursor_visible();
                             }
                             Some(PendingVfs::ExplorerOpen { split }) => {
                                 if split {
@@ -11865,6 +12887,7 @@ impl InteractiveApplication {
     }
 
     fn open_prompt(&mut self, kind: PromptKind, initial: String) {
+        self.cancel_pending_mapping();
         if self.ui.prompt.is_none() {
             if let Some(view) = self.state.active_view {
                 let mode = self.state.views[view].mode;
@@ -12372,24 +13395,103 @@ impl InteractiveApplication {
         let view = &self.state.views[view_id];
         let buffer = &self.state.buffers[view.buffer];
         let line = buffer.text.byte_to_line(view.cursor).unwrap_or(0);
-        let body_height = usize::from(
-            self.terminal_height
-                .saturating_sub(u16::from(
-                    self.configuration.settings.ui.status_line.enabled,
-                ))
-                .max(1),
-        );
+        let explorer_width =
+            self.ui.explorer.as_ref().and_then(|_| {
+                explorer_panel_width(&self.configuration.settings, self.terminal_width)
+            });
+        let content_width = explorer_width.map_or(self.terminal_width, |panel| {
+            self.terminal_width.saturating_sub(panel).saturating_sub(1)
+        });
+        let Some(viewport) = active_pane_viewport(
+            &self.state,
+            &self.configuration.settings,
+            content_width,
+            self.workspace_render_height(),
+        ) else {
+            return;
+        };
+        if viewport.view != view_id {
+            return;
+        }
+        let body_height = usize::from(viewport.height.max(1));
         let first = if line < view.scroll_line {
             line
         } else if line >= view.scroll_line.saturating_add(body_height) {
             line.saturating_sub(body_height - 1)
         } else {
-            return;
+            view.scroll_line
         };
+        let available = editor_content_width(
+            &buffer.text,
+            &self.configuration.settings.editor,
+            viewport.width,
+        );
+        let wrap_enabled = available > 0
+            && self.configuration.settings.editor.wrap
+            && !(self.ui.large_file_buffers.contains(&view.buffer)
+                && self.configuration.settings.editor.large_file.disable_wrap);
+        let first_column = if wrap_enabled || available == 0 {
+            0
+        } else {
+            let line_start = buffer.text.line_to_byte(line).unwrap_or(ByteOffset(0));
+            let prefix = buffer
+                .text
+                .slice(ByteRange::new(line_start, view.cursor).expect("cursor line range"))
+                .unwrap_or_default();
+            let cursor_column = configured_text_width(
+                &prefix,
+                self.configuration.settings.editor.tab_width,
+                self.configuration.settings.editor.ambiguous_width,
+            );
+            let margin = usize::from(
+                self.configuration
+                    .settings
+                    .editor
+                    .viewport
+                    .horizontal_margin,
+            )
+            .min(available.saturating_sub(1));
+            let target = if cursor_column < view.scroll_column.saturating_add(margin) {
+                cursor_column.saturating_sub(margin)
+            } else if cursor_column
+                >= view
+                    .scroll_column
+                    .saturating_add(available.saturating_sub(margin))
+            {
+                cursor_column.saturating_sub(available.saturating_sub(margin).saturating_sub(1))
+            } else {
+                view.scroll_column
+            };
+            let line_text = buffer.text.line(line).unwrap_or_default();
+            let line_text = line_text.strip_suffix('\n').unwrap_or(&line_text);
+            let snapped = snap_display_column(
+                line_text,
+                target,
+                self.configuration.settings.editor.tab_width,
+                self.configuration.settings.editor.ambiguous_width,
+            );
+            if cursor_column.saturating_sub(snapped) < available {
+                snapped
+            } else {
+                snap_display_column_forward(
+                    line_text,
+                    cursor_column.saturating_add(1).saturating_sub(available),
+                    self.configuration.settings.editor.tab_width,
+                    self.configuration.settings.editor.ambiguous_width,
+                )
+            }
+        };
+        if first == view.scroll_line && first_column == view.scroll_column {
+            return;
+        }
         let transaction = EditorTransaction::new(self.transaction_id())
             .with_operation(EditorOperation::SetScroll {
                 view: view_id,
                 first_line: first,
+            })
+            .with_operation(EditorOperation::SetScrollColumn {
+                view: view_id,
+                first_column,
             })
             .with_undo_policy(UndoPolicy::Ignore);
         if let Err(error) = self.state.apply_transaction(&transaction) {
@@ -12425,82 +13527,6 @@ impl InteractiveApplication {
 
 const fn configuration_generation_is_newer(current: u64, candidate: u64) -> bool {
     candidate > current
-}
-
-fn application_layout_pane_count(node: &crate::editing::LayoutNode) -> usize {
-    match node {
-        crate::editing::LayoutNode::Pane(_) => 1,
-        crate::editing::LayoutNode::Split { first, second, .. } => {
-            application_layout_pane_count(first)
-                .saturating_add(application_layout_pane_count(second))
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn locate_mouse_pane(
-    node: &crate::editing::LayoutNode,
-    x: u16,
-    y: u16,
-    width: u16,
-    height: u16,
-    column: u16,
-    row: u16,
-) -> Option<(crate::editing::PaneId, u16, u16, u16, u16)> {
-    match node {
-        crate::editing::LayoutNode::Pane(pane)
-            if column >= x
-                && column < x.saturating_add(width)
-                && row >= y
-                && row < y.saturating_add(height) =>
-        {
-            Some((
-                *pane,
-                column.saturating_sub(x),
-                row.saturating_sub(y),
-                width,
-                height,
-            ))
-        }
-        crate::editing::LayoutNode::Pane(_) => None,
-        crate::editing::LayoutNode::Split {
-            axis,
-            ratio,
-            first,
-            second,
-        } => match axis {
-            crate::editing::Axis::Horizontal => {
-                let available = width.saturating_sub(1);
-                let first_width = available.saturating_mul(*ratio) / 1000;
-                locate_mouse_pane(first, x, y, first_width, height, column, row).or_else(|| {
-                    locate_mouse_pane(
-                        second,
-                        x.saturating_add(first_width).saturating_add(1),
-                        y,
-                        available.saturating_sub(first_width),
-                        height,
-                        column,
-                        row,
-                    )
-                })
-            }
-            crate::editing::Axis::Vertical => {
-                let available = height.saturating_sub(1);
-                let first_height = available.saturating_mul(*ratio) / 1000;
-                locate_mouse_pane(first, x, y, width, first_height, column, row).or_else(|| {
-                    locate_mouse_pane(
-                        second,
-                        x,
-                        y.saturating_add(first_height).saturating_add(1),
-                        width,
-                        available.saturating_sub(first_height),
-                        column,
-                        row,
-                    )
-                })
-            }
-        },
-    }
 }
 
 fn configured_grapheme_width(
@@ -12722,17 +13748,50 @@ fn invocation_fingerprint(invocation: &CommandInvocation) -> String {
     fingerprint
 }
 
+fn keymap_entries_for_policy<'a>(
+    loaded: &'a crate::configuration::LoadedKeymaps,
+    policy: &crate::configuration::KeymapPolicyConfig,
+) -> (
+    &'a [crate::configuration::KeymapEntry],
+    usize,
+    &'a [crate::configuration::KeyGroupEntry],
+    usize,
+) {
+    if policy.load_bundled_defaults {
+        (
+            &loaded.entries,
+            loaded.bundled_count,
+            &loaded.groups,
+            loaded.bundled_group_count,
+        )
+    } else {
+        (
+            &loaded.entries[loaded.bundled_count..],
+            0,
+            &loaded.groups[loaded.bundled_group_count..],
+            0,
+        )
+    }
+}
+
 pub fn reload_keymaps(
     commands: &CommandRegistry<AppEffect>,
     current: &ResolvedKeymaps,
     candidate: &crate::configuration::LoadedKeymaps,
+    policy: &crate::configuration::KeymapPolicyConfig,
 ) -> (ResolvedKeymaps, Option<String>) {
+    let (entries, bundled_count, groups, bundled_group_count) =
+        keymap_entries_for_policy(candidate, policy);
     match compile_keymap_entries(
         commands,
-        &candidate.entries,
-        candidate.bundled_count,
+        entries,
+        bundled_count,
+        groups,
+        bundled_group_count,
         &candidate.path,
         &candidate.user_spans,
+        &candidate.user_group_spans,
+        policy,
     ) {
         Ok(compiled) => (compiled, None),
         Err(diagnostics) => (
@@ -12749,32 +13808,51 @@ pub fn reload_keymaps(
 pub fn compile_keymaps(
     commands: &CommandRegistry<AppEffect>,
     loaded: &crate::configuration::LoadedKeymaps,
+    policy: &crate::configuration::KeymapPolicyConfig,
 ) -> (ResolvedKeymaps, Option<String>) {
+    let (entries, bundled_count, groups, bundled_group_count) =
+        keymap_entries_for_policy(loaded, policy);
     match compile_keymap_entries(
         commands,
-        &loaded.entries,
-        loaded.bundled_count,
+        entries,
+        bundled_count,
+        groups,
+        bundled_group_count,
         &loaded.path,
         &loaded.user_spans,
+        &loaded.user_group_spans,
+        policy,
     ) {
         Ok(keymaps) => (keymaps, None),
-        Err(diagnostics) if loaded.bundled_count > 0 => {
-            let bundled = compile_keymap_entries(
+        Err(diagnostics) if bundled_count > 0 || bundled_group_count > 0 => {
+            match compile_keymap_entries(
                 commands,
-                &loaded.entries[..loaded.bundled_count],
-                loaded.bundled_count,
+                &entries[..bundled_count],
+                bundled_count,
+                &groups[..bundled_group_count],
+                bundled_group_count,
                 &loaded.path,
                 &[],
-            )
-            .expect("bundled keymaps are validated by unit tests");
-            (
-                bundled,
-                Some(format!(
-                    "invalid {}; keeping bundled keymaps: {}",
-                    loaded.path.display(),
-                    diagnostics.join("; ")
-                )),
-            )
+                &[],
+                policy,
+            ) {
+                Ok(bundled) => (
+                    bundled,
+                    Some(format!(
+                        "invalid {}; keeping bundled keymaps: {}",
+                        loaded.path.display(),
+                        diagnostics.join("; ")
+                    )),
+                ),
+                Err(_) => (
+                    ResolvedKeymaps::default(),
+                    Some(format!(
+                        "invalid keymap policy for {}: {}",
+                        loaded.path.display(),
+                        diagnostics.join("; ")
+                    )),
+                ),
+            }
         }
         Err(diagnostics) => (
             ResolvedKeymaps::default(),
@@ -12787,115 +13865,911 @@ pub fn compile_keymaps(
     }
 }
 
+fn literal_key_sequence(name: &str, source: &str) -> Result<Vec<KeyEvent>, String> {
+    let tokens = source.split_whitespace().collect::<Vec<_>>();
+    if tokens.is_empty() {
+        return Err(format!("{name} must not be empty"));
+    }
+    if source.len() > 64 || tokens.len() > 4 {
+        return Err(format!("{name} must contain at most 4 keys and 64 bytes"));
+    }
+    if source.chars().any(char::is_control) {
+        return Err(format!("{name} must not contain control characters"));
+    }
+    if tokens
+        .iter()
+        .any(|token| matches!(*token, "<leader>" | "<localleader>"))
+    {
+        return Err(format!(
+            "{name} must be a literal sequence without leader tokens"
+        ));
+    }
+    tokens
+        .into_iter()
+        .map(|token| KeyEvent::from_str(token).map_err(|error| format!("{name}: {error}")))
+        .collect()
+}
+
+fn expanded_key_sequence(
+    source: &str,
+    leader: &[KeyEvent],
+    local_leader: &[KeyEvent],
+) -> Result<Vec<KeyEvent>, String> {
+    let mut expanded = Vec::new();
+    for token in source.split_whitespace() {
+        match token {
+            "<leader>" => expanded.extend_from_slice(leader),
+            "<localleader>" => expanded.extend_from_slice(local_leader),
+            _ => expanded.push(KeyEvent::from_str(token).map_err(|error| error.to_string())?),
+        }
+        if expanded.len() > 64 {
+            return Err("expanded key sequence exceeds 64 keys".into());
+        }
+    }
+    if expanded.is_empty() {
+        Err("key sequence is empty".into())
+    } else {
+        Ok(expanded)
+    }
+}
+
+fn display_key_sequence(sequence: &[KeyEvent]) -> String {
+    sequence
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn display_key_declaration(source: &str, effective: &str) -> String {
+    if source == effective {
+        format!("`{source}`")
+    } else {
+        format!("`{source}` (expanded to `{effective}`)")
+    }
+}
+
+fn validate_keymap_id(id: &str) -> Result<(), String> {
+    if id.is_empty() || id.len() > 128 {
+        return Err("id must contain between 1 and 128 bytes".into());
+    }
+    let segments = id.split('.').collect::<Vec<_>>();
+    if segments.len() < 2
+        || segments.iter().any(|segment| {
+            let mut characters = segment.chars();
+            !characters
+                .next()
+                .is_some_and(|first| first.is_ascii_lowercase())
+                || characters.any(|character| {
+                    !character.is_ascii_lowercase()
+                        && !character.is_ascii_digit()
+                        && character != '-'
+                })
+        })
+    {
+        return Err(
+            "id must have at least two dot-separated lowercase ASCII segments; each segment starts with a letter and then uses letters, digits, or `-`"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct KeymapContributionOrigin {
+    layer: InputContextLayer,
+    owner: Option<String>,
+    generation: u64,
+    source: String,
+    declaration: usize,
+}
+
+#[derive(Clone)]
+struct EffectiveKeymapDeclaration {
+    id: String,
+    context: String,
+    mode: String,
+    keys: String,
+    command: Option<String>,
+    arguments: BTreeMap<String, toml::Value>,
+    operation: KeymapOperation,
+    origin: KeymapContributionOrigin,
+}
+
+fn regular_keymap_declaration(
+    entry: &crate::configuration::KeymapEntry,
+    origin: KeymapContributionOrigin,
+) -> Result<EffectiveKeymapDeclaration, String> {
+    let operations = usize::from(entry.command.is_some())
+        + usize::from(entry.unmap)
+        + usize::from(entry.pass_through);
+    if entry.disable || operations != 1 {
+        return Err(
+            "must choose one command, exact-sequence unmap, exact-sequence pass_through, or identity-only disable"
+                .into(),
+        );
+    }
+    if !entry.arguments.is_empty() && entry.command.is_none() {
+        return Err("arguments require a command declaration".into());
+    }
+    let context = entry
+        .context
+        .as_ref()
+        .filter(|context| !context.is_empty())
+        .ok_or_else(|| "command/unmap/pass_through declaration requires `context`".to_owned())?;
+    let keys = entry
+        .keys
+        .as_ref()
+        .filter(|keys| !keys.is_empty())
+        .ok_or_else(|| "command/unmap/pass_through declaration requires `keys`".to_owned())?;
+    Ok(EffectiveKeymapDeclaration {
+        id: entry.id.clone(),
+        context: context.clone(),
+        mode: entry.mode.clone(),
+        keys: keys.clone(),
+        command: entry.command.clone(),
+        arguments: entry.arguments.clone(),
+        operation: if entry.command.is_some() {
+            KeymapOperation::Command
+        } else if entry.unmap {
+            KeymapOperation::Unmap
+        } else {
+            KeymapOperation::PassThrough
+        },
+        origin,
+    })
+}
+
+fn identity_disable_is_well_formed(entry: &crate::configuration::KeymapEntry) -> bool {
+    entry.disable
+        && entry.command.is_none()
+        && !entry.unmap
+        && !entry.pass_through
+        && entry.context.is_none()
+        && entry.mode.is_empty()
+        && entry.keys.is_none()
+        && entry.arguments.is_empty()
+}
+
+fn resolve_keymap_identities(
+    entries: &[crate::configuration::KeymapEntry],
+    origins: &[KeymapContributionOrigin],
+) -> Result<Vec<EffectiveKeymapDeclaration>, Vec<String>> {
+    let mut diagnostics = Vec::new();
+    let mut slots = Vec::<EffectiveKeymapDeclaration>::new();
+    let mut identities = HashMap::<String, usize>::new();
+    for (source_index, entry) in entries.iter().enumerate() {
+        let origin = origins[source_index].clone();
+        if let Err(error) = validate_keymap_id(&entry.id) {
+            diagnostics.push(format!(
+                "keymap {} has invalid id `{}`: {error}",
+                source_index + 1,
+                entry.id
+            ));
+            continue;
+        }
+        if let Some(slot) = identities.get(&entry.id).copied() {
+            let previous = &slots[slot];
+            if previous.origin.layer == origin.layer {
+                let detail = if previous.origin.owner != origin.owner {
+                    "across plugin owners"
+                } else {
+                    "in the same contribution layer"
+                };
+                diagnostics.push(format!(
+                    "keymap {} duplicates id `{}` from keymap {} {detail}",
+                    source_index + 1,
+                    entry.id,
+                    previous.origin.declaration
+                ));
+                continue;
+            }
+            if previous.origin.layer > origin.layer {
+                diagnostics.push(format!(
+                    "keymap {} id `{}` has lower precedence than its existing contribution",
+                    source_index + 1,
+                    entry.id
+                ));
+                continue;
+            }
+            if identity_disable_is_well_formed(entry) {
+                slots[slot] = EffectiveKeymapDeclaration {
+                    id: entry.id.clone(),
+                    context: previous.context.clone(),
+                    mode: previous.mode.clone(),
+                    keys: previous.keys.clone(),
+                    command: None,
+                    arguments: BTreeMap::new(),
+                    operation: KeymapOperation::Disable,
+                    origin,
+                };
+                continue;
+            }
+            if entry.disable {
+                diagnostics.push(format!(
+                    "keymap {} identity disable for id `{}` must contain only `id` and `disable = true`",
+                    source_index + 1,
+                    entry.id
+                ));
+                continue;
+            }
+            match regular_keymap_declaration(entry, origin) {
+                Ok(replacement) => slots[slot] = replacement,
+                Err(error) => diagnostics.push(format!(
+                    "keymap {} replacement for id `{}` {error}",
+                    source_index + 1,
+                    entry.id
+                )),
+            }
+            continue;
+        }
+        if entry.disable {
+            let detail = if identity_disable_is_well_formed(entry) {
+                "targets no lower contribution"
+            } else {
+                "must contain only `id` and `disable = true`"
+            };
+            diagnostics.push(format!(
+                "keymap {} identity disable for id `{}` {detail}",
+                source_index + 1,
+                entry.id
+            ));
+            continue;
+        }
+        match regular_keymap_declaration(entry, origin) {
+            Ok(declaration) => {
+                identities.insert(entry.id.clone(), slots.len());
+                slots.push(declaration);
+            }
+            Err(error) => diagnostics.push(format!(
+                "keymap {} id `{}` {error}",
+                source_index + 1,
+                entry.id
+            )),
+        }
+    }
+    if diagnostics.is_empty() {
+        Ok(slots)
+    } else {
+        Err(diagnostics)
+    }
+}
+
+#[derive(Clone)]
+struct EffectiveKeyGroupDeclaration {
+    id: String,
+    context: String,
+    mode: String,
+    prefix: String,
+    label: String,
+    icon: Option<String>,
+    order: i32,
+    origin: KeymapContributionOrigin,
+}
+
+fn concrete_key_group(
+    entry: &crate::configuration::KeyGroupEntry,
+    origin: KeymapContributionOrigin,
+) -> Result<EffectiveKeyGroupDeclaration, String> {
+    if entry.disable {
+        return Err("identity-only disable must contain only `id` and `disable = true`".into());
+    }
+    let context = entry
+        .context
+        .as_ref()
+        .filter(|context| !context.is_empty())
+        .ok_or_else(|| "requires `context`".to_owned())?;
+    let prefix = entry
+        .prefix
+        .as_ref()
+        .filter(|prefix| !prefix.is_empty())
+        .ok_or_else(|| "requires `prefix`".to_owned())?;
+    let label = entry
+        .label
+        .as_ref()
+        .filter(|label| !label.is_empty())
+        .ok_or_else(|| "requires `label`".to_owned())?;
+    if prefix.len() > 1_024 {
+        return Err("prefix exceeds 1024 bytes".into());
+    }
+    if label.len() > 256
+        || label.chars().count() > 128
+        || unicode_width::UnicodeWidthStr::width(label.as_str()) > 128
+        || label.chars().any(char::is_control)
+    {
+        return Err(
+            "label must contain 1..=128 non-control characters and at most 256 bytes".into(),
+        );
+    }
+    if entry.icon.as_ref().is_some_and(|icon| {
+        icon.is_empty()
+            || icon.len() > 32
+            || icon.chars().count() > 8
+            || !(1..=8).contains(&unicode_width::UnicodeWidthStr::width(icon.as_str()))
+            || icon.chars().any(char::is_control)
+    }) {
+        return Err("icon must contain 1..=8 non-control characters and at most 32 bytes".into());
+    }
+    if !(-100_000..=100_000).contains(&entry.order) {
+        return Err("order is outside -100000..=100000".into());
+    }
+    Ok(EffectiveKeyGroupDeclaration {
+        id: entry.id.clone(),
+        context: context.clone(),
+        mode: entry.mode.clone(),
+        prefix: prefix.clone(),
+        label: label.clone(),
+        icon: entry.icon.clone(),
+        order: entry.order,
+        origin,
+    })
+}
+
+fn key_group_disable_is_well_formed(entry: &crate::configuration::KeyGroupEntry) -> bool {
+    entry.disable
+        && entry.context.is_none()
+        && entry.mode.is_empty()
+        && entry.prefix.is_none()
+        && entry.label.is_none()
+        && entry.icon.is_none()
+        && entry.order == 0
+}
+
+fn resolve_key_group_identities(
+    entries: &[crate::configuration::KeyGroupEntry],
+    origins: &[KeymapContributionOrigin],
+) -> Result<Vec<EffectiveKeyGroupDeclaration>, Vec<String>> {
+    let mut diagnostics = Vec::new();
+    let mut slots = Vec::<Option<EffectiveKeyGroupDeclaration>>::new();
+    let mut identities = HashMap::<String, usize>::new();
+    let mut identity_origins = HashMap::<String, KeymapContributionOrigin>::new();
+    for (source_index, entry) in entries.iter().enumerate() {
+        let origin = origins[source_index].clone();
+        if let Err(error) = validate_keymap_id(&entry.id) {
+            diagnostics.push(format!(
+                "key group {} has invalid id `{}`: {error}",
+                source_index + 1,
+                entry.id
+            ));
+            continue;
+        }
+        if let Some(slot) = identities.get(&entry.id).copied() {
+            let previous = &identity_origins[&entry.id];
+            if previous.layer == origin.layer {
+                diagnostics.push(format!(
+                    "key group {} duplicates id `{}` in the same contribution layer",
+                    source_index + 1,
+                    entry.id
+                ));
+                continue;
+            }
+            if previous.layer > origin.layer {
+                diagnostics.push(format!(
+                    "key group {} id `{}` has lower precedence than its existing contribution",
+                    source_index + 1,
+                    entry.id
+                ));
+                continue;
+            }
+            if entry.disable {
+                if key_group_disable_is_well_formed(entry) {
+                    slots[slot] = None;
+                    identity_origins.insert(entry.id.clone(), origin);
+                } else {
+                    diagnostics.push(format!(
+                        "key group {} identity disable for id `{}` must contain only `id` and `disable = true`",
+                        source_index + 1,
+                        entry.id
+                    ));
+                }
+                continue;
+            }
+            match concrete_key_group(entry, origin.clone()) {
+                Ok(replacement) => {
+                    slots[slot] = Some(replacement);
+                    identity_origins.insert(entry.id.clone(), origin);
+                }
+                Err(error) => diagnostics.push(format!(
+                    "key group {} replacement for id `{}` {error}",
+                    source_index + 1,
+                    entry.id
+                )),
+            }
+            continue;
+        }
+        if entry.disable {
+            let detail = if key_group_disable_is_well_formed(entry) {
+                "targets no lower contribution"
+            } else {
+                "must contain only `id` and `disable = true`"
+            };
+            diagnostics.push(format!(
+                "key group {} identity disable for id `{}` {detail}",
+                source_index + 1,
+                entry.id
+            ));
+            continue;
+        }
+        match concrete_key_group(entry, origin.clone()) {
+            Ok(group) => {
+                identities.insert(entry.id.clone(), slots.len());
+                identity_origins.insert(entry.id.clone(), origin);
+                slots.push(Some(group));
+            }
+            Err(error) => diagnostics.push(format!(
+                "key group {} id `{}` {error}",
+                source_index + 1,
+                entry.id
+            )),
+        }
+    }
+    if diagnostics.is_empty() {
+        Ok(slots.into_iter().flatten().collect())
+    } else {
+        Err(diagnostics)
+    }
+}
+
+fn standard_contribution_origins(
+    count: usize,
+    bundled_count: usize,
+    user_path: &std::path::Path,
+    user_spans: &[std::ops::Range<usize>],
+    kind: &str,
+) -> Vec<KeymapContributionOrigin> {
+    (0..count)
+        .map(|index| {
+            if index < bundled_count {
+                KeymapContributionOrigin {
+                    layer: InputContextLayer::Bundled,
+                    owner: None,
+                    generation: 0,
+                    source: format!("<bundled:keymaps>:{kind} {}", index + 1),
+                    declaration: index + 1,
+                }
+            } else {
+                let declaration = index + 1 - bundled_count;
+                let source = user_spans.get(declaration - 1).map_or_else(
+                    || format!("{}:{kind} {declaration}", user_path.display()),
+                    |span| {
+                        format!(
+                            "{}:bytes {}..{} ({kind} {declaration})",
+                            user_path.display(),
+                            span.start,
+                            span.end
+                        )
+                    },
+                );
+                KeymapContributionOrigin {
+                    layer: InputContextLayer::User,
+                    owner: None,
+                    generation: 0,
+                    source,
+                    declaration,
+                }
+            }
+        })
+        .collect()
+}
+
 fn compile_keymap_entries(
     commands: &CommandRegistry<AppEffect>,
     entries: &[crate::configuration::KeymapEntry],
     bundled_count: usize,
+    groups: &[crate::configuration::KeyGroupEntry],
+    bundled_group_count: usize,
     user_path: &std::path::Path,
     user_spans: &[std::ops::Range<usize>],
+    user_group_spans: &[std::ops::Range<usize>],
+    policy: &crate::configuration::KeymapPolicyConfig,
+) -> Result<ResolvedKeymaps, Vec<String>> {
+    let entry_origins = standard_contribution_origins(
+        entries.len(),
+        bundled_count,
+        user_path,
+        user_spans,
+        "declaration",
+    );
+    let group_origins = standard_contribution_origins(
+        groups.len(),
+        bundled_group_count,
+        user_path,
+        user_group_spans,
+        "key-group",
+    );
+    compile_typed_keymap_entries(
+        commands,
+        entries,
+        &entry_origins,
+        groups,
+        &group_origins,
+        &InputContextRegistry::bundled(),
+        policy,
+    )
+}
+
+pub fn compile_keymaps_with_plugin_index(
+    commands: &CommandRegistry<AppEffect>,
+    loaded: &crate::configuration::LoadedKeymaps,
+    index: &crate::plugins::PluginContributionIndex,
+    policy: &crate::configuration::KeymapPolicyConfig,
+) -> Result<ResolvedKeymaps, Vec<String>> {
+    let mut contexts = InputContextRegistry::bundled();
+    let namespace = format!("plugin.{}.", index.owner);
+    for context in &index.contexts {
+        let local = context.id.strip_prefix(&namespace).ok_or_else(|| {
+            vec![format!(
+                "plugin context `{}` has invalid ownership",
+                context.id
+            )]
+        })?;
+        contexts
+            .register_plugin(
+                &index.owner,
+                local,
+                &context.title,
+                context.parent_surface.clone(),
+                index.generation,
+                index.source.clone(),
+            )
+            .map_err(|error| vec![error.to_string()])?;
+    }
+    let plugin_entries = index
+        .keymaps
+        .iter()
+        .map(|entry| crate::configuration::KeymapEntry {
+            id: entry.id.clone(),
+            context: Some(entry.context.clone()),
+            mode: entry.mode.clone(),
+            keys: Some(entry.keys.clone()),
+            command: Some(entry.command.clone()),
+            arguments: entry.arguments.clone(),
+            unmap: false,
+            disable: false,
+            pass_through: false,
+        })
+        .collect::<Vec<_>>();
+    let plugin_groups = index
+        .key_groups
+        .iter()
+        .map(|group| crate::configuration::KeyGroupEntry {
+            id: group.id.clone(),
+            context: Some(group.context.clone()),
+            mode: group.mode.clone(),
+            prefix: Some(group.prefix.clone()),
+            label: Some(group.label.clone()),
+            icon: group.icon.clone(),
+            order: group.order,
+            disable: false,
+        })
+        .collect::<Vec<_>>();
+    let mut entries = loaded.entries[..loaded.bundled_count].to_vec();
+    entries.extend(plugin_entries);
+    entries.extend_from_slice(&loaded.entries[loaded.bundled_count..]);
+    let mut groups = loaded.groups[..loaded.bundled_group_count].to_vec();
+    groups.extend(plugin_groups);
+    groups.extend_from_slice(&loaded.groups[loaded.bundled_group_count..]);
+    let mut entry_origins = standard_contribution_origins(
+        loaded.bundled_count,
+        loaded.bundled_count,
+        &loaded.path,
+        &[],
+        "declaration",
+    );
+    entry_origins.extend(
+        (0..index.keymaps.len()).map(|offset| KeymapContributionOrigin {
+            layer: InputContextLayer::Plugin,
+            owner: Some(index.owner.clone()),
+            generation: index.generation,
+            source: format!("{}:plugin-keymap {}", index.source, offset + 1),
+            declaration: offset + 1,
+        }),
+    );
+    entry_origins.extend(standard_contribution_origins(
+        loaded.entries.len() - loaded.bundled_count,
+        0,
+        &loaded.path,
+        &loaded.user_spans,
+        "declaration",
+    ));
+    let mut group_origins = standard_contribution_origins(
+        loaded.bundled_group_count,
+        loaded.bundled_group_count,
+        &loaded.path,
+        &[],
+        "key-group",
+    );
+    group_origins.extend(
+        (0..index.key_groups.len()).map(|offset| KeymapContributionOrigin {
+            layer: InputContextLayer::Plugin,
+            owner: Some(index.owner.clone()),
+            generation: index.generation,
+            source: format!("{}:plugin-key-group {}", index.source, offset + 1),
+            declaration: offset + 1,
+        }),
+    );
+    group_origins.extend(standard_contribution_origins(
+        loaded.groups.len() - loaded.bundled_group_count,
+        0,
+        &loaded.path,
+        &loaded.user_group_spans,
+        "key-group",
+    ));
+    compile_typed_keymap_entries(
+        commands,
+        &entries,
+        &entry_origins,
+        &groups,
+        &group_origins,
+        &contexts,
+        policy,
+    )
+}
+
+pub fn compile_keymaps_with_plugin_catalog(
+    commands: &CommandRegistry<AppEffect>,
+    loaded: &crate::configuration::LoadedKeymaps,
+    catalog: &crate::plugins::PluginContributionCatalog,
+    policy: &crate::configuration::KeymapPolicyConfig,
+) -> Result<ResolvedKeymaps, Vec<String>> {
+    let contexts = catalog
+        .context_snapshot()
+        .map_err(|error| vec![error.to_string()])?;
+    let bundled_count = if policy.load_bundled_defaults {
+        loaded.bundled_count
+    } else {
+        0
+    };
+    let bundled_group_count = if policy.load_bundled_defaults {
+        loaded.bundled_group_count
+    } else {
+        0
+    };
+    let mut entries = if policy.load_bundled_defaults {
+        loaded.entries[..loaded.bundled_count].to_vec()
+    } else {
+        Vec::new()
+    };
+    let mut entry_origins = standard_contribution_origins(
+        bundled_count,
+        bundled_count,
+        &loaded.path,
+        &[],
+        "declaration",
+    );
+    for index in catalog.ordered() {
+        for (offset, entry) in index.keymaps.iter().enumerate() {
+            entries.push(crate::configuration::KeymapEntry {
+                id: entry.id.clone(),
+                context: Some(entry.context.clone()),
+                mode: entry.mode.clone(),
+                keys: Some(entry.keys.clone()),
+                command: Some(entry.command.clone()),
+                arguments: entry.arguments.clone(),
+                unmap: false,
+                disable: false,
+                pass_through: false,
+            });
+            entry_origins.push(KeymapContributionOrigin {
+                layer: InputContextLayer::Plugin,
+                owner: Some(index.owner.clone()),
+                generation: index.generation,
+                source: format!("{}:plugin-keymap {}", index.source, offset + 1),
+                declaration: offset + 1,
+            });
+        }
+    }
+    entries.extend_from_slice(&loaded.entries[loaded.bundled_count..]);
+    entry_origins.extend(standard_contribution_origins(
+        loaded.entries.len() - loaded.bundled_count,
+        0,
+        &loaded.path,
+        &loaded.user_spans,
+        "declaration",
+    ));
+    let mut groups = if policy.load_bundled_defaults {
+        loaded.groups[..loaded.bundled_group_count].to_vec()
+    } else {
+        Vec::new()
+    };
+    let mut group_origins = standard_contribution_origins(
+        bundled_group_count,
+        bundled_group_count,
+        &loaded.path,
+        &[],
+        "key-group",
+    );
+    for index in catalog.ordered() {
+        for (offset, group) in index.key_groups.iter().enumerate() {
+            groups.push(crate::configuration::KeyGroupEntry {
+                id: group.id.clone(),
+                context: Some(group.context.clone()),
+                mode: group.mode.clone(),
+                prefix: Some(group.prefix.clone()),
+                label: Some(group.label.clone()),
+                icon: group.icon.clone(),
+                order: group.order,
+                disable: false,
+            });
+            group_origins.push(KeymapContributionOrigin {
+                layer: InputContextLayer::Plugin,
+                owner: Some(index.owner.clone()),
+                generation: index.generation,
+                source: format!("{}:plugin-key-group {}", index.source, offset + 1),
+                declaration: offset + 1,
+            });
+        }
+    }
+    groups.extend_from_slice(&loaded.groups[loaded.bundled_group_count..]);
+    group_origins.extend(standard_contribution_origins(
+        loaded.groups.len() - loaded.bundled_group_count,
+        0,
+        &loaded.path,
+        &loaded.user_group_spans,
+        "key-group",
+    ));
+    compile_typed_keymap_entries(
+        commands,
+        &entries,
+        &entry_origins,
+        &groups,
+        &group_origins,
+        &contexts,
+        policy,
+    )
+}
+
+fn compile_typed_keymap_entries(
+    commands: &CommandRegistry<AppEffect>,
+    entries: &[crate::configuration::KeymapEntry],
+    entry_origins: &[KeymapContributionOrigin],
+    groups: &[crate::configuration::KeyGroupEntry],
+    group_origins: &[KeymapContributionOrigin],
+    contexts: &InputContextRegistry,
+    policy: &crate::configuration::KeymapPolicyConfig,
 ) -> Result<ResolvedKeymaps, Vec<String>> {
     let mut result = ResolvedKeymaps::default();
     let mut diagnostics = Vec::new();
-    let mut declarations = HashMap::<(String, Vec<KeyEvent>, bool), usize>::new();
+    if entries.len() != entry_origins.len() || groups.len() != group_origins.len() {
+        return Err(vec!["keymap contribution provenance is incomplete".into()]);
+    }
+    let leader = match literal_key_sequence("input.keymaps.leader", &policy.leader) {
+        Ok(sequence) => sequence,
+        Err(error) => {
+            diagnostics.push(error);
+            return Err(diagnostics);
+        }
+    };
+    let local_leader =
+        match literal_key_sequence("input.keymaps.local_leader", &policy.local_leader) {
+            Ok(sequence) => sequence,
+            Err(error) => {
+                diagnostics.push(error);
+                return Err(diagnostics);
+            }
+        };
+    let effective_entries = resolve_keymap_identities(entries, entry_origins)?;
+    let mut sequence_declarations =
+        HashMap::<(String, Vec<KeyEvent>, InputContextLayer), usize>::new();
     let mut effective_declarations = HashMap::<(String, Vec<KeyEvent>), usize>::new();
-    for (index, entry) in entries.iter().enumerate() {
-        let context = match configured_context(entry) {
+    for (index, entry) in effective_entries.iter().enumerate() {
+        let context = match configured_context(contexts, &entry.context, &entry.mode) {
             Ok(context) => context,
             Err(error) => {
-                diagnostics.push(format!("keymap {}: {error}", index + 1));
+                diagnostics.push(format!(
+                    "keymap id `{}` from declaration {}: {error}",
+                    entry.id, entry.origin.declaration
+                ));
                 continue;
             }
         };
-        let sequence = match entry
-            .keys
-            .split_whitespace()
-            .map(KeyEvent::from_str)
-            .collect::<Result<Vec<_>, _>>()
-        {
-            Ok(sequence) if !sequence.is_empty() => sequence,
-            Ok(_) => {
-                diagnostics.push(format!("keymap {} has an empty key sequence", index + 1));
-                continue;
-            }
+        let sequence = match expanded_key_sequence(&entry.keys, &leader, &local_leader) {
+            Ok(sequence) => sequence,
             Err(error) => {
-                diagnostics.push(format!("keymap {}: {error}", index + 1));
+                diagnostics.push(format!(
+                    "keymap id `{}` from declaration {}: {error}",
+                    entry.id, entry.origin.declaration
+                ));
                 continue;
             }
         };
-        let user_declaration = index >= bundled_count;
+        let effective_keys = display_key_sequence(&sequence);
+        let contribution_layer = entry.origin.layer;
         if let Some(previous) =
             effective_declarations.insert((context.clone(), sequence.clone()), index)
-            && (previous >= bundled_count) != user_declaration
+            && effective_entries[previous].origin.layer != contribution_layer
         {
+            let declared = display_key_declaration(&entry.keys, &effective_keys);
+            let previous_entry = &effective_entries[previous];
+            let previous_declared = display_key_declaration(&previous_entry.keys, &effective_keys);
             result.conflicts.push(format!(
-                "keymap {} shadows keymap {} for `{}` in `{context}`",
-                index + 1,
-                previous + 1,
-                entry.keys
+                "keymap id `{}` {declared} shadows id `{}` {previous_declared} in `{context}`",
+                entry.id, previous_entry.id
             ));
         }
-        if let Some(previous) =
-            declarations.insert((context.clone(), sequence.clone(), user_declaration), index)
-        {
+        if let Some(previous) = sequence_declarations.insert(
+            (context.clone(), sequence.clone(), contribution_layer),
+            index,
+        ) {
+            let declared = display_key_declaration(&entry.keys, &effective_keys);
+            let previous_entry = &effective_entries[previous];
+            let previous_declared = display_key_declaration(&previous_entry.keys, &effective_keys);
             diagnostics.push(format!(
-                "keymap {} conflicts with keymap {} for `{}` in `{context}`",
-                index + 1,
-                previous + 1,
-                entry.keys
+                "keymap id `{}` {declared} conflicts with id `{}` {previous_declared} in `{context}`",
+                entry.id, previous_entry.id
             ));
             continue;
         }
-        let operations = usize::from(entry.command.is_some())
-            + usize::from(entry.unmap)
-            + usize::from(entry.disable)
-            + usize::from(entry.pass_through);
-        if operations != 1 || !entry.arguments.is_empty() && entry.command.is_none() {
-            diagnostics.push(format!(
-                "keymap {} must choose exactly one of command, unmap, disable, or pass_through",
-                index + 1
-            ));
-            continue;
-        }
-        if user_declaration {
-            result.reverse.retain(|(mapped_context, _), keys| {
-                mapped_context != &context || keys != &entry.keys
+        if contribution_layer != InputContextLayer::Bundled {
+            result.reverse.retain(|(mapped_context, _), binding| {
+                mapped_context != &context || binding.keys != effective_keys
             });
             result.inspections.retain(|inspection| {
-                inspection.context != context || inspection.keys != entry.keys
+                inspection.context != context || inspection.keys != effective_keys
             });
         }
-        let layer = if user_declaration {
-            KeymapLayer::Mode
-        } else {
-            KeymapLayer::Global
+        let source = entry.origin.source.clone();
+        let layer = match contribution_layer {
+            InputContextLayer::Bundled => KeymapLayer::Global,
+            InputContextLayer::Plugin => KeymapLayer::PluginDefaults,
+            InputContextLayer::User => KeymapLayer::Mode,
         };
         let keymap = result
             .resolvers
             .entry(context.clone())
             .or_default()
             .layer_mut(layer);
-        if entry.unmap || entry.disable {
+        if matches!(
+            entry.operation,
+            KeymapOperation::Unmap | KeymapOperation::Disable
+        ) {
             keymap.insert_disabled(&sequence);
-            result.reverse.retain(|(mapped_context, _), keys| {
-                mapped_context != &context || keys != &entry.keys
+            result.reverse.retain(|(mapped_context, _), binding| {
+                mapped_context != &context || binding.keys != effective_keys
             });
             result.inspections.retain(|inspection| {
-                inspection.context != context || inspection.keys != entry.keys
+                inspection.context != context || inspection.keys != effective_keys
+            });
+            result.inspections.push(KeymapInspection {
+                id: entry.id.clone(),
+                context,
+                contribution_layer: entry.origin.layer,
+                contribution_owner: entry.origin.owner.clone(),
+                contribution_generation: entry.origin.generation,
+                operation: entry.operation,
+                command: None,
+                arguments: BTreeMap::new(),
+                source_keys: entry.keys.clone(),
+                keys: effective_keys,
+                source,
             });
             continue;
         }
-        if entry.pass_through {
+        if entry.operation == KeymapOperation::PassThrough {
             keymap.insert_pass_through(&sequence);
+            result.inspections.push(KeymapInspection {
+                id: entry.id.clone(),
+                context,
+                contribution_layer: entry.origin.layer,
+                contribution_owner: entry.origin.owner.clone(),
+                contribution_generation: entry.origin.generation,
+                operation: entry.operation,
+                command: None,
+                arguments: BTreeMap::new(),
+                source_keys: entry.keys.clone(),
+                keys: effective_keys,
+                source,
+            });
             continue;
         }
         let command_id = entry
             .command
             .as_deref()
-            .expect("validated command operation");
+            .expect("identity resolver guarantees command operation");
         let mut invocation = match CommandInvocation::new(command_id, InvocationSource::Keymap) {
             Ok(invocation) => invocation,
             Err(error) => {
-                diagnostics.push(format!("keymap {}: {error}", index + 1));
+                diagnostics.push(format!("keymap id `{}`: {error}", entry.id));
                 continue;
             }
         };
@@ -12907,8 +14781,8 @@ fn compile_keymap_entries(
                 toml::Value::Integer(value) => CommandValue::Integer(*value),
                 _ => {
                     diagnostics.push(format!(
-                        "keymap {} argument `{name}` must be string, boolean, or integer",
-                        index + 1
+                        "keymap id `{}` argument `{name}` must be string, boolean, or integer",
+                        entry.id
                     ));
                     valid_arguments = false;
                     continue;
@@ -12920,36 +14794,117 @@ fn compile_keymap_entries(
             continue;
         }
         if let Err(error) = commands.validate_invocation_shape(&invocation) {
-            diagnostics.push(format!("keymap {}: {error}", index + 1));
+            diagnostics.push(format!("keymap id `{}`: {error}", entry.id));
             continue;
         }
         let fingerprint = invocation_fingerprint(&invocation);
         result.inspections.push(KeymapInspection {
+            id: entry.id.clone(),
             context: context.clone(),
-            command: invocation.id.as_str().into(),
+            contribution_layer: entry.origin.layer,
+            contribution_owner: entry.origin.owner.clone(),
+            contribution_generation: entry.origin.generation,
+            operation: KeymapOperation::Command,
+            command: Some(invocation.id.as_str().into()),
             arguments: invocation.arguments.clone(),
-            keys: entry.keys.clone(),
-            source: if user_declaration {
-                let declaration = index + 1 - bundled_count;
-                user_spans.get(declaration - 1).map_or_else(
-                    || format!("{}:declaration {declaration}", user_path.display()),
-                    |span| {
-                        format!(
-                            "{}:bytes {}..{} (declaration {declaration})",
-                            user_path.display(),
-                            span.start,
-                            span.end
-                        )
-                    },
-                )
-            } else {
-                format!("<bundled:keymaps>:declaration {}", index + 1)
-            },
+            source_keys: entry.keys.clone(),
+            keys: effective_keys.clone(),
+            source,
         });
         keymap.insert(&sequence, invocation);
-        result
-            .reverse
-            .insert((context, fingerprint), entry.keys.clone());
+        result.reverse.insert(
+            (context, fingerprint),
+            ReverseBinding {
+                id: entry.id.clone(),
+                keys: effective_keys,
+            },
+        );
+    }
+
+    if let Ok(effective_groups) = resolve_key_group_identities(groups, group_origins)
+        .inspect_err(|errors| diagnostics.extend(errors.iter().cloned()))
+    {
+        let mut group_prefixes = HashMap::<(String, Vec<KeyEvent>), String>::new();
+        for group in effective_groups {
+            let context = match configured_context(contexts, &group.context, &group.mode) {
+                Ok(context) => context,
+                Err(error) => {
+                    diagnostics.push(format!(
+                        "key group id `{}` from declaration {}: {error}",
+                        group.id, group.origin.declaration
+                    ));
+                    continue;
+                }
+            };
+            let sequence = match expanded_key_sequence(&group.prefix, &leader, &local_leader) {
+                Ok(sequence) => sequence,
+                Err(error) => {
+                    diagnostics.push(format!(
+                        "key group id `{}` from declaration {}: {error}",
+                        group.id, group.origin.declaration
+                    ));
+                    continue;
+                }
+            };
+            let effective_prefix = display_key_sequence(&sequence);
+            if let Some(previous) =
+                group_prefixes.insert((context.clone(), sequence.clone()), group.id.clone())
+            {
+                diagnostics.push(format!(
+                    "key group id `{}` prefix {} duplicates id `{previous}` in `{context}`",
+                    group.id,
+                    display_key_declaration(&group.prefix, &effective_prefix)
+                ));
+                continue;
+            }
+            let reachable = result.inspections.iter().any(|inspection| {
+                if inspection.context != context
+                    || matches!(
+                        inspection.operation,
+                        KeymapOperation::Disable | KeymapOperation::Unmap
+                    )
+                {
+                    return false;
+                }
+                inspection
+                    .keys
+                    .split_whitespace()
+                    .map(KeyEvent::from_str)
+                    .collect::<Result<Vec<_>, _>>()
+                    .is_ok_and(|binding| {
+                        binding.len() > sequence.len() && binding.starts_with(&sequence)
+                    })
+            });
+            if !reachable {
+                diagnostics.push(format!(
+                    "key group id `{}` prefix {} reaches no resolved binding in `{context}`",
+                    group.id,
+                    display_key_declaration(&group.prefix, &effective_prefix)
+                ));
+                continue;
+            }
+            let source = group.origin.source.clone();
+            result.groups.push(ResolvedKeyGroup {
+                id: group.id,
+                context,
+                contribution_layer: group.origin.layer,
+                contribution_owner: group.origin.owner,
+                contribution_generation: group.origin.generation,
+                source_prefix: group.prefix,
+                prefix: effective_prefix,
+                label: group.label,
+                icon: group.icon,
+                order: group.order,
+                source,
+            });
+        }
+        result.groups.sort_by(|left, right| {
+            left.context
+                .cmp(&right.context)
+                .then_with(|| left.order.cmp(&right.order))
+                .then_with(|| left.prefix.cmp(&right.prefix))
+                .then_with(|| left.id.cmp(&right.id))
+        });
     }
     if diagnostics.is_empty() {
         Ok(result)
@@ -12967,54 +14922,14 @@ const fn tool_kind_key(kind: ToolKind) -> &'static str {
     }
 }
 
-fn configured_context(entry: &crate::configuration::KeymapEntry) -> Result<String, String> {
-    const SURFACES: &[&str] = &[
-        "dashboard",
-        "command_prompt",
-        "search_prompt",
-        "workspace_trust_prompt",
-        "completion",
-        "picker",
-        "workspace_edit",
-        "explorer",
-        "panel",
-        "terminal",
-        "focus",
-        "editor_mouse",
-        "explorer_mouse",
-        "dashboard_mouse",
-        "prompt_mouse",
-        "tool_manager",
-        "tool_manager_mouse",
-        "picker_mouse",
-        "key_release",
-        "register",
-        "prefix",
-        "replace",
-        "macro_record",
-        "macro_replay",
-    ];
-    if entry.context == "editor" {
-        let mode = match entry.mode.as_str() {
-            "normal" | "insert" | "replace" | "visual_char" | "visual_line" | "visual_block"
-            | "operator_pending" => entry.mode.as_str(),
-            "visual" => "visual_char",
-            "operator" => "operator_pending",
-            unknown => return Err(format!("unknown editor mode `{unknown}`")),
-        };
-        Ok(format!("editor.{mode}"))
-    } else if SURFACES.contains(&entry.context.as_str()) {
-        if entry.mode.is_empty() {
-            Ok(entry.context.clone())
-        } else {
-            Err(format!(
-                "context `{}` does not accept mode `{}`",
-                entry.context, entry.mode
-            ))
-        }
-    } else {
-        Err(format!("unknown context `{}`", entry.context))
-    }
+fn configured_context(
+    contexts: &InputContextRegistry,
+    context: &str,
+    mode: &str,
+) -> Result<String, String> {
+    contexts
+        .resolve(context, mode)
+        .map_err(|error| error.to_string())
 }
 
 fn mode_name(mode: EditorMode) -> &'static str {
@@ -13130,6 +15045,7 @@ fn build_restored_layout(
             view.scroll_line = pane
                 .scroll_line
                 .min(state.buffers[buffer].text.len_lines().saturating_sub(1));
+            view.scroll_column = pane.scroll_column;
             if pane.anchor != pane.cursor {
                 view.selection = Some(crate::editing::Selection {
                     anchor: ByteOffset(pane.anchor.min(length)),
@@ -13206,6 +15122,7 @@ fn capture_persisted_layout(
                         .map_or(view.cursor, |selection| selection.anchor)
                         .get(),
                     scroll_line: view.scroll_line,
+                    scroll_column: view.scroll_column,
                 },
             })
         }
@@ -13238,29 +15155,33 @@ fn capture_persisted_layout(
 #[cfg(test)]
 mod tests {
     use std::{
-        collections::{BTreeMap, HashMap, HashSet, VecDeque},
+        collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
         fs,
         path::PathBuf,
         thread,
         time::{Duration, Instant},
     };
 
-    use crate::document::ByteOffset;
-    use crate::editing::{CommandValue, InvocationSource};
-    use crate::input::KeyEvent;
+    use crate::document::{ByteOffset, TextBuffer};
+    use crate::editing::{CommandSource, CommandValue, InvocationSource};
+    use crate::input::{InputContextLayer, KeyEvent, MappingResolution};
+    use crate::terminal_ui::{
+        DocumentationPopupKind, DocumentationPopupState, ExplorerUiState, PtyScreen,
+        active_pane_viewport, explorer_panel_width, render, snap_display_column,
+    };
     use tempfile::tempdir;
 
     use super::{
-        InteractiveApplication, compile_keymaps, make_logs, reload_keymaps,
-        validate_configured_commands,
+        InteractiveApplication, KeymapOperation, build_restored_layout, capture_persisted_layout,
+        compile_keymaps, make_logs, reload_keymaps, validate_configured_commands,
     };
     use crate::application::{StartupTarget, build_state, register_app_commands};
     use crate::{
         observability::CrashSnapshotWriter,
         packages::{PackageService, RegistryService},
         persistence::PersistenceService,
-        plugins::PluginManager,
-        processes::{ExecutionPreflightService, JobSupervisor, PtyService},
+        plugins::{PluginLoadId, PluginManager},
+        processes::{ExecutionPreflightService, JobSupervisor, PtyId, PtyService},
         syntax::SyntaxService,
     };
 
@@ -13295,6 +15216,7 @@ mod tests {
         let logs = make_logs(&configuration.settings, false);
         let plugin_queue_capacity = configuration.settings.plugins.queue_capacity;
         let pty_queue_capacity = configuration.settings.terminals.queue_capacity;
+        let terminal_panel_height = configuration.settings.ui.terminal_panel.height;
         let diagnostics = crate::workspace::DiagnosticStore::new(
             configuration.settings.workspace.maximum_diagnostics,
             configuration
@@ -13449,6 +15371,9 @@ mod tests {
             ),
             next_crash_snapshot: Instant::now(),
             plugins: PluginManager::start(plugin_queue_capacity),
+            plugin_contributions: crate::plugins::PluginContributionCatalog::default(),
+            pending_index_activation: BTreeMap::new(),
+            rejected_plugin_loads: BTreeSet::new(),
             registry: RegistryService::start(
                 crate::configuration::PackageRegistryConfig::default(),
                 crate::configuration::user_state_directory().join("packages/test-registry-cache"),
@@ -13473,9 +15398,57 @@ mod tests {
             ptys: PtyService::start(pty_queue_capacity),
             terminals: HashMap::new(),
             active_terminal: None,
+            terminal_focused: false,
+            terminal_panel_height,
             execution_preflight: ExecutionPreflightService::start(process_event_capacity),
             pending_execution_preflight: HashMap::new(),
         }
+    }
+
+    fn plugin_manifest(
+        owner: &str,
+        mapping_id: &str,
+        keys: &str,
+    ) -> crate::plugins::PluginManifest {
+        crate::plugins::PluginManifest {
+            id: owner.into(),
+            version: "1.0.0".into(),
+            component_sha256: "0".repeat(64),
+            capabilities: BTreeSet::new(),
+            commands: [(
+                "run".into(),
+                crate::plugins::PluginCommandDeclaration {
+                    title: format!("Run {owner}"),
+                    description: String::new(),
+                    arguments: BTreeMap::new(),
+                    context: crate::plugins::PluginCommandContext::Application,
+                    activation: crate::plugins::PluginActivationBehavior::ActiveOnly,
+                },
+            )]
+            .into_iter()
+            .collect(),
+            contributions: crate::plugins::PluginContributions {
+                schema_version: 1,
+                input_contexts: Vec::new(),
+                keymaps: vec![crate::plugins::PluginKeymapContribution {
+                    id: mapping_id.into(),
+                    context: "dashboard".into(),
+                    mode: String::new(),
+                    keys: keys.into(),
+                    command: format!("plugin.{owner}.run"),
+                    arguments: BTreeMap::new(),
+                }],
+                key_groups: Vec::new(),
+            },
+        }
+    }
+
+    fn write_plugin_manifest(root: &std::path::Path, manifest: &crate::plugins::PluginManifest) {
+        fs::write(
+            root.join("manifest.toml"),
+            toml::to_string(manifest).expect("manifest TOML"),
+        )
+        .expect("manifest");
     }
 
     fn wait_vfs(app: &mut InteractiveApplication) {
@@ -13598,6 +15571,32 @@ mod tests {
         app.explorer_toggle();
         wait_explorer(&mut app);
         assert_eq!(app.explorer.visible().len(), 2);
+        let explorer_ui = app.ui.explorer.as_ref().expect("dedicated explorer ui");
+        assert_eq!(explorer_ui.rows.len(), 1, "single root remains hidden");
+        assert!(explorer_ui.rows[0].node_id > 0);
+        assert!(explorer_ui.rows[0].selected);
+        assert!(
+            explorer_ui.rows[0]
+                .segments
+                .iter()
+                .any(|segment| segment.role == crate::terminal_ui::ExplorerSegmentRole::File)
+        );
+        app.configuration.settings.ui.explorer.icon_mode =
+            crate::configuration::ExplorerIconMode::Ascii;
+        app.sync_explorer_ui();
+        assert!(app.ui.explorer.as_ref().is_some_and(|ui| {
+            ui.rows[0].segments.iter().any(|segment| {
+                segment.role == crate::terminal_ui::ExplorerSegmentRole::Icon && segment.text == "."
+            })
+        }));
+        app.configuration.settings.ui.explorer.icon_mode =
+            crate::configuration::ExplorerIconMode::Unicode;
+        app.sync_explorer_ui();
+        assert!(app.ui.explorer.as_ref().is_some_and(|ui| {
+            ui.rows[0].segments.iter().any(|segment| {
+                segment.role == crate::terminal_ui::ExplorerSegmentRole::Icon && segment.text == "·"
+            })
+        }));
         app.explorer.move_selection(1);
         app.explorer_open_file(false);
         assert!(app.ui.explorer.is_some());
@@ -13608,12 +15607,91 @@ mod tests {
         app.open_explorer();
         app.explorer_open_file(true);
         wait_vfs(&mut app);
+        assert_eq!(app.state.active_tab_views().len(), 2);
+    }
+
+    #[test]
+    fn explorer_projection_formats_only_the_terminal_viewport() {
+        let mut app = app();
+        app.terminal_height = 10;
+        for index in 0..40 {
+            fs::write(
+                app.state.workspace_root.join(format!("file{index}.txt")),
+                "fixture",
+            )
+            .expect("fixture");
+        }
+        app.open_explorer();
+        wait_explorer(&mut app);
+        let explorer = app.ui.explorer.as_ref().expect("explorer projection");
+        assert_eq!(explorer.total, 40);
+        assert_eq!(explorer.rows.len(), 6);
+        assert!(explorer.rows.len() < explorer.total);
+        assert_eq!(explorer.rows.iter().filter(|row| row.selected).count(), 1);
+        let first_child = app.explorer.selected_id().expect("first child");
+        let projection_generation = app.explorer.projection_generation();
+
+        app.move_explorer_selection(-1);
+        assert_eq!(app.explorer.selected_id(), Some(first_child));
+        app.explorer_collapse_or_parent();
+        assert_eq!(app.explorer.selected_id(), Some(first_child));
+        assert_eq!(app.explorer.projection_generation(), projection_generation);
+
+        app.handle_event(crate::terminal_ui::UiEvent::Resize(80, 20));
+        let explorer = app.ui.explorer.as_ref().expect("grown projection");
+        assert_eq!(explorer.rows.len(), 16);
+        assert_eq!(explorer.rows.iter().filter(|row| row.selected).count(), 1);
+        assert_eq!(app.explorer.projection_generation(), projection_generation);
+        app.handle_event(crate::terminal_ui::UiEvent::Resize(80, 8));
+        let explorer = app.ui.explorer.as_ref().expect("shrunk projection");
+        assert_eq!(explorer.rows.len(), 4);
+        assert_eq!(explorer.rows.iter().filter(|row| row.selected).count(), 1);
+        assert_eq!(app.explorer.projection_generation(), projection_generation);
+
+        app.move_explorer_selection(30);
+        let explorer = app.ui.explorer.as_ref().expect("scrolled projection");
+        assert_eq!(explorer.rows.len(), 4);
+        assert!(explorer.scroll > 0);
+        assert!(explorer.rows.iter().any(|row| row.selected));
+        let first_viewport_node = explorer.rows[0].node_id;
+        app.mouse_position = Some((1, 3));
+        app.explorer_mouse_select();
         assert_eq!(
-            super::application_layout_pane_count(
-                &app.state.tabs[app.state.active_tab.expect("active tab")].root,
-            ),
-            2
+            app.explorer.selected_id(),
+            Some(crate::workspace::ExplorerNodeId(first_viewport_node))
         );
+        assert_eq!(app.explorer.projection_generation(), projection_generation);
+
+        let projected_before_rejection = app.ui.explorer.clone();
+        let mut invalid = crate::configuration::load_bundled_config();
+        invalid.config.ui.explorer.icon_mode = crate::configuration::ExplorerIconMode::Ascii;
+        invalid.config.ui.explorer.maximum_visible_rows = 2;
+        invalid
+            .config
+            .input
+            .text_commands
+            .insert("editor.insert".into(), "unknown.command".into());
+        assert!(app.apply_configuration_candidate(invalid, false).is_err());
+        assert_eq!(app.ui.explorer, projected_before_rejection);
+        assert_eq!(
+            app.configuration.settings.ui.explorer.icon_mode,
+            crate::configuration::ExplorerIconMode::NerdFont
+        );
+
+        let mut valid = crate::configuration::load_bundled_config();
+        valid.config.ui.explorer.icon_mode = crate::configuration::ExplorerIconMode::Ascii;
+        valid.config.ui.explorer.maximum_visible_rows = 2;
+        app.apply_configuration_candidate(valid, false)
+            .expect("valid explorer reload");
+        let explorer = app.ui.explorer.as_ref().expect("reconfigured projection");
+        assert_eq!(explorer.rows.len(), 2);
+        assert_eq!(explorer.rows.iter().filter(|row| row.selected).count(), 1);
+        assert!(explorer.rows.iter().all(|row| {
+            row.segments.iter().any(|segment| {
+                segment.role == crate::terminal_ui::ExplorerSegmentRole::Icon && segment.text == "."
+            })
+        }));
+        assert_eq!(app.explorer.projection_generation(), projection_generation);
     }
 
     #[test]
@@ -14229,16 +16307,21 @@ mod tests {
         let mut app = app();
         let mut loaded = crate::configuration::load_bundled_config().keymaps;
         loaded.entries.push(crate::configuration::KeymapEntry {
-            context: "prompt_mouse".into(),
+            id: "user.test.prompt-mouse-context-is-independently-configurable".into(),
+            context: Some("prompt_mouse".into()),
             mode: String::new(),
-            keys: "mouse-right-down".into(),
+            keys: Some("mouse-right-down".into()),
             command: Some("command_line.cancel".into()),
             arguments: Default::default(),
             unmap: false,
             disable: false,
             pass_through: false,
         });
-        let (keymaps, diagnostic) = compile_keymaps(&app.commands, &loaded);
+        let (keymaps, diagnostic) = compile_keymaps(
+            &app.commands,
+            &loaded,
+            &app.configuration.settings.input.keymaps,
+        );
         assert!(diagnostic.is_none());
         app.configuration.keymaps = keymaps;
         app.open_prompt(crate::terminal_ui::PromptKind::Command, String::new());
@@ -14506,6 +16589,103 @@ mod tests {
     }
 
     #[test]
+    fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
+        let mut app = app();
+        app.state.open_text(TextBuffer::from_text("editor"), None);
+        app.ui.dashboard = false;
+        app.terminal_width = 80;
+        app.terminal_height = 24;
+        app.configuration.settings.ui.terminal_panel.height = 10;
+        app.configuration.settings.ui.terminal_panel.minimum_height = 4;
+        app.configuration.settings.ui.terminal_panel.maximum_height = 20;
+        app.configuration.settings.ui.terminal_panel.resize_step = 2;
+        app.terminal_panel_height = 10;
+        let mut first_screen = PtyScreen::new(80, 8, 100);
+        first_screen.feed("first terminal");
+        let mut second_screen = PtyScreen::new(80, 8, 100);
+        second_screen.feed("second terminal");
+        app.terminals.insert(
+            PtyId(1),
+            super::TerminalRuntime {
+                profile: "first".into(),
+                root_revision: app.workspace.root_revision(),
+                screen: first_screen,
+                running: true,
+                exit_code: None,
+                truncated: false,
+            },
+        );
+        app.terminals.insert(
+            PtyId(2),
+            super::TerminalRuntime {
+                profile: "second".into(),
+                root_revision: app.workspace.root_revision(),
+                screen: second_screen,
+                running: false,
+                exit_code: Some(7),
+                truncated: true,
+            },
+        );
+        app.active_terminal = Some(PtyId(1));
+        app.terminal_focused = true;
+        app.sync_terminal_panel();
+        assert_eq!(app.workspace_render_height(), 14);
+        assert_eq!(app.active_input_context(), "terminal");
+
+        app.process_effect(crate::application::AppEffect::TerminalUnfocus);
+        assert_eq!(app.active_terminal, Some(PtyId(1)));
+        assert!(!app.terminal_focused);
+        assert!(app.ui.terminal_panel.is_some());
+        assert_eq!(app.active_input_context(), "editor.normal");
+        app.process_effect(crate::application::AppEffect::TerminalToggle);
+        assert!(app.terminal_focused);
+        app.process_effect(crate::application::AppEffect::TerminalToggle);
+        assert!(!app.terminal_focused);
+        assert_eq!(app.active_terminal, Some(PtyId(1)));
+        app.handle_event(crate::terminal_ui::UiEvent::Mouse {
+            key: crate::input::KeyEvent::plain(crate::input::KeyCode::MouseLeftDown),
+            column: 4,
+            row: 16,
+        });
+        assert!(app.terminal_focused);
+        assert_eq!(app.active_terminal, Some(PtyId(1)));
+        app.process_effect(crate::application::AppEffect::TerminalUnfocus);
+
+        app.process_effect(crate::application::AppEffect::TerminalFocus(2));
+        assert_eq!(app.active_terminal, Some(PtyId(2)));
+        assert!(app.terminal_focused);
+        assert_eq!(
+            app.ui
+                .terminal_panel
+                .as_ref()
+                .expect("second panel")
+                .profile,
+            "second"
+        );
+        app.process_effect(crate::application::AppEffect::TerminalCycle(-1));
+        assert_eq!(app.active_terminal, Some(PtyId(1)));
+        assert!(app.terminals[&PtyId(2)].screen.lines()[0].contains("second"));
+
+        app.process_effect(crate::application::AppEffect::TerminalResize(1));
+        assert_eq!(app.terminal_panel_height, 12);
+        assert_eq!(app.terminals[&PtyId(1)].screen.dimensions(), (80, 10));
+        assert_eq!(app.workspace_render_height(), 12);
+        app.handle_event(crate::terminal_ui::UiEvent::Resize(60, 20));
+        assert_eq!(app.terminals[&PtyId(1)].screen.dimensions(), (60, 10));
+        assert_eq!(app.workspace_render_height(), 8);
+
+        app.process_effect(crate::application::AppEffect::TerminalClose);
+        assert!(!app.terminals.contains_key(&PtyId(1)));
+        assert_eq!(app.active_terminal, Some(PtyId(2)));
+        assert!(app.ui.terminal_panel.is_some());
+        app.process_effect(crate::application::AppEffect::TerminalClose);
+        assert!(app.terminals.is_empty());
+        assert!(app.active_terminal.is_none());
+        assert!(!app.terminal_focused);
+        assert!(app.ui.terminal_panel.is_none());
+    }
+
+    #[test]
     fn configured_notification_timeout_expires_visible_message() {
         let mut app = app();
         app.configuration.settings.ui.notifications.timeout_ms = 1;
@@ -14642,9 +16822,10 @@ mod tests {
         loaded.path = PathBuf::from("keymaps.toml");
         loaded.entries.extend([
             crate::configuration::KeymapEntry {
-                context: "editor".into(),
+                id: "user.test.user-keymaps-execute-typed-commands-and-unmap-defaults".into(),
+                context: Some("editor".into()),
                 mode: "normal".into(),
-                keys: "space q".into(),
+                keys: Some("<leader> q".into()),
                 command: Some("editor.quit".into()),
                 arguments: [("force".into(), toml::Value::Boolean(true))]
                     .into_iter()
@@ -14654,9 +16835,11 @@ mod tests {
                 pass_through: false,
             },
             crate::configuration::KeymapEntry {
-                context: "editor".into(),
+                id: "user.test.user-keymaps-execute-typed-commands-and-unmap-defaults.case-2"
+                    .into(),
+                context: Some("editor".into()),
                 mode: "normal".into(),
-                keys: "x".into(),
+                keys: Some("x".into()),
                 command: None,
                 arguments: Default::default(),
                 unmap: true,
@@ -14664,7 +16847,11 @@ mod tests {
                 pass_through: false,
             },
         ]);
-        let (keymaps, diagnostic) = compile_keymaps(&app.commands, &loaded);
+        let (keymaps, diagnostic) = compile_keymaps(
+            &app.commands,
+            &loaded,
+            &app.configuration.settings.input.keymaps,
+        );
         assert!(diagnostic.is_none());
         assert!(
             keymaps
@@ -14678,7 +16865,15 @@ mod tests {
             .keymaps
             .inspect("editor.normal", "editor.quit")
             .expect("inspect remap");
+        assert_eq!(inspection.source_keys, "<leader> q");
         assert_eq!(inspection.keys, "space q");
+        let unmap = app
+            .configuration
+            .keymaps
+            .inspect_id("user.test.user-keymaps-execute-typed-commands-and-unmap-defaults.case-2")
+            .expect("exact-sequence unmap inspection");
+        assert_eq!(unmap.operation, KeymapOperation::Unmap);
+        assert_eq!(unmap.source_keys, "x");
         assert_eq!(
             inspection.arguments.get("force"),
             Some(&CommandValue::Bool(true))
@@ -14692,26 +16887,385 @@ mod tests {
     }
 
     #[test]
+    fn symbolic_leaders_expand_before_dispatch_and_preserve_literal_space_actions() {
+        let app = app();
+        let mut loaded = crate::configuration::load_bundled_config().keymaps;
+        let bundled_count = loaded.entries.len();
+        loaded.entries.push(crate::configuration::KeymapEntry {
+            id: "user.test.symbolic-leaders-expand-before-dispatch-and-preserve-literal-space-actions".into(),
+            context: Some("dashboard".into()),
+            mode: String::new(),
+            keys: Some("<localleader> z".into()),
+            command: Some("health.open".into()),
+            arguments: Default::default(),
+            unmap: false,
+            disable: false,
+            pass_through: false,
+        });
+        loaded.bundled_count = bundled_count;
+        let policy = crate::configuration::KeymapPolicyConfig {
+            load_bundled_defaults: true,
+            leader: ",".into(),
+            local_leader: ";".into(),
+        };
+        let (keymaps, diagnostic) = compile_keymaps(&app.commands, &loaded, &policy);
+        assert!(diagnostic.is_none(), "{diagnostic:?}");
+
+        let leader_binding = keymaps
+            .inspect("editor.normal", "buffer.picker.open")
+            .expect("bundled leader binding");
+        assert_eq!(leader_binding.source_keys, "<leader> f b");
+        assert_eq!(leader_binding.keys, ", f b");
+        assert_eq!(
+            keymaps
+                .binding_for("dashboard", "health.open")
+                .expect("local leader binding"),
+            "; z"
+        );
+        let literal_space = keymaps
+            .inspect("workspace_edit", "workspace.edit.toggle")
+            .expect("literal space action");
+        assert_eq!(literal_space.source_keys, "space");
+        assert_eq!(literal_space.keys, "space");
+
+        let mut dispatch = keymaps.clone();
+        assert_eq!(
+            dispatch.resolve("editor.normal", KeyEvent::character(',')),
+            MappingResolution::Pending
+        );
+        assert_eq!(
+            dispatch.resolve("editor.normal", KeyEvent::character('f')),
+            MappingResolution::Pending
+        );
+        assert!(matches!(
+            dispatch.resolve("editor.normal", KeyEvent::character('b')),
+            MappingResolution::Ready(invocation)
+                if invocation.id.as_str() == "buffer.picker.open"
+        ));
+    }
+
+    #[test]
+    fn expanded_duplicate_sequences_are_rejected_with_symbolic_diagnostics() {
+        let app = app();
+        let mut loaded = crate::configuration::load_bundled_config().keymaps;
+        let mapping = |id: &str, keys: &str| crate::configuration::KeymapEntry {
+            id: id.into(),
+            context: Some("dashboard".into()),
+            mode: String::new(),
+            keys: Some(keys.into()),
+            command: Some("health.open".into()),
+            arguments: Default::default(),
+            unmap: false,
+            disable: false,
+            pass_through: false,
+        };
+        loaded.entries.extend([
+            mapping("user.test.expanded-symbolic", "<leader> z"),
+            mapping("user.test.expanded-literal", "space z"),
+        ]);
+        let (_, diagnostic) = compile_keymaps(
+            &app.commands,
+            &loaded,
+            &app.configuration.settings.input.keymaps,
+        );
+        let diagnostic = diagnostic.expect("expanded duplicate must fail");
+        assert!(diagnostic.contains("<leader> z"));
+        assert!(diagnostic.contains("expanded to `space z`"));
+        assert!(diagnostic.contains("conflicts with id"));
+    }
+
+    #[test]
+    fn invalid_leader_policy_rejects_the_complete_configuration_transactionally() {
+        let mut app = app();
+        let original_policy = app.configuration.settings.input.keymaps.clone();
+        let original_binding = app
+            .configuration
+            .keymaps
+            .binding_for("editor.normal", "buffer.picker.open")
+            .expect("bundled binding")
+            .to_owned();
+        for invalid_leader in ["", "<leader>", "a b c d e", "not-a-key"] {
+            let mut candidate = crate::configuration::load_bundled_config();
+            candidate.config.input.keymaps.leader = invalid_leader.into();
+            let error = app
+                .apply_configuration_candidate(candidate, false)
+                .expect_err("invalid leader must reject the whole candidate");
+            assert!(error.contains("input.keymaps.leader"), "{error}");
+            assert_eq!(app.configuration.settings.input.keymaps, original_policy);
+            assert_eq!(
+                app.configuration
+                    .keymaps
+                    .binding_for("editor.normal", "buffer.picker.open"),
+                Some(original_binding.as_str())
+            );
+        }
+    }
+
+    #[test]
+    fn disabling_bundled_keymaps_keeps_only_explicit_user_declarations() {
+        let app = app();
+        let mut loaded = crate::configuration::load_bundled_config().keymaps;
+        loaded.entries.push(crate::configuration::KeymapEntry {
+            id: "user.test.disabling-bundled-keymaps-keeps-only-explicit-user-declarations".into(),
+            context: Some("dashboard".into()),
+            mode: String::new(),
+            keys: Some("<leader> z".into()),
+            command: Some("health.open".into()),
+            arguments: Default::default(),
+            unmap: false,
+            disable: false,
+            pass_through: false,
+        });
+        let policy = crate::configuration::KeymapPolicyConfig {
+            load_bundled_defaults: false,
+            leader: ",".into(),
+            local_leader: ";".into(),
+        };
+        let (keymaps, diagnostic) = compile_keymaps(&app.commands, &loaded, &policy);
+        assert!(diagnostic.is_none(), "{diagnostic:?}");
+        assert!(
+            keymaps
+                .binding_for("editor.normal", "buffer.picker.open")
+                .is_none()
+        );
+        assert_eq!(keymaps.binding_for("dashboard", "health.open"), Some(", z"));
+    }
+
+    #[test]
+    fn identity_rebind_moves_a_bundled_mapping_without_leaving_the_old_sequence() {
+        let app = app();
+        let target = "builtin.editor.normal.buffer-picker-open.leader-f-b";
+        let mut loaded = crate::configuration::load_bundled_config().keymaps;
+        loaded.path = PathBuf::from("keymaps.toml");
+        loaded.user_spans.clear();
+        loaded.entries.push(crate::configuration::KeymapEntry {
+            id: target.into(),
+            context: Some("editor".into()),
+            mode: "normal".into(),
+            keys: Some("g b".into()),
+            command: Some("buffer.picker.open".into()),
+            arguments: BTreeMap::new(),
+            unmap: false,
+            disable: false,
+            pass_through: false,
+        });
+        let (keymaps, diagnostic) = compile_keymaps(
+            &app.commands,
+            &loaded,
+            &app.configuration.settings.input.keymaps,
+        );
+        assert!(diagnostic.is_none(), "{diagnostic:?}");
+        assert!(
+            !keymaps
+                .conflicts()
+                .iter()
+                .any(|conflict| conflict.contains(target))
+        );
+        assert_eq!(
+            keymaps.binding_for("editor.normal", "buffer.picker.open"),
+            Some("g b")
+        );
+        assert!(keymaps.inspect_key("editor.normal", "space f b").is_none());
+        let by_id = keymaps.inspect_id(target).expect("replacement identity");
+        assert_eq!(by_id.source_keys, "g b");
+        assert_eq!(by_id.keys, "g b");
+        assert!(
+            by_id.source.contains("keymaps.toml:declaration 1"),
+            "unexpected source {}",
+            by_id.source
+        );
+        assert_eq!(
+            keymaps
+                .inspect("editor.normal", "buffer.picker.open")
+                .expect("reverse lookup")
+                .id,
+            target
+        );
+
+        let mut dispatch = keymaps;
+        assert_eq!(
+            dispatch.resolve("editor.normal", KeyEvent::character('g')),
+            MappingResolution::Pending
+        );
+        assert!(matches!(
+            dispatch.resolve("editor.normal", KeyEvent::character('b')),
+            MappingResolution::Ready(invocation)
+                if invocation.id.as_str() == "buffer.picker.open"
+        ));
+    }
+
+    #[test]
+    fn identity_disable_inherits_symbolic_location_and_tracks_leader_changes() {
+        let app = app();
+        let target = "builtin.editor.normal.explorer-open.leader-f-e";
+        let mut loaded = crate::configuration::load_bundled_config().keymaps;
+        loaded.entries.push(crate::configuration::KeymapEntry {
+            id: target.into(),
+            context: None,
+            mode: String::new(),
+            keys: None,
+            command: None,
+            arguments: BTreeMap::new(),
+            unmap: false,
+            disable: true,
+            pass_through: false,
+        });
+        for leader in [",", ";"] {
+            let policy = crate::configuration::KeymapPolicyConfig {
+                load_bundled_defaults: true,
+                leader: leader.into(),
+                local_leader: "\\".into(),
+            };
+            let (keymaps, diagnostic) = compile_keymaps(&app.commands, &loaded, &policy);
+            assert!(diagnostic.is_none(), "{diagnostic:?}");
+            assert!(
+                keymaps
+                    .binding_for("editor.normal", "explorer.open")
+                    .is_none()
+            );
+            let inspection = keymaps.inspect_id(target).expect("disable inspection");
+            assert_eq!(inspection.operation, KeymapOperation::Disable);
+            assert_eq!(inspection.command, None);
+            assert_eq!(inspection.source_keys, "<leader> f e");
+            assert_eq!(inspection.keys, format!("{leader} f e"));
+
+            let mut dispatch = keymaps;
+            assert_eq!(
+                dispatch.resolve(
+                    "editor.normal",
+                    KeyEvent::character(leader.chars().next().expect("leader"))
+                ),
+                MappingResolution::Pending
+            );
+            assert_eq!(
+                dispatch.resolve("editor.normal", KeyEvent::character('f')),
+                MappingResolution::Pending
+            );
+            assert_eq!(
+                dispatch.resolve("editor.normal", KeyEvent::character('e')),
+                MappingResolution::Disabled
+            );
+        }
+    }
+
+    #[test]
+    fn identity_disable_rejects_unknown_omitted_and_overdeclared_targets() {
+        let app = app();
+        let target = "builtin.editor.normal.explorer-open.leader-f-e";
+        for (load_bundled_defaults, id, context, expected) in [
+            (
+                true,
+                "user.missing.binding",
+                None,
+                "targets no lower contribution",
+            ),
+            (false, target, None, "targets no lower contribution"),
+            (
+                true,
+                target,
+                Some("editor".to_owned()),
+                "must contain only `id` and `disable = true`",
+            ),
+        ] {
+            let mut loaded = crate::configuration::load_bundled_config().keymaps;
+            loaded.entries.push(crate::configuration::KeymapEntry {
+                id: id.into(),
+                context,
+                mode: String::new(),
+                keys: None,
+                command: None,
+                arguments: BTreeMap::new(),
+                unmap: false,
+                disable: true,
+                pass_through: false,
+            });
+            let policy = crate::configuration::KeymapPolicyConfig {
+                load_bundled_defaults,
+                ..crate::configuration::KeymapPolicyConfig::default()
+            };
+            let (_, diagnostic) = compile_keymaps(&app.commands, &loaded, &policy);
+            assert!(
+                diagnostic
+                    .as_deref()
+                    .is_some_and(|diagnostic| diagnostic.contains(expected)),
+                "missing `{expected}` in {diagnostic:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_keymap_identity_rejects_the_configuration_transactionally() {
+        let mut app = app();
+        let original = app
+            .configuration
+            .keymaps
+            .binding_for("editor.normal", "buffer.picker.open")
+            .expect("original")
+            .to_owned();
+        for id in [
+            String::new(),
+            "UPPER.invalid".into(),
+            "one-segment".into(),
+            format!("user.{}", "x".repeat(129)),
+        ] {
+            let mut candidate = crate::configuration::load_bundled_config();
+            candidate
+                .keymaps
+                .entries
+                .push(crate::configuration::KeymapEntry {
+                    id: id.into(),
+                    context: Some("dashboard".into()),
+                    mode: String::new(),
+                    keys: Some("z".into()),
+                    command: Some("health.open".into()),
+                    arguments: BTreeMap::new(),
+                    unmap: false,
+                    disable: false,
+                    pass_through: false,
+                });
+            let error = app
+                .apply_configuration_candidate(candidate, false)
+                .expect_err("invalid identity must reject candidate");
+            assert!(error.contains("invalid id"), "{error}");
+            assert_eq!(
+                app.configuration
+                    .keymaps
+                    .binding_for("editor.normal", "buffer.picker.open"),
+                Some(original.as_str())
+            );
+        }
+    }
+
+    #[test]
     fn invalid_user_keymap_set_is_rejected_transactionally() {
         let app = app();
         let mut loaded = crate::configuration::load_bundled_config().keymaps;
         loaded.path = PathBuf::from("keymaps.toml");
         loaded.entries.push(crate::configuration::KeymapEntry {
-            context: "editor".into(),
+            id: "user.test.invalid-user-keymap-set-is-rejected-transactionally".into(),
+            context: Some("editor".into()),
             mode: "normal".into(),
-            keys: "x".into(),
+            keys: Some("x".into()),
             command: Some("unknown.command".into()),
             arguments: Default::default(),
             unmap: false,
             disable: false,
             pass_through: false,
         });
-        let (keymaps, diagnostic) = compile_keymaps(&app.commands, &loaded);
+        let (keymaps, diagnostic) = compile_keymaps(
+            &app.commands,
+            &loaded,
+            &app.configuration.settings.input.keymaps,
+        );
         assert!(!keymaps.resolvers.is_empty());
         assert!(diagnostic.is_some_and(|message| message.contains("keeping bundled keymaps")));
 
-        let (reloaded, reload_diagnostic) =
-            reload_keymaps(&app.commands, &app.configuration.keymaps, &loaded);
+        let (reloaded, reload_diagnostic) = reload_keymaps(
+            &app.commands,
+            &app.configuration.keymaps,
+            &loaded,
+            &app.configuration.settings.input.keymaps,
+        );
         assert_eq!(
             reloaded.binding_for("editor.normal", "edit.delete_char"),
             app.configuration
@@ -14726,13 +17280,30 @@ mod tests {
     }
 
     #[test]
+    fn keymap_inspection_by_id_reports_identity_operation_sequences_and_source() {
+        let mut app = app();
+        let id = "builtin.editor.normal.explorer-open.leader-f-e";
+        app.process_effect(crate::application::AppEffect::InspectKeymap {
+            id: Some(id.into()),
+            context: None,
+            key: None,
+            command: None,
+        });
+        let message = app.ui.notification.expect("inspection notification");
+        assert!(message.contains(id));
+        assert!(message.contains("<leader> f e => space f e"));
+        assert!(message.contains("[command] explorer.open"));
+        assert!(message.contains("<bundled:keymaps>:declaration"));
+    }
+
+    #[test]
     fn keymap_inspection_reports_real_user_path_and_byte_range() {
         let mut app = app();
         let root = tempdir().expect("tempdir");
         let path = root.path().join("keymaps.toml");
         fs::write(
             &path,
-            "[[keymap]]\ncontext='dashboard'\nkeys='z'\ncommand='health.open'\n",
+            "[[keymap]]\nid='user.test.inspection-path'\ncontext='dashboard'\nkeys='z'\ncommand='health.open'\n",
         )
         .expect("keymap");
         let user = crate::configuration::load_keymaps(&path);
@@ -14742,26 +17313,34 @@ mod tests {
         bundled.bundled_count = bundled_count;
         bundled.path = path.clone();
         bundled.user_spans = user.user_spans;
-        let (keymaps, diagnostic) = compile_keymaps(&app.commands, &bundled);
+        let (keymaps, diagnostic) = compile_keymaps(
+            &app.commands,
+            &bundled,
+            &app.configuration.settings.input.keymaps,
+        );
         assert!(diagnostic.is_none());
-        let source = keymaps
-            .inspect_key("dashboard", "z")
-            .expect("inspection")
-            .source;
-        assert!(source.starts_with(&path.display().to_string()));
-        assert!(source.contains(":bytes 0.."));
+        let inspection = keymaps
+            .inspect_id("user.test.inspection-path")
+            .expect("inspection by stable id");
+        assert_eq!(inspection.operation, KeymapOperation::Command);
+        assert_eq!(inspection.command.as_deref(), Some("health.open"));
+        assert_eq!(inspection.source_keys, "z");
+        assert_eq!(inspection.keys, "z");
+        assert!(inspection.source.starts_with(&path.display().to_string()));
+        assert!(inspection.source.contains(":bytes 0.."));
         app.configuration.keymaps = keymaps;
     }
 
     #[test]
-    fn duplicate_user_mappings_report_conflicts_transactionally() {
+    fn duplicate_user_ids_are_rejected_transactionally() {
         let app = app();
         let mut loaded = crate::configuration::load_bundled_config().keymaps;
         loaded.path = PathBuf::from("keymaps.toml");
         let mapping = crate::configuration::KeymapEntry {
-            context: "dashboard".into(),
+            id: "user.test.duplicate-user-mappings-report-conflicts-transactionally".into(),
+            context: Some("dashboard".into()),
             mode: String::new(),
-            keys: "z".into(),
+            keys: Some("z".into()),
             command: Some("editor.quit".into()),
             arguments: [("force".into(), toml::Value::Boolean(false))]
                 .into_iter()
@@ -14771,11 +17350,15 @@ mod tests {
             pass_through: false,
         };
         loaded.entries.extend([mapping.clone(), mapping]);
-        let (_, diagnostic) = compile_keymaps(&app.commands, &loaded);
+        let (_, diagnostic) = compile_keymaps(
+            &app.commands,
+            &loaded,
+            &app.configuration.settings.input.keymaps,
+        );
         assert!(
             diagnostic
                 .as_deref()
-                .is_some_and(|message| message.contains("conflicts with keymap"))
+                .is_some_and(|message| message.contains("duplicates id"))
         );
     }
 
@@ -14784,16 +17367,21 @@ mod tests {
         let mut app = app();
         let mut loaded = crate::configuration::load_bundled_config().keymaps;
         loaded.entries.push(crate::configuration::KeymapEntry {
-            context: "dashboard".into(),
+            id: "user.test.configured-focus-loss-cancels-pending-mapping".into(),
+            context: Some("dashboard".into()),
             mode: String::new(),
-            keys: "z z".into(),
+            keys: Some("z z".into()),
             command: Some("health.open".into()),
             arguments: Default::default(),
             unmap: false,
             disable: false,
             pass_through: false,
         });
-        let (keymaps, diagnostic) = compile_keymaps(&app.commands, &loaded);
+        let (keymaps, diagnostic) = compile_keymaps(
+            &app.commands,
+            &loaded,
+            &app.configuration.settings.input.keymaps,
+        );
         assert!(diagnostic.is_none());
         app.configuration.keymaps = keymaps;
         app.handle_configured_key(KeyEvent::character('z'));
@@ -14808,9 +17396,10 @@ mod tests {
         let mut loaded = crate::configuration::load_bundled_config().keymaps;
         loaded.entries.extend([
             crate::configuration::KeymapEntry {
-                context: "command_prompt".into(),
+                id: "user.test.prompt-special-keys-are-remappable-from-configuration".into(),
+                context: Some("command_prompt".into()),
                 mode: String::new(),
-                keys: "escape".into(),
+                keys: Some("escape".into()),
                 command: None,
                 arguments: Default::default(),
                 unmap: true,
@@ -14818,9 +17407,10 @@ mod tests {
                 pass_through: false,
             },
             crate::configuration::KeymapEntry {
-                context: "command_prompt".into(),
+                id: "user.test.prompt-special-keys-are-remappable-from-configuration.case-2".into(),
+                context: Some("command_prompt".into()),
                 mode: String::new(),
-                keys: "ctrl-c".into(),
+                keys: Some("ctrl-c".into()),
                 command: Some("command_line.cancel".into()),
                 arguments: Default::default(),
                 unmap: false,
@@ -14828,7 +17418,11 @@ mod tests {
                 pass_through: false,
             },
         ]);
-        let (keymaps, diagnostic) = compile_keymaps(&app.commands, &loaded);
+        let (keymaps, diagnostic) = compile_keymaps(
+            &app.commands,
+            &loaded,
+            &app.configuration.settings.input.keymaps,
+        );
         assert!(diagnostic.is_none());
         app.configuration.keymaps = keymaps;
         app.open_prompt(crate::terminal_ui::PromptKind::Command, String::new());
@@ -15110,6 +17704,1491 @@ mod tests {
         }
         let buffer = app.state.active_buffer_id().expect("buffer");
         assert_eq!(app.state.buffers[buffer].text.to_string(), "e");
+    }
+
+    #[test]
+    fn key_hint_lifecycle_tracks_exact_prefix_delay_and_cancellation() {
+        let mut app = app();
+        app.state
+            .open_text(crate::document::TextBuffer::from_text("hint"), None);
+        app.ui.dashboard = false;
+        app.configuration.settings.ui.key_hints.delay_ms = 0;
+        app.handle_configured_key("space".parse().expect("leader"));
+        assert_eq!(
+            app.pending_keymap
+                .as_ref()
+                .map(|pending| pending.prefix.as_str()),
+            Some("space")
+        );
+        app.update_key_hint_ui();
+        assert_eq!(
+            app.ui.key_hints.as_ref().map(|hints| hints.prefix.as_str()),
+            Some("space")
+        );
+        app.handle_configured_key(KeyEvent::character('f'));
+        assert_eq!(
+            app.pending_keymap
+                .as_ref()
+                .map(|pending| pending.prefix.as_str()),
+            Some("space f")
+        );
+        app.update_key_hint_ui();
+        assert_eq!(
+            app.ui.key_hints.as_ref().map(|hints| hints.prefix.as_str()),
+            Some("space f")
+        );
+        app.handle_configured_key(KeyEvent::character('b'));
+        app.update_key_hint_ui();
+        assert!(app.pending_keymap.is_none());
+        assert!(app.ui.key_hints.is_none());
+
+        app.close_picker();
+        app.configuration.settings.ui.key_hints.delay_ms = 500;
+        app.handle_configured_key("space".parse().expect("leader"));
+        app.update_key_hint_ui();
+        assert!(app.ui.key_hints.is_none());
+        app.pending_keymap.as_mut().expect("pending").started_at =
+            Instant::now() - Duration::from_millis(600);
+        app.update_key_hint_ui();
+        assert!(app.ui.key_hints.is_some());
+        app.configuration.settings.ui.key_hints.enabled = false;
+        app.update_key_hint_ui();
+        assert!(app.ui.key_hints.is_none());
+        app.configuration.settings.ui.key_hints.enabled = true;
+        app.handle_configured_paste("x".into());
+        assert!(app.pending_keymap.is_none());
+        assert!(app.ui.key_hints.is_none());
+
+        app.handle_configured_key("space".parse().expect("leader"));
+        app.open_prompt(
+            crate::terminal_ui::PromptKind::WorkspaceTrust,
+            String::new(),
+        );
+        assert!(app.pending_keymap.is_none());
+        assert!(app.ui.key_hints.is_none());
+        app.close_prompt();
+        app.handle_configured_key("space".parse().expect("leader"));
+        app.handle_event(crate::terminal_ui::UiEvent::FocusLost);
+        assert!(app.pending_keymap.is_none());
+        assert!(app.ui.key_hints.is_none());
+    }
+
+    #[test]
+    fn key_hint_timeout_reload_and_pass_through_never_leave_stale_actions() {
+        let mut app = app();
+        let mut loaded = crate::configuration::load_bundled_config().keymaps;
+        loaded.entries.extend([
+            crate::configuration::KeymapEntry {
+                id: "user.test.ambiguous-exact".into(),
+                context: Some("dashboard".into()),
+                mode: String::new(),
+                keys: Some("x".into()),
+                command: Some("health.open".into()),
+                arguments: BTreeMap::new(),
+                unmap: false,
+                disable: false,
+                pass_through: false,
+            },
+            crate::configuration::KeymapEntry {
+                id: "user.test.ambiguous-long".into(),
+                context: Some("dashboard".into()),
+                mode: String::new(),
+                keys: Some("x y".into()),
+                command: Some("file.new".into()),
+                arguments: BTreeMap::new(),
+                unmap: false,
+                disable: false,
+                pass_through: false,
+            },
+            crate::configuration::KeymapEntry {
+                id: "user.test.hidden-pass-through".into(),
+                context: Some("editor".into()),
+                mode: "normal".into(),
+                keys: Some("<leader> f p".into()),
+                command: None,
+                arguments: BTreeMap::new(),
+                unmap: false,
+                disable: false,
+                pass_through: true,
+            },
+        ]);
+        let (keymaps, diagnostic) = compile_keymaps(
+            &app.commands,
+            &loaded,
+            &app.configuration.settings.input.keymaps,
+        );
+        assert!(diagnostic.is_none(), "{diagnostic:?}");
+        app.configuration.keymaps = keymaps;
+        assert!(
+            app.configuration
+                .keymaps
+                .hints_for_prefix(
+                    "editor.normal",
+                    "space f",
+                    &app.configuration.settings.command_labels,
+                )
+                .is_some_and(|projection| {
+                    !projection.rows.iter().any(|row| row.next_key == "p")
+                })
+        );
+
+        app.configuration.settings.ui.key_hints.delay_ms = 0;
+        app.handle_key_in_context("dashboard", KeyEvent::character('x'));
+        app.update_key_hint_ui();
+        assert!(app.pending_keymap.is_some());
+        assert!(app.ui.key_hints.is_some());
+        app.pending_keymap.as_mut().expect("pending").deadline =
+            Instant::now() - Duration::from_millis(1);
+        app.flush_keymap_timeout();
+        assert!(app.pending_keymap.is_none());
+        assert!(app.ui.key_hints.is_none());
+
+        app.handle_key_in_context("dashboard", KeyEvent::character('x'));
+        assert!(app.pending_keymap.is_some());
+        let mut candidate = crate::configuration::load_bundled_config();
+        candidate.config.input.keymaps.leader = ",".into();
+        app.apply_configuration_candidate(candidate, false)
+            .expect("accepted configuration");
+        assert!(app.pending_keymap.is_none());
+        assert!(app.ui.key_hints.is_none());
+    }
+
+    #[test]
+    fn expected_index_failure_before_sibling_index_aborts_the_complete_batch() {
+        let mut app = app();
+        app.configuration.deferred_plugin_keymaps = true;
+        app.configuration.expected_plugin_indexes =
+            ["bad".to_owned(), "good".to_owned()].into_iter().collect();
+        let bad = tempfile::tempdir().expect("bad plugin store");
+        fs::write(bad.path().join("manifest.toml"), "not = [valid").expect("bad manifest");
+        let good = tempfile::tempdir().expect("good plugin store");
+        write_plugin_manifest(
+            good.path(),
+            &plugin_manifest("good", "plugin.good.keymap.dashboard", "x y"),
+        );
+        let limits = app.plugin_limits();
+        let bad_load = app
+            .plugins
+            .index_from_store(
+                "bad".into(),
+                bad.path().to_path_buf(),
+                PathBuf::from("manifest.toml"),
+                PathBuf::from("missing.wasm"),
+                limits.clone(),
+            )
+            .expect("bad index request");
+        let good_load = app
+            .plugins
+            .index_from_store(
+                "good".into(),
+                good.path().to_path_buf(),
+                PathBuf::from("manifest.toml"),
+                PathBuf::from("missing.wasm"),
+                limits,
+            )
+            .expect("good index request");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while app.plugins.load_id("good").is_some()
+            || app.plugins.load_id("bad").is_some()
+            || !app.pending_index_activation.is_empty()
+        {
+            app.process_plugin_events();
+            assert!(Instant::now() < deadline, "batch rejection timed out");
+            thread::yield_now();
+        }
+        app.process_plugin_events();
+        assert!(app.plugin_contributions.get("bad").is_none());
+        assert!(app.plugin_contributions.get("good").is_none());
+        assert!(
+            app.configuration
+                .keymaps
+                .inspect_id("plugin.good.keymap.dashboard")
+                .is_none()
+        );
+        assert!(app.pending_index_activation.is_empty());
+        assert!(!app.plugins.is_active_generation("bad", bad_load));
+        assert!(!app.plugins.is_active_generation("good", good_load));
+    }
+
+    #[test]
+    fn deferred_user_plugin_move_compiles_after_index_then_falls_back_after_activation_failure() {
+        let mut app = app();
+        let root = tempfile::tempdir().expect("plugin store");
+        write_plugin_manifest(
+            root.path(),
+            &plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y"),
+        );
+        let mut loaded = crate::configuration::load_bundled_config();
+        loaded.config.plugins.entries.insert(
+            "demo".into(),
+            crate::configuration::PluginEntryConfig {
+                manifest: PathBuf::from("manifest.toml"),
+                component: PathBuf::from("missing.wasm"),
+                enabled: true,
+            },
+        );
+        loaded
+            .keymaps
+            .entries
+            .push(crate::configuration::KeymapEntry {
+                id: "plugin.demo.keymap.dashboard".into(),
+                context: Some("dashboard".into()),
+                mode: String::new(),
+                keys: Some("z".into()),
+                command: Some("plugin.demo.run".into()),
+                arguments: BTreeMap::new(),
+                unmap: false,
+                disable: false,
+                pass_through: false,
+            });
+        let (configuration, diagnostic) =
+            super::resolve_configuration(&app.commands, loaded, true).expect("deferred config");
+        assert!(diagnostic.is_none());
+        assert!(configuration.deferred_plugin_keymaps);
+        app.configuration = configuration;
+        let load = app
+            .plugins
+            .index_from_store(
+                "demo".into(),
+                root.path().to_path_buf(),
+                PathBuf::from("manifest.toml"),
+                PathBuf::from("missing.wasm"),
+                app.plugin_limits(),
+            )
+            .expect("index request");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while app.plugin_contributions.get("demo").is_none() {
+            app.process_plugin_events();
+            assert!(Instant::now() < deadline, "static acceptance timed out");
+            thread::yield_now();
+        }
+        let moved = app
+            .configuration
+            .keymaps
+            .inspect_id("plugin.demo.keymap.dashboard")
+            .expect("user replacement");
+        assert_eq!(moved.keys, "z");
+        assert_eq!(moved.contribution_layer, InputContextLayer::User);
+        assert!(
+            app.configuration
+                .keymaps
+                .inspect_key("dashboard", "x y")
+                .is_none()
+        );
+        while app.plugin_contributions.get("demo").is_some() {
+            app.process_plugin_events();
+            assert!(Instant::now() < deadline, "activation rollback timed out");
+            thread::yield_now();
+        }
+        assert!(!app.plugins.is_active_generation("demo", load));
+        assert!(
+            app.configuration
+                .keymaps
+                .inspect_id("plugin.demo.keymap.dashboard")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn enabled_plugin_references_are_deferred_but_unknown_namespaces_still_reject() {
+        let app = app();
+        let mut loaded = crate::configuration::load_bundled_config();
+        loaded.config.plugins.entries.insert(
+            "demo".into(),
+            crate::configuration::PluginEntryConfig {
+                manifest: PathBuf::from("demo.toml"),
+                component: PathBuf::from("demo.wasm"),
+                enabled: true,
+            },
+        );
+        loaded.keymaps.entries.extend([
+            crate::configuration::KeymapEntry {
+                id: "plugin.demo.keymap.default".into(),
+                context: None,
+                mode: String::new(),
+                keys: None,
+                command: None,
+                arguments: BTreeMap::new(),
+                unmap: false,
+                disable: true,
+                pass_through: false,
+            },
+            crate::configuration::KeymapEntry {
+                id: "user.test.demo-command".into(),
+                context: Some("dashboard".into()),
+                mode: String::new(),
+                keys: Some("z".into()),
+                command: Some("plugin.demo.run".into()),
+                arguments: BTreeMap::new(),
+                unmap: false,
+                disable: false,
+                pass_through: false,
+            },
+        ]);
+        let (resolved, diagnostic) = super::resolve_configuration(&app.commands, loaded, true)
+            .expect("deferred plugin references");
+        assert!(diagnostic.is_none());
+        assert!(resolved.deferred_plugin_keymaps);
+        assert!(resolved.expected_plugin_indexes.contains("demo"));
+        assert!(
+            resolved
+                .keymaps
+                .inspect_id("plugin.demo.keymap.default")
+                .is_none()
+        );
+        assert!(
+            resolved
+                .keymaps
+                .inspect_id("user.test.demo-command")
+                .is_none()
+        );
+
+        let mut unknown = crate::configuration::load_bundled_config();
+        unknown
+            .keymaps
+            .entries
+            .push(crate::configuration::KeymapEntry {
+                id: "user.test.unknown-plugin".into(),
+                context: Some("dashboard".into()),
+                mode: String::new(),
+                keys: Some("z".into()),
+                command: Some("plugin.unknown.run".into()),
+                arguments: BTreeMap::new(),
+                unmap: false,
+                disable: false,
+                pass_through: false,
+            });
+        assert!(super::resolve_configuration(&app.commands, unknown, true).is_err());
+
+        let mut running = self::app();
+        let previous = running.configuration.settings.plugins.clone();
+        let mut changed = crate::configuration::load_bundled_config();
+        changed.config.plugins.entries.insert(
+            "demo".into(),
+            crate::configuration::PluginEntryConfig {
+                manifest: PathBuf::from("demo.toml"),
+                component: PathBuf::from("demo.wasm"),
+                enabled: true,
+            },
+        );
+        let error = running
+            .apply_configuration_candidate(changed, false)
+            .expect_err("plugin topology reload must stage before mutation");
+        assert!(error.contains("plugin topology"));
+        assert_eq!(running.configuration.settings.plugins, previous);
+    }
+
+    #[test]
+    fn deferred_batch_abort_and_worker_loss_clear_static_ownership() {
+        fn index(owner: &str, generation: u64) -> crate::plugins::PluginContributionIndex {
+            crate::plugins::PluginContributionIndex {
+                owner: owner.into(),
+                version: "1.0.0".into(),
+                checksum: "0".repeat(64),
+                generation,
+                source: format!("test:{owner}"),
+                commands: BTreeMap::new(),
+                contexts: Vec::new(),
+                keymaps: Vec::new(),
+                key_groups: Vec::new(),
+            }
+        }
+
+        let mut app = app();
+        for (owner, load) in [("one", PluginLoadId(41)), ("two", PluginLoadId(42))] {
+            app.plugin_contributions
+                .install(index(owner, load.0))
+                .expect("provisional index");
+            app.pending_index_activation
+                .insert(owner.into(), (load, "0".repeat(64)));
+        }
+        app.abort_pending_index_batch("expected index failed");
+        assert!(app.pending_index_activation.is_empty());
+        assert!(app.plugin_contributions.get("one").is_none());
+        assert!(app.plugin_contributions.get("two").is_none());
+        assert!(
+            app.rejected_plugin_loads
+                .contains(&("one".into(), PluginLoadId(41)))
+        );
+        assert!(
+            app.rejected_plugin_loads
+                .contains(&("two".into(), PluginLoadId(42)))
+        );
+
+        app.plugin_contributions
+            .install(index("three", 43))
+            .expect("accepted index");
+        app.pending_index_activation
+            .insert("three".into(), (PluginLoadId(43), "0".repeat(64)));
+        app.handle_plugin_worker_stopped(crate::plugins::PluginError::Stopped);
+        assert!(app.pending_index_activation.is_empty());
+        assert!(app.rejected_plugin_loads.is_empty());
+        assert!(app.plugin_contributions.get("three").is_none());
+        assert!(
+            app.commands
+                .specs()
+                .all(|spec| !matches!(spec.source, CommandSource::Plugin(_)))
+        );
+    }
+
+    #[test]
+    fn lsp_documentation_popup_preserves_multiline_kind_and_cancels_without_notification() {
+        let mut app = app();
+        app.ui.notification = Some("keep unrelated notification".into());
+        app.present_lsp_result(
+            "rust-analyzer",
+            "textDocument/hover",
+            "file:///tmp/test.rs",
+            crate::languages::LspFeatureResult::Hover("first\nsecond 界".into()),
+        );
+        let popup = app.ui.documentation_popup.as_ref().expect("hover popup");
+        assert_eq!(popup.kind, DocumentationPopupKind::Hover);
+        assert_eq!(popup.lines, ["first", "second 界"]);
+        assert!(popup.title.contains("rust-analyzer"));
+        assert_eq!(
+            app.ui.notification.as_deref(),
+            Some("keep unrelated notification")
+        );
+
+        app.present_lsp_result(
+            "rust-analyzer",
+            "textDocument/signatureHelp",
+            "file:///tmp/test.rs",
+            crate::languages::LspFeatureResult::Signature("fn demo(\n  value: usize\n)".into()),
+        );
+        let popup = app
+            .ui
+            .documentation_popup
+            .as_ref()
+            .expect("signature popup");
+        assert_eq!(popup.kind, DocumentationPopupKind::Signature);
+        assert_eq!(popup.lines.len(), 3);
+        app.handle_key_in_context("dashboard", KeyEvent::character('q'));
+        assert!(app.ui.documentation_popup.is_none());
+    }
+
+    #[test]
+    fn exact_pane_horizontal_follow_is_display_safe_and_view_owned() {
+        let mut app = app();
+        app.terminal_width = 18;
+        app.terminal_height = 8;
+        app.configuration.settings.editor.wrap = false;
+        let text = "a\t界e\u{301}bcdefghijklmnopqrstuvwxyz";
+        let (_, view) = app.state.open_text(TextBuffer::from_text(text), None);
+        app.ui.dashboard = false;
+        app.state.views[view].cursor = ByteOffset(text.len());
+        app.ensure_cursor_visible();
+        let shifted = app.state.views[view].scroll_column;
+        assert!(shifted > 0);
+        assert_eq!(
+            shifted,
+            snap_display_column(
+                text,
+                shifted,
+                app.configuration.settings.editor.tab_width,
+                app.configuration.settings.editor.ambiguous_width,
+            )
+        );
+        let sibling = app
+            .state
+            .split_active(crate::editing::Axis::Horizontal, 500)
+            .expect("split view");
+        assert_eq!(app.state.views[sibling].scroll_column, shifted);
+        let first_pane = app
+            .state
+            .panes
+            .iter()
+            .find_map(|(pane, state)| (state.view == view).then_some(pane))
+            .expect("first pane");
+        app.state
+            .focus_pane_id(first_pane)
+            .expect("first view focus");
+        app.state.views[view].cursor = ByteOffset(0);
+        app.ensure_cursor_visible();
+        assert_eq!(app.state.views[view].scroll_column, 0);
+        assert_eq!(app.state.views[sibling].scroll_column, shifted);
+        app.state.views[view].scroll_column = 8;
+        app.configuration.settings.editor.wrap = true;
+        app.ensure_cursor_visible();
+        assert_eq!(app.state.views[view].scroll_column, 0);
+    }
+
+    #[test]
+    fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
+        let mut app = app();
+        let (_, view) = app.state.open_text(TextBuffer::from_text("a\tX"), None);
+        app.ui.dashboard = false;
+        app.state.views[view].cursor = ByteOffset("a\t".len());
+        app.configuration.settings.editor.wrap = false;
+        app.configuration.settings.editor.line_numbers = crate::configuration::LineNumbers::Off;
+        app.configuration.settings.editor.viewport.horizontal_margin = 0;
+        app.terminal_width = 2;
+        app.terminal_height = 6;
+        app.ensure_cursor_visible();
+        assert_eq!(app.state.views[view].scroll_column, 4);
+        let frame = render(
+            &app.state,
+            &app.ui,
+            &app.configuration.settings,
+            &app.configuration.dashboard,
+            app.terminal_width,
+            app.terminal_height,
+        );
+        assert!(frame.cursor.is_some_and(|(x, y, _)| x == 0 && y == 0));
+        app.mouse_position = Some((1, 0));
+        app.apply_mouse_cursor(false);
+        assert_eq!(app.state.views[view].cursor, ByteOffset("a\tX".len()));
+
+        app.configuration.settings.editor.line_numbers =
+            crate::configuration::LineNumbers::Absolute;
+        app.configuration.settings.editor.line_number_separator = "1234567890123456".into();
+        app.configuration.settings.editor.gutter_padding = 20;
+        app.state.views[view].cursor = ByteOffset("a\t".len());
+        app.state.views[view].scroll_column = 0;
+        app.terminal_width = 1;
+        app.ensure_cursor_visible();
+        assert_eq!(app.state.views[view].scroll_column, 4);
+        let one_cell = render(
+            &app.state,
+            &app.ui,
+            &app.configuration.settings,
+            &app.configuration.dashboard,
+            app.terminal_width,
+            app.terminal_height,
+        );
+        assert!(one_cell.cursor.is_some_and(|(x, _, _)| x == 0));
+
+        app.terminal_width = 2;
+        app.ensure_cursor_visible();
+        let two_cell = render(
+            &app.state,
+            &app.ui,
+            &app.configuration.settings,
+            &app.configuration.dashboard,
+            app.terminal_width,
+            app.terminal_height,
+        );
+        assert!(two_cell.cursor.is_some_and(|(x, _, _)| x == 1));
+        app.mouse_position = Some((1, 0));
+        app.apply_mouse_cursor(false);
+        assert_eq!(app.state.views[view].cursor, ByteOffset("a\t".len()));
+
+        app.terminal_width = 50;
+        app.ensure_cursor_visible();
+        let widened = render(
+            &app.state,
+            &app.ui,
+            &app.configuration.settings,
+            &app.configuration.dashboard,
+            app.terminal_width,
+            app.terminal_height,
+        );
+        assert!(
+            widened
+                .cursor
+                .is_some_and(|(x, _, _)| x < app.terminal_width)
+        );
+
+        let buffer = app.state.views[view].buffer;
+        app.terminal_width = 2;
+        app.configuration.settings.editor.wrap = true;
+        app.ui.large_file_buffers.push(buffer);
+        app.state.views[view].scroll_column = 0;
+        app.ensure_cursor_visible();
+        assert_eq!(app.state.views[view].scroll_column, 4);
+        app.ui
+            .large_file_buffers
+            .retain(|candidate| *candidate != buffer);
+        app.ensure_cursor_visible();
+        assert_eq!(app.state.views[view].scroll_column, 0);
+
+        app.configuration.settings.editor.wrap = false;
+        app.configuration.settings.editor.line_numbers = crate::configuration::LineNumbers::Off;
+        app.terminal_width = 2;
+        app.state.buffers[buffer].text = TextBuffer::from_text("ab界X");
+        app.state.views[view].cursor = ByteOffset("ab界".len());
+        app.state.views[view].scroll_column = 0;
+        app.ensure_cursor_visible();
+        assert_eq!(app.state.views[view].scroll_column, 4);
+        let wide = render(
+            &app.state,
+            &app.ui,
+            &app.configuration.settings,
+            &app.configuration.dashboard,
+            app.terminal_width,
+            app.terminal_height,
+        );
+        assert!(wide.cursor.is_some_and(|(x, _, _)| x == 0));
+
+        app.configuration.settings.ui.panes.minimum_width = 3;
+        app.terminal_width = 6;
+        app.state
+            .split_active(crate::editing::Axis::Horizontal, 100)
+            .expect("minimum-ratio split");
+        app.state.focus_pane(-1, false).expect("zero-width leaf");
+        let zero_view = app.state.active_view.expect("zero-width view");
+        app.state.views[zero_view].scroll_column = 9;
+        app.ensure_cursor_visible();
+        let zero_viewport = active_pane_viewport(
+            &app.state,
+            &app.configuration.settings,
+            app.terminal_width,
+            app.terminal_height,
+        )
+        .expect("zero-width focused viewport");
+        assert_eq!(zero_viewport.width, 0);
+        assert_eq!(app.state.views[zero_view].scroll_column, 0);
+    }
+
+    #[test]
+    fn session_layout_capture_and_restore_preserve_each_view_scroll_column() {
+        let path = PathBuf::from("/workspace/main.rs");
+        let text = TextBuffer::from_text("abcdefghijklmnopqrstuvwxyz");
+        let mut source = crate::editing::EditorState::new(PathBuf::from("/workspace"));
+        let (_, first) = source.open_text(text.clone(), Some(path.clone()));
+        source.views[first].scroll_column = 4;
+        let second = source
+            .split_active(crate::editing::Axis::Horizontal, 500)
+            .expect("split source view");
+        source.views[second].scroll_column = 17;
+        let source_tab = source.active_tab.expect("source tab");
+        let persisted = capture_persisted_layout(&source, &source.tabs[source_tab].root)
+            .expect("capture clean layout");
+
+        let mut restored = crate::editing::EditorState::new(PathBuf::from("/workspace"));
+        let loaded = HashMap::from([(path.clone(), (path.clone(), text))]);
+        let (_, panes) = build_restored_layout(&mut restored, &persisted, &loaded)
+            .expect("restore persisted layout");
+        let mut columns = panes
+            .iter()
+            .map(|(_, pane)| restored.views[restored.panes[*pane].view].scroll_column)
+            .collect::<Vec<_>>();
+        columns.sort_unstable();
+        assert_eq!(columns, vec![4, 17]);
+    }
+
+    #[test]
+    fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
+        let mut app = app();
+        let text = format!("{}\nx", "0123456789".repeat(8));
+        let (_, view) = app.state.open_text(TextBuffer::from_text(&text), None);
+        app.ui.dashboard = false;
+        app.configuration.settings.editor.wrap = false;
+        app.configuration.settings.editor.line_numbers = crate::configuration::LineNumbers::Off;
+        app.terminal_width = 90;
+        app.terminal_height = 18;
+        app.state.views[view].cursor = ByteOffset(80);
+        app.ensure_cursor_visible();
+        assert_eq!(app.state.views[view].scroll_column, 0);
+
+        app.ui.explorer = Some(ExplorerUiState {
+            title: "Files".into(),
+            rows: Vec::new(),
+            scroll: 0,
+            loading: false,
+            total: 0,
+            preview_lines: Vec::new(),
+        });
+        app.ensure_cursor_visible();
+        let docked = app.state.views[view].scroll_column;
+        assert!(docked > 0);
+        let panel = explorer_panel_width(&app.configuration.settings, app.terminal_width)
+            .expect("explorer panel");
+        let frame = render(
+            &app.state,
+            &app.ui,
+            &app.configuration.settings,
+            &app.configuration.dashboard,
+            app.terminal_width,
+            app.terminal_height,
+        );
+        assert!(frame.cursor.is_some_and(|(x, y, _)| {
+            x > panel && x < app.terminal_width && y < app.terminal_height - 1
+        }));
+
+        app.terminal_width = 30;
+        app.ensure_cursor_visible();
+        let narrowed = app.state.views[view].scroll_column;
+        assert!(narrowed > docked);
+        app.ui.explorer = None;
+        app.configuration.settings.editor.line_numbers =
+            crate::configuration::LineNumbers::Absolute;
+        app.state.views[view].scroll_column = 0;
+        app.ensure_cursor_visible();
+        let gutter_shifted = app.state.views[view].scroll_column;
+        assert!(gutter_shifted > 0);
+        app.terminal_width = 100;
+        app.ensure_cursor_visible();
+        let widened = render(
+            &app.state,
+            &app.ui,
+            &app.configuration.settings,
+            &app.configuration.dashboard,
+            app.terminal_width,
+            app.terminal_height,
+        );
+        assert!(
+            widened
+                .cursor
+                .is_some_and(|(x, y, _)| { x < app.terminal_width && y < app.terminal_height - 1 })
+        );
+
+        // Moving onto a shorter line must pull a stale horizontal offset back.
+        app.state.views[view].cursor = ByteOffset(text.len());
+        app.ensure_cursor_visible();
+        assert_eq!(app.state.views[view].scroll_column, 0);
+
+        // Unequal nested splits use the exact focused leaf width and keep the
+        // terminal cursor inside that leaf after the geometry changes.
+        app.terminal_width = 90;
+        app.state.views[view].cursor = ByteOffset(80);
+        app.state
+            .split_active(crate::editing::Axis::Horizontal, 300)
+            .expect("first split");
+        app.state
+            .split_active(crate::editing::Axis::Horizontal, 400)
+            .expect("nested split");
+        let focused = app.state.active_view.expect("focused nested view");
+        app.state.views[focused].scroll_column = 0;
+        app.ensure_cursor_visible();
+        let viewport = active_pane_viewport(
+            &app.state,
+            &app.configuration.settings,
+            app.terminal_width,
+            app.terminal_height,
+        )
+        .expect("focused leaf viewport");
+        assert!(app.state.views[focused].scroll_column > 0);
+        let frame = render(
+            &app.state,
+            &app.ui,
+            &app.configuration.settings,
+            &app.configuration.dashboard,
+            app.terminal_width,
+            app.terminal_height,
+        );
+        assert!(frame.cursor.is_some_and(|(x, y, _)| {
+            x >= viewport.x
+                && x < viewport.x.saturating_add(viewport.width)
+                && y >= viewport.y
+                && y < viewport.y.saturating_add(viewport.height)
+        }));
+    }
+
+    #[test]
+    fn documentation_commands_scroll_clamp_and_close_through_registry() {
+        let mut app = app();
+        app.configuration.settings.ui.documentation_popup.max_height = 5;
+        app.configuration
+            .settings
+            .ui
+            .documentation_popup
+            .scroll_step = 4;
+        app.ui.documentation_popup = Some(DocumentationPopupState {
+            kind: DocumentationPopupKind::Hover,
+            title: "Hover".into(),
+            lines: (0..10).map(|line| format!("line {line}")).collect(),
+            scroll: 0,
+        });
+        app.invoke_mapped_command("lsp.documentation.scroll_down");
+        assert_eq!(
+            app.ui
+                .documentation_popup
+                .as_ref()
+                .map(|popup| popup.scroll),
+            Some(4)
+        );
+        app.invoke_mapped_command("lsp.documentation.scroll_down");
+        assert_eq!(
+            app.ui
+                .documentation_popup
+                .as_ref()
+                .map(|popup| popup.scroll),
+            Some(7)
+        );
+        app.invoke_mapped_command("lsp.documentation.scroll_up");
+        assert_eq!(
+            app.ui
+                .documentation_popup
+                .as_ref()
+                .map(|popup| popup.scroll),
+            Some(3)
+        );
+        app.invoke_mapped_command("lsp.documentation.scroll_up");
+        assert_eq!(
+            app.ui
+                .documentation_popup
+                .as_ref()
+                .map(|popup| popup.scroll),
+            Some(0)
+        );
+        app.invoke_mapped_command("lsp.documentation.close");
+        assert!(app.ui.documentation_popup.is_none());
+        app.invoke_mapped_command("lsp.documentation.scroll_down");
+        assert!(app.ui.documentation_popup.is_none());
+    }
+
+    #[test]
+    fn indexed_plugin_defaults_install_before_activation_and_roll_back_on_failure() {
+        let mut app = app();
+        let root = tempfile::tempdir().expect("plugin store");
+        let manifest = crate::plugins::PluginManifest {
+            id: "demo".into(),
+            version: "1.0.0".into(),
+            component_sha256: "0".repeat(64),
+            capabilities: std::collections::BTreeSet::new(),
+            commands: [(
+                "run".into(),
+                crate::plugins::PluginCommandDeclaration {
+                    title: "Run demo".into(),
+                    description: String::new(),
+                    arguments: BTreeMap::new(),
+                    context: crate::plugins::PluginCommandContext::Application,
+                    activation: crate::plugins::PluginActivationBehavior::ActiveOnly,
+                },
+            )]
+            .into_iter()
+            .collect(),
+            contributions: crate::plugins::PluginContributions {
+                schema_version: 1,
+                input_contexts: Vec::new(),
+                keymaps: vec![crate::plugins::PluginKeymapContribution {
+                    id: "plugin.demo.keymap.dashboard".into(),
+                    context: "dashboard".into(),
+                    mode: String::new(),
+                    keys: "x y".into(),
+                    command: "plugin.demo.run".into(),
+                    arguments: BTreeMap::new(),
+                }],
+                key_groups: vec![crate::plugins::PluginKeyGroupContribution {
+                    id: "plugin.demo.group.dashboard".into(),
+                    context: "dashboard".into(),
+                    mode: String::new(),
+                    prefix: "x".into(),
+                    label: "Demo".into(),
+                    icon: None,
+                    order: 1,
+                }],
+            },
+        };
+        fs::write(
+            root.path().join("manifest.toml"),
+            toml::to_string(&manifest).expect("manifest TOML"),
+        )
+        .expect("manifest");
+        let load = app
+            .plugins
+            .index_from_store(
+                "demo".into(),
+                root.path().to_path_buf(),
+                PathBuf::from("manifest.toml"),
+                PathBuf::from("missing.wasm"),
+                app.plugin_limits(),
+            )
+            .expect("index request");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while app.plugin_contributions.get("demo").is_none() {
+            app.process_plugin_events();
+            assert!(Instant::now() < deadline, "index integration timed out");
+            thread::yield_now();
+        }
+        let indexed = app
+            .configuration
+            .keymaps
+            .inspect_key("dashboard", "x y")
+            .expect("indexed binding");
+        assert_eq!(indexed.contribution_owner.as_deref(), Some("demo"));
+        assert_eq!(indexed.contribution_generation, load.0);
+        assert!(!app.plugins.is_active_generation("demo", load));
+        let previous = app.plugins.load_id("demo");
+        app.invoke_mapped(
+            crate::editing::CommandInvocation::new("plugin.demo.run", InvocationSource::Test)
+                .expect("static command"),
+        );
+        assert_eq!(app.plugins.load_id("demo"), previous);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while app.plugin_contributions.get("demo").is_some() {
+            app.process_plugin_events();
+            assert!(Instant::now() < deadline, "activation rollback timed out");
+            thread::yield_now();
+        }
+        assert!(
+            app.configuration
+                .keymaps
+                .inspect_key("dashboard", "x y")
+                .is_none()
+        );
+        assert!(
+            app.commands
+                .specs()
+                .all(|spec| spec.id.as_str() != "plugin.demo.run")
+        );
+    }
+
+    #[test]
+    fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
+        let mut app = app();
+        app.commands
+            .register(
+                crate::editing::CommandSpec {
+                    id: crate::editing::CommandId::new("plugin.demo.run").expect("plugin id"),
+                    title: "Run demo".into(),
+                    description: String::new(),
+                    arguments: crate::editing::ArgumentSchema::default(),
+                    context: crate::editing::ContextRequirement::Application,
+                    source: crate::editing::CommandSource::Plugin("demo".into()),
+                },
+                |_, _| Ok(crate::editing::CommandOutcome::empty()),
+            )
+            .expect("plugin command");
+        let manifest = crate::plugins::PluginManifest {
+            id: "demo".into(),
+            version: "1.0.0".into(),
+            component_sha256: "0".repeat(64),
+            capabilities: std::collections::BTreeSet::new(),
+            commands: [(
+                "run".into(),
+                crate::plugins::PluginCommandDeclaration {
+                    title: "Run demo".into(),
+                    description: String::new(),
+                    arguments: BTreeMap::new(),
+                    context: crate::plugins::PluginCommandContext::Application,
+                    activation: crate::plugins::PluginActivationBehavior::ActiveOnly,
+                },
+            )]
+            .into_iter()
+            .collect(),
+            contributions: crate::plugins::PluginContributions {
+                schema_version: 1,
+                input_contexts: vec![crate::plugins::PluginInputContextContribution {
+                    id: "plugin.demo.chat".into(),
+                    title: "Chat".into(),
+                    parent_surface: Some("panel".into()),
+                }],
+                keymaps: vec![
+                    crate::plugins::PluginKeymapContribution {
+                        id: "plugin.demo.keymap.action".into(),
+                        context: "editor".into(),
+                        mode: "normal".into(),
+                        keys: "<leader> a x".into(),
+                        command: "plugin.demo.run".into(),
+                        arguments: BTreeMap::new(),
+                    },
+                    crate::plugins::PluginKeymapContribution {
+                        id: "plugin.demo.keymap.buffer-shadow".into(),
+                        context: "editor".into(),
+                        mode: "normal".into(),
+                        keys: "<leader> f b".into(),
+                        command: "plugin.demo.run".into(),
+                        arguments: BTreeMap::new(),
+                    },
+                    crate::plugins::PluginKeymapContribution {
+                        id: "plugin.demo.keymap.chat".into(),
+                        context: "plugin.demo.chat".into(),
+                        mode: String::new(),
+                        keys: "g".into(),
+                        command: "plugin.demo.run".into(),
+                        arguments: BTreeMap::new(),
+                    },
+                ],
+                key_groups: vec![crate::plugins::PluginKeyGroupContribution {
+                    id: "plugin.demo.group.action".into(),
+                    context: "editor".into(),
+                    mode: "normal".into(),
+                    prefix: "<leader> a".into(),
+                    label: "Demo".into(),
+                    icon: None,
+                    order: 1,
+                }],
+            },
+        };
+        let index =
+            crate::plugins::index_manifest_contributions(&manifest, 4, "demo-manifest.toml".into())
+                .expect("index");
+        let mut loaded = crate::configuration::load_bundled_config().keymaps;
+        loaded.path = PathBuf::from("keymaps.toml");
+        loaded.entries.extend([
+            crate::configuration::KeymapEntry {
+                id: "plugin.demo.keymap.action".into(),
+                context: Some("editor".into()),
+                mode: "normal".into(),
+                keys: Some("<leader> a z".into()),
+                command: Some("plugin.demo.run".into()),
+                arguments: BTreeMap::new(),
+                unmap: false,
+                disable: false,
+                pass_through: false,
+            },
+            crate::configuration::KeymapEntry {
+                id: "user.test.buffer-shadow".into(),
+                context: Some("editor".into()),
+                mode: "normal".into(),
+                keys: Some("<leader> f b".into()),
+                command: Some("health.open".into()),
+                arguments: BTreeMap::new(),
+                unmap: false,
+                disable: false,
+                pass_through: false,
+            },
+        ]);
+        let mut catalog = crate::plugins::PluginContributionCatalog::default();
+        catalog.install(index).expect("catalog install");
+        let resolved = super::compile_keymaps_with_plugin_catalog(
+            &app.commands,
+            &loaded,
+            &catalog,
+            &app.configuration.settings.input.keymaps,
+        )
+        .expect("typed contributions");
+        assert_eq!(
+            resolved
+                .inspect_id("plugin.demo.keymap.action")
+                .map(|inspection| inspection.keys),
+            Some("space a z".into())
+        );
+        assert!(resolved.inspect_key("editor.normal", "space a x").is_none());
+        assert_eq!(
+            resolved
+                .inspect_key("editor.normal", "space f b")
+                .and_then(|inspection| inspection.command),
+            Some("health.open".into())
+        );
+        let chat = resolved
+            .inspect_key("plugin.demo.chat", "g")
+            .expect("plugin context binding");
+        assert_eq!(
+            chat.contribution_layer,
+            crate::input::InputContextLayer::Plugin
+        );
+        assert_eq!(chat.contribution_owner.as_deref(), Some("demo"));
+        assert_eq!(chat.contribution_generation, 4);
+        assert!(
+            resolved.groups().iter().any(|group| {
+                group.id == "plugin.demo.group.action" && group.prefix == "space a"
+            })
+        );
+    }
+
+    #[test]
+    fn resolved_key_hints_follow_leaders_groups_and_configured_command_labels() {
+        let app = app();
+        let labels = &app.configuration.settings.command_labels;
+        let hints = app
+            .configuration
+            .keymaps
+            .hints_for_prefix("editor.normal", "space", labels)
+            .expect("leader continuations");
+        let files = hints
+            .rows
+            .iter()
+            .find(|row| row.next_key == "f")
+            .expect("files group");
+        assert_eq!(files.label, "Files");
+        assert_eq!(
+            files.group_id.as_deref(),
+            Some("builtin.editor.normal.group.files")
+        );
+        assert!(files.mappings.iter().all(|mapping| {
+            mapping.id.starts_with("builtin.")
+                && mapping.source.starts_with("<bundled:keymaps>")
+                && mapping.operation == KeymapOperation::Command
+        }));
+
+        let mut custom_labels = labels.clone();
+        custom_labels.insert("buffer.picker.open".into(), "Choose a buffer".into());
+        let file_hints = app
+            .configuration
+            .keymaps
+            .hints_for_prefix("editor.normal", "space f", &custom_labels)
+            .expect("file continuations");
+        assert_eq!(
+            file_hints
+                .rows
+                .iter()
+                .find(|row| row.next_key == "b")
+                .map(|row| row.label.as_str()),
+            Some("Choose a buffer")
+        );
+
+        let mut policy = app.configuration.settings.input.keymaps.clone();
+        policy.leader = ",".into();
+        policy.local_leader = ";".into();
+        let mut loaded = crate::configuration::load_bundled_config().keymaps;
+        loaded.entries.push(crate::configuration::KeymapEntry {
+            id: "user.test.local-leader-command".into(),
+            context: Some("editor".into()),
+            mode: "normal".into(),
+            keys: Some("<localleader> a".into()),
+            command: Some("health.open".into()),
+            arguments: BTreeMap::new(),
+            unmap: false,
+            disable: false,
+            pass_through: false,
+        });
+        loaded.groups.push(crate::configuration::KeyGroupEntry {
+            id: "user.test.local-leader-group".into(),
+            context: Some("editor".into()),
+            mode: "normal".into(),
+            prefix: Some("<localleader>".into()),
+            label: Some("Local".into()),
+            icon: None,
+            order: 1,
+            disable: false,
+        });
+        let (resolved, diagnostic) = compile_keymaps(&app.commands, &loaded, &policy);
+        assert!(diagnostic.is_none(), "{diagnostic:?}");
+        assert!(
+            resolved
+                .groups()
+                .iter()
+                .any(|group| group.source_prefix == "<leader> f" && group.prefix == ", f")
+        );
+        assert!(
+            resolved
+                .groups()
+                .iter()
+                .any(|group| group.source_prefix == "<localleader>" && group.prefix == ";")
+        );
+        assert!(
+            resolved
+                .hints_for_prefix("editor.normal", ";", labels)
+                .is_some_and(|projection| projection.rows.iter().any(|row| row.next_key == "a"))
+        );
+        assert!(
+            resolved
+                .hints_for_prefix("editor.normal", "space", labels)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
+        let app = app();
+        let mut loaded = crate::configuration::load_bundled_config().keymaps;
+        loaded.path = PathBuf::from("keymaps.toml");
+        loaded.groups.push(crate::configuration::KeyGroupEntry {
+            id: "builtin.editor.normal.group.files".into(),
+            context: Some("editor".into()),
+            mode: "normal".into(),
+            prefix: Some("<leader> f".into()),
+            label: Some("Project files".into()),
+            icon: Some("F".into()),
+            order: 1,
+            disable: false,
+        });
+        loaded.entries.extend([
+            crate::configuration::KeymapEntry {
+                id: "builtin.editor.normal.buffer-picker-open.leader-f-b".into(),
+                context: Some("editor".into()),
+                mode: "normal".into(),
+                keys: Some("<leader> f z".into()),
+                command: Some("buffer.picker.open".into()),
+                arguments: BTreeMap::new(),
+                unmap: false,
+                disable: false,
+                pass_through: false,
+            },
+            crate::configuration::KeymapEntry {
+                id: "user.test.unmap-command-palette-hint".into(),
+                context: Some("editor".into()),
+                mode: "normal".into(),
+                keys: Some("<leader> f c".into()),
+                command: None,
+                arguments: BTreeMap::new(),
+                unmap: true,
+                disable: false,
+                pass_through: false,
+            },
+        ]);
+        let (resolved, diagnostic) = compile_keymaps(
+            &app.commands,
+            &loaded,
+            &app.configuration.settings.input.keymaps,
+        );
+        assert!(diagnostic.is_none(), "{diagnostic:?}");
+        let leader = resolved
+            .hints_for_prefix(
+                "editor.normal",
+                "space",
+                &app.configuration.settings.command_labels,
+            )
+            .expect("leader hints");
+        assert_eq!(
+            leader
+                .rows
+                .iter()
+                .find(|row| row.next_key == "f")
+                .map(|row| row.label.as_str()),
+            Some("Project files")
+        );
+        let files = resolved
+            .hints_for_prefix(
+                "editor.normal",
+                "space f",
+                &app.configuration.settings.command_labels,
+            )
+            .expect("file hints");
+        assert!(!files.rows.iter().any(|row| row.next_key == "b"));
+        assert!(!files.rows.iter().any(|row| row.next_key == "c"));
+        assert!(files.rows.iter().any(|row| {
+            row.next_key == "z"
+                && row.mappings.iter().any(|mapping| {
+                    mapping.id == "builtin.editor.normal.buffer-picker-open.leader-f-b"
+                        && mapping.remaining_keys == "z"
+                })
+        }));
+
+        let mut disabled = crate::configuration::load_bundled_config().keymaps;
+        disabled.groups.push(crate::configuration::KeyGroupEntry {
+            id: "builtin.editor.normal.group.files".into(),
+            context: None,
+            mode: String::new(),
+            prefix: None,
+            label: None,
+            icon: None,
+            order: 0,
+            disable: true,
+        });
+        disabled.entries.push(crate::configuration::KeymapEntry {
+            id: "builtin.editor.normal.buffer-picker-open.leader-f-b".into(),
+            context: None,
+            mode: String::new(),
+            keys: None,
+            command: None,
+            arguments: BTreeMap::new(),
+            unmap: false,
+            disable: true,
+            pass_through: false,
+        });
+        let (disabled, diagnostic) = compile_keymaps(
+            &app.commands,
+            &disabled,
+            &app.configuration.settings.input.keymaps,
+        );
+        assert!(diagnostic.is_none(), "{diagnostic:?}");
+        assert!(
+            !disabled
+                .groups()
+                .iter()
+                .any(|group| group.id == "builtin.editor.normal.group.files")
+        );
+        let files = disabled
+            .hints_for_prefix(
+                "editor.normal",
+                "space f",
+                &app.configuration.settings.command_labels,
+            )
+            .expect("remaining file hints");
+        assert!(!files.rows.iter().any(|row| row.next_key == "b"));
+    }
+
+    #[test]
+    fn invalid_key_groups_reject_compilation_and_reload_transactionally() {
+        let app = app();
+        for (group, expected) in [
+            (
+                crate::configuration::KeyGroupEntry {
+                    id: "user.test.unreachable-group".into(),
+                    context: Some("editor".into()),
+                    mode: "normal".into(),
+                    prefix: Some("<leader> u".into()),
+                    label: Some("Unused".into()),
+                    icon: None,
+                    order: 0,
+                    disable: false,
+                },
+                "reaches no resolved binding",
+            ),
+            (
+                crate::configuration::KeyGroupEntry {
+                    id: "user.test.duplicate-files-group".into(),
+                    context: Some("editor".into()),
+                    mode: "normal".into(),
+                    prefix: Some("<leader> f".into()),
+                    label: Some("Duplicate".into()),
+                    icon: None,
+                    order: 0,
+                    disable: false,
+                },
+                "duplicates id",
+            ),
+            (
+                crate::configuration::KeyGroupEntry {
+                    id: "BAD".into(),
+                    context: Some("editor".into()),
+                    mode: "normal".into(),
+                    prefix: Some("<leader> f".into()),
+                    label: Some("Bad".into()),
+                    icon: None,
+                    order: 0,
+                    disable: false,
+                },
+                "invalid id",
+            ),
+            (
+                crate::configuration::KeyGroupEntry {
+                    id: "user.test.unknown-context-group".into(),
+                    context: Some("unknown".into()),
+                    mode: String::new(),
+                    prefix: Some("<leader> f".into()),
+                    label: Some("Bad context".into()),
+                    icon: None,
+                    order: 0,
+                    disable: false,
+                },
+                "unknown context",
+            ),
+            (
+                crate::configuration::KeyGroupEntry {
+                    id: "user.test.malformed-prefix-group".into(),
+                    context: Some("editor".into()),
+                    mode: "normal".into(),
+                    prefix: Some("<leader> not-a-key".into()),
+                    label: Some("Bad prefix".into()),
+                    icon: None,
+                    order: 0,
+                    disable: false,
+                },
+                "unknown key",
+            ),
+            (
+                crate::configuration::KeyGroupEntry {
+                    id: "user.test.control-label-group".into(),
+                    context: Some("editor".into()),
+                    mode: "normal".into(),
+                    prefix: Some("<leader> f".into()),
+                    label: Some("Bad\nlabel".into()),
+                    icon: None,
+                    order: 0,
+                    disable: false,
+                },
+                "non-control",
+            ),
+            (
+                crate::configuration::KeyGroupEntry {
+                    id: "user.test.oversized-icon-group".into(),
+                    context: Some("editor".into()),
+                    mode: "normal".into(),
+                    prefix: Some("<leader> f".into()),
+                    label: Some("Bad icon".into()),
+                    icon: Some("123456789".into()),
+                    order: 0,
+                    disable: false,
+                },
+                "icon must contain",
+            ),
+        ] {
+            let mut loaded = crate::configuration::load_bundled_config().keymaps;
+            loaded.path = PathBuf::from("keymaps.toml");
+            loaded.groups.push(group);
+            let (_, diagnostic) = compile_keymaps(
+                &app.commands,
+                &loaded,
+                &app.configuration.settings.input.keymaps,
+            );
+            assert!(
+                diagnostic
+                    .as_deref()
+                    .is_some_and(|message| message.contains(expected)),
+                "expected {expected}: {diagnostic:?}"
+            );
+        }
+
+        let mut duplicate = crate::configuration::load_bundled_config().keymaps;
+        duplicate.path = PathBuf::from("keymaps.toml");
+        let group = crate::configuration::KeyGroupEntry {
+            id: "user.test.duplicate-identity".into(),
+            context: Some("editor".into()),
+            mode: "normal".into(),
+            prefix: Some("<leader> f b".into()),
+            label: Some("Buffer".into()),
+            icon: None,
+            order: 0,
+            disable: false,
+        };
+        duplicate.groups.extend([group.clone(), group]);
+        let (_, diagnostic) = compile_keymaps(
+            &app.commands,
+            &duplicate,
+            &app.configuration.settings.input.keymaps,
+        );
+        assert!(
+            diagnostic
+                .as_deref()
+                .is_some_and(|message| message.contains("same contribution layer"))
+        );
+
+        for (group, expected) in [
+            (
+                crate::configuration::KeyGroupEntry {
+                    id: "user.test.unknown-group-disable".into(),
+                    context: None,
+                    mode: String::new(),
+                    prefix: None,
+                    label: None,
+                    icon: None,
+                    order: 0,
+                    disable: true,
+                },
+                "targets no lower contribution",
+            ),
+            (
+                crate::configuration::KeyGroupEntry {
+                    id: "builtin.editor.normal.group.files".into(),
+                    context: Some("editor".into()),
+                    mode: String::new(),
+                    prefix: None,
+                    label: None,
+                    icon: None,
+                    order: 0,
+                    disable: true,
+                },
+                "must contain only",
+            ),
+        ] {
+            let mut loaded = crate::configuration::load_bundled_config().keymaps;
+            loaded.groups.push(group);
+            let (_, diagnostic) = compile_keymaps(
+                &app.commands,
+                &loaded,
+                &app.configuration.settings.input.keymaps,
+            );
+            assert!(
+                diagnostic
+                    .as_deref()
+                    .is_some_and(|message| message.contains(expected)),
+                "expected {expected}: {diagnostic:?}"
+            );
+        }
+
+        let mut invalid = crate::configuration::load_bundled_config().keymaps;
+        invalid.path = PathBuf::from("keymaps.toml");
+        invalid.groups.push(crate::configuration::KeyGroupEntry {
+            id: "user.test.transactional-unreachable".into(),
+            context: Some("editor".into()),
+            mode: "normal".into(),
+            prefix: Some("<leader> u".into()),
+            label: Some("Unused".into()),
+            icon: None,
+            order: 0,
+            disable: false,
+        });
+        let (retained, diagnostic) = reload_keymaps(
+            &app.commands,
+            &app.configuration.keymaps,
+            &invalid,
+            &app.configuration.settings.input.keymaps,
+        );
+        assert!(
+            diagnostic
+                .as_deref()
+                .is_some_and(|message| message.contains("keeping previous keymaps"))
+        );
+        assert_eq!(
+            retained.groups(),
+            app.configuration.keymaps.groups(),
+            "rejected candidate must retain groups and maps atomically"
+        );
     }
 
     #[test]

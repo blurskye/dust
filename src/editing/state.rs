@@ -110,6 +110,7 @@ pub struct View {
     pub cursor: ByteOffset,
     pub selection: Option<Selection>,
     pub scroll_line: usize,
+    pub scroll_column: usize,
     pub preferred_column: Option<usize>,
     pub mode: EditorMode,
     pub replace_history: Vec<ReplaceRecord>,
@@ -124,6 +125,7 @@ impl View {
             cursor: ByteOffset(0),
             selection: None,
             scroll_line: 0,
+            scroll_column: 0,
             preferred_column: None,
             mode: EditorMode::Normal,
             replace_history: Vec::new(),
@@ -987,6 +989,7 @@ mod tests {
         assert_eq!(state.views[first].buffer, buffer);
         assert_eq!(state.views[second].buffer, buffer);
         state.views[second].cursor = crate::document::ByteOffset(2);
+        state.views[second].scroll_column = 12;
         state.resize_active_pane(50).expect("grow second pane");
         assert!(matches!(
             state.tabs[state.active_tab.expect("tab")].root,
@@ -995,6 +998,8 @@ mod tests {
         state.focus_pane(-1, true).expect("first pane");
         assert_eq!(state.active_view, Some(first));
         assert_eq!(state.views[first].cursor, crate::document::ByteOffset(0));
+        assert_eq!(state.views[first].scroll_column, 0);
+        assert_eq!(state.views[second].scroll_column, 12);
         state.focus_pane(-1, false).expect("clamped focus");
         assert_eq!(state.active_view, Some(first));
         let first_tab = state.active_tab.expect("tab");

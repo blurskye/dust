@@ -1,6 +1,8 @@
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+use super::pty_screen::PtyStyle;
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Style {
     #[default]
@@ -13,6 +15,35 @@ pub enum Style {
     Search,
     Error,
     Border,
+    KeyHintBackground,
+    KeyHintBorder,
+    KeyHintKey,
+    KeyHintGroup,
+    KeyHintCommand,
+    KeyHintPrefix,
+    DocumentationBackground,
+    DocumentationBorder,
+    DocumentationTitle,
+    DocumentationText,
+    ExplorerBackground,
+    ExplorerHeader,
+    ExplorerCount,
+    ExplorerTree,
+    ExplorerIcon,
+    ExplorerDirectory,
+    ExplorerFile,
+    ExplorerSymlink,
+    ExplorerGit,
+    ExplorerDiagnostic,
+    ExplorerDecoration,
+    ExplorerSelection,
+    ExplorerBorder,
+    TerminalBackground,
+    TerminalBorder,
+    TerminalTitle,
+    TerminalStatus,
+    TerminalStatusAccent,
+    Terminal(PtyStyle),
     SyntaxComment,
     SyntaxString,
     SyntaxNumber,
@@ -138,16 +169,28 @@ impl CellGrid {
         }
     }
 
-    pub fn put_text(&mut self, mut x: u16, y: u16, text: &str, style: Style) -> u16 {
+    pub fn put_text(&mut self, x: u16, y: u16, text: &str, style: Style) -> u16 {
+        self.put_text_clipped(x, y, text, style, self.width)
+    }
+
+    /// Write text without touching cells at or beyond `right_exclusive`.
+    pub fn put_text_clipped(
+        &mut self,
+        mut x: u16,
+        y: u16,
+        text: &str,
+        style: Style,
+        right_exclusive: u16,
+    ) -> u16 {
+        let right_exclusive = right_exclusive.min(self.width);
         for grapheme in text.graphemes(true) {
-            if grapheme == "\t" {
-                self.set_cell(x, y, " ", style);
-                x = x.saturating_add(1);
-                continue;
-            }
-            let safe = self.sanitize_grapheme(grapheme);
+            let safe = if grapheme == "\t" {
+                " ".into()
+            } else {
+                self.sanitize_grapheme(grapheme)
+            };
             let width = u16::try_from(self.display_width(&safe).clamp(1, 2)).unwrap_or(1);
-            if x.saturating_add(width) > self.width {
+            if x.saturating_add(width) > right_exclusive {
                 break;
             }
             self.set_cell(x, y, &safe, style);
@@ -220,5 +263,18 @@ mod tests {
         wide.put_text(0, 0, "·x", Style::Default);
         assert!(wide.get(1, 0).expect("ambiguous continuation").continuation);
         assert_eq!(wide.get(2, 0).expect("following cell").symbol, "x");
+    }
+
+    #[test]
+    fn clipped_text_never_crosses_its_region_or_splits_a_wide_grapheme() {
+        let mut grid = CellGrid::new(8, 1);
+        grid.set_cell(4, 0, "|", Style::Border);
+        grid.put_text_clipped(1, 0, "abcdef", Style::Accent, 4);
+        assert_eq!(grid.row_text(0), " abc|   ");
+
+        let mut wide = CellGrid::new(4, 1);
+        wide.set_cell(2, 0, "|", Style::Border);
+        wide.put_text_clipped(1, 0, "界", Style::Accent, 2);
+        assert_eq!(wide.row_text(0), "  | ");
     }
 }

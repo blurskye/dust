@@ -13,6 +13,8 @@ use std::{
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use thiserror::Error;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ThemeColor {
@@ -160,6 +162,35 @@ pub struct ThemeStyles {
     pub search: ThemeStyle,
     pub error: ThemeStyle,
     pub border: ThemeStyle,
+    pub key_hint_background: ThemeStyle,
+    pub key_hint_border: ThemeStyle,
+    pub key_hint_key: ThemeStyle,
+    pub key_hint_group: ThemeStyle,
+    pub key_hint_command: ThemeStyle,
+    pub key_hint_prefix: ThemeStyle,
+    pub documentation_background: ThemeStyle,
+    pub documentation_border: ThemeStyle,
+    pub documentation_title: ThemeStyle,
+    pub documentation_text: ThemeStyle,
+    pub explorer_background: ThemeStyle,
+    pub explorer_header: ThemeStyle,
+    pub explorer_count: ThemeStyle,
+    pub explorer_tree: ThemeStyle,
+    pub explorer_icon: ThemeStyle,
+    pub explorer_directory: ThemeStyle,
+    pub explorer_file: ThemeStyle,
+    pub explorer_symlink: ThemeStyle,
+    pub explorer_git: ThemeStyle,
+    pub explorer_diagnostic: ThemeStyle,
+    pub explorer_decoration: ThemeStyle,
+    pub explorer_selection: ThemeStyle,
+    pub explorer_border: ThemeStyle,
+    pub terminal_background: ThemeStyle,
+    pub terminal_border: ThemeStyle,
+    pub terminal_title: ThemeStyle,
+    pub terminal_status: ThemeStyle,
+    pub terminal_status_accent: ThemeStyle,
+    pub terminal_text: ThemeStyle,
     pub syntax_comment: ThemeStyle,
     pub syntax_string: ThemeStyle,
     pub syntax_number: ThemeStyle,
@@ -187,6 +218,41 @@ impl ThemeConfig {
             ("search", &self.styles.search),
             ("error", &self.styles.error),
             ("border", &self.styles.border),
+            ("key_hint_background", &self.styles.key_hint_background),
+            ("key_hint_border", &self.styles.key_hint_border),
+            ("key_hint_key", &self.styles.key_hint_key),
+            ("key_hint_group", &self.styles.key_hint_group),
+            ("key_hint_command", &self.styles.key_hint_command),
+            ("key_hint_prefix", &self.styles.key_hint_prefix),
+            (
+                "documentation_background",
+                &self.styles.documentation_background,
+            ),
+            ("documentation_border", &self.styles.documentation_border),
+            ("documentation_title", &self.styles.documentation_title),
+            ("documentation_text", &self.styles.documentation_text),
+            ("explorer_background", &self.styles.explorer_background),
+            ("explorer_header", &self.styles.explorer_header),
+            ("explorer_count", &self.styles.explorer_count),
+            ("explorer_tree", &self.styles.explorer_tree),
+            ("explorer_icon", &self.styles.explorer_icon),
+            ("explorer_directory", &self.styles.explorer_directory),
+            ("explorer_file", &self.styles.explorer_file),
+            ("explorer_symlink", &self.styles.explorer_symlink),
+            ("explorer_git", &self.styles.explorer_git),
+            ("explorer_diagnostic", &self.styles.explorer_diagnostic),
+            ("explorer_decoration", &self.styles.explorer_decoration),
+            ("explorer_selection", &self.styles.explorer_selection),
+            ("explorer_border", &self.styles.explorer_border),
+            ("terminal_background", &self.styles.terminal_background),
+            ("terminal_border", &self.styles.terminal_border),
+            ("terminal_title", &self.styles.terminal_title),
+            ("terminal_status", &self.styles.terminal_status),
+            (
+                "terminal_status_accent",
+                &self.styles.terminal_status_accent,
+            ),
+            ("terminal_text", &self.styles.terminal_text),
             ("syntax_comment", &self.styles.syntax_comment),
             ("syntax_string", &self.styles.syntax_string),
             ("syntax_number", &self.styles.syntax_number),
@@ -361,6 +427,21 @@ impl Default for LargeFileConfig {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct EditorViewportConfig {
+    /// Non-wrapped cursor context retained at the left and right viewport edges.
+    pub horizontal_margin: u16,
+}
+
+impl Default for EditorViewportConfig {
+    fn default() -> Self {
+        Self {
+            horizontal_margin: 4,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct EditorConfig {
     pub line_numbers: LineNumbers,
     pub tab_width: usize,
@@ -380,6 +461,7 @@ pub struct EditorConfig {
     pub control_character_replacement: String,
     pub zero_width_replacement: String,
     pub ambiguous_width: AmbiguousWidth,
+    pub viewport: EditorViewportConfig,
     pub registers: RegisterConfig,
     pub large_file: LargeFileConfig,
 }
@@ -405,6 +487,7 @@ impl Default for EditorConfig {
             control_character_replacement: "�".into(),
             zero_width_replacement: "◌".into(),
             ambiguous_width: AmbiguousWidth::Narrow,
+            viewport: EditorViewportConfig::default(),
             registers: RegisterConfig::default(),
             large_file: LargeFileConfig::default(),
         }
@@ -704,38 +787,228 @@ impl Default for PickerConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExplorerIconMode {
+    NerdFont,
+    Unicode,
+    Ascii,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExplorerGlyphSet {
+    pub tree_vertical: String,
+    pub tree_middle: String,
+    pub tree_last: String,
+    pub tree_space: String,
+    pub directory: String,
+    pub directory_open: String,
+    pub file: String,
+    pub symlink: String,
+    pub loading: String,
+    pub panel_vertical: String,
+    pub panel_horizontal: String,
+    pub icon_spacing: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExplorerGlyphs {
+    pub nerd_font: ExplorerGlyphSet,
+    pub unicode: ExplorerGlyphSet,
+    pub ascii: ExplorerGlyphSet,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExplorerConfig {
-    pub width_percent: u8,
-    pub height_percent: u8,
+    pub width: u16,
     pub minimum_width: u16,
-    pub minimum_height: u16,
-    pub indent_width: usize,
+    pub maximum_width: u16,
     pub maximum_visible_rows: usize,
     pub preview_enabled: bool,
     pub maximum_preview_bytes: usize,
     pub maximum_preview_lines: usize,
-    pub selected_marker: String,
-    pub row_marker: String,
-    pub border: BorderStyle,
+    pub focus_marker: String,
+    pub loading_label: String,
+    pub icon_mode: ExplorerIconMode,
+    pub glyphs: ExplorerGlyphs,
+}
+
+impl ExplorerConfig {
+    #[must_use]
+    pub fn active_glyphs(&self) -> &ExplorerGlyphSet {
+        match self.icon_mode {
+            ExplorerIconMode::NerdFont => &self.glyphs.nerd_font,
+            ExplorerIconMode::Unicode => &self.glyphs.unicode,
+            ExplorerIconMode::Ascii => &self.glyphs.ascii,
+        }
+    }
 }
 
 impl Default for ExplorerConfig {
     fn default() -> Self {
+        let unicode = ExplorerGlyphSet {
+            tree_vertical: "│ ".into(),
+            tree_middle: "├─".into(),
+            tree_last: "└─".into(),
+            tree_space: "  ".into(),
+            directory: "▸".into(),
+            directory_open: "▾".into(),
+            file: "·".into(),
+            symlink: "↗".into(),
+            loading: "…".into(),
+            panel_vertical: "⎸".into(),
+            panel_horizontal: "⎯".into(),
+            icon_spacing: " ".into(),
+        };
         Self {
-            width_percent: 22,
-            height_percent: 100,
+            width: 40,
             minimum_width: 28,
-            minimum_height: 10,
-            indent_width: 2,
+            maximum_width: 60,
             maximum_visible_rows: 200,
             preview_enabled: false,
             maximum_preview_bytes: 256 * 1024,
             maximum_preview_lines: 20,
-            selected_marker: ">".into(),
-            row_marker: " ".into(),
-            border: BorderStyle::Single,
+            focus_marker: ">".into(),
+            loading_label: "loading…".into(),
+            icon_mode: ExplorerIconMode::NerdFont,
+            glyphs: ExplorerGlyphs {
+                nerd_font: ExplorerGlyphSet {
+                    directory: "󰉋".into(),
+                    directory_open: "󰝰".into(),
+                    file: "󰈔".into(),
+                    symlink: "".into(),
+                    ..unicode.clone()
+                },
+                unicode,
+                ascii: ExplorerGlyphSet {
+                    tree_vertical: "| ".into(),
+                    tree_middle: "|-".into(),
+                    tree_last: "\\-".into(),
+                    tree_space: "  ".into(),
+                    directory: "+".into(),
+                    directory_open: "-".into(),
+                    file: ".".into(),
+                    symlink: "@".into(),
+                    loading: "~".into(),
+                    panel_vertical: "|".into(),
+                    panel_horizontal: "-".into(),
+                    icon_spacing: " ".into(),
+                },
+            },
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyHintAnchor {
+    BottomLeft,
+    BottomRight,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct KeyHintConfig {
+    pub enabled: bool,
+    pub delay_ms: u64,
+    pub anchor: KeyHintAnchor,
+    pub max_rows: u16,
+    pub max_columns: u16,
+    pub max_width: u16,
+    pub horizontal_padding: u16,
+    pub vertical_padding: u16,
+    pub row_gap: u16,
+    pub column_gap: u16,
+    pub show_group_icons: bool,
+    pub show_command_titles: bool,
+    pub fallback_label: String,
+    pub border: BorderStyle,
+}
+
+impl Default for KeyHintConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            delay_ms: 250,
+            anchor: KeyHintAnchor::BottomRight,
+            max_rows: 8,
+            max_columns: 3,
+            max_width: 96,
+            horizontal_padding: 1,
+            vertical_padding: 0,
+            row_gap: 0,
+            column_gap: 2,
+            show_group_icons: true,
+            show_command_titles: true,
+            fallback_label: "Action".into(),
+            border: BorderStyle::Rounded,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DocumentationPopupConfig {
+    pub enabled: bool,
+    pub max_width: u16,
+    pub max_height: u16,
+    pub horizontal_padding: u16,
+    pub scroll_step: usize,
+    pub preferred_below: bool,
+    pub border: BorderStyle,
+}
+
+impl Default for DocumentationPopupConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_width: 72,
+            max_height: 18,
+            horizontal_padding: 1,
+            scroll_step: 4,
+            preferred_below: true,
+            border: BorderStyle::Rounded,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TerminalPanelConfig {
+    pub height: u16,
+    pub minimum_height: u16,
+    pub maximum_height: u16,
+    pub minimum_workspace_height: u16,
+    pub resize_step: u16,
+    pub divider: String,
+    pub title_format: String,
+    pub status_format: String,
+    pub running_label: String,
+    pub exited_format: String,
+    pub focused_label: String,
+    pub unfocused_label: String,
+    pub truncated_label: String,
+}
+
+impl Default for TerminalPanelConfig {
+    fn default() -> Self {
+        Self {
+            height: 12,
+            minimum_height: 4,
+            maximum_height: 40,
+            minimum_workspace_height: 3,
+            resize_step: 2,
+            divider: "─".into(),
+            title_format: " TERMINAL #{id} · {profile} ".into(),
+            status_format: " {focus} · {status} · unsupported {unsupported}{truncated} ".into(),
+            running_label: "RUNNING".into(),
+            exited_format: "EXIT {code}".into(),
+            focused_label: "TERMINAL".into(),
+            unfocused_label: "EDITOR".into(),
+            truncated_label: " · TRUNCATED".into(),
         }
     }
 }
@@ -756,6 +1029,9 @@ pub struct UiConfig {
     pub tab_line: TabLineConfig,
     pub panes: PaneConfig,
     pub notifications: NotificationConfig,
+    pub key_hints: KeyHintConfig,
+    pub documentation_popup: DocumentationPopupConfig,
+    pub terminal_panel: TerminalPanelConfig,
     pub tool_manager: ToolManagerConfig,
     pub picker: PickerConfig,
     pub explorer: ExplorerConfig,
@@ -777,6 +1053,9 @@ impl Default for UiConfig {
             tab_line: TabLineConfig::default(),
             panes: PaneConfig::default(),
             notifications: NotificationConfig::default(),
+            key_hints: KeyHintConfig::default(),
+            documentation_popup: DocumentationPopupConfig::default(),
+            terminal_panel: TerminalPanelConfig::default(),
             tool_manager: ToolManagerConfig::default(),
             picker: PickerConfig::default(),
             explorer: ExplorerConfig::default(),
@@ -800,8 +1079,27 @@ impl Default for StartupConfig {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct KeymapPolicyConfig {
+    pub load_bundled_defaults: bool,
+    pub leader: String,
+    pub local_leader: String,
+}
+
+impl Default for KeymapPolicyConfig {
+    fn default() -> Self {
+        Self {
+            load_bundled_defaults: true,
+            leader: "space".into(),
+            local_leader: "\\".into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct InputConfig {
     pub mapping_timeout_ms: u64,
+    pub keymaps: KeymapPolicyConfig,
     pub count_limit: u64,
     pub completion_wrap: bool,
     pub completion_select_first: bool,
@@ -818,6 +1116,7 @@ impl Default for InputConfig {
     fn default() -> Self {
         Self {
             mapping_timeout_ms: 500,
+            keymaps: KeymapPolicyConfig::default(),
             count_limit: 1_000_000,
             completion_wrap: true,
             completion_select_first: false,
@@ -1344,6 +1643,7 @@ pub struct TerminalsConfig {
     pub maximum_output_bytes: usize,
     pub maximum_input_bytes: usize,
     pub scrollback_bytes: usize,
+    pub default_profile: String,
     #[serde(default)]
     pub profiles: BTreeMap<String, TerminalProfileConfig>,
 }
@@ -1354,7 +1654,18 @@ impl Default for TerminalsConfig {
             maximum_output_bytes: 32 * 1024 * 1024,
             maximum_input_bytes: 1024 * 1024,
             scrollback_bytes: 8 * 1024 * 1024,
-            profiles: BTreeMap::new(),
+            default_profile: "shell".into(),
+            profiles: BTreeMap::from([(
+                "shell".into(),
+                TerminalProfileConfig {
+                    program: PathBuf::from("/bin/sh"),
+                    arguments: Vec::new(),
+                    cwd: None,
+                    environment: BTreeMap::new(),
+                    columns: 80,
+                    rows: 24,
+                },
+            )]),
         }
     }
 }
@@ -1392,12 +1703,34 @@ pub struct Config {
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct KeymapEntry {
-    #[serde(default = "default_editor_context")]
-    pub context: String,
+pub struct KeyGroupEntry {
+    pub id: String,
+    #[serde(default)]
+    pub context: Option<String>,
     #[serde(default)]
     pub mode: String,
-    pub keys: String,
+    #[serde(default)]
+    pub prefix: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub order: i32,
+    #[serde(default)]
+    pub disable: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct KeymapEntry {
+    pub id: String,
+    #[serde(default)]
+    pub context: Option<String>,
+    #[serde(default)]
+    pub mode: String,
+    #[serde(default)]
+    pub keys: Option<String>,
     #[serde(default)]
     pub command: Option<String>,
     #[serde(default)]
@@ -1464,10 +1797,6 @@ pub fn migrate_config_source(source: &str) -> Result<(String, bool), String> {
         document["schema_version"] = toml_edit::value(i64::from(crate::api::CONFIG_SCHEMA_VERSION));
     }
     Ok((document.to_string(), changed))
-}
-
-fn default_editor_context() -> String {
-    "editor".into()
 }
 
 const fn default_true() -> bool {
@@ -1576,8 +1905,11 @@ impl Default for DashboardConfig {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LoadedKeymaps {
     pub entries: Vec<KeymapEntry>,
+    pub groups: Vec<KeyGroupEntry>,
     pub user_spans: Vec<std::ops::Range<usize>>,
+    pub user_group_spans: Vec<std::ops::Range<usize>>,
     pub bundled_count: usize,
+    pub bundled_group_count: usize,
     pub path: PathBuf,
     pub diagnostic: Option<String>,
 }
@@ -1675,6 +2007,50 @@ impl Config {
         if !(1..=32).contains(&self.editor.indent_width) {
             return Err("editor.indent_width must be between 1 and 32");
         }
+        for (name, sequence) in [
+            ("input.keymaps.leader", &self.input.keymaps.leader),
+            (
+                "input.keymaps.local_leader",
+                &self.input.keymaps.local_leader,
+            ),
+        ] {
+            let tokens = sequence.split_whitespace().collect::<Vec<_>>();
+            if tokens.is_empty() {
+                return Err(match name {
+                    "input.keymaps.leader" => "input.keymaps.leader must not be empty",
+                    _ => "input.keymaps.local_leader must not be empty",
+                });
+            }
+            if sequence.len() > 64 || tokens.len() > 4 {
+                return Err(match name {
+                    "input.keymaps.leader" => {
+                        "input.keymaps.leader must contain at most 4 keys and 64 bytes"
+                    }
+                    _ => "input.keymaps.local_leader must contain at most 4 keys and 64 bytes",
+                });
+            }
+            if tokens
+                .iter()
+                .any(|token| matches!(*token, "<leader>" | "<localleader>"))
+            {
+                return Err(match name {
+                    "input.keymaps.leader" => {
+                        "input.keymaps.leader must be a literal sequence without leader tokens"
+                    }
+                    _ => {
+                        "input.keymaps.local_leader must be a literal sequence without leader tokens"
+                    }
+                });
+            }
+            if sequence.chars().any(char::is_control) {
+                return Err(match name {
+                    "input.keymaps.leader" => {
+                        "input.keymaps.leader must not contain control characters"
+                    }
+                    _ => "input.keymaps.local_leader must not contain control characters",
+                });
+            }
+        }
         if self
             .input
             .disabled_command_aliases
@@ -1726,16 +2102,121 @@ impl Config {
         {
             return Err("ui.tool_manager layout or category policy is invalid");
         }
-        if !(15..=100).contains(&self.ui.explorer.width_percent)
-            || !(50..=100).contains(&self.ui.explorer.height_percent)
-            || self.ui.explorer.minimum_width < 20
-            || self.ui.explorer.minimum_height < 6
-            || !(1..=8).contains(&self.ui.explorer.indent_width)
+        let explorer_glyph_width = |glyph: &str| match self.editor.ambiguous_width {
+            AmbiguousWidth::Narrow => UnicodeWidthStr::width(glyph),
+            AmbiguousWidth::Wide => UnicodeWidthStr::width_cjk(glyph),
+        };
+        let explorer_glyphs = [
+            &self.ui.explorer.glyphs.nerd_font,
+            &self.ui.explorer.glyphs.unicode,
+            &self.ui.explorer.glyphs.ascii,
+        ];
+        let invalid_explorer_glyph = explorer_glyphs.into_iter().any(|glyphs| {
+            let invalid_bounded = [
+                &glyphs.tree_vertical,
+                &glyphs.tree_middle,
+                &glyphs.tree_last,
+                &glyphs.tree_space,
+                &glyphs.directory,
+                &glyphs.directory_open,
+                &glyphs.file,
+                &glyphs.symlink,
+                &glyphs.loading,
+                &glyphs.icon_spacing,
+            ]
+            .into_iter()
+            .any(|glyph| {
+                let width = explorer_glyph_width(glyph);
+                glyph.is_empty() || width == 0 || width > 8 || glyph.chars().any(char::is_control)
+            });
+            let invalid_panel = [&glyphs.panel_vertical, &glyphs.panel_horizontal]
+                .into_iter()
+                .any(|glyph| {
+                    UnicodeSegmentation::graphemes(glyph.as_str(), true).count() != 1
+                        || explorer_glyph_width(glyph) != 1
+                        || glyph.chars().any(char::is_control)
+                });
+            invalid_bounded || invalid_panel
+        });
+        if self.ui.explorer.minimum_width < 12
+            || self.ui.explorer.maximum_width > 240
+            || self.ui.explorer.minimum_width > self.ui.explorer.width
+            || self.ui.explorer.width > self.ui.explorer.maximum_width
             || !(1..=10_000).contains(&self.ui.explorer.maximum_visible_rows)
             || !(1..=16 * 1024 * 1024).contains(&self.ui.explorer.maximum_preview_bytes)
             || !(1..=1000).contains(&self.ui.explorer.maximum_preview_lines)
+            || self.ui.explorer.focus_marker.is_empty()
+            || self.ui.explorer.focus_marker.chars().count() > 8
+            || self.ui.explorer.focus_marker.chars().any(char::is_control)
+            || self.ui.explorer.loading_label.is_empty()
+            || self.ui.explorer.loading_label.chars().count() > 64
+            || self.ui.explorer.loading_label.chars().any(char::is_control)
+            || invalid_explorer_glyph
         {
-            return Err("ui.explorer layout policy is invalid");
+            return Err("ui.explorer layout or glyph policy is invalid");
+        }
+        if !(20..=240).contains(&self.ui.documentation_popup.max_width)
+            || !(3..=100).contains(&self.ui.documentation_popup.max_height)
+            || self.ui.documentation_popup.horizontal_padding > 8
+            || !(1..=100).contains(&self.ui.documentation_popup.scroll_step)
+        {
+            return Err("ui.documentation_popup layout policy is invalid");
+        }
+        let terminal_panel = &self.ui.terminal_panel;
+        if terminal_panel.minimum_height < 3
+            || terminal_panel.minimum_height > terminal_panel.height
+            || terminal_panel.height > terminal_panel.maximum_height
+            || terminal_panel.maximum_height > 200
+            || !(1..=100).contains(&terminal_panel.minimum_workspace_height)
+            || !(1..=50).contains(&terminal_panel.resize_step)
+            || terminal_panel.divider.graphemes(true).count() != 1
+            || UnicodeWidthStr::width(terminal_panel.divider.as_str()) != 1
+            || terminal_panel.divider.chars().any(char::is_control)
+            || !terminal_panel.title_format.contains("{id}")
+            || !terminal_panel.title_format.contains("{profile}")
+            || !terminal_panel.status_format.contains("{focus}")
+            || !terminal_panel.status_format.contains("{status}")
+            || !terminal_panel.status_format.contains("{unsupported}")
+            || !terminal_panel.status_format.contains("{truncated}")
+            || !terminal_panel.exited_format.contains("{code}")
+            || [
+                &terminal_panel.title_format,
+                &terminal_panel.status_format,
+                &terminal_panel.running_label,
+                &terminal_panel.exited_format,
+                &terminal_panel.focused_label,
+                &terminal_panel.unfocused_label,
+                &terminal_panel.truncated_label,
+            ]
+            .into_iter()
+            .any(|value| {
+                value.is_empty()
+                    || value.len() > 256
+                    || value.chars().any(char::is_control)
+                    || UnicodeWidthStr::width(value.as_str()) > 160
+            })
+        {
+            return Err("ui.terminal_panel layout or presentation policy is invalid");
+        }
+        if self.ui.key_hints.delay_ms > 60_000
+            || !(1..=100).contains(&self.ui.key_hints.max_rows)
+            || !(1..=12).contains(&self.ui.key_hints.max_columns)
+            || !(12..=240).contains(&self.ui.key_hints.max_width)
+            || self.ui.key_hints.horizontal_padding > 8
+            || self.ui.key_hints.vertical_padding > 4
+            || self.ui.key_hints.row_gap > 4
+            || self.ui.key_hints.column_gap > 16
+            || self.ui.key_hints.fallback_label.is_empty()
+            || self.ui.key_hints.fallback_label.len() > 128
+            || self
+                .ui
+                .key_hints
+                .fallback_label
+                .chars()
+                .any(char::is_control)
+            || UnicodeWidthStr::width(self.ui.key_hints.fallback_label.as_str()) > 64
+        {
+            return Err("ui.key_hints layout or presentation policy is invalid");
         }
         if !(30..=100).contains(&self.ui.picker.width_percent)
             || !(30..=100).contains(&self.ui.picker.height_percent)
@@ -1798,12 +2279,17 @@ impl Config {
             || !(1..=256 * 1024 * 1024).contains(&self.terminals.maximum_output_bytes)
             || !(1..=16 * 1024 * 1024).contains(&self.terminals.maximum_input_bytes)
             || self.terminals.scrollback_bytes > self.terminals.maximum_output_bytes
+            || self.terminals.default_profile.is_empty()
+            || !self
+                .terminals
+                .profiles
+                .contains_key(&self.terminals.default_profile)
             || self.terminals.profiles.iter().any(|(name, profile)| {
                 name.is_empty()
                     || !profile.program.is_absolute()
                     || profile.arguments.len() > 4096
-                    || profile.columns == 0
-                    || profile.rows == 0
+                    || !(1..=1000).contains(&profile.columns)
+                    || !(1..=1000).contains(&profile.rows)
             })
         {
             return Err("terminal policy is invalid");
@@ -1961,6 +2447,9 @@ impl Config {
                 .any(char::is_control)
         {
             return Err("editor gutter presentation is invalid");
+        }
+        if self.editor.viewport.horizontal_margin > 100 {
+            return Err("editor.viewport.horizontal_margin must not exceed 100");
         }
         if !(1..=100).contains(&self.editor.half_page_percent)
             || !(1..=200).contains(&self.editor.full_page_percent)
@@ -2175,12 +2664,6 @@ impl Config {
             "picker_code_lens_title",
             "picker_lsp_sessions_title",
             "explorer_title",
-            "explorer_loading_marker",
-            "explorer_expanded_marker",
-            "explorer_collapsed_marker",
-            "explorer_file_marker",
-            "explorer_symlink_marker",
-            "explorer_row",
             "workspace_search_started",
             "workspace_search_complete",
             "workspace_search_failed",
@@ -2347,6 +2830,9 @@ pub fn load_bundled_config() -> LoadedConfig {
         .expect("bundled config policy must be covered by tests");
     let mut keymaps = parse_keymaps(BUNDLED_KEYMAPS, PathBuf::from("<bundled:keymaps>"));
     keymaps.bundled_count = keymaps.entries.len();
+    keymaps.bundled_group_count = keymaps.groups.len();
+    keymaps.user_spans.clear();
+    keymaps.user_group_spans.clear();
     let dashboard = toml::from_str::<DashboardConfig>(BUNDLED_DASHBOARD)
         .expect("bundled dashboard must be covered by tests");
     dashboard
@@ -2424,18 +2910,29 @@ impl ConfigurationSourceBundle {
                 ..LoadedKeymaps::default()
             },
         };
-        let bundled_count = bundled.keymaps.entries.len();
+        let (bundled_entries, bundled_groups) = if loaded.config.input.keymaps.load_bundled_defaults
+        {
+            (bundled.keymaps.entries, bundled.keymaps.groups)
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        let bundled_count = bundled_entries.len();
+        let bundled_group_count = bundled_groups.len();
         loaded.keymaps = LoadedKeymaps {
-            entries: bundled
-                .keymaps
-                .entries
+            entries: bundled_entries
                 .into_iter()
                 .chain(user_keymaps.entries)
                 .collect(),
+            groups: bundled_groups
+                .into_iter()
+                .chain(user_keymaps.groups)
+                .collect(),
             bundled_count,
+            bundled_group_count,
             path: user_keymaps.path,
             diagnostic: user_keymaps.diagnostic,
             user_spans: user_keymaps.user_spans,
+            user_group_spans: user_keymaps.user_group_spans,
         };
         match parse_dashboard_capture(&self.dashboard) {
             Ok(Some(dashboard)) => {
@@ -2642,19 +3139,29 @@ pub fn load_keymaps(path: &Path) -> LoadedKeymaps {
 
 fn parse_keymaps(source: &str, path: PathBuf) -> LoadedKeymaps {
     #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
     struct KeymapFile {
         #[serde(default)]
         keymap: Vec<toml::Spanned<KeymapEntry>>,
+        #[serde(default)]
+        key_group: Vec<toml::Spanned<KeyGroupEntry>>,
     }
     match toml::from_str::<KeymapFile>(source) {
         Ok(file) => LoadedKeymaps {
             user_spans: file.keymap.iter().map(toml::Spanned::span).collect(),
+            user_group_spans: file.key_group.iter().map(toml::Spanned::span).collect(),
             entries: file
                 .keymap
                 .into_iter()
                 .map(toml::Spanned::into_inner)
                 .collect(),
+            groups: file
+                .key_group
+                .into_iter()
+                .map(toml::Spanned::into_inner)
+                .collect(),
             bundled_count: 0,
+            bundled_group_count: 0,
             path,
             diagnostic: None,
         },
@@ -3347,15 +3854,16 @@ fn unknown_key_warning(source: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::Cell, fs, path::PathBuf};
+    use std::{cell::Cell, collections::BTreeSet, fs, path::PathBuf};
 
     use tempfile::tempdir;
 
     use super::{
-        CandidateAttempt, CapturedSource, CapturedText, LineNumbers, SourceFingerprint,
-        WATCH_FINGERPRINT_BYTE_CEILING, capture_configuration_bundle_with,
-        captured_bundle_is_stable, hash_source_bytes, load_bundled_config, load_config,
-        load_consistent_candidate_with, load_keymaps, load_theme, source_fingerprint,
+        AmbiguousWidth, CandidateAttempt, CapturedSource, CapturedText, ConfigurationSourceBundle,
+        ExplorerIconMode, LineNumbers, SourceFingerprint, WATCH_FINGERPRINT_BYTE_CEILING,
+        capture_configuration_bundle_with, captured_bundle_is_stable, hash_source_bytes,
+        load_bundled_config, load_config, load_consistent_candidate_with, load_keymaps, load_theme,
+        source_fingerprint,
     };
 
     #[test]
@@ -3379,6 +3887,11 @@ mod tests {
         assert_eq!(loaded.config.editor.line_numbers, LineNumbers::Absolute);
         assert_eq!(loaded.config.editor.tab_width, 2);
         assert_eq!(loaded.config.ui.command_line.width, 60);
+        assert_eq!(loaded.config.ui.explorer.width, 40);
+        assert_eq!(
+            loaded.config.ui.explorer.icon_mode,
+            ExplorerIconMode::NerdFont
+        );
         assert_eq!(
             loaded.config.input.text_commands.get("editor.insert"),
             Some(&"edit.insert_text".to_owned())
@@ -3397,6 +3910,108 @@ mod tests {
                 .source,
             "bundled defaults"
         );
+    }
+
+    #[test]
+    fn viewport_horizontal_margin_is_nested_bounded_and_has_no_flat_alias() {
+        let root = tempdir().expect("tempdir");
+        let path = root.path().join("config.toml");
+        fs::write(&path, "[editor.viewport]\nhorizontal_margin = 9\n").expect("write nested");
+        let loaded = load_config(&path);
+        assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
+        assert_eq!(loaded.config.editor.viewport.horizontal_margin, 9);
+        assert!(
+            loaded
+                .explain("editor.viewport.horizontal_margin")
+                .expect("nested source")
+                .source
+                .starts_with(&path.display().to_string())
+        );
+
+        fs::write(&path, "[editor.viewport]\nhorizontal_margin = 101\n")
+            .expect("write out of bounds");
+        let loaded = load_config(&path);
+        assert_eq!(loaded.config, load_bundled_config().config);
+        assert!(
+            loaded
+                .diagnostic
+                .as_deref()
+                .is_some_and(|message| { message.contains("editor.viewport.horizontal_margin") })
+        );
+
+        fs::write(&path, "[editor]\nhorizontal_margin = 9\n").expect("write removed flat field");
+        let loaded = load_config(&path);
+        assert_eq!(loaded.config, load_bundled_config().config);
+        assert!(
+            loaded
+                .diagnostic
+                .as_deref()
+                .is_some_and(|message| { message.contains("unknown field `horizontal_margin`") })
+        );
+    }
+
+    #[test]
+    fn unpublished_explorer_schema_rejects_removed_overlay_fields() {
+        let root = tempdir().expect("tempdir");
+        let removed = [
+            ("width_percent", "22"),
+            ("height_percent", "100"),
+            ("minimum_height", "10"),
+            ("indent_width", "2"),
+            ("selected_marker", "\">\""),
+            ("row_marker", "\" \""),
+            ("border", "\"single\""),
+        ];
+        for (index, (field, value)) in removed.into_iter().enumerate() {
+            let path = root.path().join(format!("config-{index}.toml"));
+            fs::write(&path, format!("[ui.explorer]\n{field} = {value}\n")).expect("write");
+            let loaded = load_config(&path);
+            assert_eq!(loaded.config, load_bundled_config().config);
+            assert!(
+                loaded
+                    .diagnostic
+                    .as_deref()
+                    .is_some_and(|message| message.contains(field)),
+                "missing rejection for {field}"
+            );
+        }
+    }
+
+    #[test]
+    fn explorer_glyph_policy_rejects_wide_panel_cells_and_oversized_segments() {
+        let root = tempdir().expect("tempdir");
+        let path = root.path().join("config.toml");
+        fs::write(&path, "[editor]\nambiguous_width = \"wide\"\n").expect("write");
+        let loaded = load_config(&path);
+        assert!(loaded.diagnostic.is_none());
+        assert_eq!(loaded.config.editor.ambiguous_width, AmbiguousWidth::Wide);
+
+        fs::write(
+            &path,
+            "[ui.explorer.glyphs.ascii]\npanel_vertical = \"||\"\n",
+        )
+        .expect("write");
+        let loaded = load_config(&path);
+        assert!(loaded.diagnostic.is_some());
+        assert_eq!(loaded.config, load_bundled_config().config);
+
+        fs::write(
+            &path,
+            "[editor]\nambiguous_width = \"wide\"\n\n[ui.explorer.glyphs.unicode]\npanel_horizontal = \"·\"\n",
+        )
+        .expect("write");
+        let loaded = load_config(&path);
+        assert!(loaded.diagnostic.is_some());
+        assert_eq!(loaded.config, load_bundled_config().config);
+
+        fs::write(
+            &path,
+            "[ui.explorer.glyphs.unicode]\ntree_vertical = \"界界界界界\"\n",
+        )
+        .expect("write");
+        let loaded = load_config(&path);
+        assert!(loaded.diagnostic.is_some());
+        assert_eq!(loaded.config, load_bundled_config().config);
     }
 
     #[test]
@@ -3454,6 +4069,80 @@ mod tests {
         );
     }
 
+    #[test]
+    fn keymap_policy_is_typed_bounded_and_rejects_recursive_leaders() {
+        let root = tempdir().expect("tempdir");
+        let path = root.path().join("config.toml");
+        for (index, (field, value, expected)) in [
+            ("leader", "''".to_owned(), "must not be empty"),
+            (
+                "local_leader",
+                "'<localleader>'".to_owned(),
+                "without leader tokens",
+            ),
+            (
+                "leader",
+                format!("'{}'", "a ".repeat(5).trim()),
+                "at most 4 keys",
+            ),
+            ("local_leader", format!("'{}'", "x".repeat(65)), "64 bytes"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            fs::write(
+                &path,
+                format!("[input.keymaps]\n{field} = {value}\n# case {index}\n"),
+            )
+            .expect("write policy");
+            let loaded = load_config(&path);
+            assert_eq!(loaded.config, load_bundled_config().config);
+            assert!(
+                loaded
+                    .diagnostic
+                    .as_deref()
+                    .is_some_and(|diagnostic| diagnostic.contains(expected)),
+                "missing `{expected}` in {:?}",
+                loaded.diagnostic
+            );
+        }
+    }
+
+    #[test]
+    fn complete_bundled_keymap_layer_can_be_omitted_without_dropping_user_maps() {
+        let config_path = PathBuf::from("config.toml");
+        let keymaps_path = PathBuf::from("keymaps.toml");
+        let bundle = ConfigurationSourceBundle {
+            config: captured(
+                config_path,
+                CapturedText::Text(
+                    "[input.keymaps]\nload_bundled_defaults=false\nleader=','\nlocal_leader=';'\n"
+                        .into(),
+                ),
+            ),
+            keymaps: captured(
+                keymaps_path,
+                CapturedText::Text(
+                    "[[keymap]]\nid='user.test.opt-out'\ncontext='dashboard'\nkeys='<leader> z'\ncommand='health.open'\n"
+                        .into(),
+                ),
+            ),
+            dashboard: captured(PathBuf::from("dashboard.toml"), CapturedText::Missing),
+            theme: captured(PathBuf::from("dust.toml"), CapturedText::Missing),
+            selected_theme: "dust".into(),
+        };
+        let loaded = bundle.into_loaded();
+        assert!(!loaded.config.input.keymaps.load_bundled_defaults);
+        assert_eq!(loaded.keymaps.bundled_count, 0);
+        assert_eq!(loaded.keymaps.bundled_group_count, 0);
+        assert!(loaded.keymaps.groups.is_empty());
+        assert_eq!(loaded.keymaps.entries.len(), 1);
+        assert_eq!(
+            loaded.keymaps.entries[0].keys.as_deref(),
+            Some("<leader> z")
+        );
+    }
+
     fn captured(path: PathBuf, text: CapturedText) -> CapturedSource {
         let (length, content_hash) = match &text {
             CapturedText::Text(source) => (
@@ -3490,7 +4179,7 @@ mod tests {
     #[test]
     fn captured_bundle_identity_exposes_aba_and_uses_the_same_text_for_spans() {
         let config = "[ui]\ntheme='night'\n";
-        let keymaps_b = "[[keymap]]\ncontext='dashboard'\nkeys='b'\ncommand='file.new'\n";
+        let keymaps_b = "[[keymap]]\nid='user.test.captured-b'\ncontext='dashboard'\nkeys='b'\ncommand='file.new'\n";
         let dashboard = include_str!("../../assets/defaults/dashboard.toml")
             .replace("D U S T", "CAPTURED DASH");
         let theme = include_str!("../../assets/themes/dust.toml")
@@ -3518,7 +4207,7 @@ mod tests {
         observed_a[1] = captured(
             keymap_path,
             CapturedText::Text(
-                "[[keymap]]\ncontext='dashboard'\nkeys='a'\ncommand='file.new'\n".into(),
+                "[[keymap]]\nid='user.test.captured-a'\ncontext='dashboard'\nkeys='a'\ncommand='file.new'\n".into(),
             ),
         )
         .identity;
@@ -3535,8 +4224,14 @@ mod tests {
         let theme_span = &loaded.theme_spans["name"];
         assert_eq!(&theme[theme_span.clone()], "\"night\"");
         assert_eq!(
-            loaded.keymaps.entries.last().expect("user keymap").keys,
-            "b"
+            loaded
+                .keymaps
+                .entries
+                .last()
+                .expect("user keymap")
+                .keys
+                .as_deref(),
+            Some("b")
         );
     }
 
@@ -3550,7 +4245,7 @@ mod tests {
         let created = captured(
             super::user_keymaps_path(),
             CapturedText::Text(
-                "[[keymap]]\ncontext='dashboard'\nkeys='x'\ncommand='file.new'\n".into(),
+                "[[keymap]]\nid='user.test.created-x'\ncontext='dashboard'\nkeys='x'\ncommand='file.new'\n".into(),
             ),
         );
         assert_ne!(missing.identity, created.identity);
@@ -3744,6 +4439,34 @@ mod tests {
         );
         assert!(loaded.keymaps.entries.len() > 100);
         assert_eq!(loaded.keymaps.bundled_count, loaded.keymaps.entries.len());
+        let bundled_ids = loaded
+            .keymaps
+            .entries
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(bundled_ids.len(), loaded.keymaps.entries.len());
+        assert!(bundled_ids.iter().all(|id| id.starts_with("builtin.")));
+        assert_eq!(loaded.keymaps.groups.len(), 3);
+        assert_eq!(
+            loaded.keymaps.bundled_group_count,
+            loaded.keymaps.groups.len()
+        );
+        let bundled_group_ids = loaded
+            .keymaps
+            .groups
+            .iter()
+            .map(|group| group.id.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(bundled_group_ids.len(), loaded.keymaps.groups.len());
+        assert!(
+            bundled_group_ids
+                .iter()
+                .all(|id| id.starts_with("builtin."))
+        );
+        assert!(loaded.config.input.keymaps.load_bundled_defaults);
+        assert_eq!(loaded.config.input.keymaps.leader, "space");
+        assert_eq!(loaded.config.input.keymaps.local_leader, "\\");
         assert_eq!(loaded.dashboard.action.len(), 5);
         let explained = loaded.explain("ui.command_line.width").expect("explain");
         assert_eq!(explained.value, "60");
@@ -3758,15 +4481,17 @@ mod tests {
     fn themes_are_typed_and_require_capability_fallbacks() {
         let root = tempdir().expect("tempdir");
         let path = root.path().join("theme.toml");
-        let source =
-            super::BUNDLED_THEME.replace("foreground = \"cyan\"", "foreground = \"#010203\"");
+        let source = super::BUNDLED_THEME.replace(
+            "[styles.accent]\nforeground = \"#58a6ff\"\nbackground = \"#0d1117\"\nforeground_256 = \"indexed:75\"\nbackground_256 = \"indexed:233\"\nforeground_16 = \"blue\"",
+            "[styles.accent]\nforeground = \"#010203\"\nbackground = \"#0d1117\"\nbackground_256 = \"indexed:233\"",
+        );
         fs::write(&path, source).expect("theme");
         let error = load_theme(&path).expect_err("missing fallbacks");
         assert!(error.contains("256-color fallback"));
 
         let source = super::BUNDLED_THEME.replace(
-            "foreground = \"cyan\"",
-            "foreground = \"indexed:201\"\nforeground_16 = \"cyan\"",
+            "[styles.accent]\nforeground = \"#58a6ff\"\nbackground = \"#0d1117\"\nforeground_256 = \"indexed:75\"\nbackground_256 = \"indexed:233\"\nforeground_16 = \"blue\"",
+            "[styles.accent]\nforeground = \"indexed:201\"\nbackground = \"#0d1117\"\nforeground_256 = \"indexed:201\"\nbackground_256 = \"indexed:233\"\nforeground_16 = \"cyan\"",
         );
         fs::write(&path, source).expect("theme");
         let theme = load_theme(&path).expect("valid typed theme");
@@ -3777,12 +4502,138 @@ mod tests {
     }
 
     #[test]
+    fn bundled_terminal_has_a_valid_configurable_default_profile() {
+        let bundled = load_bundled_config().config;
+        assert_eq!(bundled.terminals.default_profile, "shell");
+        let shell = bundled
+            .terminals
+            .profiles
+            .get("shell")
+            .expect("bundled shell profile");
+        assert_eq!(shell.program, PathBuf::from("/bin/sh"));
+
+        let root = tempdir().expect("tempdir");
+        let path = root.path().join("config.toml");
+        fs::write(&path, "[terminals]\ndefault_profile='missing'\n")
+            .expect("invalid default profile");
+        let loaded = load_config(&path);
+        assert!(loaded.diagnostic.is_some());
+        assert_eq!(loaded.config, bundled);
+    }
+
+    #[test]
+    fn terminal_panel_policy_is_typed_bounded_and_strict() {
+        let root = tempdir().expect("tempdir");
+        let path = root.path().join("config.toml");
+        fs::write(
+            &path,
+            "[ui.terminal_panel]\nheight=9\nminimum_height=4\nmaximum_height=20\nminimum_workspace_height=2\nresize_step=3\ndivider='-'\ntitle_format=' TERM {id} {profile} '\nstatus_format=' {focus} {status} {unsupported}{truncated} '\nrunning_label='LIVE'\nexited_format='DONE {code}'\nfocused_label='TERM'\nunfocused_label='EDIT'\ntruncated_label=' CUT'\n",
+        )
+        .expect("valid terminal panel");
+        let loaded = load_config(&path);
+        assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
+        assert_eq!(loaded.config.ui.terminal_panel.height, 9);
+        assert_eq!(loaded.config.ui.terminal_panel.resize_step, 3);
+        assert_eq!(loaded.config.ui.terminal_panel.running_label, "LIVE");
+
+        for (index, invalid) in [
+            "height=2",
+            "height=9\nminimum_height=10",
+            "maximum_height=201",
+            "divider='界'",
+            "title_format='missing placeholders'",
+            "status_format='{focus} {status}'",
+            "resize_step=0",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            fs::write(&path, format!("[ui.terminal_panel]\n{invalid}\n"))
+                .expect("invalid terminal panel");
+            let loaded = load_config(&path);
+            assert_eq!(loaded.config, load_bundled_config().config, "case {index}");
+            assert!(
+                loaded
+                    .diagnostic
+                    .as_deref()
+                    .is_some_and(|message| { message.contains("ui.terminal_panel") })
+            );
+        }
+    }
+
+    #[test]
+    fn documentation_popup_policy_is_typed_and_bounded() {
+        let root = tempdir().expect("tempdir");
+        let path = root.path().join("config.toml");
+        fs::write(&path, "[ui.documentation_popup]\nscroll_step=0\n")
+            .expect("invalid documentation popup");
+        let loaded = load_config(&path);
+        assert!(
+            loaded
+                .diagnostic
+                .as_deref()
+                .is_some_and(|message| message.contains("ui.documentation_popup"))
+        );
+        assert_eq!(
+            loaded.config.ui.documentation_popup,
+            load_bundled_config().config.ui.documentation_popup
+        );
+    }
+
+    #[test]
+    fn key_hint_policy_is_typed_bounded_and_transactional() {
+        let root = tempdir().expect("tempdir");
+        let path = root.path().join("config.toml");
+        fs::write(
+            &path,
+            "[ui.key_hints]\nenabled=false\ndelay_ms=42\nanchor='bottom_left'\nmax_rows=4\nmax_columns=2\nmax_width=50\nhorizontal_padding=2\nvertical_padding=1\nrow_gap=1\ncolumn_gap=3\nshow_group_icons=false\nshow_command_titles=false\nfallback_label='Run'\nborder='single'\n",
+        )
+        .expect("valid key hints");
+        let loaded = load_config(&path);
+        assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
+        assert!(!loaded.config.ui.key_hints.enabled);
+        assert_eq!(loaded.config.ui.key_hints.delay_ms, 42);
+        assert_eq!(
+            loaded.config.ui.key_hints.anchor,
+            super::KeyHintAnchor::BottomLeft
+        );
+        assert_eq!(loaded.config.ui.key_hints.fallback_label, "Run");
+
+        for invalid in [
+            "delay_ms=60001",
+            "max_rows=0",
+            "max_columns=13",
+            "max_width=11",
+            "horizontal_padding=9",
+            "vertical_padding=5",
+            "row_gap=5",
+            "column_gap=17",
+            "fallback_label=''",
+        ] {
+            fs::write(&path, format!("[ui.key_hints]\n{invalid}\n")).expect("invalid key hints");
+            let loaded = load_config(&path);
+            assert!(
+                loaded
+                    .diagnostic
+                    .as_deref()
+                    .is_some_and(|message| message.contains("ui.key_hints")),
+                "{invalid}: {:?}",
+                loaded.diagnostic
+            );
+            assert_eq!(
+                loaded.config.ui.key_hints,
+                load_bundled_config().config.ui.key_hints
+            );
+        }
+    }
+
+    #[test]
     fn keymaps_parse_typed_arguments_and_fail_transactionally() {
         let root = tempdir().expect("tempdir");
         let path = root.path().join("keymaps.toml");
         fs::write(
             &path,
-            "[[keymap]]\nmode='normal'\nkeys='space q'\ncommand='editor.quit'\narguments={force=true}\n",
+            "[[keymap]]\nid='user.test.typed-quit'\ncontext='editor'\nmode='normal'\nkeys='space q'\ncommand='editor.quit'\narguments={force=true}\n\n[[key_group]]\nid='user.test.files-group'\ncontext='editor'\nmode='normal'\nprefix='<leader> f'\nlabel='Files'\nicon='F'\norder=7\n",
         )
         .expect("write");
         let loaded = load_keymaps(&path);
@@ -3794,7 +4645,31 @@ mod tests {
             "span was {:?}",
             loaded.user_spans[0]
         );
+        assert_eq!(loaded.entries[0].id, "user.test.typed-quit");
+        assert_eq!(loaded.entries[0].context.as_deref(), Some("editor"));
+        assert_eq!(loaded.entries[0].keys.as_deref(), Some("space q"));
         assert_eq!(loaded.entries[0].arguments["force"].as_bool(), Some(true));
+        assert_eq!(loaded.groups.len(), 1);
+        assert_eq!(loaded.user_group_spans.len(), 1);
+        assert_eq!(loaded.groups[0].id, "user.test.files-group");
+        assert_eq!(loaded.groups[0].prefix.as_deref(), Some("<leader> f"));
+        assert_eq!(loaded.groups[0].label.as_deref(), Some("Files"));
+        assert_eq!(loaded.groups[0].icon.as_deref(), Some("F"));
+        assert_eq!(loaded.groups[0].order, 7);
+
+        fs::write(
+            &path,
+            "[[keymap]]\ncontext='editor'\nmode='normal'\nkeys='q'\ncommand='editor.quit'\n",
+        )
+        .expect("id-less declaration");
+        let loaded = load_keymaps(&path);
+        assert!(loaded.entries.is_empty());
+        assert!(
+            loaded
+                .diagnostic
+                .as_deref()
+                .is_some_and(|message| message.contains("missing field `id`"))
+        );
 
         fs::write(&path, "[[keymap]\n").expect("malformed");
         let loaded = load_keymaps(&path);
@@ -3803,7 +4678,7 @@ mod tests {
 
         fs::write(
             &path,
-            "[[keymap]]\nmode='normal'\nkeys='x'\nreplacement_keys='dd'\n",
+            "[[keymap]]\nid='user.test.removed-rhs'\ncontext='editor'\nmode='normal'\nkeys='x'\nreplacement_keys='dd'\n",
         )
         .expect("unsupported recursive mapping");
         let loaded = load_keymaps(&path);
@@ -3813,6 +4688,17 @@ mod tests {
                 .diagnostic
                 .as_deref()
                 .is_some_and(|message| message.contains("unknown field `replacement_keys`"))
+        );
+
+        fs::write(&path, "[[key_gruop]]\nid='user.test.typo'\n")
+            .expect("unknown root keymap field");
+        let loaded = load_keymaps(&path);
+        assert!(loaded.groups.is_empty());
+        assert!(
+            loaded
+                .diagnostic
+                .as_deref()
+                .is_some_and(|message| message.contains("unknown field `key_gruop`"))
         );
     }
 }

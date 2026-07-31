@@ -20,6 +20,9 @@ control_character_replacement = "�"
 zero_width_replacement = "◌"
 ambiguous_width = "narrow"
 
+[editor.viewport]
+horizontal_margin = 4
+
 [editor.large_file]
 enabled = true
 byte_threshold = 16777216
@@ -95,6 +98,46 @@ rows_from_bottom = 2
 max_width = 120
 timeout_ms = 0
 
+[ui.key_hints]
+enabled = true
+delay_ms = 250
+anchor = "bottom_right"
+max_rows = 8
+max_columns = 3
+max_width = 96
+horizontal_padding = 1
+vertical_padding = 0
+row_gap = 0
+column_gap = 2
+show_group_icons = true
+show_command_titles = true
+fallback_label = "Action"
+border = "rounded"
+
+[ui.documentation_popup]
+enabled = true
+max_width = 72
+max_height = 18
+horizontal_padding = 1
+scroll_step = 4
+preferred_below = true
+border = "rounded"
+
+[ui.terminal_panel]
+height = 12
+minimum_height = 4
+maximum_height = 40
+minimum_workspace_height = 3
+resize_step = 2
+divider = "─"
+title_format = " TERMINAL #{id} · {profile} "
+status_format = " {focus} · {status} · unsupported {unsupported}{truncated} "
+running_label = "RUNNING"
+exited_format = "EXIT {code}"
+focused_label = "TERMINAL"
+unfocused_label = "EDITOR"
+truncated_label = " · TRUNCATED"
+
 [ui.tool_manager]
 title = "Dust tool manager"
 help = "j/k move  Tab category  Enter install/start  r refresh  Esc close"
@@ -133,18 +176,58 @@ source_separator = " · "
 loading_label = "loading…"
 
 [ui.explorer]
-width_percent = 22
-height_percent = 100
+width = 40
 minimum_width = 28
-minimum_height = 10
-indent_width = 2
+maximum_width = 60
 maximum_visible_rows = 200
 preview_enabled = false
 maximum_preview_bytes = 262144
 maximum_preview_lines = 20
-selected_marker = ">"
-row_marker = " "
-border = "single"
+focus_marker = ">"
+loading_label = "loading…"
+icon_mode = "nerd_font"
+
+[ui.explorer.glyphs.nerd_font]
+tree_vertical = "│ "
+tree_middle = "├─"
+tree_last = "└─"
+tree_space = "  "
+directory = "󰉋"
+directory_open = "󰝰"
+file = "󰈔"
+symlink = ""
+loading = "…"
+panel_vertical = "⎸"
+panel_horizontal = "⎯"
+icon_spacing = " "
+
+[ui.explorer.glyphs.unicode]
+tree_vertical = "│ "
+tree_middle = "├─"
+tree_last = "└─"
+tree_space = "  "
+directory = "▸"
+directory_open = "▾"
+file = "·"
+symlink = "↗"
+loading = "…"
+panel_vertical = "⎸"
+panel_horizontal = "⎯"
+icon_spacing = " "
+
+[ui.explorer.glyphs.ascii]
+tree_vertical = "| "
+tree_middle = "|-"
+tree_last = "\\-"
+tree_space = "  "
+directory = "+"
+directory_open = "-"
+file = "."
+symlink = "@"
+loading = "~"
+panel_vertical = "|"
+panel_horizontal = "-"
+icon_spacing = " "
 
 [ui.command_line]
 width = 60
@@ -190,8 +273,14 @@ queue_capacity = 256
 maximum_output_bytes = 33554432
 maximum_input_bytes = 1048576
 scrollback_bytes = 8388608
+default_profile = "shell"
 
-[terminals.profiles]
+[terminals.profiles.shell]
+program = "/bin/sh"
+arguments = []
+environment = {}
+columns = 80
+rows = 24
 
 [packages.registry]
 base_url = "https://dust.blurskye.dev/registry/v1"
@@ -332,6 +421,11 @@ completion_select_first = false
 completion_accept_on_submit = true
 disabled_command_aliases = []
 
+[input.keymaps]
+load_bundled_defaults = true
+leader = "space"
+local_leader = "\\"
+
 [input.text_commands]
 "editor.insert" = "edit.insert_text"
 "editor.replace" = "edit.replace_text"
@@ -427,6 +521,7 @@ plugindisable = "plugin.disable"
 crashinspect = "crash.inspect"
 crashclear = "crash.clear"
 terminalopen = "terminal.open"
+terminaltoggle = "terminal.toggle"
 terminals = "terminal.list"
 terminalfocus = "terminal.focus"
 terminalsend = "terminal.send"
@@ -493,7 +588,7 @@ search_no_buffer = "search requires an open buffer"
 no_previous_search = "no previous search"
 pattern_not_found = "pattern not found: {query}"
 config_explanation = "{key} = {value} ({source})"
-keymap_inspection = "{context}: {keys} -> {command} {arguments} ({source})"
+keymap_inspection = "{id} {context}: {source_keys} => {keys} [{operation}] {command} {arguments} ({source})"
 keymap_context_summary = "keymap context {context}: {count} resolved bindings"
 startup_fallback = "using bundled configuration: {diagnostic}"
 recovery_summary = "{count} recovery journal(s) available"
@@ -516,6 +611,8 @@ lsp_disabled = "language-server support is disabled by configuration"
 lsp_restart_disabled = "language server {server} exceeded its crash restart limit"
 lsp_diagnostics = "{server}: {count} diagnostic(s)"
 lsp_hover = "{server}: {hover}"
+lsp_hover_title = "Hover · {server}"
+lsp_signature_title = "Signature · {server}"
 lsp_progress = "{server}: {title} {progress}"
 lsp_health = "{server}: {documents} document(s), {pending} pending, {encoding} positions"
 lsp_unsupported = "{server} does not support {method}"
@@ -634,15 +731,8 @@ picker_output_title = "Output · {name}"
 picker_code_lens_title = "Code lenses"
 picker_lsp_sessions_title = "Language server sessions"
 explorer_title = "Explorer"
-explorer_preview_title = "Preview"
 explorer_preview_binary = "[binary preview unavailable]"
 explorer_preview_failed = "[preview failed: {diagnostic}]"
-explorer_loading_marker = "…"
-explorer_expanded_marker = "▾"
-explorer_collapsed_marker = "▸"
-explorer_file_marker = "·"
-explorer_symlink_marker = "↗"
-explorer_row = "{indent}{marker} {name}"
 workspace_search_started = "searching workspace…"
 workspace_search_complete = "{count} match(es) across {files} searched file(s)"
 workspace_search_failed = "workspace search failed: {diagnostic}"
@@ -818,6 +908,9 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "lsp.completion.trigger" = "Trigger language completion"
 "lsp.hover" = "Show language hover"
 "lsp.signature_help" = "Show signature help"
+"lsp.documentation.scroll_up" = "Scroll documentation up"
+"lsp.documentation.scroll_down" = "Scroll documentation down"
+"lsp.documentation.close" = "Close documentation"
 "lsp.definition" = "Go to definition"
 "lsp.declaration" = "Go to declaration"
 "lsp.type_definition" = "Go to type definition"
@@ -890,8 +983,12 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "crash.inspect" = "Inspect previous crash"
 "crash.clear" = "Clear previous crash"
 "terminal.open" = "Open terminal profile"
+"terminal.toggle" = "Toggle bottom terminal"
 "terminal.list" = "List terminals"
 "terminal.focus" = "Focus terminal"
+"terminal.focus_active" = "Focus visible terminal panel"
+"terminal.cycle" = "Cycle selected terminal"
+"terminal.resize" = "Resize terminal panel"
 "terminal.send" = "Send terminal text"
 "terminal.close" = "Close focused terminal"
 "terminal.unfocus" = "Return focus from terminal to editor"

@@ -1161,6 +1161,39 @@ impl DirectoryService {
     }
 }
 
+fn natural_name_key(value: &str) -> String {
+    let lowercase = value.to_lowercase();
+    let mut characters = lowercase.chars().peekable();
+    let mut key = String::with_capacity(lowercase.len());
+    while let Some(character) = characters.next() {
+        if character.is_ascii_digit() {
+            let mut digits = String::from(character);
+            while characters
+                .peek()
+                .is_some_and(|digit| digit.is_ascii_digit())
+            {
+                if let Some(digit) = characters.next() {
+                    digits.push(digit);
+                }
+            }
+            let significant = digits.trim_start_matches('0');
+            let significant = if significant.is_empty() {
+                "0"
+            } else {
+                significant
+            };
+            key.push('\u{1}');
+            key.push_str(&format!("{:09}", significant.len()));
+            key.push_str(significant);
+            key.push('\u{1}');
+            key.push_str(&format!("{:09}", digits.len()));
+        } else {
+            key.push(character);
+        }
+    }
+    key
+}
+
 fn list_scoped_directory(
     generation: u64,
     root_revision: u64,
@@ -1206,11 +1239,20 @@ fn list_scoped_directory(
             kind,
         });
     }
-    entries.sort_by(|left, right| {
+    let mut keyed_entries = entries
+        .into_iter()
+        .map(|entry| (natural_name_key(&entry.name), entry))
+        .collect::<Vec<_>>();
+    keyed_entries.sort_by(|(left_key, left), (right_key, right)| {
         let left_rank = usize::from(left.kind != DirectoryEntryKind::Directory);
         let right_rank = usize::from(right.kind != DirectoryEntryKind::Directory);
-        (left_rank, &left.path).cmp(&(right_rank, &right.path))
+        left_rank
+            .cmp(&right_rank)
+            .then_with(|| left_key.cmp(right_key))
+            .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.path.cmp(&right.path))
     });
+    let entries = keyed_entries.into_iter().map(|(_, entry)| entry).collect();
     Ok(DirectoryListing {
         generation,
         root_revision,
@@ -1729,7 +1771,7 @@ mod tests {
         VfsResult, VfsWorker, WorkspaceSearchEvent, WorkspaceSearchMatch, WorkspaceSearchPolicy,
         WorkspaceSearchService, WorkspaceSearchSummary, WriteExpectation, atomic_write,
         bounded_recovery_entries, checked_atomic_write, cleanup_recovery, discover_recovery,
-        list_scoped_directory, read_bounded_bytes, read_bounded_utf8,
+        list_scoped_directory, natural_name_key, read_bounded_bytes, read_bounded_utf8,
         recovery_journal_size_allowed, recovery_payload_size_allowed, write_recovery,
     };
 
@@ -1964,10 +2006,25 @@ mod tests {
     }
 
     #[test]
+    fn explorer_natural_key_is_case_folded_numeric_and_stably_zero_aware() {
+        let mut names = vec!["file10", "File2", "file01", "file1", "file02"];
+        names.sort_by(|left, right| {
+            natural_name_key(left)
+                .cmp(&natural_name_key(right))
+                .then_with(|| left.cmp(right))
+        });
+        assert_eq!(names, ["file1", "file01", "File2", "file02", "file10"]);
+    }
+
+    #[test]
     fn scoped_directory_listing_is_lazy_sorted_hidden_aware_and_bounded() {
         let root = tempdir().expect("root");
         fs::create_dir(root.path().join("z-dir")).expect("dir");
+        fs::create_dir(root.path().join("dir10")).expect("dir10");
+        fs::create_dir(root.path().join("dir2")).expect("dir2");
         fs::write(root.path().join("a-file"), "a").expect("file");
+        fs::write(root.path().join("file10"), "10").expect("file10");
+        fs::write(root.path().join("file2"), "2").expect("file2");
         fs::write(root.path().join(".hidden"), "h").expect("hidden");
         let canonical = fs::canonicalize(root.path()).expect("canonical");
         let mut service = DirectoryService::default();
@@ -1986,8 +2043,22 @@ mod tests {
             if let Some(result) = service.try_result() {
                 let listing = result.expect("listing");
                 assert_eq!(listing.root_revision, 7);
-                assert_eq!(listing.entries.len(), 2);
-                assert_eq!(listing.entries[0].kind, DirectoryEntryKind::Directory);
+                let ordered = listing
+                    .entries
+                    .iter()
+                    .map(|entry| (entry.kind, entry.name.as_str()))
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    ordered,
+                    [
+                        (DirectoryEntryKind::Directory, "dir2"),
+                        (DirectoryEntryKind::Directory, "dir10"),
+                        (DirectoryEntryKind::Directory, "z-dir"),
+                        (DirectoryEntryKind::File, "a-file"),
+                        (DirectoryEntryKind::File, "file2"),
+                        (DirectoryEntryKind::File, "file10"),
+                    ]
+                );
                 break;
             }
             assert!(Instant::now() < deadline);
