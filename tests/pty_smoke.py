@@ -394,6 +394,40 @@ def main() -> None:
         assert 40 <= wide_editor_cursor[0] < 60 and wide_editor_cursor[1] < 11
         assert_restored(output)
 
+    # Open text buffers have a real editor-region content line after the
+    # explorer. Physical Shift-h/l (logical H/L) navigate independently from
+    # logical workspace tabs.
+    with tempfile.TemporaryDirectory() as directory:
+        root = pathlib.Path(directory)
+        first = root / "alpha.rs"
+        second = root / "beta.rs"
+        third = root / "gamma.rs"
+        first.write_text("ALPHA-CONTENT\n", encoding="utf-8")
+        second.write_text("BETA-CONTENT\n", encoding="utf-8")
+        third.write_text("GAMMA-CONTENT\n", encoding="utf-8")
+        code, output, snapshots = run(
+            binary,
+            directory,
+            [str(first)],
+            [
+                (0.5, f":edit {second}\r".encode(), None),
+                (0.6, f":edit {third}\r".encode(), None),
+                (0.6, b":explore\r", None),
+                (0.4, b"\x0c", None),  # explorer -> editor
+                (0.3, b"H", None),
+                (0.3, b"L", None),
+                (0.3, b":q\r", None),
+            ],
+        )
+        assert code == 0
+        opened = terminal_screen(snapshots[3])
+        top = opened.splitlines()[0]
+        assert "Explorer" in top[:41]
+        assert all(name in top[41:] for name in ("alpha.rs", "beta.rs", "gamma.rs"))
+        assert "BETA-CONTENT" in terminal_screen(snapshots[5])
+        assert "GAMMA-CONTENT" in terminal_screen(snapshots[6])
+        assert_restored(output)
+
     # A real shell is rendered as a persistent full-width bottom dock. The
     # editor/explorer remain above it, both default Ctrl+/ and Ctrl+\\ toggles
     # work through legacy control-byte normalization without hiding it, and
@@ -424,7 +458,7 @@ def main() -> None:
                     b"printf '%b' '\\033\\133?2004h\\033\\1331;32mDOCKED-TERMINAL\\033\\1330m\\033\\1350;title\\a\\n'\r",
                     None,
                 ),
-                (0.6, b"\x1f", None),  # Ctrl+/ returns focus; panel remains
+                (1.5, b"\x1f", None),  # allow bounded PTY output, then return focus
                 (0.3, b"", (20, 60)),
                 (0.7, b"\x1c", None),  # legacy Ctrl+\\ focuses the same PTY
                 (0.4, b"exit\r", None),
@@ -948,7 +982,7 @@ arguments = { force = false }
                 (0.2, b"\x1b", None),
                 (0.1, b":config reload\r", None),
                 (0.5, b":config reload\r", None),
-                (0.5, b"p", None),
+                (1.0, b"p", None),
                 (0.2, b"\x1b", None),
                 (0.2, b":bye\r", None),
             ],
@@ -1064,8 +1098,8 @@ arguments = { force = false }
                 (0.25, b"", None),
                 (0.4, b"", None),
                 (0.4, b"", None),
-                (0.4, b"", None),
-                (0.4, b":bd\r", None),
+                (0.8, b"", None),
+                (0.8, b":bd\r", None),
                 (0.2, b"y", None),
             ],
             clean=False,

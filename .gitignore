@@ -1,4 +1,5 @@
 /target
+/tests/fixtures/retained-guest/target/
 /hello
 __pycache__/
 *.pyc

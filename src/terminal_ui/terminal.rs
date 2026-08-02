@@ -238,7 +238,12 @@ fn queue_style(
     if let Style::Terminal(pty) = style {
         let text = &theme.styles.terminal_text;
         let background = &theme.styles.terminal_background;
-        let foreground = pty.foreground.map_or_else(
+        let (pty_foreground, pty_background) = if pty.reverse {
+            (pty.background, pty.foreground)
+        } else {
+            (pty.foreground, pty.background)
+        };
+        let foreground = pty_foreground.map_or_else(
             || {
                 terminal_color(tier_color(
                     text.foreground,
@@ -247,9 +252,9 @@ fn queue_style(
                     tier,
                 ))
             },
-            terminal_ansi_color,
+            |color| terminal_pty_color(color, tier),
         );
-        let background = pty.background.map_or_else(
+        let background = pty_background.map_or_else(
             || {
                 terminal_color(tier_color(
                     background.background,
@@ -258,7 +263,7 @@ fn queue_style(
                     tier,
                 ))
             },
-            terminal_ansi_color,
+            |color| terminal_pty_color(color, tier),
         );
         queue!(
             writer,
@@ -268,6 +273,18 @@ fn queue_style(
         )?;
         if pty.bold {
             queue!(writer, SetAttribute(Attribute::Bold))?;
+        }
+        if pty.dim {
+            queue!(writer, SetAttribute(Attribute::Dim))?;
+        }
+        if pty.italic {
+            queue!(writer, SetAttribute(Attribute::Italic))?;
+        }
+        if pty.underline {
+            queue!(writer, SetAttribute(Attribute::Underlined))?;
+        }
+        if pty.strikethrough {
+            queue!(writer, SetAttribute(Attribute::CrossedOut))?;
         }
         return Ok(());
     }
@@ -281,6 +298,15 @@ fn queue_style(
         Style::Search => &theme.styles.search,
         Style::Error => &theme.styles.error,
         Style::Border => &theme.styles.border,
+        Style::BufferLineBackground => &theme.styles.buffer_line_background,
+        Style::BufferLineActive => &theme.styles.buffer_line_active,
+        Style::BufferLineInactive => &theme.styles.buffer_line_inactive,
+        Style::BufferLineDirty => &theme.styles.buffer_line_dirty,
+        Style::BufferLineIcon => &theme.styles.buffer_line_icon,
+        Style::BufferLinePin => &theme.styles.buffer_line_pin,
+        Style::BufferLineDiagnostic => &theme.styles.buffer_line_diagnostic,
+        Style::BufferLineClose => &theme.styles.buffer_line_close,
+        Style::BufferLineSeparator => &theme.styles.buffer_line_separator,
         Style::KeyHintBackground => &theme.styles.key_hint_background,
         Style::KeyHintBorder => &theme.styles.key_hint_border,
         Style::KeyHintKey => &theme.styles.key_hint_key,
@@ -291,6 +317,10 @@ fn queue_style(
         Style::DocumentationBorder => &theme.styles.documentation_border,
         Style::DocumentationTitle => &theme.styles.documentation_title,
         Style::DocumentationText => &theme.styles.documentation_text,
+        Style::AiGhost => &theme.styles.ai_ghost,
+        Style::GitSignAdded => &theme.styles.git_sign_added,
+        Style::GitSignChanged => &theme.styles.git_sign_changed,
+        Style::GitSignDeleted => &theme.styles.git_sign_deleted,
         Style::ExplorerBackground => &theme.styles.explorer_background,
         Style::ExplorerHeader => &theme.styles.explorer_header,
         Style::ExplorerCount => &theme.styles.explorer_count,
@@ -372,6 +402,24 @@ fn tier_color(
     }
 }
 
+fn terminal_pty_color(color: crate::terminal_ui::PtyColor, tier: ColorTier) -> Color {
+    match (color, tier) {
+        (crate::terminal_ui::PtyColor::Indexed(index), ColorTier::Ansi16) => {
+            terminal_ansi_color(index % 16)
+        }
+        (crate::terminal_ui::PtyColor::Indexed(index), _) if index > 15 => Color::AnsiValue(index),
+        (crate::terminal_ui::PtyColor::Indexed(index), _) => terminal_ansi_color(index),
+        (crate::terminal_ui::PtyColor::Rgb(r, g, b), ColorTier::TrueColor) => {
+            Color::Rgb { r, g, b }
+        }
+        (crate::terminal_ui::PtyColor::Rgb(r, g, b), ColorTier::Ansi256) => {
+            Color::AnsiValue(16 + 36 * (r / 51) + 6 * (g / 51) + (b / 51))
+        }
+        (crate::terminal_ui::PtyColor::Rgb(r, g, b), ColorTier::Ansi16) => terminal_ansi_color(
+            ((r > 127) as u8) | (((g > 127) as u8) << 1) | (((b > 127) as u8) << 2),
+        ),
+    }
+}
 fn terminal_ansi_color(index: u8) -> Color {
     match index.min(15) {
         0 => Color::Black,
@@ -611,9 +659,10 @@ mod tests {
         queue_style(
             &mut pty,
             crate::terminal_ui::Style::Terminal(crate::terminal_ui::PtyStyle {
-                foreground: Some(1),
-                background: Some(4),
+                foreground: Some(crate::terminal_ui::PtyColor::Indexed(1)),
+                background: Some(crate::terminal_ui::PtyColor::Indexed(4)),
                 bold: true,
+                ..crate::terminal_ui::PtyStyle::default()
             }),
             &theme,
             ColorTier::Ansi256,

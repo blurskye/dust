@@ -1,7 +1,10 @@
 #![forbid(unsafe_code)]
 
+pub mod git;
+pub mod search_workflow;
+
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fs,
     io::{self, Read, Write},
     path::{Path, PathBuf},
@@ -742,32 +745,60 @@ impl ExplorerState {
             .iter()
             .filter_map(|id| self.nodes.get(id).map(|child| (child.path.clone(), *id)))
             .collect::<HashMap<_, _>>();
-        for child in old_children {
-            self.remove_subtree(child);
-        }
+        let mut reused = BTreeSet::new();
         let mut ids = Vec::new();
         for child in children {
-            let id = old_ids_by_path
+            let existing = old_ids_by_path
                 .get(&child.path)
                 .copied()
-                .or_else(|| self.by_path.get(&child.path).copied())
-                .unwrap_or_else(|| self.allocate());
-            self.by_path.insert(child.path.clone(), id);
-            self.nodes.insert(
-                id,
-                ExplorerNode {
+                .filter(|id| self.nodes.get(id).is_some_and(|old| old.kind == child.kind));
+            let id = if let Some(id) = existing {
+                if let Some(old) = self.nodes.get_mut(&id) {
+                    old.parent = Some(node);
+                    old.root = root;
+                    old.name = child.name;
+                    old.path = child.path.clone();
+                }
+                reused.insert(id);
+                id
+            } else {
+                if let Some(stale) = old_ids_by_path.get(&child.path).copied() {
+                    self.remove_subtree(stale);
+                }
+                let id = self
+                    .by_path
+                    .get(&child.path)
+                    .copied()
+                    .unwrap_or_else(|| self.allocate());
+                self.by_path.insert(child.path.clone(), id);
+                self.nodes.insert(
                     id,
-                    parent: Some(node),
-                    root,
-                    path: child.path,
-                    name: child.name,
-                    kind: child.kind,
-                    load: ExplorerLoadState::Unloaded,
-                    expanded: false,
-                    children: Vec::new(),
-                },
-            );
+                    ExplorerNode {
+                        id,
+                        parent: Some(node),
+                        root,
+                        path: child.path,
+                        name: child.name,
+                        kind: child.kind,
+                        load: ExplorerLoadState::Unloaded,
+                        expanded: false,
+                        children: Vec::new(),
+                    },
+                );
+                id
+            };
             ids.push(id);
+        }
+        for old in old_children {
+            if !reused.contains(&old) && !ids.contains(&old) {
+                self.remove_subtree(old);
+            }
+        }
+        if self
+            .selected
+            .is_some_and(|selected| !self.nodes.contains_key(&selected))
+        {
+            self.selected = Some(node);
         }
         if let Some(parent) = self.nodes.get_mut(&node) {
             parent.children = ids;
@@ -817,6 +848,10 @@ impl ExplorerState {
     }
 
     #[must_use]
+    pub fn id_for_path(&self, path: &Path) -> Option<ExplorerNodeId> {
+        self.by_path.get(path).copied()
+    }
+
     pub const fn selected_id(&self) -> Option<ExplorerNodeId> {
         self.selected
     }
@@ -867,6 +902,21 @@ impl ExplorerState {
     pub const fn projection_generation(&self) -> u64 {
         self.projection_generation
     }
+    #[must_use]
+    pub fn watched_directories(&self) -> Vec<PathBuf> {
+        self.nodes
+            .values()
+            .filter(|node| {
+                matches!(node.kind, ExplorerKind::Root | ExplorerKind::Directory)
+                    && node.expanded
+                    && matches!(
+                        node.load,
+                        ExplorerLoadState::Loaded | ExplorerLoadState::Loading(_)
+                    )
+            })
+            .map(|node| node.path.clone())
+            .collect()
+    }
     fn rebuild_visible_projection(&mut self) {
         let mut visible = Vec::new();
         for root in &self.roots {
@@ -900,7 +950,7 @@ impl ExplorerState {
             .and_then(|id| self.visible_positions.get(&id).copied())
             .unwrap_or(first_presented)
             .max(first_presented);
-        let next = (current as isize + delta).clamp(
+        let next = (current as isize).saturating_add(delta).clamp(
             first_presented as isize,
             self.visible_nodes.len() as isize - 1,
         ) as usize;

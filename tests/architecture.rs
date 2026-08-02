@@ -128,6 +128,56 @@ fn tree_sitter_is_owned_only_by_syntax() {
 }
 
 #[test]
+fn editor_geometry_is_projected_from_the_universal_window_snapshot() {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let render =
+        fs::read_to_string(manifest.join("src/terminal_ui/render.rs")).expect("read renderer");
+    let production = render
+        .split("#[cfg(test)]\nmod tests")
+        .next()
+        .unwrap_or(&render);
+    assert!(production.contains("let compositor = active_compositor(state, ui, width, height);"));
+    assert!(production.contains("compositor.projection.window("));
+    assert!(production.contains("Some(compositor.graph_revision) == ui.window_graph_revision"));
+    assert!(production.contains("place_workspace_frame("));
+    assert!(production.contains("render_picker(&mut frame, picker, config, rect)"));
+    assert!(production.contains("let layout = ui.editor_window_layout.as_ref()?;"));
+    assert!(production.contains("layout.source_revision != source_revision"));
+    assert!(!production.contains("crate::editing::LayoutNode"));
+    assert!(!production.contains("collect_pane_rects"));
+    assert!(!production.contains("WindowId(u64::MAX)"));
+    assert!(!production.contains("unwrap_or(&fallback)"));
+
+    let bridge = fs::read_to_string(manifest.join("src/application/window_bridge.rs"))
+        .expect("read window bridge");
+    let production = bridge
+        .split("#[cfg(test)]\nmod tests")
+        .next()
+        .unwrap_or(&bridge);
+    assert!(production.contains("state.window_revision()"));
+    assert!(!production.contains("EditorWindowSignature"));
+    assert!(!production.contains("editor_window_signature"));
+
+    let application = fs::read_to_string(manifest.join("src/application/interactive.rs"))
+        .expect("read coordinator");
+    let production = application
+        .split("#[cfg(test)]\nmod tests")
+        .next()
+        .unwrap_or(&application);
+    assert!(
+        production.contains("pane_viewports(\n            &self.state,\n            &self.ui,")
+    );
+    assert!(
+        production
+            .contains("active_pane_viewport(\n            &self.state,\n            &self.ui,")
+    );
+    assert!(production.contains("self.terminal_window_rect()"));
+    assert!(production.contains("self.explorer_window_rect()"));
+    assert!(production.contains("apply_authoritative_editor_transaction"));
+    assert!(production.contains("Some(layout.graph_revision) == self.windows.revision()"));
+}
+
+#[test]
 fn logical_keys_are_not_dispatched_to_features_outside_the_input_pipeline() {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for relative in [

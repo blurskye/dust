@@ -3,6 +3,34 @@ use std::{fmt, str::FromStr};
 use thiserror::Error;
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum TerminalMouseInput {
+    LeftDown,
+    LeftUp,
+    RightDown,
+    RightUp,
+    MiddleDown,
+    MiddleUp,
+    LeftDrag,
+    RightDrag,
+    MiddleDrag,
+    Move,
+    ScrollUp,
+    ScrollDown,
+    ScrollLeft,
+    ScrollRight,
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum TerminalNavigationKey {
+    Up,
+    Down,
+    Left,
+    Right,
+    Home,
+    End,
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum KeyCode {
     Char(char),
     Enter,
@@ -81,6 +109,41 @@ impl KeyEvent {
     }
 
     #[must_use]
+    pub const fn terminal_mouse(&self) -> Option<TerminalMouseInput> {
+        match &self.code {
+            KeyCode::MouseLeftDown => Some(TerminalMouseInput::LeftDown),
+            KeyCode::MouseLeftUp => Some(TerminalMouseInput::LeftUp),
+            KeyCode::MouseRightDown => Some(TerminalMouseInput::RightDown),
+            KeyCode::MouseRightUp => Some(TerminalMouseInput::RightUp),
+            KeyCode::MouseMiddleDown => Some(TerminalMouseInput::MiddleDown),
+            KeyCode::MouseMiddleUp => Some(TerminalMouseInput::MiddleUp),
+            KeyCode::MouseLeftDrag => Some(TerminalMouseInput::LeftDrag),
+            KeyCode::MouseRightDrag => Some(TerminalMouseInput::RightDrag),
+            KeyCode::MouseMiddleDrag => Some(TerminalMouseInput::MiddleDrag),
+            KeyCode::MouseMove => Some(TerminalMouseInput::Move),
+            KeyCode::MouseScrollUp => Some(TerminalMouseInput::ScrollUp),
+            KeyCode::MouseScrollDown => Some(TerminalMouseInput::ScrollDown),
+            KeyCode::MouseScrollLeft => Some(TerminalMouseInput::ScrollLeft),
+            KeyCode::MouseScrollRight => Some(TerminalMouseInput::ScrollRight),
+            _ => None,
+        }
+    }
+
+    pub const fn terminal_navigation(&self) -> Option<TerminalNavigationKey> {
+        if self.modifiers.control || self.modifiers.alt || self.modifiers.shift {
+            return None;
+        }
+        match &self.code {
+            KeyCode::Up => Some(TerminalNavigationKey::Up),
+            KeyCode::Down => Some(TerminalNavigationKey::Down),
+            KeyCode::Left => Some(TerminalNavigationKey::Left),
+            KeyCode::Right => Some(TerminalNavigationKey::Right),
+            KeyCode::Home => Some(TerminalNavigationKey::Home),
+            KeyCode::End => Some(TerminalNavigationKey::End),
+            _ => None,
+        }
+    }
+
     pub const fn text_character(&self) -> Option<char> {
         match self.code {
             KeyCode::Char(character) if !self.modifiers.control && !self.modifiers.alt => {

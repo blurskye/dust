@@ -8,6 +8,9 @@ use slotmap::{Key, SlotMap};
 
 use crate::editing::{BufferId, CommandInvocation, PaneId, TabId, UndoTree, ViewId};
 
+pub const MAXIMUM_LAYOUT_DEPTH: usize = crate::UNIVERSAL_LAYOUT_DEPTH_CEILING;
+pub const MAXIMUM_LAYOUT_PANES: usize = crate::UNIVERSAL_LAYOUT_WINDOW_CEILING;
+
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum EditorMode {
     #[default]
@@ -36,11 +39,23 @@ pub struct Selection {
     pub kind: SelectionKind,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BufferOrigin {
+    FileOrScratch,
+    VirtualReadOnly {
+        owner: String,
+        generation: u64,
+        document: u64,
+        revision: u64,
+    },
+}
+
 #[derive(Clone, Debug)]
 pub struct Buffer {
     pub text: TextBuffer,
     pub path: Option<PathBuf>,
     pub read_only: bool,
+    pub origin: BufferOrigin,
     pub dirty: bool,
     pub saved_revision: BufferRevision,
     pub(crate) saved_text: String,
@@ -59,11 +74,17 @@ impl Buffer {
             text,
             path,
             read_only: false,
+            origin: BufferOrigin::FileOrScratch,
             dirty: false,
             saved_revision,
             saved_text,
             persisted_bytes,
         }
+    }
+
+    #[must_use]
+    pub fn is_virtual_read_only(&self) -> bool {
+        matches!(self.origin, BufferOrigin::VirtualReadOnly { .. })
     }
 
     pub fn refresh_dirty(&mut self) {
@@ -110,6 +131,8 @@ pub struct View {
     pub cursor: ByteOffset,
     pub selection: Option<Selection>,
     pub scroll_line: usize,
+    /// Wrapped visual row within `scroll_line`; runtime viewport state only.
+    pub scroll_wrap_row: usize,
     pub scroll_column: usize,
     pub preferred_column: Option<usize>,
     pub mode: EditorMode,
@@ -125,6 +148,7 @@ impl View {
             cursor: ByteOffset(0),
             selection: None,
             scroll_line: 0,
+            scroll_wrap_row: 0,
             scroll_column: 0,
             preferred_column: None,
             mode: EditorMode::Normal,
@@ -266,6 +290,8 @@ pub struct EditorState {
     pub active_view: Option<ViewId>,
     pub registers: RegisterStore,
     pub policy: EditingPolicy,
+    window_revision: u64,
+    window_revision_exhausted: bool,
 }
 
 impl EditorState {
@@ -281,7 +307,85 @@ impl EditorState {
             active_view: None,
             registers: RegisterStore::default(),
             policy: EditingPolicy::default(),
+            window_revision: 0,
+            window_revision_exhausted: false,
         }
+    }
+
+    /// Exact source-owned gate for universal-window reconciliation.
+    ///
+    /// Exhaustion fails open: callers receive `None` and must reconcile rather
+    /// than risk treating changed editor presentation as current.
+    #[must_use]
+    pub const fn window_revision(&self) -> Option<u64> {
+        if self.window_revision_exhausted {
+            None
+        } else {
+            Some(self.window_revision)
+        }
+    }
+
+    pub(crate) fn mark_window_changed(&mut self) {
+        match self.window_revision.checked_add(1) {
+            Some(revision) => self.window_revision = revision,
+            None => self.window_revision_exhausted = true,
+        }
+    }
+
+    pub fn set_buffer_dirty(&mut self, buffer: BufferId, dirty: bool) -> bool {
+        let Some(target) = self.buffers.get_mut(buffer) else {
+            return false;
+        };
+        if target.dirty != dirty {
+            target.dirty = dirty;
+            self.mark_window_changed();
+        }
+        true
+    }
+
+    pub fn set_buffer_path_and_dirty(
+        &mut self,
+        buffer: BufferId,
+        path: Option<PathBuf>,
+        dirty: bool,
+    ) -> bool {
+        let Some(target) = self.buffers.get_mut(buffer) else {
+            return false;
+        };
+        let changed = target.path != path || target.dirty != dirty;
+        target.path = path;
+        target.dirty = dirty;
+        if changed {
+            self.mark_window_changed();
+        }
+        true
+    }
+
+    pub fn remove_buffer(&mut self, buffer: BufferId) -> Option<Buffer> {
+        let removed = self.buffers.remove(buffer);
+        if removed.is_some() {
+            self.mark_window_changed();
+        }
+        removed
+    }
+
+    pub fn mark_buffer_saved_as(
+        &mut self,
+        buffer: BufferId,
+        revision: BufferRevision,
+        bytes: Vec<u8>,
+        path: Option<PathBuf>,
+    ) -> bool {
+        let Some(target) = self.buffers.get_mut(buffer) else {
+            return false;
+        };
+        let before_path = target.path.clone();
+        let before_dirty = target.dirty;
+        target.mark_saved_as(revision, bytes, path);
+        if target.path != before_path || target.dirty != before_dirty {
+            self.mark_window_changed();
+        }
+        true
     }
 
     pub fn load_hidden_text(&mut self, text: TextBuffer, path: PathBuf) -> BufferId {
@@ -292,7 +396,63 @@ impl EditorState {
         {
             return buffer;
         }
-        self.buffers.insert(Buffer::new(text, Some(path)))
+        let buffer = self.buffers.insert(Buffer::new(text, Some(path)));
+        self.mark_window_changed();
+        buffer
+    }
+
+    pub(crate) fn open_virtual_read_only(
+        &mut self,
+        text: TextBuffer,
+        owner: String,
+        generation: u64,
+        document: u64,
+        revision: u64,
+    ) -> (BufferId, ViewId) {
+        let (buffer, view) = self.open_text(text, None);
+        let target = &mut self.buffers[buffer];
+        target.read_only = true;
+        target.origin = BufferOrigin::VirtualReadOnly {
+            owner,
+            generation,
+            document,
+            revision,
+        };
+        (buffer, view)
+    }
+
+    pub(crate) fn replace_virtual_read_only(
+        &mut self,
+        buffer: BufferId,
+        expected_revision: u64,
+        revision: u64,
+        text: TextBuffer,
+    ) -> bool {
+        let Some(target) = self.buffers.get_mut(buffer) else {
+            return false;
+        };
+        let BufferOrigin::VirtualReadOnly {
+            owner,
+            generation,
+            document,
+            revision: current,
+        } = target.origin.clone()
+        else {
+            return false;
+        };
+        if current != expected_revision || revision != expected_revision.saturating_add(1) {
+            return false;
+        }
+        let mut replacement = Buffer::new(text, None);
+        replacement.read_only = true;
+        replacement.origin = BufferOrigin::VirtualReadOnly {
+            owner,
+            generation,
+            document,
+            revision,
+        };
+        *target = replacement;
+        true
     }
 
     pub fn open_text(&mut self, text: TextBuffer, path: Option<PathBuf>) -> (BufferId, ViewId) {
@@ -359,6 +519,7 @@ impl EditorState {
                 tab.focused = pane_id;
             }
             self.active_view = Some(view);
+            self.mark_window_changed();
             return;
         }
         if let Some(tab_id) = self.active_tab
@@ -376,6 +537,7 @@ impl EditorState {
             {
                 self.views.remove(previous);
             }
+            self.mark_window_changed();
             return;
         }
         let pane = self.panes.insert(Pane { view });
@@ -385,6 +547,7 @@ impl EditorState {
         });
         self.active_tab = Some(tab);
         self.active_view = Some(view);
+        self.mark_window_changed();
     }
 
     pub fn split_active(&mut self, axis: Axis, ratio: u16) -> Result<ViewId, &'static str> {
@@ -392,7 +555,14 @@ impl EditorState {
             return Err("split ratio must be between 100 and 900");
         }
         let tab_id = self.active_tab.ok_or("no active tab")?;
-        let focused = self.tabs.get(tab_id).ok_or("active tab is stale")?.focused;
+        let tab = self.tabs.get(tab_id).ok_or("active tab is stale")?;
+        let focused = tab.focused;
+        if self.panes.len() >= MAXIMUM_LAYOUT_PANES {
+            return Err("layout pane ceiling reached");
+        }
+        if pane_depth(&tab.root, focused, 1).is_some_and(|depth| depth >= MAXIMUM_LAYOUT_DEPTH) {
+            return Err("layout depth ceiling reached");
+        }
         let source_view = self.panes.get(focused).ok_or("focused pane is stale")?.view;
         let cloned = self
             .views
@@ -409,10 +579,14 @@ impl EditorState {
         }
         tab.focused = pane;
         self.active_view = Some(view);
+        self.mark_window_changed();
         Ok(view)
     }
 
     pub fn new_tab(&mut self) -> Result<TabId, &'static str> {
+        if self.panes.len() >= MAXIMUM_LAYOUT_PANES {
+            return Err("layout pane ceiling reached");
+        }
         let source = self.active_view.ok_or("no active view")?;
         let view = self.views.insert(
             self.views
@@ -427,6 +601,7 @@ impl EditorState {
         });
         self.active_tab = Some(tab);
         self.active_view = Some(view);
+        self.mark_window_changed();
         Ok(tab)
     }
 
@@ -516,10 +691,46 @@ impl EditorState {
         let tab_id = self.active_tab.ok_or("no active tab")?;
         let tab = self.tabs.get_mut(tab_id).ok_or("active tab is stale")?;
         if resize_parent(&mut tab.root, tab.focused, delta) {
+            self.mark_window_changed();
             Ok(())
         } else {
             Err("active pane has no resizable split")
         }
+    }
+
+    /// Swap two pane leaves in the active tab without changing pane, view, or
+    /// content identity. Focus follows the focused pane identity.
+    pub fn swap_panes(&mut self, first: PaneId, second: PaneId) -> Result<(), &'static str> {
+        if first == second {
+            return Ok(());
+        }
+        let tab_id = self.active_tab.ok_or("no active tab")?;
+        let tab = self.tabs.get_mut(tab_id).ok_or("active tab is stale")?;
+        let leaves = pane_ids(&tab.root);
+        if !leaves.contains(&first) || !leaves.contains(&second) {
+            return Err("both panes must belong to the active tab");
+        }
+        if !swap_layout_leaves(&mut tab.root, first, second) {
+            return Err("pane swap could not be applied");
+        }
+        self.mark_window_changed();
+        Ok(())
+    }
+
+    pub(crate) fn close_view(&mut self, view: ViewId) -> Result<(), &'static str> {
+        let (tab, pane) = self
+            .tabs
+            .iter()
+            .find_map(|(tab_id, tab)| {
+                pane_ids(&tab.root)
+                    .into_iter()
+                    .find(|pane| self.panes.get(*pane).is_some_and(|host| host.view == view))
+                    .map(|pane| (tab_id, pane))
+            })
+            .ok_or("view is not hosted")?;
+        self.active_tab = Some(tab);
+        self.set_focused_pane(tab, pane)?;
+        self.close_active_view().map(|_| ())
     }
 
     pub fn close_active_view(&mut self) -> Result<ViewId, &'static str> {
@@ -538,6 +749,7 @@ impl EditorState {
             self.views.remove(view);
             self.active_tab = None;
             self.active_view = None;
+            self.mark_window_changed();
         }
         Ok(view)
     }
@@ -581,6 +793,7 @@ impl EditorState {
         let view = self.panes.get(pane).ok_or("target pane is stale")?.view;
         self.tabs.get_mut(tab).ok_or("target tab is stale")?.focused = pane;
         self.active_view = Some(view);
+        self.mark_window_changed();
         Ok(())
     }
 
@@ -594,8 +807,10 @@ impl EditorState {
             return false;
         };
         let read_only = target.read_only;
+        let origin = target.origin.clone();
         *target = Buffer::new(text, Some(path));
         target.read_only = read_only;
+        target.origin = origin;
         let maximum = ByteOffset(target.text.len_bytes());
         for (_, view) in self
             .views
@@ -611,11 +826,30 @@ impl EditorState {
             view.scroll_line = view
                 .scroll_line
                 .min(target.text.len_lines().saturating_sub(1));
+            view.scroll_wrap_row = 0;
         }
+        self.mark_window_changed();
         true
     }
 
     pub fn validate_layout(&self) -> Result<(), &'static str> {
+        if self.panes.len() > MAXIMUM_LAYOUT_PANES {
+            return Err("layout pane ceiling exceeded");
+        }
+        if self
+            .tabs
+            .values()
+            .any(|tab| layout_depth(&tab.root) > MAXIMUM_LAYOUT_DEPTH)
+        {
+            return Err("layout depth ceiling exceeded");
+        }
+        if self
+            .tabs
+            .values()
+            .any(|tab| !layout_ratios_are_valid(&tab.root))
+        {
+            return Err("layout split ratio is invalid");
+        }
         if self.tabs.is_empty() {
             return if self.panes.is_empty()
                 && self.views.is_empty()
@@ -674,6 +908,40 @@ impl EditorState {
     }
 }
 
+fn layout_ratios_are_valid(node: &LayoutNode) -> bool {
+    match node {
+        LayoutNode::Pane(_) => true,
+        LayoutNode::Split {
+            ratio,
+            first,
+            second,
+            ..
+        } => {
+            (100..=900).contains(ratio)
+                && layout_ratios_are_valid(first)
+                && layout_ratios_are_valid(second)
+        }
+    }
+}
+
+fn layout_depth(node: &LayoutNode) -> usize {
+    match node {
+        LayoutNode::Pane(_) => 1,
+        LayoutNode::Split { first, second, .. } => {
+            1usize.saturating_add(layout_depth(first).max(layout_depth(second)))
+        }
+    }
+}
+
+fn pane_depth(node: &LayoutNode, target: PaneId, depth: usize) -> Option<usize> {
+    match node {
+        LayoutNode::Pane(pane) => (*pane == target).then_some(depth),
+        LayoutNode::Split { first, second, .. } => {
+            pane_depth(first, target, depth + 1).or_else(|| pane_depth(second, target, depth + 1))
+        }
+    }
+}
+
 fn pane_ids(node: &LayoutNode) -> Vec<PaneId> {
     match node {
         LayoutNode::Pane(pane) => vec![*pane],
@@ -683,6 +951,40 @@ fn pane_ids(node: &LayoutNode) -> Vec<PaneId> {
             panes
         }
     }
+}
+
+fn swap_layout_leaves(node: &mut LayoutNode, first: PaneId, second: PaneId) -> bool {
+    let mut found_first = false;
+    let mut found_second = false;
+    fn visit(
+        node: &mut LayoutNode,
+        first: PaneId,
+        second: PaneId,
+        found_first: &mut bool,
+        found_second: &mut bool,
+    ) {
+        match node {
+            LayoutNode::Pane(pane) if *pane == first => {
+                *pane = second;
+                *found_first = true;
+            }
+            LayoutNode::Pane(pane) if *pane == second => {
+                *pane = first;
+                *found_second = true;
+            }
+            LayoutNode::Pane(_) => {}
+            LayoutNode::Split {
+                first: left,
+                second: right,
+                ..
+            } => {
+                visit(left, first, second, found_first, found_second);
+                visit(right, first, second, found_first, found_second);
+            }
+        }
+    }
+    visit(node, first, second, &mut found_first, &mut found_second);
+    found_first && found_second
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1012,6 +1314,67 @@ mod tests {
             state.tabs[first_tab].root,
             super::LayoutNode::Pane(state.tabs[first_tab].focused)
         );
+    }
+
+    #[test]
+    fn split_rejects_before_exceeding_the_universal_layout_depth_ceiling() {
+        let mut state = EditorState::new(PathBuf::from("/bounded"));
+        state.open_text(TextBuffer::from_text("seed"), None);
+        for _ in 1..super::MAXIMUM_LAYOUT_DEPTH {
+            state
+                .split_active(super::Axis::Horizontal, 500)
+                .expect("split within depth ceiling");
+        }
+        assert_eq!(
+            state.split_active(super::Axis::Horizontal, 500),
+            Err("layout depth ceiling reached")
+        );
+        assert_eq!(state.panes.len(), super::MAXIMUM_LAYOUT_DEPTH);
+        state
+            .validate_layout()
+            .expect("bounded layout remains valid");
+    }
+
+    #[test]
+    fn exhausted_window_revision_fails_open_instead_of_hiding_changes() {
+        let mut state = EditorState::new(PathBuf::from("/revision"));
+        state.window_revision = u64::MAX;
+        state.mark_window_changed();
+        assert_eq!(state.window_revision(), None);
+        state.mark_window_changed();
+        assert_eq!(state.window_revision(), None);
+    }
+
+    #[test]
+    fn layout_validation_rejects_ratios_outside_editor_source_policy() {
+        let mut state = EditorState::new(PathBuf::from("/ratios"));
+        state.open_text(TextBuffer::from_text("seed"), None);
+        state
+            .split_active(super::Axis::Horizontal, 500)
+            .expect("split");
+        let tab = state.active_tab.expect("tab");
+        let super::LayoutNode::Split { ratio, .. } = &mut state.tabs[tab].root else {
+            panic!("expected split");
+        };
+        *ratio = 99;
+        assert_eq!(
+            state.validate_layout(),
+            Err("layout split ratio is invalid")
+        );
+    }
+
+    #[test]
+    fn new_tabs_share_the_global_layout_pane_ceiling_without_partial_mutation() {
+        let mut state = EditorState::new(PathBuf::from("/bounded-tabs"));
+        state.open_text(TextBuffer::from_text("seed"), None);
+        for _ in 1..super::MAXIMUM_LAYOUT_PANES {
+            state.new_tab().expect("tab within pane ceiling");
+        }
+        let revision = state.window_revision();
+        assert_eq!(state.new_tab(), Err("layout pane ceiling reached"));
+        assert_eq!(state.window_revision(), revision);
+        assert_eq!(state.panes.len(), super::MAXIMUM_LAYOUT_PANES);
+        state.validate_layout().expect("bounded tabs remain valid");
     }
 
     #[test]

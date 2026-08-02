@@ -125,6 +125,7 @@ pub fn manifest() -> Result<ApiManifest, String> {
             "tasks",
             "syntax",
             "terminals",
+            "windows",
             "workspace",
             "messages",
             "command_labels",
@@ -135,8 +136,57 @@ pub fn manifest() -> Result<ApiManifest, String> {
         capabilities: BTreeMap::from([
             ("plugin_runtime".into(), "wasmtime-component-no-wasi".into()),
             (
+                "plugin_ui".into(),
+                "retained-and-private-cells-queued-typed-v1".into(),
+            ),
+            (
+                "plugin_events".into(),
+                "static-coalesced-queued-acknowledged-v1".into(),
+            ),
+            (
+                "plugin_providers".into(),
+                "picker-source-queued-stream-v1".into(),
+            ),
+            (
+                "plugin_virtual_documents".into(),
+                "queued-read-only-tiled-health-dogfood-v1".into(),
+            ),
+            (
+                "plugin_storage".into(),
+                "private-queued-atomic-cas-v1".into(),
+            ),
+            (
                 "package_network".into(),
                 "official-https-no-redirect-v1".into(),
+            ),
+            (
+                "buffer_line_mouse".into(),
+                "select-right-close-dirty-safe-v1".into(),
+            ),
+            (
+                "ux_navigation".into(),
+                "fold-wrap-visual-row-margin-page-mouse-v2".into(),
+            ),
+            (
+                "documentation".into(),
+                "typed-sections-ranges-exact-completion-v1".into(),
+            ),
+            (
+                "ai_providers".into(),
+                "typed-bounded-fake-application-v1".into(),
+            ),
+            (
+                "content_line".into(),
+                "typed-pins-order-icons-diagnostics-custom-v1".into(),
+            ),
+            ("explorer".into(), "async-watch-follow-scroll-v1".into()),
+            (
+                "git_status".into(),
+                "worker-picker-explorer-aggregate-gutter-hunks-v2".into(),
+            ),
+            (
+                "git_mutation".into(),
+                "trusted-exact-enum-stage-confirmed-reset-v2".into(),
             ),
             ("license".into(), "GPL-3.0-or-later".into()),
             ("plugin_sdk_license".into(), "Apache-2.0".into()),
@@ -149,6 +199,14 @@ pub fn manifest() -> Result<ApiManifest, String> {
             ("release_archive".into(), "deterministic-tar-zst-v1".into()),
             ("installer".into(), "user-local-atomic-v1".into()),
             ("pty_screen".into(), "bounded-vt-subset-v1".into()),
+            (
+                "composable_search".into(),
+                "typed-bounded-file-grep-command-plugin-v1".into(),
+            ),
+            (
+                "terminal_emulation".into(),
+                "bounded-xterm-live-external-fixture-v1".into(),
+            ),
         ]),
     })
 }

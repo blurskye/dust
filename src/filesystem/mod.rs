@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, BTreeSet, HashSet},
     fs,
     io::{self, Read, Write},
     path::{Path, PathBuf},
@@ -1262,6 +1262,386 @@ fn list_scoped_directory(
     })
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum ExplorerWatchEntryKind {
+    Directory,
+    File,
+    Symlink,
+}
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct ExplorerWatchEntryFingerprint {
+    pub name: Vec<u8>,
+    pub kind: ExplorerWatchEntryKind,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExplorerDirectoryFingerprint {
+    pub directory: PathBuf,
+    pub entries: Vec<ExplorerWatchEntryFingerprint>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExplorerWatchPolicy {
+    pub enabled: bool,
+    pub poll_interval: Duration,
+    pub debounce: Duration,
+    pub maximum_directories: usize,
+    pub maximum_entries_per_directory: usize,
+    pub maximum_events: usize,
+    pub maximum_path_bytes: usize,
+    pub queue_capacity: usize,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExplorerWatchGeneration(pub u64);
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExplorerWatchBatch {
+    pub generation: ExplorerWatchGeneration,
+    pub root_revision: u64,
+    pub directories: Vec<PathBuf>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ExplorerWatchEvent {
+    Batch(ExplorerWatchBatch),
+    Failed {
+        generation: ExplorerWatchGeneration,
+        root_revision: u64,
+    },
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
+pub enum ExplorerWatchError {
+    #[error("explorer watch policy is invalid")]
+    InvalidPolicy,
+    #[error("explorer watch set exceeds limits")]
+    Limit,
+    #[error("explorer watch worker is unavailable")]
+    WorkerUnavailable,
+}
+
+enum ExplorerWatchCommand {
+    Reconcile {
+        generation: ExplorerWatchGeneration,
+        root_revision: u64,
+        roots: Vec<PathBuf>,
+        directories: Vec<PathBuf>,
+    },
+    Cancel,
+}
+struct ExplorerWatchSet {
+    generation: ExplorerWatchGeneration,
+    root_revision: u64,
+    roots: Vec<PathBuf>,
+    directories: Vec<PathBuf>,
+    fingerprints: BTreeMap<PathBuf, ExplorerDirectoryFingerprint>,
+    pending: BTreeSet<PathBuf>,
+    changed_at: Option<std::time::Instant>,
+}
+
+#[cfg(unix)]
+fn watch_name_bytes(name: &std::ffi::OsStr) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+    name.as_bytes().to_vec()
+}
+#[cfg(not(unix))]
+fn watch_name_bytes(name: &std::ffi::OsStr) -> Vec<u8> {
+    name.to_string_lossy().as_bytes().to_vec()
+}
+
+pub fn explorer_directory_fingerprint(
+    directory: &Path,
+    roots: &[PathBuf],
+    maximum_entries: usize,
+    maximum_path_bytes: usize,
+) -> Result<ExplorerDirectoryFingerprint, ExplorerWatchError> {
+    if maximum_entries == 0 || maximum_path_bytes == 0 {
+        return Err(ExplorerWatchError::InvalidPolicy);
+    }
+    let metadata =
+        fs::symlink_metadata(directory).map_err(|_| ExplorerWatchError::WorkerUnavailable)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(ExplorerWatchError::WorkerUnavailable);
+    }
+    let canonical =
+        fs::canonicalize(directory).map_err(|_| ExplorerWatchError::WorkerUnavailable)?;
+    if !roots.iter().any(|root| canonical.starts_with(root)) {
+        return Err(ExplorerWatchError::Limit);
+    }
+    let mut entries = Vec::new();
+    let mut bytes = canonical.as_os_str().len();
+    let read = fs::read_dir(&canonical).map_err(|_| ExplorerWatchError::WorkerUnavailable)?;
+    for entry in read {
+        let entry = entry.map_err(|_| ExplorerWatchError::WorkerUnavailable)?;
+        if entries.len() >= maximum_entries {
+            return Err(ExplorerWatchError::Limit);
+        }
+        let name = watch_name_bytes(&entry.file_name());
+        bytes = bytes.saturating_add(name.len());
+        if bytes > maximum_path_bytes {
+            return Err(ExplorerWatchError::Limit);
+        }
+        let kind = entry
+            .file_type()
+            .map_err(|_| ExplorerWatchError::WorkerUnavailable)?;
+        entries.push(ExplorerWatchEntryFingerprint {
+            name,
+            kind: if kind.is_dir() {
+                ExplorerWatchEntryKind::Directory
+            } else if kind.is_file() {
+                ExplorerWatchEntryKind::File
+            } else {
+                ExplorerWatchEntryKind::Symlink
+            },
+        });
+    }
+    entries.sort();
+    Ok(ExplorerDirectoryFingerprint {
+        directory: canonical,
+        entries,
+    })
+}
+
+fn collect_explorer_fingerprints(
+    directories: &[PathBuf],
+    roots: &[PathBuf],
+    policy: &ExplorerWatchPolicy,
+) -> Result<BTreeMap<PathBuf, ExplorerDirectoryFingerprint>, ExplorerWatchError> {
+    let mut snapshots = BTreeMap::new();
+    for directory in directories {
+        match explorer_directory_fingerprint(
+            directory,
+            roots,
+            policy.maximum_entries_per_directory,
+            policy.maximum_path_bytes,
+        ) {
+            Ok(fingerprint) => {
+                snapshots.insert(directory.clone(), fingerprint);
+            }
+            Err(ExplorerWatchError::WorkerUnavailable) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(snapshots)
+}
+
+pub fn diff_explorer_fingerprints(
+    previous: &BTreeMap<PathBuf, ExplorerDirectoryFingerprint>,
+    current: &BTreeMap<PathBuf, ExplorerDirectoryFingerprint>,
+    maximum_events: usize,
+) -> Result<Vec<PathBuf>, ExplorerWatchError> {
+    let mut paths = previous
+        .keys()
+        .chain(current.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    paths.retain(|path| previous.get(path) != current.get(path));
+    if paths.len() > maximum_events {
+        return Err(ExplorerWatchError::Limit);
+    }
+    Ok(paths.into_iter().collect())
+}
+
+pub struct ExplorerWatchService {
+    policy: ExplorerWatchPolicy,
+    sender: Option<SyncSender<ExplorerWatchCommand>>,
+    receiver: Option<Receiver<ExplorerWatchEvent>>,
+    generation: u64,
+    reconcile_count: u64,
+}
+impl ExplorerWatchService {
+    pub fn start(policy: ExplorerWatchPolicy) -> Result<Self, ExplorerWatchError> {
+        if policy.maximum_directories == 0
+            || policy.maximum_entries_per_directory == 0
+            || policy.maximum_events == 0
+            || policy.maximum_path_bytes == 0
+            || policy.queue_capacity == 0
+            || policy.poll_interval.is_zero()
+        {
+            return Err(ExplorerWatchError::InvalidPolicy);
+        }
+        if !policy.enabled {
+            return Ok(Self {
+                policy,
+                sender: None,
+                receiver: None,
+                generation: 0,
+                reconcile_count: 0,
+            });
+        }
+        let (sender, commands) = mpsc::sync_channel(policy.queue_capacity);
+        let (events, receiver) = mpsc::sync_channel(policy.queue_capacity);
+        let worker_policy = policy.clone();
+        thread::Builder::new()
+            .name("dust-explorer-watch".into())
+            .spawn(move || explorer_watch_worker(worker_policy, commands, events))
+            .map_err(|_| ExplorerWatchError::WorkerUnavailable)?;
+        Ok(Self {
+            policy,
+            sender: Some(sender),
+            receiver: Some(receiver),
+            generation: 0,
+            reconcile_count: 0,
+        })
+    }
+    pub fn reconcile(
+        &mut self,
+        root_revision: u64,
+        roots: Vec<PathBuf>,
+        mut directories: Vec<PathBuf>,
+    ) -> Result<Option<ExplorerWatchGeneration>, ExplorerWatchError> {
+        if !self.policy.enabled {
+            return Ok(None);
+        }
+        directories.sort();
+        directories.dedup();
+        if directories.len() > self.policy.maximum_directories
+            || directories
+                .iter()
+                .map(|path| path.as_os_str().len())
+                .sum::<usize>()
+                > self.policy.maximum_path_bytes
+        {
+            return Err(ExplorerWatchError::Limit);
+        }
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .ok_or(ExplorerWatchError::Limit)?;
+        let generation = ExplorerWatchGeneration(self.generation);
+        self.sender
+            .as_ref()
+            .ok_or(ExplorerWatchError::WorkerUnavailable)?
+            .try_send(ExplorerWatchCommand::Reconcile {
+                generation,
+                root_revision,
+                roots,
+                directories,
+            })
+            .map_err(|_| ExplorerWatchError::WorkerUnavailable)?;
+        self.reconcile_count = self.reconcile_count.saturating_add(1);
+        Ok(Some(generation))
+    }
+    pub fn cancel(&mut self) {
+        self.generation = self.generation.saturating_add(1);
+        if let Some(sender) = &self.sender {
+            let _ = sender.try_send(ExplorerWatchCommand::Cancel);
+        }
+        self.reconcile_count = self.reconcile_count.saturating_add(1);
+    }
+    pub fn poll(&self) -> Vec<ExplorerWatchEvent> {
+        let mut events = Vec::new();
+        let Some(receiver) = &self.receiver else {
+            return events;
+        };
+        while events.len() < self.policy.maximum_events {
+            match receiver.try_recv() {
+                Ok(event) => events.push(event),
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+            }
+        }
+        events
+    }
+    #[must_use]
+    pub const fn reconcile_count(&self) -> u64 {
+        self.reconcile_count
+    }
+}
+
+fn explorer_watch_worker(
+    policy: ExplorerWatchPolicy,
+    commands: Receiver<ExplorerWatchCommand>,
+    events: SyncSender<ExplorerWatchEvent>,
+) {
+    let mut active: Option<ExplorerWatchSet> = None;
+    loop {
+        match commands.recv_timeout(policy.poll_interval) {
+            Ok(ExplorerWatchCommand::Cancel) => active = None,
+            Ok(ExplorerWatchCommand::Reconcile {
+                generation,
+                root_revision,
+                roots,
+                directories,
+            }) => {
+                let fingerprints = directories
+                    .iter()
+                    .map(|directory| {
+                        explorer_directory_fingerprint(
+                            directory,
+                            &roots,
+                            policy.maximum_entries_per_directory,
+                            policy.maximum_path_bytes,
+                        )
+                        .map(|fingerprint| (directory.clone(), fingerprint))
+                    })
+                    .collect::<Result<BTreeMap<_, _>, _>>();
+                match fingerprints {
+                    Ok(fingerprints) => {
+                        active = Some(ExplorerWatchSet {
+                            generation,
+                            root_revision,
+                            roots,
+                            directories,
+                            fingerprints,
+                            pending: BTreeSet::new(),
+                            changed_at: None,
+                        })
+                    }
+                    Err(_) => {
+                        let _ = events.try_send(ExplorerWatchEvent::Failed {
+                            generation,
+                            root_revision,
+                        });
+                        active = None
+                    }
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                let Some(set) = active.as_mut() else { continue };
+                let current = collect_explorer_fingerprints(&set.directories, &set.roots, &policy);
+                let Ok(current) = current else {
+                    let _ = events.try_send(ExplorerWatchEvent::Failed {
+                        generation: set.generation,
+                        root_revision: set.root_revision,
+                    });
+                    active = None;
+                    continue;
+                };
+                match diff_explorer_fingerprints(&set.fingerprints, &current, policy.maximum_events)
+                {
+                    Ok(changed) => {
+                        set.fingerprints = current;
+                        if !changed.is_empty() {
+                            set.pending.extend(changed);
+                            set.changed_at.get_or_insert_with(std::time::Instant::now);
+                        }
+                        if !set.pending.is_empty()
+                            && set
+                                .changed_at
+                                .is_some_and(|at| at.elapsed() >= policy.debounce)
+                        {
+                            let directories = std::mem::take(&mut set.pending)
+                                .into_iter()
+                                .take(policy.maximum_events)
+                                .collect();
+                            let _ =
+                                events.try_send(ExplorerWatchEvent::Batch(ExplorerWatchBatch {
+                                    generation: set.generation,
+                                    root_revision: set.root_revision,
+                                    directories,
+                                }));
+                            set.changed_at = None;
+                        }
+                    }
+                    Err(_) => {
+                        let _ = events.try_send(ExplorerWatchEvent::Failed {
+                            generation: set.generation,
+                            root_revision: set.root_revision,
+                        });
+                        active = None;
+                    }
+                }
+            }
+        }
+    }
+}
+
 const ABSOLUTE_WORKSPACE_SEARCH_FILES: usize = 1_000_000;
 const ABSOLUTE_WORKSPACE_SEARCH_RESULTS: usize = 100_000;
 const ABSOLUTE_WORKSPACE_SEARCH_FILE_BYTES: u64 = 256 * 1024 * 1024;
@@ -1754,9 +2134,262 @@ pub enum VfsError {
     WorkerStopped,
 }
 
+const ABSOLUTE_WORKSPACE_FILE_PATH_BYTES: usize = 16 * 1024 * 1024;
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorkspaceFilePolicy {
+    pub roots: Vec<PathBuf>,
+    pub root_revision: u64,
+    pub include_hidden: bool,
+    pub include_ignored: bool,
+    pub maximum_files: usize,
+    pub maximum_path_bytes: usize,
+    pub batch_size: usize,
+    pub event_queue_capacity: usize,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorkspaceFileEntry {
+    pub id: String,
+    pub canonical_path: PathBuf,
+    pub relative_path: PathBuf,
+    pub root: PathBuf,
+}
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct WorkspaceFileSummary {
+    pub files: usize,
+    pub path_bytes: usize,
+    pub truncated: bool,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum WorkspaceFileEvent {
+    Batch {
+        generation: u64,
+        root_revision: u64,
+        entries: Vec<WorkspaceFileEntry>,
+    },
+    Complete {
+        generation: u64,
+        root_revision: u64,
+        summary: WorkspaceFileSummary,
+    },
+    Cancelled {
+        generation: u64,
+        root_revision: u64,
+    },
+    Failed {
+        generation: u64,
+        root_revision: u64,
+        error: String,
+    },
+}
+#[derive(Default)]
+pub struct WorkspaceFileService {
+    generation: u64,
+    cancellation: Option<Arc<AtomicBool>>,
+    receiver: Option<Receiver<WorkspaceFileEvent>>,
+}
+impl WorkspaceFileService {
+    pub fn start(&mut self, policy: WorkspaceFilePolicy) -> Result<u64, WorkspaceFileError> {
+        validate_workspace_file_policy(&policy)?;
+        self.cancel();
+        self.generation = self.generation.saturating_add(1);
+        let generation = self.generation;
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let worker = Arc::clone(&cancellation);
+        let (sender, receiver) = mpsc::sync_channel(policy.event_queue_capacity);
+        thread::Builder::new()
+            .name(format!("dust-workspace-files-{generation}"))
+            .spawn(move || run_workspace_files(generation, policy, worker, sender))
+            .map_err(WorkspaceFileError::Spawn)?;
+        self.cancellation = Some(cancellation);
+        self.receiver = Some(receiver);
+        Ok(generation)
+    }
+    pub fn cancel(&mut self) {
+        if let Some(c) = self.cancellation.take() {
+            c.store(true, Ordering::Release)
+        }
+        self.receiver = None
+    }
+    pub fn try_event(&self) -> Option<WorkspaceFileEvent> {
+        self.receiver.as_ref().and_then(|r| r.try_recv().ok())
+    }
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+}
+impl Drop for WorkspaceFileService {
+    fn drop(&mut self) {
+        self.cancel()
+    }
+}
+#[derive(Debug, Error)]
+pub enum WorkspaceFileError {
+    #[error("workspace files require roots")]
+    NoRoots,
+    #[error("workspace file policy exceeds {0}")]
+    Unsafe(&'static str),
+    #[error("failed to start workspace file worker: {0}")]
+    Spawn(io::Error),
+}
+fn validate_workspace_file_policy(p: &WorkspaceFilePolicy) -> Result<(), WorkspaceFileError> {
+    if p.roots.is_empty() {
+        return Err(WorkspaceFileError::NoRoots);
+    }
+    if !(1..=ABSOLUTE_WORKSPACE_SEARCH_FILES).contains(&p.maximum_files) {
+        return Err(WorkspaceFileError::Unsafe("maximum_files"));
+    }
+    if !(1..=ABSOLUTE_WORKSPACE_FILE_PATH_BYTES).contains(&p.maximum_path_bytes) {
+        return Err(WorkspaceFileError::Unsafe("maximum_path_bytes"));
+    }
+    if !(1..=4096).contains(&p.batch_size) {
+        return Err(WorkspaceFileError::Unsafe("batch_size"));
+    }
+    if !(1..=1024).contains(&p.event_queue_capacity) {
+        return Err(WorkspaceFileError::Unsafe("event_queue_capacity"));
+    }
+    Ok(())
+}
+fn send_file_event(
+    sender: &SyncSender<WorkspaceFileEvent>,
+    cancel: &AtomicBool,
+    mut event: WorkspaceFileEvent,
+) -> bool {
+    loop {
+        if cancel.load(Ordering::Acquire) {
+            return false;
+        }
+        match sender.try_send(event) {
+            Ok(()) => return true,
+            Err(TrySendError::Full(v)) => {
+                event = v;
+                thread::yield_now()
+            }
+            Err(TrySendError::Disconnected(_)) => return false,
+        }
+    }
+}
+fn run_workspace_files(
+    generation: u64,
+    policy: WorkspaceFilePolicy,
+    cancel: Arc<AtomicBool>,
+    sender: SyncSender<WorkspaceFileEvent>,
+) {
+    let mut roots = policy
+        .roots
+        .iter()
+        .filter_map(|p| fs::canonicalize(p).ok())
+        .collect::<Vec<_>>();
+    roots.sort();
+    roots.dedup();
+    if roots.is_empty() {
+        let _ = send_file_event(
+            &sender,
+            &cancel,
+            WorkspaceFileEvent::Failed {
+                generation,
+                root_revision: policy.root_revision,
+                error: "no canonical workspace roots".into(),
+            },
+        );
+        return;
+    }
+    let mut builder = WalkBuilder::new(&roots[0]);
+    for root in roots.iter().skip(1) {
+        builder.add(root);
+    }
+    builder
+        .follow_links(false)
+        .hidden(!policy.include_hidden)
+        .ignore(!policy.include_ignored)
+        .git_ignore(!policy.include_ignored)
+        .git_global(!policy.include_ignored)
+        .git_exclude(!policy.include_ignored)
+        .parents(!policy.include_ignored);
+    let mut accepted = Vec::new();
+    let mut seen = HashSet::new();
+    let mut bytes: usize = 0;
+    let mut truncated = false;
+    for entry in builder.build() {
+        if cancel.load(Ordering::Acquire) {
+            let _ = send_file_event(
+                &sender,
+                &cancel,
+                WorkspaceFileEvent::Cancelled {
+                    generation,
+                    root_revision: policy.root_revision,
+                },
+            );
+            return;
+        }
+        let Ok(entry) = entry else { continue };
+        if !entry.file_type().is_some_and(|t| t.is_file()) {
+            continue;
+        }
+        let path = entry.into_path();
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        let Some(root) = owner_root(&path, &roots).cloned() else {
+            continue;
+        };
+        let Ok(relative) = path.strip_prefix(&root).map(Path::to_path_buf) else {
+            continue;
+        };
+        let cost = path
+            .as_os_str()
+            .len()
+            .saturating_add(relative.as_os_str().len());
+        if accepted.len() >= policy.maximum_files
+            || bytes.saturating_add(cost) > policy.maximum_path_bytes
+        {
+            truncated = true;
+            break;
+        }
+        bytes += cost;
+        accepted.push(WorkspaceFileEntry {
+            id: format!("{}:{}", root.display(), relative.display()),
+            canonical_path: path,
+            relative_path: relative,
+            root,
+        });
+    }
+    accepted.sort_by(|a, b| {
+        a.root
+            .cmp(&b.root)
+            .then_with(|| a.relative_path.cmp(&b.relative_path))
+    });
+    for batch in accepted.chunks(policy.batch_size) {
+        if !send_file_event(
+            &sender,
+            &cancel,
+            WorkspaceFileEvent::Batch {
+                generation,
+                root_revision: policy.root_revision,
+                entries: batch.to_vec(),
+            },
+        ) {
+            return;
+        }
+    }
+    let _ = send_file_event(
+        &sender,
+        &cancel,
+        WorkspaceFileEvent::Complete {
+            generation,
+            root_revision: policy.root_revision,
+            summary: WorkspaceFileSummary {
+                files: accepted.len(),
+                path_bytes: bytes,
+                truncated,
+            },
+        },
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
+        collections::BTreeMap,
         fs,
         path::Path,
         time::{Duration, Instant},
@@ -1766,14 +2399,104 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        DirectoryEntryKind, DirectoryService, RECOVERY_DIRECTORY_ENTRY_CEILING,
+        DirectoryEntryKind, DirectoryService, ExplorerWatchEntryKind, ExplorerWatchError,
+        ExplorerWatchPolicy, ExplorerWatchService, RECOVERY_DIRECTORY_ENTRY_CEILING,
         RECOVERY_JOURNAL_BYTE_CEILING, RECOVERY_PAYLOAD_BYTE_CEILING, RecoveryRecord, VfsError,
         VfsResult, VfsWorker, WorkspaceSearchEvent, WorkspaceSearchMatch, WorkspaceSearchPolicy,
         WorkspaceSearchService, WorkspaceSearchSummary, WriteExpectation, atomic_write,
-        bounded_recovery_entries, checked_atomic_write, cleanup_recovery, discover_recovery,
+        bounded_recovery_entries, checked_atomic_write, cleanup_recovery,
+        diff_explorer_fingerprints, discover_recovery, explorer_directory_fingerprint,
         list_scoped_directory, natural_name_key, read_bounded_bytes, read_bounded_utf8,
         recovery_journal_size_allowed, recovery_payload_size_allowed, write_recovery,
     };
+
+    #[test]
+    fn explorer_watch_fingerprints_are_deterministic_metadata_only_and_bounded() {
+        let root = tempdir().unwrap();
+        let canonical = fs::canonicalize(root.path()).unwrap();
+        fs::write(root.path().join("b"), "one").unwrap();
+        fs::create_dir(root.path().join("a")).unwrap();
+        let first =
+            explorer_directory_fingerprint(root.path(), std::slice::from_ref(&canonical), 8, 1024)
+                .unwrap();
+        assert_eq!(
+            first
+                .entries
+                .iter()
+                .map(|entry| entry.name.clone())
+                .collect::<Vec<_>>(),
+            vec![b"a".to_vec(), b"b".to_vec()]
+        );
+        fs::write(
+            root.path().join("b"),
+            "content changes are intentionally ignored",
+        )
+        .unwrap();
+        let unchanged =
+            explorer_directory_fingerprint(root.path(), std::slice::from_ref(&canonical), 8, 1024)
+                .unwrap();
+        assert_eq!(first, unchanged);
+        fs::rename(root.path().join("b"), root.path().join("c")).unwrap();
+        let renamed =
+            explorer_directory_fingerprint(root.path(), std::slice::from_ref(&canonical), 8, 1024)
+                .unwrap();
+        let previous = BTreeMap::from([(canonical.clone(), first)]);
+        let current = BTreeMap::from([(canonical.clone(), renamed)]);
+        assert_eq!(
+            diff_explorer_fingerprints(&previous, &current, 1).unwrap(),
+            vec![canonical.clone()]
+        );
+        assert_eq!(
+            diff_explorer_fingerprints(&previous, &current, 0),
+            Err(ExplorerWatchError::Limit)
+        );
+        fs::remove_file(root.path().join("c")).unwrap();
+        fs::create_dir(root.path().join("c")).unwrap();
+        let type_changed =
+            explorer_directory_fingerprint(root.path(), std::slice::from_ref(&canonical), 8, 1024)
+                .unwrap();
+        assert_ne!(current[&canonical], type_changed);
+        assert_eq!(
+            explorer_directory_fingerprint(root.path(), std::slice::from_ref(&canonical), 1, 1024),
+            Err(ExplorerWatchError::Limit)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn explorer_watch_preserves_non_utf8_names_and_never_follows_symlinks() {
+        use std::os::unix::{ffi::OsStringExt, fs::symlink};
+        let root = tempdir().unwrap();
+        let canonical = fs::canonicalize(root.path()).unwrap();
+        let non_utf8 = std::ffi::OsString::from_vec(vec![b'x', 0xff]);
+        assert_eq!(super::watch_name_bytes(&non_utf8), vec![b'x', 0xff]);
+        let outside = tempdir().unwrap();
+        fs::write(outside.path().join("hidden"), "x").unwrap();
+        symlink(outside.path(), root.path().join("link")).unwrap();
+        let snapshot =
+            explorer_directory_fingerprint(root.path(), std::slice::from_ref(&canonical), 8, 1024)
+                .unwrap();
+        assert!(snapshot.entries.iter().any(|entry|entry.name==b"link"&&entry.kind==ExplorerWatchEntryKind::Symlink));
+        assert!(!snapshot.entries.iter().any(|entry| entry.name == b"hidden"));
+    }
+
+    #[test]
+    fn disabled_explorer_watch_has_zero_worker_or_snapshot_activity() {
+        let policy = ExplorerWatchPolicy {
+            enabled: false,
+            poll_interval: Duration::from_millis(50),
+            debounce: Duration::ZERO,
+            maximum_directories: 2,
+            maximum_entries_per_directory: 2,
+            maximum_events: 2,
+            maximum_path_bytes: 256,
+            queue_capacity: 1,
+        };
+        let mut service = ExplorerWatchService::start(policy).unwrap();
+        assert_eq!(service.reconcile(1, Vec::new(), Vec::new()).unwrap(), None);
+        assert_eq!(service.reconcile_count(), 0);
+        assert!(service.poll().is_empty());
+    }
 
     #[test]
     fn atomic_write_replaces_and_preserves_text_format_bytes() {
@@ -2341,5 +3064,55 @@ mod tests {
             std::thread::sleep(Duration::from_millis(2));
         }
         assert_eq!(fs::read(path).expect("read"), b"saved");
+    }
+    #[test]
+    fn workspace_files_are_bounded_deterministic_and_ignore_symlink_escapes() {
+        let root = tempdir().unwrap();
+        fs::create_dir(root.path().join("sub")).unwrap();
+        fs::write(root.path().join("b.txt"), "b").unwrap();
+        fs::write(root.path().join("sub/a.txt"), "a").unwrap();
+        fs::write(root.path().join(".hidden"), "h").unwrap();
+        let mut service = super::WorkspaceFileService::default();
+        let generation = service
+            .start(super::WorkspaceFilePolicy {
+                roots: vec![root.path().to_path_buf()],
+                root_revision: 7,
+                include_hidden: false,
+                include_ignored: false,
+                maximum_files: 10,
+                maximum_path_bytes: 4096,
+                batch_size: 1,
+                event_queue_capacity: 8,
+            })
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut entries = Vec::new();
+        let summary = loop {
+            if let Some(event) = service.try_event() {
+                match event {
+                    super::WorkspaceFileEvent::Batch {
+                        generation: g,
+                        root_revision,
+                        entries: batch,
+                    } => {
+                        assert_eq!((g, root_revision), (generation, 7));
+                        entries.extend(batch)
+                    }
+                    super::WorkspaceFileEvent::Complete { summary, .. } => break summary,
+                    super::WorkspaceFileEvent::Failed { error, .. } => panic!("{error}"),
+                    _ => {}
+                }
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        };
+        assert_eq!(summary.files, 2);
+        assert_eq!(
+            entries
+                .iter()
+                .map(|e| e.relative_path.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            vec!["b.txt", "sub/a.txt"]
+        );
     }
 }

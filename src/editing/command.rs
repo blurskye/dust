@@ -6,6 +6,7 @@ use crate::editing::{BufferId, EditorState, EditorTransaction, ViewId};
 
 const BUILTIN_NAMESPACES: &[&str] = &[
     "editor",
+    "ai",
     "input",
     "startup",
     "session",
@@ -49,6 +50,7 @@ const BUILTIN_NAMESPACES: &[&str] = &[
     "recent",
     "recovery",
     "application",
+    "window",
     "crash",
     "format",
     "lint",

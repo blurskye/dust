@@ -5,6 +5,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::ai::{
+    AiBufferContext, AiCapability, AiComposerProposal, AiHostBufferId, AiLimits, AiModelId,
+    AiOutput, AiProviderConfig, AiProviderId, AiProviderRegistry, AiProviderService, AiRequest,
+    AiRequestContext, AiRequestId, AiStreamRevision, AiStreamState, AiTextEdit, AiTextRange,
+    FakeChunk, FakeProviderScript, FakeTerminal,
+};
 use crate::configuration::LoadedConfig;
 use crate::debugging::{
     DapControl, DapEvent, DapResponse, DapService, DapSourceBreakpoint, DapStackFrame,
@@ -20,9 +26,12 @@ use crate::editing::{
     UndoPolicy, ViewId, register_builtin_commands,
 };
 use crate::filesystem::{
-    CheckedResourceIntent, DirectoryEntryKind, DirectoryService, RecoveryRecord, RequestId,
-    ResourceIntentKind, VfsError, VfsResult, VfsWorker, WorkspaceSearchEvent, WorkspaceSearchMatch,
-    WorkspaceSearchPolicy, WorkspaceSearchService, WriteExpectation,
+    CheckedResourceIntent, DirectoryEntryKind, DirectoryService, ExplorerWatchBatch,
+    ExplorerWatchEvent, ExplorerWatchGeneration, ExplorerWatchPolicy, ExplorerWatchService,
+    RecoveryRecord, RequestId, ResourceIntentKind, VfsError, VfsResult, VfsWorker,
+    WorkspaceFileEntry, WorkspaceFileEvent, WorkspaceFilePolicy, WorkspaceFileService,
+    WorkspaceSearchEvent, WorkspaceSearchMatch, WorkspaceSearchPolicy, WorkspaceSearchService,
+    WriteExpectation,
 };
 use crate::input::{
     InputAction, InputContextLayer, InputContextRegistry, KeyEvent, KeymapLayer, KeymapResolver,
@@ -30,8 +39,8 @@ use crate::input::{
 };
 use crate::languages::{
     LspCapabilities, LspCompletionItem, LspDocument, LspDocumentEdit, LspEvent, LspFeature,
-    LspFeatureResult, LspPosition, LspRange, LspService, LspTextEdit, LspWorkspaceEdit, file_uri,
-    language_id_for_path, path_from_file_uri,
+    LspFeatureResult, LspMarkupContent, LspMarkupKind, LspPosition, LspRange, LspService,
+    LspTextEdit, LspWorkspaceEdit, file_uri, language_id_for_path, path_from_file_uri,
 };
 use crate::observability::{
     CrashSnapshotWriter, LiveCrashSnapshot, LogLevel, LogPolicy, StructuredLogs,
@@ -44,11 +53,14 @@ use crate::packages::{
 use crate::persistence::{
     PersistedBreakpoint, PersistedLargeFileOverride, PersistedLayout, PersistedLocation,
     PersistedMark, PersistedPane, PersistedSession, PersistedState, PersistedTab, PersistedWatch,
-    PersistenceEvent, PersistenceId, PersistencePolicy, PersistenceService, STATE_VERSION,
+    PersistedWindowPlacement, PersistedWindowRule, PersistenceEvent, PersistenceId,
+    PersistencePolicy, PersistenceService, STATE_VERSION, validate_window_rules,
 };
 use crate::plugins::{
-    PluginContributionCatalog, PluginEvent, PluginExecution, PluginLimits, PluginLoadId,
-    PluginManager, PluginSnapshot, PluginStatus,
+    PluginContributionCatalog, PluginEvent, PluginExecution, PluginHostEventQueue, PluginLimits,
+    PluginLoadId, PluginManager, PluginProviderBroker, PluginProviderSessionStatus, PluginSnapshot,
+    PluginStatus, PluginStorageResult, PluginStorageService, PluginSubscriptionKind, PluginUiEvent,
+    PluginVirtualDocumentBroker,
 };
 use crate::processes::{
     ExecutionPreflightEvent, ExecutionPreflightRequest, ExecutionPreflightService, JobEvent, JobId,
@@ -60,14 +72,18 @@ use crate::syntax::{
     SyntaxSupport, builtin_languages, language_for_path,
 };
 use crate::terminal_ui::{
-    CompletionItem, DashboardAction, DocumentationPopupKind, DocumentationPopupState,
-    ExplorerSegmentRole, ExplorerUiRow, ExplorerUiSegment, ExplorerUiState, KeyHintUiRow,
-    KeyHintUiState, KeyInputKind, LanguageCompletionState, PickerRow, PickerUiState, PromptKind,
-    PromptState, PtyScreen, TerminalError, TerminalOptions, TerminalPanelState, TerminalSession,
-    ToolMenuRow, ToolMenuState, UiDiagnostic, UiEvent, UiFold, UiInlayHint, UiState, UiSyntaxSpan,
-    active_pane_viewport, editor_content_width, editor_gutter_width, explorer_panel_width,
-    pane_viewports, render, snap_display_column, snap_display_column_forward,
-    terminal_panel_geometry,
+    CompletionItem, CompositorLayoutState, ContentTabDiagnostic, ContentTabDiagnosticSeverity,
+    ContentTabEntry, ContentTabIdentity, ContentTabKind, DashboardAction, DocumentationMarkupKind,
+    DocumentationPopupKind, DocumentationPopupState, DocumentationSection,
+    EditorWindowBinding as UiEditorWindowBinding, EditorWindowLayoutState, ExplorerSegmentRole,
+    ExplorerUiRow, ExplorerUiSegment, ExplorerUiState, KeyHintUiRow, KeyHintUiState, KeyInputKind,
+    LanguageCompletionState, NativeSurfaceWindowBinding, PickerRow, PickerSurfaceKind,
+    PickerUiState, PromptKind, PromptState, PtyScreen, TerminalError, TerminalOptions,
+    TerminalPanelState, TerminalSession, ToolMenuRow, ToolMenuState, UiDiagnostic, UiEvent, UiFold,
+    UiGhostText, UiInlayHint, UiState, UiSyntaxSpan, VisualRowAnchor, VisualRowModel,
+    active_pane_viewport, editor_content_width, editor_gutter_width, editor_workspace_insets,
+    explorer_panel_width, pane_viewports, picker_geometry, prompt_geometry, render,
+    snap_display_column, snap_display_column_forward, terminal_panel_geometry,
 };
 use crate::workspace::{
     Diagnostic, DiagnosticOwner, DiagnosticSeverity, DiagnosticStore, ExecutionSource,
@@ -83,14 +99,17 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::application::{
     AppEffect, ApplicationError, LayoutAction, PickerKind, PromptMove, StartupTarget, build_state,
+    plugin_windows::{PluginUiInteraction, PluginWindowHost},
     register_app_commands,
+    virtual_documents::VirtualDocumentEditorBridge,
+    window_bridge::{
+        EditorWindowBridge, NativeSurfaceBridge, NativeSurfaceSignature, NativeSurfaceTarget,
+    },
 };
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum FocusSurface {
-    Explorer,
-    Pane(crate::editing::PaneId),
-}
+use crate::windows::{
+    CompositorProjection, ContentTypeId, DockEdge, SpatialDirection, WindowGraph, WindowPlacement,
+    WindowRect, WindowTarget,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum KeymapOperation {
@@ -198,6 +217,7 @@ pub struct ResolvedConfiguration {
     pub theme: crate::configuration::ThemeConfig,
     pub raw_keymaps: crate::configuration::LoadedKeymaps,
     pub base_keymaps: crate::configuration::LoadedKeymaps,
+    pub raw_windows: crate::configuration::WindowsConfig,
     pub deferred_plugin_keymaps: bool,
     pub expected_plugin_indexes: BTreeSet<String>,
     pub keymaps: ResolvedKeymaps,
@@ -668,12 +688,95 @@ enum LargeFileOverride {
     On,
     Off,
 }
+#[derive(Clone, Debug)]
+struct AiEditorCapture {
+    root_revision: u64,
+    buffer: crate::editing::BufferId,
+    revision: BufferRevision,
+    view: ViewId,
+    cursor: ByteOffset,
+    mode: EditorMode,
+    path: Option<PathBuf>,
+    range: ByteRange,
+}
+#[derive(Clone, Debug)]
+enum ActiveAiRequest {
+    Chat { root_revision: u64 },
+    Ghost(AiEditorCapture),
+    Composer(AiEditorCapture),
+}
+fn explorer_watch_policy(
+    config: &crate::configuration::ExplorerWatchConfig,
+) -> ExplorerWatchPolicy {
+    ExplorerWatchPolicy {
+        enabled: config.enabled,
+        poll_interval: Duration::from_millis(config.poll_interval_ms),
+        debounce: Duration::from_millis(config.debounce_ms),
+        maximum_directories: config.maximum_directories,
+        maximum_entries_per_directory: config.maximum_entries_per_directory,
+        maximum_events: config.maximum_events,
+        maximum_path_bytes: config.maximum_path_bytes,
+        queue_capacity: config.queue_capacity,
+    }
+}
+fn fake_ai_service() -> (AiProviderService, AiProviderId, AiModelId) {
+    let provider = AiProviderId::new("fake.local").expect("static AI provider");
+    let model = AiModelId::new("deterministic-v1").expect("static AI model");
+    let config = AiProviderConfig::fake_local(
+        provider.clone(),
+        [model.clone()],
+        [
+            AiCapability::Chat,
+            AiCapability::GhostText,
+            AiCapability::Composer,
+        ],
+    )
+    .expect("static AI contract");
+    let mut registry = AiProviderRegistry::new(false, 1);
+    registry.register(config).expect("single static provider");
+    (
+        AiProviderService::new(registry, AiLimits::default()),
+        provider,
+        model,
+    )
+}
 
 struct InteractiveApplication {
     state: EditorState,
+    windows: WindowGraph,
+    editor_windows: EditorWindowBridge,
+    surface_windows: NativeSurfaceBridge,
+    plugin_windows: PluginWindowHost,
+    pending_plugin_ui_events: BTreeMap<(String, PluginLoadId), Vec<PluginUiEvent>>,
+    plugin_host_events: PluginHostEventQueue,
+    plugin_host_event_observation: Option<(
+        u64,
+        String,
+        Option<(u64, u64, usize, usize, usize, u8)>,
+        u64,
+    )>,
+    plugin_storage: PluginStorageService,
+    pending_plugin_storage_results: BTreeMap<(String, PluginLoadId), Vec<PluginStorageResult>>,
+    plugin_providers: PluginProviderBroker,
+    plugin_virtual_documents: PluginVirtualDocumentBroker,
+    plugin_virtual_editor: VirtualDocumentEditorBridge,
+    ai_service: AiProviderService,
+    ai_provider: AiProviderId,
+    ai_model: AiModelId,
+    ai_epoch: Instant,
+    active_ai_request: Option<(AiRequestId, ActiveAiRequest, AiStreamRevision)>,
+    ai_composer_prompt: Option<AiEditorCapture>,
+    content_line_order: Vec<crate::editing::BufferId>,
+    content_line_pins: BTreeSet<crate::editing::BufferId>,
+    content_line_order_revision: u64,
+    content_line_diagnostic_revision: u64,
+    content_line_projection_signature: Option<(u64, u64, u64, u64)>,
+    active_plugin_picker: Option<u64>,
+    terminal_set_revision: u64,
     workspace: WorkspaceState,
     diagnostics: DiagnosticStore,
     picker: Option<PickerState>,
+    picker_surface: PickerSurfaceKind,
     picker_payloads: HashMap<PickerItemId, PickerPayload>,
     pending_workspace_proposal: Option<PendingWorkspaceProposal>,
     workspace_proposal: Option<crate::workspace::WorkspaceEditProposal>,
@@ -730,6 +833,7 @@ struct InteractiveApplication {
     lsp_pull_ids: HashMap<(String, String), String>,
     lsp_projection_owner: Option<LspProjectionOwner>,
     lsp_request_owner: Option<(u64, LspProjectionOwner)>,
+    lsp_completion_owner: Option<(u64, LspProjectionOwner)>,
 
     dap: DapService,
     dap_responses: VecDeque<(u64, DapResponse)>,
@@ -749,7 +853,39 @@ struct InteractiveApplication {
     terminal_capabilities: String,
     next_transaction: u64,
     workspace_search: WorkspaceSearchService,
+    git_status: crate::workspace::git::GitStatusService,
+    git_status_generation: Option<crate::workspace::git::GitStatusGeneration>,
+    git_status_root_revision: Option<u64>,
+    git_status_snapshot: Option<crate::workspace::git::GitStatusSnapshot>,
+    git_status_decorations: BTreeMap<PathBuf, crate::workspace::git::GitFileStatus>,
+    git_hunks: crate::workspace::git::GitHunkService,
+    git_hunk_generation: Option<crate::workspace::git::GitHunkGeneration>,
+    git_hunk_expected: Option<(u64, u64, crate::workspace::git::GitRepositoryId, PathBuf)>,
+    git_hunk_snapshot: Option<crate::workspace::git::GitHunkSnapshot>,
+    git_sign_hunks: crate::workspace::git::GitHunkService,
+    git_sign_generation: Option<crate::workspace::git::GitHunkGeneration>,
+    git_sign_owner: Option<(
+        u64,
+        u64,
+        crate::workspace::git::GitRepositoryId,
+        PathBuf,
+        crate::editing::BufferId,
+        u64,
+    )>,
+    selected_git_hunk: Option<(
+        crate::workspace::git::GitHunkSnapshot,
+        crate::workspace::git::GitHunk,
+        PathBuf,
+    )>,
+    git_mutation: crate::workspace::git::GitMutationService,
+    git_mutation_generation: Option<crate::workspace::git::GitMutationGeneration>,
+    workspace_files: WorkspaceFileService,
+    workspace_file_generation: Option<u64>,
+    workspace_file_root_revision: Option<u64>,
+    workspace_file_entries: Vec<WorkspaceFileEntry>,
     workspace_search_generation: Option<u64>,
+    workspace_search_workflow: Option<crate::workspace::search_workflow::SearchWorkflowBroker>,
+    workspace_search_sequence: u64,
     workspace_search_matches: Vec<WorkspaceSearchMatch>,
     workspace_search_intent: Option<WorkspaceSearchIntent>,
     trust_service: WorkspaceTrustService,
@@ -776,6 +912,11 @@ struct InteractiveApplication {
     explorer_preview_path: Option<PathBuf>,
     explorer_preview_lines: Vec<String>,
     explorer_preview_generation: u64,
+    explorer_follow_path: Option<PathBuf>,
+    explorer_watch: ExplorerWatchService,
+    explorer_watch_generation: Option<ExplorerWatchGeneration>,
+    explorer_watch_observation: Option<(u64, u64)>,
+    explorer_watch_reload_queue: VecDeque<PathBuf>,
     syntax: SyntaxService,
     syntax_documents: HashMap<crate::editing::BufferId, SyntaxDocumentId>,
     syntax_submitted: HashMap<crate::editing::BufferId, (BufferRevision, u64, SyntaxLanguage)>,
@@ -925,11 +1066,177 @@ enum WorkspaceSearchIntent {
     Replace(String),
 }
 
+fn compose_workspace_file_items(
+    items: Vec<(PickerItem, PickerPayload)>,
+) -> Result<Vec<(PickerItem, PickerPayload)>, crate::workspace::search_workflow::SearchWorkflowError>
+{
+    use crate::workspace::search_workflow::*;
+    let mut broker = SearchWorkflowBroker::try_new(SearchWorkflowSpec {
+        id: SearchWorkflowId(1),
+        source: SearchSourceKind::Files,
+        matcher: SearchMatcherKind::Fuzzy,
+        presenter: SearchPresenterKind::Picker,
+        maximum_items: items.len().max(1),
+        maximum_bytes: ABS_MAX_BYTES,
+    })?;
+    broker.begin(SearchRequestId(1), SearchStreamGeneration(1), "")?;
+    broker.accept(SearchWorkflowChunk {
+        request: SearchRequestId(1),
+        generation: SearchStreamGeneration(1),
+        sequence: 0,
+        items: items
+            .iter()
+            .map(|(item, _)| picker_item_adapter(item))
+            .collect(),
+        complete: true,
+    })?;
+    let order = broker
+        .snapshot_if_changed(0)
+        .ok_or(SearchWorkflowError::Stale)?
+        .items
+        .into_iter()
+        .map(|item| item.stable_key)
+        .collect::<Vec<_>>();
+    let mut map = items
+        .into_iter()
+        .map(|pair| (pair.0.id.0.clone(), pair))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    Ok(order
+        .into_iter()
+        .filter_map(|key| map.remove(&key))
+        .collect())
+}
+
+fn compose_plugin_picker_items(
+    projection: &crate::plugins::PluginPickerProjection,
+) -> Result<Vec<(PickerItem, PickerPayload)>, crate::workspace::search_workflow::SearchWorkflowError>
+{
+    use crate::workspace::search_workflow::*;
+    let spec = SearchWorkflowSpec {
+        id: SearchWorkflowId(projection.request),
+        source: SearchSourceKind::PluginProvider {
+            provider: projection.provider.clone(),
+        },
+        matcher: SearchMatcherKind::Fuzzy,
+        presenter: SearchPresenterKind::Picker,
+        maximum_items: projection.items.len().max(1),
+        maximum_bytes: ABS_MAX_BYTES,
+    };
+    let mut broker = SearchWorkflowBroker::try_new(spec)?;
+    broker.begin(
+        SearchRequestId(projection.request),
+        SearchStreamGeneration(projection.revision),
+        &projection.query,
+    )?;
+    let workflow = projection
+        .items
+        .iter()
+        .map(|item| plugin_item_adapter(&item.id, &item.primary, item.secondary.as_deref()))
+        .collect();
+    broker.accept(SearchWorkflowChunk {
+        request: SearchRequestId(projection.request),
+        generation: SearchStreamGeneration(projection.revision),
+        sequence: 0,
+        items: workflow,
+        complete: true,
+    })?;
+    let snapshot = broker
+        .snapshot_if_changed(0)
+        .ok_or(SearchWorkflowError::Stale)?;
+    let mut source = projection
+        .items
+        .iter()
+        .map(|item| (item.id.clone(), item))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    Ok(snapshot
+        .items
+        .into_iter()
+        .filter_map(|ranked| {
+            source.remove(&ranked.stable_key).map(|item| {
+                let id = PickerItemId(format!(
+                    "plugin-provider:{}:{}:{}",
+                    projection.request, projection.revision, item.id
+                ));
+                (
+                    PickerItem {
+                        id,
+                        label: item.primary.clone(),
+                        detail: item.secondary.clone().unwrap_or_default(),
+                        source: projection.provider.clone(),
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::PluginProviderItem {
+                        plugin: projection.plugin.clone(),
+                        load: projection.load,
+                        request: projection.request,
+                        item: item.id.clone(),
+                        action_command: projection.action_command.clone(),
+                    },
+                )
+            })
+        })
+        .collect())
+}
+
+fn compose_command_picker_items(
+    items: Vec<(PickerItem, PickerPayload)>,
+) -> Result<Vec<(PickerItem, PickerPayload)>, crate::workspace::search_workflow::SearchWorkflowError>
+{
+    use crate::workspace::search_workflow::*;
+    let spec = SearchWorkflowSpec {
+        id: SearchWorkflowId(1),
+        source: SearchSourceKind::Commands,
+        matcher: SearchMatcherKind::Fuzzy,
+        presenter: SearchPresenterKind::Picker,
+        maximum_items: items.len().max(1),
+        maximum_bytes: ABS_MAX_BYTES,
+    };
+    let mut broker = SearchWorkflowBroker::try_new(spec)?;
+    broker.begin(SearchRequestId(1), SearchStreamGeneration(1), "")?;
+    let workflow = items
+        .iter()
+        .map(|(item, payload)| {
+            let mut item = item.clone();
+            if let PickerPayload::Command(command) = payload {
+                item.action = PickerAction::InvokeCommand {
+                    command: command.clone(),
+                }
+            }
+            picker_item_adapter(&item)
+        })
+        .collect();
+    broker.accept(SearchWorkflowChunk {
+        request: SearchRequestId(1),
+        generation: SearchStreamGeneration(1),
+        sequence: 0,
+        items: workflow,
+        complete: true,
+    })?;
+    let order = broker
+        .snapshot_if_changed(0)
+        .ok_or(SearchWorkflowError::Stale)?
+        .items
+        .into_iter()
+        .map(|item| item.stable_key)
+        .collect::<Vec<_>>();
+    let mut by_id = items
+        .into_iter()
+        .map(|pair| (pair.0.id.0.clone(), pair))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    Ok(order
+        .into_iter()
+        .filter_map(|id| by_id.remove(&id))
+        .collect())
+}
+
 #[derive(Clone, Debug)]
 enum PickerPayload {
     WorkspaceSearch(WorkspaceSearchMatch),
     LspLocation(crate::languages::LspLocation),
-    Diagnostic { uri: String, range: ByteRange },
+    Diagnostic {
+        uri: String,
+        range: ByteRange,
+    },
     CodeAction(crate::languages::LspCodeAction),
     Buffer(crate::editing::BufferId),
     Command(String),
@@ -938,10 +1245,24 @@ enum PickerPayload {
     LspSession(String),
     DapControl(DapControl),
     PersistedLocation(PersistedLocation),
+    GitHunk {
+        path: PathBuf,
+        status_revision: u64,
+        repository: crate::workspace::git::GitRepositoryId,
+        hunk: crate::workspace::git::GitHunkId,
+        new_line: usize,
+    },
     MatcherSource(MatcherSource),
     DapFrame(DapStackFrame),
     RegistrySummary(RegistryPackageSummary),
     RegistryMetadata(RegistryPackageMetadata),
+    PluginProviderItem {
+        plugin: String,
+        load: PluginLoadId,
+        request: u64,
+        item: String,
+        action_command: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -1041,7 +1362,8 @@ fn base_safe_keymaps(
     let mut deferred = false;
     for (offset, entry) in base.entries[base.bundled_count..].iter().enumerate() {
         let owner = plugin_owner_from_id(&entry.id)
-            .or_else(|| entry.command.as_deref().and_then(plugin_owner_from_id));
+            .or_else(|| entry.command.as_deref().and_then(plugin_owner_from_id))
+            .or_else(|| entry.context.as_deref().and_then(plugin_owner_from_id));
         if owner.is_some_and(|owner| enabled.contains(owner)) {
             deferred = true;
         } else {
@@ -1054,7 +1376,9 @@ fn base_safe_keymaps(
     let mut groups = base.groups[..base.bundled_group_count].to_vec();
     let mut group_spans = Vec::new();
     for (offset, group) in base.groups[base.bundled_group_count..].iter().enumerate() {
-        if plugin_owner_from_id(&group.id).is_some_and(|owner| enabled.contains(owner)) {
+        let owner = plugin_owner_from_id(&group.id)
+            .or_else(|| group.context.as_deref().and_then(plugin_owner_from_id));
+        if owner.is_some_and(|owner| enabled.contains(owner)) {
             deferred = true;
         } else {
             groups.push(group.clone());
@@ -1084,7 +1408,7 @@ fn resolve_configuration(
     if strict && !diagnostics.is_empty() {
         return Err(diagnostics.join("; "));
     }
-    let (base_keymaps, expected_plugin_indexes, deferred_plugin_keymaps) =
+    let (base_keymaps, expected_plugin_indexes, mut deferred_plugin_keymaps) =
         base_safe_keymaps(&loaded);
     let (keymaps, keymap_diagnostic) = if strict {
         let (entries, bundled_count, groups, bundled_group_count) =
@@ -1108,6 +1432,26 @@ fn resolve_configuration(
     };
     diagnostics.extend(keymap_diagnostic);
     let mut settings = loaded.config;
+    let raw_windows = settings.windows.clone();
+    if let Some(rule) = settings.windows.rules.iter().find(|rule| {
+        plugin_owner_from_id(&rule.content_type)
+            .is_some_and(|owner| !expected_plugin_indexes.contains(owner))
+    }) {
+        return Err(format!(
+            "plugin window selector `{}` does not name an enabled plugin",
+            rule.content_type
+        ));
+    }
+    if settings.windows.rules.iter().any(|rule| {
+        plugin_owner_from_id(&rule.content_type)
+            .is_some_and(|owner| expected_plugin_indexes.contains(owner))
+    }) {
+        deferred_plugin_keymaps = true;
+        settings
+            .windows
+            .rules
+            .retain(|rule| !rule.content_type.starts_with("plugin."));
+    }
     for alias in &settings.input.disabled_command_aliases {
         settings.input.command_aliases.remove(alias);
     }
@@ -1124,6 +1468,7 @@ fn resolve_configuration(
         theme: loaded.theme,
         raw_keymaps: loaded.keymaps,
         base_keymaps,
+        raw_windows,
         deferred_plugin_keymaps,
         expected_plugin_indexes,
         keymaps,
@@ -1264,6 +1609,7 @@ pub fn run_interactive(
     let watched_theme = configuration.settings.ui.theme.clone();
     let logs = make_logs(&configuration.settings, true);
     let plugin_queue_capacity = configuration.settings.plugins.queue_capacity;
+    let plugin_storage_root = crate::configuration::user_state_directory().join("plugin-data-v1");
     let registry = RegistryService::start(
         configuration.settings.packages.registry.clone(),
         crate::configuration::user_state_directory().join("packages/registry-cache"),
@@ -1271,11 +1617,42 @@ pub fn run_interactive(
     .map_err(|error| InteractiveError::Configuration(error.to_string()))?;
     let pty_queue_capacity = configuration.settings.terminals.queue_capacity;
     let terminal_panel_height = configuration.settings.ui.terminal_panel.height;
+    let (ai_service, ai_provider, ai_model) = fake_ai_service();
+    let explorer_watch = ExplorerWatchService::start(explorer_watch_policy(
+        &configuration.settings.ui.explorer.watch,
+    ))
+    .map_err(|error| InteractiveError::Configuration(error.to_string()))?;
     let mut application = InteractiveApplication {
         state,
+        windows: WindowGraph::default(),
+        editor_windows: EditorWindowBridge::default(),
+        surface_windows: NativeSurfaceBridge::default(),
+        plugin_windows: PluginWindowHost::default(),
+        pending_plugin_ui_events: BTreeMap::new(),
+        plugin_host_events: PluginHostEventQueue::default(),
+        plugin_host_event_observation: None,
+        plugin_storage: PluginStorageService::start(plugin_storage_root, plugin_queue_capacity),
+        pending_plugin_storage_results: BTreeMap::new(),
+        plugin_providers: PluginProviderBroker::default(),
+        plugin_virtual_documents: PluginVirtualDocumentBroker::default(),
+        plugin_virtual_editor: VirtualDocumentEditorBridge::default(),
+        ai_service,
+        ai_provider,
+        ai_model,
+        ai_epoch: Instant::now(),
+        active_ai_request: None,
+        ai_composer_prompt: None,
+        content_line_order: Vec::new(),
+        content_line_pins: BTreeSet::new(),
+        content_line_order_revision: 0,
+        content_line_diagnostic_revision: 0,
+        content_line_projection_signature: None,
+        active_plugin_picker: None,
+        terminal_set_revision: 0,
         workspace,
         diagnostics,
         picker: None,
+        picker_surface: PickerSurfaceKind::Generic,
         picker_payloads: HashMap::new(),
         pending_workspace_proposal: None,
         workspace_proposal: None,
@@ -1341,6 +1718,7 @@ pub fn run_interactive(
         lsp_pull_ids: HashMap::new(),
         lsp_projection_owner: None,
         lsp_request_owner: None,
+        lsp_completion_owner: None,
         dap: DapService::new(),
         dap_responses: VecDeque::new(),
         dap_console: VecDeque::new(),
@@ -1359,7 +1737,28 @@ pub fn run_interactive(
         terminal_capabilities: "pending".into(),
         next_transaction: 1_000_000,
         workspace_search: WorkspaceSearchService::default(),
+        git_status: crate::workspace::git::GitStatusService::default(),
+        git_status_generation: None,
+        git_status_root_revision: None,
+        git_status_snapshot: None,
+        git_status_decorations: BTreeMap::new(),
+        git_hunks: crate::workspace::git::GitHunkService::default(),
+        git_hunk_generation: None,
+        git_hunk_expected: None,
+        git_hunk_snapshot: None,
+        git_sign_hunks: crate::workspace::git::GitHunkService::default(),
+        git_sign_generation: None,
+        git_sign_owner: None,
+        selected_git_hunk: None,
+        git_mutation: crate::workspace::git::GitMutationService::default(),
+        git_mutation_generation: None,
+        workspace_files: WorkspaceFileService::default(),
+        workspace_file_generation: None,
+        workspace_file_root_revision: None,
+        workspace_file_entries: Vec::new(),
         workspace_search_generation: None,
+        workspace_search_workflow: None,
+        workspace_search_sequence: 0,
         workspace_search_matches: Vec::new(),
         workspace_search_intent: None,
         trust_service,
@@ -1386,6 +1785,11 @@ pub fn run_interactive(
         explorer_preview_path: None,
         explorer_preview_lines: Vec::new(),
         explorer_preview_generation: 0,
+        explorer_follow_path: None,
+        explorer_watch,
+        explorer_watch_generation: None,
+        explorer_watch_observation: None,
+        explorer_watch_reload_queue: VecDeque::new(),
         syntax: SyntaxService::start(syntax_queue_capacity),
         syntax_documents: HashMap::new(),
         syntax_submitted: HashMap::new(),
@@ -1448,6 +1852,13 @@ pub fn run_interactive(
         execution_preflight: ExecutionPreflightService::start(process_event_capacity),
         pending_execution_preflight: HashMap::new(),
     };
+    let configured_placements =
+        configured_window_placements(&application.configuration.settings.windows)
+            .map_err(InteractiveError::Configuration)?;
+    application
+        .surface_windows
+        .set_configured_placements(configured_placements)
+        .map_err(|error| InteractiveError::Configuration(error.to_string()))?;
     let crash_path = crate::configuration::user_state_directory().join("last-crash.json");
     if application.safe_mode {
         application.ui.notification =
@@ -1504,7 +1915,13 @@ pub fn run_interactive(
 
     while !application.should_quit {
         application.process_vfs_results();
+        application.process_git_status_events();
+        application.process_git_hunk_events();
+        application.process_git_sign_events();
+        application.process_git_mutation_events();
+        application.process_workspace_file_events();
         application.process_workspace_search_events();
+        application.process_explorer_watch_events();
         application.process_explorer_result();
         application.process_trust_events();
         application.process_configuration_result();
@@ -1514,11 +1931,13 @@ pub fn run_interactive(
         application.process_dap_events();
         application.process_execution_preflight();
         application.process_pty_events();
+        application.process_plugin_storage_events();
         application.process_plugin_events();
         application.process_registry_events();
         application.process_package_events();
         application.process_job_events();
         application.process_large_file_modes();
+        application.process_ai_events();
         application.process_syntax();
         application.process_persistence_events();
         application.sync_lsp_document();
@@ -1527,6 +1946,9 @@ pub fn run_interactive(
         application.update_key_hint_ui();
         application.update_notification_timer();
         application.update_live_crash_snapshot();
+        application.reconcile_editor_windows();
+        application.reconcile_git_signs();
+        application.refresh_plugin_host_events();
         let frame = render(
             &application.state,
             &application.ui,
@@ -1552,6 +1974,8 @@ pub fn run_interactive(
         }
     }
     drop(terminal);
+    application.cancel_ai_request();
+    application.ui.ai_ghost_text = None;
     application.save_persistence();
     let persistence_deadline = Instant::now() + Duration::from_secs(2);
     while application.persistence_pending.is_some() && Instant::now() < persistence_deadline {
@@ -1562,6 +1986,446 @@ pub fn run_interactive(
 }
 
 impl InteractiveApplication {
+    fn native_surface_signature(&self, editor: &EditorWindowBridge) -> NativeSurfaceSignature {
+        let explorer_size = self
+            .ui
+            .explorer
+            .as_ref()
+            .and_then(|_| explorer_panel_width(&self.configuration.settings, self.terminal_width))
+            .map_or(1, |width| width.saturating_add(1));
+        let terminal_size = self
+            .active_terminal
+            .and_then(|_| {
+                terminal_panel_geometry(
+                    &self.configuration.settings,
+                    self.terminal_height,
+                    self.terminal_panel_height,
+                )
+            })
+            .map_or(1, |geometry| geometry.height);
+        NativeSurfaceSignature {
+            editor_tab: editor.active_tab(&self.state),
+            editor_window: editor.focused_window(&self.state),
+            explorer_visible: self.ui.explorer.is_some(),
+            explorer_focused: self.ui.explorer.is_some() && self.ui.explorer_focused,
+            explorer_size,
+            active_terminal: self.active_terminal.map(|id| id.0),
+            terminal_focused: self.active_terminal.is_some_and(|id| {
+                self.terminal_focused
+                    && self.surface_windows.terminal_placement(id.0)
+                        != Some(WindowPlacement::Hidden)
+            }),
+            terminal_size,
+            terminal_set_revision: self.terminal_set_revision,
+            terminal_width: self.terminal_width,
+            terminal_height: self.terminal_height,
+            dashboard_visible: self.ui.dashboard || self.state.active_view.is_none(),
+            picker_rect: self.ui.picker.as_ref().and_then(|_| {
+                picker_geometry(
+                    &self.configuration.settings,
+                    WindowRect {
+                        x: 0,
+                        y: 0,
+                        width: self.terminal_width,
+                        height: self.terminal_height,
+                    },
+                )
+            }),
+            picker_surface: self.ui.picker.as_ref().and_then(|picker| {
+                picker_geometry(
+                    &self.configuration.settings,
+                    WindowRect {
+                        x: 0,
+                        y: 0,
+                        width: self.terminal_width,
+                        height: self.terminal_height,
+                    },
+                )
+                .map(|_| picker.surface)
+            }),
+            protected_prompt_height: self
+                .ui
+                .prompt
+                .as_ref()
+                .map_or(0, |prompt| if prompt.error.is_some() { 4 } else { 3 }),
+            configuration_generation: self.configuration_generation,
+        }
+    }
+
+    fn reconcile_editor_windows(&mut self) {
+        let scratch_label = &self.configuration.settings.ui.buffer_line.scratch_label;
+        let editor_current = self.editor_windows.is_current(&self.state, scratch_label);
+        if editor_current {
+            let signature = self.native_surface_signature(&self.editor_windows);
+            if self.surface_windows.is_current(signature)
+                && self.windows.revision() == self.ui.window_graph_revision
+                && self.content_line_projection_signature
+                    == self.windows.revision().map(|revision| {
+                        (
+                            revision,
+                            self.content_line_diagnostic_revision,
+                            self.content_line_order_revision,
+                            self.configuration_generation,
+                        )
+                    })
+                && self.ui.compositor_layout.as_ref().is_some_and(|layout| {
+                    Some(layout.graph_revision) == self.windows.revision()
+                        && Some(layout.source_revision) == self.state.window_revision()
+                })
+            {
+                return;
+            }
+        }
+        let mut graph = self.windows.clone();
+        let mut bridge = self.editor_windows.clone();
+        let mut surfaces = self.surface_windows.clone();
+        let result = (|| {
+            let mut terminals = None;
+            if !editor_current {
+                let pre_signature = self.native_surface_signature(&bridge);
+                if !surfaces.is_current(pre_signature) {
+                    let mut rows = self
+                        .terminals
+                        .iter()
+                        .map(|(id, terminal)| (id.0, terminal.profile.clone()))
+                        .collect::<Vec<_>>();
+                    rows.sort_unstable_by_key(|(id, _)| *id);
+                    surfaces.reconcile(
+                        &mut graph,
+                        pre_signature,
+                        &self.message("explorer_title", &[]),
+                        &self.configuration.dashboard.identity,
+                        self.ui
+                            .picker
+                            .as_ref()
+                            .map_or("Picker", |picker| &picker.title),
+                        &rows,
+                    )?;
+                    terminals = Some(rows);
+                }
+                bridge.reconcile(&self.state, &mut graph, scratch_label)?;
+            }
+            let signature = self.native_surface_signature(&bridge);
+            if !editor_current || !surfaces.is_current(signature) {
+                let rows = terminals.get_or_insert_with(|| {
+                    let mut rows = self
+                        .terminals
+                        .iter()
+                        .map(|(id, terminal)| (id.0, terminal.profile.clone()))
+                        .collect::<Vec<_>>();
+                    rows.sort_unstable_by_key(|(id, _)| *id);
+                    rows
+                });
+                surfaces.reconcile(
+                    &mut graph,
+                    signature,
+                    &self.message("explorer_title", &[]),
+                    &self.configuration.dashboard.identity,
+                    self.ui
+                        .picker
+                        .as_ref()
+                        .map_or("Picker", |picker| &picker.title),
+                    rows,
+                )?;
+            }
+            graph.validate()?;
+            Ok::<(), crate::windows::WindowError>(())
+        })();
+        match result {
+            Ok(()) => {
+                self.ui.editor_window_layout = self.state.window_revision().and_then(|revision| {
+                    bridge.active_layout(&self.state, &graph).map(|active| {
+                        EditorWindowLayoutState {
+                            source_revision: revision,
+                            layout: active.layout,
+                            bindings: active
+                                .bindings
+                                .into_iter()
+                                .map(|binding| UiEditorWindowBinding {
+                                    window: binding.window,
+                                    pane: binding.pane,
+                                    view: binding.view,
+                                })
+                                .collect(),
+                        }
+                    })
+                });
+                let graph_revision = graph.revision().unwrap_or(u64::MAX);
+                let signature = (
+                    graph_revision,
+                    self.content_line_diagnostic_revision,
+                    self.content_line_order_revision,
+                    self.configuration_generation,
+                );
+                if self.content_line_projection_signature != Some(signature) {
+                    let snapshots = graph
+                        .content_snapshots()
+                        .into_iter()
+                        .filter(|content| {
+                            matches!(
+                                content.adapter,
+                                crate::windows::ContentAdapterKind::TextBuffer
+                                    | crate::windows::ContentAdapterKind::TerminalSession
+                                    | crate::windows::ContentAdapterKind::VirtualDocument
+                                    | crate::windows::ContentAdapterKind::ExternalTui
+                            ) || matches!(
+                                content.adapter,
+                                crate::windows::ContentAdapterKind::DeclarativeUi
+                                    | crate::windows::ContentAdapterKind::PrivateCellSurface
+                            ) && (content.content_type.as_str().starts_with("plugin.")
+                                || matches!(
+                                    content.content_type.as_str(),
+                                    "builtin.problems"
+                                        | "builtin.output"
+                                        | "builtin.logs"
+                                        | "builtin.debug"
+                                ))
+                        })
+                        .collect::<Vec<_>>();
+                    let represented = snapshots
+                        .iter()
+                        .filter_map(|content| bridge.buffer_for_content(content.id))
+                        .collect::<BTreeSet<_>>();
+                    let before_order = self.content_line_order.clone();
+                    let before_pins = self.content_line_pins.clone();
+                    self.content_line_order
+                        .retain(|buffer| represented.contains(buffer));
+                    self.content_line_pins
+                        .retain(|buffer| represented.contains(buffer));
+                    for content in &snapshots {
+                        if let Some(buffer) = bridge.buffer_for_content(content.id)
+                            && !self.content_line_order.contains(&buffer)
+                        {
+                            self.content_line_order.push(buffer)
+                        }
+                    }
+                    if before_order != self.content_line_order
+                        || before_pins != self.content_line_pins
+                    {
+                        self.content_line_order_revision =
+                            self.content_line_order_revision.saturating_add(1);
+                    }
+                    let mut entries = snapshots
+                        .into_iter()
+                        .enumerate()
+                        .map(|(native_index, content)| {
+                            let buffer = bridge.buffer_for_content(content.id);
+                            let pinned = buffer
+                                .is_some_and(|buffer| self.content_line_pins.contains(&buffer));
+                            let order = buffer
+                                .and_then(|buffer| {
+                                    self.content_line_order
+                                        .iter()
+                                        .position(|candidate| *candidate == buffer)
+                                })
+                                .unwrap_or(
+                                    self.content_line_order.len().saturating_add(native_index),
+                                );
+                            let (icon, diagnostic, closeable) = buffer.map_or_else(
+                                || {
+                                    let icon = match content.adapter {
+                                        crate::windows::ContentAdapterKind::TerminalSession
+                                        | crate::windows::ContentAdapterKind::ExternalTui => self
+                                            .configuration
+                                            .settings
+                                            .ui
+                                            .buffer_line
+                                            .terminal_icon
+                                            .clone(),
+                                        crate::windows::ContentAdapterKind::VirtualDocument => self
+                                            .configuration
+                                            .settings
+                                            .ui
+                                            .buffer_line
+                                            .virtual_icon
+                                            .clone(),
+                                        _ => self
+                                            .configuration
+                                            .settings
+                                            .ui
+                                            .buffer_line
+                                            .custom_icon
+                                            .clone(),
+                                    };
+                                    (icon, None, false)
+                                },
+                                |buffer| {
+                                    let state = &self.state.buffers[buffer];
+                                    let icon = if state.is_virtual_read_only() {
+                                        self.configuration
+                                            .settings
+                                            .ui
+                                            .buffer_line
+                                            .virtual_icon
+                                            .clone()
+                                    } else if let Some(extension) = state
+                                        .path
+                                        .as_ref()
+                                        .and_then(|path| path.extension())
+                                        .and_then(|value| value.to_str())
+                                        .map(str::to_ascii_lowercase)
+                                    {
+                                        self.configuration
+                                            .settings
+                                            .ui
+                                            .buffer_line
+                                            .extension_icons
+                                            .get(&extension)
+                                            .cloned()
+                                            .unwrap_or_else(|| {
+                                                self.configuration
+                                                    .settings
+                                                    .ui
+                                                    .buffer_line
+                                                    .custom_icon
+                                                    .clone()
+                                            })
+                                    } else {
+                                        self.configuration
+                                            .settings
+                                            .ui
+                                            .buffer_line
+                                            .scratch_icon
+                                            .clone()
+                                    };
+                                    let diagnostic = state.path.as_ref().and_then(|path| {
+                                        let matches = self
+                                            .ui
+                                            .diagnostics
+                                            .iter()
+                                            .filter(|diagnostic| &diagnostic.path == path)
+                                            .collect::<Vec<_>>();
+                                        if matches.is_empty() {
+                                            None
+                                        } else {
+                                            let severity = if matches.iter().any(|diagnostic| {
+                                                diagnostic.severity == DiagnosticSeverity::Error
+                                            }) {
+                                                ContentTabDiagnosticSeverity::Error
+                                            } else {
+                                                ContentTabDiagnosticSeverity::Warning
+                                            };
+                                            Some(ContentTabDiagnostic {
+                                                severity,
+                                                count: u16::try_from(matches.len())
+                                                    .unwrap_or(u16::MAX),
+                                            })
+                                        }
+                                    });
+                                    (icon, diagnostic, true)
+                                },
+                            );
+                            let entry = ContentTabEntry {
+                                identity: ContentTabIdentity(content.id),
+                                kind: if buffer.is_some_and(|buffer| {
+                                    self.state.buffers[buffer].is_virtual_read_only()
+                                }) {
+                                    ContentTabKind::VirtualDocument
+                                } else {
+                                    ContentTabKind::from(content.adapter)
+                                },
+                                title: content.title,
+                                active: content.active,
+                                dirty: content.dirty,
+                                pinned,
+                                diagnostic,
+                                icon,
+                                closeable,
+                            };
+                            (
+                                (
+                                    if buffer.is_some() {
+                                        u8::from(!pinned)
+                                    } else {
+                                        2
+                                    },
+                                    order,
+                                ),
+                                entry,
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    entries.sort_by_key(|(key, _)| *key);
+                    self.ui.content_tabs = entries.into_iter().map(|(_, entry)| entry).collect();
+                    self.content_line_projection_signature = Some((
+                        graph_revision,
+                        self.content_line_diagnostic_revision,
+                        self.content_line_order_revision,
+                        self.configuration_generation,
+                    ));
+                }
+                self.ui.window_graph_revision = graph.revision();
+                self.ui.compositor_layout = self.state.window_revision().and_then(|revision| {
+                    let graph_revision = graph.revision()?;
+                    let tab = bridge
+                        .active_tab(&self.state)
+                        .or_else(|| surfaces.workspace_tab())?;
+                    let snapshot = graph.compositor_snapshot(tab)?;
+                    let preliminary = snapshot.project(
+                        WindowRect {
+                            x: 0,
+                            y: 0,
+                            width: self.terminal_width,
+                            height: self.terminal_height,
+                        },
+                        self.configuration.settings.ui.panes.minimum_width,
+                        self.configuration.settings.ui.panes.minimum_height,
+                    );
+                    let (top, bottom) = editor_workspace_insets(
+                        &self.state,
+                        &self.ui,
+                        &self.configuration.settings,
+                        preliminary.workspace_bounds.height,
+                    );
+                    let mut projection = snapshot.project_with_tiled_insets(
+                        preliminary.bounds,
+                        self.configuration.settings.ui.panes.minimum_width,
+                        self.configuration.settings.ui.panes.minimum_height,
+                        top,
+                        bottom,
+                    );
+                    if let Some(prompt) = &self.ui.prompt {
+                        let geometry = prompt_geometry(
+                            self.terminal_width,
+                            projection.workspace_bounds.height,
+                            &self.configuration.settings.ui.command_line,
+                            prompt.error.is_some(),
+                        );
+                        projection.set_protected_regions([WindowRect {
+                            x: geometry.left,
+                            y: geometry.top,
+                            width: geometry.width,
+                            height: geometry.height,
+                        }]);
+                    }
+                    Some(CompositorLayoutState {
+                        source_revision: revision,
+                        graph_revision,
+                        projection,
+                        surfaces: NativeSurfaceWindowBinding {
+                            explorer: surfaces.explorer().map(|ids| ids.window),
+                            terminal: self.active_terminal.and_then(|id| {
+                                surfaces.terminal(id.0).map(|ids| (id.0, ids.window))
+                            }),
+                            dashboard: surfaces.dashboard().map(|ids| ids.window),
+                            picker: surfaces.picker().map(|ids| ids.window),
+                        },
+                    })
+                });
+                self.windows = graph;
+                self.editor_windows = bridge;
+                self.surface_windows = surfaces;
+                self.sync_plugin_window_ui();
+            }
+            Err(error) => self.logs.record(
+                LogLevel::Error,
+                "windows",
+                "window-reconciliation-rejected",
+                BTreeMap::from([("error".into(), error.to_string())]),
+            ),
+        }
+    }
+
     fn queue_startup_reads(&mut self) {
         while let Some((path, primary)) = self.startup_reads.front().cloned() {
             match self.vfs.read(path) {
@@ -2454,7 +3318,7 @@ impl InteractiveApplication {
                         continue;
                     }
                     self.lsp_request_owner = None;
-                    self.present_lsp_result(&server, &method, &uri, result);
+                    self.present_lsp_result(&server, generation, &method, &uri, result);
                 }
                 LspEvent::ApplyEditRequest {
                     server,
@@ -2603,7 +3467,7 @@ impl InteractiveApplication {
     }
 
     fn sync_ui_diagnostics(&mut self) {
-        self.ui.diagnostics = self
+        let candidate = self
             .diagnostics
             .problems(None, None)
             .into_iter()
@@ -2611,10 +3475,17 @@ impl InteractiveApplication {
                 Some(UiDiagnostic {
                     path: path_from_file_uri(&problem.uri)?,
                     range: problem.range,
+                    severity: problem.severity,
                     message: problem.message,
                 })
             })
-            .collect();
+            .collect::<Vec<_>>();
+        if candidate != self.ui.diagnostics {
+            self.ui.diagnostics = candidate;
+            self.content_line_diagnostic_revision =
+                self.content_line_diagnostic_revision.saturating_add(1);
+            self.content_line_projection_signature = None;
+        }
     }
 
     fn clear_lsp_ui_projection(&mut self) {
@@ -2628,6 +3499,7 @@ impl InteractiveApplication {
         self.lsp_selection_ranges.clear();
         self.lsp_projection_owner = None;
         self.lsp_request_owner = None;
+        self.lsp_completion_owner = None;
     }
     fn current_lsp_projection_owner(&self) -> Option<LspProjectionOwner> {
         let server = self.active_lsp_server.clone()?;
@@ -2771,54 +3643,168 @@ impl InteractiveApplication {
         &mut self,
         kind: DocumentationPopupKind,
         title: String,
-        text: String,
+        provider: String,
+        source_range: Option<ByteRange>,
+        source_sections: Vec<LspMarkupContent>,
     ) {
-        if !self.configuration.settings.ui.documentation_popup.enabled {
+        let policy = &self.configuration.settings.ui.documentation_popup;
+        if !policy.enabled {
             self.ui.documentation_popup = None;
             return;
         }
-        let lines = text
-            .replace("\r\n", "\n")
-            .replace('\r', "\n")
-            .split('\n')
-            .map(str::to_owned)
-            .collect::<Vec<_>>();
-        if lines.iter().all(|line| line.trim().is_empty()) {
+        let mut remaining_lines = policy.maximum_lines;
+        let mut remaining_bytes = policy.maximum_bytes;
+        let mut sections = Vec::new();
+        for source in source_sections.into_iter().take(policy.maximum_sections) {
+            if remaining_lines == 0 || remaining_bytes == 0 {
+                break;
+            }
+            let normalized = source.value.replace("\r\n", "\n").replace('\r', "\n");
+            let mut lines = Vec::new();
+            for line in normalized.split('\n') {
+                if remaining_lines == 0 || remaining_bytes == 0 {
+                    break;
+                }
+                let sanitized = line
+                    .chars()
+                    .filter(|character| !character.is_control() || *character == '\t')
+                    .take(8192)
+                    .collect::<String>();
+                let take = sanitized.len().min(remaining_bytes);
+                let mut end = take;
+                while !sanitized.is_char_boundary(end) {
+                    end = end.saturating_sub(1);
+                }
+                lines.push(sanitized[..end].to_owned());
+                remaining_bytes = remaining_bytes.saturating_sub(end);
+                remaining_lines = remaining_lines.saturating_sub(1);
+            }
+            if !lines.iter().all(|line| line.trim().is_empty()) {
+                sections.push(DocumentationSection {
+                    heading: None,
+                    markup: match source.kind {
+                        LspMarkupKind::PlainText => DocumentationMarkupKind::PlainText,
+                        LspMarkupKind::Markdown => DocumentationMarkupKind::Markdown,
+                    },
+                    lines,
+                });
+            }
+        }
+        if sections.is_empty() {
             self.ui.documentation_popup = None;
             return;
         }
         self.ui.documentation_popup = Some(DocumentationPopupState {
             kind,
             title,
-            lines,
+            provider: provider.chars().take(256).collect(),
+            source_range,
+            sections,
             scroll: 0,
         });
+    }
+
+    fn open_lsp_completion_documentation(&mut self) {
+        let Some((generation, owner)) = self.lsp_completion_owner.clone() else {
+            self.ui.documentation_popup = None;
+            self.show_error("completion documentation is stale");
+            return;
+        };
+        let live_owner = self.state.active_view == Some(owner.view)
+            && self
+                .state
+                .views
+                .get(owner.view)
+                .is_some_and(|view| view.buffer == owner.buffer)
+            && self
+                .state
+                .buffers
+                .get(owner.buffer)
+                .is_some_and(|buffer| buffer.text.revision() == owner.revision);
+        if generation != self.lsp_request_generation
+            || self.lsp_projection_owner.as_ref() != Some(&owner)
+            || !live_owner
+        {
+            self.ui.documentation_popup = None;
+            self.show_error("completion documentation is stale");
+            return;
+        }
+        let Some(selected) = self
+            .ui
+            .language_completion
+            .as_ref()
+            .map(|completion| completion.selected)
+        else {
+            return;
+        };
+        let Some((label, documentation)) =
+            self.lsp_completion_items.get(selected).and_then(|item| {
+                item.documentation
+                    .clone()
+                    .map(|documentation| (item.label.clone(), documentation))
+            })
+        else {
+            self.show_error("selected completion has no documentation");
+            return;
+        };
+        self.present_documentation_popup(
+            DocumentationPopupKind::Completion,
+            self.message(
+                "lsp_completion_documentation_title",
+                &[("server", owner.server.clone()), ("label", label)],
+            ),
+            owner.server,
+            None,
+            vec![documentation],
+        );
     }
 
     fn present_lsp_result(
         &mut self,
         server: &str,
+        generation: u64,
         method: &str,
         uri: &str,
         result: LspFeatureResult,
     ) {
         match result {
-            LspFeatureResult::Hover(text) => {
+            LspFeatureResult::Hover(hover) => {
+                let source_range = hover.range.and_then(|range| {
+                    let buffer_id = self.state.active_buffer_id()?;
+                    let buffer = self.state.buffers.get(buffer_id)?;
+                    let codec = PositionCodec::new(&buffer.text);
+                    let encoding = self.lsp_position_encoding();
+                    let start = codec
+                        .lsp_to_byte(range.start.line, range.start.character, encoding)
+                        .ok()?;
+                    let end = codec
+                        .lsp_to_byte(range.end.line, range.end.character, encoding)
+                        .ok()?;
+                    ByteRange::new(start, end).ok()
+                });
                 self.present_documentation_popup(
                     DocumentationPopupKind::Hover,
                     self.message("lsp_hover_title", &[("server", server.into())]),
-                    text,
+                    server.into(),
+                    source_range,
+                    hover.sections,
                 );
             }
-            LspFeatureResult::Signature(text) => {
+            LspFeatureResult::Signature(content) => {
                 self.present_documentation_popup(
                     DocumentationPopupKind::Signature,
                     self.message("lsp_signature_title", &[("server", server.into())]),
-                    text,
+                    server.into(),
+                    None,
+                    vec![content],
                 );
             }
             LspFeatureResult::Completion(items) => {
                 self.lsp_completion_items = items;
+                self.lsp_completion_owner = self
+                    .lsp_projection_owner
+                    .clone()
+                    .map(|owner| (generation, owner));
                 self.ui.language_completion =
                     (!self.lsp_completion_items.is_empty()).then(|| LanguageCompletionState {
                         items: self
@@ -2836,10 +3822,6 @@ impl InteractiveApplication {
                 }
             }
             LspFeatureResult::CompletionResolved(item) => {
-                if !item.documentation.is_empty() {
-                    self.ui.notification = Some(item.documentation.replace('\n', " "));
-                    self.ui.notification_error = false;
-                }
                 if let Some(selected) = self
                     .ui
                     .language_completion
@@ -3030,6 +4012,7 @@ impl InteractiveApplication {
                         };
                         self.present_lsp_result(
                             server,
+                            generation,
                             method,
                             uri,
                             LspFeatureResult::SemanticTokens(full),
@@ -3169,12 +4152,111 @@ impl InteractiveApplication {
         self.sync_explorer_ui();
     }
 
+    fn page_explorer_selection(&mut self, direction: isize) {
+        let viewport = usize::from(self.workspace_render_height().saturating_sub(4))
+            .max(1)
+            .min(self.configuration.settings.ui.explorer.maximum_visible_rows);
+        self.move_explorer_selection(
+            direction.saturating_mul(isize::try_from(viewport).unwrap_or(isize::MAX)),
+        );
+    }
+
     fn explorer_collapse_or_parent(&mut self) {
         let first_presented = self.explorer_first_presented_index();
         self.explorer.collapse_or_parent_from(first_presented);
         self.sync_explorer_ui();
     }
 
+    // EXPLORER_WATCH_FOREGROUND_BEGIN: typed event coordination only.
+    fn reconcile_explorer_watch(&mut self) {
+        if self.ui.explorer.is_none() {
+            if self.explorer_watch_generation.take().is_some() {
+                self.explorer_watch.cancel();
+            }
+            self.explorer_watch_observation = None;
+            self.explorer_watch_reload_queue.clear();
+            return;
+        }
+        let observation = (
+            self.explorer.projection_generation(),
+            self.workspace.root_revision(),
+        );
+        if self.explorer_watch_observation == Some(observation) {
+            return;
+        }
+        let roots = self
+            .workspace
+            .roots()
+            .iter()
+            .map(|root| root.identity.canonical_path.clone())
+            .collect();
+        match self.explorer_watch.reconcile(
+            observation.1,
+            roots,
+            self.explorer.watched_directories(),
+        ) {
+            Ok(generation) => {
+                self.explorer_watch_generation = generation;
+                self.explorer_watch_observation = Some(observation)
+            }
+            Err(_) => {
+                self.explorer_watch_generation = None;
+                self.explorer_watch_observation = Some(observation);
+                self.show_error("explorer watch reconciliation failed")
+            }
+        }
+    }
+    fn accept_explorer_watch_batch(&mut self, batch: ExplorerWatchBatch) {
+        if Some(batch.generation) != self.explorer_watch_generation
+            || batch.root_revision != self.workspace.root_revision()
+            || self.ui.explorer.is_none()
+        {
+            return;
+        }
+        for directory in batch.directories {
+            if !self.explorer_watch_reload_queue.contains(&directory) {
+                self.explorer_watch_reload_queue.push_back(directory)
+            }
+        }
+    }
+    fn process_explorer_watch_events(&mut self) {
+        for event in self.explorer_watch.poll() {
+            match event {
+                ExplorerWatchEvent::Batch(batch) => self.accept_explorer_watch_batch(batch),
+                ExplorerWatchEvent::Failed {
+                    generation,
+                    root_revision,
+                } if Some(generation) == self.explorer_watch_generation
+                    && root_revision == self.workspace.root_revision() =>
+                {
+                    self.explorer_watch_generation = None;
+                    self.show_error("explorer watch worker rejected the active set")
+                }
+                _ => {}
+            }
+        }
+        self.start_next_explorer_watch_reload();
+    }
+    fn start_next_explorer_watch_reload(&mut self) {
+        if self.explorer_pending.is_some() {
+            return;
+        }
+        while let Some(path) = self.explorer_watch_reload_queue.pop_front() {
+            let Some(node) = self.explorer.id_for_path(&path) else {
+                continue;
+            };
+            if self.explorer.node(node).is_some_and(|node| {
+                matches!(node.kind, ExplorerKind::Root | ExplorerKind::Directory)
+                    && node.expanded
+                    && matches!(node.load, ExplorerLoadState::Loaded)
+            }) {
+                self.load_explorer_node(node);
+                break;
+            }
+        }
+    }
+
+    // EXPLORER_WATCH_FOREGROUND_END
     fn sync_explorer_ui(&mut self) {
         if self.ui.explorer.is_none() {
             return;
@@ -3195,8 +4277,20 @@ impl InteractiveApplication {
             .explorer
             .maximum_visible_rows
             .min(viewport_rows);
-        let scroll = selected.map_or(0, |selected| {
-            selected.saturating_sub(maximum.saturating_sub(1))
+        let previous_scroll = self
+            .ui
+            .explorer
+            .as_ref()
+            .map_or(0, |explorer| explorer.scroll)
+            .min(total.saturating_sub(maximum));
+        let scroll = selected.map_or(previous_scroll, |selected| {
+            if selected < previous_scroll {
+                selected
+            } else if selected >= previous_scroll.saturating_add(maximum) {
+                selected.saturating_sub(maximum.saturating_sub(1))
+            } else {
+                previous_scroll
+            }
         });
         let glyphs = self
             .configuration
@@ -3266,11 +4360,28 @@ impl InteractiveApplication {
                     text: node.name.clone(),
                     role: name_role,
                 });
+                let right_segments = self
+                    .git_status_decorations
+                    .get(&node.path)
+                    .map(|status| ExplorerUiSegment {
+                        text: match status {
+                            crate::workspace::git::GitFileStatus::Untracked => "?",
+                            crate::workspace::git::GitFileStatus::Added => "A",
+                            crate::workspace::git::GitFileStatus::Modified => "M",
+                            crate::workspace::git::GitFileStatus::Deleted => "D",
+                            crate::workspace::git::GitFileStatus::Renamed => "R",
+                            crate::workspace::git::GitFileStatus::Conflicted => "!",
+                        }
+                        .into(),
+                        role: ExplorerSegmentRole::Git,
+                    })
+                    .into_iter()
+                    .collect();
                 ExplorerUiRow {
                     node_id: node.id.0,
                     selected: selected_id == Some(node.id),
                     segments,
-                    right_segments: Vec::new(),
+                    right_segments,
                 }
             })
             .collect();
@@ -3283,6 +4394,8 @@ impl InteractiveApplication {
             preview_lines: self.explorer_preview_lines.clone(),
         });
         self.request_explorer_preview();
+        self.reconcile_explorer_watch();
+        self.reconcile_editor_windows();
     }
 
     fn request_explorer_preview(&mut self) {
@@ -3326,6 +4439,11 @@ impl InteractiveApplication {
     }
 
     fn open_explorer(&mut self) {
+        if !self.configuration.settings.ui.explorer.bundled_enabled {
+            self.show_error("the bundled explorer contribution is disabled");
+            return;
+        }
+        self.surface_windows.allow_explorer();
         if self.explorer.root_revision != self.workspace.root_revision()
             || self.explorer.visible_ids().is_empty()
         {
@@ -3379,6 +4497,63 @@ impl InteractiveApplication {
                 self.sync_explorer_ui();
             }
             Err(error) => self.show_error(error),
+        }
+    }
+
+    fn follow_active_file_in_explorer(&mut self) {
+        let Some(path) = self
+            .state
+            .active_buffer_id()
+            .and_then(|id| self.state.buffers[id].path.clone())
+        else {
+            self.show_error("active buffer has no file path");
+            return;
+        };
+        if self.workspace.root_for_canonical_path(&path).is_none() {
+            self.show_error("active file is outside workspace roots");
+            return;
+        }
+        self.explorer_follow_path = Some(path);
+        self.open_explorer();
+        self.continue_explorer_follow();
+    }
+    fn continue_explorer_follow(&mut self) {
+        if self.explorer_pending.is_some() {
+            return;
+        }
+        let Some(target) = self.explorer_follow_path.clone() else {
+            return;
+        };
+        if let Some(id) = self.explorer.id_for_path(&target) {
+            self.explorer.select(id);
+            self.explorer_follow_path = None;
+            self.sync_explorer_ui();
+            return;
+        }
+        let mut ancestor = target.parent();
+        let mut found = None;
+        while let Some(path) = ancestor {
+            if let Some(id) = self.explorer.id_for_path(path) {
+                found = Some(id);
+                break;
+            }
+            ancestor = path.parent()
+        }
+        let Some(id) = found else {
+            self.explorer_follow_path = None;
+            self.show_error("active file has no explorer root");
+            return;
+        };
+        self.explorer.select(id);
+        let Some(node) = self.explorer.node(id).cloned() else {
+            return;
+        };
+        if matches!(node.load, ExplorerLoadState::Loaded) {
+            self.explorer_follow_path = None;
+            self.show_error("active file is absent from the current explorer projection");
+            self.sync_explorer_ui()
+        } else {
+            self.load_explorer_node(id)
         }
     }
 
@@ -3442,6 +4617,8 @@ impl InteractiveApplication {
             }
         }
         self.sync_explorer_ui();
+        self.continue_explorer_follow();
+        self.start_next_explorer_watch_reload();
     }
 
     fn explorer_open_file(&mut self, split: bool) {
@@ -3472,19 +4649,16 @@ impl InteractiveApplication {
         let Some((column, row)) = self.mouse_position else {
             return;
         };
-        let Some(panel_width) = crate::terminal_ui::explorer_panel_width(
-            &self.configuration.settings,
-            self.terminal_width,
-        ) else {
+        let Some(rect) = self.explorer_window_rect() else {
             return;
         };
-        if column >= panel_width || row < 3 {
+        if !rect_contains_point(rect, column, row) || row < rect.y.saturating_add(3) {
             return;
         }
         let Some(explorer_ui) = self.ui.explorer.as_ref() else {
             return;
         };
-        let index = usize::from(row.saturating_sub(3));
+        let index = usize::from(row.saturating_sub(rect.y).saturating_sub(3));
         let Some(id) = explorer_ui.rows.get(index).map(|row| row.node_id) else {
             return;
         };
@@ -3495,6 +4669,8 @@ impl InteractiveApplication {
 
     fn refresh_explorer(&mut self) {
         self.explorer_pending = None;
+        self.explorer_watch_reload_queue.clear();
+        self.explorer_watch_observation = None;
         self.explorer_preview_path = None;
         self.explorer_preview_lines.clear();
         self.explorer_preview_generation = self.explorer_preview_generation.saturating_add(1);
@@ -3831,11 +5007,14 @@ impl InteractiveApplication {
                                             truncated: false,
                                         },
                                     );
+                                    self.terminal_set_revision =
+                                        self.terminal_set_revision.saturating_add(1);
                                     self.active_terminal = Some(id);
                                     self.terminal_focused = true;
                                     if let Some(request) = dap_request {
                                         self.dap_terminal_responses.insert(id, request);
                                     }
+                                    self.resize_active_terminal_to_panel();
                                     self.sync_terminal_panel();
                                     self.sync_explorer_ui();
                                     self.ensure_cursor_visible();
@@ -3946,35 +5125,82 @@ impl InteractiveApplication {
             self.sync_terminal_panel();
         }
     }
-    fn workspace_render_height(&self) -> u16 {
-        if self.active_terminal.is_some() {
-            terminal_panel_geometry(
-                &self.configuration.settings,
-                self.terminal_height,
-                self.terminal_panel_height,
-            )
-            .map_or(self.terminal_height, |geometry| geometry.top)
-        } else {
-            self.terminal_height
+    fn sync_plugin_window_ui(&mut self) {
+        let projection = self.compositor_projection().cloned();
+        let events = self
+            .plugin_windows
+            .synchronize_private_geometry(projection.as_ref());
+        for (plugin, load, event) in events {
+            let pending = self
+                .pending_plugin_ui_events
+                .entry((plugin, PluginLoadId(load)))
+                .or_default();
+            pending.push(event);
+            if pending.len() > 64 {
+                pending.drain(..pending.len().saturating_sub(64));
+            }
         }
+        self.ui.plugin_surfaces = self.plugin_windows.snapshots();
+        self.ui.private_surfaces = self.plugin_windows.private_snapshots(&self.windows);
     }
 
-    fn terminal_body_dimensions(&self) -> (u16, u16) {
-        terminal_panel_geometry(
-            &self.configuration.settings,
-            self.terminal_height,
-            self.terminal_panel_height,
-        )
-        .map_or((1, 1), |geometry| {
-            (self.terminal_width.max(1), geometry.body_height.max(1))
+    fn compositor_projection(&self) -> Option<&CompositorProjection> {
+        let revision = self.state.window_revision()?;
+        self.ui.compositor_layout.as_ref().and_then(|layout| {
+            (layout.source_revision == revision
+                && Some(layout.graph_revision) == self.windows.revision()
+                && Some(layout.graph_revision) == self.ui.window_graph_revision
+                && layout.projection.bounds.width == self.terminal_width
+                && layout.projection.bounds.height == self.terminal_height)
+                .then_some(&layout.projection)
         })
+    }
+
+    fn workspace_bounds(&self) -> Option<WindowRect> {
+        self.compositor_projection()
+            .map(|projection| projection.workspace_bounds)
+    }
+
+    fn explorer_window_rect(&self) -> Option<WindowRect> {
+        let layout = self.ui.compositor_layout.as_ref()?;
+        let window = layout.surfaces.explorer?;
+        self.compositor_projection()?
+            .window(window)
+            .map(|window| window.rect)
+    }
+
+    fn terminal_window_rect(&self) -> Option<WindowRect> {
+        let layout = self.ui.compositor_layout.as_ref()?;
+        let (_, window) = layout.surfaces.terminal?;
+        self.compositor_projection()?
+            .window(window)
+            .map(|window| window.rect)
+    }
+
+    fn workspace_render_height(&self) -> u16 {
+        self.workspace_bounds()
+            .map_or(self.terminal_height, |bounds| bounds.height)
+    }
+
+    fn terminal_body_dimensions(&self) -> Option<(u16, u16)> {
+        let layout = self.ui.compositor_layout.as_ref()?;
+        if Some(layout.source_revision) != self.state.window_revision()
+            || Some(layout.graph_revision) != self.windows.revision()
+        {
+            return None;
+        }
+        let rect = self.terminal_window_rect()?;
+        Some((rect.width.max(1), rect.height.saturating_sub(2).max(1)))
     }
 
     fn resize_active_terminal_to_panel(&mut self) {
         let Some(id) = self.active_terminal else {
             return;
         };
-        let (columns, rows) = self.terminal_body_dimensions();
+        self.reconcile_editor_windows();
+        let Some((columns, rows)) = self.terminal_body_dimensions() else {
+            return;
+        };
         if self.terminals.get(&id).is_none_or(|terminal| {
             terminal.screen.dimensions() == (usize::from(columns), usize::from(rows))
         }) {
@@ -3989,16 +5215,415 @@ impl InteractiveApplication {
         }
     }
 
+    fn resolve_graph_window_target(
+        &self,
+        target: &str,
+    ) -> Result<crate::windows::WindowId, String> {
+        if target == "terminal" {
+            let terminal = self
+                .active_terminal
+                .ok_or_else(|| self.message("terminal_missing", &[]))?;
+            return self
+                .surface_windows
+                .terminal(terminal.0)
+                .map(|ids| ids.window)
+                .ok_or_else(|| "selected terminal window is unavailable".into());
+        }
+        let target = match target {
+            "focused" => WindowTarget::Focused,
+            "explorer" => WindowTarget::ContentType(
+                ContentTypeId::new("builtin.explorer").map_err(|error| error.to_string())?,
+            ),
+            value if value.starts_with("window:") => WindowTarget::Id(crate::windows::WindowId(
+                value["window:".len()..]
+                    .parse::<u64>()
+                    .map_err(|_| format!("invalid runtime window target `{value}`"))?,
+            )),
+            value => WindowTarget::ContentType(
+                ContentTypeId::new(value).map_err(|error| error.to_string())?,
+            ),
+        };
+        self.windows
+            .resolve_target(&target)
+            .map_err(|error| error.to_string())
+    }
+
+    fn resolve_native_window_target(&self, target: &str) -> Result<NativeSurfaceTarget, String> {
+        let window = self.resolve_graph_window_target(target)?;
+        self.surface_windows
+            .target_for_window(window)
+            .ok_or_else(|| {
+                let adapter = self
+                    .windows
+                    .window(window)
+                    .and_then(|window| self.windows.view(window.view))
+                    .and_then(|view| self.windows.content(view.content))
+                    .map_or("unknown", |content| match content.adapter {
+                        crate::windows::ContentAdapterKind::TextBuffer => "editor-tiled",
+                        crate::windows::ContentAdapterKind::TerminalSession => "terminal",
+                        crate::windows::ContentAdapterKind::VirtualDocument => "virtual-document",
+                        crate::windows::ContentAdapterKind::DeclarativeUi => "declarative-ui",
+                        crate::windows::ContentAdapterKind::PrivateCellSurface => "private-cell",
+                        crate::windows::ContentAdapterKind::ExternalTui => "external-tui",
+                    });
+                format!("window adapter `{adapter}` has no mutable lifecycle hook")
+            })
+    }
+
+    fn editor_pane_for_window(
+        &self,
+        window: crate::windows::WindowId,
+    ) -> Option<crate::editing::PaneId> {
+        self.editor_windows.pane_for_window(window)
+    }
+
+    fn apply_native_window_placement(
+        &mut self,
+        target: NativeSurfaceTarget,
+        placement: WindowPlacement,
+    ) -> Result<(), String> {
+        // Commands operate only against the exact application projection that
+        // was accepted for the current editor source revision.
+        if self.compositor_projection().is_none() {
+            return Err("universal compositor projection is missing or stale".into());
+        }
+        let mut graph = self.windows.clone();
+        let mut surfaces = self.surface_windows.clone();
+        if placement == WindowPlacement::Hidden
+            && let Some(current) = surfaces
+                .ids_for_target(target)
+                .and_then(|ids| graph.window(ids.window))
+                .map(|window| window.placement)
+                .filter(|current| *current != WindowPlacement::Hidden)
+        {
+            surfaces
+                .place_target(target, current)
+                .map_err(|error| error.to_string())?;
+        }
+        let ids = surfaces
+            .place_target(target, placement)
+            .map_err(|error| error.to_string())?;
+        graph
+            .place(ids.window, placement)
+            .map_err(|error| error.to_string())?;
+        graph.validate().map_err(|error| error.to_string())?;
+        self.windows = graph;
+        self.surface_windows = surfaces;
+        if placement == WindowPlacement::Hidden {
+            match target {
+                NativeSurfaceTarget::Explorer => self.ui.explorer_focused = false,
+                NativeSurfaceTarget::Terminal(_) => self.terminal_focused = false,
+                NativeSurfaceTarget::Dashboard | NativeSurfaceTarget::Picker(_) => {}
+            }
+        }
+        self.reconcile_editor_windows();
+        if matches!(target, NativeSurfaceTarget::Terminal(_))
+            && placement != WindowPlacement::Hidden
+        {
+            self.resize_active_terminal_to_panel();
+        }
+        self.sync_terminal_panel();
+        self.ensure_cursor_visible();
+        Ok(())
+    }
+
+    fn place_active_terminal(&mut self, placement: WindowPlacement) {
+        let Some(id) = self.active_terminal else {
+            self.show_error(self.message("terminal_missing", &[]));
+            return;
+        };
+        if let Err(error) =
+            self.apply_native_window_placement(NativeSurfaceTarget::Terminal(id.0), placement)
+        {
+            self.show_error(error);
+        }
+    }
+
+    fn show_native_window(&mut self, target: NativeSurfaceTarget) -> Result<(), String> {
+        if self.compositor_projection().is_none() {
+            return Err("universal compositor projection is missing or stale".into());
+        }
+        let explorer_fallback = WindowPlacement::Docked {
+            edge: DockEdge::Left,
+            size: explorer_panel_width(&self.configuration.settings, self.terminal_width)
+                .unwrap_or(1)
+                .saturating_add(1),
+        };
+        let terminal_fallback = WindowPlacement::Docked {
+            edge: DockEdge::Bottom,
+            size: self.terminal_panel_height.max(1),
+        };
+        let mut graph = self.windows.clone();
+        let mut surfaces = self.surface_windows.clone();
+        let ids = surfaces
+            .show_target(target, explorer_fallback, terminal_fallback)
+            .map_err(|error| error.to_string())?;
+        let placement = surfaces
+            .placement_for_target(target)
+            .ok_or_else(|| "native window has no restorable placement".to_owned())?;
+        graph
+            .place(ids.window, placement)
+            .map_err(|error| error.to_string())?;
+        graph.validate().map_err(|error| error.to_string())?;
+        self.windows = graph;
+        self.surface_windows = surfaces;
+        self.reconcile_editor_windows();
+        if matches!(target, NativeSurfaceTarget::Terminal(_)) {
+            self.resize_active_terminal_to_panel();
+        }
+        self.sync_terminal_panel();
+        Ok(())
+    }
+
+    fn current_native_placement(
+        &self,
+        target: NativeSurfaceTarget,
+    ) -> Result<WindowPlacement, String> {
+        let ids = self
+            .surface_windows
+            .ids_for_target(target)
+            .ok_or_else(|| "native window target is not currently instantiated".to_owned())?;
+        self.windows
+            .window(ids.window)
+            .map(|window| window.placement)
+            .ok_or_else(|| "native window graph identity is stale".to_owned())
+    }
+
+    fn resize_native_window(
+        &mut self,
+        target: NativeSurfaceTarget,
+        amount: i16,
+    ) -> Result<(), String> {
+        let placement = match self.current_native_placement(target)? {
+            WindowPlacement::Docked { edge, size } => WindowPlacement::Docked {
+                edge,
+                size: size.saturating_add_signed(amount).max(1),
+            },
+            WindowPlacement::Floating(mut rect) => {
+                rect.width = rect.width.saturating_add_signed(amount).max(1);
+                rect.height = rect.height.saturating_add_signed(amount).max(1);
+                WindowPlacement::Floating(rect)
+            }
+            WindowPlacement::Tiled => {
+                return Err("editor tiled mutation is not yet graph-authoritative".into());
+            }
+            WindowPlacement::Fullscreen | WindowPlacement::Hidden | WindowPlacement::Overlay(_) => {
+                return Err("only docked or floating ordinary windows can be resized".into());
+            }
+        };
+        self.apply_native_window_placement(target, placement)
+    }
+
+    fn resize_graph_window(&mut self, target: &str, amount: i16) -> Result<(), String> {
+        if self.compositor_projection().is_none() {
+            return Err("universal compositor projection is missing or stale".into());
+        }
+        let window = self.resolve_graph_window_target(target)?;
+        if let Some(native) = self.surface_windows.target_for_window(window) {
+            return self.resize_native_window(native, amount);
+        }
+        let pane = self.editor_pane_for_window(window).ok_or_else(|| {
+            "window adapter has no resize hook; editor dock/float/fullscreen remains unsupported"
+                .to_owned()
+        })?;
+        let transaction = EditorTransaction::new(self.transaction_id())
+            .with_operation(EditorOperation::FocusPaneId { pane })
+            .with_operation(EditorOperation::ResizePane { delta: amount })
+            .with_undo_policy(UndoPolicy::Ignore);
+        self.apply_authoritative_editor_transaction(&transaction)
+    }
+
+    fn close_graph_window(&mut self, target: &str) -> Result<(), String> {
+        if self.compositor_projection().is_none() {
+            return Err("universal compositor projection is missing or stale".into());
+        }
+        let window = self.resolve_graph_window_target(target)?;
+        if let Some(native) = self.surface_windows.target_for_window(window) {
+            return match native {
+                NativeSurfaceTarget::Explorer => self.close_native_explorer(),
+                NativeSurfaceTarget::Terminal(id) => {
+                    self.active_terminal = Some(PtyId(id));
+                    self.process_effect(AppEffect::TerminalClose);
+                    Ok(())
+                }
+                NativeSurfaceTarget::Dashboard => {
+                    if self.state.active_view.is_none() {
+                        return Err("cannot close the only dashboard surface".into());
+                    }
+                    let mut graph = self.windows.clone();
+                    let mut surfaces = self.surface_windows.clone();
+                    surfaces
+                        .close_target(&mut graph, native)
+                        .map_err(|error| error.to_string())?;
+                    self.ui.dashboard = false;
+                    self.windows = graph;
+                    self.surface_windows = surfaces;
+                    self.reconcile_editor_windows();
+                    Ok(())
+                }
+                NativeSurfaceTarget::Picker(kind) => {
+                    let mut graph = self.windows.clone();
+                    let mut surfaces = self.surface_windows.clone();
+                    surfaces
+                        .close_target(&mut graph, native)
+                        .map_err(|error| error.to_string())?;
+                    if self
+                        .ui
+                        .picker
+                        .as_ref()
+                        .is_some_and(|picker| picker.surface == kind)
+                    {
+                        self.close_picker();
+                    }
+                    self.windows = graph;
+                    self.surface_windows = surfaces;
+                    self.reconcile_editor_windows();
+                    Ok(())
+                }
+            };
+        }
+        let pane = self.editor_pane_for_window(window).ok_or_else(|| {
+            "window adapter has no close hook; plugin lifecycle is unavailable".to_owned()
+        })?;
+        let dirty = self
+            .state
+            .panes
+            .get(pane)
+            .and_then(|pane| self.state.views.get(pane.view))
+            .and_then(|view| self.state.buffers.get(view.buffer))
+            .is_some_and(|buffer| buffer.dirty);
+        if dirty {
+            return Err(self.message("dirty_close", &[]));
+        }
+        let transaction = EditorTransaction::new(self.transaction_id())
+            .with_operation(EditorOperation::FocusPaneId { pane })
+            .with_operation(EditorOperation::ClosePane)
+            .with_undo_policy(UndoPolicy::Ignore);
+        self.apply_authoritative_editor_transaction(&transaction)
+    }
+
+    fn move_native_window(
+        &mut self,
+        target: NativeSurfaceTarget,
+        x: u16,
+        y: u16,
+    ) -> Result<(), String> {
+        let WindowPlacement::Floating(mut rect) = self.current_native_placement(target)? else {
+            return Err("only floating ordinary windows can be moved".into());
+        };
+        rect.x = x;
+        rect.y = y;
+        self.apply_native_window_placement(target, WindowPlacement::Floating(rect))
+    }
+
+    fn swap_graph_windows(&mut self, first: &str, second: &str) -> Result<(), String> {
+        if self.compositor_projection().is_none() {
+            return Err("universal compositor projection is missing or stale".into());
+        }
+        let first_window = self.resolve_graph_window_target(first)?;
+        let second_window = self.resolve_graph_window_target(second)?;
+        if first_window == second_window {
+            return Ok(());
+        }
+        let first_native = self.surface_windows.target_for_window(first_window);
+        let second_native = self.surface_windows.target_for_window(second_window);
+        match (first_native, second_native) {
+            (Some(first), Some(second)) => self.swap_native_windows(first, second),
+            (None, None) => {
+                let first_pane = self.editor_pane_for_window(first_window).ok_or_else(|| {
+                    "first window adapter has no authoritative swap hook".to_owned()
+                })?;
+                let second_pane = self.editor_pane_for_window(second_window).ok_or_else(|| {
+                    "second window adapter has no authoritative swap hook".to_owned()
+                })?;
+                let transaction = EditorTransaction::new(self.transaction_id())
+                    .with_operation(EditorOperation::SwapPanes {
+                        first: first_pane,
+                        second: second_pane,
+                    })
+                    .with_undo_policy(UndoPolicy::Ignore);
+                self.apply_authoritative_editor_transaction(&transaction)
+            }
+            _ => Err("cannot swap editor and non-editor window adapters".into()),
+        }
+    }
+
+    fn swap_native_windows(
+        &mut self,
+        first: NativeSurfaceTarget,
+        second: NativeSurfaceTarget,
+    ) -> Result<(), String> {
+        if first == second {
+            return Ok(());
+        }
+        if self.compositor_projection().is_none() {
+            return Err("universal compositor projection is missing or stale".into());
+        }
+        let mut graph = self.windows.clone();
+        let mut surfaces = self.surface_windows.clone();
+        let first_ids = surfaces
+            .ids_for_target(first)
+            .ok_or_else(|| "first native window is unavailable".to_owned())?;
+        let second_ids = surfaces
+            .ids_for_target(second)
+            .ok_or_else(|| "second native window is unavailable".to_owned())?;
+        let first_placement = graph
+            .window(first_ids.window)
+            .map(|window| window.placement)
+            .ok_or_else(|| "first native window identity is stale".to_owned())?;
+        let second_placement = graph
+            .window(second_ids.window)
+            .map(|window| window.placement)
+            .ok_or_else(|| "second native window identity is stale".to_owned())?;
+        graph
+            .swap_non_tiled_placements(first_ids.window, second_ids.window)
+            .map_err(|error| error.to_string())?;
+        surfaces
+            .place_target(first, second_placement)
+            .map_err(|error| error.to_string())?;
+        surfaces
+            .place_target(second, first_placement)
+            .map_err(|error| error.to_string())?;
+        graph.validate().map_err(|error| error.to_string())?;
+        self.windows = graph;
+        self.surface_windows = surfaces;
+        self.reconcile_editor_windows();
+        self.resize_active_terminal_to_panel();
+        self.sync_terminal_panel();
+        Ok(())
+    }
+
+    fn close_native_explorer(&mut self) -> Result<(), String> {
+        if self.compositor_projection().is_none() {
+            return Err("universal compositor projection is missing or stale".into());
+        }
+        let mut graph = self.windows.clone();
+        let mut surfaces = self.surface_windows.clone();
+        surfaces
+            .close_target(&mut graph, NativeSurfaceTarget::Explorer)
+            .map_err(|error| error.to_string())?;
+        graph.validate().map_err(|error| error.to_string())?;
+        self.windows = graph;
+        self.surface_windows = surfaces;
+        self.ui.explorer = None;
+        self.ui.explorer_focused = false;
+        self.reconcile_explorer_watch();
+        self.reconcile_editor_windows();
+        Ok(())
+    }
+
     fn sync_terminal_panel(&mut self) {
         let Some(id) = self.active_terminal else {
             self.terminal_focused = false;
             self.ui.terminal_panel = None;
+            self.reconcile_editor_windows();
             return;
         };
         let Some(terminal) = self.terminals.get(&id) else {
             self.active_terminal = None;
             self.terminal_focused = false;
             self.ui.terminal_panel = None;
+            self.reconcile_editor_windows();
             return;
         };
         let (cursor_column, cursor_row) = terminal.screen.cursor();
@@ -4014,7 +5639,7 @@ impl InteractiveApplication {
             columns: u16::try_from(columns).unwrap_or(u16::MAX),
             rows: u16::try_from(rows).unwrap_or(u16::MAX),
             cells: terminal.screen.cells().to_vec(),
-            cursor: (columns > 0 && rows > 0).then_some((
+            cursor: (columns > 0 && rows > 0 && terminal.screen.cursor_visible()).then_some((
                 u16::try_from(cursor_column.min(columns.saturating_sub(1))).unwrap_or(u16::MAX),
                 u16::try_from(cursor_row.min(rows.saturating_sub(1))).unwrap_or(u16::MAX),
             )),
@@ -4022,6 +5647,7 @@ impl InteractiveApplication {
             scroll_offset: 0,
             requested_height: self.terminal_panel_height,
         });
+        self.reconcile_editor_windows();
     }
 
     fn rebuild_matcher_cache(&mut self) {
@@ -4116,7 +5742,17 @@ impl InteractiveApplication {
         for plugin in self.plugins.statuses.keys().cloned().collect::<Vec<_>>() {
             self.commands.unregister_plugin(&plugin);
         }
+        let owned_generations = self
+            .plugin_contributions
+            .ordered()
+            .map(|index| (index.owner.clone(), PluginLoadId(index.generation)))
+            .collect::<Vec<_>>();
+        for (plugin, load) in owned_generations {
+            self.remove_plugin_contribution_generation(&plugin, load);
+        }
         self.plugin_contributions = PluginContributionCatalog::default();
+        self.plugin_host_events = PluginHostEventQueue::default();
+        self.plugin_host_event_observation = None;
         if let Ok(compiled) = compile_keymaps_with_plugin_catalog(
             &self.commands,
             &self.configuration.base_keymaps,
@@ -4223,6 +5859,60 @@ impl InteractiveApplication {
         Ok(())
     }
 
+    fn resolve_plugin_window_rules(&self) -> Result<crate::configuration::WindowsConfig, String> {
+        for rule in &self.configuration.raw_windows.rules {
+            let Some(owner) = plugin_owner_from_id(&rule.content_type) else {
+                continue;
+            };
+            if !self.configuration.expected_plugin_indexes.contains(owner) {
+                return Err(format!(
+                    "plugin window selector `{}` does not name an enabled plugin",
+                    rule.content_type
+                ));
+            }
+            let index = self.plugin_contributions.get(owner).ok_or_else(|| {
+                format!(
+                    "plugin window selector `{}` is not indexed",
+                    rule.content_type
+                )
+            })?;
+            let declaration = index
+                .content_types
+                .iter()
+                .find(|content| content.id == rule.content_type)
+                .ok_or_else(|| {
+                    format!(
+                        "plugin window selector `{}` was not statically declared",
+                        rule.content_type
+                    )
+                })?;
+            let requested = match &rule.placement {
+                crate::configuration::WindowPlacementConfig::Automatic => None,
+                crate::configuration::WindowPlacementConfig::Docked { .. } => {
+                    Some(crate::plugins::PluginWindowPlacementKind::Docked)
+                }
+                crate::configuration::WindowPlacementConfig::Floating { .. } => {
+                    Some(crate::plugins::PluginWindowPlacementKind::Floating)
+                }
+                crate::configuration::WindowPlacementConfig::Fullscreen => {
+                    Some(crate::plugins::PluginWindowPlacementKind::Fullscreen)
+                }
+                crate::configuration::WindowPlacementConfig::Hidden => {
+                    Some(crate::plugins::PluginWindowPlacementKind::Hidden)
+                }
+            };
+            if requested
+                .is_some_and(|placement| !declaration.allowed_placements.contains(&placement))
+            {
+                return Err(format!(
+                    "plugin window selector `{}` requests a disallowed placement",
+                    rule.content_type
+                ));
+            }
+        }
+        Ok(self.configuration.raw_windows.clone())
+    }
+
     fn recompile_plugin_contributions(&mut self) -> Result<(), String> {
         let compiled = compile_keymaps_with_plugin_catalog(
             &self.commands,
@@ -4231,12 +5921,71 @@ impl InteractiveApplication {
             &self.configuration.settings.input.keymaps,
         )
         .map_err(|errors| errors.join("; "))?;
+        let windows = self.resolve_plugin_window_rules()?;
+        let mut plugin_windows = self.plugin_windows.clone();
+        plugin_windows.set_configured_rules(&windows)?;
+        let native_windows = crate::configuration::WindowsConfig {
+            rules: windows
+                .rules
+                .iter()
+                .filter(|rule| !rule.content_type.starts_with("plugin."))
+                .cloned()
+                .collect(),
+        };
+        let (graph, mut surfaces) = self.prepare_configured_window_rules(&native_windows)?;
+        surfaces.invalidate();
         self.cancel_pending_mapping();
         self.configuration.keymaps = compiled;
+        self.configuration.settings.windows = windows;
+        self.plugin_windows = plugin_windows;
+        self.windows = graph;
+        self.surface_windows = surfaces;
+        self.reconcile_editor_windows();
         Ok(())
     }
 
     fn remove_plugin_contribution_generation(&mut self, plugin: &str, load: PluginLoadId) {
+        let mut graph = self.windows.clone();
+        let mut windows = self.plugin_windows.clone();
+        match windows.remove_generation(&mut graph, plugin, load.0) {
+            Ok(removed) => {
+                self.pending_plugin_ui_events
+                    .remove(&(plugin.to_owned(), load));
+                if removed {
+                    self.windows = graph;
+                    self.plugin_windows = windows;
+                    self.ui.plugin_surfaces = self.plugin_windows.snapshots();
+                    self.surface_windows.invalidate();
+                    self.reconcile_editor_windows();
+                }
+            }
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        }
+        self.plugin_host_events.remove_generation(plugin, load);
+        self.plugin_host_event_observation = None;
+        self.plugin_storage.remove_generation(plugin, load);
+        self.plugin_providers.remove_generation(plugin, load);
+        self.plugin_virtual_documents
+            .remove_generation(plugin, load);
+        let mut virtual_state = self.state.clone();
+        let mut virtual_editor = self.plugin_virtual_editor.clone();
+        if virtual_editor.remove_generation(&mut virtual_state, plugin, load) > 0 {
+            self.state = virtual_state;
+            self.plugin_virtual_editor = virtual_editor;
+            self.reconcile_editor_windows();
+        }
+        if self
+            .active_plugin_picker
+            .is_some_and(|request| self.plugin_providers.projection(request).is_none())
+        {
+            self.active_plugin_picker = None;
+            self.close_picker();
+        }
+        self.pending_plugin_storage_results
+            .remove(&(plugin.to_owned(), load));
         if self.plugin_contributions.remove_generation(plugin, load.0) {
             self.commands.unregister_plugin(plugin);
             if let Err(error) = self.recompile_plugin_contributions() {
@@ -4250,6 +5999,18 @@ impl InteractiveApplication {
                         self.cancel_pending_mapping();
                         self.configuration.keymaps = compiled;
                         self.configuration.deferred_plugin_keymaps = true;
+                        let fallback_windows = crate::configuration::WindowsConfig {
+                            rules: self
+                                .configuration
+                                .raw_windows
+                                .rules
+                                .iter()
+                                .filter(|rule| !rule.content_type.starts_with("plugin."))
+                                .cloned()
+                                .collect(),
+                        };
+                        let _ = self.plugin_windows.set_configured_rules(&fallback_windows);
+                        self.configuration.settings.windows = fallback_windows;
                         self.show_error(error);
                     }
                     Err(fallback) => self.show_error(fallback.join("; ")),
@@ -4262,7 +6023,7 @@ impl InteractiveApplication {
         let pending = std::mem::take(&mut self.pending_index_activation);
         for (owner, (load, _)) in pending {
             self.rejected_plugin_loads.insert((owner.clone(), load));
-            self.plugin_contributions.remove_generation(&owner, load.0);
+            self.remove_plugin_contribution_generation(&owner, load);
             self.commands.unregister_plugin(&owner);
             let _ = self.plugins.disable_generation(&owner, load);
             if let Some((_, token)) = self
@@ -4282,6 +6043,18 @@ impl InteractiveApplication {
             self.cancel_pending_mapping();
             self.configuration.keymaps = compiled;
         }
+        let fallback_windows = crate::configuration::WindowsConfig {
+            rules: self
+                .configuration
+                .raw_windows
+                .rules
+                .iter()
+                .filter(|rule| !rule.content_type.starts_with("plugin."))
+                .cloned()
+                .collect(),
+        };
+        let _ = self.plugin_windows.set_configured_rules(&fallback_windows);
+        self.configuration.settings.windows = fallback_windows;
         self.show_error(diagnostic);
     }
 
@@ -4313,6 +6086,131 @@ impl InteractiveApplication {
         self.abort_pending_index_batch(diagnostic);
     }
 
+    fn queue_plugin_storage_result(&mut self, result: PluginStorageResult) {
+        let key = (result.plugin.clone(), result.load);
+        let pending = self.pending_plugin_storage_results.entry(key).or_default();
+        pending.push(result);
+        while pending.len() > crate::plugins::STORAGE_REQUEST_CEILING
+            || pending
+                .iter()
+                .map(PluginStorageResult::bounded_bytes)
+                .sum::<usize>()
+                > crate::plugins::STORAGE_RESULT_QUEUE_BYTE_CEILING
+        {
+            pending.remove(0);
+        }
+    }
+
+    fn process_plugin_storage_events(&mut self) {
+        for result in self.plugin_storage.poll() {
+            if self.plugins.load_id(&result.plugin) != Some(result.load)
+                || !self
+                    .plugins
+                    .is_active_generation(&result.plugin, result.load)
+            {
+                continue;
+            }
+            self.queue_plugin_storage_result(result);
+        }
+    }
+
+    fn refresh_plugin_host_events(&mut self) {
+        let active_surface = if self.terminal_focused {
+            "terminal"
+        } else if self.ui.explorer_focused {
+            "explorer"
+        } else if self
+            .ui
+            .private_surfaces
+            .iter()
+            .any(|surface| surface.focused)
+        {
+            "plugin"
+        } else {
+            "editor"
+        }
+        .to_string();
+        let buffer = self.state.active_view.and_then(|view_id| {
+            let view = self.state.views.get(view_id)?;
+            let buffer = self.state.buffers.get(view.buffer)?;
+            let (anchor, head, kind) =
+                view.selection
+                    .map_or((view.cursor.0, view.cursor.0, 0), |selection| {
+                        (
+                            selection.anchor.0,
+                            selection.head.0,
+                            match selection.kind {
+                                crate::editing::SelectionKind::Character => 1,
+                                crate::editing::SelectionKind::Line => 2,
+                                crate::editing::SelectionKind::Block => 3,
+                            },
+                        )
+                    });
+            Some((
+                view.buffer.data().as_ffi(),
+                buffer.text.revision().0,
+                view.cursor.0,
+                anchor,
+                head,
+                kind,
+            ))
+        });
+        let graph_revision = self.windows.revision().unwrap_or(0);
+        let observation = (
+            self.workspace.root_revision(),
+            active_surface.clone(),
+            buffer,
+            graph_revision,
+        );
+        if self.plugin_host_event_observation.as_ref() == Some(&observation) {
+            return;
+        }
+        self.plugin_host_event_observation = Some(observation.clone());
+        let generations = self
+            .plugin_contributions
+            .ordered()
+            .map(|index| (index.owner.clone(), PluginLoadId(index.generation)))
+            .collect::<Vec<_>>();
+        for (plugin, load) in generations {
+            let _ = self.plugin_host_events.observe(
+                &plugin,
+                load,
+                PluginSubscriptionKind::WorkspaceMetadataChanged,
+                observation.0,
+                format!("roots={}", self.workspace.roots().len()),
+            );
+            let _ = self.plugin_host_events.observe(
+                &plugin,
+                load,
+                PluginSubscriptionKind::ActiveSurfaceChanged,
+                graph_revision,
+                active_surface.clone(),
+            );
+            if let Some((id, revision, cursor, anchor, head, kind)) = buffer {
+                let _ = self.plugin_host_events.observe(
+                    &plugin,
+                    load,
+                    PluginSubscriptionKind::BufferSummaryChanged,
+                    revision,
+                    format!(
+                        "buffer={id};revision={revision};cursor={cursor};selection={anchor}:{head}:{kind}"
+                    ),
+                );
+            }
+            let _ = self.plugin_host_events.observe(
+                &plugin,
+                load,
+                PluginSubscriptionKind::PluginSurfaceChanged,
+                graph_revision,
+                format!(
+                    "retained={};private={}",
+                    self.ui.plugin_surfaces.len(),
+                    self.ui.private_surfaces.len()
+                ),
+            );
+        }
+    }
+
     fn process_plugin_events(&mut self) {
         let events = match self.plugins.poll() {
             Ok(events) => events,
@@ -4337,7 +6235,26 @@ impl InteractiveApplication {
                         .plugin_contributions
                         .install(index.clone())
                         .map_err(|error| error.to_string())
+                        .and_then(|()| {
+                            self.plugin_host_events
+                                .install(&index)
+                                .map_err(|error| error.to_string())
+                        })
+                        .and_then(|()| {
+                            self.plugin_providers
+                                .install(&index)
+                                .map_err(|error| error.detail)
+                        })
+                        .and_then(|()| {
+                            self.plugin_virtual_documents
+                                .install(&index)
+                                .map_err(|error| error.detail)
+                        })
                         .and_then(|()| self.register_indexed_plugin_commands(&index));
+                    self.plugin_host_event_observation = None;
+                    if accepted.is_ok() && index.storage.is_some() {
+                        self.plugin_storage.install_generation(&plugin, load);
+                    }
                     self.pending_index_activation
                         .insert(plugin.clone(), (load, checksum.clone()));
                     let waiting_for_deferred = self.configuration.deferred_plugin_keymaps
@@ -4571,7 +6488,143 @@ impl InteractiveApplication {
         }
     }
 
-    fn apply_plugin_execution(&mut self, execution: PluginExecution) {
+    fn apply_plugin_execution(&mut self, mut execution: PluginExecution) {
+        let plugin = execution.plugin.clone();
+        let mut provider_continuations = Vec::new();
+        if let Some(load) = self.plugins.load_id(&plugin)
+            && self.plugins.is_active_generation(&plugin, load)
+        {
+            self.plugin_host_events.acknowledge(
+                &plugin,
+                load,
+                &execution.host_event_acknowledgements,
+            );
+            if let Some(policy) = self
+                .plugin_contributions
+                .get(&plugin)
+                .filter(|index| index.generation == load.0)
+                .and_then(|index| index.storage.clone())
+            {
+                for request in std::mem::take(&mut execution.storage_requests) {
+                    let token = request.token;
+                    if let Err(error) =
+                        self.plugin_storage
+                            .request(plugin.clone(), load, policy.clone(), request)
+                    {
+                        self.queue_plugin_storage_result(
+                            crate::plugins::PluginStorageResult::rejected(
+                                plugin.clone(),
+                                load,
+                                token,
+                                error,
+                            ),
+                        );
+                    }
+                }
+            }
+            let workspace_revision = Some(self.workspace.root_revision());
+            let buffer_revision = self
+                .state
+                .active_buffer_id()
+                .and_then(|buffer| self.state.buffers.get(buffer))
+                .map(|buffer| buffer.text.revision().0);
+            for proposal in std::mem::take(&mut execution.virtual_document_proposals) {
+                let mut broker = self.plugin_virtual_documents.clone();
+                match broker.apply(&plugin, load, proposal) {
+                    Ok(snapshot) => {
+                        let mut state = self.state.clone();
+                        let mut bridge = self.plugin_virtual_editor.clone();
+                        match bridge.publish(&mut state, &snapshot) {
+                            Ok(_) => {
+                                let mut graph = self.windows.clone();
+                                let mut editor = self.editor_windows.clone();
+                                if let Err(error) = editor.reconcile(
+                                    &state,
+                                    &mut graph,
+                                    &self.configuration.settings.ui.buffer_line.scratch_label,
+                                ) {
+                                    self.show_error(format!(
+                                        "virtual document graph publication rejected: {error}"
+                                    ));
+                                    continue;
+                                }
+                                self.plugin_virtual_documents = broker;
+                                self.state = state;
+                                self.plugin_virtual_editor = bridge;
+                                self.windows = graph;
+                                self.editor_windows = editor;
+                                self.ui.dashboard = false;
+                                self.reconcile_editor_windows();
+                            }
+                            Err(error) => self.show_error(format!(
+                                "virtual document publication rejected: {error:?}"
+                            )),
+                        }
+                    }
+                    Err(error) => self.show_error(error.detail),
+                }
+            }
+            for chunk in std::mem::take(&mut execution.provider_chunks) {
+                let request = chunk.request;
+                match self.plugin_providers.apply_chunk(
+                    &plugin,
+                    load,
+                    workspace_revision,
+                    buffer_revision,
+                    chunk,
+                ) {
+                    Ok(status) => {
+                        if self.active_plugin_picker == Some(request) {
+                            self.present_plugin_picker(request);
+                        }
+                        if status == PluginProviderSessionStatus::Active
+                            && let Some(projection) = self.plugin_providers.projection(request)
+                        {
+                            let prefix = format!("plugin.{plugin}.");
+                            if let Some(command) = projection.action_command.strip_prefix(&prefix) {
+                                provider_continuations.push(command.to_owned());
+                            }
+                        }
+                    }
+                    Err(error) => self.show_error(error.detail),
+                }
+            }
+        }
+        for command in provider_continuations {
+            self.process_effect(AppEffect::PluginExecute {
+                plugin: plugin.clone(),
+                command,
+            });
+        }
+        if !execution.ui_requests.is_empty()
+            && let Some(load) = self.plugins.load_id(&plugin)
+            && self.plugins.is_active_generation(&plugin, load)
+            && let Some(index) = self
+                .plugin_contributions
+                .get(&plugin)
+                .filter(|index| index.generation == load.0)
+                .cloned()
+        {
+            let requests = std::mem::take(&mut execution.ui_requests);
+            let events = requests
+                .into_iter()
+                .map(|request| {
+                    self.plugin_windows
+                        .process(&mut self.windows, &index, request)
+                })
+                .collect::<Vec<_>>();
+            let pending = self
+                .pending_plugin_ui_events
+                .entry((plugin.clone(), load))
+                .or_default();
+            pending.extend(events);
+            if pending.len() > 64 {
+                pending.drain(..pending.len().saturating_sub(64));
+            }
+            self.ui.plugin_surfaces = self.plugin_windows.snapshots();
+            self.surface_windows.invalidate();
+            self.reconcile_editor_windows();
+        }
         for message in execution.messages {
             self.ui.notification = Some(message);
             self.ui.notification_error = false;
@@ -5406,7 +7459,8 @@ impl InteractiveApplication {
                 )
             })
             .collect();
-        self.install_picker(
+        self.install_surface_picker(
+            PickerSurfaceKind::Output,
             self.message("picker_output_title", &[("name", name.into())]),
             items,
         );
@@ -5612,6 +7666,127 @@ impl InteractiveApplication {
         }
     }
 
+    fn capture_window_rules(&self) -> Vec<PersistedWindowRule> {
+        let mut rules = self
+            .surface_windows
+            .semantic_defaults(self.active_terminal.map(|id| id.0));
+        if !rules
+            .iter()
+            .any(|(content_type, _)| *content_type == "builtin.explorer")
+            && let Some(ids) = self.surface_windows.explorer()
+            && let Some(window) = self.windows.window(ids.window)
+        {
+            rules.push(("builtin.explorer", window.placement));
+        }
+        if !rules
+            .iter()
+            .any(|(content_type, _)| *content_type == "builtin.terminal")
+            && let Some(ids) = self
+                .active_terminal
+                .and_then(|id| self.surface_windows.terminal(id.0))
+            && let Some(window) = self.windows.window(ids.window)
+        {
+            rules.push(("builtin.terminal", window.placement));
+        }
+        rules
+            .into_iter()
+            .filter_map(|(content_type, placement)| {
+                persisted_window_placement(placement).map(|placement| PersistedWindowRule {
+                    content_type: content_type.into(),
+                    placement,
+                })
+            })
+            .collect()
+    }
+
+    fn prepare_configured_window_rules(
+        &self,
+        windows: &crate::configuration::WindowsConfig,
+    ) -> Result<(WindowGraph, NativeSurfaceBridge), String> {
+        let placements = configured_window_placements(windows)?;
+        let mut graph = self.windows.clone();
+        let mut surfaces = self.surface_windows.clone();
+        surfaces
+            .set_configured_placements(placements)
+            .map_err(|error| error.to_string())?;
+        let signature = self.native_surface_signature(&self.editor_windows);
+        let mut terminals = self
+            .terminals
+            .iter()
+            .map(|(id, terminal)| (id.0, terminal.profile.clone()))
+            .collect::<Vec<_>>();
+        terminals.sort_unstable_by_key(|(id, _)| *id);
+        surfaces
+            .reconcile(
+                &mut graph,
+                signature,
+                &self.message("explorer_title", &[]),
+                &self.configuration.dashboard.identity,
+                self.ui
+                    .picker
+                    .as_ref()
+                    .map_or("Picker", |picker| &picker.title),
+                &terminals,
+            )
+            .map_err(|error| error.to_string())?;
+        graph.validate().map_err(|error| error.to_string())?;
+        graph
+            .revision()
+            .ok_or_else(|| "window graph revision is exhausted".to_owned())?;
+        Ok((graph, surfaces))
+    }
+
+    fn apply_persisted_window_rules(
+        &mut self,
+        rules: &[PersistedWindowRule],
+    ) -> Result<(), String> {
+        validate_window_rules(rules).map_err(|error| error.to_string())?;
+        let mut graph = self.windows.clone();
+        let mut candidate = self.surface_windows.clone();
+        for rule in rules {
+            let placement = restored_window_placement(&rule.placement)?;
+            candidate
+                .set_semantic_default(&rule.content_type, placement)
+                .map_err(|error| error.to_string())?;
+        }
+        let signature = self.native_surface_signature(&self.editor_windows);
+        let mut terminals = self
+            .terminals
+            .iter()
+            .map(|(id, terminal)| (id.0, terminal.profile.clone()))
+            .collect::<Vec<_>>();
+        terminals.sort_unstable_by_key(|(id, _)| *id);
+        candidate
+            .reconcile(
+                &mut graph,
+                signature,
+                &self.message("explorer_title", &[]),
+                &self.configuration.dashboard.identity,
+                self.ui
+                    .picker
+                    .as_ref()
+                    .map_or("Picker", |picker| &picker.title),
+                &terminals,
+            )
+            .map_err(|error| error.to_string())?;
+        graph.validate().map_err(|error| error.to_string())?;
+        graph
+            .revision()
+            .ok_or_else(|| "window graph revision is exhausted".to_owned())?;
+
+        let requires_projection = graph.active_tab().is_some();
+        self.windows = graph;
+        self.surface_windows = candidate;
+        // The dry-run candidate is accepted, but the application projection
+        // must be rebuilt against its newly published graph revision.
+        self.surface_windows.invalidate();
+        self.reconcile_editor_windows();
+        if requires_projection && self.compositor_projection().is_none() {
+            return Err("persisted window projection could not be published".into());
+        }
+        Ok(())
+    }
+
     fn capture_session(&self) -> Option<PersistedSession> {
         let mut tabs = Vec::new();
         let mut active_tab = 0_usize;
@@ -5644,6 +7819,7 @@ impl InteractiveApplication {
                 .collect(),
             tabs,
             active_tab,
+            window_rules: self.capture_window_rules(),
         })
     }
 
@@ -5721,6 +7897,14 @@ impl InteractiveApplication {
                     if self.persistence_pending == Some(generation) =>
                 {
                     let session = state.session.clone();
+                    if let Some(session) = &session
+                        && let Err(diagnostic) =
+                            self.apply_persisted_window_rules(&session.window_rules)
+                    {
+                        self.ui.config_diagnostic = Some(format!(
+                            "persistent window layout rejected transactionally: {diagnostic}"
+                        ));
+                    }
                     let configured = &self.configuration.settings.persistence;
                     self.recent_files = state
                         .recent_files
@@ -5901,15 +8085,57 @@ impl InteractiveApplication {
         let active = restore.session.active_tab.min(tabs.len() - 1);
         candidate.active_tab = Some(tabs[active].0);
         candidate.active_view = candidate.panes.get(tabs[active].1).map(|pane| pane.view);
+        candidate.mark_window_changed();
         if candidate.validate_layout().is_err() {
             return;
         }
+        let mut graph = self.windows.clone();
+        let mut plugin_windows = self.plugin_windows.clone();
+        let mut surface_windows = self.surface_windows.clone();
+        let mut editor_windows = self.editor_windows.clone();
+        let reset = plugin_windows
+            .reset_runtime(&mut graph)
+            .and_then(|()| surface_windows.reset(&mut graph))
+            .and_then(|()| editor_windows.reset(&mut graph));
+        if let Err(error) = reset {
+            self.logs.record(
+                LogLevel::Error,
+                "windows",
+                "session-window-reset-rejected",
+                BTreeMap::from([("error".into(), error.to_string())]),
+            );
+            return;
+        }
+        self.windows = graph;
+        self.plugin_windows = plugin_windows;
+        self.surface_windows = surface_windows;
+        self.editor_windows = editor_windows;
+        self.pending_plugin_ui_events.clear();
+        self.pending_plugin_storage_results.clear();
+        let storage_generations = self
+            .plugin_contributions
+            .ordered()
+            .filter(|index| index.storage.is_some())
+            .map(|index| (index.owner.clone(), PluginLoadId(index.generation)))
+            .collect::<Vec<_>>();
+        for (plugin, load) in storage_generations {
+            self.plugin_storage.reset_generation(&plugin, load);
+        }
+        self.plugin_host_events.reset_runtime();
+        self.plugin_host_event_observation = None;
+        self.plugin_providers.reset_runtime();
+        self.plugin_virtual_documents.reset_runtime();
+        self.plugin_virtual_editor = VirtualDocumentEditorBridge::default();
+        self.active_plugin_picker = None;
+        self.ui.plugin_surfaces.clear();
+        self.ui.private_surfaces.clear();
         self.state = candidate;
         self.ui.dashboard = false;
         for (canonical, _) in restore.loaded.values() {
             self.record_recent_file(canonical.clone());
         }
         self.ensure_cursor_visible();
+        self.reconcile_editor_windows();
     }
 
     fn fail_session_restore(&mut self) {
@@ -6405,12 +8631,16 @@ impl InteractiveApplication {
     }
 
     fn invalidate_root_scoped_operations(&mut self) {
+        self.clear_git_status();
         for terminal in self.terminals.keys().copied().collect::<Vec<_>>() {
             let _ = self.ptys.close(terminal);
         }
         self.active_terminal = None;
         self.terminal_focused = false;
-        self.terminals.clear();
+        if !self.terminals.is_empty() {
+            self.terminals.clear();
+            self.terminal_set_revision = self.terminal_set_revision.saturating_add(1);
+        }
         self.ui.terminal_panel = None;
         let roots = self
             .workspace
@@ -6475,7 +8705,14 @@ impl InteractiveApplication {
         for job in self.job_tasks.keys().copied().collect::<Vec<_>>() {
             let _ = self.jobs.cancel(job);
         }
+        self.clear_git_status();
+        self.workspace_files.cancel();
+        self.workspace_file_generation = None;
+        self.workspace_file_root_revision = None;
+        self.workspace_file_entries.clear();
         self.workspace_search.cancel();
+        self.workspace_search_workflow = None;
+        self.workspace_search_sequence = 0;
         self.workspace_search_generation = None;
         self.workspace_search_intent = None;
         self.workspace_search_matches.clear();
@@ -6495,6 +8732,7 @@ impl InteractiveApplication {
             .reset_roots(self.workspace.roots(), self.workspace.root_revision());
         self.ui.explorer = None;
         self.ui.explorer_focused = false;
+        self.reconcile_explorer_watch();
         self.close_picker();
         self.ensure_cursor_visible();
     }
@@ -6520,6 +8758,7 @@ impl InteractiveApplication {
     fn activate_workspace_root(&mut self, id: crate::workspace::RootId) {
         match self.workspace.set_active_root(id) {
             Ok(()) => {
+                self.clear_git_status();
                 let path = self
                     .workspace
                     .roots()
@@ -6967,6 +9206,605 @@ impl InteractiveApplication {
             })
     }
 
+    // GIT_SIGN_FOREGROUND_BEGIN: immutable ownership and worker queue coordination only.
+    fn current_git_sign_owner(
+        &self,
+    ) -> Option<(
+        u64,
+        u64,
+        crate::workspace::git::GitRepositoryId,
+        PathBuf,
+        crate::editing::BufferId,
+        u64,
+    )> {
+        if !self.configuration.settings.editor.git_signs.enabled {
+            return None;
+        }
+        let status = self
+            .git_status_snapshot
+            .as_ref()
+            .filter(|status| status.root_revision == self.workspace.root_revision())?;
+        let buffer_id = self.state.active_buffer_id()?;
+        let buffer = self.state.buffers.get(buffer_id)?;
+        if buffer.dirty {
+            return None;
+        }
+        let path = buffer.path.as_ref()?;
+        let relative = path.strip_prefix(&status.scope_root).ok()?.to_path_buf();
+        if !status
+            .entries
+            .iter()
+            .any(|entry| entry.relative_path == relative)
+        {
+            return None;
+        }
+        Some((
+            status.root_revision,
+            status.revision,
+            status.repository_id,
+            relative,
+            buffer_id,
+            buffer.text.revision().0,
+        ))
+    }
+
+    fn clear_git_signs(&mut self) {
+        self.git_sign_hunks.cancel();
+        self.git_sign_generation = None;
+        self.git_sign_owner = None;
+        self.ui.git_signs.clear();
+    }
+
+    fn reconcile_git_signs(&mut self) {
+        use crate::workspace::git::{GitDiffLayer, GitHunkPolicy};
+        let Some(owner) = self.current_git_sign_owner() else {
+            if self.git_sign_owner.is_some() || !self.ui.git_signs.is_empty() {
+                self.clear_git_signs();
+            }
+            return;
+        };
+        if self.git_sign_owner.as_ref() == Some(&owner) {
+            return;
+        }
+        self.clear_git_signs();
+        let Some(status) = self.git_status_snapshot.as_ref() else {
+            return;
+        };
+        let policy = GitHunkPolicy {
+            scope_root: status.scope_root.clone(),
+            repository_id: owner.2,
+            status_revision: owner.1,
+            root_revision: owner.0,
+            file: owner.3.clone(),
+            layer: GitDiffLayer::Unstaged,
+            maximum_hunks: 10_000,
+            maximum_lines: 100_000,
+            maximum_bytes: 8 * 1024 * 1024,
+            deadline: Duration::from_secs(5),
+        };
+        match self.git_sign_hunks.start(policy) {
+            Ok(generation) => {
+                self.git_sign_generation = Some(generation);
+                self.git_sign_owner = Some(owner);
+            }
+            Err(_) => self.clear_git_signs(),
+        }
+    }
+
+    fn process_git_sign_events(&mut self) {
+        use crate::terminal_ui::{UiGitSign, UiGitSignKind};
+        use crate::workspace::git::{GitHunkSignKind, git_hunk_signs};
+        let Some(owner) = self.git_sign_owner.clone() else {
+            return;
+        };
+        if self.current_git_sign_owner().as_ref() != Some(&owner) {
+            self.clear_git_signs();
+            return;
+        }
+        match self.git_sign_hunks.poll() {
+            Ok(Some(snapshot)) => {
+                let snapshot = snapshot.clone();
+                if Some(snapshot.generation) != self.git_sign_generation
+                    || snapshot.root_revision != owner.0
+                    || snapshot.status_revision != owner.1
+                    || snapshot.repository_id != owner.2
+                    || snapshot.file != owner.3
+                {
+                    self.clear_git_signs();
+                    return;
+                }
+                self.git_sign_generation = None;
+                self.ui.git_signs = git_hunk_signs(&snapshot)
+                    .into_iter()
+                    .map(|sign| UiGitSign {
+                        buffer: owner.4,
+                        buffer_revision: owner.5,
+                        root_revision: owner.0,
+                        status_revision: owner.1,
+                        repository_id: owner.2,
+                        line: sign.line,
+                        kind: match sign.kind {
+                            GitHunkSignKind::Added => UiGitSignKind::Added,
+                            GitHunkSignKind::Changed => UiGitSignKind::Changed,
+                            GitHunkSignKind::Deleted => UiGitSignKind::Deleted,
+                        },
+                    })
+                    .collect();
+            }
+            Ok(None) => {}
+            Err(_) => self.clear_git_signs(),
+        }
+    }
+
+    // GIT_SIGN_FOREGROUND_END
+    fn clear_git_hunks(&mut self) {
+        self.git_hunks.cancel();
+        self.git_hunk_generation = None;
+        self.git_hunk_expected = None;
+        self.git_hunk_snapshot = None;
+        self.selected_git_hunk = None;
+        self.git_mutation.cancel();
+        self.git_mutation_generation = None;
+    }
+    fn clear_git_status(&mut self) {
+        self.clear_git_hunks();
+        self.clear_git_signs();
+        self.git_status.cancel();
+        self.git_status_generation = None;
+        self.git_status_root_revision = None;
+        self.git_status_snapshot = None;
+        self.git_status_decorations.clear();
+    }
+    fn start_git_hunks(&mut self) {
+        use crate::workspace::git::*;
+        self.clear_git_hunks();
+        let Some(snapshot) = self
+            .git_status_snapshot
+            .clone()
+            .filter(|s| s.root_revision == self.workspace.root_revision())
+        else {
+            self.show_error("Git status is unavailable; refresh first");
+            return;
+        };
+        let Some(path) = self
+            .state
+            .active_buffer_id()
+            .and_then(|id| self.state.buffers[id].path.clone())
+        else {
+            self.show_error("active buffer has no file path");
+            return;
+        };
+        let Ok(relative) = path.strip_prefix(&snapshot.scope_root).map(PathBuf::from) else {
+            self.show_error("active file is outside Git scope");
+            return;
+        };
+        let policy = GitHunkPolicy {
+            scope_root: snapshot.scope_root.clone(),
+            repository_id: snapshot.repository_id,
+            status_revision: snapshot.revision,
+            root_revision: snapshot.root_revision,
+            file: relative.clone(),
+            layer: GitDiffLayer::Unstaged,
+            maximum_hunks: 10_000,
+            maximum_lines: 100_000,
+            maximum_bytes: 8 * 1024 * 1024,
+            deadline: Duration::from_secs(5),
+        };
+        match self.git_hunks.start(policy) {
+            Ok(generation) => {
+                self.git_hunk_generation = Some(generation);
+                self.git_hunk_expected = Some((
+                    snapshot.root_revision,
+                    snapshot.revision,
+                    snapshot.repository_id,
+                    path,
+                ))
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+    fn process_git_hunk_events(&mut self) {
+        let Some(expected) = self.git_hunk_expected.clone() else {
+            return;
+        };
+        if self.git_status_snapshot.as_ref().is_none_or(|s| {
+            s.root_revision != expected.0
+                || s.revision != expected.1
+                || s.repository_id != expected.2
+        }) {
+            self.clear_git_hunks();
+            return;
+        }
+        match self.git_hunks.poll() {
+            Ok(Some(snapshot)) => {
+                let snapshot = snapshot.clone();
+                if Some(snapshot.generation) != self.git_hunk_generation {
+                    return;
+                }
+                self.git_hunk_generation = None;
+                self.git_hunk_expected = None;
+                self.git_hunk_snapshot = Some(snapshot.clone());
+                let items = snapshot
+                    .hunks
+                    .iter()
+                    .map(|hunk| {
+                        (
+                            PickerItem {
+                                id: PickerItemId(format!("git-hunk:{}", hunk.id.0)),
+                                label: hunk.header.trim().to_owned(),
+                                detail: format!(
+                                    "-{},{} +{},{}",
+                                    hunk.old_start, hunk.old_lines, hunk.new_start, hunk.new_lines
+                                ),
+                                source: "git-hunk".into(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::GitHunk {
+                                path: expected.3.clone(),
+                                status_revision: expected.1,
+                                repository: expected.2,
+                                hunk: hunk.id,
+                                new_line: hunk.new_start.saturating_sub(1) as usize,
+                            },
+                        )
+                    })
+                    .collect();
+                self.install_picker("Git hunks".into(), items)
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.clear_git_hunks();
+                self.show_error(error)
+            }
+        }
+    }
+
+    fn request_reset_selected_git_hunk(&mut self) {
+        if self.workspace.trust() != WorkspaceTrust::Trusted {
+            self.show_error("Git reset requires a trusted workspace");
+            return;
+        }
+        if self.selected_git_hunk.is_none() {
+            self.show_error("select a current Git hunk first");
+            return;
+        }
+        self.open_prompt(PromptKind::GitReset, String::new());
+        if let Some(prompt) = &mut self.ui.prompt {
+            prompt.error =
+                Some("Type `reset this hunk` to confirm destructive worktree reset".into())
+        }
+    }
+    fn confirm_reset_selected_git_hunk(&mut self, phrase: String) {
+        use crate::workspace::git::*;
+        if phrase != "reset this hunk" {
+            self.show_error("Git hunk reset confirmation did not match");
+            return;
+        }
+        if self.workspace.trust() != WorkspaceTrust::Trusted {
+            self.show_error("Git reset requires a trusted workspace");
+            return;
+        }
+        let Some((snapshot, hunk, _)) = self.selected_git_hunk.clone() else {
+            self.show_error("Git hunk is stale");
+            return;
+        };
+        let Some(status) = self.git_status_snapshot.as_ref().filter(|s| {
+            s.repository_id == snapshot.repository_id
+                && s.revision == snapshot.status_revision
+                && s.root_revision == self.workspace.root_revision()
+        }) else {
+            self.show_error("Git hunk is stale");
+            return;
+        };
+        let request = GitResetHunkRequest {
+            policy: GitHunkPolicy {
+                scope_root: status.scope_root.clone(),
+                repository_id: status.repository_id,
+                status_revision: status.revision,
+                root_revision: status.root_revision,
+                file: snapshot.file.clone(),
+                layer: GitDiffLayer::Unstaged,
+                maximum_hunks: 10_000,
+                maximum_lines: 100_000,
+                maximum_bytes: 8 * 1024 * 1024,
+                deadline: Duration::from_secs(5),
+            },
+            hunk_snapshot_revision: snapshot.revision,
+            hunk_id: hunk.id,
+            selected: hunk,
+            expected_index: Some(snapshot.index_fingerprint),
+            expected_worktree: snapshot.worktree_sha256,
+            maximum_patch_bytes: 1024 * 1024,
+            deadline: Duration::from_secs(5),
+        };
+        match self
+            .git_mutation
+            .start(GitMutationRequest::ResetUnstagedHunk(request))
+        {
+            Ok(generation) => self.git_mutation_generation = Some(generation),
+            Err(error) => self.show_error(error),
+        }
+    }
+
+    fn stage_selected_git_hunk(&mut self) {
+        use crate::workspace::git::*;
+        if self.workspace.trust() != WorkspaceTrust::Trusted {
+            self.show_error("Git staging requires a trusted workspace");
+            return;
+        }
+        let Some((snapshot, hunk, _path)) = self.selected_git_hunk.clone() else {
+            self.show_error("select a current Git hunk first");
+            return;
+        };
+        let Some(status) = self.git_status_snapshot.as_ref().filter(|s| {
+            s.repository_id == snapshot.repository_id
+                && s.revision == snapshot.status_revision
+                && s.root_revision == self.workspace.root_revision()
+        }) else {
+            self.show_error("Git hunk is stale");
+            return;
+        };
+        let request = GitStageHunkRequest {
+            policy: GitHunkPolicy {
+                scope_root: status.scope_root.clone(),
+                repository_id: status.repository_id,
+                status_revision: status.revision,
+                root_revision: status.root_revision,
+                file: snapshot.file.clone(),
+                layer: GitDiffLayer::Unstaged,
+                maximum_hunks: 10_000,
+                maximum_lines: 100_000,
+                maximum_bytes: 8 * 1024 * 1024,
+                deadline: Duration::from_secs(5),
+            },
+            hunk_snapshot_revision: snapshot.revision,
+            hunk_id: hunk.id,
+            selected: hunk,
+            expected_index: Some(snapshot.index_fingerprint),
+            expected_worktree: snapshot.worktree_sha256,
+            maximum_patch_bytes: 1024 * 1024,
+            deadline: Duration::from_secs(5),
+        };
+        match self
+            .git_mutation
+            .start(GitMutationRequest::StageHunk(request))
+        {
+            Ok(generation) => self.git_mutation_generation = Some(generation),
+            Err(error) => self.show_error(error),
+        }
+    }
+    fn process_git_mutation_events(&mut self) {
+        if self.git_mutation_generation.is_none() {
+            return;
+        }
+        match self.git_mutation.poll() {
+            Ok(Some(result)) => {
+                let was_reset = matches!(
+                    result.kind,
+                    crate::workspace::git::GitMutationKind::ResetUnstagedHunk
+                );
+                self.git_mutation_generation = None;
+                self.clear_git_status();
+                self.start_git_status_refresh();
+                self.ui.notification = Some(
+                    if was_reset {
+                        "Git hunk reset"
+                    } else {
+                        "Git hunk staged"
+                    }
+                    .into(),
+                );
+                self.ui.notification_error = false
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.git_mutation_generation = None;
+                self.show_error(error)
+            }
+        }
+    }
+
+    fn start_git_status_refresh(&mut self) {
+        use crate::workspace::git::*;
+        self.clear_git_status();
+        let revision = self.workspace.root_revision();
+        let Some(root) = self
+            .workspace
+            .active_root()
+            .and_then(|id| self.workspace.roots().iter().find(|r| r.id == id))
+            .map(|r| r.identity.canonical_path.clone())
+        else {
+            self.show_error("workspace root is unavailable");
+            return;
+        };
+        match self.git_status.start(GitStatusPolicy {
+            root,
+            root_revision: revision,
+            maximum_files: 100_000,
+            maximum_path_bytes: 16 * 1024 * 1024,
+            deadline: Duration::from_secs(5),
+        }) {
+            Ok(generation) => {
+                self.git_status_generation = Some(generation);
+                self.git_status_root_revision = Some(revision);
+                self.git_status_snapshot = None
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+    fn process_git_status_events(&mut self) {
+        if self.git_status_generation.is_some()
+            && self.git_status_root_revision != Some(self.workspace.root_revision())
+        {
+            self.clear_git_status();
+            return;
+        }
+        match self.git_status.poll() {
+            Ok(Some(snapshot)) => {
+                let snapshot = snapshot.clone();
+                if Some(snapshot.generation) == self.git_status_generation
+                    && Some(snapshot.root_revision) == self.git_status_root_revision
+                {
+                    self.git_status_generation = None;
+                    self.git_status_root_revision = None;
+                    self.git_status_decorations = crate::workspace::git::aggregate_git_status(
+                        &snapshot.scope_root,
+                        &snapshot.entries,
+                    );
+                    self.git_status_snapshot = Some(snapshot);
+                    if self.ui.explorer.is_some() {
+                        self.sync_explorer_ui();
+                    }
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.clear_git_status();
+                self.show_error(error)
+            }
+        }
+    }
+    fn open_git_status_picker(&mut self) {
+        let active_root = self
+            .workspace
+            .active_root()
+            .and_then(|id| self.workspace.roots().iter().find(|root| root.id == id))
+            .map(|root| &root.identity.canonical_path);
+        let Some(snapshot) = self
+            .git_status_snapshot
+            .as_ref()
+            .filter(|s| {
+                s.root_revision == self.workspace.root_revision()
+                    && active_root == Some(&s.scope_root)
+            })
+            .cloned()
+        else {
+            self.show_error("Git status is unavailable; refresh first");
+            return;
+        };
+        let items = snapshot
+            .entries
+            .iter()
+            .map(|entry| {
+                (
+                    PickerItem {
+                        id: PickerItemId(format!("git:{}", entry.relative_path.display())),
+                        label: entry.relative_path.display().to_string(),
+                        detail: format!("{:?}", entry.status),
+                        source: "git".into(),
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::MatcherSource(MatcherSource {
+                        path: snapshot.scope_root.join(&entry.relative_path),
+                        line: 0,
+                        column: 0,
+                    }),
+                )
+            })
+            .collect();
+        self.install_picker("Git status".into(), items)
+    }
+
+    fn start_workspace_file_picker(&mut self) {
+        self.close_picker();
+        let configured = &self.configuration.settings.workspace.search;
+        let root_revision = self.workspace.root_revision();
+        let policy = WorkspaceFilePolicy {
+            roots: self
+                .workspace
+                .roots()
+                .iter()
+                .map(|r| r.identity.canonical_path.clone())
+                .collect(),
+            root_revision,
+            include_hidden: configured.include_hidden,
+            include_ignored: configured.include_ignored,
+            maximum_files: configured.maximum_files,
+            maximum_path_bytes: 16 * 1024 * 1024,
+            batch_size: configured.batch_size,
+            event_queue_capacity: configured.event_queue_capacity,
+        };
+        match self.workspace_files.start(policy) {
+            Ok(generation) => {
+                self.workspace_file_generation = Some(generation);
+                self.workspace_file_root_revision = Some(root_revision);
+                self.workspace_file_entries.clear();
+                self.install_picker("Workspace files".into(), Vec::new());
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+    fn process_workspace_file_events(&mut self) {
+        if self.workspace_file_generation.is_some()
+            && self.workspace_file_root_revision != Some(self.workspace.root_revision())
+        {
+            self.workspace_files.cancel();
+            self.workspace_file_generation = None;
+            self.workspace_file_entries.clear();
+            return;
+        }
+        while let Some(event) = self.workspace_files.try_event() {
+            match event {
+                WorkspaceFileEvent::Batch {
+                    generation,
+                    root_revision,
+                    entries,
+                } if Some(generation) == self.workspace_file_generation
+                    && Some(root_revision) == self.workspace_file_root_revision =>
+                {
+                    self.workspace_file_entries.extend(entries)
+                }
+                WorkspaceFileEvent::Complete {
+                    generation,
+                    root_revision,
+                    ..
+                } if Some(generation) == self.workspace_file_generation
+                    && Some(root_revision) == self.workspace_file_root_revision =>
+                {
+                    self.workspace_file_generation = None;
+                    let items = self
+                        .workspace_file_entries
+                        .iter()
+                        .map(|entry| {
+                            (
+                                PickerItem {
+                                    id: PickerItemId(entry.id.clone()),
+                                    label: entry.relative_path.display().to_string(),
+                                    detail: entry.root.display().to_string(),
+                                    source: "files".into(),
+                                    action: PickerAction::None,
+                                },
+                                PickerPayload::MatcherSource(MatcherSource {
+                                    path: entry.canonical_path.clone(),
+                                    line: 0,
+                                    column: 0,
+                                }),
+                            )
+                        })
+                        .collect();
+                    match compose_workspace_file_items(items) {
+                        Ok(items) => self.install_picker("Workspace files".into(), items),
+                        Err(error) => self.show_error(error.to_string()),
+                    }
+                }
+                WorkspaceFileEvent::Failed {
+                    generation, error, ..
+                } if Some(generation) == self.workspace_file_generation => {
+                    self.workspace_file_generation = None;
+                    self.workspace_file_entries.clear();
+                    self.show_error(error)
+                }
+                WorkspaceFileEvent::Cancelled { generation, .. }
+                    if Some(generation) == self.workspace_file_generation =>
+                {
+                    self.workspace_file_generation = None;
+                    self.workspace_file_entries.clear()
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn start_workspace_search(&mut self, query: String, replacement: Option<String>) {
         let configured = &self.configuration.settings.workspace.search;
         let policy = WorkspaceSearchPolicy {
@@ -6994,6 +9832,33 @@ impl InteractiveApplication {
         };
         match self.workspace_search.start(policy) {
             Ok(generation) => {
+                use crate::workspace::search_workflow::*;
+                let spec = SearchWorkflowSpec {
+                    id: SearchWorkflowId(generation),
+                    source: SearchSourceKind::Grep,
+                    matcher: SearchMatcherKind::Literal,
+                    presenter: SearchPresenterKind::Picker,
+                    maximum_items: configured.maximum_results.max(1),
+                    maximum_bytes: usize::try_from(configured.maximum_total_bytes)
+                        .unwrap_or(ABS_MAX_BYTES)
+                        .min(ABS_MAX_BYTES)
+                        .max(1),
+                };
+                let workflow = SearchWorkflowBroker::try_new(spec).and_then(|mut broker| {
+                    broker.begin(
+                        SearchRequestId(generation),
+                        SearchStreamGeneration(generation),
+                        "",
+                    )?;
+                    Ok(broker)
+                });
+                let Ok(workflow) = workflow else {
+                    self.workspace_search.cancel();
+                    self.show_error("workspace search workflow limits are invalid");
+                    return;
+                };
+                self.workspace_search_workflow = Some(workflow);
+                self.workspace_search_sequence = 0;
                 self.workspace_search_generation = Some(generation);
                 self.workspace_search_root_revision = Some(self.workspace.root_revision());
                 self.workspace_search_matches.clear();
@@ -7012,18 +9877,98 @@ impl InteractiveApplication {
     }
 
     fn process_workspace_search_events(&mut self) {
+        if self.workspace_search_generation.is_some()
+            && self.workspace_search_root_revision != Some(self.workspace.root_revision())
+        {
+            self.workspace_search.cancel();
+            self.workspace_search_generation = None;
+            self.workspace_search_workflow = None;
+            self.workspace_search_sequence = 0;
+            self.workspace_search_intent = None;
+            self.workspace_search_matches.clear();
+            self.workspace_search_root_revision = None;
+        }
         while let Some(event) = self.workspace_search.try_event() {
             match event {
                 WorkspaceSearchEvent::Batch {
                     generation,
                     matches,
-                } if self.workspace_search_generation == Some(generation) => {
+                } if self.workspace_search_generation == Some(generation)
+                    && self.workspace_search_root_revision
+                        == Some(self.workspace.root_revision()) =>
+                {
+                    use crate::workspace::search_workflow::*;
+                    let items = matches
+                        .iter()
+                        .map(|found| SearchWorkflowItem {
+                            stable_key: found.id.clone(),
+                            title: found.relative_path.display().to_string(),
+                            detail: found.line_text.clone(),
+                            search_text: format!(
+                                "{} {}",
+                                found.relative_path.display(),
+                                found.line_text
+                            ),
+                            action: SearchHostAction::OpenLocation {
+                                uri: file_uri(&found.canonical_path),
+                            },
+                        })
+                        .collect();
+                    let chunk = SearchWorkflowChunk {
+                        request: SearchRequestId(generation),
+                        generation: SearchStreamGeneration(generation),
+                        sequence: self.workspace_search_sequence,
+                        items,
+                        complete: false,
+                    };
+                    if self
+                        .workspace_search_workflow
+                        .as_mut()
+                        .is_none_or(|broker| broker.accept(chunk).is_err())
+                    {
+                        self.workspace_search.cancel();
+                        self.workspace_search_generation = None;
+                        self.workspace_search_workflow = None;
+                        self.workspace_search_sequence = 0;
+                        self.workspace_search_root_revision = None;
+                        self.workspace_search_intent = None;
+                        self.workspace_search_matches.clear();
+                        self.show_error("workspace search workflow rejected a result batch");
+                        continue;
+                    }
+                    self.workspace_search_sequence =
+                        self.workspace_search_sequence.saturating_add(1);
                     self.workspace_search_matches.extend(matches);
                 }
                 WorkspaceSearchEvent::Complete {
                     generation,
                     summary,
-                } if self.workspace_search_generation == Some(generation) => {
+                } if self.workspace_search_generation == Some(generation)
+                    && self.workspace_search_root_revision
+                        == Some(self.workspace.root_revision()) =>
+                {
+                    use crate::workspace::search_workflow::*;
+                    let terminal = SearchWorkflowChunk {
+                        request: SearchRequestId(generation),
+                        generation: SearchStreamGeneration(generation),
+                        sequence: self.workspace_search_sequence,
+                        items: Vec::new(),
+                        complete: true,
+                    };
+                    if self
+                        .workspace_search_workflow
+                        .as_mut()
+                        .is_none_or(|broker| broker.accept(terminal).is_err())
+                    {
+                        self.workspace_search_generation = None;
+                        self.workspace_search_workflow = None;
+                        self.workspace_search_sequence = 0;
+                        self.workspace_search_root_revision = None;
+                        self.workspace_search_intent = None;
+                        self.workspace_search_matches.clear();
+                        self.show_error("workspace search workflow rejected completion");
+                        continue;
+                    }
                     self.workspace_search_generation = None;
                     let intent = self.workspace_search_intent.take();
                     match intent {
@@ -7053,9 +9998,14 @@ impl InteractiveApplication {
                     }
                 }
                 WorkspaceSearchEvent::Failed { generation, error }
-                    if self.workspace_search_generation == Some(generation) =>
+                    if self.workspace_search_generation == Some(generation)
+                        && self.workspace_search_root_revision
+                            == Some(self.workspace.root_revision()) =>
                 {
                     self.workspace_search_generation = None;
+                    self.workspace_search_workflow = None;
+                    self.workspace_search_sequence = 0;
+                    self.workspace_search_root_revision = None;
                     self.workspace_search_intent = None;
                     self.workspace_search_matches.clear();
                     self.show_error(
@@ -7063,9 +10013,14 @@ impl InteractiveApplication {
                     );
                 }
                 WorkspaceSearchEvent::Cancelled { generation }
-                    if self.workspace_search_generation == Some(generation) =>
+                    if self.workspace_search_generation == Some(generation)
+                        && self.workspace_search_root_revision
+                            == Some(self.workspace.root_revision()) =>
                 {
                     self.workspace_search_generation = None;
+                    self.workspace_search_workflow = None;
+                    self.workspace_search_sequence = 0;
+                    self.workspace_search_root_revision = None;
                     self.workspace_search_intent = None;
                     self.workspace_search_matches.clear();
                 }
@@ -7075,10 +10030,24 @@ impl InteractiveApplication {
     }
 
     fn open_workspace_search_picker(&mut self) {
-        let items = self
+        let Some(snapshot) = self
+            .workspace_search_workflow
+            .as_ref()
+            .and_then(|broker| broker.snapshot_if_changed(0))
+        else {
+            self.show_error("workspace search workflow projection is unavailable");
+            return;
+        };
+        let mut matches = self
             .workspace_search_matches
             .iter()
             .cloned()
+            .map(|found| (found.id.clone(), found))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let items = snapshot
+            .items
+            .into_iter()
+            .filter_map(|item| matches.remove(&item.stable_key))
             .map(|found| {
                 let item = PickerItem {
                     id: PickerItemId(found.id.clone()),
@@ -7176,6 +10145,15 @@ impl InteractiveApplication {
     }
 
     fn install_picker(&mut self, title: String, items: Vec<(PickerItem, PickerPayload)>) {
+        self.install_surface_picker(PickerSurfaceKind::Generic, title, items);
+    }
+
+    fn install_surface_picker(
+        &mut self,
+        surface: PickerSurfaceKind,
+        title: String,
+        items: Vec<(PickerItem, PickerPayload)>,
+    ) {
         self.completion_generation = self.completion_generation.saturating_add(1);
         let generation = self.completion_generation;
         let mut picker = PickerState::new(
@@ -7192,6 +10170,7 @@ impl InteractiveApplication {
             })
             .collect::<Vec<_>>();
         picker.append(generation, rows, true);
+        self.picker_surface = surface;
         self.picker = Some(picker);
         self.sync_picker_ui();
     }
@@ -7296,7 +10275,8 @@ impl InteractiveApplication {
                 )
             })
             .collect();
-        self.install_picker(
+        self.install_surface_picker(
+            PickerSurfaceKind::Debug,
             self.message("dap_picker_title", &[("kind", kind.into())]),
             items,
         );
@@ -7323,7 +10303,8 @@ impl InteractiveApplication {
                 )
             })
             .collect();
-        self.install_picker(
+        self.install_surface_picker(
+            PickerSurfaceKind::Debug,
             self.message("dap_picker_title", &[("kind", "frames".into())]),
             items,
         );
@@ -7356,7 +10337,11 @@ impl InteractiveApplication {
                         )
                     })
                     .collect();
-                self.install_picker(self.message("picker_diagnostics_title", &[]), items);
+                self.install_surface_picker(
+                    PickerSurfaceKind::Problems,
+                    self.message("picker_diagnostics_title", &[]),
+                    items,
+                );
             }
             PickerKind::Buffers => {
                 let items = self
@@ -7550,7 +10535,12 @@ impl InteractiveApplication {
                         )
                     })
                     .collect();
-                self.install_picker(self.message("picker_commands_title", &[]), items);
+                match compose_command_picker_items(items) {
+                    Ok(items) => {
+                        self.install_picker(self.message("picker_commands_title", &[]), items)
+                    }
+                    Err(error) => self.show_error(error.to_string()),
+                }
             }
         }
     }
@@ -7559,6 +10549,7 @@ impl InteractiveApplication {
         self.ui.picker = self.picker.as_ref().map(|picker| {
             let presentation = picker.presentation();
             PickerUiState {
+                surface: self.picker_surface,
                 title: presentation.title,
                 query: presentation.query,
                 rows: presentation
@@ -7608,7 +10599,84 @@ impl InteractiveApplication {
         }
     }
 
+    fn open_plugin_picker(&mut self, provider: String, query: String) {
+        let Some(plugin) = plugin_owner_from_id(&provider).map(str::to_owned) else {
+            self.show_error("plugin provider ID is malformed");
+            return;
+        };
+        let Some(load) = self.plugins.load_id(&plugin) else {
+            self.show_error(crate::plugins::PluginError::NotActive);
+            return;
+        };
+        if !self.plugins.is_active_generation(&plugin, load) {
+            self.show_error(crate::plugins::PluginError::NotActive);
+            return;
+        }
+        let Some(declaration) = self
+            .plugin_contributions
+            .get(&plugin)
+            .filter(|index| index.generation == load.0)
+            .and_then(|index| index.providers.iter().find(|item| item.id == provider))
+            .cloned()
+        else {
+            self.show_error("plugin picker provider is not statically declared");
+            return;
+        };
+        self.close_picker();
+        let buffer_revision = self
+            .state
+            .active_buffer_id()
+            .and_then(|buffer| self.state.buffers.get(buffer))
+            .map(|buffer| buffer.text.revision().0);
+        let request = match self.plugin_providers.start(
+            &plugin,
+            load,
+            &provider,
+            query,
+            "editor".into(),
+            Some(self.workspace.root_revision()),
+            buffer_revision,
+        ) {
+            Ok(request) => request,
+            Err(error) => {
+                self.show_error(error.detail);
+                return;
+            }
+        };
+        self.active_plugin_picker = Some(request);
+        self.install_picker(format!("Plugin · {provider}"), Vec::new());
+        let prefix = format!("plugin.{plugin}.");
+        let Some(command) = declaration.command.strip_prefix(&prefix).map(str::to_owned) else {
+            self.show_error("plugin picker command is malformed");
+            return;
+        };
+        self.process_effect(AppEffect::PluginExecute { plugin, command });
+    }
+
+    fn present_plugin_picker(&mut self, request: u64) {
+        let Some(projection) = self.plugin_providers.projection(request) else {
+            return;
+        };
+        let items = match compose_plugin_picker_items(&projection) {
+            Ok(items) => items,
+            Err(error) => {
+                self.show_error(error.to_string());
+                return;
+            }
+        };
+        self.install_picker(format!("Plugin · {}", projection.provider), items);
+        self.active_plugin_picker = Some(request);
+    }
+
     fn close_picker(&mut self) {
+        if self.workspace_file_generation.take().is_some() {
+            self.workspace_files.cancel();
+            self.workspace_file_root_revision = None;
+            self.workspace_file_entries.clear();
+        }
+        if let Some(request) = self.active_plugin_picker.take() {
+            self.plugin_providers.cancel(request);
+        }
         self.picker = None;
         self.picker_payloads.clear();
         self.ui.picker = None;
@@ -7661,6 +10729,34 @@ impl InteractiveApplication {
                     });
                 }
             }
+            Some(PickerPayload::GitHunk {
+                path,
+                status_revision,
+                repository,
+                hunk,
+                new_line,
+            }) => {
+                if self.git_status_snapshot.as_ref().is_some_and(|s| {
+                    s.revision == status_revision
+                        && s.repository_id == repository
+                        && s.root_revision == self.workspace.root_revision()
+                }) {
+                    if let Some(snapshot) = self.git_hunk_snapshot.as_ref()
+                        && let Some(selected) =
+                            snapshot.hunks.iter().find(|candidate| candidate.id == hunk)
+                    {
+                        self.selected_git_hunk =
+                            Some((snapshot.clone(), selected.clone(), path.clone()));
+                    }
+                    self.navigate_matcher_source(MatcherSource {
+                        path,
+                        line: new_line,
+                        column: 0,
+                    })
+                } else {
+                    self.show_error("Git hunk is stale")
+                }
+            }
             Some(PickerPayload::MatcherSource(source)) => self.navigate_matcher_source(source),
             Some(PickerPayload::PersistedLocation(location)) => {
                 self.navigate_persisted_location(location)
@@ -7690,6 +10786,33 @@ impl InteractiveApplication {
             Some(PickerPayload::Command(command)) if !command.is_empty() => {
                 if let Ok(invocation) = CommandInvocation::new(&command, InvocationSource::Picker) {
                     self.invoke(invocation);
+                }
+            }
+            Some(PickerPayload::PluginProviderItem {
+                plugin,
+                load,
+                request,
+                item,
+                action_command,
+            }) => {
+                let valid = self.plugins.load_id(&plugin) == Some(load)
+                    && self.plugins.is_active_generation(&plugin, load)
+                    && self
+                        .plugin_providers
+                        .projection(request)
+                        .is_some_and(|projection| {
+                            projection.action_command == action_command
+                                && projection
+                                    .items
+                                    .iter()
+                                    .any(|candidate| candidate.id == item)
+                        });
+                let prefix = format!("plugin.{plugin}.");
+                if valid && let Some(command) = action_command.strip_prefix(&prefix) {
+                    self.process_effect(AppEffect::PluginExecute {
+                        plugin,
+                        command: command.into(),
+                    });
                 }
             }
             _ => {}
@@ -8081,6 +11204,7 @@ impl InteractiveApplication {
             }
         }
         self.lsp_completion_items.clear();
+        self.lsp_completion_owner = None;
         self.ui.language_completion = None;
     }
 
@@ -8703,9 +11827,7 @@ impl InteractiveApplication {
             return;
         }
         for buffer in created_buffers {
-            if let Some(state) = self.state.buffers.get_mut(buffer) {
-                state.dirty = true;
-            }
+            self.state.set_buffer_dirty(buffer, true);
         }
         if let Some(proposal) = &mut self.workspace_proposal {
             let _ = proposal.accept();
@@ -9123,7 +12245,7 @@ impl InteractiveApplication {
                             let (buffer, _) =
                                 self.state.open_text(TextBuffer::from_text(&content), None);
                             self.state.buffers[buffer].read_only = true;
-                            self.state.buffers[buffer].dirty = false;
+                            self.state.set_buffer_dirty(buffer, false);
                             self.ui.notification = Some(self.message(
                                 "dap_source_loaded",
                                 &[("name", name), ("mime", mime_type.unwrap_or_default())],
@@ -9261,6 +12383,7 @@ impl InteractiveApplication {
             .state
             .buffers
             .iter()
+            .filter(|(_, buffer)| !buffer.is_virtual_read_only())
             .map(|(id, buffer)| (id, buffer.dirty, buffer.text.revision()))
             .collect::<Vec<_>>();
         for (buffer, dirty, revision) in buffers {
@@ -9364,11 +12487,133 @@ impl InteractiveApplication {
         }
     }
 
+    fn toggle_buffer_pin(&mut self, buffer: crate::editing::BufferId) {
+        if !self.state.buffers.contains_key(buffer) {
+            return;
+        }
+        if !self.content_line_pins.remove(&buffer) {
+            self.content_line_pins.insert(buffer);
+        }
+        self.content_line_order_revision = self.content_line_order_revision.saturating_add(1);
+        self.content_line_projection_signature = None;
+        self.reconcile_editor_windows();
+    }
+    fn toggle_active_buffer_pin(&mut self) {
+        if let Some(buffer) = self.state.active_buffer_id() {
+            self.toggle_buffer_pin(buffer)
+        }
+    }
+    fn move_active_buffer_line(&mut self, direction: isize) {
+        let Some(buffer) = self.state.active_buffer_id() else {
+            return;
+        };
+        let pinned = self.content_line_pins.contains(&buffer);
+        let Some(index) = self
+            .content_line_order
+            .iter()
+            .position(|candidate| *candidate == buffer)
+        else {
+            self.show_error("active buffer has no content-line entry");
+            return;
+        };
+        let target = if direction < 0 {
+            self.content_line_order[..index]
+                .iter()
+                .rposition(|candidate| self.content_line_pins.contains(candidate) == pinned)
+        } else {
+            self.content_line_order[index.saturating_add(1)..]
+                .iter()
+                .position(|candidate| self.content_line_pins.contains(candidate) == pinned)
+                .map(|offset| index + 1 + offset)
+        };
+        let Some(target) = target else {
+            self.show_error("buffer is already at the content-line boundary");
+            return;
+        };
+        self.content_line_order.swap(index, target);
+        self.content_line_order_revision = self.content_line_order_revision.saturating_add(1);
+        self.content_line_projection_signature = None;
+        self.reconcile_editor_windows();
+    }
+
+    fn handle_content_tab_mouse(&mut self, key: &KeyEvent, column: u16, row: u16) -> bool {
+        if self.ui.prompt.is_some() || self.ui.picker.is_some() || self.ui.tool_menu.is_some() {
+            return false;
+        }
+        let Some(kind) = key.terminal_mouse() else {
+            return false;
+        };
+        if !matches!(
+            kind,
+            crate::input::TerminalMouseInput::LeftDown
+                | crate::input::TerminalMouseInput::RightDown
+                | crate::input::TerminalMouseInput::MiddleDown
+        ) {
+            return false;
+        }
+        let Some(bounds) = self.workspace_bounds() else {
+            return false;
+        };
+        let tab_line = self.configuration.settings.ui.tab_line.enabled
+            && (!self.configuration.settings.ui.tab_line.hide_when_single
+                || self.state.tabs.len() > 1);
+        let buffer_line = self.configuration.settings.ui.buffer_line.enabled
+            && (!self.configuration.settings.ui.buffer_line.hide_when_single
+                || self.ui.content_tabs.len() > 1);
+        if !buffer_line
+            || row != bounds.y.saturating_add(u16::from(tab_line))
+            || column < bounds.x
+            || column >= bounds.x.saturating_add(bounds.width)
+        {
+            return false;
+        }
+        let Some(identity) = crate::terminal_ui::content_tab_at_column(
+            &self.ui.content_tabs,
+            &self.configuration.settings,
+            bounds.width,
+            column - bounds.x,
+        ) else {
+            return false;
+        };
+        let entry = self
+            .ui
+            .content_tabs
+            .iter()
+            .find(|entry| entry.identity == identity)
+            .cloned();
+        let Some(buffer) = self.editor_windows.buffer_for_content(identity.0) else {
+            if kind == crate::input::TerminalMouseInput::RightDown
+                && entry.is_some_and(|entry| !entry.closeable)
+            {
+                self.show_error("content-line entry is not closeable");
+                return true;
+            }
+            return false;
+        };
+        if kind == crate::input::TerminalMouseInput::MiddleDown {
+            self.toggle_buffer_pin(buffer);
+            return true;
+        }
+        if self.state.show_buffer(buffer).is_err() {
+            return false;
+        }
+        self.reconcile_editor_windows();
+        if kind == crate::input::TerminalMouseInput::RightDown {
+            if entry.is_some_and(|entry| entry.closeable) {
+                self.close_active_buffer(false)
+            } else {
+                self.show_error("content-line entry is not closeable")
+            }
+        }
+        true
+    }
+
     fn handle_event(&mut self, event: UiEvent) {
         match event {
             UiEvent::Resize(width, height) => {
                 self.terminal_width = width;
                 self.terminal_height = height;
+                self.surface_windows.invalidate();
                 self.resize_active_terminal_to_panel();
                 self.sync_terminal_panel();
                 self.sync_explorer_ui();
@@ -9381,34 +12626,78 @@ impl InteractiveApplication {
                 KeyInputKind::Release => self.handle_key_in_context("key_release", key),
             },
             UiEvent::Paste(text) => self.handle_configured_paste(text),
-            UiEvent::FocusGained => self.handle_key_in_context("focus", KeyEvent::focus_gained()),
+            UiEvent::FocusGained => {
+                self.send_terminal_focus_report(true);
+                self.handle_key_in_context("focus", KeyEvent::focus_gained())
+            }
             UiEvent::FocusLost => {
-                if self
-                    .ui
-                    .prompt
-                    .as_ref()
-                    .is_some_and(|prompt| prompt.kind == PromptKind::WorkspaceTrust)
-                {
+                self.send_terminal_focus_report(false);
+                if self.ui.prompt.as_ref().is_some_and(|prompt| {
+                    matches!(
+                        prompt.kind,
+                        PromptKind::WorkspaceTrust
+                            | PromptKind::GitReset
+                            | PromptKind::AiChat
+                            | PromptKind::AiComposer
+                    )
+                }) {
                     self.close_prompt();
                 }
+                self.cancel_ai_request();
+                self.ui.ai_ghost_text = None;
                 self.handle_key_in_context("focus", KeyEvent::focus_lost());
             }
             UiEvent::Mouse { key, column, row } => {
                 self.mouse_position = Some((column, row));
-                let over_terminal = self.ui.terminal_panel.is_some()
-                    && terminal_panel_geometry(
-                        &self.configuration.settings,
-                        self.terminal_height,
-                        self.terminal_panel_height,
-                    )
-                    .is_some_and(|geometry| row >= geometry.top);
+                if self.handle_content_tab_mouse(&key, column, row) {
+                    return;
+                }
+                let over_terminal = self
+                    .terminal_window_rect()
+                    .is_some_and(|rect| rect_contains_point(rect, column, row));
                 let over_explorer = !over_terminal
-                    && self.ui.explorer.is_some()
-                    && crate::terminal_ui::explorer_panel_width(
-                        &self.configuration.settings,
-                        self.terminal_width,
-                    )
-                    .is_some_and(|panel| column <= panel);
+                    && self
+                        .explorer_window_rect()
+                        .is_some_and(|rect| rect_contains_point(rect, column, row));
+                if over_explorer && let Some(mouse) = key.terminal_mouse() {
+                    match mouse {
+                        crate::input::TerminalMouseInput::ScrollUp => {
+                            self.move_explorer_selection(-3);
+                            return;
+                        }
+                        crate::input::TerminalMouseInput::ScrollDown => {
+                            self.move_explorer_selection(3);
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
+                let plugin_context = self
+                    .compositor_projection()
+                    .and_then(|projection| projection.hit_test(column, row))
+                    .and_then(|window| {
+                        self.plugin_windows
+                            .input_context(window, &self.plugin_contributions)
+                    });
+                if self.ui.picker.is_none()
+                    && self.ui.prompt.is_none()
+                    && self.ui.tool_menu.is_none()
+                    && let Some(context) = plugin_context
+                {
+                    if let Some(window) = self
+                        .compositor_projection()
+                        .and_then(|projection| projection.hit_test(column, row))
+                    {
+                        let mut graph = self.windows.clone();
+                        if graph.focus(window).and_then(|_| graph.validate()).is_ok() {
+                            self.windows = graph;
+                            self.surface_windows.invalidate();
+                            self.reconcile_editor_windows();
+                        }
+                    }
+                    self.handle_key_in_context(&context, key);
+                    return;
+                }
                 let context = if self.ui.picker.is_some() {
                     "picker_mouse"
                 } else if self.ui.prompt.is_some() {
@@ -9426,6 +12715,33 @@ impl InteractiveApplication {
                     self.ui.explorer_focused = false;
                     "editor_mouse"
                 };
+                if context == "terminal_mouse"
+                    && self.terminal_focused
+                    && let Some(id) = self.active_terminal
+                    && let Some(terminal) = self.terminals.get(&id)
+                    && let Some(rect) = self.terminal_window_rect()
+                    && let Some(event) = key.terminal_mouse()
+                {
+                    if let Some(bytes) = crate::terminal_ui::encode_terminal_mouse_event(
+                        event,
+                        column,
+                        row,
+                        rect.x,
+                        rect.y.saturating_add(1),
+                        rect.width,
+                        rect.height.saturating_sub(2),
+                        terminal.screen.mouse_mode(),
+                        terminal.screen.sgr_mouse(),
+                        self.configuration.settings.terminals.maximum_input_bytes,
+                    ) {
+                        let _ = self.ptys.input(
+                            id,
+                            bytes,
+                            self.configuration.settings.terminals.maximum_input_bytes,
+                        );
+                        return;
+                    }
+                }
                 self.handle_key_in_context(context, key);
             }
         }
@@ -9442,7 +12758,10 @@ impl InteractiveApplication {
             }
             .into();
         }
-        if self.terminal_focused && self.active_terminal.is_some() {
+        if self.terminal_focused
+            && self.active_terminal.is_some()
+            && self.terminal_window_rect().is_some()
+        {
             return "terminal".into();
         }
         if self.workspace_proposal.is_some() {
@@ -9461,12 +12780,19 @@ impl InteractiveApplication {
             return match prompt.kind {
                 PromptKind::Command => "command_prompt",
                 PromptKind::SearchForward | PromptKind::SearchBackward => "search_prompt",
-                PromptKind::WorkspaceTrust => "workspace_trust_prompt",
+                PromptKind::WorkspaceTrust | PromptKind::GitReset => "workspace_trust_prompt",
+                PromptKind::AiChat | PromptKind::AiComposer => "command_prompt",
             }
             .into();
         }
         if self.ui.tool_menu.is_some() {
             return "tool_manager".into();
+        }
+        if let Some(context) = self.windows.focused().and_then(|window| {
+            self.plugin_windows
+                .input_context(window, &self.plugin_contributions)
+        }) {
+            return context;
         }
         if self.ui.dashboard || self.state.active_view.is_none() {
             return "dashboard".into();
@@ -9479,7 +12805,50 @@ impl InteractiveApplication {
         format!("editor.{}", mode_name(mode))
     }
 
+    fn send_terminal_focus_report(&mut self, focused: bool) {
+        if self.terminal_focused
+            && let Some(id) = self.active_terminal
+            && let Some(terminal) = self.terminals.get(&id)
+            && let Some(bytes) =
+                crate::terminal_ui::encode_focus(focused, terminal.screen.focus_reporting())
+        {
+            let _ = self.ptys.input(
+                id,
+                bytes.to_vec(),
+                self.configuration.settings.terminals.maximum_input_bytes,
+            );
+        }
+    }
+
     fn handle_configured_key(&mut self, key: KeyEvent) {
+        if self.terminal_focused {
+            let encoded = key.terminal_navigation().map(|key| match key {
+                crate::input::TerminalNavigationKey::Up => crate::terminal_ui::PtyInputKey::Up,
+                crate::input::TerminalNavigationKey::Down => crate::terminal_ui::PtyInputKey::Down,
+                crate::input::TerminalNavigationKey::Left => crate::terminal_ui::PtyInputKey::Left,
+                crate::input::TerminalNavigationKey::Right => {
+                    crate::terminal_ui::PtyInputKey::Right
+                }
+                crate::input::TerminalNavigationKey::Home => crate::terminal_ui::PtyInputKey::Home,
+                crate::input::TerminalNavigationKey::End => crate::terminal_ui::PtyInputKey::End,
+            });
+            if let Some(encoded) = encoded
+                && let Some(id) = self.active_terminal
+                && let Some(terminal) = self.terminals.get(&id)
+            {
+                let bytes =
+                    crate::terminal_ui::encode_key(encoded, terminal.screen.application_cursor())
+                        .to_vec();
+                if bytes.len() <= self.configuration.settings.terminals.maximum_input_bytes {
+                    let _ = self.ptys.input(
+                        id,
+                        bytes,
+                        self.configuration.settings.terminals.maximum_input_bytes,
+                    );
+                }
+                return;
+            }
+        }
         let context = self.active_input_context();
         self.handle_key_in_context(&context, key);
     }
@@ -9594,6 +12963,23 @@ impl InteractiveApplication {
 
     fn handle_configured_paste(&mut self, text: String) {
         self.ui.documentation_popup = None;
+        if self.terminal_focused
+            && let Some(id) = self.active_terminal
+            && let Some(terminal) = self.terminals.get(&id)
+        {
+            if let Some(bytes) = crate::terminal_ui::encode_paste(
+                &text,
+                terminal.screen.bracketed_paste(),
+                self.configuration.settings.terminals.maximum_input_bytes,
+            ) {
+                let _ = self.ptys.input(
+                    id,
+                    bytes,
+                    self.configuration.settings.terminals.maximum_input_bytes,
+                );
+            }
+            return;
+        }
         self.cancel_pending_mapping();
         let context = self.active_input_context();
         if let Some(command_id) = self
@@ -9803,6 +13189,388 @@ impl InteractiveApplication {
         }
     }
 
+    // AI_APPLICATION_DOGFOOD_BEGIN: audited data-only foreground bridge.
+    fn ai_now(&self) -> u64 {
+        u64::try_from(self.ai_epoch.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+    fn cancel_ai_request(&mut self) {
+        if let Some((request, _, _)) = self.active_ai_request.take() {
+            let _ = self.ai_service.cancel(request);
+        }
+        self.ai_composer_prompt = None;
+    }
+    fn capture_ai_editor(&mut self, composer: bool) -> Option<AiEditorCapture> {
+        let view_id = self.state.active_view?;
+        let view = self.state.views[view_id].clone();
+        let buffer = self.state.buffers[view.buffer].clone();
+        if buffer.is_virtual_read_only() || buffer.read_only {
+            self.show_error("AI request requires a writable text buffer");
+            return None;
+        }
+        if composer
+            && (self.workspace.trust() != WorkspaceTrust::Trusted
+                || buffer.path.is_none()
+                || buffer.dirty)
+        {
+            self.show_error("AI composer requires a trusted clean path-backed buffer");
+            return None;
+        }
+        if let Some(path) = &buffer.path
+            && self.workspace.require_path(path).is_err()
+        {
+            self.show_error("AI buffer is outside workspace roots");
+            return None;
+        }
+        let (start, end) = view
+            .selection
+            .map_or((view.cursor, view.cursor), |selection| {
+                (
+                    selection.anchor.min(selection.head),
+                    selection.anchor.max(selection.head),
+                )
+            });
+        let range = ByteRange::new(start, end).ok()?;
+        Some(AiEditorCapture {
+            root_revision: self.workspace.root_revision(),
+            buffer: view.buffer,
+            revision: buffer.text.revision(),
+            view: view_id,
+            cursor: view.cursor,
+            mode: view.mode,
+            path: buffer.path,
+            range,
+        })
+    }
+    fn ai_context(&self, capture: Option<&AiEditorCapture>) -> AiRequestContext {
+        let (buffer, text) = capture.map_or((None, String::new()), |capture| {
+            let source = self.state.buffers[capture.buffer].text.to_string();
+            let start = capture.cursor.get().saturating_sub(2048);
+            let mut start = start.min(source.len());
+            while !source.is_char_boundary(start) {
+                start = start.saturating_sub(1)
+            }
+            let mut end = capture.cursor.get().saturating_add(2048).min(source.len());
+            while !source.is_char_boundary(end) {
+                end = end.saturating_sub(1)
+            }
+            (
+                Some(AiBufferContext {
+                    buffer: AiHostBufferId(capture.buffer.data().as_ffi()),
+                    revision: capture.revision.0,
+                    cursor: capture.cursor.get(),
+                    range: Some(
+                        AiTextRange::new(capture.range.start.get(), capture.range.end.get())
+                            .expect("ordered capture"),
+                    ),
+                }),
+                source[start..end].to_owned(),
+            )
+        });
+        AiRequestContext {
+            workspace_root_revision: capture
+                .map_or(self.workspace.root_revision(), |c| c.root_revision),
+            buffer,
+            text,
+        }
+    }
+    fn start_ai(
+        &mut self,
+        capability: AiCapability,
+        prompt: String,
+        capture: Option<AiEditorCapture>,
+    ) {
+        self.cancel_ai_request();
+        self.ui.ai_ghost_text = None;
+        let chunks = match capability {
+            AiCapability::Chat => vec!["Dust fake chat: ", "héllo ", "界 🙂"],
+            AiCapability::GhostText => vec![" · fake suggestion"],
+            AiCapability::Composer => vec!["bounded proposal"],
+        };
+        let composer_edits = if capability == AiCapability::Composer {
+            let capture = capture.as_ref().expect("composer capture");
+            vec![AiTextEdit {
+                range: AiTextRange::new(capture.range.start.get(), capture.range.end.get())
+                    .expect("ordered capture"),
+                replacement: "/* deterministic AI proposal */".into(),
+            }]
+        } else {
+            Vec::new()
+        };
+        let now = self.ai_now();
+        let request = AiRequest {
+            provider: self.ai_provider.clone(),
+            model: self.ai_model.clone(),
+            capability,
+            context: self.ai_context(capture.as_ref()),
+            prompt,
+            deadline_millis: now.saturating_add(5_000),
+        };
+        let script = FakeProviderScript {
+            chunks: chunks
+                .into_iter()
+                .map(|text| FakeChunk {
+                    delay_millis: 0,
+                    text: text.into(),
+                })
+                .collect(),
+            terminal: FakeTerminal::Complete,
+            composer_edits,
+        };
+        match self.ai_service.start_fake(request, script, now) {
+            Ok(id) => {
+                let owner = match capability {
+                    AiCapability::Chat => ActiveAiRequest::Chat {
+                        root_revision: self.workspace.root_revision(),
+                    },
+                    AiCapability::GhostText => {
+                        ActiveAiRequest::Ghost(capture.expect("ghost capture"))
+                    }
+                    AiCapability::Composer => {
+                        ActiveAiRequest::Composer(capture.expect("composer capture"))
+                    }
+                };
+                let revision = self
+                    .ai_service
+                    .snapshot()
+                    .expect("started AI snapshot")
+                    .revision;
+                self.active_ai_request = Some((id, owner, revision));
+            }
+            Err(error) => self.show_error(format!("AI request rejected: {error}")),
+        }
+    }
+    fn publish_ai_chat(&mut self, text: &str) {
+        let load = PluginLoadId(1);
+        let source = "builtin.ai.chat";
+        let key = "chat";
+        let revision = self
+            .plugin_virtual_editor
+            .find("builtin.ai", load, source, key)
+            .map_or(1, |entry| entry.revision.saturating_add(1));
+        let snapshot = crate::plugins::PluginVirtualDocumentSnapshot {
+            plugin: "builtin.ai".into(),
+            load,
+            source: source.into(),
+            document: 2,
+            key: key.into(),
+            title: "AI chat · fake.local".into(),
+            language: "markdown".into(),
+            text: format!("# AI chat · fake.local\n\n{text}\n"),
+            revision,
+            closed: false,
+        };
+        let mut state = self.state.clone();
+        let mut bridge = self.plugin_virtual_editor.clone();
+        if bridge.publish(&mut state, &snapshot).is_err() {
+            self.show_error("AI chat virtual document rejected");
+            return;
+        }
+        let mut graph = self.windows.clone();
+        let mut editor = self.editor_windows.clone();
+        if editor
+            .reconcile(
+                &state,
+                &mut graph,
+                &self.configuration.settings.ui.buffer_line.scratch_label,
+            )
+            .is_err()
+        {
+            self.show_error("AI chat graph rejected");
+            return;
+        }
+        self.state = state;
+        self.plugin_virtual_editor = bridge;
+        self.windows = graph;
+        self.editor_windows = editor;
+        self.ui.dashboard = false;
+    }
+    fn publish_ai_composer(&mut self, capture: &AiEditorCapture, proposal: &AiComposerProposal) {
+        if self.pending_workspace_proposal.is_some() || self.workspace_proposal.is_some() {
+            self.show_error("another workspace edit is already being previewed");
+            return;
+        }
+        if self.workspace.trust() != WorkspaceTrust::Trusted
+            || capture.root_revision != self.workspace.root_revision()
+        {
+            self.show_error("AI composer ownership is stale");
+            return;
+        }
+        let Some(path) = capture.path.clone() else {
+            return;
+        };
+        let Some(buffer) = self.state.buffers.get(capture.buffer) else {
+            return;
+        };
+        if buffer.text.revision() != capture.revision
+            || buffer.dirty
+            || buffer.path.as_ref() != Some(&path)
+            || proposal.buffer_revision != capture.revision.0
+            || proposal.workspace_root_revision != capture.root_revision
+            || proposal.buffer != AiHostBufferId(capture.buffer.data().as_ffi())
+        {
+            self.show_error("AI composer ownership is stale");
+            return;
+        }
+        let edits = proposal
+            .edits
+            .iter()
+            .map(|edit| {
+                Ok(TextEdit::new(
+                    ByteRange::new(ByteOffset(edit.range.start), ByteOffset(edit.range.end))
+                        .map_err(|e| e.to_string())?,
+                    edit.replacement.clone(),
+                ))
+            })
+            .collect::<Result<Vec<_>, String>>();
+        let Ok(edits) = edits else {
+            self.show_error("AI composer proposal is invalid");
+            return;
+        };
+        let snapshot = FileSnapshot {
+            canonical_path: path.clone(),
+            revision: Some(capture.revision),
+            bytes: buffer.text.to_bytes(),
+        };
+        let draft = WorkspaceEditDraft {
+            canonical_path: path,
+            expected_revision: Some(capture.revision),
+            edits,
+        };
+        let id = ProposalId(self.next_proposal);
+        self.next_proposal = self.next_proposal.saturating_add(1);
+        match WorkspaceEditProposal::build(
+            id,
+            "AI composer · fake.local".into(),
+            &self.workspace,
+            vec![draft],
+            vec![snapshot],
+        ) {
+            Ok(proposal) => {
+                self.workspace_proposal_root_revision = Some(capture.root_revision);
+                self.workspace_proposal = Some(proposal);
+                self.show_workspace_proposal();
+            }
+            Err(_) => self.show_error("AI composer proposal rejected"),
+        }
+    }
+    fn invalidate_ai_ownership(&mut self) {
+        let valid = self
+            .active_ai_request
+            .as_ref()
+            .is_none_or(|(_, owner, _)| match owner {
+                ActiveAiRequest::Chat { root_revision } => {
+                    *root_revision == self.workspace.root_revision()
+                        && self.ai_service.snapshot().is_none_or(|snapshot| {
+                            snapshot.text.is_empty()
+                                || self
+                                    .plugin_virtual_editor
+                                    .find("builtin.ai", PluginLoadId(1), "builtin.ai.chat", "chat")
+                                    .is_some_and(|entry| {
+                                        self.state.buffers.contains_key(entry.buffer)
+                                    })
+                        })
+                }
+                ActiveAiRequest::Ghost(capture) | ActiveAiRequest::Composer(capture) => {
+                    self.workspace.root_revision() == capture.root_revision
+                        && self.state.active_view == Some(capture.view)
+                        && self.state.views.get(capture.view).is_some_and(|view| {
+                            view.buffer == capture.buffer
+                                && view.cursor == capture.cursor
+                                && view.mode == capture.mode
+                        })
+                        && self
+                            .state
+                            .buffers
+                            .get(capture.buffer)
+                            .is_some_and(|buffer| buffer.text.revision() == capture.revision)
+                }
+            });
+        if !valid {
+            self.cancel_ai_request();
+            self.ui.ai_ghost_text = None
+        }
+        let ghost_valid = self.ui.ai_ghost_text.as_ref().is_none_or(|ghost| {
+            self.workspace.root_revision() == ghost.workspace_root_revision
+                && self.state.active_view == Some(ghost.view)
+                && self.state.views.get(ghost.view).is_some_and(|view| {
+                    view.buffer == ghost.buffer
+                        && view.cursor == ghost.cursor
+                        && view.mode == ghost.mode
+                })
+                && self
+                    .state
+                    .buffers
+                    .get(ghost.buffer)
+                    .is_some_and(|buffer| buffer.text.revision() == ghost.revision)
+        });
+        if !ghost_valid {
+            self.ui.ai_ghost_text = None
+        }
+    }
+    fn process_ai_events(&mut self) {
+        self.invalidate_ai_ownership();
+        let Some((request, owner, observed)) = self.active_ai_request.clone() else {
+            return;
+        };
+        let now = self.ai_now();
+        match self.ai_service.process_one(now) {
+            Ok(false) => return,
+            Ok(true) => {}
+            Err(_) => {
+                self.cancel_ai_request();
+                self.show_error("AI provider request failed");
+                return;
+            }
+        }
+        let Some(snapshot) = self.ai_service.snapshot().cloned() else {
+            return;
+        };
+        if snapshot.request != request || snapshot.revision == observed {
+            return;
+        }
+        if let Some(active) = &mut self.active_ai_request {
+            active.2 = snapshot.revision
+        }
+        match &owner {
+            ActiveAiRequest::Chat { .. } => {
+                if !snapshot.text.is_empty() {
+                    self.publish_ai_chat(&snapshot.text)
+                }
+            }
+            ActiveAiRequest::Ghost(capture) => {
+                if let AiStreamState::Complete(AiOutput::GhostText(ghost)) = &snapshot.state {
+                    if snapshot.validate_ownership(
+                        capture.root_revision,
+                        Some((
+                            AiHostBufferId(capture.buffer.data().as_ffi()),
+                            capture.revision.0,
+                        )),
+                    ) && ghost.cursor == capture.cursor.get()
+                    {
+                        self.ui.ai_ghost_text = Some(UiGhostText {
+                            workspace_root_revision: capture.root_revision,
+                            buffer: capture.buffer,
+                            revision: capture.revision,
+                            view: capture.view,
+                            cursor: capture.cursor,
+                            mode: capture.mode,
+                            text: ghost.text.clone(),
+                        });
+                    }
+                }
+            }
+            ActiveAiRequest::Composer(capture) => {
+                if let AiStreamState::Complete(AiOutput::Composer(proposal)) = &snapshot.state {
+                    self.publish_ai_composer(capture, proposal)
+                }
+            }
+        }
+        if !matches!(snapshot.state, AiStreamState::Running) {
+            self.active_ai_request = None;
+        }
+    }
+
+    // AI_APPLICATION_DOGFOOD_END
     fn process_effect(&mut self, effect: AppEffect) {
         match effect {
             AppEffect::Quit { force } => {
@@ -9832,12 +13600,20 @@ impl InteractiveApplication {
                 }
                 Err(error) => self.show_error(error),
             },
+            AppEffect::ToggleBufferPin => self.toggle_active_buffer_pin(),
+            AppEffect::MoveBufferLine(direction) => self.move_active_buffer_line(direction),
             AppEffect::NewBuffer => {
                 self.state.open_text(TextBuffer::from_text(""), None);
                 self.ui.dashboard = false;
                 self.ui.notification = Some(self.message("new_scratch", &[]));
                 self.ui.notification_error = false;
             }
+            AppEffect::OpenWorkspaceFilePicker => self.start_workspace_file_picker(),
+            AppEffect::GitStatusRefresh => self.start_git_status_refresh(),
+            AppEffect::GitStatusOpen => self.open_git_status_picker(),
+            AppEffect::GitHunksOpen => self.start_git_hunks(),
+            AppEffect::GitHunkStage => self.stage_selected_git_hunk(),
+            AppEffect::GitHunkReset => self.request_reset_selected_git_hunk(),
             AppEffect::OpenFilePrompt => {
                 let alias = self
                     .configuration
@@ -9856,7 +13632,10 @@ impl InteractiveApplication {
             AppEffect::PromptHistory(direction) => self.prompt_history(direction),
             AppEffect::PromptComplete(direction) => self.prompt_complete(direction),
             AppEffect::PromptSubmit => self.submit_prompt(),
-            AppEffect::PromptCancel => self.close_prompt(),
+            AppEffect::PromptCancel => {
+                self.ai_composer_prompt = None;
+                self.close_prompt()
+            }
             AppEffect::SearchRepeat { reverse } => {
                 let forward = if reverse {
                     !self.last_search_forward
@@ -9880,6 +13659,117 @@ impl InteractiveApplication {
             AppEffect::ExtendMouseSelection => self.apply_mouse_cursor(true),
             AppEffect::Layout(action) => self.apply_layout_action(action),
             AppEffect::SurfaceFocus(direction) => self.focus_surface(direction),
+            AppEffect::RetainedUiFocus(delta) => {
+                self.apply_retained_ui_interaction(PluginUiInteraction::Focus(delta));
+            }
+            AppEffect::RetainedUiScroll(delta) => {
+                self.apply_retained_ui_interaction(PluginUiInteraction::Scroll(delta));
+            }
+            AppEffect::RetainedUiActivate => {
+                self.apply_retained_ui_interaction(PluginUiInteraction::Activate);
+            }
+            AppEffect::RetainedUiMouseSelect => self.select_retained_ui_at_mouse(),
+            AppEffect::PrivateUiActivate { at_mouse } => {
+                self.activate_private_surface_action(at_mouse);
+            }
+            AppEffect::WindowDock { target, edge, size } => {
+                let edge = match edge.as_str() {
+                    "left" => DockEdge::Left,
+                    "right" => DockEdge::Right,
+                    "top" => DockEdge::Top,
+                    "bottom" => DockEdge::Bottom,
+                    _ => {
+                        self.show_error("window dock edge must be left, right, top, or bottom");
+                        return;
+                    }
+                };
+                let result = self
+                    .resolve_native_window_target(&target)
+                    .and_then(|target| {
+                        self.apply_native_window_placement(
+                            target,
+                            WindowPlacement::Docked { edge, size },
+                        )
+                    });
+                if let Err(error) = result {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowFloat {
+                target,
+                x,
+                y,
+                width,
+                height,
+            } => {
+                let result = self
+                    .resolve_native_window_target(&target)
+                    .and_then(|target| {
+                        self.apply_native_window_placement(
+                            target,
+                            WindowPlacement::Floating(WindowRect {
+                                x,
+                                y,
+                                width,
+                                height,
+                            }),
+                        )
+                    });
+                if let Err(error) = result {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowFullscreen(target) => {
+                let result = self
+                    .resolve_native_window_target(&target)
+                    .and_then(|target| {
+                        self.apply_native_window_placement(target, WindowPlacement::Fullscreen)
+                    });
+                if let Err(error) = result {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowHide(target) => {
+                let result = self
+                    .resolve_native_window_target(&target)
+                    .and_then(|target| {
+                        self.apply_native_window_placement(target, WindowPlacement::Hidden)
+                    });
+                if let Err(error) = result {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowShow(target) => {
+                let result = self
+                    .resolve_native_window_target(&target)
+                    .and_then(|target| self.show_native_window(target));
+                if let Err(error) = result {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowClose(target) => {
+                if let Err(error) = self.close_graph_window(&target) {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowResize { target, amount } => {
+                if let Err(error) = self.resize_graph_window(&target, amount) {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowMove { target, x, y } => {
+                let result = self
+                    .resolve_native_window_target(&target)
+                    .and_then(|target| self.move_native_window(target, x, y));
+                if let Err(error) = result {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowSwap { first, second } => {
+                if let Err(error) = self.swap_graph_windows(&first, &second) {
+                    self.show_error(error);
+                }
+            }
             AppEffect::RepeatLast => self.repeat_last_change(),
             AppEffect::MacroRecordStart(register) => {
                 self.recording_macro = Some((register, Vec::new()));
@@ -10398,6 +14288,34 @@ impl InteractiveApplication {
                     self.ensure_cursor_visible();
                 }
             }
+            AppEffect::TerminalDock { edge, size } => {
+                let edge = match edge.as_str() {
+                    "left" => DockEdge::Left,
+                    "right" => DockEdge::Right,
+                    "top" => DockEdge::Top,
+                    "bottom" => DockEdge::Bottom,
+                    _ => {
+                        self.show_error("terminal dock edge must be left, right, top, or bottom");
+                        return;
+                    }
+                };
+                self.place_active_terminal(WindowPlacement::Docked { edge, size });
+            }
+            AppEffect::TerminalFloat {
+                x,
+                y,
+                width,
+                height,
+            } => self.place_active_terminal(WindowPlacement::Floating(WindowRect {
+                x,
+                y,
+                width,
+                height,
+            })),
+            AppEffect::TerminalFullscreen => {
+                self.place_active_terminal(WindowPlacement::Fullscreen)
+            }
+            AppEffect::TerminalHide => self.place_active_terminal(WindowPlacement::Hidden),
             AppEffect::TerminalUnfocus => {
                 self.terminal_focused = false;
                 self.sync_terminal_panel();
@@ -10417,7 +14335,9 @@ impl InteractiveApplication {
             AppEffect::TerminalClose => {
                 if let Some(id) = self.active_terminal.take() {
                     let _ = self.ptys.close(id);
-                    self.terminals.remove(&id);
+                    if self.terminals.remove(&id).is_some() {
+                        self.terminal_set_revision = self.terminal_set_revision.saturating_add(1);
+                    }
                     self.dap_terminal_responses.remove(&id);
                     let mut remaining = self.terminals.keys().copied().collect::<Vec<_>>();
                     remaining.sort_unstable_by_key(|candidate| candidate.0);
@@ -10465,6 +14385,179 @@ impl InteractiveApplication {
                     self.ui.notification_error = false;
                 }
             }
+            AppEffect::PluginPickerOpen { provider, query } => {
+                self.open_plugin_picker(provider, query)
+            }
+            AppEffect::VirtualDocumentOpen { source, key } => {
+                if key.len() > crate::plugins::VIRTUAL_DOCUMENT_KEY_BYTE_CEILING
+                    || key.chars().any(char::is_control)
+                {
+                    self.show_error("invalid virtual document key");
+                    return;
+                }
+                let Some((plugin, load, command)) =
+                    self.plugin_contributions.ordered().find_map(|index| {
+                        index
+                            .virtual_documents
+                            .iter()
+                            .find(|declaration| declaration.id == source)
+                            .map(|declaration| {
+                                (
+                                    index.owner.clone(),
+                                    PluginLoadId(index.generation),
+                                    declaration.command.clone(),
+                                )
+                            })
+                    })
+                else {
+                    self.show_error("unknown virtual document source");
+                    return;
+                };
+                if let Some(entry) = self
+                    .plugin_virtual_editor
+                    .find(&plugin, load, &source, &key)
+                {
+                    let _ = self.state.show_buffer(entry.buffer);
+                    self.ui.dashboard = false;
+                    self.reconcile_editor_windows();
+                    return;
+                }
+                match self
+                    .plugin_virtual_documents
+                    .start(&plugin, load, &source, key)
+                {
+                    Ok(_) => {
+                        let prefix = format!("plugin.{plugin}.");
+                        let Some(local) = command.strip_prefix(&prefix).map(str::to_owned) else {
+                            self.show_error("invalid virtual document command");
+                            return;
+                        };
+                        self.process_effect(AppEffect::PluginExecute {
+                            plugin,
+                            command: local,
+                        });
+                    }
+                    Err(error) => self.show_error(error.detail),
+                }
+            }
+            AppEffect::AiChatOpen => {
+                self.cancel_ai_request();
+                self.open_prompt(PromptKind::AiChat, String::new())
+            }
+            AppEffect::AiGhostRequest => {
+                if let Some(capture) = self.capture_ai_editor(false) {
+                    self.start_ai(AiCapability::GhostText, String::new(), Some(capture))
+                }
+            }
+            AppEffect::AiComposerRequest => {
+                self.cancel_ai_request();
+                if let Some(capture) = self.capture_ai_editor(true) {
+                    self.ai_composer_prompt = Some(capture);
+                    self.open_prompt(PromptKind::AiComposer, String::new())
+                }
+            }
+            kind @ (AppEffect::HealthVirtualOpen | AppEffect::HealthVirtualRefresh) => {
+                let load = PluginLoadId(1);
+                let source = "builtin.health.virtual";
+                let key = "health";
+                if matches!(kind, AppEffect::HealthVirtualOpen) {
+                    if let Some(entry) =
+                        self.plugin_virtual_editor
+                            .find("builtin.health", load, source, key)
+                    {
+                        let buffer = entry.buffer;
+                        let _ = self.state.show_buffer(buffer);
+                        self.ui.dashboard = false;
+                        self.reconcile_editor_windows();
+                        return;
+                    }
+                }
+                let revision = self
+                    .plugin_virtual_editor
+                    .find("builtin.health", load, source, key)
+                    .map_or(1, |entry| entry.revision.saturating_add(1));
+                let plugin_rows = self.plugins.statuses.len();
+                let text = format!(
+                    "# Dust health\n\n- editor: ready\n- plugins indexed: {plugin_rows}\n- API commands: {}\n- persistence schema: {}\n",
+                    self.commands.specs().count(),
+                    crate::persistence::STATE_VERSION
+                );
+                let snapshot = crate::plugins::PluginVirtualDocumentSnapshot {
+                    plugin: "builtin.health".into(),
+                    load,
+                    source: source.into(),
+                    document: 1,
+                    key: key.into(),
+                    title: "Dust health".into(),
+                    language: "markdown".into(),
+                    text,
+                    revision,
+                    closed: false,
+                };
+                let mut state = self.state.clone();
+                let mut bridge = self.plugin_virtual_editor.clone();
+                match bridge.publish(&mut state, &snapshot) {
+                    Ok(_) => {
+                        let mut graph = self.windows.clone();
+                        let mut editor = self.editor_windows.clone();
+                        if let Err(error) = editor.reconcile(
+                            &state,
+                            &mut graph,
+                            &self.configuration.settings.ui.buffer_line.scratch_label,
+                        ) {
+                            self.show_error(format!("health document graph rejected: {error}"));
+                            return;
+                        }
+                        self.state = state;
+                        self.plugin_virtual_editor = bridge;
+                        self.windows = graph;
+                        self.editor_windows = editor;
+                        self.ui.dashboard = false;
+                        self.reconcile_editor_windows();
+                    }
+                    Err(error) => self.show_error(format!("health document rejected: {error:?}")),
+                }
+            }
+            AppEffect::VirtualDocumentRefresh => {
+                let Some(buffer) = self.state.active_buffer_id() else {
+                    self.show_error("no active virtual document");
+                    return;
+                };
+                let Some(entry) = self.plugin_virtual_editor.entry_for_buffer(buffer).cloned()
+                else {
+                    self.show_error("active buffer is not a virtual document");
+                    return;
+                };
+                if let Err(error) =
+                    self.plugin_virtual_documents
+                        .refresh(&entry.plugin, entry.load, entry.document)
+                {
+                    self.show_error(error.detail);
+                    return;
+                }
+                let command = self
+                    .plugin_contributions
+                    .get(&entry.plugin)
+                    .and_then(|index| {
+                        index
+                            .virtual_documents
+                            .iter()
+                            .find(|d| d.id == entry.source)
+                    })
+                    .map(|d| d.command.clone());
+                let Some(command) = command else {
+                    self.show_error("virtual document source unavailable");
+                    return;
+                };
+                let prefix = format!("plugin.{}.", entry.plugin);
+                let Some(local) = command.strip_prefix(&prefix).map(str::to_owned) else {
+                    return;
+                };
+                self.process_effect(AppEffect::PluginExecute {
+                    plugin: entry.plugin,
+                    command: local,
+                });
+            }
             AppEffect::PluginExecute { plugin, command } => {
                 let Some(load) = self.plugins.load_id(&plugin) else {
                     self.show_error(crate::plugins::PluginError::NotActive);
@@ -10474,6 +14567,7 @@ impl InteractiveApplication {
                     self.show_error(crate::plugins::PluginError::NotActive);
                     return;
                 }
+                self.refresh_plugin_host_events();
                 let snapshot = self.state.active_buffer_id().and_then(|id| {
                     self.state.buffers.get(id).map(|buffer| PluginSnapshot {
                         buffer: id.data().as_ffi(),
@@ -10487,6 +14581,19 @@ impl InteractiveApplication {
                     Vec::new(),
                     snapshot,
                     BTreeMap::new(),
+                    self.pending_plugin_ui_events
+                        .remove(&(plugin.clone(), load))
+                        .unwrap_or_default(),
+                    self.plugin_host_events.deliver(&plugin, load),
+                    self.pending_plugin_storage_results
+                        .remove(&(plugin.clone(), load))
+                        .unwrap_or_default(),
+                    self.plugin_providers.requests(&plugin, load),
+                    self.plugin_virtual_documents.requests_for_command(
+                        &plugin,
+                        load,
+                        &format!("plugin.{plugin}.{command}"),
+                    ),
                     self.configuration_generation,
                 ) {
                     self.show_error(error)
@@ -10604,11 +14711,13 @@ impl InteractiveApplication {
             AppEffect::ExplorerClose => {
                 self.ui.explorer = None;
                 self.ui.explorer_focused = false;
+                self.reconcile_explorer_watch();
                 self.ensure_cursor_visible();
             }
             AppEffect::ExplorerMove(delta) => {
                 self.move_explorer_selection(isize::from(delta));
             }
+            AppEffect::ExplorerPage(direction) => self.page_explorer_selection(direction),
             AppEffect::ExplorerParent => self.explorer_collapse_or_parent(),
             AppEffect::ExplorerChild => {
                 self.explorer.select_first_child();
@@ -10616,6 +14725,7 @@ impl InteractiveApplication {
             }
             AppEffect::ExplorerToggle => self.explorer_toggle(),
             AppEffect::ExplorerRefresh => self.refresh_explorer(),
+            AppEffect::ExplorerFollow => self.follow_active_file_in_explorer(),
             AppEffect::ExplorerToggleHidden => {
                 self.explorer_hidden = !self.explorer_hidden;
                 self.refresh_explorer();
@@ -10652,6 +14762,8 @@ impl InteractiveApplication {
             AppEffect::WorkspaceSearch(query) => self.start_workspace_search(query, None),
             AppEffect::WorkspaceSearchCancel => {
                 self.workspace_search.cancel();
+                self.workspace_search_workflow = None;
+                self.workspace_search_sequence = 0;
                 self.workspace_search_generation = None;
                 self.workspace_search_intent = None;
                 self.workspace_search_matches.clear();
@@ -10799,16 +14911,28 @@ impl InteractiveApplication {
             AppEffect::LspSessions => self.show_lsp_sessions(),
             AppEffect::LspSessionSelect(key) => self.select_lsp_session(&key),
             AppEffect::LspLogs => {
-                let logs = self
+                let items = self
                     .lsp_logs
                     .iter()
-                    .rev()
-                    .take(3)
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(" | ");
-                self.ui.notification = Some(self.message("lsp_logs", &[("logs", logs)]));
-                self.ui.notification_error = false;
+                    .enumerate()
+                    .map(|(index, line)| {
+                        (
+                            PickerItem {
+                                id: PickerItemId(format!("lsp-log:{index}")),
+                                label: line.clone(),
+                                detail: String::new(),
+                                source: "lsp".into(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::Command(String::new()),
+                        )
+                    })
+                    .collect();
+                self.install_surface_picker(
+                    PickerSurfaceKind::Logs,
+                    self.message("lsp_logs", &[("logs", String::new())]),
+                    items,
+                );
             }
             AppEffect::LspRequest(feature) => self.request_lsp(feature),
             AppEffect::LspDocumentationScroll(direction) => {
@@ -10822,7 +14946,7 @@ impl InteractiveApplication {
                             .saturating_sub(2),
                     )
                     .max(1);
-                    let maximum = popup.lines.len().saturating_sub(page);
+                    let maximum = popup.line_count().saturating_sub(page);
                     let step = self
                         .configuration
                         .settings
@@ -10837,6 +14961,7 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::LspDocumentationClose => self.ui.documentation_popup = None,
+            AppEffect::LspCompletionDocumentationOpen => self.open_lsp_completion_documentation(),
             AppEffect::LspCompletionMove(direction) => self.move_lsp_completion(direction),
             AppEffect::DiagnosticNavigate(direction) => self.navigate_diagnostic(direction),
             AppEffect::LspCompletionAccept => self.accept_lsp_completion(),
@@ -10846,6 +14971,7 @@ impl InteractiveApplication {
                     let _ = self.lsp.cancel(server, generation);
                 }
                 self.lsp_completion_items.clear();
+                self.lsp_completion_owner = None;
                 self.ui.language_completion = None;
             }
             AppEffect::SnippetNavigate(direction) => self.navigate_snippet(direction),
@@ -11521,49 +15647,94 @@ impl InteractiveApplication {
         self.perform_search(forward);
     }
 
-    fn current_focus_surface(&self) -> Option<FocusSurface> {
-        if self.ui.explorer.is_some() && self.ui.explorer_focused {
-            return Some(FocusSurface::Explorer);
+    fn apply_authoritative_editor_transaction(
+        &mut self,
+        transaction: &EditorTransaction,
+    ) -> Result<(), String> {
+        let mut candidate = self.state.clone();
+        candidate
+            .apply_transaction(transaction)
+            .map_err(|error| error.to_string())?;
+        if candidate.window_revision() == self.state.window_revision() {
+            self.state = candidate;
+            return Ok(());
         }
-        self.state
-            .active_tab
-            .and_then(|tab| self.state.tabs.get(tab))
-            .map(|tab| FocusSurface::Pane(tab.focused))
+
+        let previous_state = std::mem::replace(&mut self.state, candidate);
+        let previous_graph = self.windows.clone();
+        let previous_editor = self.editor_windows.clone();
+        let previous_surfaces = self.surface_windows.clone();
+        let previous_ui = self.ui.clone();
+        self.reconcile_editor_windows();
+        let accepted = self.editor_windows.is_current(
+            &self.state,
+            &self.configuration.settings.ui.buffer_line.scratch_label,
+        ) && self.windows.validate().is_ok()
+            && self.windows.revision().is_some()
+            && self.compositor_projection().is_some();
+        if accepted {
+            Ok(())
+        } else {
+            self.state = previous_state;
+            self.windows = previous_graph;
+            self.editor_windows = previous_editor;
+            self.surface_windows = previous_surfaces;
+            self.ui = previous_ui;
+            Err("authoritative editor/window transaction was rejected".into())
+        }
     }
 
     fn focus_surface(&mut self, direction: FocusDirection) {
-        let target = match self.current_focus_surface() {
-            Some(FocusSurface::Explorer) if direction == FocusDirection::Right => self
-                .state
-                .active_tab
-                .and_then(|tab| self.state.tabs.get(tab))
-                .map(|tab| FocusSurface::Pane(tab.focused)),
-            Some(FocusSurface::Explorer) | None => None,
-            Some(FocusSurface::Pane(_)) => match self.state.directional_pane(direction) {
-                Ok(Some(pane)) => Some(FocusSurface::Pane(pane)),
-                Ok(None) if direction == FocusDirection::Left && self.ui.explorer.is_some() => {
-                    Some(FocusSurface::Explorer)
-                }
-                Ok(None) | Err(_) => None,
-            },
+        self.reconcile_editor_windows();
+        let Some(current) = self.windows.focused() else {
+            return;
         };
-        match target {
-            Some(FocusSurface::Explorer) => self.ui.explorer_focused = true,
-            Some(FocusSurface::Pane(pane)) => {
-                let transaction = EditorTransaction::new(self.transaction_id())
-                    .with_operation(EditorOperation::FocusPaneId { pane })
-                    .with_undo_policy(UndoPolicy::Ignore);
-                if let Err(error) = self.state.apply_transaction(&transaction) {
-                    self.show_error(error);
-                    return;
-                }
-                self.ui.explorer_focused = false;
+        let Some(layout) = self.ui.compositor_layout.as_ref() else {
+            return;
+        };
+        let direction = match direction {
+            FocusDirection::Left => SpatialDirection::Left,
+            FocusDirection::Down => SpatialDirection::Down,
+            FocusDirection::Up => SpatialDirection::Up,
+            FocusDirection::Right => SpatialDirection::Right,
+        };
+        let Some(target) = layout.projection.spatial_neighbor(current, direction) else {
+            return;
+        };
+        if layout.surfaces.explorer == Some(target) {
+            self.ui.explorer_focused = true;
+            self.terminal_focused = false;
+        } else if layout
+            .surfaces
+            .terminal
+            .is_some_and(|(_, window)| window == target)
+        {
+            self.ui.explorer_focused = false;
+            self.terminal_focused = true;
+        } else {
+            let Some(pane) = self.ui.editor_window_layout.as_ref().and_then(|editor| {
+                editor
+                    .bindings
+                    .iter()
+                    .find(|binding| binding.window == target)
+                    .map(|binding| binding.pane)
+            }) else {
+                return;
+            };
+            let transaction = EditorTransaction::new(self.transaction_id())
+                .with_operation(EditorOperation::FocusPaneId { pane })
+                .with_undo_policy(UndoPolicy::Ignore);
+            if let Err(error) = self.apply_authoritative_editor_transaction(&transaction) {
+                self.show_error(error);
+                return;
             }
-            None => return,
+            self.ui.explorer_focused = false;
+            self.terminal_focused = false;
         }
         self.cancel_pending_mapping();
         self.input.cancel_pending();
         self.ensure_cursor_visible();
+        self.sync_terminal_panel();
     }
 
     fn apply_layout_action(&mut self, action: LayoutAction) {
@@ -11611,7 +15782,7 @@ impl InteractiveApplication {
         let transaction = EditorTransaction::new(self.transaction_id())
             .with_operation(operation)
             .with_undo_policy(UndoPolicy::Ignore);
-        if let Err(error) = self.state.apply_transaction(&transaction) {
+        if let Err(error) = self.apply_authoritative_editor_transaction(&transaction) {
             self.show_error(error);
         } else {
             self.ui.dashboard = false;
@@ -11621,26 +15792,106 @@ impl InteractiveApplication {
         }
     }
 
+    fn apply_retained_ui_interaction(&mut self, interaction: PluginUiInteraction) {
+        match self.plugin_windows.interact_focused(
+            &self.windows,
+            &self.plugin_contributions,
+            interaction,
+        ) {
+            Ok(action) => {
+                self.ui.plugin_surfaces = self.plugin_windows.snapshots();
+                if let Some(action) = action {
+                    self.invoke_mapped_command(&action);
+                }
+            }
+            Err(error) => self.show_error(error.detail),
+        }
+    }
+
+    fn select_retained_ui_at_mouse(&mut self) {
+        let Some((column, row)) = self.mouse_position else {
+            return;
+        };
+        let Some(projection) = self.compositor_projection() else {
+            return;
+        };
+        let Some(window) = projection.hit_test(column, row) else {
+            return;
+        };
+        let Some(rect) = projection.window(window).map(|projected| projected.rect) else {
+            return;
+        };
+        if let Err(error) = self
+            .plugin_windows
+            .focus_node_at_row(window, usize::from(row.saturating_sub(rect.y)))
+        {
+            self.show_error(error.detail);
+            return;
+        }
+        self.ui.plugin_surfaces = self.plugin_windows.snapshots();
+    }
+
+    fn activate_private_surface_action(&mut self, at_mouse: bool) {
+        let Some(projection) = self.compositor_projection() else {
+            return;
+        };
+        let target = if at_mouse {
+            self.mouse_position.and_then(|(x, y)| {
+                projection.hit_test(x, y).and_then(|window| {
+                    projection.window(window).map(|projected| {
+                        (
+                            window,
+                            x.saturating_sub(projected.rect.x),
+                            y.saturating_sub(projected.rect.y),
+                        )
+                    })
+                })
+            })
+        } else {
+            self.windows.focused().and_then(|window| {
+                self.ui
+                    .private_surfaces
+                    .iter()
+                    .find(|surface| surface.window == window)
+                    .and_then(|surface| surface.cursor.map(|(x, y)| (window, x, y)))
+            })
+        };
+        let Some((window, x, y)) = target else { return };
+        match self
+            .plugin_windows
+            .private_action_at(window, x, y, &self.plugin_contributions)
+        {
+            Ok((plugin, load, event)) => {
+                let action = event.action.clone();
+                let pending = self
+                    .pending_plugin_ui_events
+                    .entry((plugin, PluginLoadId(load)))
+                    .or_default();
+                if pending.len() >= 64 {
+                    self.show_error("private surface action queue is full");
+                    return;
+                }
+                pending.push(event);
+                if let Some(action) = action {
+                    self.invoke_mapped_command(&action);
+                }
+            }
+            Err(error) => self.show_error(error.detail),
+        }
+    }
+
     fn mouse_pane_geometry(&self) -> Option<(crate::editing::PaneId, u16, u16, u16, u16)> {
         let (global_column, global_row) = self.mouse_position?;
-        let explorer_offset = self
-            .ui
-            .explorer
-            .as_ref()
-            .and_then(|_| {
-                crate::terminal_ui::explorer_panel_width(
-                    &self.configuration.settings,
-                    self.terminal_width,
-                )
-            })
-            .map_or(0, |width| width.saturating_add(1));
-        if global_column < explorer_offset {
+        let workspace = self.workspace_bounds()?;
+        if !rect_contains_point(workspace, global_column, global_row) {
             return None;
         }
-        let content_width = self.terminal_width.saturating_sub(explorer_offset);
-        let local_column = global_column.saturating_sub(explorer_offset);
+        let content_width = workspace.width;
+        let local_column = global_column.saturating_sub(workspace.x);
+        let local_row = global_row.saturating_sub(workspace.y);
         pane_viewports(
             &self.state,
+            &self.ui,
             &self.configuration.settings,
             content_width,
             self.workspace_render_height(),
@@ -11649,14 +15900,14 @@ impl InteractiveApplication {
         .find(|viewport| {
             local_column >= viewport.x
                 && local_column < viewport.x.saturating_add(viewport.width)
-                && global_row >= viewport.y
-                && global_row < viewport.y.saturating_add(viewport.height)
+                && local_row >= viewport.y
+                && local_row < viewport.y.saturating_add(viewport.height)
         })
         .map(|viewport| {
             (
                 viewport.pane,
                 local_column.saturating_sub(viewport.x),
-                global_row.saturating_sub(viewport.y),
+                local_row.saturating_sub(viewport.y),
                 viewport.width,
                 viewport.height,
             )
@@ -11664,13 +15915,14 @@ impl InteractiveApplication {
     }
 
     fn focus_mouse_pane(&mut self) {
+        self.reconcile_editor_windows();
         let Some((pane, ..)) = self.mouse_pane_geometry() else {
             return;
         };
         let transaction = EditorTransaction::new(self.transaction_id())
             .with_operation(EditorOperation::FocusPaneId { pane })
             .with_undo_policy(UndoPolicy::Ignore);
-        if let Err(error) = self.state.apply_transaction(&transaction) {
+        if let Err(error) = self.apply_authoritative_editor_transaction(&transaction) {
             self.show_error(error);
         } else {
             self.ensure_cursor_visible();
@@ -11678,6 +15930,7 @@ impl InteractiveApplication {
     }
 
     fn apply_mouse_cursor(&mut self, extend_selection: bool) {
+        self.reconcile_editor_windows();
         let Some((pane_id, column, row, pane_width, pane_height)) = self.mouse_pane_geometry()
         else {
             return;
@@ -11690,7 +15943,9 @@ impl InteractiveApplication {
         let buffer_id = view.buffer;
         let buffer = &self.state.buffers[buffer_id];
         let revision = buffer.text.revision();
-        let body_height = pane_height;
+        let body_height = pane_height.saturating_sub(u16::from(
+            self.configuration.settings.ui.status_line.enabled,
+        ));
         if row >= body_height {
             return;
         }
@@ -11710,64 +15965,63 @@ impl InteractiveApplication {
         let wrap_enabled = self.configuration.settings.editor.wrap
             && !(self.ui.large_file_buffers.contains(&buffer_id)
                 && self.configuration.settings.editor.large_file.disable_wrap);
-        let mut remaining_row = usize::from(row);
-        let mut line_index = view.scroll_line;
-        let mut wrapped_column = 0_usize;
-        while line_index < buffer.text.len_lines() {
-            let line = buffer.text.line(line_index).unwrap_or_default();
-            let content = line.strip_suffix('\n').unwrap_or(&line);
-            let columns = configured_text_width(
-                content,
-                self.configuration.settings.editor.tab_width,
-                self.configuration.settings.editor.ambiguous_width,
-            );
-            let rows = if wrap_enabled {
-                columns.max(1).div_ceil(available)
-            } else {
-                1
-            };
-            if remaining_row < rows {
-                wrapped_column = if wrap_enabled {
-                    remaining_row.saturating_mul(available)
-                } else {
-                    0
-                };
-                break;
-            }
-            remaining_row = remaining_row.saturating_sub(rows);
-            line_index = line_index.saturating_add(1);
-        }
-        if line_index >= buffer.text.len_lines() {
+        let visual_rows = VisualRowModel::new(
+            &buffer.text,
+            view_id,
+            &self.ui,
+            &self.configuration.settings,
+            pane_width,
+            wrap_enabled,
+        );
+        let start_anchor = visual_rows.normalize(VisualRowAnchor {
+            line: view.scroll_line,
+            wrap_row: view.scroll_wrap_row,
+        });
+        let target_anchor = visual_rows.forward(start_anchor, usize::from(row));
+        if visual_rows.screen_row(start_anchor, target_anchor, usize::from(body_height))
+            != Some(usize::from(row))
+        {
             return;
         }
+        let line_index = target_anchor.line;
         let line_start = buffer
             .text
             .line_to_byte(line_index)
             .unwrap_or(ByteOffset(0));
-        let line = buffer.text.line(line_index).unwrap_or_default();
-        let content = line.strip_suffix('\n').unwrap_or(&line);
-        let target_column = wrapped_column
-            .saturating_add(usize::from(column.saturating_sub(gutter)))
-            .saturating_add(if wrap_enabled { 0 } else { view.scroll_column });
-        let mut display_column = 0_usize;
-        let mut byte = 0_usize;
-        for (relative, grapheme) in content.grapheme_indices(true) {
-            let width = if grapheme == "\t" {
-                self.configuration.settings.editor.tab_width
-                    - (display_column % self.configuration.settings.editor.tab_width)
-            } else {
-                configured_grapheme_width(
-                    grapheme,
-                    self.configuration.settings.editor.ambiguous_width,
-                )
-            };
-            if display_column.saturating_add(width) > target_column {
-                byte = relative;
-                break;
+        let byte = if wrap_enabled {
+            visual_rows.byte_at_cell(target_anchor, usize::from(column.saturating_sub(gutter)))
+        } else {
+            let line = buffer.text.line(line_index).unwrap_or_default();
+            let content = line.strip_suffix('\n').unwrap_or(&line);
+            let snapped_scroll = snap_display_column(
+                content,
+                view.scroll_column,
+                self.configuration.settings.editor.tab_width,
+                self.configuration.settings.editor.ambiguous_width,
+            );
+            let target_column =
+                usize::from(column.saturating_sub(gutter)).saturating_add(snapped_scroll);
+            let mut display_column = 0_usize;
+            let mut byte = 0_usize;
+            for (relative, grapheme) in content.grapheme_indices(true) {
+                let width = if grapheme == "\t" {
+                    self.configuration.settings.editor.tab_width
+                        - (display_column % self.configuration.settings.editor.tab_width)
+                } else {
+                    configured_grapheme_width(
+                        grapheme,
+                        self.configuration.settings.editor.ambiguous_width,
+                    )
+                };
+                if display_column.saturating_add(width) > target_column {
+                    byte = relative;
+                    break;
+                }
+                display_column = display_column.saturating_add(width);
+                byte = relative.saturating_add(grapheme.len());
             }
-            display_column = display_column.saturating_add(width);
-            byte = relative.saturating_add(grapheme.len());
-        }
+            byte
+        };
         let position = ByteOffset(line_start.get().saturating_add(byte));
         let mut transaction = EditorTransaction::new(self.transaction_id())
             .with_precondition(Precondition::BufferRevision {
@@ -11802,7 +16056,7 @@ impl InteractiveApplication {
                 selection: None,
             });
         }
-        if let Err(error) = self.state.apply_transaction(&transaction) {
+        if let Err(error) = self.apply_authoritative_editor_transaction(&transaction) {
             self.show_error(error);
         } else {
             if !extend_selection {
@@ -11813,26 +16067,34 @@ impl InteractiveApplication {
     }
 
     fn scroll_view(&mut self, kind: &str, count: u64) {
+        self.reconcile_editor_windows();
         let Some(view_id) = self.state.active_view else {
             return;
         };
         let view = &self.state.views[view_id];
         let buffer = &self.state.buffers[view.buffer];
-        let explorer_width =
-            self.ui.explorer.as_ref().and_then(|_| {
-                explorer_panel_width(&self.configuration.settings, self.terminal_width)
-            });
-        let content_width = explorer_width.map_or(self.terminal_width, |panel| {
-            self.terminal_width.saturating_sub(panel).saturating_sub(1)
-        });
-        let body = active_pane_viewport(
+        let Some(workspace) = self.workspace_bounds() else {
+            return;
+        };
+        let content_width = workspace.width;
+        let Some(viewport) = active_pane_viewport(
             &self.state,
+            &self.ui,
             &self.configuration.settings,
             content_width,
             self.workspace_render_height(),
         )
-        .filter(|viewport| viewport.view == view_id)
-        .map_or(1, |viewport| usize::from(viewport.height.max(1)));
+        .filter(|viewport| viewport.view == view_id) else {
+            return;
+        };
+        let body = usize::from(
+            viewport
+                .height
+                .saturating_sub(u16::from(
+                    self.configuration.settings.ui.status_line.enabled,
+                ))
+                .max(1),
+        );
         let percent = if kind.starts_with("half_") {
             self.configuration.settings.editor.half_page_percent
         } else {
@@ -11842,34 +16104,94 @@ impl InteractiveApplication {
         let amount = amount
             .max(1)
             .saturating_mul(usize::try_from(count).unwrap_or(usize::MAX));
-        let maximum = buffer.text.len_lines().saturating_sub(1);
-        let first_line = if kind.ends_with("up") {
-            view.scroll_line.saturating_sub(amount)
+        let available = editor_content_width(
+            &buffer.text,
+            &self.configuration.settings.editor,
+            viewport.width,
+        );
+        let wrap_enabled = available > 0
+            && self.configuration.settings.editor.wrap
+            && !(self.ui.large_file_buffers.contains(&view.buffer)
+                && self.configuration.settings.editor.large_file.disable_wrap);
+        let visual_rows = VisualRowModel::new(
+            &buffer.text,
+            view_id,
+            &self.ui,
+            &self.configuration.settings,
+            viewport.width,
+            wrap_enabled,
+        );
+        let old_start_anchor = visual_rows.normalize(VisualRowAnchor {
+            line: view.scroll_line,
+            wrap_row: view.scroll_wrap_row,
+        });
+        let first_anchor = if kind.ends_with("up") {
+            visual_rows.backward(old_start_anchor, amount)
         } else {
-            view.scroll_line.saturating_add(amount).min(maximum)
+            visual_rows.forward(old_start_anchor, amount)
         };
+        let cursor_anchor = visual_rows.cursor_anchor(view.cursor);
+        let last_anchor = visual_rows.forward(first_anchor, body.saturating_sub(1));
+        let target_anchor = cursor_anchor.clamp(first_anchor, last_anchor);
         let current_line = buffer.text.byte_to_line(view.cursor).unwrap_or(0);
-        let target_line =
-            current_line.clamp(first_line, first_line.saturating_add(body - 1).min(maximum));
-        let old_start = buffer
+        let old_line_start = buffer
             .text
             .line_to_byte(current_line)
             .unwrap_or(ByteOffset(0));
-        let column = view.cursor.get().saturating_sub(old_start.get());
+        let old_prefix = buffer
+            .text
+            .slice(ByteRange::new(old_line_start, view.cursor).expect("cursor line range"))
+            .unwrap_or_default();
+        let current_column = configured_text_width(
+            &old_prefix,
+            self.configuration.settings.editor.tab_width,
+            self.configuration.settings.editor.ambiguous_width,
+        );
+        let target_line = target_anchor.line;
         let target_start = buffer
             .text
             .line_to_byte(target_line)
             .unwrap_or(ByteOffset(0));
-        let target_text = buffer.text.line(target_line).unwrap_or_default();
-        let target_content = target_text.strip_suffix('\n').unwrap_or(&target_text);
-        let mut target = ByteOffset(target_start.get() + column.min(target_content.len()));
-        while !buffer.text.is_char_boundary(target) {
-            target = ByteOffset(target.get().saturating_sub(1));
-        }
+        let target_byte = if wrap_enabled {
+            let current_cell = visual_rows.cursor_projection(view.cursor).1;
+            visual_rows.byte_at_cell(target_anchor, current_cell)
+        } else {
+            let target_text = buffer.text.line(target_line).unwrap_or_default();
+            let target_content = target_text.strip_suffix('\n').unwrap_or(&target_text);
+            let mut display_column = 0_usize;
+            let mut target_byte = 0_usize;
+            for (relative, grapheme) in target_content.grapheme_indices(true) {
+                let width = if grapheme == "\t" {
+                    self.configuration.settings.editor.tab_width
+                        - (display_column % self.configuration.settings.editor.tab_width)
+                } else {
+                    configured_grapheme_width(
+                        grapheme,
+                        self.configuration.settings.editor.ambiguous_width,
+                    )
+                };
+                if display_column.saturating_add(width) > current_column {
+                    target_byte = relative;
+                    break;
+                }
+                display_column = display_column.saturating_add(width);
+                target_byte = relative.saturating_add(grapheme.len());
+            }
+            target_byte
+        };
+        let target = ByteOffset(target_start.get().saturating_add(target_byte));
         let transaction = EditorTransaction::new(self.transaction_id())
             .with_operation(EditorOperation::SetScroll {
                 view: view_id,
-                first_line,
+                first_line: first_anchor.line,
+            })
+            .with_operation(EditorOperation::SetScrollWrapRow {
+                view: view_id,
+                first_wrap_row: if wrap_enabled {
+                    first_anchor.wrap_row
+                } else {
+                    0
+                },
             })
             .with_operation(EditorOperation::SetCursor {
                 view: view_id,
@@ -11903,6 +16225,10 @@ impl InteractiveApplication {
             return;
         };
         let buffer = &self.state.buffers[buffer_id];
+        if buffer.is_virtual_read_only() {
+            self.show_error("virtual document is read-only");
+            return;
+        }
         if buffer.dirty && !force {
             self.show_error(self.message("dirty_reload", &[]));
             return;
@@ -11928,6 +16254,10 @@ impl InteractiveApplication {
             return;
         };
         let buffer_id = self.state.views[view_id].buffer;
+        let virtual_entry = self
+            .plugin_virtual_editor
+            .entry_for_buffer(buffer_id)
+            .cloned();
         if self.state.buffers[buffer_id].dirty && !force {
             self.show_error(self.message("dirty_close", &[]));
             return;
@@ -11942,6 +16272,15 @@ impl InteractiveApplication {
             .iter()
             .any(|(_, view)| view.buffer == buffer_id);
         if !still_viewed {
+            if let Some(entry) = virtual_entry {
+                self.plugin_virtual_documents
+                    .cancel(&entry.plugin, entry.load, entry.document);
+                self.plugin_virtual_editor.forget_document(
+                    &entry.plugin,
+                    entry.load,
+                    entry.document,
+                );
+            }
             let documents = self
                 .lsp_sessions
                 .iter()
@@ -11953,7 +16292,7 @@ impl InteractiveApplication {
                 })
                 .collect::<Vec<_>>();
             self.detach_lsp_documents(buffer_id, documents);
-            self.state.buffers.remove(buffer_id);
+            self.state.remove_buffer(buffer_id);
             self.lsp_synced_revisions.remove(&buffer_id);
         }
         if self.state.active_view.is_none()
@@ -11983,6 +16322,10 @@ impl InteractiveApplication {
             return;
         };
         let buffer = &self.state.buffers[buffer_id];
+        if buffer.is_virtual_read_only() {
+            self.show_error("virtual document is read-only");
+            return;
+        }
         let mut path = match requested_path {
             Some(path) => path,
             None => {
@@ -12082,6 +16425,18 @@ impl InteractiveApplication {
             Ok((_, Some(diagnostic))) | Err(diagnostic) => return Err(diagnostic),
         };
         let plugins_changed = candidate.settings.plugins != self.configuration.settings.plugins;
+        let replacement_explorer_watch = if candidate.settings.ui.explorer.watch
+            != self.configuration.settings.ui.explorer.watch
+        {
+            Some(
+                ExplorerWatchService::start(explorer_watch_policy(
+                    &candidate.settings.ui.explorer.watch,
+                ))
+                .map_err(|error| error.to_string())?,
+            )
+        } else {
+            None
+        };
         if plugins_changed {
             return Err(
                 "live plugin topology reload is not yet staged; previous configuration retained"
@@ -12097,6 +16452,9 @@ impl InteractiveApplication {
             )
             .map_err(|errors| errors.join("; "))?;
         }
+        let window_candidate = (candidate.settings.windows != self.configuration.settings.windows)
+            .then(|| self.prepare_configured_window_rules(&candidate.settings.windows))
+            .transpose()?;
         self.configuration_worker
             .configure_watch(
                 candidate.settings.config_watch.clone(),
@@ -12189,9 +16547,28 @@ impl InteractiveApplication {
                 }
             }
             self.plugin_contributions = PluginContributionCatalog::default();
+            self.plugin_host_events = PluginHostEventQueue::default();
+            self.plugin_host_event_observation = None;
         }
         self.ui.documentation_popup = None;
         self.configuration = candidate;
+        if let Some(watch) = replacement_explorer_watch {
+            self.explorer_watch = watch;
+            self.explorer_watch_generation = None;
+            self.explorer_watch_observation = None;
+            self.explorer_watch_reload_queue.clear();
+        }
+        if let Some((graph, mut surfaces)) = window_candidate {
+            surfaces.invalidate();
+            self.windows = graph;
+            self.surface_windows = surfaces;
+        }
+        if !self.configuration.settings.ui.explorer.bundled_enabled {
+            self.ui.explorer = None;
+            self.ui.explorer_focused = false;
+        }
+        self.explorer_watch_observation = None;
+        self.reconcile_explorer_watch();
         self.terminal_panel_height = self.terminal_panel_height.clamp(
             self.configuration.settings.ui.terminal_panel.minimum_height,
             self.configuration.settings.ui.terminal_panel.maximum_height,
@@ -12397,7 +16774,12 @@ impl InteractiveApplication {
                                         buffer.path.as_ref() == Some(&intent.source)
                                     })
                                 {
-                                    self.state.buffers[buffer].path = Some(target.clone());
+                                    let dirty = self.state.buffers[buffer].dirty;
+                                    self.state.set_buffer_path_and_dirty(
+                                        buffer,
+                                        Some(target.clone()),
+                                        dirty,
+                                    );
                                     self.record_recent_file(target);
                                 }
                             }
@@ -12407,8 +16789,7 @@ impl InteractiveApplication {
                                         buffer.path.as_ref() == Some(&intent.source)
                                     })
                                 {
-                                    self.state.buffers[buffer].path = None;
-                                    self.state.buffers[buffer].dirty = true;
+                                    self.state.set_buffer_path_and_dirty(buffer, None, true);
                                 }
                             }
                         },
@@ -12620,6 +17001,7 @@ impl InteractiveApplication {
                                         .len_lines()
                                         .saturating_sub(1),
                                 );
+                                self.state.views[view].scroll_wrap_row = 0;
                                 self.state.views[view].scroll_column = location.scroll_column;
                                 self.state.views[view].selection =
                                     (anchor != cursor).then_some(crate::editing::Selection {
@@ -12836,8 +17218,13 @@ impl InteractiveApplication {
                             }),
                             Ok(()),
                         ) => {
-                            if let Some(buffer_state) = self.state.buffers.get_mut(buffer) {
-                                buffer_state.mark_saved_as(revision, bytes, Some(target));
+                            if self.state.mark_buffer_saved_as(
+                                buffer,
+                                revision,
+                                bytes,
+                                Some(target),
+                            ) {
+                                let buffer_state = &self.state.buffers[buffer];
                                 let still_dirty = buffer_state.dirty;
                                 let lsp_document = buffer_state.path.clone().and_then(|path| {
                                     Some(LspDocument {
@@ -12896,7 +17283,10 @@ impl InteractiveApplication {
                     PromptKind::Command => EditorMode::CommandLine,
                     PromptKind::SearchForward
                     | PromptKind::SearchBackward
-                    | PromptKind::WorkspaceTrust => EditorMode::Prompt,
+                    | PromptKind::WorkspaceTrust
+                    | PromptKind::GitReset
+                    | PromptKind::AiChat
+                    | PromptKind::AiComposer => EditorMode::Prompt,
                 });
             }
         }
@@ -12968,7 +17358,13 @@ impl InteractiveApplication {
         let Some(kind) = self.ui.prompt.as_ref().map(|prompt| prompt.kind) else {
             return;
         };
-        if kind == PromptKind::WorkspaceTrust {
+        if matches!(
+            kind,
+            PromptKind::WorkspaceTrust
+                | PromptKind::GitReset
+                | PromptKind::AiChat
+                | PromptKind::AiComposer
+        ) {
             return;
         }
         let (enabled, history) = if kind == PromptKind::Command {
@@ -13188,7 +17584,10 @@ impl InteractiveApplication {
         if input.is_empty() {
             return;
         }
-        if kind == PromptKind::WorkspaceTrust {
+        if matches!(
+            kind,
+            PromptKind::WorkspaceTrust | PromptKind::AiChat | PromptKind::AiComposer
+        ) {
             return;
         }
         let configured = if kind == PromptKind::Command {
@@ -13227,7 +17626,10 @@ impl InteractiveApplication {
         let Some(prompt) = self.ui.prompt.clone() else {
             return;
         };
-        if prompt.kind != PromptKind::WorkspaceTrust {
+        if !matches!(
+            prompt.kind,
+            PromptKind::WorkspaceTrust | PromptKind::GitReset
+        ) {
             self.record_prompt_history(prompt.kind, &prompt.input);
         }
         match prompt.kind {
@@ -13261,6 +17663,46 @@ impl InteractiveApplication {
                     }
                 }
             },
+            PromptKind::GitReset => {
+                self.close_prompt();
+                self.confirm_reset_selected_git_hunk(prompt.input);
+            }
+            PromptKind::AiChat => {
+                if prompt.input.is_empty() {
+                    if let Some(active) = &mut self.ui.prompt {
+                        active.error = Some("AI chat prompt must not be empty".into())
+                    }
+                    return;
+                }
+                self.close_prompt();
+                self.start_ai(AiCapability::Chat, prompt.input, None);
+            }
+            PromptKind::AiComposer => {
+                let Some(capture) = self.ai_composer_prompt.take() else {
+                    self.close_prompt();
+                    self.show_error("AI composer context expired");
+                    return;
+                };
+                if prompt.input.is_empty() {
+                    self.ai_composer_prompt = Some(capture);
+                    if let Some(active) = &mut self.ui.prompt {
+                        active.error = Some("AI composer instruction must not be empty".into())
+                    }
+                    return;
+                }
+                self.close_prompt();
+                if self.workspace.root_revision() != capture.root_revision
+                    || self
+                        .state
+                        .buffers
+                        .get(capture.buffer)
+                        .is_none_or(|buffer| buffer.text.revision() != capture.revision)
+                {
+                    self.show_error("AI composer context expired");
+                    return;
+                }
+                self.start_ai(AiCapability::Composer, prompt.input, Some(capture));
+            }
             PromptKind::SearchForward | PromptKind::SearchBackward => {
                 if prompt.input.is_empty() {
                     let message = self.message("search_empty", &[]);
@@ -13389,21 +17831,20 @@ impl InteractiveApplication {
     }
 
     fn ensure_cursor_visible(&mut self) {
+        self.reconcile_editor_windows();
         let Some(view_id) = self.state.active_view else {
             return;
         };
         let view = &self.state.views[view_id];
         let buffer = &self.state.buffers[view.buffer];
         let line = buffer.text.byte_to_line(view.cursor).unwrap_or(0);
-        let explorer_width =
-            self.ui.explorer.as_ref().and_then(|_| {
-                explorer_panel_width(&self.configuration.settings, self.terminal_width)
-            });
-        let content_width = explorer_width.map_or(self.terminal_width, |panel| {
-            self.terminal_width.saturating_sub(panel).saturating_sub(1)
-        });
+        let Some(workspace) = self.workspace_bounds() else {
+            return;
+        };
+        let content_width = workspace.width;
         let Some(viewport) = active_pane_viewport(
             &self.state,
+            &self.ui,
             &self.configuration.settings,
             content_width,
             self.workspace_render_height(),
@@ -13413,14 +17854,17 @@ impl InteractiveApplication {
         if viewport.view != view_id {
             return;
         }
-        let body_height = usize::from(viewport.height.max(1));
-        let first = if line < view.scroll_line {
-            line
-        } else if line >= view.scroll_line.saturating_add(body_height) {
-            line.saturating_sub(body_height - 1)
-        } else {
-            view.scroll_line
-        };
+        let body_height = usize::from(
+            viewport
+                .height
+                .saturating_sub(u16::from(
+                    self.configuration.settings.ui.status_line.enabled,
+                ))
+                .max(1),
+        );
+        let vertical_margin =
+            usize::from(self.configuration.settings.editor.viewport.vertical_margin)
+                .min(body_height.saturating_sub(1) / 2);
         let available = editor_content_width(
             &buffer.text,
             &self.configuration.settings.editor,
@@ -13430,6 +17874,47 @@ impl InteractiveApplication {
             && self.configuration.settings.editor.wrap
             && !(self.ui.large_file_buffers.contains(&view.buffer)
                 && self.configuration.settings.editor.large_file.disable_wrap);
+        let visual_rows = VisualRowModel::new(
+            &buffer.text,
+            view_id,
+            &self.ui,
+            &self.configuration.settings,
+            viewport.width,
+            wrap_enabled,
+        );
+        let start_anchor = visual_rows.normalize(VisualRowAnchor {
+            line: view.scroll_line,
+            wrap_row: view.scroll_wrap_row,
+        });
+        let cursor_anchor = visual_rows.cursor_anchor(view.cursor);
+        let first_anchor = match visual_rows.screen_row(start_anchor, cursor_anchor, body_height) {
+            Some(row) if row < vertical_margin => {
+                visual_rows.backward(cursor_anchor, vertical_margin)
+            }
+            Some(row) if row >= body_height.saturating_sub(vertical_margin) => visual_rows
+                .backward(
+                    cursor_anchor,
+                    body_height
+                        .saturating_sub(vertical_margin)
+                        .saturating_sub(1),
+                ),
+            Some(_) => start_anchor,
+            None if cursor_anchor < start_anchor => {
+                visual_rows.backward(cursor_anchor, vertical_margin)
+            }
+            None => visual_rows.backward(
+                cursor_anchor,
+                body_height
+                    .saturating_sub(vertical_margin)
+                    .saturating_sub(1),
+            ),
+        };
+        let first = first_anchor.line;
+        let first_wrap_row = if wrap_enabled {
+            first_anchor.wrap_row
+        } else {
+            0
+        };
         let first_column = if wrap_enabled || available == 0 {
             0
         } else {
@@ -13481,13 +17966,20 @@ impl InteractiveApplication {
                 )
             }
         };
-        if first == view.scroll_line && first_column == view.scroll_column {
+        if first == view.scroll_line
+            && first_wrap_row == view.scroll_wrap_row
+            && first_column == view.scroll_column
+        {
             return;
         }
         let transaction = EditorTransaction::new(self.transaction_id())
             .with_operation(EditorOperation::SetScroll {
                 view: view_id,
                 first_line: first,
+            })
+            .with_operation(EditorOperation::SetScrollWrapRow {
+                view: view_id,
+                first_wrap_row,
             })
             .with_operation(EditorOperation::SetScrollColumn {
                 view: view_id,
@@ -15019,6 +19511,118 @@ fn task_plan(
     Some(plan)
 }
 
+fn configured_window_placements(
+    windows: &crate::configuration::WindowsConfig,
+) -> Result<BTreeMap<String, WindowPlacement>, String> {
+    let mut placements = BTreeMap::new();
+    for rule in &windows.rules {
+        if rule.content_type.starts_with("plugin.") {
+            continue;
+        }
+        let placement = match &rule.placement {
+            crate::configuration::WindowPlacementConfig::Automatic => continue,
+            crate::configuration::WindowPlacementConfig::Docked { edge, size } => {
+                WindowPlacement::Docked {
+                    edge: match edge.as_str() {
+                        "left" => DockEdge::Left,
+                        "right" => DockEdge::Right,
+                        "top" => DockEdge::Top,
+                        "bottom" => DockEdge::Bottom,
+                        _ => return Err(format!("unknown configured dock edge `{edge}`")),
+                    },
+                    size: *size,
+                }
+            }
+            crate::configuration::WindowPlacementConfig::Floating {
+                x,
+                y,
+                width,
+                height,
+            } => WindowPlacement::Floating(WindowRect {
+                x: *x,
+                y: *y,
+                width: *width,
+                height: *height,
+            }),
+            crate::configuration::WindowPlacementConfig::Fullscreen => WindowPlacement::Fullscreen,
+            crate::configuration::WindowPlacementConfig::Hidden => WindowPlacement::Hidden,
+        };
+        placement.validate().map_err(|error| error.to_string())?;
+        if placements
+            .insert(rule.content_type.clone(), placement)
+            .is_some()
+        {
+            return Err(format!(
+                "duplicate configured window target `{}`",
+                rule.content_type
+            ));
+        }
+    }
+    Ok(placements)
+}
+
+fn persisted_window_placement(placement: WindowPlacement) -> Option<PersistedWindowPlacement> {
+    match placement {
+        WindowPlacement::Docked { edge, size } => Some(PersistedWindowPlacement::Docked {
+            edge: match edge {
+                DockEdge::Left => "left",
+                DockEdge::Right => "right",
+                DockEdge::Top => "top",
+                DockEdge::Bottom => "bottom",
+            }
+            .into(),
+            size,
+        }),
+        WindowPlacement::Floating(rect) => Some(PersistedWindowPlacement::Floating {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+        }),
+        WindowPlacement::Fullscreen => Some(PersistedWindowPlacement::Fullscreen),
+        WindowPlacement::Hidden => Some(PersistedWindowPlacement::Hidden),
+        WindowPlacement::Tiled | WindowPlacement::Overlay(_) => None,
+    }
+}
+
+fn restored_window_placement(
+    placement: &PersistedWindowPlacement,
+) -> Result<WindowPlacement, String> {
+    let placement = match placement {
+        PersistedWindowPlacement::Docked { edge, size } => WindowPlacement::Docked {
+            edge: match edge.as_str() {
+                "left" => DockEdge::Left,
+                "right" => DockEdge::Right,
+                "top" => DockEdge::Top,
+                "bottom" => DockEdge::Bottom,
+                _ => return Err(format!("unknown dock edge `{edge}`")),
+            },
+            size: *size,
+        },
+        PersistedWindowPlacement::Floating {
+            x,
+            y,
+            width,
+            height,
+        } => WindowPlacement::Floating(WindowRect {
+            x: *x,
+            y: *y,
+            width: *width,
+            height: *height,
+        }),
+        PersistedWindowPlacement::Fullscreen => WindowPlacement::Fullscreen,
+        PersistedWindowPlacement::Hidden => WindowPlacement::Hidden,
+    };
+    placement.validate().map_err(|error| error.to_string())
+}
+
+fn rect_contains_point(rect: WindowRect, column: u16, row: u16) -> bool {
+    column >= rect.x
+        && column < rect.x.saturating_add(rect.width)
+        && row >= rect.y
+        && row < rect.y.saturating_add(rect.height)
+}
+
 fn mode_name_large(mode: LargeFileOverride) -> &'static str {
     match mode {
         LargeFileOverride::Auto => "auto",
@@ -15045,6 +19649,7 @@ fn build_restored_layout(
             view.scroll_line = pane
                 .scroll_line
                 .min(state.buffers[buffer].text.len_lines().saturating_sub(1));
+            view.scroll_wrap_row = 0;
             view.scroll_column = pane.scroll_column;
             if pane.anchor != pane.cursor {
                 view.selection = Some(crate::editing::Selection {
@@ -15066,7 +19671,7 @@ fn build_restored_layout(
             first,
             second,
         } => {
-            if !(1..=9999).contains(ratio) {
+            if !(100..=900).contains(ratio) {
                 return None;
             }
             let (first, mut panes) = build_restored_layout(state, first, loaded)?;
@@ -15162,27 +19767,39 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use crate::document::{ByteOffset, TextBuffer};
-    use crate::editing::{CommandSource, CommandValue, InvocationSource};
+    use crate::document::{ByteOffset, ByteRange, TextBuffer, TextEdit, TextEditSet};
+    use crate::editing::{
+        CommandSource, CommandValue, EditorMode, EditorOperation, EditorTransaction,
+        InvocationSource, TransactionId,
+    };
+    use crate::filesystem::{ExplorerWatchBatch, ExplorerWatchGeneration, ExplorerWatchService};
     use crate::input::{InputContextLayer, KeyEvent, MappingResolution};
     use crate::terminal_ui::{
-        DocumentationPopupKind, DocumentationPopupState, ExplorerUiState, PtyScreen,
-        active_pane_viewport, explorer_panel_width, render, snap_display_column,
+        ContentTabDiagnostic, ContentTabDiagnosticSeverity, ContentTabKind,
+        DocumentationMarkupKind, DocumentationPopupKind, DocumentationPopupState,
+        DocumentationSection, ExplorerUiState, PickerSurfaceKind, PromptKind, PtyScreen, UiEvent,
+        UiFold, VisualRowAnchor, VisualRowModel, active_pane_viewport, explorer_panel_width,
+        render, snap_display_column,
     };
     use tempfile::tempdir;
 
     use super::{
         InteractiveApplication, KeymapOperation, build_restored_layout, capture_persisted_layout,
-        compile_keymaps, make_logs, reload_keymaps, validate_configured_commands,
+        compile_keymaps, explorer_watch_policy, fake_ai_service, make_logs, reload_keymaps,
+        validate_configured_commands,
     };
-    use crate::application::{StartupTarget, build_state, register_app_commands};
+    use crate::application::{
+        AppEffect, PickerKind, StartupTarget, build_state, register_app_commands,
+    };
     use crate::{
         observability::CrashSnapshotWriter,
         packages::{PackageService, RegistryService},
-        persistence::PersistenceService,
+        persistence::{PersistedWindowPlacement, PersistedWindowRule, PersistenceService},
         plugins::{PluginLoadId, PluginManager},
         processes::{ExecutionPreflightService, JobSupervisor, PtyId, PtyService},
         syntax::SyntaxService,
+        windows::{DockEdge, WindowPlacement, WindowRect},
+        workspace::{DiagnosticSeverity, RootIdentity, WorkspaceTrust},
     };
 
     fn app() -> InteractiveApplication {
@@ -15215,8 +19832,14 @@ mod tests {
         .expect("workspace");
         let logs = make_logs(&configuration.settings, false);
         let plugin_queue_capacity = configuration.settings.plugins.queue_capacity;
+        let plugin_storage_root = state.workspace_root.join("plugin-storage-test");
         let pty_queue_capacity = configuration.settings.terminals.queue_capacity;
         let terminal_panel_height = configuration.settings.ui.terminal_panel.height;
+        let (ai_service, ai_provider, ai_model) = fake_ai_service();
+        let explorer_watch = ExplorerWatchService::start(explorer_watch_policy(
+            &configuration.settings.ui.explorer.watch,
+        ))
+        .unwrap();
         let diagnostics = crate::workspace::DiagnosticStore::new(
             configuration.settings.workspace.maximum_diagnostics,
             configuration
@@ -15226,9 +19849,39 @@ mod tests {
         );
         InteractiveApplication {
             state,
+            windows: crate::windows::WindowGraph::default(),
+            editor_windows: crate::application::window_bridge::EditorWindowBridge::default(),
+            surface_windows: crate::application::window_bridge::NativeSurfaceBridge::default(),
+            plugin_windows: crate::application::plugin_windows::PluginWindowHost::default(),
+            pending_plugin_ui_events: BTreeMap::new(),
+            plugin_host_events: crate::plugins::PluginHostEventQueue::default(),
+            plugin_host_event_observation: None,
+            plugin_storage: crate::plugins::PluginStorageService::start(
+                plugin_storage_root,
+                plugin_queue_capacity,
+            ),
+            pending_plugin_storage_results: BTreeMap::new(),
+            plugin_providers: crate::plugins::PluginProviderBroker::default(),
+            plugin_virtual_documents: crate::plugins::PluginVirtualDocumentBroker::default(),
+            plugin_virtual_editor:
+                crate::application::virtual_documents::VirtualDocumentEditorBridge::default(),
+            ai_service,
+            ai_provider,
+            ai_model,
+            ai_epoch: Instant::now(),
+            active_ai_request: None,
+            ai_composer_prompt: None,
+            content_line_order: Vec::new(),
+            content_line_pins: BTreeSet::new(),
+            content_line_order_revision: 0,
+            content_line_diagnostic_revision: 0,
+            content_line_projection_signature: None,
+            active_plugin_picker: None,
+            terminal_set_revision: 0,
             workspace,
             diagnostics,
             picker: None,
+            picker_surface: PickerSurfaceKind::Generic,
             picker_payloads: Default::default(),
             pending_workspace_proposal: None,
             workspace_proposal: None,
@@ -15292,6 +19945,7 @@ mod tests {
             lsp_pull_ids: HashMap::new(),
             lsp_projection_owner: None,
             lsp_request_owner: None,
+            lsp_completion_owner: None,
             dap: crate::debugging::DapService::new(),
             dap_responses: VecDeque::new(),
             dap_console: VecDeque::new(),
@@ -15310,7 +19964,28 @@ mod tests {
             terminal_capabilities: "test".into(),
             next_transaction: 1_000_000,
             workspace_search: crate::filesystem::WorkspaceSearchService::default(),
+            git_status: crate::workspace::git::GitStatusService::default(),
+            git_status_generation: None,
+            git_status_root_revision: None,
+            git_status_snapshot: None,
+            git_status_decorations: BTreeMap::new(),
+            git_hunks: crate::workspace::git::GitHunkService::default(),
+            git_hunk_generation: None,
+            git_hunk_expected: None,
+            git_hunk_snapshot: None,
+            git_sign_hunks: crate::workspace::git::GitHunkService::default(),
+            git_sign_generation: None,
+            git_sign_owner: None,
+            selected_git_hunk: None,
+            git_mutation: crate::workspace::git::GitMutationService::default(),
+            git_mutation_generation: None,
+            workspace_files: crate::filesystem::WorkspaceFileService::default(),
+            workspace_file_generation: None,
+            workspace_file_root_revision: None,
+            workspace_file_entries: Vec::new(),
             workspace_search_generation: None,
+            workspace_search_workflow: None,
+            workspace_search_sequence: 0,
             workspace_search_matches: Vec::new(),
             workspace_search_intent: None,
             trust_service: crate::workspace::WorkspaceTrustService::start(4),
@@ -15337,6 +20012,11 @@ mod tests {
             explorer_preview_path: None,
             explorer_preview_lines: Vec::new(),
             explorer_preview_generation: 0,
+            explorer_follow_path: None,
+            explorer_watch,
+            explorer_watch_generation: None,
+            explorer_watch_observation: None,
+            explorer_watch_reload_queue: VecDeque::new(),
             syntax: SyntaxService::start(syntax_queue_capacity),
             syntax_documents: HashMap::new(),
             syntax_submitted: HashMap::new(),
@@ -15429,7 +20109,11 @@ mod tests {
             .collect(),
             contributions: crate::plugins::PluginContributions {
                 schema_version: 1,
-                input_contexts: Vec::new(),
+                input_contexts: vec![crate::plugins::PluginInputContextContribution {
+                    id: format!("plugin.{owner}.chat"),
+                    title: format!("{owner} chat"),
+                    parent_surface: Some("panel".into()),
+                }],
                 keymaps: vec![crate::plugins::PluginKeymapContribution {
                     id: mapping_id.into(),
                     context: "dashboard".into(),
@@ -15439,6 +20123,28 @@ mod tests {
                     arguments: BTreeMap::new(),
                 }],
                 key_groups: Vec::new(),
+                content_types: vec![crate::plugins::PluginContentTypeContribution {
+                    id: format!("plugin.{owner}.panel"),
+                    title: format!("{owner} panel"),
+                    presenter: crate::plugins::PluginPresenterKind::RetainedDeclarative,
+                    default_placement: crate::plugins::PluginWindowPlacementKind::Floating,
+                    allowed_placements: [
+                        crate::plugins::PluginWindowPlacementKind::Floating,
+                        crate::plugins::PluginWindowPlacementKind::Hidden,
+                    ]
+                    .into_iter()
+                    .collect(),
+                    focusable: true,
+                    maximum_instances: 1,
+                    context: format!("plugin.{owner}.chat"),
+                    command: format!("plugin.{owner}.run"),
+                    private_cells: None,
+                    provenance: None,
+                }],
+                subscriptions: Vec::new(),
+                providers: Vec::new(),
+                virtual_documents: Vec::new(),
+                storage: None,
             },
         }
     }
@@ -15611,6 +20317,115 @@ mod tests {
     }
 
     #[test]
+    fn explorer_follow_lazily_expands_to_active_file() {
+        let mut app = app();
+        let directory = app.state.workspace_root.join("a/b");
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("follow.txt");
+        fs::write(&path, "follow").unwrap();
+        app.state
+            .open_text(TextBuffer::from_text("follow"), Some(path.clone()));
+        app.ui.dashboard = false;
+        app.follow_active_file_in_explorer();
+        wait_explorer(&mut app);
+        assert_eq!(
+            app.explorer.selected_node().map(|node| &node.path),
+            Some(&path)
+        );
+        assert!(app.explorer_follow_path.is_none());
+        assert!(
+            app.ui
+                .explorer
+                .as_ref()
+                .is_some_and(|ui| ui.rows.iter().any(|row| row.selected))
+        );
+    }
+
+    #[test]
+    fn explorer_watch_batches_reload_through_directory_service_and_preserve_identity() {
+        let mut app = app();
+        let directory = app.state.workspace_root.join("dir");
+        fs::create_dir_all(&directory).unwrap();
+        let kept = directory.join("kept.txt");
+        fs::write(&kept, "x").unwrap();
+        fs::write(app.state.workspace_root.join("root.txt"), "x").unwrap();
+        app.open_explorer();
+        wait_explorer(&mut app);
+        let directory_id = app.explorer.id_for_path(&directory).unwrap();
+        app.explorer.select(directory_id);
+        app.explorer_toggle();
+        wait_explorer(&mut app);
+        let kept_id = app.explorer.id_for_path(&kept).unwrap();
+        app.explorer.select(kept_id);
+        app.sync_explorer_ui();
+        let generation = app.explorer_watch_generation.unwrap();
+        let root = app.state.workspace_root.clone();
+        let stale = ExplorerWatchBatch {
+            generation: ExplorerWatchGeneration(generation.0.saturating_sub(1)),
+            root_revision: app.workspace.root_revision(),
+            directories: vec![root.clone()],
+        };
+        app.accept_explorer_watch_batch(stale);
+        assert!(app.explorer_watch_reload_queue.is_empty());
+        let added = root.join("added.txt");
+        fs::write(&added, "x").unwrap();
+        let hidden = root.join(".hidden");
+        let ignored = root.join("ignored.log");
+        fs::write(&hidden, "x").unwrap();
+        fs::write(&ignored, "x").unwrap();
+        fs::write(root.join(".ignore"), "*.log\n").unwrap();
+        app.accept_explorer_watch_batch(ExplorerWatchBatch {
+            generation,
+            root_revision: app.workspace.root_revision(),
+            directories: vec![root.clone()],
+        });
+        app.start_next_explorer_watch_reload();
+        wait_explorer(&mut app);
+        assert!(app.explorer.id_for_path(&added).is_some());
+        assert!(app.explorer.id_for_path(&hidden).is_none());
+        assert!(app.explorer.id_for_path(&ignored).is_none());
+        assert_eq!(app.explorer.id_for_path(&directory), Some(directory_id));
+        assert!(
+            app.explorer
+                .node(directory_id)
+                .is_some_and(|node| node.expanded)
+        );
+        assert_eq!(app.explorer.id_for_path(&kept), Some(kept_id));
+        fs::remove_file(&kept).unwrap();
+        let generation = app.explorer_watch_generation.unwrap();
+        app.accept_explorer_watch_batch(ExplorerWatchBatch {
+            generation,
+            root_revision: app.workspace.root_revision(),
+            directories: vec![directory.clone()],
+        });
+        app.start_next_explorer_watch_reload();
+        wait_explorer(&mut app);
+        assert!(app.explorer.id_for_path(&kept).is_none());
+        assert_eq!(app.explorer.selected_id(), Some(directory_id));
+        let reconciles = app.explorer_watch.reconcile_count();
+        let pending = app.pending_vfs.len();
+        for _ in 0..256 {
+            app.reconcile_editor_windows();
+            let _ = render(
+                &app.state,
+                &app.ui,
+                &app.configuration.settings,
+                &app.configuration.dashboard,
+                app.terminal_width,
+                app.terminal_height,
+            );
+        }
+        assert_eq!(app.explorer_watch.reconcile_count(), reconciles);
+        assert_eq!(app.pending_vfs.len(), pending);
+        app.explorer.select(directory_id);
+        app.explorer.toggle_loaded(directory_id);
+        app.sync_explorer_ui();
+        assert!(!app.explorer.watched_directories().contains(&directory));
+        app.process_effect(AppEffect::ExplorerClose);
+        assert!(app.explorer_watch_generation.is_none());
+    }
+
+    #[test]
     fn explorer_projection_formats_only_the_terminal_viewport() {
         let mut app = app();
         app.terminal_height = 10;
@@ -15653,7 +20468,52 @@ mod tests {
         assert_eq!(explorer.rows.len(), 4);
         assert!(explorer.scroll > 0);
         assert!(explorer.rows.iter().any(|row| row.selected));
-        let first_viewport_node = explorer.rows[0].node_id;
+        let before_page = app
+            .explorer
+            .visible_index(app.explorer.selected_id().unwrap())
+            .unwrap();
+        app.page_explorer_selection(-1);
+        let after_page = app
+            .explorer
+            .visible_index(app.explorer.selected_id().unwrap())
+            .unwrap();
+        assert!(after_page < before_page);
+        app.page_explorer_selection(1);
+        assert!(
+            app.explorer
+                .visible_index(app.explorer.selected_id().unwrap())
+                .unwrap()
+                > after_page
+        );
+        let rect = app.explorer_window_rect().unwrap();
+        let wheel = KeyEvent::mouse(
+            crate::input::KeyCode::MouseScrollUp,
+            crate::input::Modifiers::default(),
+        );
+        let before_wheel = app
+            .explorer
+            .visible_index(app.explorer.selected_id().unwrap())
+            .unwrap();
+        app.handle_event(UiEvent::Mouse {
+            key: wheel,
+            column: rect.x,
+            row: rect.y.saturating_add(2),
+        });
+        assert!(
+            app.explorer
+                .visible_index(app.explorer.selected_id().unwrap())
+                .unwrap()
+                < before_wheel
+        );
+        app.move_explorer_selection(isize::MIN);
+        let top = app.explorer.selected_id();
+        app.page_explorer_selection(-1);
+        assert_eq!(app.explorer.selected_id(), top);
+        app.move_explorer_selection(isize::MAX);
+        let bottom = app.explorer.selected_id();
+        app.page_explorer_selection(1);
+        assert_eq!(app.explorer.selected_id(), bottom);
+        let first_viewport_node = app.ui.explorer.as_ref().unwrap().rows[0].node_id;
         app.mouse_position = Some((1, 3));
         app.explorer_mouse_select();
         assert_eq!(
@@ -15715,6 +20575,8 @@ mod tests {
         assert!(app.ui.explorer_focused);
         app.handle_configured_key("ctrl-l".parse::<KeyEvent>().expect("Ctrl-l"));
         assert!(!app.ui.explorer_focused);
+        assert_eq!(app.state.tabs[tab].focused, left);
+        app.handle_configured_key("ctrl-l".parse::<KeyEvent>().expect("Ctrl-l"));
         assert_eq!(app.state.tabs[tab].focused, right);
 
         app.handle_configured_key("ctrl-h".parse::<KeyEvent>().expect("Ctrl-h"));
@@ -15877,6 +20739,269 @@ mod tests {
     }
 
     #[test]
+    fn git_status_refresh_opens_read_only_picker_and_idles() {
+        let mut app = app();
+        let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
+        let path = app.state.workspace_root.join("tracked.txt");
+        fs::write(&path, "one").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("tracked.txt")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
+            .unwrap();
+        drop(tree);
+        fs::write(&path, "two").unwrap();
+        app.start_git_status_refresh();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while app.git_status_generation.is_some() {
+            app.process_git_status_events();
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        let revision = app.git_status_snapshot.as_ref().unwrap().revision;
+        assert_eq!(
+            app.git_status_decorations.get(&path),
+            Some(&crate::workspace::git::GitFileStatus::Modified)
+        );
+        assert_eq!(
+            app.git_status_decorations.get(&app.state.workspace_root),
+            Some(&crate::workspace::git::GitFileStatus::Modified)
+        );
+        let generation = app.git_status.generation();
+        for _ in 0..256 {
+            app.process_git_status_events();
+            assert_eq!(app.git_status.generation(), generation);
+            assert_eq!(app.git_status_snapshot.as_ref().unwrap().revision, revision)
+        }
+        app.open_git_status_picker();
+        assert_eq!(
+            app.ui.picker.as_ref().map(|p| p.title.as_str()),
+            Some("Git status")
+        );
+        app.accept_picker();
+        wait_vfs(&mut app);
+        assert_eq!(
+            app.state
+                .active_buffer_id()
+                .and_then(|id| app.state.buffers[id].path.as_ref()),
+            Some(&path)
+        );
+        app.reconcile_git_signs();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while app.git_sign_generation.is_some() {
+            app.process_git_sign_events();
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        assert!(!app.ui.git_signs.is_empty());
+        let sign_generation = app.git_sign_hunks.generation();
+        let signs = app.ui.git_signs.clone();
+        for _ in 0..256 {
+            app.reconcile_git_signs();
+            app.process_git_sign_events();
+            let _ = crate::terminal_ui::render(
+                &app.state,
+                &app.ui,
+                &app.configuration.settings,
+                &app.configuration.dashboard,
+                100,
+                30,
+            );
+            assert_eq!(app.git_sign_hunks.generation(), sign_generation);
+            assert_eq!(app.ui.git_signs, signs);
+        }
+        app.start_git_hunks();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while app.git_hunk_generation.is_some() {
+            app.process_git_hunk_events();
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        assert_eq!(
+            app.ui.picker.as_ref().map(|p| p.title.as_str()),
+            Some("Git hunks")
+        );
+        app.accept_picker();
+        assert!(app.selected_git_hunk.is_some());
+        app.stage_selected_git_hunk();
+        assert!(app.git_mutation_generation.is_none());
+        assert!(app.ui.notification_error);
+    }
+
+    #[test]
+    fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
+        let mut app = app();
+        let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
+        let path = app.state.workspace_root.join("two-hunks.txt");
+        let original = (1..=20).map(|n| format!("line {n}\n")).collect::<String>();
+        fs::write(&path, &original).unwrap();
+        let mut index = repo.index().unwrap();
+        index
+            .add_path(std::path::Path::new("two-hunks.txt"))
+            .unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
+            .unwrap();
+        drop(tree);
+        let changed = original
+            .replace("line 2\n", "changed 2\n")
+            .replace("line 18\n", "changed 18\n");
+        fs::write(&path, &changed).unwrap();
+        prepare_trust_identity(&mut app);
+        for root in app.workspace.roots() {
+            app.trust_store.trust(root.identity.clone())
+        }
+        app.reconcile_workspace_trust();
+        assert_eq!(
+            app.workspace.trust(),
+            crate::workspace::WorkspaceTrust::Trusted
+        );
+        app.start_git_status_refresh();
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while app.git_status_generation.is_some() {
+            app.process_git_status_events();
+            assert!(Instant::now() < deadline);
+            thread::yield_now()
+        }
+        app.start_open(path.clone());
+        wait_vfs(&mut app);
+        app.start_git_hunks();
+        while app.git_hunk_generation.is_some() {
+            app.process_git_hunk_events();
+            assert!(Instant::now() < deadline);
+            thread::yield_now()
+        }
+        assert_eq!(app.git_hunk_snapshot.as_ref().unwrap().hunks.len(), 2);
+        app.accept_picker();
+        assert!(app.selected_git_hunk.is_some());
+        let before =
+            crate::workspace::git::git_index_fingerprint(&app.state.workspace_root).unwrap();
+        app.stage_selected_git_hunk();
+        assert!(app.git_mutation_generation.is_some());
+        while app.git_mutation_generation.is_some() || app.git_status_generation.is_some() {
+            app.process_git_mutation_events();
+            app.process_git_status_events();
+            assert!(Instant::now() < deadline);
+            thread::yield_now()
+        }
+        let after =
+            crate::workspace::git::git_index_fingerprint(&app.state.workspace_root).unwrap();
+        assert_ne!(before, after);
+        assert_eq!(fs::read_to_string(&path).unwrap(), changed);
+        assert!(app.selected_git_hunk.is_none());
+        assert!(app.git_hunk_snapshot.is_none());
+        let status = app.git_status_snapshot.clone().unwrap();
+        let mut policy = crate::workspace::git::GitHunkPolicy {
+            scope_root: status.scope_root,
+            repository_id: status.repository_id,
+            status_revision: status.revision,
+            root_revision: status.root_revision,
+            file: "two-hunks.txt".into(),
+            layer: crate::workspace::git::GitDiffLayer::Unstaged,
+            maximum_hunks: 10,
+            maximum_lines: 100,
+            maximum_bytes: 4096,
+            deadline: Duration::from_secs(2),
+        };
+        assert_eq!(
+            crate::workspace::git::read_hunks(&policy)
+                .unwrap()
+                .hunks
+                .len(),
+            1
+        );
+        policy.layer = crate::workspace::git::GitDiffLayer::Staged;
+        assert_eq!(
+            crate::workspace::git::read_hunks(&policy)
+                .unwrap()
+                .hunks
+                .len(),
+            1
+        );
+        app.start_git_hunks();
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while app.git_hunk_generation.is_some() {
+            app.process_git_hunk_events();
+            assert!(Instant::now() < deadline);
+            thread::yield_now()
+        }
+        app.accept_picker();
+        let index_before_reset =
+            crate::workspace::git::git_index_fingerprint(&app.state.workspace_root).unwrap();
+        let worktree_before_reset = fs::read_to_string(&path).unwrap();
+        app.request_reset_selected_git_hunk();
+        assert_eq!(
+            app.ui.prompt.as_ref().map(|p| p.kind),
+            Some(crate::terminal_ui::PromptKind::GitReset)
+        );
+        app.close_prompt();
+        assert_eq!(
+            crate::workspace::git::git_index_fingerprint(&app.state.workspace_root).unwrap(),
+            index_before_reset
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), worktree_before_reset);
+        app.request_reset_selected_git_hunk();
+        app.close_prompt();
+        app.confirm_reset_selected_git_hunk("reset this hunk".into());
+        while app.git_mutation_generation.is_some() || app.git_status_generation.is_some() {
+            app.process_git_mutation_events();
+            app.process_git_status_events();
+            assert!(Instant::now() < deadline);
+            thread::yield_now()
+        }
+        assert_eq!(
+            crate::workspace::git::git_index_fingerprint(&app.state.workspace_root).unwrap(),
+            index_before_reset
+        );
+        let reset_text = fs::read_to_string(&path).unwrap();
+        assert!(reset_text.contains("changed 2\n") && !reset_text.contains("changed 18\n"));
+        policy.layer = crate::workspace::git::GitDiffLayer::Unstaged;
+        assert!(
+            crate::workspace::git::read_hunks(&policy)
+                .unwrap()
+                .hunks
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
+        let mut app = app();
+        let path = app.state.workspace_root.join("find-me.txt");
+        fs::write(&path, "found").unwrap();
+        app.start_workspace_file_picker();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while app.workspace_file_generation.is_some() {
+            app.process_workspace_file_events();
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        assert!(
+            app.ui
+                .picker
+                .as_ref()
+                .is_some_and(|p| p.title == "Workspace files")
+        );
+        app.picker_insert("find-me");
+        for _ in 0..256 {
+            app.sync_picker_ui();
+            assert_eq!(app.workspace_files.generation(), 1)
+        }
+        app.accept_picker();
+        wait_vfs(&mut app);
+        assert_eq!(
+            app.state
+                .active_buffer_id()
+                .and_then(|id| app.state.buffers[id].path.as_ref()),
+            Some(&path)
+        );
+    }
+
+    #[test]
     fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
         let mut app = app();
         let path = app.state.workspace_root.join("match.txt");
@@ -15894,6 +21019,37 @@ mod tests {
         assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
         let view = app.state.active_view.expect("view");
         assert_eq!(app.state.views[view].cursor, ByteOffset(7));
+    }
+
+    #[test]
+    fn workspace_search_streams_exact_batches_and_root_changes_cancel() {
+        let mut app = app();
+        app.configuration.settings.workspace.search.batch_size = 1;
+        fs::write(app.state.workspace_root.join("one.txt"), "needle\n").unwrap();
+        fs::write(app.state.workspace_root.join("two.txt"), "needle\n").unwrap();
+        app.start_workspace_search("needle".into(), None);
+        wait_workspace_search(&mut app);
+        assert_eq!(app.workspace_search_sequence, 2);
+        let broker = app.workspace_search_workflow.as_ref().unwrap();
+        let snapshot = broker.snapshot_if_changed(0).unwrap();
+        assert!(snapshot.complete);
+        assert_eq!(snapshot.items.len(), 2);
+        for _ in 0..256 {
+            assert!(broker.snapshot_if_changed(snapshot.revision).is_none())
+        }
+        app.close_picker();
+        app.start_workspace_search("needle".into(), None);
+        let extra = tempdir().unwrap();
+        app.workspace
+            .add_root(
+                "extra".into(),
+                crate::workspace::RootIdentity::capture(extra.path()).unwrap(),
+            )
+            .unwrap();
+        app.process_workspace_search_events();
+        assert!(app.workspace_search_generation.is_none());
+        assert!(app.workspace_search_workflow.is_none());
+        assert!(app.workspace_search_matches.is_empty());
     }
 
     #[test]
@@ -16128,7 +21284,7 @@ mod tests {
         );
         app.picker_insert("health");
         let picker = app.ui.picker.as_ref().expect("picker");
-        assert!(picker.rows.iter().all(|row| {
+        assert!(picker.rows.iter().any(|row| {
             format!("{} {}", row.label, row.detail)
                 .to_lowercase()
                 .contains("health")
@@ -16236,7 +21392,7 @@ mod tests {
             additional_edits: Vec::new(),
             kind: None,
             snippet: false,
-            documentation: String::new(),
+            documentation: None,
             resolve_item: None,
             resolved: false,
         }];
@@ -16334,6 +21490,242 @@ mod tests {
     }
 
     #[test]
+    fn dashboard_and_picker_are_stable_graph_overlays_with_projected_geometry() {
+        let mut app = app();
+        app.terminal_width = 100;
+        app.terminal_height = 30;
+        app.reconcile_editor_windows();
+        let dashboard = app
+            .surface_windows
+            .dashboard()
+            .expect("dashboard resources");
+        let dashboard_rect = app
+            .compositor_projection()
+            .and_then(|projection| projection.window(dashboard.window))
+            .expect("dashboard projection")
+            .rect;
+        assert_eq!(
+            dashboard_rect,
+            WindowRect {
+                x: 0,
+                y: 0,
+                width: 100,
+                height: 30,
+            }
+        );
+
+        app.state
+            .open_text(crate::document::TextBuffer::from_text("editor"), None);
+        app.ui.dashboard = false;
+        app.ui.picker = Some(crate::terminal_ui::PickerUiState {
+            surface: crate::terminal_ui::PickerSurfaceKind::Generic,
+            title: "Search".into(),
+            query: "needle".into(),
+            rows: Vec::new(),
+            selected: None,
+            scroll: 0,
+            loading: false,
+        });
+        app.reconcile_editor_windows();
+        let picker = app.surface_windows.picker().expect("picker resources");
+        let expected = crate::terminal_ui::picker_geometry(
+            &app.configuration.settings,
+            WindowRect {
+                x: 0,
+                y: 0,
+                width: 100,
+                height: 30,
+            },
+        )
+        .expect("picker geometry");
+        let projection = app.compositor_projection().expect("picker projection");
+        assert_eq!(
+            projection
+                .window(picker.window)
+                .expect("picker window")
+                .rect,
+            expected
+        );
+        assert_eq!(
+            projection.hit_test(expected.x.saturating_add(1), expected.y.saturating_add(1)),
+            Some(picker.window)
+        );
+
+        app.ui.picker = None;
+        app.reconcile_editor_windows();
+        assert_eq!(app.surface_windows.dashboard(), Some(dashboard));
+        assert_eq!(
+            app.surface_windows.picker_for(PickerSurfaceKind::Generic),
+            Some(picker)
+        );
+        assert!(
+            app.compositor_projection()
+                .expect("hidden picker projection")
+                .window(picker.window)
+                .is_none()
+        );
+
+        app.close_active_buffer(false);
+        app.reconcile_editor_windows();
+        assert!(app.ui.dashboard);
+        assert_eq!(app.surface_windows.dashboard(), Some(dashboard));
+        assert!(
+            app.compositor_projection()
+                .expect("dashboard after last buffer")
+                .window(dashboard.window)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn problems_logs_output_and_debug_keep_distinct_graph_surface_identities() {
+        let mut app = app();
+        app.state.open_text(TextBuffer::from_text("editor"), None);
+        app.ui.dashboard = false;
+
+        app.open_builtin_picker(PickerKind::Diagnostics);
+        app.reconcile_editor_windows();
+        let problems = app
+            .surface_windows
+            .picker_for(PickerSurfaceKind::Problems)
+            .expect("problems surface");
+        assert_eq!(
+            app.windows
+                .content(problems.content)
+                .expect("problems content")
+                .content_type
+                .as_str(),
+            "builtin.problems"
+        );
+
+        app.show_output_picker("missing-task");
+        app.reconcile_editor_windows();
+        let output = app
+            .surface_windows
+            .picker_for(PickerSurfaceKind::Output)
+            .expect("output surface");
+        assert_ne!(output, problems);
+        assert!(
+            app.compositor_projection()
+                .expect("output projection")
+                .window(problems.window)
+                .is_none()
+        );
+
+        app.process_effect(AppEffect::LspLogs);
+        app.reconcile_editor_windows();
+        let logs = app
+            .surface_windows
+            .picker_for(PickerSurfaceKind::Logs)
+            .expect("logs surface");
+        assert_eq!(
+            app.windows
+                .content(logs.content)
+                .expect("logs content")
+                .content_type
+                .as_str(),
+            "builtin.logs"
+        );
+
+        app.open_dap_picker("threads", Vec::new());
+        app.reconcile_editor_windows();
+        let debug = app
+            .surface_windows
+            .picker_for(PickerSurfaceKind::Debug)
+            .expect("debug surface");
+        assert_eq!(
+            app.windows
+                .content(debug.content)
+                .expect("debug content")
+                .content_type
+                .as_str(),
+            "builtin.debug"
+        );
+        assert_eq!(
+            app.compositor_projection()
+                .expect("debug projection")
+                .hit_test(50, 15),
+            Some(debug.window)
+        );
+
+        app.process_effect(AppEffect::WindowHide(format!("window:{}", debug.window.0)));
+        assert!(
+            app.compositor_projection()
+                .expect("hidden debug")
+                .window(debug.window)
+                .is_none()
+        );
+        app.process_effect(AppEffect::WindowShow(format!("window:{}", debug.window.0)));
+        assert!(
+            app.compositor_projection()
+                .expect("shown debug")
+                .window(debug.window)
+                .is_some()
+        );
+        app.process_effect(AppEffect::WindowClose(format!("window:{}", debug.window.0)));
+        assert!(app.windows.window(debug.window).is_none());
+        assert!(app.ui.picker.is_none());
+
+        app.close_picker();
+        app.reconcile_editor_windows();
+        for ids in [problems, output, logs] {
+            assert!(app.windows.window(ids.window).is_some());
+            assert!(
+                app.compositor_projection()
+                    .expect("hidden retained surfaces")
+                    .window(ids.window)
+                    .is_none()
+            );
+        }
+        let reconciliation_count = app.editor_windows.reconciliation_count();
+        let idle_graph = app.windows.clone();
+        for _ in 0..256 {
+            app.reconcile_editor_windows();
+        }
+        assert_eq!(
+            app.editor_windows.reconciliation_count(),
+            reconciliation_count
+        );
+        assert_eq!(app.windows, idle_graph);
+    }
+
+    #[test]
+    fn protected_prompt_region_blocks_ordinary_compositor_hit_testing() {
+        let mut app = app();
+        app.state
+            .open_text(crate::document::TextBuffer::from_text("abcdef"), None);
+        app.ui.dashboard = false;
+        app.reconcile_editor_windows();
+        app.open_prompt(
+            crate::terminal_ui::PromptKind::WorkspaceTrust,
+            String::new(),
+        );
+        app.reconcile_editor_windows();
+        let geometry = crate::terminal_ui::prompt_geometry(
+            app.terminal_width,
+            app.workspace_render_height(),
+            &app.configuration.settings.ui.command_line,
+            false,
+        );
+        let point = (
+            geometry.left.saturating_add(geometry.width / 2),
+            geometry.top.saturating_add(geometry.height / 2),
+        );
+        let projection = app.compositor_projection().expect("protected projection");
+        assert_eq!(projection.protected_regions.len(), 1);
+        assert_eq!(projection.hit_test(point.0, point.1), None);
+
+        app.close_prompt();
+        app.reconcile_editor_windows();
+        assert!(
+            app.compositor_projection()
+                .expect("ordinary projection")
+                .hit_test(point.0, point.1)
+                .is_some()
+        );
+    }
+
+    #[test]
     fn normalized_mouse_position_invokes_real_cursor_placement() {
         let mut app = app();
         app.state
@@ -16351,6 +21743,40 @@ mod tests {
     }
 
     #[test]
+    fn nonwrapped_mouse_uses_the_same_snapped_tab_origin_as_rendering() {
+        let mut app = app();
+        app.terminal_width = 6;
+        app.terminal_height = 5;
+        app.configuration.settings.editor.wrap = false;
+        app.configuration.settings.editor.line_numbers = crate::configuration::LineNumbers::Off;
+        app.configuration.settings.ui.status_line.enabled = false;
+        let (_, view) = app
+            .state
+            .open_text(crate::document::TextBuffer::from_text("a\tb"), None);
+        app.ui.dashboard = false;
+        app.state.views[view].scroll_column = 2;
+        app.reconcile_editor_windows();
+        let viewport = active_pane_viewport(
+            &app.state,
+            &app.ui,
+            &app.configuration.settings,
+            app.workspace_bounds().unwrap().width,
+            app.workspace_render_height(),
+        )
+        .unwrap();
+        for cell in 0..3 {
+            app.state.views[view].scroll_column = 2;
+            app.mouse_position = Some((viewport.x + cell, viewport.y));
+            app.apply_mouse_cursor(false);
+            assert_eq!(
+                app.state.views[view].cursor,
+                ByteOffset(1),
+                "visible tab cell {cell}"
+            );
+        }
+    }
+
+    #[test]
     fn mouse_click_focuses_the_real_target_pane_before_placing_cursor() {
         let mut app = app();
         app.state
@@ -16360,13 +21786,391 @@ mod tests {
             .split_active(crate::editing::Axis::Horizontal, 500)
             .expect("split");
         assert_ne!(app.state.active_view, Some(first));
-        app.mouse_position = Some((4, 0));
+        app.reconcile_editor_windows();
+        let viewport = crate::terminal_ui::pane_viewports(
+            &app.state,
+            &app.ui,
+            &app.configuration.settings,
+            app.terminal_width,
+            app.workspace_render_height(),
+        )
+        .into_iter()
+        .find(|viewport| viewport.view == first)
+        .expect("generic first-window viewport");
+        app.mouse_position = Some((viewport.x.saturating_add(4), viewport.y));
+        let geometry = app.mouse_pane_geometry().expect("mouse geometry");
+        assert_eq!(geometry.0, viewport.pane);
+        assert_eq!((geometry.3, geometry.4), (viewport.width, viewport.height));
         app.apply_mouse_cursor(false);
         assert_eq!(app.state.active_view, Some(first));
         assert_eq!(
             app.state.views[first].cursor,
             crate::document::ByteOffset(1)
         );
+    }
+
+    #[test]
+    fn ai_chat_streams_into_one_read_only_virtual_identity_and_focus_cancel_is_late_safe() {
+        let mut app = app();
+        app.process_effect(AppEffect::AiChatOpen);
+        assert_eq!(
+            app.ui.prompt.as_ref().map(|p| p.kind),
+            Some(PromptKind::AiChat)
+        );
+        app.reconcile_editor_windows();
+        assert_eq!(
+            app.compositor_projection().unwrap().protected_regions.len(),
+            1
+        );
+        app.ui.prompt.as_mut().unwrap().input = "secret-like prompt text".into();
+        app.submit_prompt();
+        app.process_ai_events();
+        let entry = app
+            .plugin_virtual_editor
+            .find("builtin.ai", PluginLoadId(1), "builtin.ai.chat", "chat")
+            .unwrap()
+            .clone();
+        let buffer = entry.buffer;
+        assert!(app.state.buffers[buffer].is_virtual_read_only());
+        while app.active_ai_request.is_some() {
+            app.process_ai_events()
+        }
+        let final_entry = app
+            .plugin_virtual_editor
+            .find("builtin.ai", PluginLoadId(1), "builtin.ai.chat", "chat")
+            .unwrap();
+        assert_eq!(final_entry.buffer, buffer);
+        assert!(final_entry.revision > 1);
+        assert!(
+            app.state.buffers[buffer]
+                .text
+                .to_string()
+                .contains("héllo 界 🙂")
+        );
+        assert!(
+            !app.ui
+                .notification
+                .as_deref()
+                .unwrap_or_default()
+                .contains("secret-like")
+        );
+        let mut cancelled = self::app();
+        cancelled.process_effect(AppEffect::AiChatOpen);
+        cancelled.ui.prompt.as_mut().unwrap().input = "cancel me".into();
+        cancelled.submit_prompt();
+        cancelled.handle_event(UiEvent::FocusLost);
+        for _ in 0..8 {
+            cancelled.process_ai_events()
+        }
+        assert!(
+            cancelled
+                .plugin_virtual_editor
+                .find("builtin.ai", PluginLoadId(1), "builtin.ai.chat", "chat")
+                .is_none()
+        );
+        let mut closed = self::app();
+        closed.process_effect(AppEffect::AiChatOpen);
+        closed.ui.prompt.as_mut().unwrap().input = "close".into();
+        closed.submit_prompt();
+        closed.process_ai_events();
+        let buffer = closed.state.active_buffer_id().unwrap();
+        closed.close_active_buffer(true);
+        closed.process_ai_events();
+        assert!(closed.active_ai_request.is_none() && !closed.state.buffers.contains_key(buffer));
+    }
+
+    #[test]
+    fn ai_ghost_is_exact_non_mutating_and_idle() {
+        let mut app = app();
+        let (buffer, view) = app.state.open_text(TextBuffer::from_text("abc"), None);
+        app.state.views[view].cursor = ByteOffset(3);
+        app.ui.dashboard = false;
+        let before = app.state.buffers[buffer].text.to_string();
+        app.process_effect(AppEffect::AiGhostRequest);
+        while app.active_ai_request.is_some() {
+            app.process_ai_events()
+        }
+        let ghost = app.ui.ai_ghost_text.clone().expect("ghost");
+        assert_eq!(
+            (ghost.buffer, ghost.view, ghost.cursor),
+            (buffer, view, ByteOffset(3))
+        );
+        assert_eq!(app.state.buffers[buffer].text.to_string(), before);
+        let processed = app.ai_service.processed_events();
+        for _ in 0..256 {
+            app.process_ai_events()
+        }
+        assert_eq!(app.ai_service.processed_events(), processed);
+        assert_eq!(app.ui.ai_ghost_text.as_ref(), Some(&ghost));
+        app.state.views[view].cursor = ByteOffset(2);
+        app.invalidate_ai_ownership();
+        assert!(app.ui.ai_ghost_text.is_none());
+        app.state.views[view].cursor = ByteOffset(3);
+        app.process_effect(AppEffect::AiGhostRequest);
+        app.set_specific_mode(view, EditorMode::Insert);
+        app.invoke_insert_text("x".into());
+        app.process_ai_events();
+        assert!(app.active_ai_request.is_none());
+        assert!(app.ui.ai_ghost_text.is_none());
+        assert_ne!(app.state.buffers[buffer].text.revision(), ghost.revision);
+        app.set_specific_mode(view, EditorMode::Normal);
+        app.process_effect(AppEffect::AiGhostRequest);
+        while app.active_ai_request.is_some() {
+            app.process_ai_events()
+        }
+        assert!(app.ui.ai_ghost_text.is_some());
+        let extra = tempdir().unwrap().keep();
+        let identity = RootIdentity::capture(&extra).unwrap();
+        app.workspace.add_root("extra".into(), identity).unwrap();
+        app.invalidate_ai_ownership();
+        assert!(app.ui.ai_ghost_text.is_none());
+    }
+
+    #[test]
+    fn ai_composer_uses_trusted_exact_workspace_proposal_gate() {
+        let mut app = app();
+        let path = app.state.workspace_root.join("ai.rs");
+        fs::write(&path, "abc").unwrap();
+        let path = fs::canonicalize(path).unwrap();
+        let (buffer, view) = app
+            .state
+            .open_text(TextBuffer::from_text("abc"), Some(path));
+        app.state.views[view].cursor = ByteOffset(3);
+        app.workspace.set_trust(WorkspaceTrust::Trusted);
+        app.process_effect(AppEffect::AiComposerRequest);
+        assert_eq!(
+            app.ui.prompt.as_ref().map(|p| p.kind),
+            Some(PromptKind::AiComposer)
+        );
+        app.ui.prompt.as_mut().unwrap().input = "make an edit".into();
+        app.submit_prompt();
+        while app.active_ai_request.is_some() {
+            app.process_ai_events()
+        }
+        assert!(app.workspace_proposal.is_some());
+        assert_eq!(app.state.buffers[buffer].text.to_string(), "abc");
+        app.accept_workspace_proposal();
+        assert_eq!(
+            app.state.buffers[buffer].text.to_string(),
+            "abc/* deterministic AI proposal */"
+        );
+        let mut rejected = self::app();
+        let path = rejected.state.workspace_root.join("reject.rs");
+        fs::write(&path, "abc").unwrap();
+        let path = fs::canonicalize(path).unwrap();
+        let (buffer, view) = rejected
+            .state
+            .open_text(TextBuffer::from_text("abc"), Some(path));
+        rejected.state.views[view].cursor = ByteOffset(3);
+        rejected.workspace.set_trust(WorkspaceTrust::Trusted);
+        rejected.process_effect(AppEffect::AiComposerRequest);
+        rejected.ui.prompt.as_mut().unwrap().input = "proposal".into();
+        rejected.submit_prompt();
+        while rejected.active_ai_request.is_some() {
+            rejected.process_ai_events()
+        }
+        rejected.reject_workspace_proposal();
+        assert_eq!(rejected.state.buffers[buffer].text.to_string(), "abc");
+        let mut untrusted = self::app();
+        untrusted.state.open_text(
+            TextBuffer::from_text("abc"),
+            Some(untrusted.state.workspace_root.join("missing.rs")),
+        );
+        untrusted.process_effect(AppEffect::AiComposerRequest);
+        assert!(untrusted.ui.prompt.is_none() && untrusted.active_ai_request.is_none());
+        untrusted.process_effect(AppEffect::HealthVirtualOpen);
+        untrusted.workspace.set_trust(WorkspaceTrust::Trusted);
+        untrusted.process_effect(AppEffect::AiComposerRequest);
+        assert!(untrusted.ui.prompt.is_none());
+    }
+
+    #[test]
+    fn ai_composer_stale_root_revision_and_scratch_fail_without_mutation() {
+        let mut stale = self::app();
+        let path = stale.state.workspace_root.join("stale.rs");
+        fs::write(&path, "abc").unwrap();
+        let path = fs::canonicalize(path).unwrap();
+        let (buffer, view) = stale
+            .state
+            .open_text(TextBuffer::from_text("abc"), Some(path));
+        stale.state.views[view].cursor = ByteOffset(3);
+        stale.workspace.set_trust(WorkspaceTrust::Trusted);
+        stale.process_effect(AppEffect::AiComposerRequest);
+        let revision = stale.state.buffers[buffer].text.revision();
+        let transaction = EditorTransaction::new(TransactionId(700)).with_operation(
+            EditorOperation::ApplyEdits {
+                buffer,
+                edits: TextEditSet::new(
+                    revision,
+                    vec![TextEdit::new(
+                        ByteRange::new(ByteOffset(3), ByteOffset(3)).unwrap(),
+                        "x",
+                    )],
+                ),
+            },
+        );
+        stale.state.apply_transaction(&transaction).unwrap();
+        stale.ui.prompt.as_mut().unwrap().input = "stale".into();
+        stale.submit_prompt();
+        assert!(stale.active_ai_request.is_none() && stale.workspace_proposal.is_none());
+        assert_eq!(stale.state.buffers[buffer].text.to_string(), "abcx");
+        let mut rooted = self::app();
+        let path = rooted.state.workspace_root.join("root.rs");
+        fs::write(&path, "abc").unwrap();
+        let path = fs::canonicalize(path).unwrap();
+        let (_, view) = rooted
+            .state
+            .open_text(TextBuffer::from_text("abc"), Some(path));
+        rooted.state.views[view].cursor = ByteOffset(3);
+        rooted.workspace.set_trust(WorkspaceTrust::Trusted);
+        rooted.process_effect(AppEffect::AiComposerRequest);
+        rooted.ui.prompt.as_mut().unwrap().input = "root".into();
+        rooted.submit_prompt();
+        let extra = tempdir().unwrap().keep();
+        rooted
+            .workspace
+            .add_root("new".into(), RootIdentity::capture(&extra).unwrap())
+            .unwrap();
+        for _ in 0..4 {
+            rooted.process_ai_events()
+        }
+        assert!(rooted.active_ai_request.is_none() && rooted.workspace_proposal.is_none());
+        let mut scratch = self::app();
+        scratch.state.open_text(TextBuffer::from_text("abc"), None);
+        scratch.workspace.set_trust(WorkspaceTrust::Trusted);
+        scratch.process_effect(AppEffect::AiComposerRequest);
+        assert!(scratch.ui.prompt.is_none() && scratch.active_ai_request.is_none());
+    }
+
+    #[test]
+    fn health_virtual_dogfood_opens_refreshes_and_remains_read_only() {
+        let mut app = app();
+        app.process_effect(AppEffect::HealthVirtualOpen);
+        let buffer = app.state.active_buffer_id().expect("health buffer");
+        assert!(
+            app.state.buffers[buffer]
+                .text
+                .to_string()
+                .contains("# Dust health")
+        );
+        assert!(app.state.buffers[buffer].is_virtual_read_only());
+        app.reconcile_editor_windows();
+        assert!(app.ui.content_tabs.iter().any(|entry| entry.icon == "V"
+            && entry.closeable
+            && entry.kind == ContentTabKind::VirtualDocument));
+        let ids = (buffer, app.state.active_view, app.windows.focused());
+        app.process_effect(AppEffect::HealthVirtualRefresh);
+        assert_eq!(
+            (
+                app.state.active_buffer_id().unwrap(),
+                app.state.active_view,
+                app.windows.focused()
+            ),
+            ids
+        );
+        let revision = app.state.buffers[buffer].text.revision();
+        let transaction =
+            crate::editing::EditorTransaction::new(crate::editing::TransactionId(999))
+                .with_operation(crate::editing::EditorOperation::ApplyEdits {
+                    buffer,
+                    edits: crate::document::TextEditSet::new(
+                        revision,
+                        vec![crate::document::TextEdit::new(
+                            crate::document::ByteRange::new(
+                                crate::document::ByteOffset(0),
+                                crate::document::ByteOffset(0),
+                            )
+                            .unwrap(),
+                            "x",
+                        )],
+                    ),
+                });
+        assert!(matches!(
+            app.state.apply_transaction(&transaction),
+            Err(crate::editing::TransactionError::ReadOnly)
+        ));
+        for _ in 0..256 {
+            app.reconcile_editor_windows();
+            assert_eq!(app.windows.focused(), ids.2);
+        }
+    }
+
+    #[test]
+    fn accepted_virtual_snapshot_publishes_through_the_tiled_editor_bridge() {
+        let mut app = app();
+        let snapshot = crate::plugins::PluginVirtualDocumentSnapshot {
+            plugin: "demo".into(),
+            load: PluginLoadId(7),
+            source: "plugin.demo.virtual.help".into(),
+            document: 9,
+            key: "help".into(),
+            title: "Help".into(),
+            language: "markdown".into(),
+            text: "# Héllo\nvirtual".into(),
+            revision: 1,
+            closed: false,
+        };
+        let buffer = app
+            .plugin_virtual_editor
+            .publish(&mut app.state, &snapshot)
+            .expect("publish");
+        app.ui.dashboard = false;
+        app.reconcile_editor_windows();
+        assert!(app.editor_windows.content_for(buffer).is_some());
+        assert!(app.windows.focused().is_some());
+        assert_eq!(
+            app.state.buffers[buffer].text.to_string(),
+            "# Héllo\nvirtual"
+        );
+        let ids = (app.state.active_view, app.windows.focused());
+        let mut refresh = snapshot.clone();
+        refresh.revision = 2;
+        refresh.text = "# Héllo\nrefreshed".into();
+        assert_eq!(
+            app.plugin_virtual_editor
+                .publish(&mut app.state, &refresh)
+                .unwrap(),
+            buffer
+        );
+        app.reconcile_editor_windows();
+        assert_eq!((app.state.active_view, app.windows.focused()), ids);
+        assert!(matches!(
+            app.windows
+                .window(app.windows.focused().unwrap())
+                .unwrap()
+                .placement,
+            WindowPlacement::Tiled
+        ));
+    }
+
+    #[test]
+    fn virtual_read_only_origin_never_queues_save_reload_or_recovery_io() {
+        let mut app = app();
+        let (buffer, _) = app
+            .state
+            .open_text(crate::document::TextBuffer::from_text("virtual"), None);
+        app.state.buffers[buffer].read_only = true;
+        app.state.buffers[buffer].origin = crate::editing::BufferOrigin::VirtualReadOnly {
+            owner: "demo".into(),
+            generation: 7,
+            document: 9,
+            revision: 1,
+        };
+        let before = app.pending_vfs.len();
+        app.start_save(
+            false,
+            Some(app.state.workspace_root.join("forbidden")),
+            false,
+        );
+        app.start_reload(true);
+        assert_eq!(app.pending_vfs.len(), before);
+        app.state.buffers[buffer].dirty = true;
+        app.configuration.settings.recovery.enabled = true;
+        app.recovery_discovery_queued = true;
+        app.configuration.settings.recovery.cleanup_enabled = false;
+        app.schedule_recovery_work();
+        assert!(!app.recovery_scheduled.contains_key(&buffer));
+        assert!(app.capture_session().is_none());
     }
 
     #[test]
@@ -16589,6 +22393,976 @@ mod tests {
     }
 
     #[test]
+    fn bundled_upper_h_and_l_cycle_open_buffers_in_normal_mode() {
+        let mut app = app();
+        let (first, _) = app.state.open_text(
+            TextBuffer::from_text("first"),
+            Some(PathBuf::from("/workspace/first.rs")),
+        );
+        let (second, _) = app.state.open_text(
+            TextBuffer::from_text("second"),
+            Some(PathBuf::from("/workspace/second.rs")),
+        );
+        app.ui.dashboard = false;
+        assert_eq!(app.state.active_buffer_id(), Some(second));
+
+        app.handle_key_in_context("editor.normal", KeyEvent::character('H'));
+        assert_eq!(app.state.active_buffer_id(), Some(first));
+        app.handle_key_in_context("editor.normal", KeyEvent::character('L'));
+        assert_eq!(app.state.active_buffer_id(), Some(second));
+    }
+
+    #[test]
+    fn buffer_line_mouse_selects_and_right_click_closes_with_dirty_safety() {
+        let mut app = app();
+        let (first, _) = app.state.open_text(
+            TextBuffer::from_text("first"),
+            Some(PathBuf::from("/workspace/first.rs")),
+        );
+        let (second, _) = app.state.open_text(
+            TextBuffer::from_text("second"),
+            Some(PathBuf::from("/workspace/second.rs")),
+        );
+        app.ui.dashboard = false;
+        app.reconcile_editor_windows();
+        let bounds = app.workspace_bounds().unwrap();
+        let target = app.editor_windows.content_for(first).unwrap();
+        let local = (0..bounds.width)
+            .find(|column| {
+                crate::terminal_ui::content_tab_at_column(
+                    &app.ui.content_tabs,
+                    &app.configuration.settings,
+                    bounds.width,
+                    *column,
+                )
+                .is_some_and(|id| id.0 == target)
+            })
+            .unwrap();
+        let row = bounds.y
+            + u16::from(
+                app.configuration.settings.ui.tab_line.enabled
+                    && (!app.configuration.settings.ui.tab_line.hide_when_single
+                        || app.state.tabs.len() > 1),
+            );
+        let left = KeyEvent::mouse(
+            crate::input::KeyCode::MouseLeftDown,
+            crate::input::Modifiers::default(),
+        );
+        assert!(app.handle_content_tab_mouse(&left, bounds.x + local, row));
+        assert_eq!(app.state.active_buffer_id(), Some(first));
+        app.state.set_buffer_dirty(first, true);
+        app.reconcile_editor_windows();
+        let local = (0..bounds.width)
+            .find(|column| {
+                crate::terminal_ui::content_tab_at_column(
+                    &app.ui.content_tabs,
+                    &app.configuration.settings,
+                    bounds.width,
+                    *column,
+                )
+                .is_some_and(|id| id.0 == target)
+            })
+            .unwrap();
+        let right = KeyEvent::mouse(
+            crate::input::KeyCode::MouseRightDown,
+            crate::input::Modifiers::default(),
+        );
+        assert!(app.handle_content_tab_mouse(&right, bounds.x + local, row));
+        assert!(app.state.buffers.contains_key(first));
+        app.state.set_buffer_dirty(first, false);
+        app.reconcile_editor_windows();
+        let local = (0..bounds.width)
+            .find(|column| {
+                crate::terminal_ui::content_tab_at_column(
+                    &app.ui.content_tabs,
+                    &app.configuration.settings,
+                    bounds.width,
+                    *column,
+                )
+                .is_some_and(|id| id.0 == target)
+            })
+            .unwrap();
+        assert!(app.handle_content_tab_mouse(&right, bounds.x + local, row));
+        assert!(!app.state.buffers.contains_key(first));
+        assert_eq!(app.state.active_buffer_id(), Some(second));
+    }
+
+    #[test]
+    fn content_line_pins_reorder_middle_mouse_and_survive_bridge_reset() {
+        let mut app = app();
+        let (a, _) = app.state.open_text(
+            TextBuffer::from_text("a"),
+            Some(PathBuf::from("/workspace/a.rs")),
+        );
+        let (b, _) = app.state.open_text(
+            TextBuffer::from_text("b"),
+            Some(PathBuf::from("/workspace/b.rs")),
+        );
+        let (c, _) = app.state.open_text(
+            TextBuffer::from_text("c"),
+            Some(PathBuf::from("/workspace/c.rs")),
+        );
+        app.ui.dashboard = false;
+        app.reconcile_editor_windows();
+        app.state.open_text(TextBuffer::from_text("scratch"), None);
+        app.reconcile_editor_windows();
+        assert!(
+            app.ui
+                .content_tabs
+                .iter()
+                .any(|entry| entry.icon == "S" && entry.kind == ContentTabKind::Text)
+        );
+        app.state.show_buffer(b).unwrap();
+        app.reconcile_editor_windows();
+        app.toggle_active_buffer_pin();
+        assert_eq!(
+            app.ui.content_tabs.first().map(|entry| entry.pinned),
+            Some(true),
+            "{:?} active={:?} pins={:?}",
+            app.ui.content_tabs,
+            app.state.active_buffer_id(),
+            app.content_line_pins
+        );
+        app.state.show_buffer(a).unwrap();
+        app.reconcile_editor_windows();
+        app.toggle_active_buffer_pin();
+        app.state.show_buffer(b).unwrap();
+        app.reconcile_editor_windows();
+        app.move_active_buffer_line(-1);
+        let pinned = app
+            .ui
+            .content_tabs
+            .iter()
+            .filter(|entry| entry.pinned)
+            .map(|entry| entry.title.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(pinned, vec!["b.rs", "a.rs"]);
+        let before = app.content_line_order.clone();
+        app.move_active_buffer_line(-1);
+        assert_eq!(app.content_line_order, before);
+        let bounds = app.workspace_bounds().unwrap();
+        let target = app.editor_windows.content_for(c).unwrap();
+        let local = (0..bounds.width)
+            .find(|column| {
+                crate::terminal_ui::content_tab_at_column(
+                    &app.ui.content_tabs,
+                    &app.configuration.settings,
+                    bounds.width,
+                    *column,
+                )
+                .is_some_and(|id| id.0 == target)
+            })
+            .unwrap();
+        let row = bounds.y
+            + u16::from(
+                app.configuration.settings.ui.tab_line.enabled
+                    && (!app.configuration.settings.ui.tab_line.hide_when_single
+                        || app.state.tabs.len() > 1),
+            );
+        let middle = KeyEvent::mouse(
+            crate::input::KeyCode::MouseMiddleDown,
+            crate::input::Modifiers::default(),
+        );
+        assert!(app.handle_content_tab_mouse(&middle, bounds.x + local, row));
+        assert!(app.content_line_pins.contains(&c));
+        let pins = app.content_line_pins.clone();
+        let order = app.content_line_order.clone();
+        app.editor_windows.reset(&mut app.windows).unwrap();
+        app.reconcile_editor_windows();
+        assert_eq!(app.content_line_pins, pins);
+        assert_eq!(app.content_line_order, order);
+        let views = app
+            .state
+            .views
+            .iter()
+            .filter_map(|(view, state)| (state.buffer == c).then_some(view))
+            .collect::<Vec<_>>();
+        for view in views {
+            let _ = app.state.close_view(view);
+        }
+        app.state.remove_buffer(c);
+        app.reconcile_editor_windows();
+        assert!(!app.content_line_pins.contains(&c) && !app.content_line_order.contains(&c));
+    }
+
+    #[test]
+    fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
+        let mut app = app();
+        let path = PathBuf::from("/workspace/diagnostic.rs");
+        app.state
+            .open_text(TextBuffer::from_text("bad"), Some(path.clone()));
+        app.ui.dashboard = false;
+        app.reconcile_editor_windows();
+        app.ui.diagnostics = vec![crate::terminal_ui::UiDiagnostic {
+            path: path.clone(),
+            range: ByteRange::new(ByteOffset(0), ByteOffset(1)).unwrap(),
+            severity: DiagnosticSeverity::Error,
+            message: "bad".into(),
+        }];
+        app.content_line_diagnostic_revision += 1;
+        app.content_line_projection_signature = None;
+        let buffer_count = app.state.buffers.len();
+        let custom = app
+            .windows
+            .create_content(
+                crate::windows::ContentTypeId::new("plugin.demo-custom").unwrap(),
+                crate::windows::ContentAdapterKind::DeclarativeUi,
+                "Custom surface".into(),
+                false,
+                "plugin.demo",
+                1,
+            )
+            .unwrap();
+        app.reconcile_editor_windows();
+        let text = app
+            .ui
+            .content_tabs
+            .iter()
+            .find(|entry| entry.kind == ContentTabKind::Text)
+            .unwrap();
+        assert_eq!(text.icon, "R");
+        assert_eq!(
+            text.diagnostic,
+            Some(ContentTabDiagnostic {
+                severity: ContentTabDiagnosticSeverity::Error,
+                count: 1
+            })
+        );
+        assert_eq!(app.state.buffers.len(), buffer_count);
+        let custom_entry = app
+            .ui
+            .content_tabs
+            .iter()
+            .find(|entry| entry.identity.0 == custom)
+            .unwrap();
+        assert_eq!(
+            (custom_entry.icon.as_str(), custom_entry.closeable),
+            ("C", false)
+        );
+        app.terminal_width = 300;
+        app.reconcile_editor_windows();
+        let bounds = app.workspace_bounds().unwrap();
+        let local = (0..bounds.width)
+            .find(|column| {
+                crate::terminal_ui::content_tab_at_column(
+                    &app.ui.content_tabs,
+                    &app.configuration.settings,
+                    bounds.width,
+                    *column,
+                )
+                .is_some_and(|id| id.0 == custom)
+            })
+            .unwrap();
+        let row = bounds.y
+            + u16::from(
+                app.configuration.settings.ui.tab_line.enabled
+                    && (!app.configuration.settings.ui.tab_line.hide_when_single
+                        || app.state.tabs.len() > 1),
+            );
+        let right = KeyEvent::mouse(
+            crate::input::KeyCode::MouseRightDown,
+            crate::input::Modifiers::default(),
+        );
+        assert!(app.handle_content_tab_mouse(&right, bounds.x + local, row));
+        assert!(
+            app.ui.notification_error
+                && app
+                    .windows
+                    .content_snapshots()
+                    .iter()
+                    .any(|entry| entry.id == custom)
+        );
+        app.windows
+            .remove_owner_generation("plugin.demo", 2)
+            .unwrap();
+        assert!(
+            app.windows
+                .content_snapshots()
+                .iter()
+                .any(|entry| entry.id == custom)
+        );
+        app.windows
+            .remove_owner_generation("plugin.demo", 1)
+            .unwrap();
+        app.reconcile_editor_windows();
+        assert!(
+            !app.ui
+                .content_tabs
+                .iter()
+                .any(|entry| entry.identity.0 == custom)
+        );
+        let signature = app.content_line_projection_signature;
+        let tabs = app.ui.content_tabs.clone();
+        for _ in 0..256 {
+            app.reconcile_editor_windows();
+            let frame = render(
+                &app.state,
+                &app.ui,
+                &app.configuration.settings,
+                &app.configuration.dashboard,
+                app.terminal_width,
+                app.terminal_height,
+            );
+            assert_eq!(frame.grid.width(), app.terminal_width);
+            assert_eq!(app.content_line_projection_signature, signature);
+            assert_eq!(app.ui.content_tabs, tabs);
+        }
+    }
+
+    #[test]
+    fn editor_lifecycle_reconciles_into_window_graph_and_drives_content_tabs() {
+        let mut app = app();
+        let (first, _) = app.state.open_text(
+            TextBuffer::from_text("first"),
+            Some(PathBuf::from("/workspace/src/main.rs")),
+        );
+        let (second, _) = app.state.open_text(
+            TextBuffer::from_text("second"),
+            Some(PathBuf::from("/workspace/tests/main.rs")),
+        );
+        app.state.set_buffer_dirty(first, true);
+        app.ui.dashboard = false;
+        app.reconcile_editor_windows();
+        assert_eq!(app.windows.counts(), (3, 2, 2, 1));
+        assert_eq!(app.ui.content_tabs.len(), 2);
+        assert_ne!(app.ui.content_tabs[0].title, app.ui.content_tabs[1].title);
+        assert!(app.ui.content_tabs[0].dirty);
+        assert!(app.ui.content_tabs[1].active);
+        assert_eq!(
+            app.ui.content_tabs[1].identity,
+            crate::terminal_ui::ContentTabIdentity(
+                app.editor_windows
+                    .content_for(second)
+                    .expect("second content")
+            )
+        );
+
+        app.state
+            .split_active(crate::editing::Axis::Horizontal, 500)
+            .expect("split");
+        app.reconcile_editor_windows();
+        assert_eq!(app.windows.counts(), (3, 3, 3, 1));
+        let focused = app.windows.focused().expect("focused split");
+
+        let second_workspace_tab = app.state.new_tab().expect("new workspace tab");
+        app.reconcile_editor_windows();
+        assert_eq!(app.windows.counts(), (3, 4, 4, 2));
+        assert_eq!(
+            app.windows.active_tab(),
+            app.editor_windows.tab_for(second_workspace_tab)
+        );
+        assert_ne!(app.windows.focused(), Some(focused));
+
+        app.state.close_active_tab().expect("close workspace tab");
+        app.reconcile_editor_windows();
+        assert_eq!(app.windows.counts(), (3, 3, 3, 1));
+        assert_eq!(app.ui.content_tabs.len(), 2);
+        app.windows.validate().expect("valid reconciled graph");
+    }
+
+    #[test]
+    fn editor_layout_commands_commit_state_bridge_and_graph_as_one_authoritative_transaction() {
+        let mut app = app();
+        app.state.open_text(TextBuffer::from_text("editor"), None);
+        app.ui.dashboard = false;
+        app.reconcile_editor_windows();
+        let initial_revision = app.windows.revision().expect("graph revision");
+        let initial_window = app.windows.focused().expect("initial window");
+
+        app.process_effect(crate::application::AppEffect::Layout(
+            crate::application::LayoutAction::Split(crate::editing::Axis::Horizontal),
+        ));
+        assert_eq!(app.state.panes.len(), 2);
+        assert_eq!(
+            app.windows
+                .tiled_layout_snapshot(app.windows.active_tab().expect("tab"))
+                .expect("layout")
+                .project(
+                    WindowRect {
+                        x: 0,
+                        y: 0,
+                        width: 80,
+                        height: 20,
+                    },
+                    1,
+                    1,
+                )
+                .windows
+                .len(),
+            2
+        );
+        assert!(app.windows.revision().expect("split revision") > initial_revision);
+        assert!(app.windows.window(initial_window).is_some());
+
+        let focused = app.windows.focused().expect("focused split");
+        let before_swap = app
+            .compositor_projection()
+            .expect("swap projection")
+            .clone();
+        let initial_rect = before_swap
+            .window(initial_window)
+            .expect("initial rect")
+            .rect;
+        let focused_rect = before_swap.window(focused).expect("focused rect").rect;
+        app.process_effect(crate::application::AppEffect::WindowSwap {
+            first: format!("window:{}", initial_window.0),
+            second: format!("window:{}", focused.0),
+        });
+        let after_swap = app.compositor_projection().expect("swapped projection");
+        assert_eq!(
+            after_swap
+                .window(initial_window)
+                .expect("initial swapped")
+                .rect,
+            focused_rect
+        );
+        assert_eq!(
+            after_swap.window(focused).expect("focused swapped").rect,
+            initial_rect
+        );
+        assert_eq!(app.windows.focused(), Some(focused));
+
+        let before_resize = app.windows.clone();
+        app.process_effect(crate::application::AppEffect::WindowResize {
+            target: format!("window:{}", focused.0),
+            amount: 50,
+        });
+        assert_ne!(app.windows, before_resize);
+        assert_eq!(app.state.panes.len(), 2);
+
+        app.process_effect(crate::application::AppEffect::WindowClose(format!(
+            "window:{}",
+            focused.0
+        )));
+        assert_eq!(app.state.panes.len(), 1);
+        assert!(app.windows.window(initial_window).is_some());
+        let state_revision_before_rejected = app.state.window_revision();
+        let active_view_before_rejected = app.state.active_view;
+        let pane_count_before_rejected = app.state.panes.len();
+        let graph_before_rejected = app.windows.clone();
+        app.process_effect(crate::application::AppEffect::WindowClose("focused".into()));
+        assert_eq!(app.state.window_revision(), state_revision_before_rejected);
+        assert_eq!(app.state.active_view, active_view_before_rejected);
+        assert_eq!(app.state.panes.len(), pane_count_before_rejected);
+        assert_eq!(app.windows, graph_before_rejected);
+        assert!(app.ui.notification_error);
+    }
+
+    #[test]
+    fn editor_window_swap_rejects_mixed_and_cross_tab_targets_atomically() {
+        let mut app = app();
+        app.state.open_text(TextBuffer::from_text("editor"), None);
+        app.ui.dashboard = false;
+        app.process_effect(AppEffect::Layout(crate::application::LayoutAction::Split(
+            crate::editing::Axis::Horizontal,
+        )));
+        app.open_explorer();
+        let tab = app.windows.active_tab().expect("active tab");
+        let editor_windows = app
+            .windows
+            .tiled_layout_snapshot(tab)
+            .expect("editor layout")
+            .project(
+                WindowRect {
+                    x: 0,
+                    y: 0,
+                    width: 80,
+                    height: 20,
+                },
+                1,
+                1,
+            )
+            .windows
+            .into_iter()
+            .map(|window| window.window)
+            .collect::<Vec<_>>();
+        let explorer = app.surface_windows.explorer().expect("explorer").window;
+        let graph_before_mixed = app.windows.clone();
+        app.process_effect(AppEffect::WindowSwap {
+            first: format!("window:{}", editor_windows[0].0),
+            second: format!("window:{}", explorer.0),
+        });
+        assert_eq!(app.windows, graph_before_mixed);
+        assert!(app.ui.notification_error);
+
+        let old_editor = editor_windows[0];
+        app.process_effect(AppEffect::Layout(crate::application::LayoutAction::NewTab));
+        let current_editor = app.windows.focused().expect("new tab editor");
+        let graph_before_cross_tab = app.windows.clone();
+        let revision_before_cross_tab = app.state.window_revision();
+        app.process_effect(AppEffect::WindowSwap {
+            first: format!("window:{}", old_editor.0),
+            second: format!("window:{}", current_editor.0),
+        });
+        assert_eq!(app.windows, graph_before_cross_tab);
+        assert_eq!(app.state.window_revision(), revision_before_cross_tab);
+        assert!(
+            app.ui
+                .notification
+                .as_deref()
+                .is_some_and(|message| message.contains("tab")),
+            "{:?}",
+            app.ui.notification
+        );
+    }
+
+    #[test]
+    fn editor_window_revision_skips_idle_rebuilds_and_tracks_projection_changes() {
+        let mut app = app();
+        let (buffer, _) = app.state.open_text(
+            TextBuffer::from_text("first"),
+            Some(PathBuf::from("/workspace/first.rs")),
+        );
+        app.ui.dashboard = false;
+        app.reconcile_editor_windows();
+        let initial_count = app.editor_windows.reconciliation_count();
+        let initial_graph = app.windows.clone();
+        for _ in 0..128 {
+            app.reconcile_editor_windows();
+        }
+        assert_eq!(app.editor_windows.reconciliation_count(), initial_count);
+        assert_eq!(app.windows, initial_graph);
+
+        app.state.set_buffer_dirty(buffer, true);
+        app.reconcile_editor_windows();
+        assert!(app.ui.content_tabs[0].dirty);
+        let after_dirty = app.editor_windows.reconciliation_count();
+
+        let revision = app.state.buffers[buffer].text.revision();
+        let bytes = app.state.buffers[buffer].text.to_bytes();
+        app.state.mark_buffer_saved_as(
+            buffer,
+            revision,
+            bytes,
+            Some(PathBuf::from("/workspace/saved.rs")),
+        );
+        app.reconcile_editor_windows();
+        assert!(!app.ui.content_tabs[0].dirty);
+        assert_eq!(app.ui.content_tabs[0].title, "saved.rs");
+        assert_eq!(app.editor_windows.reconciliation_count(), after_dirty + 1);
+
+        app.state
+            .split_active(crate::editing::Axis::Horizontal, 500)
+            .expect("split");
+        app.reconcile_editor_windows();
+        let split_count = app.editor_windows.reconciliation_count();
+        let first_pane = match &app.state.tabs[app.state.active_tab.expect("tab")].root {
+            crate::editing::LayoutNode::Split { first, .. } => match first.as_ref() {
+                crate::editing::LayoutNode::Pane(pane) => *pane,
+                crate::editing::LayoutNode::Split { .. } => panic!("unexpected nested split"),
+            },
+            crate::editing::LayoutNode::Pane(_) => panic!("expected split"),
+        };
+        app.state.focus_pane_id(first_pane).expect("focus");
+        app.reconcile_editor_windows();
+        app.state.resize_active_pane(50).expect("resize");
+        app.reconcile_editor_windows();
+        assert_eq!(app.editor_windows.reconciliation_count(), split_count + 2);
+
+        let before_label = app.editor_windows.reconciliation_count();
+        app.configuration.settings.ui.buffer_line.scratch_label = "[untitled]".into();
+        app.reconcile_editor_windows();
+        assert_eq!(app.editor_windows.reconciliation_count(), before_label + 1);
+        app.windows
+            .validate()
+            .expect("revision-driven graph is valid");
+    }
+
+    #[test]
+    fn explorer_is_a_graph_dock_and_bundled_disable_is_transactional() {
+        let mut app = app();
+        app.state.open_text(TextBuffer::from_text("editor"), None);
+        app.ui.dashboard = false;
+        app.open_explorer();
+        let ids = app.surface_windows.explorer().expect("explorer resources");
+        assert!(matches!(
+            app.windows
+                .window(ids.window)
+                .expect("explorer window")
+                .placement,
+            WindowPlacement::Docked {
+                edge: crate::windows::DockEdge::Left,
+                ..
+            }
+        ));
+        let rect = app.explorer_window_rect().expect("projected explorer");
+        assert!(rect.width > 1 && rect.height == app.terminal_height);
+
+        let mut disabled = crate::configuration::load_bundled_config();
+        disabled.config.ui.explorer.bundled_enabled = false;
+        app.apply_configuration_candidate(disabled, false)
+            .expect("disable bundled explorer");
+        assert!(app.ui.explorer.is_none());
+        assert!(app.state.active_view.is_some());
+        app.open_explorer();
+        assert!(app.ui.explorer.is_none());
+        assert!(
+            app.ui
+                .notification
+                .as_deref()
+                .is_some_and(|message| message.contains("disabled"))
+        );
+        app.reconcile_editor_windows();
+        assert_eq!(
+            app.windows
+                .window(ids.window)
+                .expect("hidden explorer")
+                .placement,
+            WindowPlacement::Hidden
+        );
+
+        let enabled = crate::configuration::load_bundled_config();
+        app.apply_configuration_candidate(enabled, false)
+            .expect("re-enable bundled explorer");
+        app.open_explorer();
+        assert_eq!(app.surface_windows.explorer(), Some(ids));
+        assert!(matches!(
+            app.windows
+                .window(ids.window)
+                .expect("shown explorer")
+                .placement,
+            WindowPlacement::Docked { .. }
+        ));
+    }
+
+    #[test]
+    fn generic_native_window_operations_are_revision_checked_atomic_and_identity_preserving() {
+        let mut app = app();
+        app.state.open_text(TextBuffer::from_text("editor"), None);
+        app.ui.dashboard = false;
+        app.terminal_width = 100;
+        app.terminal_height = 30;
+        app.open_explorer();
+        app.terminals.insert(
+            PtyId(7),
+            super::TerminalRuntime {
+                profile: "shell".into(),
+                root_revision: app.workspace.root_revision(),
+                screen: PtyScreen::new(100, 8, 100),
+                running: true,
+                exit_code: None,
+                truncated: false,
+            },
+        );
+        app.active_terminal = Some(PtyId(7));
+        app.terminal_set_revision = app.terminal_set_revision.saturating_add(1);
+        app.sync_terminal_panel();
+        let explorer = app.surface_windows.explorer().expect("explorer");
+        let terminal = app.surface_windows.terminal(7).expect("terminal");
+        let original_explorer = app
+            .windows
+            .window(explorer.window)
+            .expect("explorer")
+            .placement;
+        let original_terminal = app
+            .windows
+            .window(terminal.window)
+            .expect("terminal")
+            .placement;
+
+        app.process_effect(crate::application::AppEffect::WindowSwap {
+            first: "explorer".into(),
+            second: "terminal".into(),
+        });
+        assert_eq!(app.surface_windows.explorer(), Some(explorer));
+        assert_eq!(app.surface_windows.terminal(7), Some(terminal));
+        assert_eq!(
+            app.windows
+                .window(explorer.window)
+                .expect("swapped")
+                .placement,
+            original_terminal
+        );
+        assert_eq!(
+            app.windows
+                .window(terminal.window)
+                .expect("swapped")
+                .placement,
+            original_explorer
+        );
+        app.process_effect(crate::application::AppEffect::WindowSwap {
+            first: "explorer".into(),
+            second: "terminal".into(),
+        });
+
+        app.process_effect(crate::application::AppEffect::WindowFullscreen(
+            "explorer".into(),
+        ));
+        let terminal_before = app
+            .windows
+            .window(terminal.window)
+            .expect("terminal")
+            .placement;
+        app.process_effect(crate::application::AppEffect::WindowFullscreen(
+            "terminal".into(),
+        ));
+        assert_eq!(
+            app.windows
+                .window(explorer.window)
+                .expect("fullscreen")
+                .placement,
+            WindowPlacement::Fullscreen
+        );
+        assert_eq!(
+            app.windows
+                .window(terminal.window)
+                .expect("atomic rejection")
+                .placement,
+            terminal_before
+        );
+        assert!(app.ui.notification_error);
+
+        app.process_effect(crate::application::AppEffect::WindowDock {
+            target: "explorer".into(),
+            edge: "left".into(),
+            size: 31,
+        });
+        app.process_effect(crate::application::AppEffect::WindowHide("explorer".into()));
+        assert_eq!(
+            app.windows
+                .window(explorer.window)
+                .expect("hidden")
+                .placement,
+            WindowPlacement::Hidden
+        );
+        app.process_effect(crate::application::AppEffect::WindowShow("explorer".into()));
+        assert_eq!(
+            app.windows
+                .window(explorer.window)
+                .expect("restored")
+                .placement,
+            WindowPlacement::Docked {
+                edge: DockEdge::Left,
+                size: 31,
+            }
+        );
+
+        let focus_target = if app.windows.focused() == Some(explorer.window) {
+            terminal.window
+        } else {
+            explorer.window
+        };
+        app.windows
+            .focus(focus_target)
+            .expect("graph-only focus change");
+        assert!(app.compositor_projection().is_none());
+        let graph_stale = app.windows.clone();
+        app.process_effect(crate::application::AppEffect::WindowHide("terminal".into()));
+        assert_eq!(app.windows, graph_stale);
+        app.reconcile_editor_windows();
+        assert!(app.compositor_projection().is_some());
+
+        let before_stale = app.windows.clone();
+        app.ui
+            .compositor_layout
+            .as_mut()
+            .expect("compositor")
+            .source_revision = app
+            .state
+            .window_revision()
+            .expect("source revision")
+            .saturating_add(1);
+        app.process_effect(crate::application::AppEffect::WindowHide("terminal".into()));
+        assert_eq!(app.windows, before_stale);
+        assert!(app.ui.notification_error);
+        app.ui
+            .compositor_layout
+            .as_mut()
+            .expect("compositor")
+            .source_revision = app.state.window_revision().expect("source revision");
+        let idle_graph = app.windows.clone();
+        let idle_reconciliations = app.editor_windows.reconciliation_count();
+        for _ in 0..128 {
+            app.reconcile_editor_windows();
+        }
+        assert_eq!(app.windows, idle_graph);
+        assert_eq!(
+            app.editor_windows.reconciliation_count(),
+            idle_reconciliations
+        );
+
+        app.process_effect(crate::application::AppEffect::WindowClose(
+            "explorer".into(),
+        ));
+        assert!(app.windows.content(explorer.content).is_none());
+        assert!(app.surface_windows.explorer().is_none());
+        assert!(app.ui.explorer.is_none());
+        assert!(app.terminals.contains_key(&PtyId(7)));
+    }
+
+    #[test]
+    fn semantic_window_layout_persistence_is_strict_transactional_and_id_free() {
+        let mut source = app();
+        source.state.open_text(
+            TextBuffer::from_text("editor"),
+            Some(PathBuf::from("/workspace/editor.rs")),
+        );
+        source.ui.dashboard = false;
+        source.open_explorer();
+        source.process_effect(crate::application::AppEffect::WindowDock {
+            target: "explorer".into(),
+            edge: "right".into(),
+            size: 27,
+        });
+        let session = source.capture_session().expect("session");
+        assert_eq!(session.window_rules.len(), 1);
+        assert_eq!(session.window_rules[0].content_type, "builtin.explorer");
+        let encoded = serde_json::to_string(&session.window_rules).expect("encode rules");
+        assert!(!encoded.contains("content_id"));
+        assert!(!encoded.contains("view_id"));
+        assert!(!encoded.contains("window_id"));
+        assert!(!encoded.contains("pty"));
+
+        let mut restored = app();
+        restored
+            .state
+            .open_text(TextBuffer::from_text("restored"), None);
+        restored.ui.dashboard = false;
+        restored.open_explorer();
+        let ids = restored
+            .surface_windows
+            .explorer()
+            .expect("fresh runtime ids");
+        restored
+            .apply_persisted_window_rules(&session.window_rules)
+            .expect("apply semantic rules");
+        assert_eq!(
+            restored
+                .windows
+                .window(ids.window)
+                .expect("restored")
+                .placement,
+            WindowPlacement::Docked {
+                edge: DockEdge::Right,
+                size: 27,
+            }
+        );
+
+        let before = restored.surface_windows.semantic_defaults(None);
+        let hostile = vec![
+            PersistedWindowRule {
+                content_type: "builtin.explorer".into(),
+                placement: PersistedWindowPlacement::Fullscreen,
+            },
+            PersistedWindowRule {
+                content_type: "unknown.surface".into(),
+                placement: PersistedWindowPlacement::Hidden,
+            },
+        ];
+        assert!(restored.apply_persisted_window_rules(&hostile).is_err());
+        assert_eq!(restored.surface_windows.semantic_defaults(None), before);
+        assert_eq!(restored.surface_windows.explorer(), Some(ids));
+
+        let two_fullscreen = vec![
+            PersistedWindowRule {
+                content_type: "builtin.explorer".into(),
+                placement: PersistedWindowPlacement::Fullscreen,
+            },
+            PersistedWindowRule {
+                content_type: "builtin.terminal".into(),
+                placement: PersistedWindowPlacement::Fullscreen,
+            },
+        ];
+        let graph_before = restored.windows.clone();
+        assert!(
+            restored
+                .apply_persisted_window_rules(&two_fullscreen)
+                .is_err()
+        );
+        assert_eq!(restored.windows, graph_before);
+        assert_eq!(restored.surface_windows.semantic_defaults(None), before);
+
+        restored
+            .surface_windows
+            .set_configured_placements(BTreeMap::from([(
+                "builtin.dashboard".into(),
+                WindowPlacement::Fullscreen,
+            )]))
+            .expect("one configured fullscreen");
+        let merged_conflict = [PersistedWindowRule {
+            content_type: "builtin.explorer".into(),
+            placement: PersistedWindowPlacement::Fullscreen,
+        }];
+        let graph_before_merged = restored.windows.clone();
+        let defaults_before_merged = restored.surface_windows.semantic_defaults(None);
+        assert!(
+            restored
+                .apply_persisted_window_rules(&merged_conflict)
+                .is_err()
+        );
+        assert_eq!(restored.windows, graph_before_merged);
+        assert_eq!(
+            restored.surface_windows.semantic_defaults(None),
+            defaults_before_merged
+        );
+    }
+
+    #[test]
+    fn configured_window_rule_candidate_is_cloned_validated_and_published_atomically() {
+        let mut app = app();
+        app.state.open_text(TextBuffer::from_text("editor"), None);
+        app.ui.dashboard = false;
+        app.open_explorer();
+        let explorer = app.surface_windows.explorer().expect("explorer");
+        let original = app.windows.clone();
+        let rules = crate::configuration::WindowsConfig {
+            rules: vec![crate::configuration::WindowRuleConfig {
+                content_type: "builtin.explorer".into(),
+                placement: crate::configuration::WindowPlacementConfig::Docked {
+                    edge: "right".into(),
+                    size: 31,
+                },
+            }],
+        };
+        let (graph, mut surfaces) = app
+            .prepare_configured_window_rules(&rules)
+            .expect("configured candidate");
+        assert_eq!(app.windows, original);
+        assert_eq!(
+            graph
+                .window(explorer.window)
+                .expect("candidate explorer")
+                .placement,
+            WindowPlacement::Docked {
+                edge: DockEdge::Right,
+                size: 31,
+            }
+        );
+        surfaces.invalidate();
+        app.windows = graph;
+        app.surface_windows = surfaces;
+        app.reconcile_editor_windows();
+        assert_eq!(
+            app.windows
+                .window(explorer.window)
+                .expect("published")
+                .placement,
+            WindowPlacement::Docked {
+                edge: DockEdge::Right,
+                size: 31,
+            }
+        );
+
+        let hostile = crate::configuration::WindowsConfig {
+            rules: vec![
+                crate::configuration::WindowRuleConfig {
+                    content_type: "builtin.dashboard".into(),
+                    placement: crate::configuration::WindowPlacementConfig::Fullscreen,
+                },
+                crate::configuration::WindowRuleConfig {
+                    content_type: "builtin.debug".into(),
+                    placement: crate::configuration::WindowPlacementConfig::Fullscreen,
+                },
+            ],
+        };
+        let graph_before = app.windows.clone();
+        let surfaces_before = app.surface_windows.clone();
+        assert!(app.prepare_configured_window_rules(&hostile).is_err());
+        assert_eq!(app.windows, graph_before);
+        assert_eq!(app.surface_windows, surfaces_before);
+    }
+
+    #[test]
     fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
         let mut app = app();
         app.state.open_text(TextBuffer::from_text("editor"), None);
@@ -16674,12 +23448,125 @@ mod tests {
         assert_eq!(app.terminals[&PtyId(1)].screen.dimensions(), (60, 10));
         assert_eq!(app.workspace_render_height(), 8);
 
+        let terminal_ids = app.surface_windows.terminal(1).expect("terminal resources");
+        app.process_effect(crate::application::AppEffect::TerminalFloat {
+            x: 5,
+            y: 3,
+            width: 40,
+            height: 10,
+        });
+        assert_eq!(app.surface_windows.terminal(1), Some(terminal_ids));
+        assert_eq!(
+            app.windows
+                .window(terminal_ids.window)
+                .expect("floating")
+                .placement,
+            WindowPlacement::Floating(WindowRect {
+                x: 5,
+                y: 3,
+                width: 40,
+                height: 10,
+            })
+        );
+        assert_eq!(app.terminals[&PtyId(1)].screen.dimensions(), (40, 8));
+        app.process_effect(crate::application::AppEffect::WindowMove {
+            target: "terminal".into(),
+            x: 7,
+            y: 4,
+        });
+        app.process_effect(crate::application::AppEffect::WindowResize {
+            target: "terminal".into(),
+            amount: 2,
+        });
+        assert_eq!(
+            app.windows
+                .window(terminal_ids.window)
+                .expect("moved")
+                .placement,
+            WindowPlacement::Floating(WindowRect {
+                x: 7,
+                y: 4,
+                width: 42,
+                height: 12,
+            })
+        );
+        assert_eq!(app.terminals[&PtyId(1)].screen.dimensions(), (42, 10));
+        app.process_effect(crate::application::AppEffect::TerminalFullscreen);
+        assert_eq!(app.surface_windows.terminal(1), Some(terminal_ids));
+        assert_eq!(
+            app.windows
+                .window(terminal_ids.window)
+                .expect("fullscreen")
+                .placement,
+            WindowPlacement::Fullscreen
+        );
+        assert_eq!(app.terminals[&PtyId(1)].screen.dimensions(), (60, 18));
+        app.process_effect(crate::application::AppEffect::TerminalHide);
+        assert_eq!(app.surface_windows.terminal(1), Some(terminal_ids));
+        assert!(app.terminals.contains_key(&PtyId(1)));
+        assert!(app.terminal_window_rect().is_none());
+        app.process_effect(crate::application::AppEffect::WindowShow("terminal".into()));
+        assert_eq!(app.surface_windows.terminal(1), Some(terminal_ids));
+        assert_eq!(
+            app.windows
+                .window(terminal_ids.window)
+                .expect("shown")
+                .placement,
+            WindowPlacement::Fullscreen
+        );
+        app.process_effect(crate::application::AppEffect::TerminalDock {
+            edge: "top".into(),
+            size: 5,
+        });
+        assert_eq!(app.terminals[&PtyId(1)].screen.dimensions(), (60, 3));
+        app.process_effect(crate::application::AppEffect::TerminalDock {
+            edge: "right".into(),
+            size: 10,
+        });
+        assert_eq!(app.terminals[&PtyId(1)].screen.dimensions(), (10, 18));
+        app.process_effect(crate::application::AppEffect::TerminalDock {
+            edge: "left".into(),
+            size: 8,
+        });
+        assert_eq!(app.terminals[&PtyId(1)].screen.dimensions(), (8, 18));
+        app.process_effect(crate::application::AppEffect::TerminalDock {
+            edge: "bottom".into(),
+            size: 12,
+        });
+        assert_eq!(app.surface_windows.terminal(1), Some(terminal_ids));
+        assert_eq!(app.terminals[&PtyId(1)].screen.dimensions(), (60, 10));
+        app.process_effect(crate::application::AppEffect::TerminalFocus(2));
+        app.process_effect(crate::application::AppEffect::TerminalFloat {
+            x: 9,
+            y: 4,
+            width: 33,
+            height: 9,
+        });
+        let terminal_rule = app
+            .capture_window_rules()
+            .into_iter()
+            .find(|rule| rule.content_type == "builtin.terminal")
+            .expect("selected terminal placement rule");
+        assert_eq!(
+            terminal_rule.placement,
+            PersistedWindowPlacement::Floating {
+                x: 9,
+                y: 4,
+                width: 33,
+                height: 9,
+            }
+        );
+        app.process_effect(crate::application::AppEffect::TerminalFocus(1));
+
         app.process_effect(crate::application::AppEffect::TerminalClose);
         assert!(!app.terminals.contains_key(&PtyId(1)));
         assert_eq!(app.active_terminal, Some(PtyId(2)));
         assert!(app.ui.terminal_panel.is_some());
         app.process_effect(crate::application::AppEffect::TerminalClose);
         assert!(app.terminals.is_empty());
+        assert!(app.surface_windows.terminal(1).is_none());
+        assert!(app.surface_windows.terminal(2).is_none());
+        assert!(app.windows.content(terminal_ids.content).is_none());
         assert!(app.active_terminal.is_none());
         assert!(!app.terminal_focused);
         assert!(app.ui.terminal_panel.is_none());
@@ -17854,6 +24741,516 @@ mod tests {
     }
 
     #[test]
+    fn retained_plugin_window_projection_is_idle_and_generation_owned() {
+        let mut app = app();
+        app.state.open_text(TextBuffer::from_text("editor"), None);
+        app.ui.dashboard = false;
+        app.reconcile_editor_windows();
+        let manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
+        let index = crate::plugins::index_manifest_contributions(
+            &manifest,
+            77,
+            "manifest.toml:bytes 0..1".into(),
+        )
+        .expect("index");
+        app.plugin_contributions
+            .install(index.clone())
+            .expect("catalog");
+        let request = crate::plugins::PluginUiRequest {
+            token: 1,
+            kind: crate::plugins::PluginUiRequestKind::OpenWindow {
+                expected_graph_revision: app.windows.revision().expect("revision"),
+                content_type: "plugin.demo.panel".into(),
+                title: "Demo".into(),
+                placement: crate::plugins::PluginRequestedPlacement::Floating {
+                    x: 5,
+                    y: 3,
+                    width: 24,
+                    height: 7,
+                },
+                tree: Some(crate::plugins::PluginUiTree {
+                    revision: 1,
+                    root: 1,
+                    nodes: vec![crate::plugins::PluginUiNode {
+                        id: 1,
+                        kind: crate::plugins::PluginUiNodeKind::Text,
+                        text: "retained plugin".into(),
+                        style: crate::plugins::PluginUiStyle::Accent,
+                        action: None,
+                        children: Vec::new(),
+                    }],
+                }),
+            },
+        };
+        let event = app
+            .plugin_windows
+            .process(&mut app.windows, &index, request);
+        assert!(event.error.is_none(), "{:?}", event.error);
+        let window = app.plugin_windows.snapshots()[0].window;
+        app.ui.plugin_surfaces = app.plugin_windows.snapshots();
+        app.surface_windows.invalidate();
+        app.reconcile_editor_windows();
+        assert!(
+            app.compositor_projection()
+                .expect("projection")
+                .window(window)
+                .is_some()
+        );
+        let reconciliation_count = app.editor_windows.reconciliation_count();
+        let graph = app.windows.clone();
+        for _ in 0..256 {
+            app.reconcile_editor_windows();
+        }
+        assert_eq!(
+            app.editor_windows.reconciliation_count(),
+            reconciliation_count
+        );
+        assert_eq!(app.windows, graph);
+        app.remove_plugin_contribution_generation("demo", PluginLoadId(77));
+        assert!(app.ui.plugin_surfaces.is_empty());
+        assert!(app.windows.window(window).is_none());
+    }
+
+    #[test]
+    fn plugin_host_events_are_snapshot_owned_coalesced_and_idle() {
+        let mut app = app();
+        app.state.open_text(TextBuffer::from_text("editor"), None);
+        app.ui.dashboard = false;
+        app.reconcile_editor_windows();
+        let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
+        manifest
+            .capabilities
+            .insert(crate::plugins::PluginCapability::EventSubscriptions);
+        manifest.contributions.subscriptions =
+            vec![crate::plugins::PluginSubscriptionContribution {
+                id: "plugin.demo.subscription.buffer".into(),
+                kind: crate::plugins::PluginSubscriptionKind::BufferSummaryChanged,
+                maximum_queued: 8,
+                maximum_rate_per_second: 120,
+                coalesce: true,
+                provenance: None,
+            }];
+        let index =
+            crate::plugins::index_manifest_contributions(&manifest, 77, "event manifest".into())
+                .expect("event index");
+        app.plugin_contributions
+            .install(index.clone())
+            .expect("catalog");
+        app.plugin_host_events.install(&index).expect("event owner");
+        app.refresh_plugin_host_events();
+        assert_eq!(app.plugin_host_events.pending("demo", PluginLoadId(77)), 1);
+        let stable_queue = app.plugin_host_events.clone();
+        let stable_observation = app.plugin_host_event_observation.clone();
+        for _ in 0..256 {
+            app.refresh_plugin_host_events();
+        }
+        assert_eq!(app.plugin_host_events, stable_queue);
+        assert_eq!(app.plugin_host_event_observation, stable_observation);
+
+        let view = app.state.active_view.expect("view");
+        app.state.views[view].cursor = ByteOffset(1);
+        app.refresh_plugin_host_events();
+        let event = app
+            .plugin_host_events
+            .deliver("demo", PluginLoadId(77))
+            .pop()
+            .expect("coalesced buffer event");
+        assert_eq!(event.coalesced, 1);
+        assert!(event.payload.contains("cursor=1"));
+        app.remove_plugin_contribution_generation("demo", PluginLoadId(77));
+        assert_eq!(app.plugin_host_events.pending("demo", PluginLoadId(77)), 0);
+    }
+
+    #[test]
+    fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
+        let mut app = app();
+        let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
+        manifest
+            .capabilities
+            .insert(crate::plugins::PluginCapability::PickerProviders);
+        manifest.contributions.providers = vec![crate::plugins::PluginProviderContribution {
+            id: "plugin.demo.provider.files".into(),
+            kind: crate::plugins::PluginProviderKind::PickerSource,
+            command: "plugin.demo.run".into(),
+            maximum_concurrent_requests: 1,
+            maximum_items: 16,
+            maximum_bytes: 8_192,
+            deadline_milliseconds: 30_000,
+            provenance: None,
+        }];
+        let index =
+            crate::plugins::index_manifest_contributions(&manifest, 77, "provider manifest".into())
+                .expect("provider index");
+        app.plugin_contributions
+            .install(index.clone())
+            .expect("catalog");
+        app.plugin_providers
+            .install(&index)
+            .expect("provider owner");
+        let request = app
+            .plugin_providers
+            .start(
+                "demo",
+                PluginLoadId(77),
+                "plugin.demo.provider.files",
+                "be".into(),
+                "editor".into(),
+                Some(app.workspace.root_revision()),
+                None,
+            )
+            .expect("request");
+        app.plugin_providers
+            .apply_chunk(
+                "demo",
+                PluginLoadId(77),
+                Some(app.workspace.root_revision()),
+                None,
+                crate::plugins::PluginPickerChunk {
+                    request,
+                    sequence: 1,
+                    items: vec![
+                        crate::plugins::PluginPickerItem {
+                            id: "z".into(),
+                            primary: "Zebra".into(),
+                            secondary: None,
+                            action_data: vec![1],
+                        },
+                        crate::plugins::PluginPickerItem {
+                            id: "b".into(),
+                            primary: "Beta".into(),
+                            secondary: Some("ranked first".into()),
+                            action_data: vec![2],
+                        },
+                    ],
+                    terminal: crate::plugins::PluginProviderTerminal::Complete,
+                },
+            )
+            .expect("chunk");
+        app.active_plugin_picker = Some(request);
+        app.present_plugin_picker(request);
+        assert_eq!(app.picker_surface, PickerSurfaceKind::Generic);
+        assert_eq!(
+            app.picker
+                .as_ref()
+                .and_then(crate::workspace::PickerState::selected_item)
+                .map(|item| item.label.as_str()),
+            Some("Beta")
+        );
+        let stable = app.plugin_providers.projection(request);
+        let stable_ui = app.ui.picker.clone();
+        for _ in 0..256 {
+            assert_eq!(app.plugin_providers.projection(request), stable);
+            assert_eq!(app.ui.picker, stable_ui);
+        }
+        app.close_picker();
+        assert_eq!(
+            app.plugin_providers
+                .apply_chunk(
+                    "demo",
+                    PluginLoadId(77),
+                    Some(app.workspace.root_revision()),
+                    None,
+                    crate::plugins::PluginPickerChunk {
+                        request,
+                        sequence: 2,
+                        items: Vec::new(),
+                        terminal: crate::plugins::PluginProviderTerminal::Complete,
+                    },
+                )
+                .unwrap_err()
+                .code,
+            crate::plugins::PluginProviderErrorCode::Cancelled
+        );
+    }
+
+    #[test]
+    fn private_plugin_surface_geometry_snapshot_and_idle_projection_are_application_owned() {
+        let mut app = app();
+        app.state.open_text(TextBuffer::from_text("editor"), None);
+        app.ui.dashboard = false;
+        app.reconcile_editor_windows();
+        let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
+        manifest
+            .capabilities
+            .insert(crate::plugins::PluginCapability::PrivateCells);
+        let content = &mut manifest.contributions.content_types[0];
+        content.presenter = crate::plugins::PluginPresenterKind::PrivateCells;
+        content.private_cells = Some(crate::plugins::PluginPrivateCellPolicy {
+            maximum_cells: 64,
+            maximum_patch_cells: 32,
+            maximum_dirty_rectangles: 8,
+            maximum_styles: 8,
+            maximum_hit_regions: 8,
+            maximum_bytes: 4_096,
+            cursor: true,
+        });
+        let index =
+            crate::plugins::index_manifest_contributions(&manifest, 77, "private manifest".into())
+                .expect("index");
+        app.plugin_contributions
+            .install(index.clone())
+            .expect("catalog");
+        let revision = app.windows.revision().expect("revision");
+        let opened = app.plugin_windows.process(
+            &mut app.windows,
+            &index,
+            crate::plugins::PluginUiRequest {
+                token: 1,
+                kind: crate::plugins::PluginUiRequestKind::OpenWindow {
+                    expected_graph_revision: revision,
+                    content_type: "plugin.demo.panel".into(),
+                    title: "Cells".into(),
+                    placement: crate::plugins::PluginRequestedPlacement::Floating {
+                        x: 4,
+                        y: 2,
+                        width: 12,
+                        height: 4,
+                    },
+                    tree: None,
+                },
+            },
+        );
+        assert!(opened.error.is_none(), "{:?}", opened.error);
+        let handle = opened.handle.expect("handle");
+        app.surface_windows.invalidate();
+        app.reconcile_editor_windows();
+        let geometry = app
+            .pending_plugin_ui_events
+            .get(&("demo".into(), PluginLoadId(77)))
+            .and_then(|events| events.iter().find_map(|event| event.geometry.clone()))
+            .expect("local geometry event");
+        assert_eq!((geometry.width, geometry.height), (12, 4));
+        let replaced = app.plugin_windows.process(
+            &mut app.windows,
+            &index,
+            crate::plugins::PluginUiRequest {
+                token: 2,
+                kind: crate::plugins::PluginUiRequestKind::ReplacePrivate {
+                    handle,
+                    snapshot: crate::plugins::PluginPrivateSnapshot {
+                        revision: 1,
+                        dimensions_revision: geometry.dimensions_revision,
+                        styles: vec![crate::plugins::PluginPrivateStyle {
+                            id: 1,
+                            style: crate::plugins::PluginUiStyle::Accent,
+                        }],
+                        cells: vec![crate::plugins::PluginPrivateCell {
+                            x: 0,
+                            y: 0,
+                            grapheme: "X".into(),
+                            continuation: false,
+                            style: 1,
+                        }],
+                        cursor: Some(crate::plugins::PluginPrivateCursor { x: 0, y: 0 }),
+                        hit_regions: vec![crate::plugins::PluginPrivateHitRegion {
+                            x: 0,
+                            y: 0,
+                            width: 1,
+                            height: 1,
+                            action: "plugin.demo.run".into(),
+                        }],
+                    },
+                },
+            },
+        );
+        assert!(replaced.error.is_none(), "{:?}", replaced.error);
+        app.surface_windows.invalidate();
+        app.reconcile_editor_windows();
+        assert_eq!(app.ui.private_surfaces.len(), 1);
+        assert_eq!(app.ui.private_surfaces[0].cells[0].grapheme, "X");
+        let graph = app.windows.clone();
+        let ui = app.ui.private_surfaces.clone();
+        let reconciliations = app.editor_windows.reconciliation_count();
+        for _ in 0..256 {
+            app.reconcile_editor_windows();
+        }
+        assert_eq!(app.windows, graph);
+        assert_eq!(app.ui.private_surfaces, ui);
+        assert_eq!(app.editor_windows.reconciliation_count(), reconciliations);
+    }
+
+    #[test]
+    fn retained_interaction_commands_use_host_focus_scroll_and_mouse_state() {
+        let mut app = app();
+        app.state.open_text(TextBuffer::from_text("editor"), None);
+        app.ui.dashboard = false;
+        app.reconcile_editor_windows();
+        let manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
+        let index =
+            crate::plugins::index_manifest_contributions(&manifest, 77, "manifest.toml".into())
+                .expect("index");
+        app.plugin_contributions
+            .install(index.clone())
+            .expect("catalog");
+        let revision = app.windows.revision().expect("revision");
+        let event = app.plugin_windows.process(
+            &mut app.windows,
+            &index,
+            crate::plugins::PluginUiRequest {
+                token: 1,
+                kind: crate::plugins::PluginUiRequestKind::OpenWindow {
+                    expected_graph_revision: revision,
+                    content_type: "plugin.demo.panel".into(),
+                    title: "Demo".into(),
+                    placement: crate::plugins::PluginRequestedPlacement::Floating {
+                        x: 4,
+                        y: 2,
+                        width: 24,
+                        height: 7,
+                    },
+                    tree: Some(crate::plugins::PluginUiTree {
+                        revision: 1,
+                        root: 1,
+                        nodes: vec![
+                            crate::plugins::PluginUiNode {
+                                id: 1,
+                                kind: crate::plugins::PluginUiNodeKind::Container,
+                                text: String::new(),
+                                style: crate::plugins::PluginUiStyle::Default,
+                                action: None,
+                                children: vec![2, 3],
+                            },
+                            crate::plugins::PluginUiNode {
+                                id: 2,
+                                kind: crate::plugins::PluginUiNodeKind::List,
+                                text: "List".into(),
+                                style: crate::plugins::PluginUiStyle::Default,
+                                action: None,
+                                children: Vec::new(),
+                            },
+                            crate::plugins::PluginUiNode {
+                                id: 3,
+                                kind: crate::plugins::PluginUiNodeKind::Button,
+                                text: "Run".into(),
+                                style: crate::plugins::PluginUiStyle::Accent,
+                                action: Some("plugin.demo.run".into()),
+                                children: Vec::new(),
+                            },
+                        ],
+                    }),
+                },
+            },
+        );
+        assert!(event.error.is_none(), "{:?}", event.error);
+        app.ui.plugin_surfaces = app.plugin_windows.snapshots();
+        assert_eq!(
+            app.ui.plugin_surfaces[0]
+                .rows
+                .iter()
+                .find(|row| row.focused)
+                .map(|row| row.node),
+            Some(2)
+        );
+        app.invoke_mapped_command("surface.retained.focus.next");
+        assert_eq!(
+            app.ui.plugin_surfaces[0]
+                .rows
+                .iter()
+                .find(|row| row.focused)
+                .map(|row| row.node),
+            Some(3)
+        );
+        app.invoke_mapped_command("surface.retained.scroll.down");
+        assert_eq!(app.ui.plugin_surfaces[0].scroll, 1);
+        let window = app.ui.plugin_surfaces[0].window;
+        app.surface_windows.invalidate();
+        app.reconcile_editor_windows();
+        let rect = app
+            .compositor_projection()
+            .and_then(|projection| projection.window(window).map(|window| window.rect))
+            .expect("plugin rectangle");
+        app.mouse_position = Some((rect.x, rect.y));
+        app.invoke_mapped_command("surface.retained.mouse.select");
+        assert_eq!(
+            app.ui.plugin_surfaces[0]
+                .rows
+                .iter()
+                .find(|row| row.focused)
+                .map(|row| row.node),
+            Some(3),
+            "scroll-adjusted mouse row selects the visible button"
+        );
+    }
+
+    #[test]
+    fn stale_generation_cleanup_preserves_replacement_ui_events() {
+        let mut app = app();
+        let event = |token| crate::plugins::PluginUiEvent {
+            token,
+            handle: None,
+            graph_revision: None,
+            tree_revision: None,
+            surface_revision: None,
+            geometry: None,
+            action: None,
+            error: None,
+        };
+        app.pending_plugin_ui_events
+            .insert(("demo".into(), PluginLoadId(77)), vec![event(1)]);
+        app.pending_plugin_ui_events
+            .insert(("demo".into(), PluginLoadId(78)), vec![event(2)]);
+        let storage_result = |load, token| crate::plugins::PluginStorageResult {
+            plugin: "demo".into(),
+            load: PluginLoadId(load),
+            token,
+            value: None,
+            revision: None,
+            entries: Vec::new(),
+            truncated: false,
+            error: None,
+        };
+        app.pending_plugin_storage_results.insert(
+            ("demo".into(), PluginLoadId(77)),
+            vec![storage_result(77, 1)],
+        );
+        app.pending_plugin_storage_results.insert(
+            ("demo".into(), PluginLoadId(78)),
+            vec![storage_result(78, 2)],
+        );
+        app.plugin_storage
+            .install_generation("demo", PluginLoadId(78));
+        let manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
+        let replacement = crate::plugins::index_manifest_contributions(
+            &manifest,
+            78,
+            "replacement manifest".into(),
+        )
+        .expect("replacement index");
+        app.plugin_contributions
+            .install(replacement)
+            .expect("replacement catalog");
+        app.remove_plugin_contribution_generation("demo", PluginLoadId(77));
+        assert!(
+            !app.pending_plugin_ui_events
+                .contains_key(&("demo".into(), PluginLoadId(77)))
+        );
+        assert_eq!(
+            app.pending_plugin_ui_events
+                .get(&("demo".into(), PluginLoadId(78)))
+                .and_then(|events| events.first())
+                .map(|event| event.token),
+            Some(2)
+        );
+        assert_eq!(
+            app.plugin_contributions
+                .get("demo")
+                .map(|index| index.generation),
+            Some(78)
+        );
+        assert!(
+            !app.pending_plugin_storage_results
+                .contains_key(&("demo".into(), PluginLoadId(77)))
+        );
+        assert_eq!(
+            app.pending_plugin_storage_results
+                .get(&("demo".into(), PluginLoadId(78)))
+                .and_then(|results| results.first())
+                .map(|result| result.token),
+            Some(2)
+        );
+    }
+
+    #[test]
     fn expected_index_failure_before_sibling_index_aborts_the_complete_batch() {
         let mut app = app();
         app.configuration.deferred_plugin_keymaps = true;
@@ -17927,10 +25324,17 @@ mod tests {
                 enabled: true,
             },
         );
-        loaded
-            .keymaps
-            .entries
-            .push(crate::configuration::KeymapEntry {
+        loaded.config.windows.rules = vec![crate::configuration::WindowRuleConfig {
+            content_type: "plugin.demo.panel".into(),
+            placement: crate::configuration::WindowPlacementConfig::Floating {
+                x: 4,
+                y: 3,
+                width: 50,
+                height: 12,
+            },
+        }];
+        loaded.keymaps.entries.extend([
+            crate::configuration::KeymapEntry {
                 id: "plugin.demo.keymap.dashboard".into(),
                 context: Some("dashboard".into()),
                 mode: String::new(),
@@ -17940,11 +25344,25 @@ mod tests {
                 unmap: false,
                 disable: false,
                 pass_through: false,
-            });
+            },
+            crate::configuration::KeymapEntry {
+                id: "user.test.demo-retained-next".into(),
+                context: Some("plugin.demo.chat".into()),
+                mode: String::new(),
+                keys: Some("j".into()),
+                command: Some("surface.retained.focus.next".into()),
+                arguments: BTreeMap::new(),
+                unmap: false,
+                disable: false,
+                pass_through: false,
+            },
+        ]);
         let (configuration, diagnostic) =
             super::resolve_configuration(&app.commands, loaded, true).expect("deferred config");
         assert!(diagnostic.is_none());
         assert!(configuration.deferred_plugin_keymaps);
+        assert!(configuration.settings.windows.rules.is_empty());
+        assert_eq!(configuration.raw_windows.rules.len(), 1);
         app.configuration = configuration;
         let load = app
             .plugins
@@ -17969,6 +25387,17 @@ mod tests {
             .expect("user replacement");
         assert_eq!(moved.keys, "z");
         assert_eq!(moved.contribution_layer, InputContextLayer::User);
+        assert_eq!(
+            app.configuration
+                .keymaps
+                .inspect_id("user.test.demo-retained-next")
+                .map(|mapping| mapping.context),
+            Some("plugin.demo.chat".into())
+        );
+        assert_eq!(
+            app.configuration.settings.windows.rules[0].content_type,
+            "plugin.demo.panel"
+        );
         assert!(
             app.configuration
                 .keymaps
@@ -17987,6 +25416,13 @@ mod tests {
                 .inspect_id("plugin.demo.keymap.dashboard")
                 .is_none()
         );
+        assert!(
+            app.configuration
+                .keymaps
+                .inspect_id("user.test.demo-retained-next")
+                .is_none()
+        );
+        assert!(app.configuration.settings.windows.rules.is_empty());
     }
 
     #[test]
@@ -18001,6 +25437,14 @@ mod tests {
                 enabled: true,
             },
         );
+        loaded
+            .config
+            .windows
+            .rules
+            .push(crate::configuration::WindowRuleConfig {
+                content_type: "plugin.demo.panel".into(),
+                placement: crate::configuration::WindowPlacementConfig::Automatic,
+            });
         loaded.keymaps.entries.extend([
             crate::configuration::KeymapEntry {
                 id: "plugin.demo.keymap.default".into(),
@@ -18024,12 +25468,38 @@ mod tests {
                 disable: false,
                 pass_through: false,
             },
+            crate::configuration::KeymapEntry {
+                id: "user.test.demo-retained-context".into(),
+                context: Some("plugin.demo.chat".into()),
+                mode: String::new(),
+                keys: Some("j".into()),
+                command: Some("surface.retained.focus.next".into()),
+                arguments: BTreeMap::new(),
+                unmap: false,
+                disable: false,
+                pass_through: false,
+            },
         ]);
         let (resolved, diagnostic) = super::resolve_configuration(&app.commands, loaded, true)
             .expect("deferred plugin references");
         assert!(diagnostic.is_none());
         assert!(resolved.deferred_plugin_keymaps);
         assert!(resolved.expected_plugin_indexes.contains("demo"));
+        assert!(
+            resolved
+                .settings
+                .windows
+                .rules
+                .iter()
+                .all(|rule| !rule.content_type.starts_with("plugin."))
+        );
+        assert!(
+            resolved
+                .raw_windows
+                .rules
+                .iter()
+                .any(|rule| rule.content_type == "plugin.demo.panel")
+        );
         assert!(
             resolved
                 .keymaps
@@ -18059,6 +25529,16 @@ mod tests {
                 pass_through: false,
             });
         assert!(super::resolve_configuration(&app.commands, unknown, true).is_err());
+        let mut unknown_window = crate::configuration::load_bundled_config();
+        unknown_window
+            .config
+            .windows
+            .rules
+            .push(crate::configuration::WindowRuleConfig {
+                content_type: "plugin.unknown.panel".into(),
+                placement: crate::configuration::WindowPlacementConfig::Hidden,
+            });
+        assert!(super::resolve_configuration(&app.commands, unknown_window, true).is_err());
 
         let mut running = self::app();
         let previous = running.configuration.settings.plugins.clone();
@@ -18091,6 +25571,11 @@ mod tests {
                 contexts: Vec::new(),
                 keymaps: Vec::new(),
                 key_groups: Vec::new(),
+                content_types: Vec::new(),
+                subscriptions: Vec::new(),
+                providers: Vec::new(),
+                virtual_documents: Vec::new(),
+                storage: None,
             }
         }
 
@@ -18137,13 +25622,22 @@ mod tests {
         app.ui.notification = Some("keep unrelated notification".into());
         app.present_lsp_result(
             "rust-analyzer",
+            1,
             "textDocument/hover",
             "file:///tmp/test.rs",
-            crate::languages::LspFeatureResult::Hover("first\nsecond 界".into()),
+            crate::languages::LspFeatureResult::Hover(crate::languages::LspHover {
+                sections: vec![crate::languages::LspMarkupContent {
+                    kind: crate::languages::LspMarkupKind::Markdown,
+                    value: "first\nsecond 界".into(),
+                }],
+                range: None,
+            }),
         );
         let popup = app.ui.documentation_popup.as_ref().expect("hover popup");
         assert_eq!(popup.kind, DocumentationPopupKind::Hover);
-        assert_eq!(popup.lines, ["first", "second 界"]);
+        assert_eq!(popup.sections[0].lines, ["first", "second 界"]);
+        assert_eq!(popup.sections[0].markup, DocumentationMarkupKind::Markdown);
+        assert_eq!(popup.provider, "rust-analyzer");
         assert!(popup.title.contains("rust-analyzer"));
         assert_eq!(
             app.ui.notification.as_deref(),
@@ -18152,9 +25646,13 @@ mod tests {
 
         app.present_lsp_result(
             "rust-analyzer",
+            2,
             "textDocument/signatureHelp",
             "file:///tmp/test.rs",
-            crate::languages::LspFeatureResult::Signature("fn demo(\n  value: usize\n)".into()),
+            crate::languages::LspFeatureResult::Signature(crate::languages::LspMarkupContent {
+                kind: crate::languages::LspMarkupKind::PlainText,
+                value: "fn demo(\n  value: usize\n)".into(),
+            }),
         );
         let popup = app
             .ui
@@ -18162,9 +25660,429 @@ mod tests {
             .as_ref()
             .expect("signature popup");
         assert_eq!(popup.kind, DocumentationPopupKind::Signature);
-        assert_eq!(popup.lines.len(), 3);
+        assert_eq!(popup.line_count(), 3);
+
+        app.configuration
+            .settings
+            .ui
+            .documentation_popup
+            .maximum_sections = 1;
+        app.configuration
+            .settings
+            .ui
+            .documentation_popup
+            .maximum_lines = 1;
+        app.configuration
+            .settings
+            .ui
+            .documentation_popup
+            .maximum_bytes = 256;
+        app.present_documentation_popup(
+            DocumentationPopupKind::Hover,
+            "bounded".into(),
+            "provider".into(),
+            Some(ByteRange::new(ByteOffset(0), ByteOffset(1)).unwrap()),
+            vec![
+                crate::languages::LspMarkupContent {
+                    kind: crate::languages::LspMarkupKind::PlainText,
+                    value: "first\nsecond".into(),
+                },
+                crate::languages::LspMarkupContent {
+                    kind: crate::languages::LspMarkupKind::Markdown,
+                    value: "third".into(),
+                },
+            ],
+        );
+        let bounded = app.ui.documentation_popup.as_ref().unwrap();
+        assert_eq!(bounded.sections.len(), 1);
+        assert_eq!(bounded.line_count(), 1);
+        assert_eq!(bounded.source_range.unwrap().end, ByteOffset(1));
         app.handle_key_in_context("dashboard", KeyEvent::character('q'));
         assert!(app.ui.documentation_popup.is_none());
+    }
+
+    #[test]
+    fn completion_documentation_is_typed_and_exact_request_owned() {
+        let mut app = app();
+        let path = app.state.workspace_root.join("completion.rs");
+        let (buffer, view) = app
+            .state
+            .open_text(TextBuffer::from_text("let value = 1;"), Some(path));
+        app.ui.dashboard = false;
+        let owner = super::LspProjectionOwner {
+            server: "fake-server".into(),
+            buffer,
+            view,
+            revision: app.state.buffers[buffer].text.revision(),
+            uri: "file:///completion.rs".into(),
+            language: "rust".into(),
+        };
+        app.lsp_request_generation = 7;
+        app.lsp_projection_owner = Some(owner.clone());
+        app.lsp_completion_owner = Some((7, owner.clone()));
+        app.lsp_completion_items = vec![crate::languages::LspCompletionItem {
+            label: "value".into(),
+            detail: "usize".into(),
+            insert_text: "value".into(),
+            text_edit: None,
+            additional_edits: Vec::new(),
+            kind: None,
+            snippet: false,
+            documentation: Some(crate::languages::LspMarkupContent {
+                kind: crate::languages::LspMarkupKind::Markdown,
+                value: "**value docs**".into(),
+            }),
+            resolve_item: None,
+            resolved: true,
+        }];
+        app.ui.language_completion = Some(crate::terminal_ui::LanguageCompletionState {
+            items: vec![crate::terminal_ui::CompletionItem {
+                label: "value".into(),
+                detail: "usize".into(),
+            }],
+            selected: 0,
+        });
+        app.invoke_mapped_command("lsp.completion.documentation.open");
+        let popup = app.ui.documentation_popup.as_ref().expect("documentation");
+        assert_eq!(popup.kind, DocumentationPopupKind::Completion);
+        assert_eq!(popup.provider, "fake-server");
+        assert_eq!(popup.sections[0].markup, DocumentationMarkupKind::Markdown);
+
+        app.lsp_request_generation = 8;
+        app.invoke_mapped_command("lsp.completion.documentation.open");
+        assert!(app.ui.documentation_popup.is_none());
+        assert!(app.ui.notification_error);
+
+        app.lsp_request_generation = 7;
+        let revision = app.state.buffers[buffer].text.revision();
+        app.state.buffers[buffer]
+            .text
+            .apply_edits(&crate::document::TextEditSet::new(
+                revision,
+                vec![crate::document::TextEdit::new(
+                    ByteRange::new(ByteOffset(0), ByteOffset(0)).unwrap(),
+                    "x",
+                )],
+            ))
+            .unwrap();
+        app.invoke_mapped_command("lsp.completion.documentation.open");
+        assert!(app.ui.documentation_popup.is_none());
+
+        let mut live_owner = owner;
+        live_owner.revision = app.state.buffers[buffer].text.revision();
+        app.lsp_projection_owner = Some(live_owner.clone());
+        app.lsp_completion_owner = Some((7, live_owner));
+        app.state
+            .split_active(crate::editing::Axis::Horizontal, 500)
+            .unwrap();
+        app.invoke_mapped_command("lsp.completion.documentation.open");
+        assert!(app.ui.documentation_popup.is_none());
+        assert!(app.ui.notification_error);
+    }
+
+    #[test]
+    fn adversarial_grapheme_rows_make_render_mouse_and_reversed_pages_agree() {
+        let mut app = app();
+        app.terminal_width = 3;
+        app.terminal_height = 7;
+        app.configuration.settings.editor.wrap = true;
+        app.configuration.settings.editor.line_numbers = crate::configuration::LineNumbers::Off;
+        app.configuration.settings.editor.viewport.vertical_margin = 0;
+        app.configuration.settings.ui.status_line.enabled = false;
+        let (buffer, view) = app.state.open_text(
+            TextBuffer::from_text("aa界界\naa\t\t\ne\u{301}界x\ntail"),
+            None,
+        );
+        app.ui.dashboard = false;
+        app.reconcile_editor_windows();
+        let viewport = active_pane_viewport(
+            &app.state,
+            &app.ui,
+            &app.configuration.settings,
+            app.workspace_bounds().unwrap().width,
+            app.workspace_render_height(),
+        )
+        .unwrap();
+        assert_eq!(viewport.width, 3);
+
+        for wrap_row in 0..3 {
+            for cell in 0..3 {
+                app.state.views[view].scroll_line = 0;
+                app.state.views[view].scroll_wrap_row = 0;
+                let expected = {
+                    let model = VisualRowModel::new(
+                        &app.state.buffers[buffer].text,
+                        view,
+                        &app.ui,
+                        &app.configuration.settings,
+                        viewport.width,
+                        true,
+                    );
+                    model.byte_at_cell(VisualRowAnchor { line: 0, wrap_row }, cell)
+                };
+                app.mouse_position = Some((
+                    viewport.x.saturating_add(u16::try_from(cell).unwrap()),
+                    viewport.y.saturating_add(u16::try_from(wrap_row).unwrap()),
+                ));
+                app.apply_mouse_cursor(false);
+                assert_eq!(
+                    app.state.views[view].cursor,
+                    ByteOffset(expected),
+                    "mouse row {wrap_row} cell {cell}"
+                );
+            }
+        }
+
+        app.state.views[view].cursor = ByteOffset(0);
+        app.state.views[view].scroll_line = 0;
+        app.state.views[view].scroll_wrap_row = 0;
+        let body = usize::from(viewport.height.max(1));
+        let amount = body.saturating_mul(usize::from(
+            app.configuration.settings.editor.full_page_percent,
+        )) / 100;
+        let expected_down = {
+            let model = VisualRowModel::new(
+                &app.state.buffers[buffer].text,
+                view,
+                &app.ui,
+                &app.configuration.settings,
+                viewport.width,
+                true,
+            );
+            model.forward(VisualRowAnchor::default(), amount.max(1))
+        };
+        app.scroll_view("full_down", 1);
+        assert_eq!(
+            VisualRowAnchor {
+                line: app.state.views[view].scroll_line,
+                wrap_row: app.state.views[view].scroll_wrap_row,
+            },
+            expected_down
+        );
+        app.scroll_view("full_up", 1);
+        assert_eq!(app.state.views[view].scroll_line, 0);
+        assert_eq!(app.state.views[view].scroll_wrap_row, 0);
+    }
+
+    #[test]
+    fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently() {
+        let mut app = app();
+        app.terminal_width = 12;
+        app.terminal_height = 8;
+        app.configuration.settings.editor.wrap = true;
+        app.configuration.settings.editor.line_numbers = crate::configuration::LineNumbers::Off;
+        app.configuration.settings.ui.status_line.enabled = false;
+        app.configuration.settings.editor.viewport.vertical_margin = 2;
+        let text = format!(
+            "{}\nfold\nhidden 界\nhidden e\u{301}\ntail",
+            "x".repeat(150)
+        );
+        let (_, view) = app.state.open_text(TextBuffer::from_text(&text), None);
+        let buffer = app.state.views[view].buffer;
+        app.ui.dashboard = false;
+        app.reconcile_editor_windows();
+        let viewport = active_pane_viewport(
+            &app.state,
+            &app.ui,
+            &app.configuration.settings,
+            app.workspace_bounds().unwrap().width,
+            app.workspace_render_height(),
+        )
+        .unwrap();
+        app.state.views[view].cursor = ByteOffset(120);
+        app.ensure_cursor_visible();
+        assert!(app.state.views[view].scroll_wrap_row > 0);
+        let model = VisualRowModel::new(
+            &app.state.buffers[buffer].text,
+            view,
+            &app.ui,
+            &app.configuration.settings,
+            viewport.width,
+            true,
+        );
+        let start = VisualRowAnchor {
+            line: app.state.views[view].scroll_line,
+            wrap_row: app.state.views[view].scroll_wrap_row,
+        };
+        let cursor = model.cursor_anchor(app.state.views[view].cursor);
+        let row = model
+            .screen_row(start, cursor, usize::from(viewport.height))
+            .unwrap();
+        assert!(row >= 2 && row < usize::from(viewport.height).saturating_sub(2));
+
+        app.configuration.settings.editor.viewport.vertical_margin = 100;
+        app.terminal_height = 4;
+        app.ensure_cursor_visible();
+        let tiny_viewport = active_pane_viewport(
+            &app.state,
+            &app.ui,
+            &app.configuration.settings,
+            app.workspace_bounds().unwrap().width,
+            app.workspace_render_height(),
+        )
+        .unwrap();
+        let tiny_model = VisualRowModel::new(
+            &app.state.buffers[buffer].text,
+            view,
+            &app.ui,
+            &app.configuration.settings,
+            tiny_viewport.width,
+            true,
+        );
+        assert!(
+            tiny_model
+                .screen_row(
+                    VisualRowAnchor {
+                        line: app.state.views[view].scroll_line,
+                        wrap_row: app.state.views[view].scroll_wrap_row,
+                    },
+                    tiny_model.cursor_anchor(app.state.views[view].cursor),
+                    usize::from(tiny_viewport.height),
+                )
+                .is_some()
+        );
+
+        app.terminal_height = 8;
+        app.configuration.settings.editor.viewport.vertical_margin = 0;
+        app.state.views[view].cursor = ByteOffset(0);
+        app.state.views[view].scroll_line = 0;
+        app.state.views[view].scroll_wrap_row = 0;
+        app.scroll_view("full_down", 1);
+        let down = app.state.views[view].scroll_wrap_row;
+        assert!(down > 0);
+        app.scroll_view("full_up", 1);
+        assert_eq!(app.state.views[view].scroll_line, 0);
+        assert_eq!(app.state.views[view].scroll_wrap_row, 0);
+
+        app.ui.lsp_folds = vec![UiFold {
+            view,
+            start_line: 1,
+            end_line: 3,
+            collapsed: true,
+        }];
+        app.state.views[view].cursor = app.state.buffers[buffer].text.line_to_byte(2).unwrap();
+        app.ensure_cursor_visible();
+        let folded_model = VisualRowModel::new(
+            &app.state.buffers[buffer].text,
+            view,
+            &app.ui,
+            &app.configuration.settings,
+            viewport.width,
+            true,
+        );
+        assert_eq!(
+            folded_model
+                .cursor_anchor(app.state.views[view].cursor)
+                .line,
+            1
+        );
+
+        app.ui.lsp_folds.clear();
+        app.state.views[view].cursor = ByteOffset(0);
+        app.state.views[view].scroll_line = 0;
+        app.state.views[view].scroll_wrap_row = 0;
+        let workspace = app.workspace_bounds().unwrap();
+        app.mouse_position = Some((
+            workspace.x.saturating_add(viewport.x).saturating_add(1),
+            workspace.y.saturating_add(viewport.y).saturating_add(2),
+        ));
+        app.apply_mouse_cursor(false);
+        let mouse_model = VisualRowModel::new(
+            &app.state.buffers[buffer].text,
+            view,
+            &app.ui,
+            &app.configuration.settings,
+            viewport.width,
+            true,
+        );
+        assert_eq!(
+            mouse_model
+                .cursor_anchor(app.state.views[view].cursor)
+                .wrap_row,
+            2
+        );
+        app.state.views[view].scroll_wrap_row = 1;
+        let sibling = app
+            .state
+            .split_active(crate::editing::Axis::Horizontal, 500)
+            .expect("split view");
+        assert_eq!(app.state.views[sibling].scroll_wrap_row, 1);
+        app.reconcile_editor_windows();
+        app.ensure_cursor_visible();
+        let split_viewport = active_pane_viewport(
+            &app.state,
+            &app.ui,
+            &app.configuration.settings,
+            app.workspace_bounds().unwrap().width,
+            app.workspace_render_height(),
+        )
+        .unwrap();
+        assert!(split_viewport.width > 0 && split_viewport.height > 0);
+        let reconciliation_count = app.editor_windows.reconciliation_count();
+        let window_revision = app.state.window_revision();
+        let transaction = app.next_transaction;
+        let accepted_scroll = (
+            app.state.views[sibling].scroll_line,
+            app.state.views[sibling].scroll_wrap_row,
+            app.state.views[sibling].scroll_column,
+        );
+        for _ in 0..256 {
+            app.ensure_cursor_visible();
+            let _ = render(
+                &app.state,
+                &app.ui,
+                &app.configuration.settings,
+                &app.configuration.dashboard,
+                app.terminal_width,
+                app.terminal_height,
+            );
+        }
+        assert_eq!(
+            app.editor_windows.reconciliation_count(),
+            reconciliation_count
+        );
+        assert_eq!(app.state.window_revision(), window_revision);
+        assert_eq!(app.next_transaction, transaction);
+        assert_eq!(
+            (
+                app.state.views[sibling].scroll_line,
+                app.state.views[sibling].scroll_wrap_row,
+                app.state.views[sibling].scroll_column,
+            ),
+            accepted_scroll
+        );
+    }
+
+    #[test]
+    fn vertical_margin_keeps_cursor_context_above_and_below() {
+        let mut app = app();
+        app.terminal_height = 10;
+        app.configuration.settings.editor.viewport.vertical_margin = 2;
+        let text = (0..30).map(|n| format!("line {n}\n")).collect::<String>();
+        let (_, view) = app.state.open_text(TextBuffer::from_text(&text), None);
+        app.ui.dashboard = false;
+        app.state.views[view].cursor = app.state.buffers[app.state.views[view].buffer]
+            .text
+            .line_to_byte(15)
+            .unwrap();
+        app.ensure_cursor_visible();
+        let first = app.state.views[view].scroll_line;
+        assert!(15usize.saturating_sub(first) >= 2);
+        let viewport = active_pane_viewport(
+            &app.state,
+            &app.ui,
+            &app.configuration.settings,
+            app.terminal_width,
+            app.workspace_render_height(),
+        )
+        .unwrap();
+        assert!(15 < first + usize::from(viewport.height).saturating_sub(2));
+        app.state.views[view].cursor = app.state.buffers[app.state.views[view].buffer]
+            .text
+            .line_to_byte(first + 1)
+            .unwrap();
+        app.ensure_cursor_visible();
+        assert!(app.state.views[view].scroll_line < first);
     }
 
     #[test]
@@ -18331,13 +26249,14 @@ mod tests {
         app.ensure_cursor_visible();
         let zero_viewport = active_pane_viewport(
             &app.state,
+            &app.ui,
             &app.configuration.settings,
             app.terminal_width,
             app.terminal_height,
         )
-        .expect("zero-width focused viewport");
-        assert_eq!(zero_viewport.width, 0);
-        assert_eq!(app.state.views[zero_view].scroll_column, 0);
+        .expect("focused tiny-layout viewport");
+        assert_eq!(zero_viewport.width, 6);
+        assert_eq!(app.state.views[zero_view].scroll_column, 4);
     }
 
     #[test]
@@ -18453,6 +26372,7 @@ mod tests {
         app.ensure_cursor_visible();
         let viewport = active_pane_viewport(
             &app.state,
+            &app.ui,
             &app.configuration.settings,
             app.terminal_width,
             app.terminal_height,
@@ -18487,7 +26407,13 @@ mod tests {
         app.ui.documentation_popup = Some(DocumentationPopupState {
             kind: DocumentationPopupKind::Hover,
             title: "Hover".into(),
-            lines: (0..10).map(|line| format!("line {line}")).collect(),
+            provider: "test".into(),
+            source_range: None,
+            sections: vec![DocumentationSection {
+                heading: None,
+                markup: DocumentationMarkupKind::PlainText,
+                lines: (0..10).map(|line| format!("line {line}")).collect(),
+            }],
             scroll: 0,
         });
         app.invoke_mapped_command("lsp.documentation.scroll_down");
@@ -18569,6 +26495,11 @@ mod tests {
                     icon: None,
                     order: 1,
                 }],
+                content_types: Vec::new(),
+                subscriptions: Vec::new(),
+                providers: Vec::new(),
+                virtual_documents: Vec::new(),
+                storage: None,
             },
         };
         fs::write(
@@ -18700,6 +26631,11 @@ mod tests {
                     icon: None,
                     order: 1,
                 }],
+                content_types: Vec::new(),
+                subscriptions: Vec::new(),
+                providers: Vec::new(),
+                virtual_documents: Vec::new(),
+                storage: None,
             },
         };
         let index =

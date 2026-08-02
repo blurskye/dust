@@ -13,6 +13,8 @@ pub use context::{
     InputContextRegistry,
 };
 pub use grammar::{GrammarInput, InputAction, InputError, ModalResolver, PendingInputContext};
-pub use key::{KeyCode, KeyEvent, KeyParseError, Modifiers};
+pub use key::{
+    KeyCode, KeyEvent, KeyParseError, Modifiers, TerminalMouseInput, TerminalNavigationKey,
+};
 pub use keymap::{Keymap, KeymapLayer, KeymapResolver, MappingResolution};
 pub use search::{SearchPatternError, search_matches};

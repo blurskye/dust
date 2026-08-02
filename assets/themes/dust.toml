@@ -81,6 +81,87 @@ foreground_16 = "dark_grey"
 background_16 = "black"
 attributes = []
 
+[styles.buffer_line_background]
+foreground = "#8b949e"
+background = "#0d1117"
+foreground_256 = "indexed:246"
+background_256 = "indexed:233"
+foreground_16 = "dark_grey"
+background_16 = "black"
+attributes = []
+
+[styles.buffer_line_active]
+foreground = "#f0f6fc"
+background = "#161b22"
+foreground_256 = "indexed:255"
+background_256 = "indexed:234"
+foreground_16 = "white"
+background_16 = "black"
+attributes = ["bold"]
+
+[styles.buffer_line_inactive]
+foreground = "#8b949e"
+background = "#0d1117"
+foreground_256 = "indexed:246"
+background_256 = "indexed:233"
+foreground_16 = "dark_grey"
+background_16 = "black"
+attributes = []
+
+[styles.buffer_line_dirty]
+foreground = "#ff7b72"
+background = "#161b22"
+foreground_256 = "indexed:210"
+background_256 = "indexed:234"
+foreground_16 = "red"
+background_16 = "black"
+attributes = ["bold"]
+
+[styles.buffer_line_icon]
+foreground = "#8b949e"
+background = "#161b22"
+foreground_256 = "indexed:246"
+background_256 = "indexed:234"
+foreground_16 = "dark_grey"
+background_16 = "black"
+attributes = []
+
+[styles.buffer_line_pin]
+foreground = "#d2a8ff"
+background = "#161b22"
+foreground_256 = "indexed:141"
+background_256 = "indexed:234"
+foreground_16 = "magenta"
+background_16 = "black"
+attributes = []
+
+[styles.buffer_line_diagnostic]
+foreground = "#f0883e"
+background = "#161b22"
+foreground_256 = "indexed:208"
+background_256 = "indexed:234"
+foreground_16 = "yellow"
+background_16 = "black"
+attributes = []
+
+[styles.buffer_line_close]
+foreground = "#8b949e"
+background = "#161b22"
+foreground_256 = "indexed:246"
+background_256 = "indexed:234"
+foreground_16 = "dark_grey"
+background_16 = "black"
+attributes = []
+
+[styles.buffer_line_separator]
+foreground = "#30363d"
+background = "#0d1117"
+foreground_256 = "indexed:236"
+background_256 = "indexed:233"
+foreground_16 = "dark_grey"
+background_16 = "black"
+attributes = []
+
 [styles.key_hint_background]
 foreground = "#c9d1d9"
 background = "#161b22"
@@ -168,6 +249,42 @@ background = "#161b22"
 foreground_256 = "indexed:252"
 background_256 = "indexed:234"
 foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.ai_ghost]
+foreground = "#6e7681"
+background = "#0d1117"
+foreground_256 = "indexed:242"
+background_256 = "indexed:233"
+foreground_16 = "dark_grey"
+background_16 = "black"
+attributes = ["italic"]
+
+[styles.git_sign_added]
+foreground = "#3fb950"
+background = "#0d1117"
+foreground_256 = "indexed:71"
+background_256 = "indexed:233"
+foreground_16 = "green"
+background_16 = "black"
+attributes = []
+
+[styles.git_sign_changed]
+foreground = "#d29922"
+background = "#0d1117"
+foreground_256 = "indexed:178"
+background_256 = "indexed:233"
+foreground_16 = "yellow"
+background_16 = "black"
+attributes = []
+
+[styles.git_sign_deleted]
+foreground = "#f85149"
+background = "#0d1117"
+foreground_256 = "indexed:203"
+background_256 = "indexed:233"
+foreground_16 = "red"
 background_16 = "black"
 attributes = []
 

@@ -5,10 +5,343 @@ package dust:plugin@0.1.0;
 interface host {
   record snapshot { buffer: u64, revision: u64, utf8: string }
   record edit { start: u64, end: u64, replacement: string }
+
+  enum window-placement {
+    docked-left,
+    docked-right,
+    docked-top,
+    docked-bottom,
+    floating,
+    fullscreen,
+    hidden,
+  }
+
+  enum ui-node-kind { container, text, list-node, button }
+
+  enum ui-style { default, muted, accent, warning, error, selected, border }
+
+  record ui-node {
+    id: u64,
+    kind: ui-node-kind,
+    text: string,
+    style: ui-style,
+    action: option<string>,
+    children: list<u64>,
+  }
+
+  record ui-tree {
+    revision: u64,
+    root: u64,
+    nodes: list<ui-node>,
+  }
+
+  record open-window-request {
+    expected-graph-revision: u64,
+    content-type: string,
+    title: string,
+    placement: window-placement,
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+    size: u16,
+    tree: option<ui-tree>,
+  }
+
+  record replace-ui-request {
+    handle: u64,
+    expected-tree-revision: u64,
+    tree: ui-tree,
+  }
+
+  record place-window-request {
+    handle: u64,
+    expected-graph-revision: u64,
+    placement: window-placement,
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+    size: u16,
+  }
+
+  record private-style { id: u16, style: ui-style }
+
+  record private-cell {
+    x: u16,
+    y: u16,
+    grapheme: string,
+    continuation: bool,
+    style: u16,
+  }
+
+  record private-rect { x: u16, y: u16, width: u16, height: u16 }
+  record private-cursor { x: u16, y: u16 }
+  record private-hit-region { x: u16, y: u16, width: u16, height: u16, action: string }
+
+  record private-snapshot {
+    revision: u64,
+    dimensions-revision: u64,
+    styles: list<private-style>,
+    cells: list<private-cell>,
+    cursor: option<private-cursor>,
+    hit-regions: list<private-hit-region>,
+  }
+
+  record replace-private-request { handle: u64, snapshot: private-snapshot }
+
+  record private-patch {
+    revision: u64,
+    expected-surface-revision: u64,
+    dimensions-revision: u64,
+    dirty: list<private-rect>,
+    styles: list<private-style>,
+    cells: list<private-cell>,
+    replace-cursor: bool,
+    cursor: option<private-cursor>,
+    replace-hit-regions: bool,
+    hit-regions: list<private-hit-region>,
+  }
+
+  record patch-private-request { handle: u64, patch: private-patch }
+
+  record checked-window-request {
+    handle: u64,
+    expected-graph-revision: u64,
+  }
+
+  variant ui-request {
+    open-window(open-window-request),
+    replace-ui(replace-ui-request),
+    place-window(place-window-request),
+    focus-window(checked-window-request),
+    close-window(checked-window-request),
+    replace-private(replace-private-request),
+    patch-private(patch-private-request),
+  }
+
+  enum ui-error-code {
+    queue-full,
+    stale-graph,
+    stale-tree,
+    stale-handle,
+    foreign-generation,
+    undeclared-content,
+    undeclared-action,
+    disallowed-placement,
+    hidden-focus,
+    cross-tab,
+    instance-ceiling,
+    graph-ceiling,
+    invalid-tree,
+    invalid-placement,
+    close-order,
+    generation-lost,
+    internal-rejected,
+    wrong-presenter,
+    stale-surface,
+    stale-dimensions,
+    invalid-local-bounds,
+    cell-overlap,
+    split-wide-grapheme,
+    invalid-grapheme,
+    invalid-style,
+    invalid-cursor,
+    invalid-hit-region,
+    patch-ceiling,
+  }
+
+  record ui-error { code: ui-error-code, detail: string }
+
+  record surface-geometry { handle: u64, width: u16, height: u16, dimensions-revision: u64 }
+
+  record ui-event {
+    token: u64,
+    handle: option<u64>,
+    graph-revision: option<u64>,
+    tree-revision: option<u64>,
+    surface-revision: option<u64>,
+    geometry: option<surface-geometry>,
+    action: option<string>,
+    error: option<ui-error>,
+  }
+
+  enum host-event-kind {
+    workspace-metadata-changed,
+    active-surface-changed,
+    buffer-summary-changed,
+    plugin-surface-changed,
+  }
+
+  record host-event {
+    id: u64,
+    sequence: u64,
+    kind: host-event-kind,
+    revision: u64,
+    payload: string,
+    coalesced: u16,
+    dropped: u16,
+  }
+
+  record storage-cas-request {
+    key: string,
+    expected-revision: option<u64>,
+    value: list<u8>,
+  }
+  record storage-delete-request { key: string, expected-revision: u64 }
+  record storage-list-request { prefix: string, maximum: u16 }
+  variant storage-request {
+    get(string),
+    compare-and-set(storage-cas-request),
+    delete(storage-delete-request),
+    prefix-list(storage-list-request),
+  }
+  enum storage-error-code {
+    queue-full,
+    invalid-key,
+    invalid-value,
+    stale-revision,
+    quota-exceeded,
+    unavailable,
+    corrupt,
+    generation-lost,
+  }
+  record storage-error { code: storage-error-code, detail: string }
+  record storage-entry { key: string, revision: u64, value: list<u8> }
+  record storage-result {
+    token: u64,
+    value: option<list<u8>>,
+    revision: option<u64>,
+    entries: list<storage-entry>,
+    truncated: bool,
+    error: option<storage-error>,
+  }
+
+  record picker-provider-request {
+    id: u64,
+    provider: string,
+    query: string,
+    context: string,
+    workspace-revision: option<u64>,
+    buffer-revision: option<u64>,
+    deadline-milliseconds: u32,
+    cancellation-generation: u64,
+    maximum-items: u16,
+    maximum-bytes: u32,
+  }
+  record picker-provider-item {
+    id: string,
+    primary: string,
+    secondary: option<string>,
+    action-data: list<u8>,
+  }
+  enum provider-terminal-kind { more, complete, truncated, error }
+  enum provider-error-code {
+    queue-full,
+    unknown-request,
+    unknown-provider,
+    stale-generation,
+    stale-revision,
+    cancelled,
+    expired,
+    invalid-sequence,
+    duplicate-item,
+    item-ceiling,
+    byte-ceiling,
+    malformed,
+    unavailable,
+    internal,
+  }
+  record provider-error { code: provider-error-code, detail: string }
+  record provider-terminal {
+    kind: provider-terminal-kind,
+    error: option<provider-error>,
+  }
+  record picker-provider-chunk {
+    request: u64,
+    sequence: u64,
+    items: list<picker-provider-item>,
+    terminal: provider-terminal,
+  }
+
+  enum virtual-document-request-kind { open, refresh, close-notice }
+  record virtual-document-request {
+    request: u64,
+    document: u64,
+    source: string,
+    key: string,
+    kind: virtual-document-request-kind,
+    current-revision: option<u64>,
+    deadline-milliseconds: u32,
+    cancellation-generation: u64,
+    maximum-document-bytes: u32,
+    maximum-document-lines: u32,
+    maximum-patch-bytes: u32,
+    maximum-patches: u16,
+  }
+  record virtual-document-full {
+    expected-revision: option<u64>,
+    revision: u64,
+    title: string,
+    language: string,
+    text: string,
+  }
+  record virtual-document-patch { start: u32, end: u32, replacement: string }
+  record virtual-document-patch-set {
+    expected-revision: u64,
+    revision: u64,
+    patches: list<virtual-document-patch>,
+  }
+  enum virtual-document-error-code {
+    queue-full, unknown-source, unknown-request, unknown-document,
+    stale-generation, stale-revision, cancelled, expired, invalid-title,
+    invalid-language, invalid-utf8-range, invalid-control, byte-ceiling,
+    line-ceiling, patch-ceiling, read-only, malformed, internal,
+  }
+  record virtual-document-error { code: virtual-document-error-code, detail: string }
+  variant virtual-document-proposal-kind {
+    full(virtual-document-full),
+    patches(virtual-document-patch-set),
+    close-acknowledged,
+    error(virtual-document-error),
+  }
+  record virtual-document-proposal {
+    request: u64,
+    document: u64,
+    cancellation-generation: u64,
+    kind: virtual-document-proposal-kind,
+  }
+
   current-buffer: func() -> result<snapshot, string>;
   propose-edits: func(buffer: u64, revision: u64, edits: list<edit>) -> result<u64, string>;
   show-message: func(message: string) -> result<_, string>;
   config-get: func(key: string) -> option<string>;
+
+  // These calls only enqueue bounded proposals in the component worker. The
+  // application validates and applies them asynchronously after execution.
+  queue-ui-request: func(request: ui-request) -> result<u64, ui-error>;
+  take-ui-events: func() -> list<ui-event>;
+
+  // Subscription declarations are accepted before Component bytes. Delivery
+  // occurs only in a later command execution; acknowledgement is bounded and
+  // generation ownership remains host-private.
+  take-host-events: func() -> list<host-event>;
+  acknowledge-host-events: func(ids: list<u64>) -> result<_, string>;
+
+  // Storage requests contain logical keys only. The host derives plugin and
+  // generation ownership and performs all persistence on a bounded worker.
+  queue-storage-request: func(request: storage-request) -> result<u64, storage-error>;
+  take-storage-results: func() -> list<storage-result>;
+
+  // Picker-source requests are delivered later. Chunks contain no command;
+  // the statically accepted provider declaration owns the only action command.
+  take-picker-provider-requests: func() -> list<picker-provider-request>;
+  queue-picker-provider-chunk: func(chunk: picker-provider-chunk) -> result<_, provider-error>;
+
+  // Read-only virtual documents are proposals only. Handles and source keys are
+  // opaque and never expose paths, editor IDs, graph IDs, or URI authority.
+  take-virtual-document-requests: func() -> list<virtual-document-request>;
+  queue-virtual-document-proposal: func(proposal: virtual-document-proposal) -> result<_, virtual-document-error>;
 }
 
 world editor-plugin {

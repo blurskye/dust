@@ -10,6 +10,7 @@ default-run = "dust"
 clap = { version = "4.5.28", features = ["derive"] }
 crossterm = "0.29.0"
 globset = "0.4.16"
+git2 = { version = "0.20.2", default-features = false }
 ignore = "0.4.23"
 nix = { version = "0.30.1", features = ["signal", "process"] }
 portable-pty = "0.9.0"
@@ -36,6 +37,9 @@ toml_edit = "0.25.12"
 unicode-segmentation = "1.12.0"
 unicode-width = "0.2.0"
 zstd = "=0.13.3"
+
+[dev-dependencies]
+wit-component = "=0.226.0"
 
 [lints.rust]
 unsafe_code = "forbid"

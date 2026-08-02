@@ -171,6 +171,24 @@ pub struct LspLocation {
     pub range: LspRange,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LspMarkupKind {
+    PlainText,
+    Markdown,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LspMarkupContent {
+    pub kind: LspMarkupKind,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LspHover {
+    pub sections: Vec<LspMarkupContent>,
+    pub range: Option<LspRange>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspCompletionItem {
     pub label: String,
@@ -180,7 +198,7 @@ pub struct LspCompletionItem {
     pub additional_edits: Vec<LspTextEdit>,
     pub kind: Option<u8>,
     pub snippet: bool,
-    pub documentation: String,
+    pub documentation: Option<LspMarkupContent>,
     pub resolve_item: Option<Value>,
     pub resolved: bool,
 }
@@ -343,10 +361,10 @@ impl LspFeature {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LspFeatureResult {
-    Hover(String),
+    Hover(LspHover),
     Completion(Vec<LspCompletionItem>),
     CompletionResolved(LspCompletionItem),
-    Signature(String),
+    Signature(LspMarkupContent),
     Locations(Vec<LspLocation>),
     Symbols(Vec<LspSymbol>),
     WorkspaceEdit(LspWorkspaceEdit),
@@ -1466,12 +1484,15 @@ fn normalize_result(feature: &LspFeature, result: &Value) -> Result<LspFeatureRe
         return Ok(LspFeatureResult::Empty);
     }
     match feature {
-        LspFeature::Hover => Ok(LspFeatureResult::Hover(hover_text(Some(result)))),
+        LspFeature::Hover => Ok(LspFeatureResult::Hover(hover_result(result))),
         LspFeature::Completion => Ok(LspFeatureResult::Completion(completion_items(result)?)),
         LspFeature::CompletionResolve { .. } => Ok(LspFeatureResult::CompletionResolved(
             completion_item(result, true)?,
         )),
-        LspFeature::SignatureHelp => Ok(LspFeatureResult::Signature(signature_text(result))),
+        LspFeature::SignatureHelp => Ok(LspFeatureResult::Signature(LspMarkupContent {
+            kind: LspMarkupKind::PlainText,
+            value: signature_text(result),
+        })),
         LspFeature::Definition
         | LspFeature::Declaration
         | LspFeature::TypeDefinition
@@ -1724,18 +1745,20 @@ fn completion_item(item: &Value, resolved: bool) -> Result<LspCompletionItem, St
         .chars()
         .take(1024 * 1024)
         .collect();
-    let documentation = item
-        .get("documentation")
-        .and_then(|value| {
-            value
-                .as_str()
-                .or_else(|| value.get("value").and_then(Value::as_str))
+    let documentation = item.get("documentation").and_then(|documentation| {
+        let value = documentation
+            .as_str()
+            .or_else(|| documentation.get("value").and_then(Value::as_str))?;
+        let kind = if documentation.get("kind").and_then(Value::as_str) == Some("markdown") {
+            LspMarkupKind::Markdown
+        } else {
+            LspMarkupKind::PlainText
+        };
+        Some(LspMarkupContent {
+            kind,
+            value: sanitize_markdown(value, 64 * 1024),
         })
-        .map(|source| sanitize_markdown(source, 64 * 1024))
-        .unwrap_or_default()
-        .chars()
-        .take(64 * 1024)
-        .collect();
+    });
     Ok(LspCompletionItem {
         label,
         detail: item
@@ -2247,28 +2270,44 @@ fn signature_text(result: &Value) -> String {
         .to_owned()
 }
 
-fn hover_text(result: Option<&Value>) -> String {
-    let Some(result) = result else {
-        return "no hover information".into();
+fn markup_content(value: &Value) -> Option<LspMarkupContent> {
+    let (kind, source) = if let Some(source) = value.as_str() {
+        (LspMarkupKind::Markdown, source)
+    } else {
+        let source = value.get("value").and_then(Value::as_str)?;
+        let kind = match value.get("kind").and_then(Value::as_str) {
+            Some("plaintext") => LspMarkupKind::PlainText,
+            _ => LspMarkupKind::Markdown,
+        };
+        (kind, source)
     };
+    Some(LspMarkupContent {
+        kind,
+        value: sanitize_markdown(source, MAX_LOG_LINE_BYTES),
+    })
+}
+
+fn hover_result(result: &Value) -> LspHover {
     let contents = result.get("contents").unwrap_or(result);
-    if let Some(text) = contents.as_str() {
-        return sanitize_log(text, MAX_LOG_LINE_BYTES);
-    }
-    if let Some(text) = contents.get("value").and_then(Value::as_str) {
-        return sanitize_log(text, MAX_LOG_LINE_BYTES);
-    }
-    if let Some(parts) = contents.as_array() {
-        return parts
+    let mut sections = if let Some(parts) = contents.as_array() {
+        parts
             .iter()
-            .filter_map(|part| {
-                part.as_str()
-                    .or_else(|| part.get("value").and_then(Value::as_str))
-            })
+            .filter_map(markup_content)
+            .take(16)
             .collect::<Vec<_>>()
-            .join("\n");
+    } else {
+        markup_content(contents).into_iter().collect()
+    };
+    if sections.is_empty() {
+        sections.push(LspMarkupContent {
+            kind: LspMarkupKind::PlainText,
+            value: "no hover information".into(),
+        });
     }
-    contents.to_string()
+    LspHover {
+        sections,
+        range: result.get("range").and_then(parse_range),
+    }
 }
 
 fn sanitize_log(text: &str, limit: usize) -> String {
@@ -2498,18 +2537,26 @@ pub fn parse_snippet(source: &str, maximum_bytes: usize) -> Result<ParsedSnippet
 pub fn sanitize_markdown(source: &str, maximum_chars: usize) -> String {
     let mut out = String::new();
     let mut escape = false;
+    let mut csi = false;
     for character in source.chars() {
         if out.chars().count() >= maximum_chars {
             break;
         }
         if escape {
-            if ('@'..='~').contains(&character) {
-                escape = false
+            if !csi {
+                csi = character == '[';
+                if !csi {
+                    escape = false;
+                }
+            } else if ('@'..='~').contains(&character) {
+                escape = false;
+                csi = false;
             }
             continue;
         }
         if character == '\u{1b}' {
             escape = true;
+            csi = false;
             continue;
         }
         if character.is_control() && !matches!(character, '\n' | '\t') {
@@ -2531,8 +2578,8 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        LspDocument, LspEvent, LspFeature, LspFeatureResult, LspPolicy, LspService,
-        PositionEncoding, SyncKind, completion_items, file_uri, hover_text, incremental_change,
+        LspDocument, LspEvent, LspFeature, LspFeatureResult, LspMarkupKind, LspPolicy, LspService,
+        PositionEncoding, SyncKind, completion_items, file_uri, hover_result, incremental_change,
         initialize_capabilities, language_id_for_path, path_from_file_uri, workspace_edit,
     };
     use crate::packages::{ToolDefinition, ToolKind};
@@ -2557,14 +2604,15 @@ mod tests {
     }
 
     #[test]
-    fn hover_markup_is_safely_reduced_to_text() {
-        assert_eq!(
-            hover_text(Some(
-                &json!({"contents":{"kind":"markdown","value":"**type**"}})
-            )),
-            "**type**"
-        );
-        assert_eq!(hover_text(Some(&Value::Null)), "null");
+    fn hover_markup_kind_sections_and_range_are_preserved_and_sanitized() {
+        let hover = hover_result(&json!({
+            "contents":{"kind":"markdown","value":"**type**\u{001b}[31m"},
+            "range":{"start":{"line":1,"character":2},"end":{"line":1,"character":6}}
+        }));
+        assert_eq!(hover.sections.len(), 1);
+        assert_eq!(hover.sections[0].kind, LspMarkupKind::Markdown);
+        assert_eq!(hover.sections[0].value, "**type**");
+        assert_eq!(hover.range.unwrap().start.line, 1);
     }
 
     #[test]
@@ -2771,7 +2819,12 @@ while True:
             }) = service.try_event()
             {
                 match (generation, result) {
-                    (11, LspFeatureResult::Hover(text)) => hover = text == "fake hover",
+                    (11, LspFeatureResult::Hover(result)) => {
+                        hover = result
+                            .sections
+                            .first()
+                            .is_some_and(|section| section.value == "fake hover")
+                    }
                     (12, LspFeatureResult::Completion(items)) => {
                         completion = items[0].label == "fakeItem";
                     }

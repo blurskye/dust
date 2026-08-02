@@ -162,6 +162,15 @@ pub struct ThemeStyles {
     pub search: ThemeStyle,
     pub error: ThemeStyle,
     pub border: ThemeStyle,
+    pub buffer_line_background: ThemeStyle,
+    pub buffer_line_active: ThemeStyle,
+    pub buffer_line_inactive: ThemeStyle,
+    pub buffer_line_dirty: ThemeStyle,
+    pub buffer_line_icon: ThemeStyle,
+    pub buffer_line_pin: ThemeStyle,
+    pub buffer_line_diagnostic: ThemeStyle,
+    pub buffer_line_close: ThemeStyle,
+    pub buffer_line_separator: ThemeStyle,
     pub key_hint_background: ThemeStyle,
     pub key_hint_border: ThemeStyle,
     pub key_hint_key: ThemeStyle,
@@ -172,6 +181,10 @@ pub struct ThemeStyles {
     pub documentation_border: ThemeStyle,
     pub documentation_title: ThemeStyle,
     pub documentation_text: ThemeStyle,
+    pub ai_ghost: ThemeStyle,
+    pub git_sign_added: ThemeStyle,
+    pub git_sign_changed: ThemeStyle,
+    pub git_sign_deleted: ThemeStyle,
     pub explorer_background: ThemeStyle,
     pub explorer_header: ThemeStyle,
     pub explorer_count: ThemeStyle,
@@ -218,6 +231,21 @@ impl ThemeConfig {
             ("search", &self.styles.search),
             ("error", &self.styles.error),
             ("border", &self.styles.border),
+            (
+                "buffer_line_background",
+                &self.styles.buffer_line_background,
+            ),
+            ("buffer_line_active", &self.styles.buffer_line_active),
+            ("buffer_line_inactive", &self.styles.buffer_line_inactive),
+            ("buffer_line_dirty", &self.styles.buffer_line_dirty),
+            ("buffer_line_icon", &self.styles.buffer_line_icon),
+            ("buffer_line_pin", &self.styles.buffer_line_pin),
+            (
+                "buffer_line_diagnostic",
+                &self.styles.buffer_line_diagnostic,
+            ),
+            ("buffer_line_close", &self.styles.buffer_line_close),
+            ("buffer_line_separator", &self.styles.buffer_line_separator),
             ("key_hint_background", &self.styles.key_hint_background),
             ("key_hint_border", &self.styles.key_hint_border),
             ("key_hint_key", &self.styles.key_hint_key),
@@ -231,6 +259,10 @@ impl ThemeConfig {
             ("documentation_border", &self.styles.documentation_border),
             ("documentation_title", &self.styles.documentation_title),
             ("documentation_text", &self.styles.documentation_text),
+            ("ai_ghost", &self.styles.ai_ghost),
+            ("git_sign_added", &self.styles.git_sign_added),
+            ("git_sign_changed", &self.styles.git_sign_changed),
+            ("git_sign_deleted", &self.styles.git_sign_deleted),
             ("explorer_background", &self.styles.explorer_background),
             ("explorer_header", &self.styles.explorer_header),
             ("explorer_count", &self.styles.explorer_count),
@@ -430,12 +462,35 @@ impl Default for LargeFileConfig {
 pub struct EditorViewportConfig {
     /// Non-wrapped cursor context retained at the left and right viewport edges.
     pub horizontal_margin: u16,
+    /// Cursor context retained above and below the viewport.
+    pub vertical_margin: u16,
 }
 
 impl Default for EditorViewportConfig {
     fn default() -> Self {
         Self {
             horizontal_margin: 4,
+            vertical_margin: 4,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GitSignsConfig {
+    pub enabled: bool,
+    pub added: String,
+    pub changed: String,
+    pub deleted: String,
+}
+
+impl Default for GitSignsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            added: "+".into(),
+            changed: "~".into(),
+            deleted: "_".into(),
         }
     }
 }
@@ -462,6 +517,7 @@ pub struct EditorConfig {
     pub zero_width_replacement: String,
     pub ambiguous_width: AmbiguousWidth,
     pub viewport: EditorViewportConfig,
+    pub git_signs: GitSignsConfig,
     pub registers: RegisterConfig,
     pub large_file: LargeFileConfig,
 }
@@ -488,6 +544,7 @@ impl Default for EditorConfig {
             zero_width_replacement: "◌".into(),
             ambiguous_width: AmbiguousWidth::Narrow,
             viewport: EditorViewportConfig::default(),
+            git_signs: GitSignsConfig::default(),
             registers: RegisterConfig::default(),
             large_file: LargeFileConfig::default(),
         }
@@ -514,6 +571,10 @@ pub struct PromptTextConfig {
     pub search_backward_marker: String,
     pub workspace_trust_title: String,
     pub workspace_trust_marker: String,
+    pub ai_chat_title: String,
+    pub ai_chat_marker: String,
+    pub ai_composer_title: String,
+    pub ai_composer_marker: String,
 }
 
 impl Default for PromptTextConfig {
@@ -527,6 +588,10 @@ impl Default for PromptTextConfig {
             search_backward_marker: "? ".into(),
             workspace_trust_title: "Confirm workspace trust".into(),
             workspace_trust_marker: "> ".into(),
+            ai_chat_title: "AI chat · fake.local".into(),
+            ai_chat_marker: "? ".into(),
+            ai_composer_title: "AI composer · fake.local".into(),
+            ai_composer_marker: "> ".into(),
         }
     }
 }
@@ -665,6 +730,71 @@ impl Default for PaneConfig {
             minimum_height: 3,
             border: BorderStyle::Single,
             focus_wrap: true,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BufferLineConfig {
+    pub enabled: bool,
+    pub show_icons: bool,
+    pub show_diagnostics: bool,
+    pub show_pins: bool,
+    pub show_close: bool,
+    pub pin_marker: String,
+    pub close_marker: String,
+    pub diagnostic_error_marker: String,
+    pub diagnostic_warning_marker: String,
+    pub scratch_icon: String,
+    pub virtual_icon: String,
+    pub terminal_icon: String,
+    pub custom_icon: String,
+    pub extension_icons: BTreeMap<String, String>,
+    pub hide_when_single: bool,
+    pub active_format: String,
+    pub inactive_format: String,
+    pub separator: String,
+    pub dirty_marker: String,
+    pub scratch_label: String,
+    pub overflow_left: String,
+    pub overflow_right: String,
+    pub maximum_name_width: u16,
+}
+
+impl Default for BufferLineConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            show_icons: true,
+            show_diagnostics: true,
+            show_pins: true,
+            show_close: true,
+            pin_marker: "P".into(),
+            close_marker: "x".into(),
+            diagnostic_error_marker: "E".into(),
+            diagnostic_warning_marker: "W".into(),
+            scratch_icon: "S".into(),
+            virtual_icon: "V".into(),
+            terminal_icon: "T".into(),
+            custom_icon: "C".into(),
+            extension_icons: BTreeMap::from([
+                ("rs".into(), "R".into()),
+                ("md".into(), "M".into()),
+                ("toml".into(), "T".into()),
+                ("json".into(), "J".into()),
+                ("ts".into(), "T".into()),
+                ("go".into(), "G".into()),
+            ]),
+            hide_when_single: true,
+            active_format: " {title}{dirty} ".into(),
+            inactive_format: " {title}{dirty} ".into(),
+            separator: "│".into(),
+            dirty_marker: " ●".into(),
+            scratch_label: "[scratch]".into(),
+            overflow_left: "‹ ".into(),
+            overflow_right: " ›".into(),
+            maximum_name_width: 32,
         }
     }
 }
@@ -822,7 +952,36 @@ pub struct ExplorerGlyphs {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct ExplorerWatchConfig {
+    pub enabled: bool,
+    pub poll_interval_ms: u64,
+    pub debounce_ms: u64,
+    pub maximum_directories: usize,
+    pub maximum_entries_per_directory: usize,
+    pub maximum_events: usize,
+    pub maximum_path_bytes: usize,
+    pub queue_capacity: usize,
+}
+impl Default for ExplorerWatchConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            poll_interval_ms: 500,
+            debounce_ms: 100,
+            maximum_directories: 128,
+            maximum_entries_per_directory: 10_000,
+            maximum_events: 128,
+            maximum_path_bytes: 65_536,
+            queue_capacity: 8,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExplorerConfig {
+    pub bundled_enabled: bool,
+    pub watch: ExplorerWatchConfig,
     pub width: u16,
     pub minimum_width: u16,
     pub maximum_width: u16,
@@ -864,6 +1023,8 @@ impl Default for ExplorerConfig {
             icon_spacing: " ".into(),
         };
         Self {
+            bundled_enabled: true,
+            watch: ExplorerWatchConfig::default(),
             width: 40,
             minimum_width: 28,
             maximum_width: 60,
@@ -957,6 +1118,9 @@ pub struct DocumentationPopupConfig {
     pub max_height: u16,
     pub horizontal_padding: u16,
     pub scroll_step: usize,
+    pub maximum_sections: usize,
+    pub maximum_lines: usize,
+    pub maximum_bytes: usize,
     pub preferred_below: bool,
     pub border: BorderStyle,
 }
@@ -969,6 +1133,9 @@ impl Default for DocumentationPopupConfig {
             max_height: 18,
             horizontal_padding: 1,
             scroll_step: 4,
+            maximum_sections: 16,
+            maximum_lines: 512,
+            maximum_bytes: 64 * 1024,
             preferred_below: true,
             border: BorderStyle::Rounded,
         }
@@ -1026,6 +1193,7 @@ pub struct UiConfig {
     pub command_line: CommandLineConfig,
     pub cursor: CursorConfig,
     pub status_line: StatusLineConfig,
+    pub buffer_line: BufferLineConfig,
     pub tab_line: TabLineConfig,
     pub panes: PaneConfig,
     pub notifications: NotificationConfig,
@@ -1050,6 +1218,7 @@ impl Default for UiConfig {
             command_line: CommandLineConfig::default(),
             cursor: CursorConfig::default(),
             status_line: StatusLineConfig::default(),
+            buffer_line: BufferLineConfig::default(),
             tab_line: TabLineConfig::default(),
             panes: PaneConfig::default(),
             notifications: NotificationConfig::default(),
@@ -1670,6 +1839,38 @@ impl Default for TerminalsConfig {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WindowPlacementConfig {
+    Automatic,
+    Docked {
+        edge: String,
+        size: u16,
+    },
+    Floating {
+        x: u16,
+        y: u16,
+        width: u16,
+        height: u16,
+    },
+    Fullscreen,
+    Hidden,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WindowRuleConfig {
+    pub content_type: String,
+    pub placement: WindowPlacementConfig,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WindowsConfig {
+    #[serde(default, rename = "rule")]
+    pub rules: Vec<WindowRuleConfig>,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -1696,6 +1897,8 @@ pub struct Config {
     pub tasks: BTreeMap<String, TaskConfig>,
     pub syntax: SyntaxConfig,
     pub terminals: TerminalsConfig,
+    #[serde(default)]
+    pub windows: WindowsConfig,
     pub workspace: WorkspaceConfig,
     pub messages: BTreeMap<String, String>,
     pub command_labels: BTreeMap<String, String>,
@@ -2001,6 +2204,60 @@ impl LoadedConfig {
 
 impl Config {
     fn validate(&self) -> Result<(), &'static str> {
+        const SUPPORTED_WINDOW_CONTENT: &[&str] = &[
+            "builtin.explorer",
+            "builtin.terminal",
+            "builtin.dashboard",
+            "builtin.picker",
+            "builtin.problems",
+            "builtin.output",
+            "builtin.logs",
+            "builtin.debug",
+        ];
+        if self.windows.rules.len() > 32 {
+            return Err("windows.rule exceeds the 32-rule ceiling");
+        }
+        let mut window_targets = BTreeSet::new();
+        let mut fullscreen_rules = 0_usize;
+        for rule in &self.windows.rules {
+            let plugin_content = rule.content_type.starts_with("plugin.")
+                && rule.content_type.len() <= 128
+                && rule.content_type.split('.').count() >= 3
+                && rule.content_type.split('.').all(|segment| {
+                    segment
+                        .bytes()
+                        .next()
+                        .is_some_and(|byte| byte.is_ascii_lowercase())
+                        && segment.bytes().all(|byte| {
+                            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'
+                        })
+                });
+            if !SUPPORTED_WINDOW_CONTENT.contains(&rule.content_type.as_str()) && !plugin_content {
+                return Err("windows.rule contains an unsupported content_type");
+            }
+            if !window_targets.insert(rule.content_type.as_str()) {
+                return Err("windows.rule contains a duplicate content_type");
+            }
+            match &rule.placement {
+                WindowPlacementConfig::Automatic | WindowPlacementConfig::Hidden => {}
+                WindowPlacementConfig::Docked { edge, size } => {
+                    if !matches!(edge.as_str(), "left" | "right" | "top" | "bottom")
+                        || !(1..=240).contains(size)
+                    {
+                        return Err("windows.rule contains an invalid dock placement");
+                    }
+                }
+                WindowPlacementConfig::Floating { width, height, .. } => {
+                    if *width == 0 || *height == 0 {
+                        return Err("windows.rule contains an invalid floating placement");
+                    }
+                }
+                WindowPlacementConfig::Fullscreen => fullscreen_rules += 1,
+            }
+        }
+        if fullscreen_rules > 1 {
+            return Err("windows.rule contains conflicting fullscreen defaults");
+        }
         if !(1..=32).contains(&self.editor.tab_width) {
             return Err("editor.tab_width must be between 1 and 32");
         }
@@ -2152,6 +2409,14 @@ impl Config {
             || self.ui.explorer.loading_label.chars().count() > 64
             || self.ui.explorer.loading_label.chars().any(char::is_control)
             || invalid_explorer_glyph
+            || !(50..=60_000).contains(&self.ui.explorer.watch.poll_interval_ms)
+            || self.ui.explorer.watch.debounce_ms
+                > self.ui.explorer.watch.poll_interval_ms.saturating_mul(10)
+            || !(1..=1024).contains(&self.ui.explorer.watch.maximum_directories)
+            || !(1..=100_000).contains(&self.ui.explorer.watch.maximum_entries_per_directory)
+            || !(1..=10_000).contains(&self.ui.explorer.watch.maximum_events)
+            || !(256..=4 * 1024 * 1024).contains(&self.ui.explorer.watch.maximum_path_bytes)
+            || !(1..=1024).contains(&self.ui.explorer.watch.queue_capacity)
         {
             return Err("ui.explorer layout or glyph policy is invalid");
         }
@@ -2159,6 +2424,9 @@ impl Config {
             || !(3..=100).contains(&self.ui.documentation_popup.max_height)
             || self.ui.documentation_popup.horizontal_padding > 8
             || !(1..=100).contains(&self.ui.documentation_popup.scroll_step)
+            || !(1..=32).contains(&self.ui.documentation_popup.maximum_sections)
+            || !(1..=4096).contains(&self.ui.documentation_popup.maximum_lines)
+            || !(256..=1024 * 1024).contains(&self.ui.documentation_popup.maximum_bytes)
         {
             return Err("ui.documentation_popup layout policy is invalid");
         }
@@ -2411,6 +2679,60 @@ impl Config {
         if self.ui.panes.minimum_width < 3 || self.ui.panes.minimum_height < 2 {
             return Err("ui.panes minimum dimensions are too small");
         }
+        if !self.ui.buffer_line.active_format.contains("{title}")
+            || !self.ui.buffer_line.active_format.contains("{dirty}")
+            || !self.ui.buffer_line.inactive_format.contains("{title}")
+            || !self.ui.buffer_line.inactive_format.contains("{dirty}")
+            || !(4..=256).contains(&self.ui.buffer_line.maximum_name_width)
+            || [
+                &self.ui.buffer_line.active_format,
+                &self.ui.buffer_line.inactive_format,
+                &self.ui.buffer_line.separator,
+                &self.ui.buffer_line.dirty_marker,
+                &self.ui.buffer_line.scratch_label,
+                &self.ui.buffer_line.overflow_left,
+                &self.ui.buffer_line.overflow_right,
+                &self.ui.buffer_line.pin_marker,
+                &self.ui.buffer_line.close_marker,
+                &self.ui.buffer_line.diagnostic_error_marker,
+                &self.ui.buffer_line.diagnostic_warning_marker,
+                &self.ui.buffer_line.scratch_icon,
+                &self.ui.buffer_line.virtual_icon,
+                &self.ui.buffer_line.terminal_icon,
+                &self.ui.buffer_line.custom_icon,
+            ]
+            .iter()
+            .any(|value| value.len() > 256 || value.chars().any(char::is_control))
+            || [
+                &self.ui.buffer_line.pin_marker,
+                &self.ui.buffer_line.close_marker,
+                &self.ui.buffer_line.diagnostic_error_marker,
+                &self.ui.buffer_line.diagnostic_warning_marker,
+                &self.ui.buffer_line.scratch_icon,
+                &self.ui.buffer_line.virtual_icon,
+                &self.ui.buffer_line.terminal_icon,
+                &self.ui.buffer_line.custom_icon,
+            ]
+            .iter()
+            .any(|glyph| UnicodeWidthStr::width(glyph.as_str()) != 1)
+            || self.ui.buffer_line.extension_icons.len() > 64
+            || self
+                .ui
+                .buffer_line
+                .extension_icons
+                .iter()
+                .any(|(extension, glyph)| {
+                    extension.is_empty()
+                        || extension.len() > 16
+                        || !extension
+                            .bytes()
+                            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+                        || UnicodeWidthStr::width(glyph.as_str()) != 1
+                        || glyph.chars().any(char::is_control)
+                })
+        {
+            return Err("ui.buffer_line policy is invalid");
+        }
         if !self.ui.tab_line.active_format.contains("{title}")
             || !self.ui.tab_line.inactive_format.contains("{title}")
         {
@@ -2448,8 +2770,24 @@ impl Config {
         {
             return Err("editor gutter presentation is invalid");
         }
+        if [
+            &self.editor.git_signs.added,
+            &self.editor.git_signs.changed,
+            &self.editor.git_signs.deleted,
+        ]
+        .into_iter()
+        .any(|symbol| {
+            symbol.chars().any(char::is_control)
+                || UnicodeWidthStr::width(symbol.as_str()) != 1
+                || UnicodeWidthStr::width_cjk(symbol.as_str()) != 1
+        }) {
+            return Err("editor.git_signs symbols must each occupy one display cell");
+        }
         if self.editor.viewport.horizontal_margin > 100 {
             return Err("editor.viewport.horizontal_margin must not exceed 100");
+        }
+        if self.editor.viewport.vertical_margin > 100 {
+            return Err("editor.viewport.vertical_margin must not exceed 100");
         }
         if !(1..=100).contains(&self.editor.half_page_percent)
             || !(1..=200).contains(&self.editor.full_page_percent)
@@ -3842,6 +4180,7 @@ fn unknown_key_warning(source: &str) -> Option<String> {
                     | "tasks"
                     | "syntax"
                     | "terminals"
+                    | "windows"
                     | "workspace"
                     | "messages"
                     | "command_labels"
@@ -3920,6 +4259,7 @@ mod tests {
         let loaded = load_config(&path);
         assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
         assert_eq!(loaded.config.editor.viewport.horizontal_margin, 9);
+        assert_eq!(loaded.config.editor.viewport.vertical_margin, 4);
         assert!(
             loaded
                 .explain("editor.viewport.horizontal_margin")
@@ -3927,6 +4267,11 @@ mod tests {
                 .source
                 .starts_with(&path.display().to_string())
         );
+
+        fs::write(&path, "[editor.viewport]\nvertical_margin = 7\n").expect("write vertical");
+        let loaded = load_config(&path);
+        assert!(loaded.diagnostic.is_none());
+        assert_eq!(loaded.config.editor.viewport.vertical_margin, 7);
 
         fs::write(&path, "[editor.viewport]\nhorizontal_margin = 101\n")
             .expect("write out of bounds");
@@ -3948,6 +4293,51 @@ mod tests {
                 .as_deref()
                 .is_some_and(|message| { message.contains("unknown field `horizontal_margin`") })
         );
+    }
+
+    #[test]
+    fn git_sign_policy_is_nested_strict_and_display_safe() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        fs::write(
+            &path,
+            "[editor.git_signs]\nenabled=false\nadded=\"A\"\nchanged=\"C\"\ndeleted=\"D\"\n",
+        )
+        .unwrap();
+        let loaded = load_config(&path);
+        assert!(loaded.diagnostic.is_none());
+        assert!(!loaded.config.editor.git_signs.enabled);
+        for invalid in ["added=\"\"", "changed=\"界\"", "deleted=\"DD\""] {
+            fs::write(&path, format!("[editor.git_signs]\n{invalid}\n")).unwrap();
+            assert!(load_config(&path).diagnostic.is_some());
+        }
+        fs::write(&path, "[editor.git_signs]\nunknown=\"x\"\n").unwrap();
+        assert!(load_config(&path).diagnostic.is_some());
+    }
+
+    #[test]
+    fn explorer_watch_policy_is_nested_strict_and_bounded() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        fs::write(
+            &path,
+            "[ui.explorer.watch]\nenabled=false\npoll_interval_ms=1000\n",
+        )
+        .unwrap();
+        let loaded = load_config(&path);
+        assert!(loaded.diagnostic.is_none());
+        assert!(!loaded.config.ui.explorer.watch.enabled);
+        for invalid in [
+            "poll_interval_ms=49",
+            "maximum_directories=0",
+            "maximum_entries_per_directory=100001",
+            "maximum_events=0",
+            "maximum_path_bytes=12",
+            "queue_capacity=0",
+        ] {
+            fs::write(&path, format!("[ui.explorer.watch]\n{invalid}\n")).unwrap();
+            assert!(load_config(&path).diagnostic.is_some());
+        }
     }
 
     #[test]
@@ -4522,6 +4912,75 @@ mod tests {
     }
 
     #[test]
+    fn buffer_line_policy_is_typed_bounded_and_strict() {
+        let root = tempdir().expect("tempdir");
+        let path = root.path().join("config.toml");
+        fs::write(
+            &path,
+            "[ui.buffer_line]\nmaximum_name_width=48\ndirty_marker=' *'\n",
+        )
+        .expect("valid buffer line");
+        let loaded = load_config(&path);
+        assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
+        assert_eq!(loaded.config.ui.buffer_line.maximum_name_width, 48);
+        assert_eq!(loaded.config.ui.buffer_line.dirty_marker, " *");
+
+        for invalid in [
+            "maximum_name_width=3",
+            "active_format='{title}'",
+            "inactive_format='{dirty}'",
+            "separator=\"bad\\nvalue\"",
+            "pin_marker='界'",
+            "extension_icons={RS='R'}",
+        ] {
+            fs::write(&path, format!("[ui.buffer_line]\n{invalid}\n"))
+                .expect("invalid buffer line");
+            let loaded = load_config(&path);
+            assert_eq!(loaded.config, load_bundled_config().config);
+            assert!(loaded.diagnostic.is_some());
+        }
+    }
+
+    #[test]
+    fn semantic_window_rules_are_typed_bounded_and_transactional() {
+        let root = tempdir().expect("tempdir");
+        let path = root.path().join("config.toml");
+        fs::write(
+            &path,
+            "[windows]\nrule=[{content_type='builtin.problems',placement={kind='floating',x=4,y=3,width=50,height=12}}]\n",
+        )
+        .expect("valid windows");
+        let loaded = load_config(&path);
+        assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
+        assert_eq!(loaded.config.windows.rules.len(), 1);
+        assert_eq!(
+            loaded.config.windows.rules[0].content_type,
+            "builtin.problems"
+        );
+        let explanation = loaded.explain("windows.rule").expect("rule provenance");
+        assert!(
+            explanation
+                .contributors
+                .iter()
+                .any(|source| source.contains("config.toml")),
+            "{explanation:?}"
+        );
+
+        for invalid in [
+            "[windows]\nrule=[{content_type='unknown.surface',placement={kind='hidden'}}]\n",
+            "[windows]\nrule=[{content_type='builtin.picker',placement={kind='hidden'}},{content_type='builtin.picker',placement={kind='automatic'}}]\n",
+            "[windows]\nrule=[{content_type='builtin.picker',placement={kind='fullscreen'}},{content_type='builtin.debug',placement={kind='fullscreen'}}]\n",
+            "[windows]\nrule=[{content_type='builtin.output',placement={kind='floating',x=0,y=0,width=0,height=4}}]\n",
+            "[windows]\nrule=[{content_type='builtin.logs',placement={kind='docked',edge='middle',size=4}}]\n",
+        ] {
+            fs::write(&path, invalid).expect("invalid windows");
+            let loaded = load_config(&path);
+            assert!(loaded.diagnostic.is_some(), "accepted {invalid}");
+            assert_eq!(loaded.config, load_bundled_config().config);
+        }
+    }
+
+    #[test]
     fn terminal_panel_policy_is_typed_bounded_and_strict() {
         let root = tempdir().expect("tempdir");
         let path = root.path().join("config.toml");
@@ -4565,19 +5024,27 @@ mod tests {
     fn documentation_popup_policy_is_typed_and_bounded() {
         let root = tempdir().expect("tempdir");
         let path = root.path().join("config.toml");
-        fs::write(&path, "[ui.documentation_popup]\nscroll_step=0\n")
-            .expect("invalid documentation popup");
-        let loaded = load_config(&path);
-        assert!(
-            loaded
-                .diagnostic
-                .as_deref()
-                .is_some_and(|message| message.contains("ui.documentation_popup"))
-        );
-        assert_eq!(
-            loaded.config.ui.documentation_popup,
-            load_bundled_config().config.ui.documentation_popup
-        );
+        for invalid in [
+            "scroll_step=0",
+            "maximum_sections=0",
+            "maximum_lines=0",
+            "maximum_bytes=255",
+            "maximum_bytes=1048577",
+        ] {
+            fs::write(&path, format!("[ui.documentation_popup]\n{invalid}\n"))
+                .expect("invalid documentation popup");
+            let loaded = load_config(&path);
+            assert!(
+                loaded
+                    .diagnostic
+                    .as_deref()
+                    .is_some_and(|message| message.contains("ui.documentation_popup"))
+            );
+            assert_eq!(
+                loaded.config.ui.documentation_popup,
+                load_bundled_config().config.ui.documentation_popup
+            );
+        }
     }
 
     #[test]

@@ -24,8 +24,16 @@ pub enum AppEffect {
         force: bool,
     },
     CycleBuffer(isize),
+    ToggleBufferPin,
+    MoveBufferLine(isize),
     NewBuffer,
     OpenFilePrompt,
+    OpenWorkspaceFilePicker,
+    GitStatusRefresh,
+    GitStatusOpen,
+    GitHunksOpen,
+    GitHunkStage,
+    GitHunkReset,
     OpenPrompt {
         kind: PromptKind,
         initial: String,
@@ -52,6 +60,42 @@ pub enum AppEffect {
     ExtendMouseSelection,
     Layout(LayoutAction),
     SurfaceFocus(FocusDirection),
+    RetainedUiFocus(isize),
+    RetainedUiScroll(isize),
+    RetainedUiActivate,
+    RetainedUiMouseSelect,
+    PrivateUiActivate {
+        at_mouse: bool,
+    },
+    WindowDock {
+        target: String,
+        edge: String,
+        size: u16,
+    },
+    WindowFloat {
+        target: String,
+        x: u16,
+        y: u16,
+        width: u16,
+        height: u16,
+    },
+    WindowFullscreen(String),
+    WindowHide(String),
+    WindowShow(String),
+    WindowClose(String),
+    WindowResize {
+        target: String,
+        amount: i16,
+    },
+    WindowMove {
+        target: String,
+        x: u16,
+        y: u16,
+    },
+    WindowSwap {
+        first: String,
+        second: String,
+    },
     RepeatLast,
     MacroRecordStart(char),
     MacroRecordStop,
@@ -91,6 +135,20 @@ pub enum AppEffect {
         plugin: String,
         command: String,
     },
+    PluginPickerOpen {
+        provider: String,
+        query: String,
+    },
+    VirtualDocumentOpen {
+        source: String,
+        key: String,
+    },
+    VirtualDocumentRefresh,
+    HealthVirtualOpen,
+    HealthVirtualRefresh,
+    AiChatOpen,
+    AiGhostRequest,
+    AiComposerRequest,
     PackageInstall {
         package_manifest: PathBuf,
         plugin_manifest: PathBuf,
@@ -122,6 +180,18 @@ pub enum AppEffect {
     TerminalFocusActive,
     TerminalCycle(i8),
     TerminalResize(i16),
+    TerminalDock {
+        edge: String,
+        size: u16,
+    },
+    TerminalFloat {
+        x: u16,
+        y: u16,
+        width: u16,
+        height: u16,
+    },
+    TerminalFullscreen,
+    TerminalHide,
     TerminalSend(String),
     TerminalUnfocus,
     TerminalClose,
@@ -147,10 +217,12 @@ pub enum AppEffect {
     ExplorerOpen,
     ExplorerClose,
     ExplorerMove(i8),
+    ExplorerPage(isize),
     ExplorerParent,
     ExplorerChild,
     ExplorerToggle,
     ExplorerRefresh,
+    ExplorerFollow,
     ExplorerToggleHidden,
     ExplorerToggleIgnored,
     ExplorerFileOpen {
@@ -191,6 +263,7 @@ pub enum AppEffect {
     LspRequest(crate::languages::LspFeature),
     LspDocumentationScroll(isize),
     LspDocumentationClose,
+    LspCompletionDocumentationOpen,
     LspCompletionMove(i8),
     LspCompletionAccept,
     LspCompletionCancel,
@@ -350,6 +423,27 @@ pub fn register_app_commands(
     }
     register(
         registry,
+        "buffer.pin.toggle",
+        "Toggle active buffer pin",
+        ContextRequirement::Buffer,
+        ArgumentSchema::default(),
+        |_| AppEffect::ToggleBufferPin,
+    )?;
+    for (id, title, direction) in [
+        ("buffer.move_left", "Move buffer left", -1),
+        ("buffer.move_right", "Move buffer right", 1),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::Buffer,
+            ArgumentSchema::default(),
+            move |_| AppEffect::MoveBufferLine(direction),
+        )?;
+    }
+    register(
+        registry,
         "file.new",
         "New buffer",
         ContextRequirement::Workspace,
@@ -470,6 +564,11 @@ pub fn register_app_commands(
             "lsp.documentation.close",
             "Close documentation",
             AppEffect::LspDocumentationClose,
+        ),
+        (
+            "lsp.completion.documentation.open",
+            "Open completion documentation",
+            AppEffect::LspCompletionDocumentationOpen,
         ),
         (
             "lsp.definition",
@@ -877,6 +976,16 @@ pub fn register_app_commands(
             AppEffect::ExplorerMove(-1),
         ),
         (
+            "explorer.page_up",
+            "Page explorer selection up",
+            AppEffect::ExplorerPage(-1),
+        ),
+        (
+            "explorer.page_down",
+            "Page explorer selection down",
+            AppEffect::ExplorerPage(1),
+        ),
+        (
             "explorer.parent",
             "Select explorer parent",
             AppEffect::ExplorerParent,
@@ -895,6 +1004,11 @@ pub fn register_app_commands(
             "explorer.refresh",
             "Refresh explorer",
             AppEffect::ExplorerRefresh,
+        ),
+        (
+            "explorer.follow",
+            "Follow active file in explorer",
+            AppEffect::ExplorerFollow,
         ),
         (
             "explorer.hidden.toggle",
@@ -1063,6 +1177,92 @@ pub fn register_app_commands(
         ArgumentSchema::default(),
         |_| AppEffect::PluginList,
     )?;
+    register(
+        registry,
+        "picker.plugin.open",
+        "Open a plugin picker source",
+        ContextRequirement::Application,
+        ArgumentSchema::default()
+            .field("provider", ArgumentType::String, true)
+            .field("query", ArgumentType::String, false),
+        |invocation| {
+            Ok(AppEffect::PluginPickerOpen {
+                provider: string_arg(invocation, "provider")?.into(),
+                query: invocation
+                    .arguments
+                    .get("query")
+                    .map(CommandValue::as_str)
+                    .transpose()?
+                    .unwrap_or("")
+                    .into(),
+            })
+        },
+    )?;
+    register(
+        registry,
+        "buffer.virtual.open",
+        "Open a read-only plugin virtual document",
+        ContextRequirement::Application,
+        ArgumentSchema::default()
+            .field("source", ArgumentType::String, true)
+            .field("key", ArgumentType::String, true),
+        |invocation| {
+            Ok(AppEffect::VirtualDocumentOpen {
+                source: string_arg(invocation, "source")?.into(),
+                key: string_arg(invocation, "key")?.into(),
+            })
+        },
+    )?;
+    register(
+        registry,
+        "health.virtual.open",
+        "Open read-only health document",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_| AppEffect::HealthVirtualOpen,
+    )?;
+    register(
+        registry,
+        "health.virtual.refresh",
+        "Refresh read-only health document",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_| AppEffect::HealthVirtualRefresh,
+    )?;
+    for (id, title, effect) in [
+        (
+            "ai.chat.open",
+            "Open fake-provider AI chat",
+            AppEffect::AiChatOpen,
+        ),
+        (
+            "ai.ghost.request",
+            "Request fake-provider ghost text",
+            AppEffect::AiGhostRequest,
+        ),
+        (
+            "ai.composer.request",
+            "Request fake-provider edit proposal",
+            AppEffect::AiComposerRequest,
+        ),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::Application,
+            ArgumentSchema::default(),
+            move |_| effect.clone(),
+        )?;
+    }
+    register(
+        registry,
+        "buffer.virtual.refresh",
+        "Refresh focused read-only virtual document",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_| AppEffect::VirtualDocumentRefresh,
+    )?;
     for (id, title, update) in [
         ("package.install", "Install verified package", false),
         ("package.update", "Update verified package", true),
@@ -1197,6 +1397,138 @@ pub fn register_app_commands(
     )?;
     register(
         registry,
+        "window.dock",
+        "Dock an ordinary native window",
+        ContextRequirement::Application,
+        ArgumentSchema::default()
+            .field("target", ArgumentType::String, true)
+            .field("edge", ArgumentType::String, true)
+            .field("size", ArgumentType::Integer, true),
+        |invocation| {
+            let size = u16::try_from(integer_arg(invocation, "size")?).map_err(|_| {
+                CommandError::InvalidArguments("window dock size is outside u16 bounds".into())
+            })?;
+            Ok(AppEffect::WindowDock {
+                target: string_arg(invocation, "target")?.to_owned(),
+                edge: string_arg(invocation, "edge")?.to_owned(),
+                size,
+            })
+        },
+    )?;
+    register(
+        registry,
+        "window.float",
+        "Float an ordinary native window",
+        ContextRequirement::Application,
+        ArgumentSchema::default()
+            .field("target", ArgumentType::String, true)
+            .field("x", ArgumentType::Integer, true)
+            .field("y", ArgumentType::Integer, true)
+            .field("width", ArgumentType::Integer, true)
+            .field("height", ArgumentType::Integer, true),
+        |invocation| {
+            let bounded = |name| {
+                u16::try_from(integer_arg(invocation, name)?).map_err(|_| {
+                    CommandError::InvalidArguments(format!(
+                        "window float {name} is outside u16 bounds"
+                    ))
+                })
+            };
+            Ok(AppEffect::WindowFloat {
+                target: string_arg(invocation, "target")?.to_owned(),
+                x: bounded("x")?,
+                y: bounded("y")?,
+                width: bounded("width")?,
+                height: bounded("height")?,
+            })
+        },
+    )?;
+    for (id, title, build) in [
+        (
+            "window.fullscreen",
+            "Fullscreen an ordinary native window",
+            AppEffect::WindowFullscreen as fn(String) -> AppEffect,
+        ),
+        (
+            "window.hide",
+            "Hide an ordinary native window",
+            AppEffect::WindowHide,
+        ),
+        (
+            "window.show",
+            "Show an ordinary native window",
+            AppEffect::WindowShow,
+        ),
+        (
+            "window.close",
+            "Close an ordinary native window",
+            AppEffect::WindowClose,
+        ),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::Application,
+            ArgumentSchema::default().field("target", ArgumentType::String, true),
+            move |invocation| Ok(build(string_arg(invocation, "target")?.to_owned())),
+        )?;
+    }
+    register(
+        registry,
+        "window.resize",
+        "Resize an ordinary native window",
+        ContextRequirement::Application,
+        ArgumentSchema::default()
+            .field("target", ArgumentType::String, true)
+            .field("amount", ArgumentType::Integer, true),
+        |invocation| {
+            Ok(AppEffect::WindowResize {
+                target: string_arg(invocation, "target")?.to_owned(),
+                amount: i16::try_from(integer_arg(invocation, "amount")?).map_err(|_| {
+                    CommandError::InvalidArguments("window resize is outside i16 bounds".into())
+                })?,
+            })
+        },
+    )?;
+    register(
+        registry,
+        "window.move",
+        "Move an ordinary floating native window",
+        ContextRequirement::Application,
+        ArgumentSchema::default()
+            .field("target", ArgumentType::String, true)
+            .field("x", ArgumentType::Integer, true)
+            .field("y", ArgumentType::Integer, true),
+        |invocation| {
+            Ok(AppEffect::WindowMove {
+                target: string_arg(invocation, "target")?.to_owned(),
+                x: u16::try_from(integer_arg(invocation, "x")?).map_err(|_| {
+                    CommandError::InvalidArguments("window x is outside u16 bounds".into())
+                })?,
+                y: u16::try_from(integer_arg(invocation, "y")?).map_err(|_| {
+                    CommandError::InvalidArguments("window y is outside u16 bounds".into())
+                })?,
+            })
+        },
+    )?;
+    register(
+        registry,
+        "window.swap",
+        "Swap two ordinary native window placements",
+        ContextRequirement::Application,
+        ArgumentSchema::default()
+            .field("first", ArgumentType::String, true)
+            .field("second", ArgumentType::String, true),
+        |invocation| {
+            Ok(AppEffect::WindowSwap {
+                first: string_arg(invocation, "first")?.to_owned(),
+                second: string_arg(invocation, "second")?.to_owned(),
+            })
+        },
+    )?;
+    register(
+        registry,
         "terminal.open",
         "Open terminal profile",
         ContextRequirement::Workspace,
@@ -1270,6 +1602,66 @@ pub fn register_app_commands(
             })?;
             Ok(AppEffect::TerminalResize(rows))
         },
+    )?;
+    register(
+        registry,
+        "terminal.dock",
+        "Dock the selected terminal window",
+        ContextRequirement::Application,
+        ArgumentSchema::default()
+            .field("edge", ArgumentType::String, true)
+            .field("size", ArgumentType::Integer, true),
+        |invocation| {
+            let size = u16::try_from(integer_arg(invocation, "size")?).map_err(|_| {
+                CommandError::InvalidArguments("terminal dock size is outside u16 bounds".into())
+            })?;
+            Ok(AppEffect::TerminalDock {
+                edge: string_arg(invocation, "edge")?.to_owned(),
+                size,
+            })
+        },
+    )?;
+    register(
+        registry,
+        "terminal.float",
+        "Float the selected terminal window",
+        ContextRequirement::Application,
+        ArgumentSchema::default()
+            .field("x", ArgumentType::Integer, true)
+            .field("y", ArgumentType::Integer, true)
+            .field("width", ArgumentType::Integer, true)
+            .field("height", ArgumentType::Integer, true),
+        |invocation| {
+            let bounded = |name| {
+                u16::try_from(integer_arg(invocation, name)?).map_err(|_| {
+                    CommandError::InvalidArguments(format!(
+                        "terminal float {name} is outside u16 bounds"
+                    ))
+                })
+            };
+            Ok(AppEffect::TerminalFloat {
+                x: bounded("x")?,
+                y: bounded("y")?,
+                width: bounded("width")?,
+                height: bounded("height")?,
+            })
+        },
+    )?;
+    register(
+        registry,
+        "terminal.fullscreen",
+        "Fullscreen the selected terminal window",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_| AppEffect::TerminalFullscreen,
+    )?;
+    register(
+        registry,
+        "terminal.hide",
+        "Hide the selected terminal window without closing its process",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_| AppEffect::TerminalHide,
     )?;
     register(
         registry,
@@ -1714,6 +2106,46 @@ pub fn register_app_commands(
     )?;
     register(
         registry,
+        "workspace.git.status.refresh",
+        "Refresh Git status",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::GitStatusRefresh,
+    )?;
+    register(
+        registry,
+        "workspace.git.hunk.reset",
+        "Reset selected Git hunk",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::GitHunkReset,
+    )?;
+    register(
+        registry,
+        "workspace.git.hunk.stage",
+        "Stage selected Git hunk",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::GitHunkStage,
+    )?;
+    register(
+        registry,
+        "workspace.git.hunks.open",
+        "Open Git hunks",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::GitHunksOpen,
+    )?;
+    register(
+        registry,
+        "workspace.git.status.open",
+        "Open Git status",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::GitStatusOpen,
+    )?;
+    register(
+        registry,
         "health.open",
         "Show health",
         ContextRequirement::Application,
@@ -1726,7 +2158,7 @@ pub fn register_app_commands(
         "Open file",
         ContextRequirement::Workspace,
         ArgumentSchema::default(),
-        |_| AppEffect::OpenFilePrompt,
+        |_| AppEffect::OpenWorkspaceFilePicker,
     )?;
     register(
         registry,
@@ -1941,6 +2373,68 @@ pub fn register_app_commands(
             ContextRequirement::Application,
             ArgumentSchema::default(),
             move |_| AppEffect::SurfaceFocus(direction),
+        )?;
+    }
+    for (id, title, effect) in [
+        (
+            "surface.retained.focus.next",
+            "Focus next retained UI node",
+            AppEffect::RetainedUiFocus(1),
+        ),
+        (
+            "surface.retained.focus.previous",
+            "Focus previous retained UI node",
+            AppEffect::RetainedUiFocus(-1),
+        ),
+        (
+            "surface.retained.scroll.down",
+            "Scroll retained UI down",
+            AppEffect::RetainedUiScroll(1),
+        ),
+        (
+            "surface.retained.scroll.up",
+            "Scroll retained UI up",
+            AppEffect::RetainedUiScroll(-1),
+        ),
+        (
+            "surface.retained.activate",
+            "Activate focused retained UI node",
+            AppEffect::RetainedUiActivate,
+        ),
+        (
+            "surface.retained.mouse.select",
+            "Select retained UI node at mouse position",
+            AppEffect::RetainedUiMouseSelect,
+        ),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::Application,
+            ArgumentSchema::default(),
+            move |_| effect.clone(),
+        )?;
+    }
+    for (id, title, at_mouse) in [
+        (
+            "surface.private.activate",
+            "Activate private surface action at cursor",
+            false,
+        ),
+        (
+            "surface.private.mouse.activate",
+            "Activate private surface action at mouse",
+            true,
+        ),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::Application,
+            ArgumentSchema::default(),
+            move |_| AppEffect::PrivateUiActivate { at_mouse },
         )?;
     }
     for (id, title, action) in [

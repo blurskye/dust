@@ -43,6 +43,10 @@ pub enum EditorOperation {
         view: ViewId,
         first_line: usize,
     },
+    SetScrollWrapRow {
+        view: ViewId,
+        first_wrap_row: usize,
+    },
     SetScrollColumn {
         view: ViewId,
         first_column: usize,
@@ -85,6 +89,10 @@ pub enum EditorOperation {
     ClosePane,
     ResizePane {
         delta: i16,
+    },
+    SwapPanes {
+        first: crate::editing::PaneId,
+        second: crate::editing::PaneId,
     },
     CloseTab,
     FocusPane {
@@ -180,8 +188,28 @@ impl EditorState {
                 buffer.undo.boundary();
             }
         }
+        if transaction
+            .operations
+            .iter()
+            .any(|operation| operation.changed_buffer_dirtiness(self, &candidate))
+        {
+            candidate.mark_window_changed();
+        }
         *self = candidate;
         Ok(())
+    }
+}
+
+impl EditorOperation {
+    fn changed_buffer_dirtiness(&self, before: &EditorState, after: &EditorState) -> bool {
+        let buffer = match self {
+            Self::ApplyEdits { buffer, .. } | Self::Undo { buffer } | Self::Redo { buffer } => {
+                *buffer
+            }
+            _ => return false,
+        };
+        before.buffers.get(buffer).map(|buffer| buffer.dirty)
+            != after.buffers.get(buffer).map(|buffer| buffer.dirty)
     }
 }
 
@@ -303,6 +331,17 @@ fn apply_operation(
                 .get_mut(*view)
                 .ok_or(TransactionError::MissingView)?;
             target.scroll_line = *first_line;
+            target.scroll_wrap_row = 0;
+        }
+        EditorOperation::SetScrollWrapRow {
+            view,
+            first_wrap_row,
+        } => {
+            let target = state
+                .views
+                .get_mut(*view)
+                .ok_or(TransactionError::MissingView)?;
+            target.scroll_wrap_row = *first_wrap_row;
         }
         EditorOperation::SetScrollColumn { view, first_column } => {
             let target = state
@@ -395,6 +434,9 @@ fn apply_operation(
                 .buffers
                 .get_mut(*buffer)
                 .ok_or(TransactionError::MissingBuffer)?;
+            if target.read_only {
+                return Err(TransactionError::ReadOnly);
+            }
             let text = target
                 .undo
                 .undo()
@@ -412,6 +454,9 @@ fn apply_operation(
                 .buffers
                 .get_mut(*buffer)
                 .ok_or(TransactionError::MissingBuffer)?;
+            if target.read_only {
+                return Err(TransactionError::ReadOnly);
+            }
             let text = target
                 .undo
                 .redo()
@@ -439,6 +484,9 @@ fn apply_operation(
             .map_err(|error| TransactionError::Layout(error.into()))?,
         EditorOperation::ResizePane { delta } => state
             .resize_active_pane(*delta)
+            .map_err(|error| TransactionError::Layout(error.into()))?,
+        EditorOperation::SwapPanes { first, second } => state
+            .swap_panes(*first, *second)
             .map_err(|error| TransactionError::Layout(error.into()))?,
         EditorOperation::CloseTab => state
             .close_active_tab()
@@ -518,6 +566,52 @@ mod tests {
             });
         assert!(state.apply_transaction(&transaction).is_err());
         assert_eq!(state.views[view].scroll_column, 0);
+    }
+
+    #[test]
+    fn virtual_origin_rejects_edits_undo_redo_and_refreshes_only_by_host_revision() {
+        let mut state = EditorState::new(PathBuf::from("/tmp"));
+        let (buffer, view) =
+            state.open_virtual_read_only(TextBuffer::from_text("héllo"), "demo".into(), 7, 11, 1);
+        let before = state.buffers[buffer].text.to_string();
+        let edit =
+            EditorTransaction::new(TransactionId(4)).with_operation(EditorOperation::ApplyEdits {
+                buffer,
+                edits: TextEditSet::new(
+                    state.buffers[buffer].text.revision(),
+                    vec![TextEdit::new(
+                        ByteRange::new(ByteOffset(0), ByteOffset(1)).unwrap(),
+                        "x",
+                    )],
+                ),
+            });
+        assert!(matches!(
+            state.apply_transaction(&edit),
+            Err(super::TransactionError::ReadOnly)
+        ));
+        for operation in [
+            EditorOperation::Undo { buffer },
+            EditorOperation::Redo { buffer },
+        ] {
+            assert!(matches!(
+                state.apply_transaction(
+                    &EditorTransaction::new(TransactionId(5)).with_operation(operation)
+                ),
+                Err(super::TransactionError::ReadOnly)
+            ));
+        }
+        assert_eq!(state.buffers[buffer].text.to_string(), before);
+        assert!(!state.buffers[buffer].dirty);
+        assert!(!state.replace_virtual_read_only(buffer, 0, 2, TextBuffer::from_text("stale")));
+        assert!(state.replace_virtual_read_only(
+            buffer,
+            1,
+            2,
+            TextBuffer::from_text("héllo refreshed")
+        ));
+        assert_eq!(state.views[view].buffer, buffer);
+        assert_eq!(state.buffers[buffer].text.to_string(), "héllo refreshed");
+        assert!(state.buffers[buffer].is_virtual_read_only());
     }
 
     #[test]

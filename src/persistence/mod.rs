@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
     io::{self, Read, Write},
     path::{Path, PathBuf},
@@ -15,7 +15,7 @@ use std::{
 };
 use thiserror::Error;
 
-pub const STATE_VERSION: u32 = 1;
+pub const STATE_VERSION: u32 = 2;
 const MAXIMUM_SCROLL_COLUMN: usize = 1_000_000_000;
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone, Debug)]
@@ -68,12 +68,39 @@ pub struct PersistedTab {
     pub layout: PersistedLayout,
     pub focused_path: Option<PathBuf>,
 }
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PersistedWindowPlacement {
+    Docked {
+        edge: String,
+        size: u16,
+    },
+    Floating {
+        x: u16,
+        y: u16,
+        width: u16,
+        height: u16,
+    },
+    Fullscreen,
+    Hidden,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PersistedWindowRule {
+    /// Stable content-type identity, never a runtime ContentId/ViewId/WindowId.
+    pub content_type: String,
+    pub placement: PersistedWindowPlacement,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersistedSession {
     pub roots: Vec<PathBuf>,
     pub tabs: Vec<PersistedTab>,
     pub active_tab: usize,
+    /// Semantic placement defaults reconstructed with fresh runtime IDs.
+    pub window_rules: Vec<PersistedWindowRule>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -155,6 +182,7 @@ impl PersistedState {
             self.watches.len(),
             self.large_file_overrides.len(),
             self.session.as_ref().map_or(0, |s| s.tabs.len()),
+            self.session.as_ref().map_or(0, |s| s.window_rules.len()),
         ] {
             if length > policy.maximum_entries {
                 return Err(PersistenceError::TooManyEntries);
@@ -196,7 +224,58 @@ impl PersistedState {
         {
             return Err(PersistenceError::EntryTooLarge);
         }
+        if let Some(session) = &self.session {
+            validate_window_rules(&session.window_rules)?;
+        }
         Ok(())
+    }
+}
+
+pub fn validate_window_rules(rules: &[PersistedWindowRule]) -> Result<(), PersistenceError> {
+    let mut content_types = BTreeSet::new();
+    let fullscreen = rules
+        .iter()
+        .filter(|rule| matches!(rule.placement, PersistedWindowPlacement::Fullscreen))
+        .count();
+    if rules.len() > 2
+        || fullscreen > 1
+        || rules.iter().any(|rule| {
+            !valid_content_type(&rule.content_type)
+                || !matches!(
+                    rule.content_type.as_str(),
+                    "builtin.explorer" | "builtin.terminal"
+                )
+                || !content_types.insert(rule.content_type.as_str())
+                || !valid_persisted_window_placement(&rule.placement)
+        })
+    {
+        return Err(PersistenceError::InvalidWindowRule);
+    }
+    Ok(())
+}
+
+fn valid_content_type(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value.split('.').count() >= 2
+        && value.split('.').all(|segment| {
+            let mut characters = segment.chars();
+            characters
+                .next()
+                .is_some_and(|first| first.is_ascii_lowercase())
+                && characters.all(|character| {
+                    character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+                })
+        })
+}
+
+fn valid_persisted_window_placement(placement: &PersistedWindowPlacement) -> bool {
+    match placement {
+        PersistedWindowPlacement::Docked { edge, size } => {
+            *size > 0 && matches!(edge.as_str(), "left" | "right" | "top" | "bottom")
+        }
+        PersistedWindowPlacement::Floating { width, height, .. } => *width > 0 && *height > 0,
+        PersistedWindowPlacement::Fullscreen | PersistedWindowPlacement::Hidden => true,
     }
 }
 
@@ -405,6 +484,8 @@ pub enum PersistenceError {
     TooLarge,
     #[error("persistence collection exceeds its entry ceiling")]
     TooManyEntries,
+    #[error("persistent window rule is invalid or duplicated")]
+    InvalidWindowRule,
     #[error("persistence entry exceeds its byte ceiling")]
     EntryTooLarge,
     #[error("persistence path has no parent")]
@@ -425,7 +506,8 @@ mod tests {
 
     use super::{
         PersistedLayout, PersistedLocation, PersistedPane, PersistedSession, PersistedState,
-        PersistedTab, PersistenceError, PersistencePolicy, STATE_VERSION, read_state, write_state,
+        PersistedTab, PersistedWindowPlacement, PersistedWindowRule, PersistenceError,
+        PersistencePolicy, STATE_VERSION, read_state, write_state,
     };
 
     fn state_with_horizontal_offsets() -> PersistedState {
@@ -446,6 +528,13 @@ mod tests {
                     focused_path: Some(PathBuf::from("/workspace/main.rs")),
                 }],
                 active_tab: 0,
+                window_rules: vec![PersistedWindowRule {
+                    content_type: "builtin.explorer".into(),
+                    placement: PersistedWindowPlacement::Docked {
+                        edge: "left".into(),
+                        size: 41,
+                    },
+                }],
             }),
             jumps: vec![PersistedLocation {
                 path: PathBuf::from("/workspace/main.rs"),
@@ -472,6 +561,80 @@ mod tests {
         };
         assert_eq!(pane.scroll_column, 19);
         assert_eq!(restored.jumps[0].scroll_column, 17);
+    }
+
+    #[test]
+    fn semantic_window_rules_round_trip_and_reject_missing_duplicate_or_invalid_data() {
+        let state = state_with_horizontal_offsets();
+        let encoded = serde_json::to_value(&state).expect("serialize state");
+        let decoded: PersistedState = serde_json::from_value(encoded.clone()).expect("strict rule");
+        assert_eq!(
+            decoded.session.expect("session").window_rules[0].content_type,
+            "builtin.explorer"
+        );
+
+        let mut missing = encoded.clone();
+        missing["session"]
+            .as_object_mut()
+            .expect("session")
+            .remove("window_rules");
+        assert!(serde_json::from_value::<PersistedState>(missing).is_err());
+
+        let mut unknown_field = encoded.clone();
+        unknown_field["session"]["window_rules"][0]["runtime_window_id"] = serde_json::json!(42);
+        assert!(serde_json::from_value::<PersistedState>(unknown_field).is_err());
+
+        let mut duplicated: PersistedState =
+            serde_json::from_value(encoded.clone()).expect("decode duplicate candidate");
+        let duplicate = duplicated.session.as_ref().expect("session").window_rules[0].clone();
+        duplicated
+            .session
+            .as_mut()
+            .expect("session")
+            .window_rules
+            .push(duplicate);
+        assert!(matches!(
+            duplicated.validate(&PersistencePolicy::default()),
+            Err(PersistenceError::InvalidWindowRule)
+        ));
+
+        let mut invalid: PersistedState =
+            serde_json::from_value(encoded.clone()).expect("decode invalid");
+        invalid.session.as_mut().expect("session").window_rules[0].placement =
+            PersistedWindowPlacement::Docked {
+                edge: "diagonal".into(),
+                size: 0,
+            };
+        assert!(matches!(
+            invalid.validate(&PersistencePolicy::default()),
+            Err(PersistenceError::InvalidWindowRule)
+        ));
+
+        let mut unsupported: PersistedState =
+            serde_json::from_value(encoded.clone()).expect("decode unsupported");
+        unsupported.session.as_mut().expect("session").window_rules[0].content_type =
+            "plugin.unknown".into();
+        assert!(matches!(
+            unsupported.validate(&PersistencePolicy::default()),
+            Err(PersistenceError::InvalidWindowRule)
+        ));
+
+        let mut two_fullscreen: PersistedState =
+            serde_json::from_value(encoded).expect("decode fullscreen");
+        let rules = &mut two_fullscreen
+            .session
+            .as_mut()
+            .expect("session")
+            .window_rules;
+        rules[0].placement = PersistedWindowPlacement::Fullscreen;
+        rules.push(PersistedWindowRule {
+            content_type: "builtin.terminal".into(),
+            placement: PersistedWindowPlacement::Fullscreen,
+        });
+        assert!(matches!(
+            two_fullscreen.validate(&PersistencePolicy::default()),
+            Err(PersistenceError::InvalidWindowRule)
+        ));
     }
 
     #[test]

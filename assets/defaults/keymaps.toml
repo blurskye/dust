@@ -1817,6 +1817,18 @@ context = "editor"
 mode = "normal"
 keys = "[ b"
 command = "buffer.previous"
+[[keymap]]
+id = "builtin.editor.normal.buffer-previous.upper-h"
+context = "editor"
+mode = "normal"
+keys = "H"
+command = "buffer.previous"
+[[keymap]]
+id = "builtin.editor.normal.buffer-next.upper-l"
+context = "editor"
+mode = "normal"
+keys = "L"
+command = "buffer.next"
 
 # The bottom terminal toggle is available from every editor mode and the two
 # persistent navigation surfaces. Both conventional terminal shortcuts are
@@ -2259,6 +2271,20 @@ id = "builtin.picker.surface.picker-backspace.backspace"
 context = "picker"
 keys = "backspace"
 command = "picker.backspace"
+
+[[keymap]]
+id = "builtin.editor.normal.workspace-file-find.leader-leader"
+context = "editor"
+mode = "normal"
+keys = "<leader> <leader>"
+command = "workspace.file.find"
+
+[[keymap]]
+id = "builtin.editor.normal.workspace-search-prompt.leader-s"
+context = "editor"
+mode = "normal"
+keys = "<leader> s"
+command = "workspace.search.prompt"
 
 [[keymap]]
 id = "builtin.editor.normal.buffer-picker-open.leader-f-b"

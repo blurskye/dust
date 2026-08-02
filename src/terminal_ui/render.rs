@@ -9,6 +9,10 @@ use crate::document::{
     display_column_at,
 };
 use crate::editing::{EditorMode, EditorState, SelectionKind};
+use crate::windows::{
+    CompositorProjection, ContentAdapterKind, ContentId, TileAxis, TiledLayoutSnapshot, WindowId,
+    WindowRect,
+};
 use crossterm::cursor::SetCursorStyle;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -21,6 +25,9 @@ pub enum PromptKind {
     SearchForward,
     SearchBackward,
     WorkspaceTrust,
+    GitReset,
+    AiChat,
+    AiComposer,
 }
 
 impl PromptKind {
@@ -30,7 +37,9 @@ impl PromptKind {
             Self::Command => &text.command_title,
             Self::SearchForward => &text.search_forward_title,
             Self::SearchBackward => &text.search_backward_title,
-            Self::WorkspaceTrust => &text.workspace_trust_title,
+            Self::WorkspaceTrust | Self::GitReset => &text.workspace_trust_title,
+            Self::AiChat => &text.ai_chat_title,
+            Self::AiComposer => &text.ai_composer_title,
         }
     }
 
@@ -40,7 +49,9 @@ impl PromptKind {
             Self::Command => &text.command_marker,
             Self::SearchForward => &text.search_forward_marker,
             Self::SearchBackward => &text.search_backward_marker,
-            Self::WorkspaceTrust => &text.workspace_trust_marker,
+            Self::WorkspaceTrust | Self::GitReset => &text.workspace_trust_marker,
+            Self::AiChat => &text.ai_chat_marker,
+            Self::AiComposer => &text.ai_composer_marker,
         }
     }
 }
@@ -108,6 +119,16 @@ pub struct UiInlayHint {
     pub label: String,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UiGhostText {
+    pub workspace_root_revision: u64,
+    pub buffer: crate::editing::BufferId,
+    pub revision: crate::document::BufferRevision,
+    pub view: crate::editing::ViewId,
+    pub cursor: ByteOffset,
+    pub mode: crate::editing::EditorMode,
+    pub text: String,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiFold {
     pub view: crate::editing::ViewId,
     pub start_line: usize,
@@ -119,6 +140,7 @@ pub struct UiFold {
 pub struct UiDiagnostic {
     pub path: std::path::PathBuf,
     pub range: ByteRange,
+    pub severity: crate::workspace::DiagnosticSeverity,
     pub message: String,
 }
 
@@ -126,14 +148,57 @@ pub struct UiDiagnostic {
 pub enum DocumentationPopupKind {
     Hover,
     Signature,
+    Completion,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DocumentationMarkupKind {
+    PlainText,
+    Markdown,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DocumentationSection {
+    pub heading: Option<String>,
+    pub markup: DocumentationMarkupKind,
+    pub lines: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DocumentationPopupState {
     pub kind: DocumentationPopupKind,
     pub title: String,
-    pub lines: Vec<String>,
+    pub provider: String,
+    pub source_range: Option<ByteRange>,
+    pub sections: Vec<DocumentationSection>,
     pub scroll: usize,
+}
+
+impl DocumentationPopupState {
+    #[must_use]
+    pub fn line_count(&self) -> usize {
+        self.sections.iter().fold(0usize, |count, section| {
+            count
+                .saturating_add(usize::from(section.heading.is_some()))
+                .saturating_add(section.lines.len())
+        })
+    }
+
+    fn line_at(&self, mut index: usize) -> Option<&str> {
+        for section in &self.sections {
+            if let Some(heading) = &section.heading {
+                if index == 0 {
+                    return Some(heading);
+                }
+                index = index.saturating_sub(1);
+            }
+            if let Some(line) = section.lines.get(index) {
+                return Some(line);
+            }
+            index = index.saturating_sub(section.lines.len());
+        }
+        None
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -150,14 +215,66 @@ pub struct PickerRow {
     pub source: String,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum PickerSurfaceKind {
+    #[default]
+    Generic,
+    Problems,
+    Output,
+    Logs,
+    Debug,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PickerUiState {
+    pub surface: PickerSurfaceKind,
     pub title: String,
     pub query: String,
     pub rows: Vec<PickerRow>,
     pub selected: Option<usize>,
     pub scroll: usize,
     pub loading: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PluginSurfaceRow {
+    pub node: u64,
+    pub depth: u16,
+    pub text: String,
+    pub style: Style,
+    pub actionable: bool,
+    pub focused: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PluginSurfaceUiState {
+    pub handle: u64,
+    pub window: WindowId,
+    pub tree_revision: u64,
+    pub scroll: usize,
+    pub rows: Vec<PluginSurfaceRow>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PrivateSurfaceCell {
+    pub x: u16,
+    pub y: u16,
+    pub grapheme: String,
+    pub continuation: bool,
+    pub style: Style,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PrivateSurfaceUiState {
+    pub handle: u64,
+    pub window: WindowId,
+    pub dimensions_revision: u64,
+    pub surface_revision: u64,
+    pub width: u16,
+    pub height: u16,
+    pub cells: Vec<PrivateSurfaceCell>,
+    pub cursor: Option<(u16, u16)>,
+    pub focused: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -230,6 +347,8 @@ pub struct TerminalPanelState {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerminalPanelGeometry {
+    pub x: u16,
+    pub width: u16,
     pub top: u16,
     pub height: u16,
     pub body_top: u16,
@@ -243,6 +362,109 @@ pub struct ToolMenuState {
     pub selected: usize,
     pub scroll: usize,
     pub rows: Vec<ToolMenuRow>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ContentTabIdentity(pub ContentId);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ContentTabKind {
+    Text,
+    Terminal,
+    VirtualDocument,
+    DeclarativeUi,
+    PrivateCellSurface,
+    ExternalTui,
+}
+
+impl From<ContentAdapterKind> for ContentTabKind {
+    fn from(adapter: ContentAdapterKind) -> Self {
+        match adapter {
+            ContentAdapterKind::TextBuffer => Self::Text,
+            ContentAdapterKind::TerminalSession => Self::Terminal,
+            ContentAdapterKind::VirtualDocument => Self::VirtualDocument,
+            ContentAdapterKind::DeclarativeUi => Self::DeclarativeUi,
+            ContentAdapterKind::PrivateCellSurface => Self::PrivateCellSurface,
+            ContentAdapterKind::ExternalTui => Self::ExternalTui,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ContentTabDiagnosticSeverity {
+    Error,
+    Warning,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ContentTabDiagnostic {
+    pub severity: ContentTabDiagnosticSeverity,
+    pub count: u16,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContentTabEntry {
+    pub identity: ContentTabIdentity,
+    pub kind: ContentTabKind,
+    pub title: String,
+    pub active: bool,
+    pub dirty: bool,
+    pub pinned: bool,
+    pub diagnostic: Option<ContentTabDiagnostic>,
+    pub icon: String,
+    pub closeable: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EditorWindowBinding {
+    pub window: WindowId,
+    pub pane: crate::editing::PaneId,
+    pub view: crate::editing::ViewId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EditorWindowLayoutState {
+    pub source_revision: u64,
+    pub layout: TiledLayoutSnapshot,
+    pub bindings: Vec<EditorWindowBinding>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeSurfaceWindowBinding {
+    pub explorer: Option<WindowId>,
+    pub terminal: Option<(u64, WindowId)>,
+    pub dashboard: Option<WindowId>,
+    pub picker: Option<WindowId>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompositorLayoutState {
+    pub source_revision: u64,
+    pub graph_revision: u64,
+    pub projection: CompositorProjection,
+    pub surfaces: NativeSurfaceWindowBinding,
+}
+
+enum PluginRenderable<'a> {
+    Retained(&'a PluginSurfaceUiState),
+    Private(&'a PrivateSurfaceUiState),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UiGitSignKind {
+    Added,
+    Changed,
+    Deleted,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UiGitSign {
+    pub buffer: crate::editing::BufferId,
+    pub buffer_revision: u64,
+    pub root_revision: u64,
+    pub status_revision: u64,
+    pub repository_id: crate::workspace::git::GitRepositoryId,
+    pub line: usize,
+    pub kind: UiGitSignKind,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -259,14 +481,26 @@ pub struct UiState {
     pub documentation_popup: Option<DocumentationPopupState>,
     pub diagnostics: Vec<UiDiagnostic>,
     pub picker: Option<PickerUiState>,
+    pub plugin_surfaces: Vec<PluginSurfaceUiState>,
+    pub private_surfaces: Vec<PrivateSurfaceUiState>,
     pub key_hints: Option<KeyHintUiState>,
     pub explorer: Option<ExplorerUiState>,
     pub explorer_focused: bool,
     pub terminal_panel: Option<TerminalPanelState>,
+    /// Renderer-pure content-switcher projection supplied by the application-owned window graph.
+    pub content_tabs: Vec<ContentTabEntry>,
+    /// Active generic tiled topology and editor adapter bindings.
+    pub editor_window_layout: Option<EditorWindowLayoutState>,
+    /// Current source-owned graph revision, independent from the projection.
+    pub window_graph_revision: Option<u64>,
+    /// Final application-supplied universal compositor projection.
+    pub compositor_layout: Option<CompositorLayoutState>,
     pub syntax_spans: Vec<UiSyntaxSpan>,
     pub lsp_semantic_spans: Vec<UiSyntaxSpan>,
     pub lsp_highlight_spans: Vec<UiSyntaxSpan>,
     pub lsp_inlay_hints: Vec<UiInlayHint>,
+    pub ai_ghost_text: Option<UiGhostText>,
+    pub git_signs: Vec<UiGitSign>,
     pub lsp_folds: Vec<UiFold>,
     pub lsp_server: Option<String>,
     pub syntax_folds: Vec<UiFold>,
@@ -317,6 +551,22 @@ pub fn prompt_geometry(
 }
 
 #[must_use]
+pub fn editor_workspace_insets(
+    state: &EditorState,
+    ui: &UiState,
+    config: &Config,
+    available_height: u16,
+) -> (u16, u16) {
+    let tab_line = config.ui.tab_line.enabled
+        && (!config.ui.tab_line.hide_when_single || state.tabs.len() > 1);
+    let buffer_line = config.ui.buffer_line.enabled
+        && (!config.ui.buffer_line.hide_when_single || ui.content_tabs.len() > 1);
+    let top = u16::from(tab_line).saturating_add(u16::from(buffer_line));
+    let bottom = u16::from(config.ui.status_line.enabled && available_height > top);
+    (top, bottom)
+}
+
+#[must_use]
 pub fn terminal_panel_geometry(
     config: &Config,
     terminal_height: u16,
@@ -336,6 +586,8 @@ pub fn terminal_panel_geometry(
         .max(3);
     let top = terminal_height.saturating_sub(height);
     Some(TerminalPanelGeometry {
+        x: 0,
+        width: u16::MAX,
         top,
         height,
         body_top: top.saturating_add(1),
@@ -353,17 +605,52 @@ pub fn render(
     width: u16,
     height: u16,
 ) -> Frame {
-    let terminal_geometry = ui
-        .terminal_panel
-        .as_ref()
-        .and_then(|terminal| terminal_panel_geometry(config, height, terminal.requested_height));
-    let workspace_height = terminal_geometry.map_or(height, |geometry| geometry.top);
-    let explorer_width = ui
-        .explorer
-        .as_ref()
-        .and_then(|_| explorer_panel_width(config, width));
-    let content_width =
-        explorer_width.map_or(width, |panel| width.saturating_sub(panel).saturating_sub(1));
+    let compositor = active_compositor(state, ui, width, height);
+    if compositor.is_none() {
+        let mut frame = Frame {
+            grid: CellGrid::new_with_policy(
+                width,
+                height,
+                &config.editor.control_character_replacement,
+                &config.editor.zero_width_replacement,
+                config.editor.ambiguous_width == AmbiguousWidth::Wide,
+            ),
+            cursor: None,
+        };
+        // Protected host prompts remain reachable even while ordinary
+        // compositor state fails closed.
+        if let Some(prompt) = &ui.prompt {
+            render_prompt(&mut frame, prompt, config, width, height);
+        }
+        return frame;
+    }
+    let terminal_geometry = compositor.and_then(|compositor| {
+        let (_, window) = compositor.surfaces.terminal?;
+        terminal_geometry_from_rect(compositor.projection.window(window)?.rect)
+    });
+    let workspace = compositor.map(|compositor| compositor.projection.workspace_bounds);
+    let workspace_height = workspace.map_or(height, |bounds| bounds.height);
+    let explorer_rect = compositor.and_then(|compositor| {
+        let window = compositor.surfaces.explorer?;
+        compositor
+            .projection
+            .window(window)
+            .map(|window| window.rect)
+    });
+    let dashboard_rect = compositor.and_then(|compositor| {
+        let window = compositor.surfaces.dashboard?;
+        compositor
+            .projection
+            .window(window)
+            .map(|window| window.rect)
+    });
+    let content_bounds = if ui.dashboard || state.active_view.is_none() {
+        dashboard_rect.or(workspace)
+    } else {
+        workspace
+    };
+    let content_width = content_bounds.map_or(width, |bounds| bounds.width);
+    let content_height = content_bounds.map_or(workspace_height, |bounds| bounds.height);
     let content = if ui.dashboard || state.active_view.is_none() {
         render_dashboard(
             &state.workspace_root,
@@ -371,36 +658,88 @@ pub fn render(
             dashboard,
             config,
             content_width,
-            workspace_height,
+            content_height,
         )
     } else {
-        render_workspace(state, ui, config, content_width, workspace_height)
+        render_workspace(state, ui, config, content_width, content_height)
     };
-    let workspace = if let (Some(panel_width), Some(explorer)) = (explorer_width, &ui.explorer) {
-        dock_explorer(
-            content,
-            explorer,
-            state,
-            ui,
-            config,
-            panel_width,
+    let mut workspace_frame = place_workspace_frame(
+        content,
+        content_bounds.unwrap_or(WindowRect {
+            x: 0,
+            y: 0,
             width,
-            workspace_height,
-        )
-    } else {
-        content
-    };
+            height: workspace_height,
+        }),
+        config,
+        width,
+        height,
+    );
+    if let (Some(rect), Some(explorer)) = (explorer_rect, &ui.explorer) {
+        render_explorer_window(&mut workspace_frame, explorer, ui, config, rect);
+    }
     let mut frame =
         if let (Some(terminal), Some(geometry)) = (&ui.terminal_panel, terminal_geometry) {
-            dock_terminal_panel(workspace, terminal, geometry, config, width, height)
+            dock_terminal_panel(workspace_frame, terminal, geometry, config, width, height)
         } else {
-            workspace
+            workspace_frame
         };
     if let Some(tool_menu) = &ui.tool_menu {
         render_tool_menu(&mut frame, tool_menu, config, width, workspace_height);
     }
-    if let Some(picker) = &ui.picker {
-        render_picker(&mut frame, picker, config, width, workspace_height);
+    if let Some(compositor) = compositor {
+        let mut plugin_surfaces = ui
+            .plugin_surfaces
+            .iter()
+            .filter_map(|surface| {
+                compositor
+                    .projection
+                    .window(surface.window)
+                    .map(|projected| {
+                        (
+                            projected.z_index,
+                            surface.handle,
+                            PluginRenderable::Retained(surface),
+                            projected.rect,
+                        )
+                    })
+            })
+            .chain(ui.private_surfaces.iter().filter_map(|surface| {
+                compositor
+                    .projection
+                    .window(surface.window)
+                    .map(|projected| {
+                        (
+                            projected.z_index,
+                            surface.handle,
+                            PluginRenderable::Private(surface),
+                            projected.rect,
+                        )
+                    })
+            }))
+            .collect::<Vec<_>>();
+        plugin_surfaces.sort_by_key(|(z_index, handle, _, _)| (*z_index, *handle));
+        for (_, _, surface, rect) in plugin_surfaces {
+            match surface {
+                PluginRenderable::Retained(surface) => {
+                    render_plugin_surface(&mut frame, surface, rect);
+                }
+                PluginRenderable::Private(surface) => {
+                    render_private_surface(&mut frame, surface, rect);
+                }
+            }
+        }
+    }
+    if let Some(picker) = &ui.picker
+        && let Some(rect) = compositor.and_then(|compositor| {
+            let window = compositor.surfaces.picker?;
+            compositor
+                .projection
+                .window(window)
+                .map(|window| window.rect)
+        })
+    {
+        render_picker(&mut frame, picker, config, rect);
     }
     if let Some(completion) = &ui.language_completion {
         render_language_completion(&mut frame, completion, config, width, workspace_height);
@@ -410,7 +749,7 @@ pub fn render(
             &mut frame,
             documentation,
             config,
-            explorer_width.map_or(0, |panel| panel.saturating_add(1)),
+            workspace.map_or(0, |bounds| bounds.x),
             content_width,
             workspace_height,
         );
@@ -420,7 +759,7 @@ pub fn render(
             &mut frame,
             key_hints,
             config,
-            explorer_width.map_or(0, |panel| panel.saturating_add(1)),
+            workspace.map_or(0, |bounds| bounds.x),
             content_width,
             workspace_height,
         );
@@ -463,6 +802,33 @@ pub fn render(
     frame
 }
 
+fn active_compositor<'a>(
+    state: &EditorState,
+    ui: &'a UiState,
+    width: u16,
+    height: u16,
+) -> Option<&'a CompositorLayoutState> {
+    let revision = state.window_revision()?;
+    ui.compositor_layout.as_ref().filter(|compositor| {
+        compositor.source_revision == revision
+            && Some(compositor.graph_revision) == ui.window_graph_revision
+            && compositor.projection.bounds.width == width
+            && compositor.projection.bounds.height == height
+    })
+}
+
+fn terminal_geometry_from_rect(rect: WindowRect) -> Option<TerminalPanelGeometry> {
+    (rect.width > 0 && rect.height >= 3).then_some(TerminalPanelGeometry {
+        x: rect.x,
+        width: rect.width,
+        top: rect.y,
+        height: rect.height,
+        body_top: rect.y.saturating_add(1),
+        body_height: rect.height.saturating_sub(2),
+        status_y: rect.y.saturating_add(rect.height).saturating_sub(1),
+    })
+}
+
 fn dock_terminal_panel(
     workspace: Frame,
     terminal: &TerminalPanelState,
@@ -478,7 +844,7 @@ fn dock_terminal_panel(
         &config.editor.zero_width_replacement,
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
-    for y in 0..workspace.grid.height().min(geometry.top) {
+    for y in 0..workspace.grid.height().min(height) {
         for x in 0..workspace.grid.width().min(width) {
             let Some(cell) = workspace.grid.get(x, y) else {
                 continue;
@@ -488,12 +854,14 @@ fn dock_terminal_panel(
             }
         }
     }
-    for y in geometry.top..height {
-        for x in 0..width {
+    let right = geometry.x.saturating_add(geometry.width).min(width);
+    let bottom = geometry.top.saturating_add(geometry.height).min(height);
+    for y in geometry.top..bottom {
+        for x in geometry.x..right {
             grid.set_cell(x, y, " ", Style::TerminalBackground);
         }
     }
-    for x in 0..width {
+    for x in geometry.x..right {
         grid.set_cell(
             x,
             geometry.top,
@@ -507,7 +875,13 @@ fn dock_terminal_panel(
         .title_format
         .replace("{id}", &terminal.id.to_string())
         .replace("{profile}", &terminal.profile);
-    grid.put_text_clipped(1, geometry.top, &title, Style::TerminalTitle, width);
+    grid.put_text_clipped(
+        geometry.x.saturating_add(1),
+        geometry.top,
+        &title,
+        Style::TerminalTitle,
+        right,
+    );
 
     let source_rows = terminal.cells.len().min(usize::from(terminal.rows));
     let visible_rows = usize::from(geometry.body_height).min(source_rows);
@@ -524,14 +898,16 @@ fn dock_terminal_panel(
             .saturating_add(u16::try_from(screen_row).unwrap_or(u16::MAX));
         for (column, cell) in row
             .iter()
-            .take(usize::from(width.min(terminal.columns)))
+            .take(usize::from(geometry.width.min(terminal.columns)))
             .enumerate()
         {
             if cell.continuation {
                 continue;
             }
             grid.set_cell(
-                u16::try_from(column).unwrap_or(u16::MAX),
+                geometry
+                    .x
+                    .saturating_add(u16::try_from(column).unwrap_or(u16::MAX)),
                 y,
                 &cell.text,
                 Style::Terminal(cell.style),
@@ -539,7 +915,7 @@ fn dock_terminal_panel(
         }
     }
 
-    for x in 0..width {
+    for x in geometry.x..right {
         grid.set_cell(x, geometry.status_y, " ", Style::TerminalStatus);
     }
     let status = if terminal.running {
@@ -573,7 +949,7 @@ fn dock_terminal_panel(
             },
         );
     grid.put_text_clipped(
-        0,
+        geometry.x,
         geometry.status_y,
         &status_line,
         if terminal.focused {
@@ -581,7 +957,7 @@ fn dock_terminal_panel(
         } else {
             Style::TerminalStatus
         },
-        width,
+        right,
     );
 
     let cursor = if terminal.focused {
@@ -591,8 +967,8 @@ fn dock_terminal_panel(
             let y = geometry
                 .body_top
                 .saturating_add(u16::try_from(projected_row).ok()?);
-            (column < width && y < geometry.status_y).then_some((
-                column,
+            (column < geometry.width && y < geometry.status_y).then_some((
+                geometry.x.saturating_add(column),
                 y,
                 crossterm::cursor::SetCursorStyle::SteadyBlock,
             ))
@@ -818,14 +1194,10 @@ pub fn explorer_panel_width(config: &Config, terminal_width: u16) -> Option<u16>
     )
 }
 
-#[allow(clippy::too_many_arguments)]
-fn dock_explorer(
+fn place_workspace_frame(
     content: Frame,
-    explorer: &ExplorerUiState,
-    state: &EditorState,
-    ui: &UiState,
+    bounds: WindowRect,
     config: &Config,
-    panel_width: u16,
     width: u16,
     height: u16,
 ) -> Frame {
@@ -836,45 +1208,78 @@ fn dock_explorer(
         &config.editor.zero_width_replacement,
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
-    let content_left = panel_width.saturating_add(1);
-    for y in 0..content.grid.height() {
-        for x in 0..content.grid.width() {
+    for y in 0..content.grid.height().min(bounds.height) {
+        for x in 0..content.grid.width().min(bounds.width) {
             if let Some(cell) = content.grid.get(x, y)
                 && !cell.continuation
             {
-                grid.set_cell(content_left.saturating_add(x), y, &cell.symbol, cell.style);
+                grid.set_cell(
+                    bounds.x.saturating_add(x),
+                    bounds.y.saturating_add(y),
+                    &cell.symbol,
+                    cell.style,
+                );
             }
         }
     }
-    render_explorer_dock(&mut grid, explorer, ui, config, panel_width, height);
-    if config.ui.status_line.enabled
-        && height > 0
-        && let Some(view) = state.active_view
-    {
-        render_status_line(&mut grid, state, view, ui, config, width, height - 1);
+    let cursor = content.cursor.and_then(|(x, y, shape)| {
+        (x < bounds.width && y < bounds.height).then_some((
+            bounds.x.saturating_add(x),
+            bounds.y.saturating_add(y),
+            shape,
+        ))
+    });
+    Frame { grid, cursor }
+}
+
+fn render_explorer_window(
+    frame: &mut Frame,
+    explorer: &ExplorerUiState,
+    ui: &UiState,
+    config: &Config,
+    rect: WindowRect,
+) {
+    if rect.width < 2 || rect.height == 0 {
+        return;
     }
-    let cursor = if ui.explorer_focused {
-        explorer
+    let mut local = CellGrid::new_with_policy(
+        rect.width,
+        rect.height,
+        &config.editor.control_character_replacement,
+        &config.editor.zero_width_replacement,
+        config.editor.ambiguous_width == AmbiguousWidth::Wide,
+    );
+    let panel_width = rect.width.saturating_sub(1);
+    render_explorer_dock(&mut local, explorer, ui, config, panel_width, rect.height);
+    for y in 0..rect.height {
+        for x in 0..rect.width {
+            if let Some(cell) = local.get(x, y)
+                && !cell.continuation
+            {
+                frame.grid.set_cell(
+                    rect.x.saturating_add(x),
+                    rect.y.saturating_add(y),
+                    &cell.symbol,
+                    cell.style,
+                );
+            }
+        }
+    }
+    if ui.explorer_focused {
+        frame.cursor = explorer
             .rows
             .iter()
             .position(|row| row.selected)
             .and_then(|row| u16::try_from(row).ok())
             .map(|row| {
                 (
-                    1.min(panel_width.saturating_sub(1)),
-                    3_u16.saturating_add(row),
+                    rect.x.saturating_add(1.min(panel_width.saturating_sub(1))),
+                    rect.y.saturating_add(3).saturating_add(row),
                     cursor_style(config.ui.cursor.normal),
                 )
             })
-            .filter(|(_, y, _)| {
-                *y < height.saturating_sub(u16::from(config.ui.status_line.enabled))
-            })
-    } else {
-        content
-            .cursor
-            .map(|(x, y, shape)| (content_left.saturating_add(x), y, shape))
-    };
-    Frame { grid, cursor }
+            .filter(|(_, y, _)| *y < rect.y.saturating_add(rect.height));
+    }
 }
 
 fn render_explorer_dock(
@@ -1066,13 +1471,13 @@ fn render_documentation_popup(
         return;
     };
     let available_height = height.saturating_sub(u16::from(config.ui.status_line.enabled));
-    if !policy.enabled || popup.lines.is_empty() || editor_width < 4 || available_height < 3 {
+    let line_count = popup.line_count();
+    if !policy.enabled || line_count == 0 || editor_width < 4 || available_height < 3 {
         return;
     }
-    let widest = popup
-        .lines
-        .iter()
-        .map(|line| UnicodeWidthStr::width(line.as_str()))
+    let widest = (0..line_count)
+        .filter_map(|index| popup.line_at(index))
+        .map(UnicodeWidthStr::width)
         .chain(std::iter::once(UnicodeWidthStr::width(
             popup.title.as_str(),
         )))
@@ -1084,9 +1489,7 @@ fn render_documentation_popup(
         .unwrap_or(policy.max_width)
         .min(policy.max_width)
         .min(editor_width);
-    let visible_rows = popup
-        .lines
-        .len()
+    let visible_rows = line_count
         .saturating_sub(popup.scroll)
         .min(usize::from(policy.max_height.saturating_sub(2)))
         .min(usize::from(available_height.saturating_sub(2)));
@@ -1169,11 +1572,8 @@ fn render_documentation_popup(
     let text_left = left
         .saturating_add(1)
         .saturating_add(policy.horizontal_padding);
-    for (row, line) in popup
-        .lines
-        .iter()
-        .skip(popup.scroll)
-        .take(visible_rows)
+    for (row, line) in (popup.scroll..popup.scroll.saturating_add(visible_rows))
+        .filter_map(|index| popup.line_at(index))
         .enumerate()
     {
         frame.grid.put_text_clipped(
@@ -1358,6 +1758,257 @@ fn center_text(
     grid.put_text(x, y, text, style);
 }
 
+fn truncate_content_title(
+    title: &str,
+    maximum_width: usize,
+    ambiguous_width: AmbiguousWidth,
+) -> String {
+    if text_width(title, ambiguous_width) <= maximum_width {
+        return title.to_owned();
+    }
+    let ellipsis = "…";
+    let available = maximum_width.saturating_sub(text_width(ellipsis, ambiguous_width));
+    let mut suffix = Vec::new();
+    let mut width = 0usize;
+    for grapheme in title.graphemes(true).rev() {
+        let grapheme_width = text_width(grapheme, ambiguous_width).max(1);
+        if width.saturating_add(grapheme_width) > available {
+            break;
+        }
+        suffix.push(grapheme);
+        width = width.saturating_add(grapheme_width);
+    }
+    suffix.reverse();
+    format!("{ellipsis}{}", suffix.concat())
+}
+
+fn formatted_content_tab(
+    entry: &ContentTabEntry,
+    config: &Config,
+) -> (String, String, String, Style) {
+    let format = if entry.active {
+        &config.ui.buffer_line.active_format
+    } else {
+        &config.ui.buffer_line.inactive_format
+    };
+    let title = truncate_content_title(
+        &entry.title,
+        usize::from(config.ui.buffer_line.maximum_name_width),
+        config.editor.ambiguous_width,
+    );
+    let format = format.replace("{title}", &title);
+    let (before, after) = format
+        .split_once("{dirty}")
+        .expect("validated buffer-line format");
+    (
+        before.to_owned(),
+        if entry.dirty {
+            config.ui.buffer_line.dirty_marker.clone()
+        } else {
+            String::new()
+        },
+        after.to_owned(),
+        if entry.active {
+            Style::BufferLineActive
+        } else {
+            Style::BufferLineInactive
+        },
+    )
+}
+
+fn content_tab_segments(entry: &ContentTabEntry, config: &Config) -> Vec<(String, Style)> {
+    let (before, dirty, after, style) = formatted_content_tab(entry, config);
+    let mut segments = Vec::with_capacity(8);
+    if config.ui.buffer_line.show_pins && entry.pinned {
+        segments.push((
+            format!("{} ", config.ui.buffer_line.pin_marker),
+            Style::BufferLinePin,
+        ));
+    }
+    if config.ui.buffer_line.show_icons {
+        segments.push((format!("{} ", entry.icon), Style::BufferLineIcon));
+    }
+    segments.push((before, style));
+    if !dirty.is_empty() {
+        segments.push((dirty, Style::BufferLineDirty));
+    }
+    if config.ui.buffer_line.show_diagnostics
+        && let Some(diagnostic) = entry.diagnostic
+    {
+        let marker = match diagnostic.severity {
+            ContentTabDiagnosticSeverity::Error => &config.ui.buffer_line.diagnostic_error_marker,
+            ContentTabDiagnosticSeverity::Warning => {
+                &config.ui.buffer_line.diagnostic_warning_marker
+            }
+        };
+        segments.push((
+            format!(" {marker}{}", diagnostic.count),
+            Style::BufferLineDiagnostic,
+        ));
+    }
+    if config.ui.buffer_line.show_close && entry.closeable {
+        segments.push((
+            format!(" {}", config.ui.buffer_line.close_marker),
+            Style::BufferLineClose,
+        ));
+    }
+    segments.push((after, style));
+    segments.push((
+        config.ui.buffer_line.separator.clone(),
+        Style::BufferLineSeparator,
+    ));
+    segments
+}
+fn content_tab_width(entry: &ContentTabEntry, config: &Config) -> usize {
+    content_tab_segments(entry, config)
+        .iter()
+        .map(|(text, _)| text_width(text, config.editor.ambiguous_width))
+        .sum()
+}
+
+#[must_use]
+pub fn content_tab_at_column(
+    entries: &[ContentTabEntry],
+    config: &Config,
+    width: u16,
+    column: u16,
+) -> Option<ContentTabIdentity> {
+    if entries.is_empty() || column >= width {
+        return None;
+    }
+    let active = entries.iter().position(|e| e.active).unwrap_or(0);
+    let left = text_width(
+        &config.ui.buffer_line.overflow_left,
+        config.editor.ambiguous_width,
+    );
+    let right = text_width(
+        &config.ui.buffer_line.overflow_right,
+        config.editor.ambiguous_width,
+    );
+    let available = usize::from(width);
+    let mut start = 0;
+    while start < active {
+        let required = entries[start..=active]
+            .iter()
+            .map(|e| content_tab_width(e, config))
+            .sum::<usize>()
+            .saturating_add(if start > 0 { left } else { 0 })
+            .saturating_add(if active + 1 < entries.len() { right } else { 0 });
+        if required <= available {
+            break;
+        }
+        start += 1
+    }
+    let mut x = if start > 0 {
+        u16::try_from(left).unwrap_or(width)
+    } else {
+        0
+    };
+    for (index, entry) in entries.iter().enumerate().skip(start) {
+        let item = content_tab_width(entry, config);
+        let remaining = usize::from(width.saturating_sub(x));
+        let reserve = if index + 1 < entries.len() { right } else { 0 };
+        if item.saturating_add(reserve) > remaining && index > active {
+            break;
+        }
+        let end = x
+            .saturating_add(u16::try_from(item).unwrap_or(u16::MAX))
+            .min(width);
+        if column >= x && column < end {
+            return Some(entry.identity.clone());
+        }
+        x = end;
+        if x >= width {
+            break;
+        }
+    }
+    None
+}
+
+fn render_content_tab_line(
+    grid: &mut CellGrid,
+    entries: &[ContentTabEntry],
+    config: &Config,
+    row: u16,
+) {
+    let width = grid.width();
+    if width == 0 || row >= grid.height() {
+        return;
+    }
+    grid.fill_row(row, Style::BufferLineBackground);
+    if entries.is_empty() {
+        return;
+    }
+    let active = entries.iter().position(|entry| entry.active).unwrap_or(0);
+    let left_width = text_width(
+        &config.ui.buffer_line.overflow_left,
+        config.editor.ambiguous_width,
+    );
+    let right_width = text_width(
+        &config.ui.buffer_line.overflow_right,
+        config.editor.ambiguous_width,
+    );
+    let available = usize::from(width);
+    let mut start = 0usize;
+    while start < active {
+        let required = entries[start..=active]
+            .iter()
+            .map(|entry| content_tab_width(entry, config))
+            .sum::<usize>()
+            .saturating_add(if start > 0 { left_width } else { 0 })
+            .saturating_add(if active + 1 < entries.len() {
+                right_width
+            } else {
+                0
+            });
+        if required <= available {
+            break;
+        }
+        start += 1;
+    }
+
+    let mut x = 0u16;
+    if start > 0 {
+        x = grid.put_text_clipped(
+            x,
+            row,
+            &config.ui.buffer_line.overflow_left,
+            Style::BufferLineSeparator,
+            width,
+        );
+    }
+    let mut end = start;
+    for (index, entry) in entries.iter().enumerate().skip(start) {
+        let item_width = content_tab_width(entry, config);
+        let remaining = usize::from(width.saturating_sub(x));
+        let reserve_right = if index + 1 < entries.len() {
+            right_width
+        } else {
+            0
+        };
+        if item_width.saturating_add(reserve_right) > remaining && index > active {
+            break;
+        }
+        for (text, style) in content_tab_segments(entry, config) {
+            x = grid.put_text_clipped(x, row, &text, style, width);
+        }
+        end = index + 1;
+        if x >= width {
+            break;
+        }
+    }
+    if end < entries.len() && right_width <= available {
+        let marker_x = width.saturating_sub(u16::try_from(right_width).unwrap_or(width));
+        grid.put_text_clipped(
+            marker_x,
+            row,
+            &config.ui.buffer_line.overflow_right,
+            Style::BufferLineSeparator,
+            width,
+        );
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PaneViewport {
     pub pane: crate::editing::PaneId,
@@ -1371,6 +2022,7 @@ pub struct PaneViewport {
 #[derive(Clone, Copy)]
 struct PaneRect {
     pane: crate::editing::PaneId,
+    view: crate::editing::ViewId,
     x: u16,
     y: u16,
     width: u16,
@@ -1379,78 +2031,96 @@ struct PaneRect {
 
 struct WorkspaceProjection {
     tab_line_visible: bool,
+    buffer_line_visible: bool,
     status_rows: u16,
     panes: Vec<PaneRect>,
-    borders: Vec<(u16, u16, u16, crate::editing::Axis)>,
+    borders: Vec<crate::windows::ProjectedBorder>,
 }
 
 fn workspace_projection(
     state: &EditorState,
+    ui: &UiState,
     config: &Config,
     width: u16,
     height: u16,
 ) -> Option<WorkspaceProjection> {
-    let tab = state.tabs.get(state.active_tab?)?;
+    state.tabs.get(state.active_tab?)?;
+    let source_revision = state.window_revision()?;
+    let layout = ui.editor_window_layout.as_ref()?;
+    let compositor = ui.compositor_layout.as_ref()?;
+    if layout.source_revision != source_revision
+        || compositor.source_revision != source_revision
+        || compositor.projection.workspace_bounds.width != width
+        || compositor.projection.workspace_bounds.height != height
+    {
+        return None;
+    }
     let tab_line_visible = config.ui.tab_line.enabled
         && (!config.ui.tab_line.hide_when_single || state.tabs.len() > 1);
-    let top = u16::from(tab_line_visible);
+    let buffer_line_visible = config.ui.buffer_line.enabled
+        && (!config.ui.buffer_line.hide_when_single || ui.content_tabs.len() > 1);
+    let top = u16::from(tab_line_visible).saturating_add(u16::from(buffer_line_visible));
     let status_rows = u16::from(config.ui.status_line.enabled && height > top);
-    let layout_height = height.saturating_sub(top).saturating_sub(status_rows);
-    let pane_count = layout_pane_count(&tab.root);
-    let focused_layout;
-    let layout = if width
-        < config
-            .ui
-            .panes
-            .minimum_width
-            .saturating_mul(u16::try_from(pane_count).unwrap_or(u16::MAX))
-        || layout_height < config.ui.panes.minimum_height
-    {
-        focused_layout = crate::editing::LayoutNode::Pane(tab.focused);
-        &focused_layout
-    } else {
-        &tab.root
-    };
-    let mut panes = Vec::new();
-    let mut borders = Vec::new();
-    collect_pane_rects(
-        layout,
-        0,
-        top,
-        width,
-        layout_height,
-        &mut panes,
-        &mut borders,
-    );
+    let origin = compositor.projection.workspace_bounds;
+    let panes = compositor
+        .projection
+        .windows
+        .iter()
+        .filter(|projected| projected.layer == crate::windows::CompositorLayer::Tiled)
+        .filter_map(|projected| {
+            let binding = layout
+                .bindings
+                .iter()
+                .find(|binding| binding.window == projected.window)?;
+            Some(PaneRect {
+                pane: binding.pane,
+                view: binding.view,
+                x: projected.rect.x.saturating_sub(origin.x),
+                y: projected.rect.y.saturating_sub(origin.y),
+                width: projected.rect.width,
+                height: projected.rect.height,
+            })
+        })
+        .collect();
+    let borders = compositor
+        .projection
+        .borders
+        .iter()
+        .map(|border| crate::windows::ProjectedBorder {
+            x: border.x.saturating_sub(origin.x),
+            y: border.y.saturating_sub(origin.y),
+            ..*border
+        })
+        .collect();
     Some(WorkspaceProjection {
         tab_line_visible,
+        buffer_line_visible,
         status_rows,
         panes,
         borders,
     })
 }
 
-/// Exact renderer-owned pane rectangles for the active tab.
+/// Exact generic-window rectangles used by rendering, cursor following, and mouse projection.
 #[must_use]
 pub fn pane_viewports(
     state: &EditorState,
+    ui: &UiState,
     config: &Config,
     width: u16,
     height: u16,
 ) -> Vec<PaneViewport> {
-    workspace_projection(state, config, width, height).map_or_else(Vec::new, |projection| {
+    workspace_projection(state, ui, config, width, height).map_or_else(Vec::new, |projection| {
         projection
             .panes
             .into_iter()
-            .filter_map(|rect| {
-                Some(PaneViewport {
-                    pane: rect.pane,
-                    view: state.panes.get(rect.pane)?.view,
-                    x: rect.x,
-                    y: rect.y,
-                    width: rect.width,
-                    height: rect.height,
-                })
+            .map(|rect| PaneViewport {
+                pane: rect.pane,
+                view: rect.view,
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
             })
             .collect()
     })
@@ -1459,12 +2129,13 @@ pub fn pane_viewports(
 #[must_use]
 pub fn active_pane_viewport(
     state: &EditorState,
+    ui: &UiState,
     config: &Config,
     width: u16,
     height: u16,
 ) -> Option<PaneViewport> {
     let tab = state.tabs.get(state.active_tab?)?;
-    pane_viewports(state, config, width, height)
+    pane_viewports(state, ui, config, width, height)
         .into_iter()
         .find(|viewport| viewport.pane == tab.focused)
 }
@@ -1493,19 +2164,18 @@ fn render_workspace(
             cursor: None,
         };
     };
-    let pane_count = layout_pane_count(&tab.root);
-    let Some(projection) = workspace_projection(state, config, width, height) else {
+    let pane_count = ui
+        .editor_window_layout
+        .as_ref()
+        .map_or(0, |layout| layout.bindings.len());
+    let Some(projection) = workspace_projection(state, ui, config, width, height) else {
         return Frame {
             grid: CellGrid::new(width, height),
             cursor: None,
         };
     };
-    if pane_count == 1 && !projection.tab_line_visible {
-        let pane = match &tab.root {
-            crate::editing::LayoutNode::Pane(pane) => *pane,
-            _ => unreachable!("pane count and layout disagree"),
-        };
-        let Some(view) = state.panes.get(pane).map(|pane| pane.view) else {
+    if pane_count == 1 && !projection.tab_line_visible && !projection.buffer_line_visible {
+        let Some(view) = projection.panes.first().map(|pane| pane.view) else {
             return Frame {
                 grid: CellGrid::new(width, height),
                 cursor: None,
@@ -1553,14 +2223,19 @@ fn render_workspace(
             x = grid.put_text(x, 0, &config.ui.tab_line.separator, Style::Status);
         }
     }
+    if projection.buffer_line_visible {
+        render_content_tab_line(
+            &mut grid,
+            &ui.content_tabs,
+            config,
+            u16::from(projection.tab_line_visible),
+        );
+    }
     let mut cursor = None;
     let mut pane_config = config.clone();
     pane_config.ui.status_line.enabled = false;
     for rect in projection.panes {
-        let Some(view) = state.panes.get(rect.pane).map(|pane| pane.view) else {
-            continue;
-        };
-        let frame = render_editor_view(state, view, ui, &pane_config, rect.width, rect.height);
+        let frame = render_editor_view(state, rect.view, ui, &pane_config, rect.width, rect.height);
         for y in 0..rect.height {
             for x in 0..rect.width {
                 let Some(cell) = frame.grid.get(x, y) else {
@@ -1586,11 +2261,11 @@ fn render_workspace(
         BorderStyle::Double => ('═', '║'),
         BorderStyle::Single | BorderStyle::Rounded => ('─', '│'),
     };
-    for (x, y, length, axis) in projection.borders {
-        for offset in 0..length {
-            let (cell_x, cell_y, symbol) = match axis {
-                crate::editing::Axis::Horizontal => (x, y.saturating_add(offset), vertical),
-                crate::editing::Axis::Vertical => (x.saturating_add(offset), y, horizontal),
+    for border in projection.borders {
+        for offset in 0..border.length {
+            let (cell_x, cell_y, symbol) = match border.axis {
+                TileAxis::Horizontal => (border.x, border.y.saturating_add(offset), vertical),
+                TileAxis::Vertical => (border.x.saturating_add(offset), border.y, horizontal),
             };
             grid.set_cell(cell_x, cell_y, &symbol.to_string(), Style::Border);
         }
@@ -1603,85 +2278,6 @@ fn render_workspace(
     Frame { grid, cursor }
 }
 
-fn layout_pane_count(node: &crate::editing::LayoutNode) -> usize {
-    match node {
-        crate::editing::LayoutNode::Pane(_) => 1,
-        crate::editing::LayoutNode::Split { first, second, .. } => {
-            layout_pane_count(first).saturating_add(layout_pane_count(second))
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn collect_pane_rects(
-    node: &crate::editing::LayoutNode,
-    x: u16,
-    y: u16,
-    width: u16,
-    height: u16,
-    panes: &mut Vec<PaneRect>,
-    borders: &mut Vec<(u16, u16, u16, crate::editing::Axis)>,
-) {
-    match node {
-        crate::editing::LayoutNode::Pane(pane) => panes.push(PaneRect {
-            pane: *pane,
-            x,
-            y,
-            width,
-            height,
-        }),
-        crate::editing::LayoutNode::Split {
-            axis,
-            ratio,
-            first,
-            second,
-        } => match axis {
-            crate::editing::Axis::Horizontal => {
-                let available = width.saturating_sub(1);
-                let first_width = available
-                    .saturating_mul(*ratio)
-                    .checked_div(1000)
-                    .unwrap_or(0)
-                    .min(available);
-                let second_width = available.saturating_sub(first_width);
-                collect_pane_rects(first, x, y, first_width, height, panes, borders);
-                let border_x = x.saturating_add(first_width);
-                borders.push((border_x, y, height, *axis));
-                collect_pane_rects(
-                    second,
-                    border_x.saturating_add(1),
-                    y,
-                    second_width,
-                    height,
-                    panes,
-                    borders,
-                );
-            }
-            crate::editing::Axis::Vertical => {
-                let available = height.saturating_sub(1);
-                let first_height = available
-                    .saturating_mul(*ratio)
-                    .checked_div(1000)
-                    .unwrap_or(0)
-                    .min(available);
-                let second_height = available.saturating_sub(first_height);
-                collect_pane_rects(first, x, y, width, first_height, panes, borders);
-                let border_y = y.saturating_add(first_height);
-                borders.push((x, border_y, width, *axis));
-                collect_pane_rects(
-                    second,
-                    x,
-                    border_y.saturating_add(1),
-                    width,
-                    second_height,
-                    panes,
-                    borders,
-                );
-            }
-        },
-    }
-}
-
 fn syntax_role_style(role: crate::syntax::SyntaxRole) -> Style {
     match role {
         crate::syntax::SyntaxRole::Comment => Style::SyntaxComment,
@@ -1690,6 +2286,382 @@ fn syntax_role_style(role: crate::syntax::SyntaxRole) -> Style {
         crate::syntax::SyntaxRole::Keyword => Style::SyntaxKeyword,
         crate::syntax::SyntaxRole::Type => Style::SyntaxType,
         crate::syntax::SyntaxRole::Variable => Style::SyntaxVariable,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+pub struct VisualRowAnchor {
+    pub line: usize,
+    pub wrap_row: usize,
+}
+
+/// Pure visual-row ownership shared by viewport follow, rendering, paging,
+/// cursor projection, and mouse hit testing. It reads immutable editor/UI
+/// snapshots only and performs no parsing or service work.
+pub struct VisualRowModel<'a> {
+    text: &'a crate::document::TextBuffer,
+    folds: Vec<(usize, usize)>,
+    wrap: bool,
+    content_width: usize,
+    tab_width: usize,
+    ambiguous_width: AmbiguousWidth,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct VisualRowSlice {
+    pub byte_start: usize,
+    pub byte_end: usize,
+    pub source_column_start: usize,
+    pub used_cells: usize,
+}
+
+impl<'a> VisualRowModel<'a> {
+    #[must_use]
+    pub fn new(
+        text: &'a crate::document::TextBuffer,
+        view: crate::editing::ViewId,
+        ui: &UiState,
+        config: &Config,
+        pane_width: u16,
+        wrap: bool,
+    ) -> Self {
+        let maximum = text.len_lines().saturating_sub(1);
+        let mut folds = ui
+            .lsp_folds
+            .iter()
+            .chain(ui.syntax_folds.iter())
+            .filter(|fold| fold.view == view && fold.collapsed)
+            .filter_map(|fold| {
+                let start = fold.start_line.min(maximum);
+                let end = fold.end_line.min(maximum);
+                (start < end).then_some((start, end))
+            })
+            .collect::<Vec<_>>();
+        folds.sort_unstable_by_key(|&(start, end)| (start, std::cmp::Reverse(end)));
+        let mut normalized_folds: Vec<(usize, usize)> = Vec::with_capacity(folds.len());
+        for (start, end) in folds {
+            if let Some(last) = normalized_folds.last_mut()
+                && start <= last.1
+            {
+                last.1 = last.1.max(end);
+            } else {
+                normalized_folds.push((start, end));
+            }
+        }
+        Self {
+            text,
+            folds: normalized_folds,
+            wrap,
+            content_width: editor_content_width(text, &config.editor, pane_width).max(1),
+            tab_width: config.editor.tab_width.max(1),
+            ambiguous_width: config.editor.ambiguous_width,
+        }
+    }
+
+    fn containing_fold(&self, line: usize) -> Option<(usize, usize)> {
+        self.folds
+            .iter()
+            .copied()
+            .find(|&(start, end)| line > start && line <= end)
+    }
+
+    fn grapheme_width(&self, grapheme: &str, source_column: usize) -> usize {
+        if grapheme == "\t" {
+            self.tab_width - (source_column % self.tab_width)
+        } else {
+            text_width(grapheme, self.ambiguous_width).max(1)
+        }
+    }
+
+    /// Return exact grapheme-atomic slices for one logical line. A grapheme is
+    /// never split across rows. If it is wider than a tiny content body, it
+    /// alone consumes one row and its visible width is clipped to that body.
+    #[must_use]
+    pub fn line_rows(&self, line: usize) -> Vec<VisualRowSlice> {
+        let text = self.text.line(line).unwrap_or_default();
+        let content = text.strip_suffix('\n').unwrap_or(&text);
+        if !self.wrap {
+            return vec![VisualRowSlice {
+                byte_start: 0,
+                byte_end: content.len(),
+                source_column_start: 0,
+                used_cells: display_column(content, self.tab_width, self.ambiguous_width),
+            }];
+        }
+        if content.is_empty() {
+            return vec![VisualRowSlice {
+                byte_start: 0,
+                byte_end: 0,
+                source_column_start: 0,
+                used_cells: 0,
+            }];
+        }
+        let mut rows = Vec::new();
+        let mut row_start = 0usize;
+        let mut row_source_column = 0usize;
+        let mut row_used = 0usize;
+        let mut source_column = 0usize;
+        for (relative, grapheme) in content.grapheme_indices(true) {
+            let source_width = self.grapheme_width(grapheme, source_column);
+            let visible_width = source_width.min(self.content_width);
+            if row_used > 0 && row_used.saturating_add(visible_width) > self.content_width {
+                rows.push(VisualRowSlice {
+                    byte_start: row_start,
+                    byte_end: relative,
+                    source_column_start: row_source_column,
+                    used_cells: row_used,
+                });
+                row_start = relative;
+                row_source_column = source_column;
+                row_used = 0;
+            }
+            row_used = row_used.saturating_add(visible_width);
+            source_column = source_column.saturating_add(source_width);
+        }
+        rows.push(VisualRowSlice {
+            byte_start: row_start,
+            byte_end: content.len(),
+            source_column_start: row_source_column,
+            used_cells: row_used,
+        });
+        rows
+    }
+
+    #[must_use]
+    pub fn row_slice(&self, anchor: VisualRowAnchor) -> VisualRowSlice {
+        let anchor = self.normalize(anchor);
+        self.line_rows(anchor.line)
+            .get(anchor.wrap_row)
+            .copied()
+            .unwrap_or(VisualRowSlice {
+                byte_start: 0,
+                byte_end: 0,
+                source_column_start: 0,
+                used_cells: 0,
+            })
+    }
+
+    fn row_cell_for_relative_byte(&self, line: usize, row: VisualRowSlice, byte: usize) -> usize {
+        let text = self.text.line(line).unwrap_or_default();
+        let content = text.strip_suffix('\n').unwrap_or(&text);
+        let end = row.byte_end.min(content.len());
+        let mut source_column = row.source_column_start;
+        let mut cell = 0usize;
+        for (relative, grapheme) in content[row.byte_start..end].grapheme_indices(true) {
+            let relative = row.byte_start.saturating_add(relative);
+            if byte <= relative {
+                return cell.min(self.content_width.saturating_sub(1));
+            }
+            let source_width = self.grapheme_width(grapheme, source_column);
+            let visible_width = source_width.min(self.content_width);
+            if byte < relative.saturating_add(grapheme.len()) {
+                return cell.min(self.content_width.saturating_sub(1));
+            }
+            cell = cell.saturating_add(visible_width);
+            source_column = source_column.saturating_add(source_width);
+        }
+        // Exact-width line endings stay on the final owned cell; no synthetic
+        // empty row is introduced between adjacent logical lines.
+        cell.min(self.content_width.saturating_sub(1))
+    }
+
+    #[must_use]
+    pub fn cell_for_byte(&self, anchor: VisualRowAnchor, byte: usize) -> usize {
+        let anchor = self.normalize(anchor);
+        self.row_cell_for_relative_byte(anchor.line, self.row_slice(anchor), byte)
+    }
+
+    #[must_use]
+    pub fn byte_at_cell(&self, anchor: VisualRowAnchor, cell: usize) -> usize {
+        let anchor = self.normalize(anchor);
+        let row = self.row_slice(anchor);
+        let text = self.text.line(anchor.line).unwrap_or_default();
+        let content = text.strip_suffix('\n').unwrap_or(&text);
+        let end = row.byte_end.min(content.len());
+        let mut source_column = row.source_column_start;
+        let mut used = 0usize;
+        for (relative, grapheme) in content[row.byte_start..end].grapheme_indices(true) {
+            let relative = row.byte_start.saturating_add(relative);
+            let source_width = self.grapheme_width(grapheme, source_column);
+            let visible_width = source_width.min(self.content_width);
+            if cell < used.saturating_add(visible_width) {
+                return relative;
+            }
+            used = used.saturating_add(visible_width);
+            source_column = source_column.saturating_add(source_width);
+        }
+        row.byte_end
+    }
+
+    #[must_use]
+    pub fn normalize(&self, anchor: VisualRowAnchor) -> VisualRowAnchor {
+        let maximum = self.text.len_lines().saturating_sub(1);
+        let mut line = anchor.line.min(maximum);
+        if let Some((start, _)) = self.containing_fold(line) {
+            line = start;
+        }
+        VisualRowAnchor {
+            line,
+            wrap_row: anchor
+                .wrap_row
+                .min(self.rows_for_line(line).saturating_sub(1)),
+        }
+    }
+
+    #[must_use]
+    pub fn rows_for_line(&self, line: usize) -> usize {
+        self.line_rows(line).len()
+    }
+
+    fn next_line(&self, line: usize) -> usize {
+        let folded_end = self
+            .folds
+            .iter()
+            .find_map(|&(start, end)| (start == line).then_some(end))
+            .unwrap_or(line);
+        folded_end
+            .saturating_add(1)
+            .min(self.text.len_lines().saturating_sub(1))
+    }
+
+    fn previous_line(&self, line: usize) -> usize {
+        let previous = line.saturating_sub(1);
+        self.containing_fold(previous)
+            .map_or(previous, |(start, _)| start)
+    }
+
+    #[must_use]
+    pub fn next(&self, anchor: VisualRowAnchor) -> VisualRowAnchor {
+        let anchor = self.normalize(anchor);
+        if anchor.wrap_row + 1 < self.rows_for_line(anchor.line) {
+            return VisualRowAnchor {
+                line: anchor.line,
+                wrap_row: anchor.wrap_row + 1,
+            };
+        }
+        let line = self.next_line(anchor.line);
+        if line == anchor.line {
+            anchor
+        } else {
+            VisualRowAnchor { line, wrap_row: 0 }
+        }
+    }
+
+    #[must_use]
+    pub fn previous(&self, anchor: VisualRowAnchor) -> VisualRowAnchor {
+        let anchor = self.normalize(anchor);
+        if anchor.wrap_row > 0 {
+            return VisualRowAnchor {
+                line: anchor.line,
+                wrap_row: anchor.wrap_row - 1,
+            };
+        }
+        let line = self.previous_line(anchor.line);
+        if line == anchor.line {
+            anchor
+        } else {
+            VisualRowAnchor {
+                line,
+                wrap_row: self.rows_for_line(line).saturating_sub(1),
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn forward(&self, mut anchor: VisualRowAnchor, count: usize) -> VisualRowAnchor {
+        anchor = self.normalize(anchor);
+        for _ in 0..count {
+            let next = self.next(anchor);
+            if next == anchor {
+                break;
+            }
+            anchor = next;
+        }
+        anchor
+    }
+
+    #[must_use]
+    pub fn backward(&self, mut anchor: VisualRowAnchor, count: usize) -> VisualRowAnchor {
+        anchor = self.normalize(anchor);
+        for _ in 0..count {
+            let previous = self.previous(anchor);
+            if previous == anchor {
+                break;
+            }
+            anchor = previous;
+        }
+        anchor
+    }
+
+    #[must_use]
+    pub fn cursor_projection(&self, cursor: ByteOffset) -> (VisualRowAnchor, usize) {
+        let line = self.text.byte_to_line(cursor).unwrap_or(0);
+        if let Some((start, _)) = self.containing_fold(line) {
+            return (
+                VisualRowAnchor {
+                    line: start,
+                    wrap_row: 0,
+                },
+                0,
+            );
+        }
+        if !self.wrap {
+            let line_start = self.text.line_to_byte(line).unwrap_or(ByteOffset(0));
+            let prefix = self
+                .text
+                .slice(ByteRange::new(line_start, cursor).expect("cursor line range"))
+                .unwrap_or_default();
+            return (
+                VisualRowAnchor { line, wrap_row: 0 },
+                display_column(&prefix, self.tab_width, self.ambiguous_width),
+            );
+        }
+        let line_start = self.text.line_to_byte(line).unwrap_or(ByteOffset(0));
+        let relative = cursor.get().saturating_sub(line_start.get());
+        let rows = self.line_rows(line);
+        let row_index = rows
+            .iter()
+            .enumerate()
+            .find_map(|(index, row)| {
+                (relative < row.byte_end || (relative == row.byte_end && index + 1 == rows.len()))
+                    .then_some(index)
+            })
+            .unwrap_or_else(|| rows.len().saturating_sub(1));
+        let anchor = VisualRowAnchor {
+            line,
+            wrap_row: row_index,
+        };
+        (
+            anchor,
+            self.row_cell_for_relative_byte(line, rows[row_index], relative),
+        )
+    }
+
+    #[must_use]
+    pub fn cursor_anchor(&self, cursor: ByteOffset) -> VisualRowAnchor {
+        self.cursor_projection(cursor).0
+    }
+
+    #[must_use]
+    pub fn screen_row(
+        &self,
+        start: VisualRowAnchor,
+        target: VisualRowAnchor,
+        height: usize,
+    ) -> Option<usize> {
+        let mut current = self.normalize(start);
+        let target = self.normalize(target);
+        for row in 0..height {
+            if current == target {
+                return Some(row);
+            }
+            let next = self.next(current);
+            if next == current {
+                break;
+            }
+            current = next;
+        }
+        None
     }
 }
 
@@ -1764,23 +2736,24 @@ fn render_editor_view(
     let wrap_enabled = content_width > 0
         && config.editor.wrap
         && !(large_file && config.editor.large_file.disable_wrap);
-    let first_wrap_skip = if wrap_enabled && current_line == view.scroll_line && body_height > 0 {
-        let line_start = buffer
-            .text
-            .line_to_byte(current_line)
-            .unwrap_or(ByteOffset(0));
-        let prefix = buffer
-            .text
-            .slice(ByteRange::new(line_start, view.cursor).expect("cursor range"))
-            .unwrap_or_default();
-        let cursor_wrap_row = display_column(
-            &prefix,
-            config.editor.tab_width,
-            config.editor.ambiguous_width,
-        ) / content_width;
-        cursor_wrap_row.saturating_sub(usize::from(body_height.saturating_sub(1)))
+    let visual_rows = VisualRowModel::new(&buffer.text, view_id, ui, config, width, wrap_enabled);
+    let configured_start = visual_rows.normalize(VisualRowAnchor {
+        line: view.scroll_line,
+        wrap_row: view.scroll_wrap_row,
+    });
+    let cursor_anchor = visual_rows.cursor_anchor(view.cursor);
+    let start_anchor = if configured_start.line == cursor_anchor.line
+        && visual_rows
+            .screen_row(
+                configured_start,
+                cursor_anchor,
+                usize::from(body_height.max(1)),
+            )
+            .is_none()
+    {
+        visual_rows.backward(cursor_anchor, usize::from(body_height.saturating_sub(1)))
     } else {
-        0
+        configured_start
     };
     let search_ranges = if config.search.highlight && !large_file {
         ui.search_query
@@ -1832,7 +2805,7 @@ fn render_editor_view(
         .filter(|hint| hint.buffer == view.buffer && hint.revision == buffer.text.revision())
         .collect::<Vec<_>>();
     let mut screen_row = 0_u16;
-    let mut line_index = view.scroll_line;
+    let mut line_index = start_anchor.line;
     while screen_row < body_height && line_index < buffer.text.len_lines() {
         if let Some(fold) = ui
             .lsp_folds
@@ -1848,7 +2821,13 @@ fn render_editor_view(
             line_index = fold.end_line.saturating_add(1);
             continue;
         }
-        if gutter_width > 0 {
+        let line_rows = visual_rows.line_rows(line_index);
+        let first_line_row = if line_index == start_anchor.line {
+            start_anchor.wrap_row.min(line_rows.len().saturating_sub(1))
+        } else {
+            0
+        };
+        if gutter_width > 0 && first_line_row == 0 {
             let number = match config.editor.line_numbers {
                 LineNumbers::Absolute => line_index + 1,
                 LineNumbers::Relative => current_line.abs_diff(line_index),
@@ -1881,6 +2860,24 @@ fn render_editor_view(
                 gutter_width,
             );
         }
+        if config.editor.git_signs.enabled && gutter_width > 0 && first_line_row == 0 {
+            if let Some(sign) = ui.git_signs.iter().find(|sign| {
+                sign.buffer == view.buffer
+                    && sign.buffer_revision == buffer.text.revision().0
+                    && sign.line == line_index
+            }) {
+                let (symbol, style) = match sign.kind {
+                    UiGitSignKind::Added => (&config.editor.git_signs.added, Style::GitSignAdded),
+                    UiGitSignKind::Changed => {
+                        (&config.editor.git_signs.changed, Style::GitSignChanged)
+                    }
+                    UiGitSignKind::Deleted => {
+                        (&config.editor.git_signs.deleted, Style::GitSignDeleted)
+                    }
+                };
+                grid.set_cell(gutter_width - 1, screen_row, symbol, style);
+            }
+        }
         let line_start = buffer
             .text
             .line_to_byte(line_index)
@@ -1888,32 +2885,43 @@ fn render_editor_view(
         let line = buffer.text.line(line_index).unwrap_or_default();
         let full_content = line.strip_suffix('\n').unwrap_or(&line);
         let can_wrap = wrap_enabled;
-        let skipped_bytes = if line_index == view.scroll_line && first_wrap_skip > 0 {
-            byte_offset_at_display_column(
-                full_content,
-                first_wrap_skip.saturating_mul(content_width),
-                config.editor.tab_width,
-                config.editor.ambiguous_width,
-            )
-        } else if !can_wrap {
+        let skipped_bytes = if can_wrap {
+            line_rows[first_line_row].byte_start
+        } else {
             byte_offset_at_display_column(
                 full_content,
                 view.scroll_column,
                 config.editor.tab_width,
                 config.editor.ambiguous_width,
             )
-        } else {
-            0
         };
-        let skipped_column = display_column(
-            &full_content[..skipped_bytes],
-            config.editor.tab_width,
-            config.editor.ambiguous_width,
-        );
+        let skipped_column = if can_wrap {
+            line_rows[first_line_row].source_column_start
+        } else {
+            display_column(
+                &full_content[..skipped_bytes],
+                config.editor.tab_width,
+                config.editor.ambiguous_width,
+            )
+        };
         let visible_content = &full_content[skipped_bytes..];
         let mut x = gutter_width;
         let mut source_column = skipped_column;
+        let mut visual_row_index = first_line_row;
         for (relative, grapheme) in visible_content.grapheme_indices(true) {
+            let source_relative = skipped_bytes.saturating_add(relative);
+            if can_wrap
+                && line_rows
+                    .get(visual_row_index.saturating_add(1))
+                    .is_some_and(|row| source_relative >= row.byte_start)
+            {
+                screen_row = screen_row.saturating_add(1);
+                if screen_row >= body_height {
+                    break;
+                }
+                visual_row_index = visual_row_index.saturating_add(1);
+                x = gutter_width;
+            }
             let global = ByteOffset(line_start.get() + skipped_bytes + relative);
             let style = if is_selected(
                 view.selection,
@@ -1986,20 +2994,18 @@ fn render_editor_view(
             } else {
                 text_width(grapheme, config.editor.ambiguous_width).max(1)
             };
-            let advance = u16::try_from(cells).unwrap_or(u16::MAX);
-            if x.saturating_add(advance) > width {
-                if !can_wrap {
-                    break;
-                }
-                screen_row = screen_row.saturating_add(1);
-                if screen_row >= body_height {
-                    break;
-                }
-                x = gutter_width;
+            let visible_cells = if can_wrap {
+                cells.min(content_width)
+            } else {
+                cells
+            };
+            let advance = u16::try_from(visible_cells).unwrap_or(u16::MAX);
+            if !can_wrap && x.saturating_add(advance) > width {
+                break;
             }
             source_column = source_column.saturating_add(cells);
             if grapheme == "\t" {
-                for _ in 0..cells {
+                for _ in 0..visible_cells {
                     if x >= width {
                         break;
                     }
@@ -2007,7 +3013,20 @@ fn render_editor_view(
                     x = x.saturating_add(1);
                 }
             } else if x < width {
-                grid.set_cell(x, screen_row, grapheme, style);
+                if can_wrap && cells > content_width {
+                    let replacement = if text_width(
+                        &config.editor.control_character_replacement,
+                        config.editor.ambiguous_width,
+                    ) == 1
+                    {
+                        config.editor.control_character_replacement.as_str()
+                    } else {
+                        "?"
+                    };
+                    grid.set_cell(x, screen_row, replacement, style);
+                } else {
+                    grid.set_cell(x, screen_row, grapheme, style);
+                }
                 x = x.saturating_add(advance);
             }
         }
@@ -2023,22 +3042,52 @@ fn render_editor_view(
             .filter(|hint| hint.position >= visible_start && hint.position <= line_end)
             .take(32)
         {
-            let source_relative = hint
-                .position
-                .get()
-                .saturating_sub(line_start.get())
-                .min(full_content.len());
-            if full_content.is_char_boundary(source_relative) {
-                let source_hint_column = display_column(
-                    &full_content[..source_relative],
-                    config.editor.tab_width,
-                    config.editor.ambiguous_width,
-                );
-                let visible_hint_column = source_hint_column.saturating_sub(skipped_column);
-                let hint_x = gutter_width
-                    .saturating_add(u16::try_from(visible_hint_column).unwrap_or(u16::MAX));
-                if hint_x < width {
-                    grid.put_text(hint_x, screen_row, &hint.label, Style::Muted);
+            let (hint_anchor, absolute_hint_cell) = visual_rows.cursor_projection(hint.position);
+            let hint_cell = if can_wrap {
+                absolute_hint_cell
+            } else {
+                absolute_hint_cell.saturating_sub(skipped_column)
+            };
+            if let Some(hint_row) =
+                visual_rows.screen_row(start_anchor, hint_anchor, usize::from(body_height))
+            {
+                let hint_x =
+                    gutter_width.saturating_add(u16::try_from(hint_cell).unwrap_or(u16::MAX));
+                let hint_y = u16::try_from(hint_row).unwrap_or(u16::MAX);
+                if hint_x < width && hint_y < body_height {
+                    grid.put_text(hint_x, hint_y, &hint.label, Style::Muted);
+                }
+            }
+        }
+        if let Some(ghost) = ui.ai_ghost_text.as_ref().filter(|ghost| {
+            ghost.buffer == view.buffer
+                && ghost.revision == buffer.text.revision()
+                && ghost.view == view_id
+                && ghost.cursor == view.cursor
+                && ghost.mode == view.mode
+                && ghost.cursor >= visible_start
+                && ghost.cursor <= line_end
+        }) {
+            let (ghost_anchor, absolute_ghost_cell) = visual_rows.cursor_projection(ghost.cursor);
+            let ghost_cell = if can_wrap {
+                absolute_ghost_cell
+            } else {
+                absolute_ghost_cell.saturating_sub(skipped_column)
+            };
+            if let Some(ghost_row) =
+                visual_rows.screen_row(start_anchor, ghost_anchor, usize::from(body_height))
+            {
+                let ghost_row = u16::try_from(ghost_row).unwrap_or(u16::MAX);
+                let ghost_x =
+                    gutter_width.saturating_add(u16::try_from(ghost_cell).unwrap_or(u16::MAX));
+                if ghost_row < body_height && ghost_x < width {
+                    grid.put_text_clipped(
+                        ghost_x,
+                        ghost_row,
+                        &ghost.text,
+                        Style::AiGhost,
+                        width - ghost_x,
+                    );
                 }
             }
         }
@@ -2066,8 +3115,9 @@ fn render_editor_view(
         width,
         body_height,
         gutter_width,
-        content_width,
         wrap_enabled,
+        &visual_rows,
+        start_anchor,
     )
     .map(|(x, y)| {
         let configured = match view.mode {
@@ -2194,49 +3244,23 @@ fn editor_cursor(
     width: u16,
     body_height: u16,
     gutter: u16,
-    available: usize,
     wrap_enabled: bool,
+    visual_rows: &VisualRowModel<'_>,
+    start_anchor: VisualRowAnchor,
 ) -> Option<(u16, u16)> {
     let view = state.views.get(view_id)?;
     let buffer = state.buffers.get(view.buffer)?;
     let point = PositionCodec::new(&buffer.text)
         .byte_to_point(view.cursor)
         .ok()?;
-    if point.line < view.scroll_line {
-        return None;
-    }
-    let line_start = buffer.text.line_to_byte(point.line).ok()?;
-    let prefix = buffer
-        .text
-        .slice(ByteRange::new(line_start, view.cursor).ok()?)
-        .ok()?;
-    let column = display_column(
-        &prefix,
-        config.editor.tab_width,
-        config.editor.ambiguous_width,
-    );
+    let (cursor_anchor, cursor_cell) = visual_rows.cursor_projection(view.cursor);
     if wrap_enabled {
-        let mut row = 0_usize;
-        for line_index in view.scroll_line..point.line {
-            let line = buffer.text.line(line_index).ok()?;
-            let content = line.strip_suffix('\n').unwrap_or(&line);
-            let columns = display_column(
-                content,
-                config.editor.tab_width,
-                config.editor.ambiguous_width,
-            );
-            row = row.saturating_add(columns.max(1).div_ceil(available));
-        }
-        row = row.saturating_add(column / available);
-        if point.line == view.scroll_line {
-            let skip =
-                (column / available).saturating_sub(usize::from(body_height.saturating_sub(1)));
-            row = row.saturating_sub(skip);
-        }
+        let row = visual_rows.screen_row(start_anchor, cursor_anchor, usize::from(body_height))?;
         let y = u16::try_from(row).ok()?;
-        let x = gutter.saturating_add(u16::try_from(column % available).ok()?);
+        let x = gutter.saturating_add(u16::try_from(cursor_cell).ok()?);
         (x < width && y < body_height).then_some((x, y))
     } else {
+        let column = cursor_cell;
         let line = buffer.text.line(point.line).ok()?;
         let content = line.strip_suffix('\n').unwrap_or(&line);
         let snapped_scroll = snap_display_column(
@@ -2247,7 +3271,12 @@ fn editor_cursor(
         );
         let visible_column = column.checked_sub(snapped_scroll)?;
         let x = gutter.saturating_add(u16::try_from(visible_column).ok()?);
-        let y = u16::try_from(point.line - view.scroll_line).ok()?;
+        let y = u16::try_from(visual_rows.screen_row(
+            start_anchor,
+            cursor_anchor,
+            usize::from(body_height),
+        )?)
+        .ok()?;
         (x < width && y < body_height).then_some((x, y))
     }
 }
@@ -2420,29 +3449,129 @@ fn cursor_style(shape: CursorShape) -> SetCursorStyle {
     }
 }
 
-fn render_picker(
-    frame: &mut Frame,
-    picker: &PickerUiState,
-    config: &Config,
-    terminal_width: u16,
-    terminal_height: u16,
-) {
+fn render_plugin_surface(frame: &mut Frame, surface: &PluginSurfaceUiState, rect: WindowRect) {
+    if rect.width == 0 || rect.height == 0 {
+        return;
+    }
+    let right = rect.x.saturating_add(rect.width).min(frame.grid.width());
+    let bottom = rect.y.saturating_add(rect.height).min(frame.grid.height());
+    for y in rect.y..bottom {
+        for x in rect.x..right {
+            frame.grid.set_cell(x, y, " ", Style::Default);
+        }
+    }
+    for (offset, row) in surface.rows.iter().skip(surface.scroll).enumerate() {
+        let Ok(offset) = u16::try_from(offset) else {
+            break;
+        };
+        let y = rect.y.saturating_add(offset);
+        if y >= bottom {
+            break;
+        }
+        let indent = row
+            .depth
+            .saturating_mul(2)
+            .min(rect.width.saturating_sub(1));
+        let x = rect.x.saturating_add(indent);
+        let prefix = if row.actionable { "› " } else { "" };
+        let mut text = String::with_capacity(prefix.len().saturating_add(row.text.len()));
+        text.push_str(prefix);
+        text.push_str(&row.text);
+        frame.grid.put_text_clipped(
+            x,
+            y,
+            &text,
+            if row.focused {
+                Style::Selection
+            } else {
+                row.style
+            },
+            right,
+        );
+    }
+}
+
+fn render_private_surface(frame: &mut Frame, surface: &PrivateSurfaceUiState, rect: WindowRect) {
+    if rect.width == 0
+        || rect.height == 0
+        || surface.width != rect.width
+        || surface.height != rect.height
+        || surface.dimensions_revision == 0
+        || surface.surface_revision == 0
+    {
+        return;
+    }
+    let right = rect.x.saturating_add(rect.width).min(frame.grid.width());
+    let bottom = rect.y.saturating_add(rect.height).min(frame.grid.height());
+    for y in rect.y..bottom {
+        for x in rect.x..right {
+            frame.grid.set_cell(x, y, " ", Style::Default);
+        }
+    }
+    for cell in &surface.cells {
+        if cell.continuation || cell.x >= rect.width || cell.y >= rect.height {
+            continue;
+        }
+        let x = rect.x.saturating_add(cell.x);
+        let y = rect.y.saturating_add(cell.y);
+        if x < right && y < bottom {
+            frame
+                .grid
+                .put_text_clipped(x, y, &cell.grapheme, cell.style, right);
+        }
+    }
+    if surface.focused {
+        frame.cursor = surface
+            .cursor
+            .filter(|(x, y)| *x < rect.width && *y < rect.height)
+            .map(|(x, y)| {
+                (
+                    rect.x.saturating_add(x),
+                    rect.y.saturating_add(y),
+                    SetCursorStyle::SteadyBlock,
+                )
+            });
+    }
+}
+
+#[must_use]
+pub fn picker_geometry(config: &Config, bounds: WindowRect) -> Option<WindowRect> {
     let configured = &config.ui.picker;
-    let width =
-        u16::try_from(u32::from(terminal_width) * u32::from(configured.width_percent) / 100)
-            .unwrap_or(terminal_width)
-            .max(configured.minimum_width.min(terminal_width))
-            .min(terminal_width);
+    let width = u16::try_from(u32::from(bounds.width) * u32::from(configured.width_percent) / 100)
+        .unwrap_or(bounds.width)
+        .max(configured.minimum_width.min(bounds.width))
+        .min(bounds.width);
     let height =
-        u16::try_from(u32::from(terminal_height) * u32::from(configured.height_percent) / 100)
-            .unwrap_or(terminal_height)
-            .max(configured.minimum_height.min(terminal_height))
-            .min(terminal_height);
+        u16::try_from(u32::from(bounds.height) * u32::from(configured.height_percent) / 100)
+            .unwrap_or(bounds.height)
+            .max(configured.minimum_height.min(bounds.height))
+            .min(bounds.height);
+    if width < 4 || height < 6 {
+        return None;
+    }
+    Some(WindowRect {
+        x: bounds
+            .x
+            .saturating_add(bounds.width.saturating_sub(width) / 2),
+        y: bounds
+            .y
+            .saturating_add(bounds.height.saturating_sub(height) / 2),
+        width,
+        height,
+    })
+}
+
+fn render_picker(frame: &mut Frame, picker: &PickerUiState, config: &Config, rect: WindowRect) {
+    let configured = &config.ui.picker;
+    let WindowRect {
+        x: left,
+        y: top,
+        width,
+        height,
+    } = rect;
     if width < 4 || height < 6 {
         return;
     }
-    let left = terminal_width.saturating_sub(width) / 2;
-    let top = terminal_height.saturating_sub(height) / 2;
     for y in top..top.saturating_add(height) {
         for x in left..left.saturating_add(width) {
             frame.grid.set_cell(x, y, " ", Style::Default);
@@ -2733,23 +3862,34 @@ fn render_prompt(
     if geometry.width == 0 || geometry.height == 0 {
         return;
     }
+    let right = geometry.left.saturating_add(geometry.width);
+    for y in geometry.top..geometry.top.saturating_add(geometry.height) {
+        for x in geometry.left..right {
+            frame.grid.set_cell(x, y, " ", Style::Default);
+        }
+    }
     if geometry.height < 3 {
-        let marker_end = frame.grid.put_text(
+        let marker_end = frame.grid.put_text_clipped(
             geometry.left,
             geometry.top,
             prompt.kind.marker(&config.ui.command_line.text),
             Style::Accent,
+            right,
         );
-        frame
-            .grid
-            .put_text(marker_end, geometry.top, &prompt.input, Style::Default);
+        frame.grid.put_text_clipped(
+            marker_end,
+            geometry.top,
+            &prompt.input,
+            Style::Default,
+            right,
+        );
         let prefix = prompt.input.get(..prompt.cursor).unwrap_or(&prompt.input);
         frame.cursor = Some((
             marker_end
                 .saturating_add(
                     u16::try_from(text_width(prefix, config.editor.ambiguous_width)).unwrap_or(0),
                 )
-                .min(width.saturating_sub(1)),
+                .min(right.saturating_sub(1)),
             geometry.top,
             cursor_style(config.ui.cursor.prompt),
         ));
@@ -2823,27 +3963,37 @@ fn render_prompt(
         .left
         .saturating_add(config.ui.command_line.input_padding);
     let input_y = geometry.top.saturating_add(1);
-    let marker_end = frame.grid.put_text(
+    let content_right = right.saturating_sub(1);
+    let marker_end = frame.grid.put_text_clipped(
         input_x,
         input_y,
         prompt.kind.marker(&config.ui.command_line.text),
         Style::Accent,
+        content_right,
     );
-    frame
-        .grid
-        .put_text(marker_end, input_y, &prompt.input, Style::Default);
+    frame.grid.put_text_clipped(
+        marker_end,
+        input_y,
+        &prompt.input,
+        Style::Default,
+        content_right,
+    );
     if let Some(error) = &prompt.error {
         let error_y = geometry
             .top
             .saturating_add(3)
             .saturating_add(config.ui.command_line.attachment_gap);
-        frame.grid.put_text(
+        for x in geometry.left..right {
+            frame.grid.set_cell(x, error_y, " ", Style::Default);
+        }
+        frame.grid.put_text_clipped(
             geometry
                 .left
                 .saturating_add(config.ui.command_line.input_padding),
             error_y,
             error,
             Style::Error,
+            right,
         );
     } else if !prompt.completions.is_empty() {
         let available = height.saturating_sub(geometry.top.saturating_add(3));
@@ -2876,8 +4026,12 @@ fn render_prompt(
                         .unwrap_or(0),
                 )
                 .saturating_add(config.ui.command_line.completion_detail_gap);
-            frame.grid.put_text(label_x, y, &item.label, style);
-            frame.grid.put_text(detail_x, y, &item.detail, Style::Muted);
+            frame
+                .grid
+                .put_text_clipped(label_x, y, &item.label, style, right);
+            frame
+                .grid
+                .put_text_clipped(detail_x, y, &item.detail, Style::Muted, right);
         }
     }
     let prefix = prompt.input.get(..prompt.cursor).unwrap_or(&prompt.input);
@@ -2898,9 +4052,295 @@ mod tests {
     use crate::editing::EditorState;
 
     use super::{
-        CompletionItem, DocumentationPopupKind, DocumentationPopupState, PromptKind, PromptState,
-        UiState, prompt_geometry, render,
+        CompletionItem, DocumentationMarkupKind, DocumentationPopupKind, DocumentationPopupState,
+        DocumentationSection, EditorWindowBinding, EditorWindowLayoutState, PromptKind,
+        PromptState, UiState, prompt_geometry,
     };
+
+    fn editor_layout(state: &EditorState) -> EditorWindowLayoutState {
+        fn convert(
+            node: &crate::editing::LayoutNode,
+            state: &EditorState,
+            next: &mut u64,
+            bindings: &mut Vec<EditorWindowBinding>,
+        ) -> crate::windows::TiledLayoutNode {
+            match node {
+                crate::editing::LayoutNode::Pane(pane) => {
+                    *next += 1;
+                    let window = crate::windows::WindowId(*next);
+                    bindings.push(EditorWindowBinding {
+                        window,
+                        pane: *pane,
+                        view: state.panes[*pane].view,
+                    });
+                    crate::windows::TiledLayoutNode::Window(window)
+                }
+                crate::editing::LayoutNode::Split {
+                    axis,
+                    ratio,
+                    first,
+                    second,
+                } => crate::windows::TiledLayoutNode::Split {
+                    axis: match axis {
+                        crate::editing::Axis::Horizontal => crate::windows::TileAxis::Horizontal,
+                        crate::editing::Axis::Vertical => crate::windows::TileAxis::Vertical,
+                    },
+                    ratio: *ratio,
+                    first: Box::new(convert(first, state, next, bindings)),
+                    second: Box::new(convert(second, state, next, bindings)),
+                },
+            }
+        }
+
+        let tab = &state.tabs[state.active_tab.expect("active tab")];
+        let mut bindings = Vec::new();
+        let root = convert(&tab.root, state, &mut 0, &mut bindings);
+        let focused = bindings
+            .iter()
+            .find(|binding| binding.pane == tab.focused)
+            .map(|binding| binding.window);
+        EditorWindowLayoutState {
+            source_revision: state.window_revision().expect("test revision"),
+            layout: crate::windows::TiledLayoutSnapshot { root, focused },
+            bindings,
+        }
+    }
+
+    fn ui_with_editor_layout(state: &EditorState) -> UiState {
+        UiState {
+            editor_window_layout: Some(editor_layout(state)),
+            ..UiState::default()
+        }
+    }
+
+    fn attach_test_compositor(
+        state: &EditorState,
+        ui: &mut UiState,
+        config: &crate::configuration::Config,
+        width: u16,
+        height: u16,
+    ) {
+        let layout = ui.editor_window_layout.as_ref();
+        let mut windows = layout
+            .into_iter()
+            .flat_map(|layout| &layout.bindings)
+            .map(|binding| crate::windows::CompositorWindowSnapshot {
+                window: binding.window,
+                placement: crate::windows::WindowPlacement::Tiled,
+                adapter: crate::windows::ContentAdapterKind::TextBuffer,
+                focusable: true,
+            })
+            .collect::<Vec<_>>();
+        let explorer_window = ui
+            .explorer
+            .as_ref()
+            .map(|_| crate::windows::WindowId(10_001));
+        if let Some(window) = explorer_window {
+            let size = super::explorer_panel_width(config, width)
+                .map_or(1, |panel| panel.saturating_add(1));
+            windows.push(crate::windows::CompositorWindowSnapshot {
+                window,
+                placement: crate::windows::WindowPlacement::Docked {
+                    edge: crate::windows::DockEdge::Left,
+                    size,
+                },
+                adapter: crate::windows::ContentAdapterKind::DeclarativeUi,
+                focusable: true,
+            });
+        }
+        let terminal_window = ui
+            .terminal_panel
+            .as_ref()
+            .map(|terminal| (terminal.id, crate::windows::WindowId(10_002)));
+        if let Some((_, window)) = terminal_window {
+            let size = super::terminal_panel_geometry(
+                config,
+                height,
+                ui.terminal_panel
+                    .as_ref()
+                    .expect("terminal")
+                    .requested_height,
+            )
+            .map_or(1, |geometry| geometry.height);
+            windows.push(crate::windows::CompositorWindowSnapshot {
+                window,
+                placement: crate::windows::WindowPlacement::Docked {
+                    edge: crate::windows::DockEdge::Bottom,
+                    size,
+                },
+                adapter: crate::windows::ContentAdapterKind::TerminalSession,
+                focusable: true,
+            });
+        }
+        let dashboard_window = ui.dashboard.then_some(crate::windows::WindowId(10_003));
+        if let Some(window) = dashboard_window {
+            windows.push(crate::windows::CompositorWindowSnapshot {
+                window,
+                placement: crate::windows::WindowPlacement::Overlay(crate::windows::WindowRect {
+                    x: 0,
+                    y: 0,
+                    width,
+                    height,
+                }),
+                adapter: crate::windows::ContentAdapterKind::DeclarativeUi,
+                focusable: true,
+            });
+        }
+        let picker_window = ui
+            .picker
+            .as_ref()
+            .and_then(|_| {
+                super::picker_geometry(
+                    config,
+                    crate::windows::WindowRect {
+                        x: 0,
+                        y: 0,
+                        width,
+                        height,
+                    },
+                )
+            })
+            .map(|rect| (crate::windows::WindowId(10_004), rect));
+        if let Some((window, rect)) = picker_window {
+            windows.push(crate::windows::CompositorWindowSnapshot {
+                window,
+                placement: crate::windows::WindowPlacement::Overlay(rect),
+                adapter: crate::windows::ContentAdapterKind::DeclarativeUi,
+                focusable: true,
+            });
+        }
+        let focused = if let Some((window, _)) = picker_window {
+            Some(window)
+        } else if ui
+            .terminal_panel
+            .as_ref()
+            .is_some_and(|terminal| terminal.focused)
+        {
+            terminal_window.map(|(_, window)| window)
+        } else if ui.explorer_focused {
+            explorer_window
+        } else {
+            layout.and_then(|layout| layout.layout.focused)
+        };
+        let snapshot = crate::windows::CompositorSnapshot {
+            tab: crate::windows::WorkspaceTabId(1),
+            tiled: layout.map(|layout| layout.layout.clone()),
+            windows,
+            focused,
+        };
+        let bounds = crate::windows::WindowRect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        };
+        let preliminary = snapshot.project(
+            bounds,
+            config.ui.panes.minimum_width,
+            config.ui.panes.minimum_height,
+        );
+        let (top, bottom) =
+            super::editor_workspace_insets(state, ui, config, preliminary.workspace_bounds.height);
+        ui.window_graph_revision = Some(1);
+        ui.compositor_layout = Some(super::CompositorLayoutState {
+            source_revision: state.window_revision().expect("test revision"),
+            graph_revision: 1,
+            projection: snapshot.project_with_tiled_insets(
+                bounds,
+                config.ui.panes.minimum_width,
+                config.ui.panes.minimum_height,
+                top,
+                bottom,
+            ),
+            surfaces: super::NativeSurfaceWindowBinding {
+                explorer: explorer_window,
+                terminal: terminal_window,
+                dashboard: dashboard_window,
+                picker: picker_window.map(|(window, _)| window),
+            },
+        });
+    }
+
+    fn render(
+        state: &EditorState,
+        ui: &UiState,
+        config: &crate::configuration::Config,
+        dashboard: &crate::configuration::DashboardConfig,
+        width: u16,
+        height: u16,
+    ) -> super::Frame {
+        let mut ui = ui.clone();
+        attach_test_compositor(state, &mut ui, config, width, height);
+        super::render(state, &ui, config, dashboard, width, height)
+    }
+
+    #[test]
+    fn workspace_frame_respects_nonzero_compositor_origin_for_side_and_top_docks() {
+        let config = crate::configuration::Config::default();
+        let mut local = crate::terminal_ui::CellGrid::new(6, 3);
+        local.set_cell(0, 0, "X", crate::terminal_ui::Style::Default);
+        local.set_cell(5, 2, "Y", crate::terminal_ui::Style::Default);
+        let frame = super::place_workspace_frame(
+            super::Frame {
+                grid: local,
+                cursor: Some((1, 1, crossterm::cursor::SetCursorStyle::SteadyBlock)),
+            },
+            crate::windows::WindowRect {
+                x: 7,
+                y: 4,
+                width: 6,
+                height: 3,
+            },
+            &config,
+            20,
+            10,
+        );
+        assert_eq!(frame.grid.get(7, 4).expect("offset first").symbol, "X");
+        assert_eq!(frame.grid.get(12, 6).expect("offset last").symbol, "Y");
+        assert_eq!(frame.grid.get(0, 0).expect("outside").symbol, " ");
+        assert!(frame.cursor.is_some_and(|(x, y, _)| (x, y) == (8, 5)));
+
+        let terminal = super::TerminalPanelState {
+            id: 1,
+            profile: "side".into(),
+            running: true,
+            exit_code: None,
+            truncated: false,
+            unsupported_sequences: 0,
+            focused: false,
+            columns: 5,
+            rows: 8,
+            cells: Vec::new(),
+            cursor: None,
+            scrollback_lines: 0,
+            scroll_offset: 0,
+            requested_height: 5,
+        };
+        let composed = super::dock_terminal_panel(
+            frame,
+            &terminal,
+            super::TerminalPanelGeometry {
+                x: 0,
+                width: 5,
+                top: 0,
+                height: 10,
+                body_top: 1,
+                body_height: 8,
+                status_y: 9,
+            },
+            &config,
+            20,
+            10,
+        );
+        assert_eq!(
+            composed.grid.get(0, 0).expect("side terminal").style,
+            crate::terminal_ui::Style::TerminalBorder
+        );
+        assert_eq!(
+            composed.grid.get(7, 4).expect("workspace retained").symbol,
+            "X"
+        );
+    }
 
     #[test]
     fn prompt_is_globally_centered_and_clamped() {
@@ -2915,6 +4355,70 @@ mod tests {
     }
 
     #[test]
+    fn prompt_clears_and_clips_the_editor_layer_beneath_its_box() {
+        let mut state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
+        state.open_text(
+            crate::document::TextBuffer::from_text(&vec!["X".repeat(100); 10].join("\n")),
+            None,
+        );
+        let loaded = crate::configuration::load_bundled_config();
+        let base_ui = UiState {
+            editor_window_layout: Some(editor_layout(&state)),
+            ..UiState::default()
+        };
+        let geometry = prompt_geometry(100, 20, &loaded.config.ui.command_line, false);
+        let probe_x = geometry.left + geometry.width - 2;
+        let probe_y = geometry.top + 1;
+        let base = render(&state, &base_ui, &loaded.config, &loaded.dashboard, 100, 20);
+        assert_eq!(
+            base.grid.get(probe_x, probe_y).expect("editor cell").symbol,
+            "X"
+        );
+
+        let ui = UiState {
+            prompt: Some(PromptState::new(PromptKind::Command)),
+            ..base_ui.clone()
+        };
+        let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 100, 20);
+        assert_eq!(
+            frame
+                .grid
+                .get(probe_x, probe_y)
+                .expect("cleared cell")
+                .symbol,
+            " "
+        );
+        assert_eq!(
+            frame
+                .grid
+                .get(geometry.left + geometry.width - 1, probe_y)
+                .expect("right border")
+                .style,
+            crate::terminal_ui::Style::Border
+        );
+
+        let mut long_prompt = PromptState::new(PromptKind::Command);
+        long_prompt.input = "x".repeat(200);
+        long_prompt.cursor = long_prompt.input.len();
+        let clipped = render(
+            &state,
+            &UiState {
+                prompt: Some(long_prompt),
+                ..base_ui
+            },
+            &loaded.config,
+            &loaded.dashboard,
+            100,
+            20,
+        );
+        let outside_x = geometry.left + geometry.width;
+        assert_eq!(
+            clipped.grid.get(outside_x, probe_y),
+            base.grid.get(outside_x, probe_y)
+        );
+    }
+
+    #[test]
     fn documentation_popup_preserves_lines_clamps_and_protects_status_row() {
         let mut state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
         state.open_text(
@@ -2922,10 +4426,17 @@ mod tests {
             None,
         );
         let ui = UiState {
+            editor_window_layout: Some(editor_layout(&state)),
             documentation_popup: Some(DocumentationPopupState {
                 kind: DocumentationPopupKind::Hover,
                 title: "Hover".into(),
-                lines: vec!["first line".into(), "wide 界界 clipped safely".into()],
+                provider: "test".into(),
+                source_range: None,
+                sections: vec![DocumentationSection {
+                    heading: None,
+                    markup: DocumentationMarkupKind::Markdown,
+                    lines: vec!["first line".into(), "wide 界界 clipped safely".into()],
+                }],
                 scroll: 0,
             }),
             ..UiState::default()
@@ -2989,14 +4500,8 @@ mod tests {
         });
         state.views[view].cursor = crate::document::ByteOffset("\tZ\n界ab".len());
         let loaded = crate::configuration::load_bundled_config();
-        let frame = render(
-            &state,
-            &UiState::default(),
-            &loaded.config,
-            &loaded.dashboard,
-            20,
-            6,
-        );
+        let ui = ui_with_editor_layout(&state);
+        let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 20, 6);
         let gutter = 3;
         assert_eq!(
             frame.grid.get(gutter + 3, 0).expect("tab cell").style,
@@ -3009,6 +4514,26 @@ mod tests {
     }
 
     #[test]
+    fn missing_application_window_snapshot_fails_closed() {
+        let mut state = EditorState::new(PathBuf::from("/workspace"));
+        state.open_text(crate::document::TextBuffer::from_text("not rendered"), None);
+        let loaded = crate::configuration::load_bundled_config();
+        let ui = UiState::default();
+        assert!(super::pane_viewports(&state, &ui, &loaded.config, 40, 8).is_empty());
+        let frame = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 40, 8);
+        assert!(frame.cursor.is_none());
+        assert!(!(0..8).any(|row| frame.grid.row_text(row).contains("not rendered")));
+
+        let stale = ui_with_editor_layout(&state);
+        state
+            .split_active(crate::editing::Axis::Horizontal, 500)
+            .expect("change source layout");
+        assert!(super::pane_viewports(&state, &stale, &loaded.config, 40, 8).is_empty());
+        let frame = super::render(&state, &stale, &loaded.config, &loaded.dashboard, 40, 8);
+        assert!(frame.cursor.is_none());
+    }
+
+    #[test]
     fn split_tree_and_tab_line_render_real_independent_views() {
         let mut state = EditorState::new(PathBuf::from("/workspace"));
         state.open_text(crate::document::TextBuffer::from_text("left\nright"), None);
@@ -3018,17 +4543,525 @@ mod tests {
         let loaded = crate::configuration::load_bundled_config();
         let mut config = loaded.config;
         config.ui.tab_line.hide_when_single = false;
-        let frame = render(
-            &state,
-            &UiState::default(),
-            &config,
-            &loaded.dashboard,
-            20,
-            8,
-        );
+        let ui = ui_with_editor_layout(&state);
+        let frame = render(&state, &ui, &config, &loaded.dashboard, 20, 8);
         assert!(frame.grid.row_text(0).contains("[scratch]"));
         assert_eq!(frame.grid.get(9, 2).expect("split border").symbol, "│");
         assert!(frame.cursor.is_some_and(|(x, y, _)| x > 9 && y > 0));
+    }
+
+    #[test]
+    fn buffer_line_lists_unique_dirty_content_and_follows_active_overflow() {
+        let mut state = EditorState::new(PathBuf::from("/workspace"));
+        let (first, _) = state.open_text(
+            crate::document::TextBuffer::from_text("first"),
+            Some(PathBuf::from("/workspace/src/main.rs")),
+        );
+        state.open_text(
+            crate::document::TextBuffer::from_text("second"),
+            Some(PathBuf::from("/workspace/tests/main.rs")),
+        );
+        state.open_text(
+            crate::document::TextBuffer::from_text("third"),
+            Some(PathBuf::from("/workspace/very-long-active-buffer-name.rs")),
+        );
+        state.buffers[first].dirty = true;
+        let loaded = crate::configuration::load_bundled_config();
+        let mut config = loaded.config;
+        config.ui.tab_line.enabled = false;
+        config.ui.buffer_line.maximum_name_width = 18;
+        let entries = vec![
+            super::ContentTabEntry {
+                identity: super::ContentTabIdentity(crate::windows::ContentId(1)),
+                kind: super::ContentTabKind::Text,
+                title: "src/main.rs ·1".into(),
+                active: false,
+                dirty: true,
+                pinned: false,
+                diagnostic: None,
+                icon: "R".into(),
+                closeable: true,
+            },
+            super::ContentTabEntry {
+                identity: super::ContentTabIdentity(crate::windows::ContentId(2)),
+                kind: super::ContentTabKind::Text,
+                title: "tests/main.rs ·2".into(),
+                active: false,
+                dirty: false,
+                pinned: false,
+                diagnostic: None,
+                icon: "R".into(),
+                closeable: true,
+            },
+            super::ContentTabEntry {
+                identity: super::ContentTabIdentity(crate::windows::ContentId(3)),
+                kind: super::ContentTabKind::Text,
+                title: "very-long-active-buffer-name.rs".into(),
+                active: true,
+                dirty: false,
+                pinned: false,
+                diagnostic: None,
+                icon: "R".into(),
+                closeable: true,
+            },
+        ];
+        let ui = UiState {
+            editor_window_layout: Some(editor_layout(&state)),
+            content_tabs: entries,
+            ..UiState::default()
+        };
+
+        let frame = render(&state, &ui, &config, &loaded.dashboard, 24, 7);
+        let line = frame.grid.row_text(0);
+        assert!(line.contains("buffer-name.rs"), "{line:?}");
+        assert!(line.contains('‹'));
+        assert!(frame.cursor.is_some_and(|(_, y, _)| y >= 1));
+
+        for width in 1..=5 {
+            let narrow = render(&state, &ui, &config, &loaded.dashboard, width, 5);
+            assert_eq!(narrow.grid.width(), width);
+            assert!(narrow.cursor.is_none_or(|(x, y, _)| x < width && y < 5));
+        }
+    }
+
+    #[test]
+    fn content_line_segment_width_and_hit_testing_share_exact_boundaries() {
+        let loaded = crate::configuration::load_bundled_config();
+        let mut config = loaded.config;
+        config.ui.buffer_line.active_format = "{title}{dirty}".into();
+        config.ui.buffer_line.inactive_format = "{title}{dirty}".into();
+        let entry = super::ContentTabEntry {
+            identity: super::ContentTabIdentity(crate::windows::ContentId(9)),
+            kind: super::ContentTabKind::Text,
+            title: "a.rs".into(),
+            active: true,
+            dirty: true,
+            pinned: true,
+            diagnostic: Some(super::ContentTabDiagnostic {
+                severity: super::ContentTabDiagnosticSeverity::Error,
+                count: 2,
+            }),
+            icon: "R".into(),
+            closeable: true,
+        };
+        let width = super::content_tab_width(&entry, &config);
+        let mut grid = crate::terminal_ui::CellGrid::new(u16::try_from(width).unwrap(), 1);
+        super::render_content_tab_line(&mut grid, std::slice::from_ref(&entry), &config, 0);
+        let styles = (0..grid.width())
+            .filter_map(|x| grid.get(x, 0).map(|cell| cell.style))
+            .collect::<Vec<_>>();
+        for role in [
+            crate::terminal_ui::Style::BufferLinePin,
+            crate::terminal_ui::Style::BufferLineIcon,
+            crate::terminal_ui::Style::BufferLineDirty,
+            crate::terminal_ui::Style::BufferLineDiagnostic,
+            crate::terminal_ui::Style::BufferLineClose,
+        ] {
+            assert!(styles.contains(&role));
+        }
+        for column in 0..u16::try_from(width).unwrap() {
+            assert_eq!(
+                super::content_tab_at_column(
+                    std::slice::from_ref(&entry),
+                    &config,
+                    u16::try_from(width).unwrap(),
+                    column
+                ),
+                Some(entry.identity)
+            );
+        }
+        assert_eq!(
+            super::content_tab_at_column(
+                std::slice::from_ref(&entry),
+                &config,
+                u16::try_from(width).unwrap(),
+                u16::try_from(width).unwrap()
+            ),
+            None
+        );
+        let mut entries = vec![entry.clone(), entry.clone(), entry.clone()];
+        for (index, entry) in entries.iter_mut().enumerate() {
+            entry.identity = super::ContentTabIdentity(crate::windows::ContentId(index as u64 + 1));
+            entry.title = char::from(b'a' + index as u8).to_string();
+            entry.active = index == 2;
+        }
+        let left = super::text_width(
+            &config.ui.buffer_line.overflow_left,
+            config.editor.ambiguous_width,
+        );
+        for column in 0..u16::try_from(left).unwrap() {
+            assert_eq!(
+                super::content_tab_at_column(&entries, &config, 8, column),
+                None
+            )
+        }
+        let mut right_entries = entries.clone();
+        for (index, entry) in right_entries.iter_mut().enumerate() {
+            entry.active = index == 0;
+            entry.pinned = false;
+            entry.diagnostic = None;
+            entry.dirty = false;
+            entry.closeable = false;
+        }
+        config.ui.buffer_line.show_icons = false;
+        config.ui.buffer_line.show_pins = false;
+        config.ui.buffer_line.show_diagnostics = false;
+        config.ui.buffer_line.show_close = false;
+        let first = super::content_tab_width(&right_entries[0], &config);
+        assert_eq!(
+            super::content_tab_at_column(&right_entries, &config, 5, u16::try_from(first).unwrap()),
+            None
+        );
+    }
+
+    #[test]
+    fn buffer_line_begins_after_the_explorer_dock() {
+        let mut state = EditorState::new(PathBuf::from("/workspace"));
+        state.open_text(
+            crate::document::TextBuffer::from_text("one"),
+            Some(PathBuf::from("/workspace/one.rs")),
+        );
+        state.open_text(
+            crate::document::TextBuffer::from_text("two"),
+            Some(PathBuf::from("/workspace/two.rs")),
+        );
+        let ui = UiState {
+            editor_window_layout: Some(editor_layout(&state)),
+            content_tabs: vec![
+                super::ContentTabEntry {
+                    identity: super::ContentTabIdentity(crate::windows::ContentId(1)),
+                    kind: super::ContentTabKind::Text,
+                    title: "one.rs".into(),
+                    active: false,
+                    dirty: false,
+                    pinned: false,
+                    diagnostic: None,
+                    icon: "R".into(),
+                    closeable: true,
+                },
+                super::ContentTabEntry {
+                    identity: super::ContentTabIdentity(crate::windows::ContentId(2)),
+                    kind: super::ContentTabKind::Text,
+                    title: "two.rs".into(),
+                    active: true,
+                    dirty: false,
+                    pinned: false,
+                    diagnostic: None,
+                    icon: "R".into(),
+                    closeable: true,
+                },
+            ],
+            explorer: Some(super::ExplorerUiState {
+                title: "Explorer".into(),
+                rows: Vec::new(),
+                scroll: 0,
+                loading: false,
+                total: 0,
+                preview_lines: Vec::new(),
+            }),
+            ..UiState::default()
+        };
+        let loaded = crate::configuration::load_bundled_config();
+        let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 10);
+        let panel = super::explorer_panel_width(&loaded.config, 80).expect("explorer width");
+        assert!(frame.grid.row_text(0).contains("Explorer"));
+        let editor_line = (panel.saturating_add(1)..80)
+            .map(|x| frame.grid.get(x, 0).map_or("", |cell| cell.symbol.as_str()))
+            .collect::<String>();
+        assert!(editor_line.contains("one.rs"));
+        assert!(editor_line.contains("two.rs"));
+    }
+
+    #[test]
+    fn exact_ai_ghost_text_is_cursor_clipped_and_non_mutating() {
+        let mut state = EditorState::new(PathBuf::from("/tmp"));
+        let (buffer, view) = state.open_text(crate::document::TextBuffer::from_text("abc"), None);
+        state.views[view].cursor = crate::document::ByteOffset(3);
+        let loaded = crate::configuration::load_bundled_config();
+        let mut config = loaded.config;
+        config.editor.line_numbers = crate::configuration::LineNumbers::Off;
+        config.ui.status_line.enabled = false;
+        let mut ui = ui_with_editor_layout(&state);
+        ui.ai_ghost_text = Some(super::UiGhostText {
+            workspace_root_revision: 1,
+            buffer,
+            revision: state.buffers[buffer].text.revision(),
+            view,
+            cursor: crate::document::ByteOffset(3),
+            mode: crate::editing::EditorMode::Normal,
+            text: " suggestion beyond width".into(),
+        });
+        let before = state.buffers[buffer].text.to_string();
+        let frame = render(&state, &ui, &config, &loaded.dashboard, 10, 2);
+        assert!(frame.grid.row_text(0).starts_with("abc sug"));
+        assert_eq!(state.buffers[buffer].text.to_string(), before);
+        ui.ai_ghost_text.as_mut().unwrap().revision = crate::document::BufferRevision(99);
+        let frame = render(&state, &ui, &config, &loaded.dashboard, 10, 2);
+        assert!(!frame.grid.row_text(0).contains("sugges"));
+    }
+
+    #[test]
+    fn visual_row_model_is_reversible_fold_aware_and_unicode_width_exact() {
+        let mut state = EditorState::new(PathBuf::from("/tmp"));
+        let (_, view) = state.open_text(
+            crate::document::TextBuffer::from_text(
+                "a\t界e\u{301}zz\nfold\nhidden one\nhidden two\ntail tail",
+            ),
+            None,
+        );
+        let loaded = crate::configuration::load_bundled_config();
+        let mut config = loaded.config;
+        config.editor.wrap = true;
+        config.editor.line_numbers = crate::configuration::LineNumbers::Off;
+        let ui = UiState {
+            lsp_folds: vec![super::UiFold {
+                view,
+                start_line: 1,
+                end_line: 3,
+                collapsed: true,
+            }],
+            ..ui_with_editor_layout(&state)
+        };
+        let buffer = state.views[view].buffer;
+        let model =
+            super::VisualRowModel::new(&state.buffers[buffer].text, view, &ui, &config, 4, true);
+        assert_eq!(model.rows_for_line(0), 3);
+        assert_eq!(
+            model.normalize(super::VisualRowAnchor {
+                line: 3,
+                wrap_row: 8
+            }),
+            super::VisualRowAnchor {
+                line: 1,
+                wrap_row: 0
+            }
+        );
+        let start = super::VisualRowAnchor::default();
+        let sequence = (0..7)
+            .scan(start, |anchor, _| {
+                let current = *anchor;
+                *anchor = model.next(*anchor);
+                Some(current)
+            })
+            .collect::<Vec<_>>();
+        assert!(!sequence.iter().any(|anchor| matches!(anchor.line, 2 | 3)));
+        for pair in sequence.windows(2) {
+            assert_eq!(model.previous(pair[1]), pair[0]);
+        }
+        assert_eq!(model.backward(model.forward(start, 5), 5), start);
+    }
+
+    #[test]
+    fn grapheme_atomic_rows_match_render_cursor_and_tiny_pane_policy() {
+        let loaded = crate::configuration::load_bundled_config();
+        let mut config = loaded.config;
+        config.editor.wrap = true;
+        config.editor.line_numbers = crate::configuration::LineNumbers::Off;
+        config.ui.status_line.enabled = false;
+
+        let mut state = EditorState::new(PathBuf::from("/tmp"));
+        let (buffer, view) =
+            state.open_text(crate::document::TextBuffer::from_text("aa界界"), None);
+        let ui = ui_with_editor_layout(&state);
+        let model =
+            super::VisualRowModel::new(&state.buffers[buffer].text, view, &ui, &config, 3, true);
+        assert_eq!(model.rows_for_line(0), 3);
+        assert_eq!(
+            model.line_rows(0),
+            vec![
+                super::VisualRowSlice {
+                    byte_start: 0,
+                    byte_end: 2,
+                    source_column_start: 0,
+                    used_cells: 2,
+                },
+                super::VisualRowSlice {
+                    byte_start: 2,
+                    byte_end: 5,
+                    source_column_start: 2,
+                    used_cells: 2,
+                },
+                super::VisualRowSlice {
+                    byte_start: 5,
+                    byte_end: 8,
+                    source_column_start: 4,
+                    used_cells: 2,
+                },
+            ]
+        );
+        let frame = render(&state, &ui, &config, &loaded.dashboard, 3, 3);
+        assert_eq!(frame.grid.get(0, 0).unwrap().symbol, "a");
+        assert_eq!(frame.grid.get(1, 0).unwrap().symbol, "a");
+        assert_eq!(frame.grid.get(0, 1).unwrap().symbol, "界");
+        assert!(frame.grid.get(1, 1).unwrap().continuation);
+        assert_eq!(frame.grid.get(0, 2).unwrap().symbol, "界");
+        assert!(frame.grid.get(1, 2).unwrap().continuation);
+
+        state.views[view].scroll_wrap_row = 1;
+        state.views[view].cursor = crate::document::ByteOffset(2);
+        let ui = ui_with_editor_layout(&state);
+        let scrolled = render(&state, &ui, &config, &loaded.dashboard, 3, 1);
+        assert_eq!(scrolled.grid.get(0, 0).unwrap().symbol, "界");
+        assert_eq!(scrolled.cursor.map(|(x, y, _)| (x, y)), Some((0, 0)));
+        state.views[view].scroll_wrap_row = 0;
+
+        for &(cursor, expected) in &[
+            (0, (0, 0)),
+            (1, (1, 0)),
+            (2, (0, 1)),
+            (5, (0, 2)),
+            (8, (2, 2)),
+        ] {
+            state.views[view].cursor = crate::document::ByteOffset(cursor);
+            let ui = ui_with_editor_layout(&state);
+            let frame = render(&state, &ui, &config, &loaded.dashboard, 3, 3);
+            assert_eq!(
+                frame.cursor.map(|(x, y, _)| (x, y)),
+                Some(expected),
+                "cursor byte {cursor}"
+            );
+        }
+
+        state.buffers[buffer].text = crate::document::TextBuffer::from_text("abc");
+        state.views[view].cursor = crate::document::ByteOffset(3);
+        let ui = ui_with_editor_layout(&state);
+        let exact = render(&state, &ui, &config, &loaded.dashboard, 3, 1);
+        assert_eq!(exact.cursor.map(|(x, y, _)| (x, y)), Some((2, 0)));
+
+        state.buffers[buffer].text = crate::document::TextBuffer::from_text("界a");
+        state.views[view].cursor = crate::document::ByteOffset(0);
+        let ui = ui_with_editor_layout(&state);
+        let tiny_model =
+            super::VisualRowModel::new(&state.buffers[buffer].text, view, &ui, &config, 1, true);
+        assert_eq!(tiny_model.rows_for_line(0), 2);
+        let tiny = render(&state, &ui, &config, &loaded.dashboard, 1, 2);
+        assert_eq!(
+            tiny.grid.get(0, 0).unwrap().symbol,
+            config.editor.control_character_replacement
+        );
+        assert_eq!(tiny.grid.get(0, 1).unwrap().symbol, "a");
+    }
+
+    #[test]
+    fn mixed_grapheme_row_sequences_are_partitioned_reversible_and_bounded() {
+        let loaded = crate::configuration::load_bundled_config();
+        let mut config = loaded.config;
+        config.editor.wrap = true;
+        config.editor.line_numbers = crate::configuration::LineNumbers::Off;
+        let samples = [
+            "aa界界",
+            "aa\t\t",
+            "e\u{301}界\tx",
+            "界界界",
+            "abc",
+            "\t界e\u{301}z",
+        ];
+        for sample in samples {
+            for width in 1..=4 {
+                let mut state = EditorState::new(PathBuf::from("/tmp"));
+                let (buffer, view) =
+                    state.open_text(crate::document::TextBuffer::from_text(sample), None);
+                let ui = ui_with_editor_layout(&state);
+                let model = super::VisualRowModel::new(
+                    &state.buffers[buffer].text,
+                    view,
+                    &ui,
+                    &config,
+                    width,
+                    true,
+                );
+                let rows = model.line_rows(0);
+                assert!(!rows.is_empty());
+                assert_eq!(rows[0].byte_start, 0);
+                assert_eq!(rows.last().unwrap().byte_end, sample.len());
+                for (index, row) in rows.iter().enumerate() {
+                    assert!(row.used_cells <= usize::from(width));
+                    assert!(sample.is_char_boundary(row.byte_start));
+                    assert!(sample.is_char_boundary(row.byte_end));
+                    if let Some(next) = rows.get(index + 1) {
+                        assert_eq!(row.byte_end, next.byte_start);
+                        let current = super::VisualRowAnchor {
+                            line: 0,
+                            wrap_row: index,
+                        };
+                        let following = model.next(current);
+                        assert_eq!(following.wrap_row, index + 1);
+                        assert_eq!(model.previous(following), current);
+                    }
+                    let anchor = super::VisualRowAnchor {
+                        line: 0,
+                        wrap_row: index,
+                    };
+                    let bytes = (0..usize::from(width))
+                        .map(|cell| model.byte_at_cell(anchor, cell))
+                        .collect::<Vec<_>>();
+                    assert!(bytes.windows(2).all(|pair| pair[0] <= pair[1]));
+                    assert!(bytes.iter().all(|byte| {
+                        *byte >= row.byte_start
+                            && *byte <= row.byte_end
+                            && sample.is_char_boundary(*byte)
+                    }));
+                }
+                let last = super::VisualRowAnchor {
+                    line: 0,
+                    wrap_row: rows.len() - 1,
+                };
+                assert_eq!(
+                    model.backward(model.forward(super::VisualRowAnchor::default(), 999), 999),
+                    super::VisualRowAnchor::default()
+                );
+                assert_eq!(model.forward(last, 1), last);
+            }
+        }
+    }
+
+    #[test]
+    fn overlapping_collapsed_folds_normalize_to_one_reversible_interval() {
+        let mut state = EditorState::new(PathBuf::from("/tmp"));
+        let (buffer, view) = state.open_text(
+            crate::document::TextBuffer::from_text("zero\none\ntwo\nthree\nfour\nfive"),
+            None,
+        );
+        let loaded = crate::configuration::load_bundled_config();
+        let ui = UiState {
+            lsp_folds: vec![super::UiFold {
+                view,
+                start_line: 1,
+                end_line: 3,
+                collapsed: true,
+            }],
+            syntax_folds: vec![super::UiFold {
+                view,
+                start_line: 2,
+                end_line: 4,
+                collapsed: true,
+            }],
+            ..ui_with_editor_layout(&state)
+        };
+        let model = super::VisualRowModel::new(
+            &state.buffers[buffer].text,
+            view,
+            &ui,
+            &loaded.config,
+            20,
+            true,
+        );
+        let fold_start = super::VisualRowAnchor {
+            line: 1,
+            wrap_row: 0,
+        };
+        let after = model.next(fold_start);
+        assert_eq!(after.line, 5);
+        assert_eq!(model.previous(after), fold_start);
+        for hidden in 2..=4 {
+            assert_eq!(
+                model.normalize(super::VisualRowAnchor {
+                    line: hidden,
+                    wrap_row: 99,
+                }),
+                fold_start
+            );
+        }
     }
 
     #[test]
@@ -3040,14 +5073,8 @@ mod tests {
         config.editor.wrap = true;
         config.editor.line_numbers = crate::configuration::LineNumbers::Off;
         config.ui.status_line.enabled = false;
-        let frame = render(
-            &state,
-            &UiState::default(),
-            &config,
-            &loaded.dashboard,
-            5,
-            3,
-        );
+        let ui = ui_with_editor_layout(&state);
+        let frame = render(&state, &ui, &config, &loaded.dashboard, 5, 3);
         assert!(frame.grid.row_text(0).starts_with("abcde"));
         assert!(frame.grid.row_text(1).starts_with("fghij"));
 
@@ -3056,14 +5083,8 @@ mod tests {
         state.buffers[buffer].text =
             crate::document::TextBuffer::from_text("abcdefghijklmnopqrstuvwxyz");
         state.views[view].cursor = crate::document::ByteOffset(25);
-        let frame = render(
-            &state,
-            &UiState::default(),
-            &config,
-            &loaded.dashboard,
-            5,
-            3,
-        );
+        let ui = ui_with_editor_layout(&state);
+        let frame = render(&state, &ui, &config, &loaded.dashboard, 5, 3);
         assert!(frame.cursor.is_some_and(|(_, y, _)| y < 3));
         assert!(frame.grid.row_text(2).contains('z'));
     }
@@ -3084,6 +5105,7 @@ mod tests {
         state.views[view].scroll_column = 2;
         state.views[view].cursor = crate::document::ByteOffset("a\t界e\u{301}".len());
         let ui = UiState {
+            editor_window_layout: Some(editor_layout(&state)),
             syntax_spans: vec![super::UiSyntaxSpan {
                 buffer,
                 revision: state.buffers[buffer].text.revision(),
@@ -3129,14 +5151,8 @@ mod tests {
 
         // Column five is inside the wide glyph and snaps to its column-four start.
         state.views[view].scroll_column = 5;
-        let frame = render(
-            &state,
-            &UiState::default(),
-            &config,
-            &loaded.dashboard,
-            8,
-            2,
-        );
+        let ui = ui_with_editor_layout(&state);
+        let frame = render(&state, &ui, &config, &loaded.dashboard, 8, 2);
         assert_eq!(
             frame.grid.get(0, 0).expect("snapped wide glyph").symbol,
             "界"
@@ -3163,6 +5179,71 @@ mod tests {
     }
 
     #[test]
+    fn immutable_git_signs_use_the_reserved_gutter_and_exact_buffer_revision() {
+        let mut state = EditorState::new(PathBuf::from("/workspace"));
+        let (buffer, _) = state.open_text(
+            crate::document::TextBuffer::from_text("added\nchanged\ndeleted\n"),
+            Some(PathBuf::from("/workspace/file.rs")),
+        );
+        let loaded = crate::configuration::load_bundled_config();
+        let mut ui = ui_with_editor_layout(&state);
+        let revision = state.buffers[buffer].text.revision().0;
+        ui.git_signs = vec![
+            super::UiGitSign {
+                buffer,
+                buffer_revision: revision,
+                root_revision: 1,
+                status_revision: 1,
+                repository_id: crate::workspace::git::GitRepositoryId(1),
+                line: 0,
+                kind: super::UiGitSignKind::Added,
+            },
+            super::UiGitSign {
+                buffer,
+                buffer_revision: revision,
+                root_revision: 1,
+                status_revision: 1,
+                repository_id: crate::workspace::git::GitRepositoryId(1),
+                line: 1,
+                kind: super::UiGitSignKind::Changed,
+            },
+            super::UiGitSign {
+                buffer,
+                buffer_revision: revision,
+                root_revision: 1,
+                status_revision: 1,
+                repository_id: crate::workspace::git::GitRepositoryId(1),
+                line: 2,
+                kind: super::UiGitSignKind::Deleted,
+            },
+        ];
+        let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 20, 5);
+        let gutter =
+            super::editor_gutter_width(&state.buffers[buffer].text, &loaded.config.editor, 20);
+        assert_eq!(
+            frame.grid.get(gutter - 1, 0).unwrap().style,
+            crate::terminal_ui::Style::GitSignAdded
+        );
+        assert_eq!(
+            frame.grid.get(gutter - 1, 1).unwrap().style,
+            crate::terminal_ui::Style::GitSignChanged
+        );
+        assert_eq!(
+            frame.grid.get(gutter - 1, 2).unwrap().style,
+            crate::terminal_ui::Style::GitSignDeleted
+        );
+
+        ui.git_signs[0].buffer_revision = revision.saturating_add(1);
+        let stale = render(&state, &ui, &loaded.config, &loaded.dashboard, 20, 5);
+        assert_ne!(
+            stale.grid.get(gutter - 1, 0).unwrap().style,
+            crate::terminal_ui::Style::GitSignAdded
+        );
+        let tiny = render(&state, &ui, &loaded.config, &loaded.dashboard, 1, 3);
+        assert_eq!(tiny.grid.width(), 1);
+    }
+
+    #[test]
     fn concrete_gutter_reserves_content_at_zero_one_and_two_cell_widths() {
         let mut state = EditorState::new(PathBuf::from("/tmp"));
         let (buffer, view) = state.open_text(crate::document::TextBuffer::from_text("a\tX"), None);
@@ -3184,14 +5265,8 @@ mod tests {
             super::editor_content_width(&state.buffers[buffer].text, &config.editor, 0),
             0
         );
-        let zero = render(
-            &state,
-            &UiState::default(),
-            &config,
-            &loaded.dashboard,
-            0,
-            2,
-        );
+        let ui = ui_with_editor_layout(&state);
+        let zero = render(&state, &ui, &config, &loaded.dashboard, 0, 2);
         assert_eq!(zero.grid.width(), 0);
         assert!(zero.cursor.is_none());
 
@@ -3203,18 +5278,13 @@ mod tests {
         split_state.focus_pane(-1, false).expect("zero-width leaf");
         config.ui.panes.minimum_width = 3;
         config.ui.panes.minimum_height = 2;
-        let zero_leaf = super::active_pane_viewport(&split_state, &config, 6, 2)
-            .expect("reachable zero-width pane");
-        assert_eq!(zero_leaf.width, 0);
-        let split_frame = render(
-            &split_state,
-            &UiState::default(),
-            &config,
-            &loaded.dashboard,
-            6,
-            2,
-        );
-        assert!(split_frame.cursor.is_none());
+        let mut split_ui = ui_with_editor_layout(&split_state);
+        attach_test_compositor(&split_state, &mut split_ui, &config, 6, 2);
+        let zero_leaf = super::active_pane_viewport(&split_state, &split_ui, &config, 6, 2)
+            .expect("focused tiny-layout fallback");
+        assert_eq!(zero_leaf.width, 6);
+        let split_frame = render(&split_state, &split_ui, &config, &loaded.dashboard, 6, 2);
+        assert!(split_frame.cursor.is_some());
 
         for (width, expected_gutter) in [(1, 0), (2, 1)] {
             assert_eq!(
@@ -3225,14 +5295,8 @@ mod tests {
                 super::editor_content_width(&state.buffers[buffer].text, &config.editor, width,),
                 1
             );
-            let frame = render(
-                &state,
-                &UiState::default(),
-                &config,
-                &loaded.dashboard,
-                width,
-                2,
-            );
+            let ui = ui_with_editor_layout(&state);
+            let frame = render(&state, &ui, &config, &loaded.dashboard, width, 2);
             assert_eq!(
                 frame
                     .grid
@@ -3269,17 +5333,57 @@ mod tests {
         config.editor.wrap = true;
         config.editor.line_numbers = crate::configuration::LineNumbers::Off;
         config.ui.status_line.enabled = false;
-        let frame = render(
-            &state,
-            &UiState::default(),
-            &config,
-            &loaded.dashboard,
-            5,
-            3,
-        );
+        let ui = ui_with_editor_layout(&state);
+        let frame = render(&state, &ui, &config, &loaded.dashboard, 5, 3);
         assert!(frame.grid.row_text(0).starts_with("abcde"));
         assert!(frame.grid.row_text(1).starts_with("fghij"));
         assert!(frame.cursor.is_some_and(|(x, y, _)| x == 0 && y == 0));
+    }
+
+    #[test]
+    fn retained_plugin_surface_rows_are_strictly_clipped_to_the_projected_window() {
+        let mut frame = super::Frame {
+            grid: crate::terminal_ui::CellGrid::new(12, 5),
+            cursor: None,
+        };
+        let surface = super::PluginSurfaceUiState {
+            handle: 9,
+            window: crate::windows::WindowId(99),
+            tree_revision: 1,
+            scroll: 0,
+            rows: vec![
+                super::PluginSurfaceRow {
+                    node: 1,
+                    depth: 0,
+                    text: "abcdefgh".into(),
+                    style: crate::terminal_ui::Style::Accent,
+                    actionable: false,
+                    focused: false,
+                },
+                super::PluginSurfaceRow {
+                    node: 2,
+                    depth: 1,
+                    text: "button".into(),
+                    style: crate::terminal_ui::Style::Selection,
+                    actionable: true,
+                    focused: true,
+                },
+            ],
+        };
+        super::render_plugin_surface(
+            &mut frame,
+            &surface,
+            crate::windows::WindowRect {
+                x: 3,
+                y: 1,
+                width: 4,
+                height: 2,
+            },
+        );
+        assert_eq!(&frame.grid.row_text(1)[3..7], "abcd");
+        assert_eq!(frame.grid.get(7, 1).expect("outside right").symbol, " ");
+        assert_eq!(frame.grid.get(2, 2).expect("outside left").symbol, " ");
+        assert_eq!(frame.grid.get(3, 3).expect("outside bottom").symbol, " ");
     }
 
     #[test]
@@ -3288,6 +5392,7 @@ mod tests {
         let ui = UiState {
             dashboard: true,
             picker: Some(super::PickerUiState {
+                surface: super::PickerSurfaceKind::Generic,
                 title: "Commands".into(),
                 query: "health".into(),
                 rows: vec![super::PickerRow {
@@ -3319,8 +5424,10 @@ mod tests {
             .split_active(crate::editing::Axis::Vertical, 600)
             .expect("vertical split");
         let loaded = crate::configuration::load_bundled_config();
-        let viewport =
-            super::active_pane_viewport(&state, &loaded.config, 79, 24).expect("focused viewport");
+        let mut ui = ui_with_editor_layout(&state);
+        attach_test_compositor(&state, &mut ui, &loaded.config, 79, 24);
+        let viewport = super::active_pane_viewport(&state, &ui, &loaded.config, 79, 24)
+            .expect("focused viewport");
         assert_eq!(Some(viewport.view), state.active_view);
         assert!(viewport.x > 0 && viewport.y > 0);
         assert!(viewport.width < 79 && viewport.height < 23);
@@ -3335,6 +5442,7 @@ mod tests {
             Some(PathBuf::from("/workspace/main.rs")),
         );
         let ui = UiState {
+            editor_window_layout: Some(editor_layout(&state)),
             explorer: Some(super::ExplorerUiState {
                 title: "Explorer".into(),
                 rows: vec![
@@ -3493,6 +5601,86 @@ mod tests {
     }
 
     #[test]
+    fn private_surface_cells_and_cursor_are_local_and_strictly_clipped() {
+        let mut frame = super::Frame {
+            grid: crate::terminal_ui::CellGrid::new(10, 4),
+            cursor: None,
+        };
+        let surface = super::PrivateSurfaceUiState {
+            handle: 3,
+            window: crate::windows::WindowId(7),
+            dimensions_revision: 2,
+            surface_revision: 1,
+            width: 4,
+            height: 2,
+            cells: vec![
+                super::PrivateSurfaceCell {
+                    x: 0,
+                    y: 0,
+                    grapheme: "界".into(),
+                    continuation: false,
+                    style: crate::terminal_ui::Style::Accent,
+                },
+                super::PrivateSurfaceCell {
+                    x: 1,
+                    y: 0,
+                    grapheme: String::new(),
+                    continuation: true,
+                    style: crate::terminal_ui::Style::Accent,
+                },
+                super::PrivateSurfaceCell {
+                    x: 3,
+                    y: 1,
+                    grapheme: "e\u{301}".into(),
+                    continuation: false,
+                    style: crate::terminal_ui::Style::Selection,
+                },
+            ],
+            cursor: Some((3, 1)),
+            focused: true,
+        };
+        super::render_private_surface(
+            &mut frame,
+            &surface,
+            crate::windows::WindowRect {
+                x: 2,
+                y: 1,
+                width: 4,
+                height: 2,
+            },
+        );
+        assert_eq!(frame.grid.get(2, 1).expect("wide lead").symbol, "界");
+        assert!(
+            frame
+                .grid
+                .get(3, 1)
+                .expect("wide continuation")
+                .continuation
+        );
+        assert_eq!(frame.grid.get(6, 2).expect("outside right").symbol, " ");
+        assert!(frame.cursor.is_some_and(|(x, y, _)| (x, y) == (5, 2)));
+
+        let mut stale = surface.clone();
+        stale.width = 5;
+        let before = (frame.grid.row_text(1), frame.grid.row_text(2), frame.cursor);
+        super::render_private_surface(
+            &mut frame,
+            &stale,
+            crate::windows::WindowRect {
+                x: 2,
+                y: 1,
+                width: 4,
+                height: 2,
+            },
+        );
+        assert_eq!(
+            (frame.grid.row_text(1), frame.grid.row_text(2), frame.cursor),
+            before,
+            "stale dimensions draw nothing"
+        );
+    }
+
+    #[test]
     fn language_diagnostics_and_completion_are_projected_without_service_calls() {
         let mut state = EditorState::new(PathBuf::from("/tmp"));
         let path = PathBuf::from("/tmp/main.rs");
@@ -3501,8 +5689,10 @@ mod tests {
             Some(path.clone()),
         );
         let ui = UiState {
+            editor_window_layout: Some(editor_layout(&state)),
             diagnostics: vec![super::UiDiagnostic {
                 path,
+                severity: crate::workspace::DiagnosticSeverity::Error,
                 range: crate::document::ByteRange::new(
                     crate::document::ByteOffset(0),
                     crate::document::ByteOffset(3),
@@ -3564,25 +5754,25 @@ mod tests {
             scroll_offset: 0,
             requested_height: 6,
         };
-        let ui = UiState {
-            explorer: Some(super::ExplorerUiState {
-                title: "Explorer".into(),
-                rows: Vec::new(),
-                scroll: 0,
-                loading: false,
-                total: 0,
-                preview_lines: Vec::new(),
-            }),
-            terminal_panel: Some(terminal.clone()),
-            ..UiState::default()
-        };
+        let mut ui = ui_with_editor_layout(&state);
+        ui.explorer = Some(super::ExplorerUiState {
+            title: "Explorer".into(),
+            rows: Vec::new(),
+            scroll: 0,
+            loading: false,
+            total: 0,
+            preview_lines: Vec::new(),
+        });
+        ui.terminal_panel = Some(terminal.clone());
         let geometry = super::terminal_panel_geometry(&config, 20, 6).expect("terminal geometry");
         assert_eq!(geometry.top, 14);
         assert_eq!(geometry.body_height, 4);
         let panel_width = super::explorer_panel_width(&config, 80).expect("explorer width");
         let editor_width = 80_u16.saturating_sub(panel_width).saturating_sub(1);
-        let viewport = super::active_pane_viewport(&state, &config, editor_width, geometry.top)
-            .expect("reduced editor viewport");
+        attach_test_compositor(&state, &mut ui, &config, 80, 20);
+        let viewport =
+            super::active_pane_viewport(&state, &ui, &config, editor_width, geometry.top)
+                .expect("reduced editor viewport");
         assert!(viewport.height < 14);
 
         let frame = render(&state, &ui, &config, &loaded.dashboard, 80, 20);
@@ -3605,9 +5795,9 @@ mod tests {
                 .expect("red terminal cell")
                 .style,
             crate::terminal_ui::Style::Terminal(crate::terminal_ui::PtyStyle {
-                foreground: Some(1),
-                background: None,
+                foreground: Some(crate::terminal_ui::PtyColor::Indexed(1)),
                 bold: true,
+                ..crate::terminal_ui::PtyStyle::default()
             })
         );
         assert_eq!(

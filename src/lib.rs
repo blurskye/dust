@@ -1,5 +1,10 @@
 #![forbid(unsafe_code)]
 
+pub(crate) const UNIVERSAL_LAYOUT_DEPTH_CEILING: usize = 64;
+pub(crate) const UNIVERSAL_LAYOUT_WINDOW_CEILING: usize = 1_024;
+
+/// Typed bounded AI-provider registry, queued streams, and revision-owned proposals.
+pub mod ai;
 /// Public command, configuration, persistence, package, and WIT API versions.
 pub mod api;
 /// Startup composition, foreground coordination, command effects, and policy.
@@ -39,5 +44,7 @@ pub mod syntax;
 pub mod terminal_ui;
 /// Headless fixture exercising production editing and input paths.
 pub mod test_support;
+/// Universal generational content/view/window/workspace-tab graph and placement invariants.
+pub mod windows;
 /// Workspace roots, trust, diagnostics, pickers, and revision-safe edit proposals.
 pub mod workspace;
