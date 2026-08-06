@@ -1948,7 +1948,28 @@ context = "terminal"
 keys = "ctrl-\\"
 command = "terminal.toggle"
 
-# Focused terminal input remains typed and configurable.
+# Focused terminal input remains typed and configurable. Spatial focus keys
+# are host commands, so they are never forwarded as terminal control bytes.
+[[keymap]]
+id = "builtin.terminal.surface.surface-focus-left.ctrl-h"
+context = "terminal"
+keys = "ctrl-h"
+command = "surface.focus.left"
+[[keymap]]
+id = "builtin.terminal.surface.surface-focus-down.ctrl-j"
+context = "terminal"
+keys = "ctrl-j"
+command = "surface.focus.down"
+[[keymap]]
+id = "builtin.terminal.surface.surface-focus-up.ctrl-k"
+context = "terminal"
+keys = "ctrl-k"
+command = "surface.focus.up"
+[[keymap]]
+id = "builtin.terminal.surface.surface-focus-right.ctrl-l"
+context = "terminal"
+keys = "ctrl-l"
+command = "surface.focus.right"
 [[keymap]]
 id = "builtin.terminal.surface.terminal-unfocus.escape"
 context = "terminal"

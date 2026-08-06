@@ -81,9 +81,10 @@ use crate::terminal_ui::{
     PickerUiState, PromptKind, PromptState, PtyScreen, TerminalError, TerminalOptions,
     TerminalPanelState, TerminalSession, ToolMenuRow, ToolMenuState, UiDiagnostic, UiEvent, UiFold,
     UiGhostText, UiInlayHint, UiState, UiSyntaxSpan, VisualRowAnchor, VisualRowModel,
-    active_pane_viewport, editor_content_width, editor_gutter_width, editor_workspace_insets,
-    explorer_panel_width, pane_viewports, picker_geometry, prompt_geometry, render,
-    snap_display_column, snap_display_column_forward, terminal_panel_geometry,
+    active_pane_viewport, editor_state_content_width, editor_state_gutter_width,
+    editor_workspace_insets, explorer_panel_width, pane_viewports, picker_geometry,
+    prompt_geometry, render, snap_display_column, snap_display_column_forward,
+    terminal_panel_geometry,
 };
 use crate::workspace::{
     Diagnostic, DiagnosticOwner, DiagnosticSeverity, DiagnosticStore, ExecutionSource,
@@ -858,6 +859,8 @@ struct InteractiveApplication {
     git_status_root_revision: Option<u64>,
     git_status_snapshot: Option<crate::workspace::git::GitStatusSnapshot>,
     git_status_decorations: BTreeMap<PathBuf, crate::workspace::git::GitFileStatus>,
+    git_status_silent: bool,
+    git_status_silent_attempted: Option<(u64, PathBuf)>,
     git_hunks: crate::workspace::git::GitHunkService,
     git_hunk_generation: Option<crate::workspace::git::GitHunkGeneration>,
     git_hunk_expected: Option<(u64, u64, crate::workspace::git::GitRepositoryId, PathBuf)>,
@@ -1742,6 +1745,8 @@ pub fn run_interactive(
         git_status_root_revision: None,
         git_status_snapshot: None,
         git_status_decorations: BTreeMap::new(),
+        git_status_silent: false,
+        git_status_silent_attempted: None,
         git_hunks: crate::workspace::git::GitHunkService::default(),
         git_hunk_generation: None,
         git_hunk_expected: None,
@@ -2165,9 +2170,7 @@ impl InteractiveApplication {
                             matches!(
                                 content.adapter,
                                 crate::windows::ContentAdapterKind::TextBuffer
-                                    | crate::windows::ContentAdapterKind::TerminalSession
                                     | crate::windows::ContentAdapterKind::VirtualDocument
-                                    | crate::windows::ContentAdapterKind::ExternalTui
                             ) || matches!(
                                 content.adapter,
                                 crate::windows::ContentAdapterKind::DeclarativeUi
@@ -4321,10 +4324,17 @@ impl InteractiveApplication {
                         &glyphs.tree_vertical
                     });
                 }
-                let name_role = match node.kind {
-                    ExplorerKind::Root | ExplorerKind::Directory => ExplorerSegmentRole::Directory,
-                    ExplorerKind::File => ExplorerSegmentRole::File,
-                    ExplorerKind::Symlink => ExplorerSegmentRole::Symlink,
+                let git_status = self.git_status_decorations.get(&node.path);
+                let name_role = if git_status.is_some() {
+                    ExplorerSegmentRole::Git
+                } else {
+                    match node.kind {
+                        ExplorerKind::Root | ExplorerKind::Directory => {
+                            ExplorerSegmentRole::Directory
+                        }
+                        ExplorerKind::File => ExplorerSegmentRole::File,
+                        ExplorerKind::Symlink => ExplorerSegmentRole::Symlink,
+                    }
                 };
                 let (icon, icon_role) = match (node.kind, node.load, node.expanded) {
                     (
@@ -4360,9 +4370,7 @@ impl InteractiveApplication {
                     text: node.name.clone(),
                     role: name_role,
                 });
-                let right_segments = self
-                    .git_status_decorations
-                    .get(&node.path)
+                let right_segments = git_status
                     .map(|status| ExplorerUiSegment {
                         text: match status {
                             crate::workspace::git::GitFileStatus::Untracked => "?",
@@ -4460,6 +4468,8 @@ impl InteractiveApplication {
         });
         self.ui.explorer_focused = true;
         self.sync_explorer_ui();
+        self.git_status_silent_attempted = None;
+        self.start_git_status_refresh_silent();
         let root_to_load = self.explorer.selected_node().and_then(|node| {
             (node.kind == ExplorerKind::Root && node.load != ExplorerLoadState::Loaded)
                 .then_some(node.id)
@@ -9226,15 +9236,13 @@ impl InteractiveApplication {
             .filter(|status| status.root_revision == self.workspace.root_revision())?;
         let buffer_id = self.state.active_buffer_id()?;
         let buffer = self.state.buffers.get(buffer_id)?;
-        if buffer.dirty {
-            return None;
-        }
         let path = buffer.path.as_ref()?;
         let relative = path.strip_prefix(&status.scope_root).ok()?.to_path_buf();
-        if !status
-            .entries
-            .iter()
-            .any(|entry| entry.relative_path == relative)
+        if !buffer.dirty
+            && !status
+                .entries
+                .iter()
+                .any(|entry| entry.relative_path == relative)
         {
             return None;
         }
@@ -9256,8 +9264,18 @@ impl InteractiveApplication {
     }
 
     fn reconcile_git_signs(&mut self) {
-        use crate::workspace::git::{GitDiffLayer, GitHunkPolicy};
+        use crate::workspace::git::{GitDiffLayer, GitHunkBufferInput, GitHunkPolicy};
         let Some(owner) = self.current_git_sign_owner() else {
+            if self.git_status_snapshot.is_none()
+                && self
+                    .state
+                    .active_buffer_id()
+                    .and_then(|buffer| self.state.buffers.get(buffer))
+                    .and_then(|buffer| buffer.path.as_ref())
+                    .is_some()
+            {
+                self.start_git_status_refresh_silent();
+            }
             if self.git_sign_owner.is_some() || !self.ui.git_signs.is_empty() {
                 self.clear_git_signs();
             }
@@ -9282,7 +9300,19 @@ impl InteractiveApplication {
             maximum_bytes: 8 * 1024 * 1024,
             deadline: Duration::from_secs(5),
         };
-        match self.git_sign_hunks.start(policy) {
+        let Some(buffer) = self
+            .state
+            .buffers
+            .get(owner.4)
+            .filter(|buffer| buffer.text.revision().0 == owner.5 && buffer.path.is_some())
+        else {
+            return;
+        };
+        let input = GitHunkBufferInput {
+            revision: owner.5,
+            bytes: buffer.text.to_bytes(),
+        };
+        match self.git_sign_hunks.start_buffer(policy, input) {
             Ok(generation) => {
                 self.git_sign_generation = Some(generation);
                 self.git_sign_owner = Some(owner);
@@ -9309,6 +9339,7 @@ impl InteractiveApplication {
                     || snapshot.status_revision != owner.1
                     || snapshot.repository_id != owner.2
                     || snapshot.file != owner.3
+                    || snapshot.buffer_revision != Some(owner.5)
                 {
                     self.clear_git_signs();
                     return;
@@ -9354,6 +9385,7 @@ impl InteractiveApplication {
         self.git_status_root_revision = None;
         self.git_status_snapshot = None;
         self.git_status_decorations.clear();
+        self.git_status_silent = false;
     }
     fn start_git_hunks(&mut self) {
         use crate::workspace::git::*;
@@ -9605,8 +9637,32 @@ impl InteractiveApplication {
     }
 
     fn start_git_status_refresh(&mut self) {
+        self.start_git_status_refresh_with_feedback(true);
+    }
+    fn start_git_status_refresh_silent(&mut self) {
+        let revision = self.workspace.root_revision();
+        let active_root = self
+            .workspace
+            .active_root()
+            .and_then(|id| self.workspace.roots().iter().find(|root| root.id == id))
+            .map(|root| root.identity.canonical_path.clone());
+        let current = self.git_status_snapshot.as_ref().is_some_and(|snapshot| {
+            snapshot.root_revision == revision && active_root.as_ref() == Some(&snapshot.scope_root)
+        });
+        let attempt = active_root.map(|root| (revision, root));
+        if !current
+            && self.git_status_generation.is_none()
+            && attempt.is_some()
+            && self.git_status_silent_attempted != attempt
+        {
+            self.git_status_silent_attempted = attempt;
+            self.start_git_status_refresh_with_feedback(false);
+        }
+    }
+    fn start_git_status_refresh_with_feedback(&mut self, report_errors: bool) {
         use crate::workspace::git::*;
         self.clear_git_status();
+        self.git_status_silent = !report_errors;
         let revision = self.workspace.root_revision();
         let Some(root) = self
             .workspace
@@ -9614,7 +9670,10 @@ impl InteractiveApplication {
             .and_then(|id| self.workspace.roots().iter().find(|r| r.id == id))
             .map(|r| r.identity.canonical_path.clone())
         else {
-            self.show_error("workspace root is unavailable");
+            self.git_status_silent = false;
+            if report_errors {
+                self.show_error("workspace root is unavailable");
+            }
             return;
         };
         match self.git_status.start(GitStatusPolicy {
@@ -9629,7 +9688,12 @@ impl InteractiveApplication {
                 self.git_status_root_revision = Some(revision);
                 self.git_status_snapshot = None
             }
-            Err(error) => self.show_error(error),
+            Err(error) => {
+                self.git_status_silent = false;
+                if report_errors {
+                    self.show_error(error)
+                }
+            }
         }
     }
     fn process_git_status_events(&mut self) {
@@ -9652,6 +9716,7 @@ impl InteractiveApplication {
                         &snapshot.entries,
                     );
                     self.git_status_snapshot = Some(snapshot);
+                    self.git_status_silent = false;
                     if self.ui.explorer.is_some() {
                         self.sync_explorer_ui();
                     }
@@ -9659,8 +9724,14 @@ impl InteractiveApplication {
             }
             Ok(None) => {}
             Err(error) => {
+                let report_error = !self.git_status_silent;
                 self.clear_git_status();
-                self.show_error(error)
+                if self.ui.explorer.is_some() {
+                    self.sync_explorer_ui();
+                }
+                if report_error {
+                    self.show_error(error)
+                }
             }
         }
     }
@@ -15686,10 +15757,20 @@ impl InteractiveApplication {
 
     fn focus_surface(&mut self, direction: FocusDirection) {
         self.reconcile_editor_windows();
-        let Some(current) = self.windows.focused() else {
+        let Some(layout) = self.ui.compositor_layout.as_ref() else {
             return;
         };
-        let Some(layout) = self.ui.compositor_layout.as_ref() else {
+        // Dock focus is host-owned and intentionally distinct from the graph's
+        // tiled-editor focus. Spatial movement must therefore start from the
+        // visibly focused dock, not from the last editor window.
+        let current = if self.terminal_focused {
+            layout.surfaces.terminal.map(|(_, window)| window)
+        } else if self.ui.explorer_focused {
+            layout.surfaces.explorer
+        } else {
+            self.windows.focused()
+        };
+        let Some(current) = current else {
             return;
         };
         let direction = match direction {
@@ -15949,12 +16030,14 @@ impl InteractiveApplication {
         if row >= body_height {
             return;
         }
-        let gutter = editor_gutter_width(
+        let gutter = editor_state_gutter_width(
+            &self.state,
             &buffer.text,
             &self.configuration.settings.editor,
             pane_width,
         );
-        let available = editor_content_width(
+        let available = editor_state_content_width(
+            &self.state,
             &buffer.text,
             &self.configuration.settings.editor,
             pane_width,
@@ -15965,7 +16048,8 @@ impl InteractiveApplication {
         let wrap_enabled = self.configuration.settings.editor.wrap
             && !(self.ui.large_file_buffers.contains(&buffer_id)
                 && self.configuration.settings.editor.large_file.disable_wrap);
-        let visual_rows = VisualRowModel::new(
+        let visual_rows = VisualRowModel::new_for_state(
+            &self.state,
             &buffer.text,
             view_id,
             &self.ui,
@@ -16104,7 +16188,8 @@ impl InteractiveApplication {
         let amount = amount
             .max(1)
             .saturating_mul(usize::try_from(count).unwrap_or(usize::MAX));
-        let available = editor_content_width(
+        let available = editor_state_content_width(
+            &self.state,
             &buffer.text,
             &self.configuration.settings.editor,
             viewport.width,
@@ -16113,7 +16198,8 @@ impl InteractiveApplication {
             && self.configuration.settings.editor.wrap
             && !(self.ui.large_file_buffers.contains(&view.buffer)
                 && self.configuration.settings.editor.large_file.disable_wrap);
-        let visual_rows = VisualRowModel::new(
+        let visual_rows = VisualRowModel::new_for_state(
+            &self.state,
             &buffer.text,
             view_id,
             &self.ui,
@@ -17251,6 +17337,9 @@ impl InteractiveApplication {
                                 {
                                     let _ = self.lsp.save(server, document);
                                 }
+                                if self.ui.explorer.is_some() {
+                                    self.start_git_status_refresh_with_feedback(false);
+                                }
                                 if quit_after && !still_dirty {
                                     if self
                                         .state
@@ -17865,7 +17954,8 @@ impl InteractiveApplication {
         let vertical_margin =
             usize::from(self.configuration.settings.editor.viewport.vertical_margin)
                 .min(body_height.saturating_sub(1) / 2);
-        let available = editor_content_width(
+        let available = editor_state_content_width(
+            &self.state,
             &buffer.text,
             &self.configuration.settings.editor,
             viewport.width,
@@ -17874,7 +17964,8 @@ impl InteractiveApplication {
             && self.configuration.settings.editor.wrap
             && !(self.ui.large_file_buffers.contains(&view.buffer)
                 && self.configuration.settings.editor.large_file.disable_wrap);
-        let visual_rows = VisualRowModel::new(
+        let visual_rows = VisualRowModel::new_for_state(
+            &self.state,
             &buffer.text,
             view_id,
             &self.ui,
@@ -19777,9 +19868,9 @@ mod tests {
     use crate::terminal_ui::{
         ContentTabDiagnostic, ContentTabDiagnosticSeverity, ContentTabKind,
         DocumentationMarkupKind, DocumentationPopupKind, DocumentationPopupState,
-        DocumentationSection, ExplorerUiState, PickerSurfaceKind, PromptKind, PtyScreen, UiEvent,
-        UiFold, VisualRowAnchor, VisualRowModel, active_pane_viewport, explorer_panel_width,
-        render, snap_display_column,
+        DocumentationSection, ExplorerSegmentRole, ExplorerUiState, PickerSurfaceKind, PromptKind,
+        PtyScreen, UiEvent, UiFold, VisualRowAnchor, VisualRowModel, active_pane_viewport,
+        explorer_panel_width, render, snap_display_column,
     };
     use tempfile::tempdir;
 
@@ -19969,6 +20060,8 @@ mod tests {
             git_status_root_revision: None,
             git_status_snapshot: None,
             git_status_decorations: BTreeMap::new(),
+            git_status_silent: false,
+            git_status_silent_attempted: None,
             git_hunks: crate::workspace::git::GitHunkService::default(),
             git_hunk_generation: None,
             git_hunk_expected: None,
@@ -20739,11 +20832,87 @@ mod tests {
     }
 
     #[test]
-    fn git_status_refresh_opens_read_only_picker_and_idles() {
+    fn explorer_auto_git_status_is_silent_outside_a_repository() {
+        let mut app = app();
+        let path = app.state.workspace_root.join("plain.txt");
+        fs::write(&path, "plain\n").unwrap();
+        app.state.open_text(
+            crate::document::TextBuffer::from_text("plain\n"),
+            Some(path),
+        );
+        app.ui.dashboard = false;
+        app.open_explorer();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while app.git_status_generation.is_some() {
+            app.process_git_status_events();
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        assert!(app.git_status_snapshot.is_none());
+        assert!(!app.ui.notification_error);
+        let generation = app.git_status.generation();
+        for _ in 0..256 {
+            app.reconcile_git_signs();
+            app.process_git_status_events();
+            assert_eq!(app.git_status.generation(), generation);
+        }
+    }
+
+    #[test]
+    fn active_tracked_buffer_starts_git_status_and_updates_unsaved_signs_without_explorer() {
+        let mut app = app();
+        let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
+        let path = app.state.workspace_root.join("live.txt");
+        fs::write(&path, "one\ntwo\nthree\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("live.txt")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
+            .unwrap();
+        drop(tree);
+        let (buffer, _) = app.state.open_text(
+            crate::document::TextBuffer::from_text("one\ntwo\nthree\n"),
+            Some(path),
+        );
+        app.ui.dashboard = false;
+
+        app.reconcile_git_signs();
+        assert!(app.git_status_generation.is_some());
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while app.git_status_generation.is_some() {
+            app.process_git_status_events();
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        assert!(app.git_status_snapshot.is_some());
+        assert!(app.ui.explorer.is_none());
+        app.handle_configured_key(KeyEvent::character('d'));
+        app.handle_configured_key(KeyEvent::character('d'));
+        assert!(app.state.buffers[buffer].dirty);
+        let revision = app.state.buffers[buffer].text.revision().0;
+        app.reconcile_git_signs();
+        assert!(app.git_sign_generation.is_some());
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while app.git_sign_generation.is_some() {
+            app.process_git_sign_events();
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        assert!(app.ui.git_signs.iter().any(|sign| {
+            sign.buffer == buffer
+                && sign.buffer_revision == revision
+                && sign.kind == crate::terminal_ui::UiGitSignKind::Deleted
+        }));
+    }
+
+    #[test]
+    fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
         let mut app = app();
         let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
         let path = app.state.workspace_root.join("tracked.txt");
-        fs::write(&path, "one").unwrap();
+        fs::write(&path, "normal\n").unwrap();
         let mut index = repo.index().unwrap();
         index.add_path(std::path::Path::new("tracked.txt")).unwrap();
         index.write().unwrap();
@@ -20752,8 +20921,10 @@ mod tests {
         repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
             .unwrap();
         drop(tree);
-        fs::write(&path, "two").unwrap();
-        app.start_git_status_refresh();
+        fs::write(&path, "normal\nadded\n").unwrap();
+        app.open_explorer();
+        assert!(app.git_status_generation.is_some());
+        assert!(app.git_status_silent);
         let deadline = Instant::now() + Duration::from_secs(3);
         while app.git_status_generation.is_some() {
             app.process_git_status_events();
@@ -20769,6 +20940,32 @@ mod tests {
             app.git_status_decorations.get(&app.state.workspace_root),
             Some(&crate::workspace::git::GitFileStatus::Modified)
         );
+        wait_explorer(&mut app);
+        let tracked_row = app
+            .ui
+            .explorer
+            .as_ref()
+            .and_then(|explorer| {
+                explorer.rows.iter().find(|row| {
+                    row.segments
+                        .iter()
+                        .any(|segment| segment.text == "tracked.txt")
+                })
+            })
+            .expect("tracked Git row");
+        assert!(
+            tracked_row
+                .segments
+                .iter()
+                .any(|segment| segment.role == ExplorerSegmentRole::Git)
+        );
+        assert!(
+            tracked_row
+                .right_segments
+                .iter()
+                .any(|segment| segment.text == "M")
+        );
+        assert!(!app.git_status_silent);
         let generation = app.git_status.generation();
         for _ in 0..256 {
             app.process_git_status_events();
@@ -20796,6 +20993,33 @@ mod tests {
             thread::yield_now();
         }
         assert!(!app.ui.git_signs.is_empty());
+        app.terminal_width = 100;
+        app.terminal_height = 30;
+        app.reconcile_editor_windows();
+        let frame = crate::terminal_ui::render(
+            &app.state,
+            &app.ui,
+            &app.configuration.settings,
+            &app.configuration.dashboard,
+            100,
+            30,
+        );
+        let added_cells = (0..frame.grid.height())
+            .flat_map(|y| (0..frame.grid.width()).map(move |x| (x, y)))
+            .filter(|(x, y)| {
+                frame
+                    .grid
+                    .get(*x, *y)
+                    .is_some_and(|cell| cell.style == crate::terminal_ui::Style::GitSignAdded)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(added_cells.len(), 1);
+        let (sign_x, sign_y) = added_cells[0];
+        assert_eq!(frame.grid.get(sign_x, sign_y).unwrap().symbol, "│");
+        assert!(sign_y > 0);
+        let normal_sign_cell = frame.grid.get(sign_x, sign_y - 1).unwrap();
+        assert_eq!(normal_sign_cell.symbol, "│");
+        assert_eq!(normal_sign_cell.style, crate::terminal_ui::Style::Muted);
         let sign_generation = app.git_sign_hunks.generation();
         let signs = app.ui.git_signs.clone();
         for _ in 0..256 {
@@ -20828,6 +21052,48 @@ mod tests {
         app.stage_selected_git_hunk();
         assert!(app.git_mutation_generation.is_none());
         assert!(app.ui.notification_error);
+
+        app.ui.explorer_focused = false;
+        app.handle_configured_key(KeyEvent::character('d'));
+        app.handle_configured_key(KeyEvent::character('d'));
+        let active = app.state.active_buffer_id().unwrap();
+        assert!(app.state.buffers[active].dirty);
+        let dirty_revision = app.state.buffers[active].text.revision().0;
+        app.reconcile_git_signs();
+        assert!(app.ui.git_signs.is_empty());
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while app.git_sign_generation.is_some() {
+            app.process_git_sign_events();
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        assert!(!app.ui.git_signs.is_empty());
+        assert!(
+            app.ui
+                .git_signs
+                .iter()
+                .all(|sign| { sign.buffer == active && sign.buffer_revision == dirty_revision })
+        );
+        let dirty_frame = crate::terminal_ui::render(
+            &app.state,
+            &app.ui,
+            &app.configuration.settings,
+            &app.configuration.dashboard,
+            100,
+            30,
+        );
+        assert!((0..dirty_frame.grid.height()).any(|y| {
+            (0..dirty_frame.grid.width()).any(|x| {
+                dirty_frame.grid.get(x, y).is_some_and(|cell| {
+                    matches!(
+                        cell.style,
+                        crate::terminal_ui::Style::GitSignAdded
+                            | crate::terminal_ui::Style::GitSignChanged
+                            | crate::terminal_ui::Style::GitSignDeleted
+                    )
+                })
+            })
+        }));
     }
 
     #[test]
@@ -23405,6 +23671,18 @@ mod tests {
         app.sync_terminal_panel();
         assert_eq!(app.workspace_render_height(), 14);
         assert_eq!(app.active_input_context(), "terminal");
+        assert!(
+            app.ui
+                .content_tabs
+                .iter()
+                .all(|entry| entry.kind != ContentTabKind::Terminal),
+            "a docked terminal is a separate window, not an editor content tab"
+        );
+
+        app.handle_configured_key("ctrl-k".parse::<KeyEvent>().expect("Ctrl-k"));
+        assert!(!app.terminal_focused, "Ctrl-k returns to the editor above");
+        app.handle_configured_key("ctrl-j".parse::<KeyEvent>().expect("Ctrl-j"));
+        assert!(app.terminal_focused, "Ctrl-j returns to the terminal below");
 
         app.process_effect(crate::application::AppEffect::TerminalUnfocus);
         assert_eq!(app.active_terminal, Some(PtyId(1)));

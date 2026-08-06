@@ -26,8 +26,9 @@ vertical_margin = 4
 
 [editor.git_signs]
 enabled = true
-added = "+"
-changed = "~"
+unchanged = "│"
+added = "│"
+changed = "│"
 deleted = "_"
 
 [editor.large_file]

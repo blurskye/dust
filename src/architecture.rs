@@ -209,6 +209,29 @@ pub fn audit_source(root: &Path) -> Result<ArchitectureAudit, ArchitectureError>
         .map_err(ArchitectureError::Io)?;
     let language_surface =
         fs::read_to_string(source.join("languages/mod.rs")).map_err(ArchitectureError::Io)?;
+    let content_line_begin =
+        interactive
+            .find("let snapshots = graph")
+            .ok_or(ArchitectureError::Violation {
+                path: source.join("application/interactive.rs"),
+                rule: "editor content-line projection must remain explicit",
+            })?;
+    let content_line_end = interactive[content_line_begin..]
+        .find("let represented = snapshots")
+        .map(|offset| content_line_begin + offset)
+        .ok_or(ArchitectureError::Violation {
+            path: source.join("application/interactive.rs"),
+            rule: "editor content-line projection must remain bounded",
+        })?;
+    let content_line_filter = &interactive[content_line_begin..content_line_end];
+    if content_line_filter.contains("TerminalSession")
+        || content_line_filter.contains("ExternalTui")
+    {
+        return Err(ArchitectureError::Violation {
+            path: source.join("application/interactive.rs"),
+            rule: "terminal and external-TUI windows must not project as editor content tabs",
+        });
+    }
     if !render_surface.contains("content_tab_segments")
         || !render_surface.contains("content_tab_width")
         || !render_surface.contains("ContentTabDiagnosticSeverity")

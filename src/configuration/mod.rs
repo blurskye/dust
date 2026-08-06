@@ -479,6 +479,7 @@ impl Default for EditorViewportConfig {
 #[serde(deny_unknown_fields)]
 pub struct GitSignsConfig {
     pub enabled: bool,
+    pub unchanged: String,
     pub added: String,
     pub changed: String,
     pub deleted: String,
@@ -488,8 +489,9 @@ impl Default for GitSignsConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            added: "+".into(),
-            changed: "~".into(),
+            unchanged: "│".into(),
+            added: "│".into(),
+            changed: "│".into(),
             deleted: "_".into(),
         }
     }
@@ -2771,17 +2773,16 @@ impl Config {
             return Err("editor gutter presentation is invalid");
         }
         if [
+            &self.editor.git_signs.unchanged,
             &self.editor.git_signs.added,
             &self.editor.git_signs.changed,
             &self.editor.git_signs.deleted,
         ]
         .into_iter()
         .any(|symbol| {
-            symbol.chars().any(char::is_control)
-                || UnicodeWidthStr::width(symbol.as_str()) != 1
-                || UnicodeWidthStr::width_cjk(symbol.as_str()) != 1
+            symbol.chars().any(char::is_control) || UnicodeWidthStr::width(symbol.as_str()) != 1
         }) {
-            return Err("editor.git_signs symbols must each occupy one display cell");
+            return Err("editor.git_signs symbols must each occupy one narrow display cell");
         }
         if self.editor.viewport.horizontal_margin > 100 {
             return Err("editor.viewport.horizontal_margin must not exceed 100");
@@ -4301,13 +4302,18 @@ mod tests {
         let path = root.path().join("config.toml");
         fs::write(
             &path,
-            "[editor.git_signs]\nenabled=false\nadded=\"A\"\nchanged=\"C\"\ndeleted=\"D\"\n",
+            "[editor.git_signs]\nenabled=false\nunchanged=\"│\"\nadded=\"A\"\nchanged=\"C\"\ndeleted=\"D\"\n",
         )
         .unwrap();
         let loaded = load_config(&path);
         assert!(loaded.diagnostic.is_none());
         assert!(!loaded.config.editor.git_signs.enabled);
-        for invalid in ["added=\"\"", "changed=\"界\"", "deleted=\"DD\""] {
+        for invalid in [
+            "unchanged=\"\"",
+            "added=\"\"",
+            "changed=\"界\"",
+            "deleted=\"DD\"",
+        ] {
             fs::write(&path, format!("[editor.git_signs]\n{invalid}\n")).unwrap();
             assert!(load_config(&path).diagnostic.is_some());
         }

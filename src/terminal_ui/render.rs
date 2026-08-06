@@ -2325,6 +2325,47 @@ impl<'a> VisualRowModel<'a> {
         pane_width: u16,
         wrap: bool,
     ) -> Self {
+        Self::new_with_minimum_digits(
+            text,
+            view,
+            ui,
+            config,
+            pane_width,
+            wrap,
+            line_number_digits(text),
+        )
+    }
+
+    #[must_use]
+    pub fn new_for_state(
+        state: &EditorState,
+        text: &'a crate::document::TextBuffer,
+        view: crate::editing::ViewId,
+        ui: &UiState,
+        config: &Config,
+        pane_width: u16,
+        wrap: bool,
+    ) -> Self {
+        Self::new_with_minimum_digits(
+            text,
+            view,
+            ui,
+            config,
+            pane_width,
+            wrap,
+            editor_line_number_digits(state),
+        )
+    }
+
+    fn new_with_minimum_digits(
+        text: &'a crate::document::TextBuffer,
+        view: crate::editing::ViewId,
+        ui: &UiState,
+        config: &Config,
+        pane_width: u16,
+        wrap: bool,
+        minimum_digits: usize,
+    ) -> Self {
         let maximum = text.len_lines().saturating_sub(1);
         let mut folds = ui
             .lsp_folds
@@ -2352,7 +2393,13 @@ impl<'a> VisualRowModel<'a> {
             text,
             folds: normalized_folds,
             wrap,
-            content_width: editor_content_width(text, &config.editor, pane_width).max(1),
+            content_width: usize::from(pane_width.saturating_sub(editor_gutter_width_with_digits(
+                text,
+                &config.editor,
+                pane_width,
+                minimum_digits,
+            )))
+            .max(1),
             tab_width: config.editor.tab_width.max(1),
             ambiguous_width: config.editor.ambiguous_width,
         }
@@ -2665,22 +2712,61 @@ impl<'a> VisualRowModel<'a> {
     }
 }
 
+fn one_cell_git_symbol<'a>(
+    symbol: &'a str,
+    fallback: &'static str,
+    ambiguous_width: AmbiguousWidth,
+) -> &'a str {
+    if text_width(symbol, ambiguous_width) == 1 {
+        symbol
+    } else {
+        fallback
+    }
+}
+
+fn line_number_digits(text: &crate::document::TextBuffer) -> usize {
+    text.len_lines().max(1).to_string().len()
+}
+
+#[must_use]
+pub fn editor_line_number_digits(state: &EditorState) -> usize {
+    state
+        .buffers
+        .values()
+        .map(|buffer| line_number_digits(&buffer.text))
+        .max()
+        .unwrap_or(1)
+}
+
 fn configured_editor_gutter_width(
     text: &crate::document::TextBuffer,
     config: &EditorConfig,
+    minimum_digits: usize,
 ) -> usize {
     if config.line_numbers == LineNumbers::Off {
         return 0;
     }
-    text.len_lines()
-        .max(1)
-        .to_string()
-        .len()
+    line_number_digits(text)
+        .max(minimum_digits)
         .saturating_add(text_width(
             &config.line_number_separator,
             config.ambiguous_width,
         ))
-        .saturating_add(usize::from(config.gutter_padding))
+        .saturating_add(
+            usize::from(config.gutter_padding).max(usize::from(config.git_signs.enabled)),
+        )
+}
+
+fn editor_gutter_width_with_digits(
+    text: &crate::document::TextBuffer,
+    config: &EditorConfig,
+    pane_width: u16,
+    minimum_digits: usize,
+) -> u16 {
+    let maximum = pane_width.saturating_sub(1);
+    u16::try_from(configured_editor_gutter_width(text, config, minimum_digits))
+        .unwrap_or(u16::MAX)
+        .min(maximum)
 }
 
 /// Effective display-cell gutter for an exact pane width. Every non-empty
@@ -2691,10 +2777,17 @@ pub fn editor_gutter_width(
     config: &EditorConfig,
     pane_width: u16,
 ) -> u16 {
-    let maximum = pane_width.saturating_sub(1);
-    u16::try_from(configured_editor_gutter_width(text, config))
-        .unwrap_or(u16::MAX)
-        .min(maximum)
+    editor_gutter_width_with_digits(text, config, pane_width, line_number_digits(text))
+}
+
+#[must_use]
+pub fn editor_state_gutter_width(
+    state: &EditorState,
+    text: &crate::document::TextBuffer,
+    config: &EditorConfig,
+    pane_width: u16,
+) -> u16 {
+    editor_gutter_width_with_digits(text, config, pane_width, editor_line_number_digits(state))
 }
 
 /// Display cells available to buffer content in an exact pane viewport.
@@ -2706,6 +2799,18 @@ pub fn editor_content_width(
     pane_width: u16,
 ) -> usize {
     usize::from(pane_width.saturating_sub(editor_gutter_width(text, config, pane_width)))
+}
+
+#[must_use]
+pub fn editor_state_content_width(
+    state: &EditorState,
+    text: &crate::document::TextBuffer,
+    config: &EditorConfig,
+    pane_width: u16,
+) -> usize {
+    usize::from(
+        pane_width.saturating_sub(editor_state_gutter_width(state, text, config, pane_width)),
+    )
 }
 
 fn render_editor_view(
@@ -2729,14 +2834,22 @@ fn render_editor_view(
     let buffer = &state.buffers[view.buffer];
     let body_height = height.saturating_sub(u16::from(config.ui.status_line.enabled));
     let current_line = buffer.text.byte_to_line(view.cursor).unwrap_or(0);
-    let digits = buffer.text.len_lines().max(1).to_string().len();
-    let gutter_width = editor_gutter_width(&buffer.text, &config.editor, width);
-    let content_width = editor_content_width(&buffer.text, &config.editor, width);
+    let digits = editor_line_number_digits(state);
+    let gutter_width = editor_state_gutter_width(state, &buffer.text, &config.editor, width);
+    let content_width = editor_state_content_width(state, &buffer.text, &config.editor, width);
     let large_file = ui.large_file_buffers.contains(&view.buffer);
     let wrap_enabled = content_width > 0
         && config.editor.wrap
         && !(large_file && config.editor.large_file.disable_wrap);
-    let visual_rows = VisualRowModel::new(&buffer.text, view_id, ui, config, width, wrap_enabled);
+    let visual_rows = VisualRowModel::new_for_state(
+        state,
+        &buffer.text,
+        view_id,
+        ui,
+        config,
+        width,
+        wrap_enabled,
+    );
     let configured_start = visual_rows.normalize(VisualRowAnchor {
         line: view.scroll_line,
         wrap_row: view.scroll_wrap_row,
@@ -2861,21 +2974,38 @@ fn render_editor_view(
             );
         }
         if config.editor.git_signs.enabled && gutter_width > 0 && first_line_row == 0 {
+            grid.set_cell(
+                gutter_width - 1,
+                screen_row,
+                one_cell_git_symbol(
+                    &config.editor.git_signs.unchanged,
+                    "|",
+                    config.editor.ambiguous_width,
+                ),
+                Style::Muted,
+            );
             if let Some(sign) = ui.git_signs.iter().find(|sign| {
                 sign.buffer == view.buffer
                     && sign.buffer_revision == buffer.text.revision().0
                     && sign.line == line_index
             }) {
-                let (symbol, style) = match sign.kind {
-                    UiGitSignKind::Added => (&config.editor.git_signs.added, Style::GitSignAdded),
+                let (symbol, fallback, style) = match sign.kind {
+                    UiGitSignKind::Added => {
+                        (&config.editor.git_signs.added, "|", Style::GitSignAdded)
+                    }
                     UiGitSignKind::Changed => {
-                        (&config.editor.git_signs.changed, Style::GitSignChanged)
+                        (&config.editor.git_signs.changed, "|", Style::GitSignChanged)
                     }
                     UiGitSignKind::Deleted => {
-                        (&config.editor.git_signs.deleted, Style::GitSignDeleted)
+                        (&config.editor.git_signs.deleted, "_", Style::GitSignDeleted)
                     }
                 };
-                grid.set_cell(gutter_width - 1, screen_row, symbol, style);
+                grid.set_cell(
+                    gutter_width - 1,
+                    screen_row,
+                    one_cell_git_symbol(symbol, fallback, config.editor.ambiguous_width),
+                    style,
+                );
             }
         }
         let line_start = buffer
@@ -5221,17 +5351,40 @@ mod tests {
         let gutter =
             super::editor_gutter_width(&state.buffers[buffer].text, &loaded.config.editor, 20);
         assert_eq!(
-            frame.grid.get(gutter - 1, 0).unwrap().style,
-            crate::terminal_ui::Style::GitSignAdded
+            (
+                frame.grid.get(gutter - 1, 0).unwrap().symbol.as_str(),
+                frame.grid.get(gutter - 1, 0).unwrap().style,
+            ),
+            ("│", crate::terminal_ui::Style::GitSignAdded)
         );
         assert_eq!(
-            frame.grid.get(gutter - 1, 1).unwrap().style,
-            crate::terminal_ui::Style::GitSignChanged
+            (
+                frame.grid.get(gutter - 1, 1).unwrap().symbol.as_str(),
+                frame.grid.get(gutter - 1, 1).unwrap().style,
+            ),
+            ("│", crate::terminal_ui::Style::GitSignChanged)
         );
         assert_eq!(
-            frame.grid.get(gutter - 1, 2).unwrap().style,
-            crate::terminal_ui::Style::GitSignDeleted
+            (
+                frame.grid.get(gutter - 1, 2).unwrap().symbol.as_str(),
+                frame.grid.get(gutter - 1, 2).unwrap().style,
+            ),
+            ("_", crate::terminal_ui::Style::GitSignDeleted)
         );
+        assert_eq!(
+            (
+                frame.grid.get(gutter - 1, 3).unwrap().symbol.as_str(),
+                frame.grid.get(gutter - 1, 3).unwrap().style,
+            ),
+            ("│", crate::terminal_ui::Style::Muted)
+        );
+
+        let mut wide_config = loaded.config.clone();
+        wide_config.editor.ambiguous_width = crate::configuration::AmbiguousWidth::Wide;
+        let wide = render(&state, &ui, &wide_config, &loaded.dashboard, 20, 5);
+        assert_eq!(wide.grid.get(gutter - 1, 0).unwrap().symbol, "|");
+        assert!(!wide.grid.get(gutter - 1, 0).unwrap().continuation);
+        assert_eq!(wide.grid.get(gutter - 1, 3).unwrap().symbol, "|");
 
         ui.git_signs[0].buffer_revision = revision.saturating_add(1);
         let stale = render(&state, &ui, &loaded.config, &loaded.dashboard, 20, 5);
@@ -5241,6 +5394,52 @@ mod tests {
         );
         let tiny = render(&state, &ui, &loaded.config, &loaded.dashboard, 1, 3);
         assert_eq!(tiny.grid.width(), 1);
+    }
+
+    #[test]
+    fn line_number_gutter_uses_the_largest_open_buffer_across_tabs() {
+        let mut state = EditorState::new(PathBuf::from("/workspace"));
+        let (short, short_view) = state.open_text(
+            crate::document::TextBuffer::from_text("short\n"),
+            Some(PathBuf::from("/workspace/short.rs")),
+        );
+        let first_tab = state.active_tab.unwrap();
+        state.new_tab().unwrap();
+        let long_text = (0..1_000).map(|_| "long\n").collect::<String>();
+        let (long, long_view) = state.open_text(
+            crate::document::TextBuffer::from_text(&long_text),
+            Some(PathBuf::from("/workspace/long.rs")),
+        );
+        let loaded = crate::configuration::load_bundled_config();
+        assert_eq!(super::editor_line_number_digits(&state), 4);
+        let short_gutter = super::editor_state_gutter_width(
+            &state,
+            &state.buffers[short].text,
+            &loaded.config.editor,
+            80,
+        );
+        let long_gutter = super::editor_state_gutter_width(
+            &state,
+            &state.buffers[long].text,
+            &loaded.config.editor,
+            80,
+        );
+        assert_eq!(short_gutter, long_gutter);
+        assert_eq!(short_gutter, 6);
+        state.focus_tab(-1, true).unwrap();
+        assert_eq!(state.active_tab, Some(first_tab));
+        let ui = ui_with_editor_layout(&state);
+        let frame = super::render_editor_view(&state, short_view, &ui, &loaded.config, 80, 4);
+        assert_eq!(frame.grid.get(3, 0).unwrap().symbol, "1");
+        assert_eq!(frame.grid.get(short_gutter - 1, 0).unwrap().symbol, "│");
+        assert_eq!(
+            frame.grid.get(short_gutter - 1, 0).unwrap().style,
+            crate::terminal_ui::Style::Muted
+        );
+        assert_eq!(frame.grid.get(short_gutter, 0).unwrap().symbol, "s");
+        let long_frame = super::render_editor_view(&state, long_view, &ui, &loaded.config, 80, 4);
+        assert_eq!(long_frame.grid.get(long_gutter - 1, 0).unwrap().symbol, "│");
+        assert_eq!(long_frame.grid.get(long_gutter, 0).unwrap().symbol, "l");
     }
 
     #[test]

@@ -182,7 +182,7 @@ pub fn manifest() -> Result<ApiManifest, String> {
             ("explorer".into(), "async-watch-follow-scroll-v1".into()),
             (
                 "git_status".into(),
-                "worker-picker-explorer-aggregate-gutter-hunks-v2".into(),
+                "worker-picker-explorer-live-buffer-stable-gutter-hunks-v4".into(),
             ),
             (
                 "git_mutation".into(),
