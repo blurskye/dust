@@ -698,6 +698,21 @@ impl EditorState {
         }
     }
 
+    pub fn resize_active_pane_on_axis(
+        &mut self,
+        axis: Axis,
+        delta: i16,
+    ) -> Result<(), &'static str> {
+        let tab_id = self.active_tab.ok_or("no active tab")?;
+        let tab = self.tabs.get_mut(tab_id).ok_or("active tab is stale")?;
+        if resize_parent_on_axis(&mut tab.root, tab.focused, axis, delta) {
+            self.mark_window_changed();
+            Ok(())
+        } else {
+            Err("active pane has no resizable split on that axis")
+        }
+    }
+
     /// Swap two pane leaves in the active tab without changing pane, view, or
     /// content identity. Focus follows the focused pane identity.
     pub fn swap_panes(&mut self, first: PaneId, second: PaneId) -> Result<(), &'static str> {
@@ -1153,6 +1168,39 @@ fn resize_parent(node: &mut LayoutNode, target: PaneId, delta: i16) -> bool {
     } else {
         return false;
     };
+    let adjusted = i32::from(*ratio) + i32::from(signed);
+    *ratio = u16::try_from(adjusted.clamp(100, 900)).unwrap_or(*ratio);
+    true
+}
+
+fn resize_parent_on_axis(
+    node: &mut LayoutNode,
+    target: PaneId,
+    requested_axis: Axis,
+    delta: i16,
+) -> bool {
+    let LayoutNode::Split {
+        axis,
+        ratio,
+        first,
+        second,
+    } = node
+    else {
+        return false;
+    };
+    let in_first = contains_pane(first, target);
+    let in_second = contains_pane(second, target);
+    if !in_first && !in_second {
+        return false;
+    }
+    let child = if in_first { first } else { second };
+    if resize_parent_on_axis(child, target, requested_axis, delta) {
+        return true;
+    }
+    if *axis != requested_axis {
+        return false;
+    }
+    let signed = if in_first { delta } else { -delta };
     let adjusted = i32::from(*ratio) + i32::from(signed);
     *ratio = u16::try_from(adjusted.clamp(100, 900)).unwrap_or(*ratio);
     true

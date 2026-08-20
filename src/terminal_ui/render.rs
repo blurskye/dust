@@ -327,10 +327,27 @@ pub struct ExplorerUiState {
     pub preview_lines: Vec<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalPanelMode {
+    Input,
+    Normal,
+    Visual,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TerminalTabState {
+    pub id: u64,
+    pub profile: String,
+    pub running: bool,
+    pub exit_code: Option<u32>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TerminalPanelState {
     pub id: u64,
     pub profile: String,
+    pub tabs: Vec<TerminalTabState>,
+    pub mode: TerminalPanelMode,
     pub running: bool,
     pub exit_code: Option<u32>,
     pub truncated: bool,
@@ -339,7 +356,9 @@ pub struct TerminalPanelState {
     pub columns: u16,
     pub rows: u16,
     pub cells: Vec<Vec<super::pty_screen::PtyCell>>,
-    pub cursor: Option<(u16, u16)>,
+    pub cells_start: usize,
+    pub cursor: Option<(usize, usize)>,
+    pub selection: Option<((usize, usize), (usize, usize), bool)>,
     pub scrollback_lines: usize,
     pub scroll_offset: usize,
     pub requested_height: u16,
@@ -829,6 +848,58 @@ fn terminal_geometry_from_rect(rect: WindowRect) -> Option<TerminalPanelGeometry
     })
 }
 
+fn terminal_tab_label(tab: &TerminalTabState, config: &Config) -> String {
+    let mut title = config
+        .ui
+        .terminal_panel
+        .title_format
+        .replace("{id}", &tab.id.to_string())
+        .replace("{profile}", &tab.profile);
+    if !tab.running {
+        title.push_str(
+            &tab.exit_code
+                .map_or_else(|| " [signal]".into(), |code| format!(" [exit {code}]")),
+        );
+    }
+    title
+}
+
+#[must_use]
+pub fn terminal_tab_at_column(
+    terminal: &TerminalPanelState,
+    config: &Config,
+    width: u16,
+    column: u16,
+) -> Option<u64> {
+    let mut x = 1_u16;
+    for (index, tab) in terminal.tabs.iter().enumerate() {
+        if index > 0 {
+            x = x.saturating_add(
+                u16::try_from(text_width(
+                    &config.ui.terminal_panel.tab_separator,
+                    config.editor.ambiguous_width,
+                ))
+                .unwrap_or(u16::MAX),
+            );
+        }
+        let label = terminal_tab_label(tab, config);
+        let end = x
+            .saturating_add(
+                u16::try_from(text_width(&label, config.editor.ambiguous_width))
+                    .unwrap_or(u16::MAX),
+            )
+            .min(width);
+        if column >= x && column < end {
+            return Some(tab.id);
+        }
+        x = end;
+        if x >= width {
+            break;
+        }
+    }
+    None
+}
+
 fn dock_terminal_panel(
     workspace: Frame,
     terminal: &TerminalPanelState,
@@ -869,30 +940,35 @@ fn dock_terminal_panel(
             Style::TerminalBorder,
         );
     }
-    let title = config
-        .ui
-        .terminal_panel
-        .title_format
-        .replace("{id}", &terminal.id.to_string())
-        .replace("{profile}", &terminal.profile);
-    grid.put_text_clipped(
-        geometry.x.saturating_add(1),
-        geometry.top,
-        &title,
-        Style::TerminalTitle,
-        right,
-    );
+    let mut title_x = geometry.x.saturating_add(1);
+    for (index, tab) in terminal.tabs.iter().enumerate() {
+        if index > 0 {
+            title_x = grid.put_text_clipped(
+                title_x,
+                geometry.top,
+                &config.ui.terminal_panel.tab_separator,
+                Style::TerminalBorder,
+                right,
+            );
+        }
+        let title = terminal_tab_label(tab, config);
+        title_x = grid.put_text_clipped(
+            title_x,
+            geometry.top,
+            &title,
+            if tab.id == terminal.id {
+                Style::TerminalTitle
+            } else {
+                Style::TerminalBorder
+            },
+            right,
+        );
+    }
 
-    let source_rows = terminal.cells.len().min(usize::from(terminal.rows));
-    let visible_rows = usize::from(geometry.body_height).min(source_rows);
-    let source_start = source_rows.saturating_sub(visible_rows);
-    for (screen_row, row) in terminal
-        .cells
-        .iter()
-        .skip(source_start)
-        .take(visible_rows)
-        .enumerate()
-    {
+    let visible_rows = usize::from(geometry.body_height).min(terminal.cells.len());
+    let source_start = terminal.cells_start;
+    for (screen_row, row) in terminal.cells.iter().take(visible_rows).enumerate() {
+        let source_row = source_start.saturating_add(screen_row);
         let y = geometry
             .body_top
             .saturating_add(u16::try_from(screen_row).unwrap_or(u16::MAX));
@@ -904,13 +980,29 @@ fn dock_terminal_panel(
             if cell.continuation {
                 continue;
             }
+            let selected = terminal.selection.is_some_and(|(first, second, linewise)| {
+                let (start, end) = if first <= second {
+                    (first, second)
+                } else {
+                    (second, first)
+                };
+                if linewise {
+                    (start.0..=end.0).contains(&source_row)
+                } else {
+                    (source_row, column) >= start && (source_row, column) <= end
+                }
+            });
             grid.set_cell(
                 geometry
                     .x
                     .saturating_add(u16::try_from(column).unwrap_or(u16::MAX)),
                 y,
                 &cell.text,
-                Style::Terminal(cell.style),
+                if selected {
+                    Style::Selection
+                } else {
+                    Style::Terminal(cell.style)
+                },
             );
         }
     }
@@ -918,36 +1010,19 @@ fn dock_terminal_panel(
     for x in geometry.x..right {
         grid.set_cell(x, geometry.status_y, " ", Style::TerminalStatus);
     }
-    let status = if terminal.running {
-        config.ui.terminal_panel.running_label.clone()
-    } else {
-        config.ui.terminal_panel.exited_format.replace(
-            "{code}",
-            &terminal
-                .exit_code
-                .map_or_else(|| "signal".into(), |code| code.to_string()),
-        )
+    let mode = match terminal.mode {
+        TerminalPanelMode::Input => &config.ui.terminal_panel.input_mode_label,
+        TerminalPanelMode::Normal => &config.ui.terminal_panel.normal_mode_label,
+        TerminalPanelMode::Visual => &config.ui.terminal_panel.visual_mode_label,
     };
-    let focus = if terminal.focused {
-        &config.ui.terminal_panel.focused_label
+    let mut status_line = if terminal.focused {
+        format!(" {mode}  {}: {}", terminal.id, terminal.profile)
     } else {
-        &config.ui.terminal_panel.unfocused_label
+        format!(" {}: {}", terminal.id, terminal.profile)
     };
-    let status_line = config
-        .ui
-        .terminal_panel
-        .status_format
-        .replace("{focus}", focus)
-        .replace("{status}", &status)
-        .replace("{unsupported}", &terminal.unsupported_sequences.to_string())
-        .replace(
-            "{truncated}",
-            if terminal.truncated {
-                &config.ui.terminal_panel.truncated_label
-            } else {
-                ""
-            },
-        );
+    if terminal.truncated {
+        status_line.push_str(" · output truncated");
+    }
     grid.put_text_clipped(
         geometry.x,
         geometry.status_y,
@@ -961,14 +1036,13 @@ fn dock_terminal_panel(
     );
 
     let cursor = if terminal.focused {
-        terminal.cursor.and_then(|(column, row)| {
-            let source_row = usize::from(row);
+        terminal.cursor.and_then(|(column, source_row)| {
             let projected_row = source_row.checked_sub(source_start)?;
             let y = geometry
                 .body_top
                 .saturating_add(u16::try_from(projected_row).ok()?);
-            (column < geometry.width && y < geometry.status_y).then_some((
-                geometry.x.saturating_add(column),
+            (column < usize::from(geometry.width) && y < geometry.status_y).then_some((
+                geometry.x.saturating_add(u16::try_from(column).ok()?),
                 y,
                 crossterm::cursor::SetCursorStyle::SteadyBlock,
             ))
@@ -4433,6 +4507,13 @@ mod tests {
         let terminal = super::TerminalPanelState {
             id: 1,
             profile: "side".into(),
+            tabs: vec![super::TerminalTabState {
+                id: 1,
+                profile: "side".into(),
+                running: true,
+                exit_code: None,
+            }],
+            mode: super::TerminalPanelMode::Input,
             running: true,
             exit_code: None,
             truncated: false,
@@ -4441,7 +4522,9 @@ mod tests {
             columns: 5,
             rows: 8,
             cells: Vec::new(),
+            cells_start: 0,
             cursor: None,
+            selection: None,
             scrollback_lines: 0,
             scroll_offset: 0,
             requested_height: 5,
@@ -5937,6 +6020,21 @@ mod tests {
         let terminal = super::TerminalPanelState {
             id: 7,
             profile: "shell".into(),
+            tabs: vec![
+                super::TerminalTabState {
+                    id: 7,
+                    profile: "shell".into(),
+                    running: true,
+                    exit_code: None,
+                },
+                super::TerminalTabState {
+                    id: 8,
+                    profile: "logs".into(),
+                    running: false,
+                    exit_code: Some(2),
+                },
+            ],
+            mode: super::TerminalPanelMode::Input,
             running: true,
             exit_code: None,
             truncated: false,
@@ -5944,15 +6042,22 @@ mod tests {
             focused: true,
             columns: 80,
             rows: 4,
-            cells: screen.cells().to_vec(),
-            cursor: Some((
-                u16::try_from(cursor_column).expect("cursor column"),
-                u16::try_from(cursor_row).expect("cursor row"),
-            )),
+            cells: screen.history_window(0, 4),
+            cells_start: 0,
+            cursor: Some((cursor_column, cursor_row)),
+            selection: None,
             scrollback_lines: screen.scrollback_len(),
             scroll_offset: 0,
             requested_height: 6,
         };
+        assert_eq!(
+            super::terminal_tab_at_column(&terminal, &config, 80, 2),
+            Some(7)
+        );
+        assert_eq!(
+            super::terminal_tab_at_column(&terminal, &config, 80, 13),
+            Some(8)
+        );
         let mut ui = ui_with_editor_layout(&state);
         ui.explorer = Some(super::ExplorerUiState {
             title: "Explorer".into(),
@@ -6025,7 +6130,18 @@ mod tests {
         assert!(frame.cursor.is_some_and(|(x, y, _)| {
             x == u16::try_from(cursor_column).unwrap() && y == geometry.body_top
         }));
-        assert!(frame.grid.row_text(geometry.status_y).contains("RUNNING"));
+        assert!(
+            frame
+                .grid
+                .row_text(geometry.status_y)
+                .contains("TERMINAL  7: shell")
+        );
+        assert!(
+            !frame
+                .grid
+                .row_text(geometry.status_y)
+                .contains("unsupported")
+        );
 
         let mut editor_ui = ui;
         editor_ui.terminal_panel.as_mut().expect("terminal").focused = false;
@@ -6035,12 +6151,9 @@ mod tests {
                 .cursor
                 .is_some_and(|(_, y, _)| y < geometry.top)
         );
-        assert!(
-            editor_frame
-                .grid
-                .row_text(geometry.top)
-                .contains("TERMINAL #7")
-        );
+        let tab_row = editor_frame.grid.row_text(geometry.top);
+        assert!(tab_row.contains("7: shell"));
+        assert!(tab_row.contains("8: logs [exit 2]"));
     }
 
     #[test]

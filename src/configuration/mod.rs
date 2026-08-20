@@ -1154,12 +1154,10 @@ pub struct TerminalPanelConfig {
     pub resize_step: u16,
     pub divider: String,
     pub title_format: String,
-    pub status_format: String,
-    pub running_label: String,
-    pub exited_format: String,
-    pub focused_label: String,
-    pub unfocused_label: String,
-    pub truncated_label: String,
+    pub tab_separator: String,
+    pub input_mode_label: String,
+    pub normal_mode_label: String,
+    pub visual_mode_label: String,
 }
 
 impl Default for TerminalPanelConfig {
@@ -1171,13 +1169,11 @@ impl Default for TerminalPanelConfig {
             minimum_workspace_height: 3,
             resize_step: 2,
             divider: "─".into(),
-            title_format: " TERMINAL #{id} · {profile} ".into(),
-            status_format: " {focus} · {status} · unsupported {unsupported}{truncated} ".into(),
-            running_label: "RUNNING".into(),
-            exited_format: "EXIT {code}".into(),
-            focused_label: "TERMINAL".into(),
-            unfocused_label: "EDITOR".into(),
-            truncated_label: " · TRUNCATED".into(),
+            title_format: "{id}: {profile}".into(),
+            tab_separator: " │ ".into(),
+            input_mode_label: "TERMINAL".into(),
+            normal_mode_label: "NORMAL".into(),
+            visual_mode_label: "VISUAL".into(),
         }
     }
 }
@@ -2444,19 +2440,12 @@ impl Config {
             || terminal_panel.divider.chars().any(char::is_control)
             || !terminal_panel.title_format.contains("{id}")
             || !terminal_panel.title_format.contains("{profile}")
-            || !terminal_panel.status_format.contains("{focus}")
-            || !terminal_panel.status_format.contains("{status}")
-            || !terminal_panel.status_format.contains("{unsupported}")
-            || !terminal_panel.status_format.contains("{truncated}")
-            || !terminal_panel.exited_format.contains("{code}")
             || [
                 &terminal_panel.title_format,
-                &terminal_panel.status_format,
-                &terminal_panel.running_label,
-                &terminal_panel.exited_format,
-                &terminal_panel.focused_label,
-                &terminal_panel.unfocused_label,
-                &terminal_panel.truncated_label,
+                &terminal_panel.tab_separator,
+                &terminal_panel.input_mode_label,
+                &terminal_panel.normal_mode_label,
+                &terminal_panel.visual_mode_label,
             ]
             .into_iter()
             .any(|value| {
@@ -2991,6 +2980,7 @@ impl Config {
             "terminal_title",
             "terminal_list",
             "terminal_missing",
+            "terminal_yanked",
             "formatter_invalid_utf8",
             "formatter_stale",
             "formatter_applied",
@@ -4992,14 +4982,14 @@ mod tests {
         let path = root.path().join("config.toml");
         fs::write(
             &path,
-            "[ui.terminal_panel]\nheight=9\nminimum_height=4\nmaximum_height=20\nminimum_workspace_height=2\nresize_step=3\ndivider='-'\ntitle_format=' TERM {id} {profile} '\nstatus_format=' {focus} {status} {unsupported}{truncated} '\nrunning_label='LIVE'\nexited_format='DONE {code}'\nfocused_label='TERM'\nunfocused_label='EDIT'\ntruncated_label=' CUT'\n",
+            "[ui.terminal_panel]\nheight=9\nminimum_height=4\nmaximum_height=20\nminimum_workspace_height=2\nresize_step=3\ndivider='-'\ntitle_format='{id}: {profile}'\ntab_separator=' | '\ninput_mode_label='TERM'\nnormal_mode_label='NORMAL'\nvisual_mode_label='VISUAL'\n",
         )
         .expect("valid terminal panel");
         let loaded = load_config(&path);
         assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
         assert_eq!(loaded.config.ui.terminal_panel.height, 9);
         assert_eq!(loaded.config.ui.terminal_panel.resize_step, 3);
-        assert_eq!(loaded.config.ui.terminal_panel.running_label, "LIVE");
+        assert_eq!(loaded.config.ui.terminal_panel.input_mode_label, "TERM");
 
         for (index, invalid) in [
             "height=2",
@@ -5007,7 +4997,7 @@ mod tests {
             "maximum_height=201",
             "divider='界'",
             "title_format='missing placeholders'",
-            "status_format='{focus} {status}'",
+            "input_mode_label=''",
             "resize_step=0",
         ]
         .into_iter()

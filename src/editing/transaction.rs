@@ -90,6 +90,10 @@ pub enum EditorOperation {
     ResizePane {
         delta: i16,
     },
+    ResizePaneOnAxis {
+        axis: crate::editing::Axis,
+        delta: i16,
+    },
     SwapPanes {
         first: crate::editing::PaneId,
         second: crate::editing::PaneId,
@@ -484,6 +488,9 @@ fn apply_operation(
             .map_err(|error| TransactionError::Layout(error.into()))?,
         EditorOperation::ResizePane { delta } => state
             .resize_active_pane(*delta)
+            .map_err(|error| TransactionError::Layout(error.into()))?,
+        EditorOperation::ResizePaneOnAxis { axis, delta } => state
+            .resize_active_pane_on_axis(*axis, *delta)
             .map_err(|error| TransactionError::Layout(error.into()))?,
         EditorOperation::SwapPanes { first, second } => state
             .swap_panes(*first, *second)

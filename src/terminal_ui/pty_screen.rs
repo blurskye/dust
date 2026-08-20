@@ -55,7 +55,7 @@ pub struct PtyScreen {
     style: PtyStyle,
     parser: Parser,
     utf8_pending: Vec<u8>,
-    scrollback: Vec<String>,
+    scrollback: Vec<Vec<PtyCell>>,
     maximum_scrollback_lines: usize,
     unsupported_sequences: u64,
     alternate: bool,
@@ -264,11 +264,7 @@ impl PtyScreen {
         let columns = usize::from(columns.max(1));
         let rows = usize::from(rows.max(1));
         if rows < self.rows {
-            let drained = self
-                .cells
-                .drain(..self.rows - rows)
-                .map(|row| render_row(&row))
-                .collect::<Vec<_>>();
+            let drained = self.cells.drain(..self.rows - rows).collect::<Vec<_>>();
             for row in drained {
                 self.push_scrollback(row);
             }
@@ -314,8 +310,28 @@ impl PtyScreen {
     pub fn lines(&self) -> Vec<String> {
         self.scrollback
             .iter()
-            .cloned()
-            .chain(self.cells.iter().map(|row| render_row(row)))
+            .chain(&self.cells)
+            .map(|row| render_row(row))
+            .collect()
+    }
+    #[must_use]
+    pub fn history_len(&self) -> usize {
+        self.scrollback.len().saturating_add(self.cells.len())
+    }
+    #[must_use]
+    pub fn history_row(&self, row: usize) -> Option<&[PtyCell]> {
+        if row < self.scrollback.len() {
+            self.scrollback.get(row).map(Vec::as_slice)
+        } else {
+            self.cells
+                .get(row.saturating_sub(self.scrollback.len()))
+                .map(Vec::as_slice)
+        }
+    }
+    #[must_use]
+    pub fn history_window(&self, start: usize, maximum_rows: usize) -> Vec<Vec<PtyCell>> {
+        (start..self.history_len().min(start.saturating_add(maximum_rows)))
+            .filter_map(|row| self.history_row(row).map(<[PtyCell]>::to_vec))
             .collect()
     }
     #[must_use]
@@ -421,7 +437,7 @@ impl PtyScreen {
         for _ in 0..count.min(self.scroll_bottom - self.scroll_top) {
             let row = self.cells.remove(self.scroll_top);
             if self.scroll_top == 0 && self.scroll_bottom == self.rows && !self.alternate {
-                self.push_scrollback(render_row(&row));
+                self.push_scrollback(row);
             }
             self.cells.insert(
                 self.scroll_bottom - 1,
@@ -436,7 +452,7 @@ impl PtyScreen {
                 .insert(self.scroll_top, vec![PtyCell::default(); self.columns]);
         }
     }
-    fn push_scrollback(&mut self, line: String) {
+    fn push_scrollback(&mut self, line: Vec<PtyCell>) {
         self.scrollback.push(line);
         if self.scrollback.len() > self.maximum_scrollback_lines {
             let excess = self.scrollback.len() - self.maximum_scrollback_lines;

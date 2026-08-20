@@ -1743,6 +1743,62 @@ context = "explorer"
 keys = "ctrl-l"
 command = "surface.focus.right"
 
+# Ctrl-arrow resizing follows the active window, matching the bundled
+# Neovim-like model. Horizontal arrows resize width; vertical arrows resize
+# height. Dock edges grow toward the editor and shrink away from it.
+[[keymap]]
+id = "builtin.editor.normal.window-resize-left.ctrl-left"
+context = "editor"
+mode = "normal"
+keys = "ctrl-left"
+command = "window.resize.directional"
+arguments = { direction = "left" }
+[[keymap]]
+id = "builtin.editor.normal.window-resize-right.ctrl-right"
+context = "editor"
+mode = "normal"
+keys = "ctrl-right"
+command = "window.resize.directional"
+arguments = { direction = "right" }
+[[keymap]]
+id = "builtin.editor.normal.window-resize-up.ctrl-up"
+context = "editor"
+mode = "normal"
+keys = "ctrl-up"
+command = "window.resize.directional"
+arguments = { direction = "up" }
+[[keymap]]
+id = "builtin.editor.normal.window-resize-down.ctrl-down"
+context = "editor"
+mode = "normal"
+keys = "ctrl-down"
+command = "window.resize.directional"
+arguments = { direction = "down" }
+[[keymap]]
+id = "builtin.explorer.surface.window-resize-left.ctrl-left"
+context = "explorer"
+keys = "ctrl-left"
+command = "window.resize.directional"
+arguments = { direction = "left" }
+[[keymap]]
+id = "builtin.explorer.surface.window-resize-right.ctrl-right"
+context = "explorer"
+keys = "ctrl-right"
+command = "window.resize.directional"
+arguments = { direction = "right" }
+[[keymap]]
+id = "builtin.explorer.surface.window-resize-up.ctrl-up"
+context = "explorer"
+keys = "ctrl-up"
+command = "window.resize.directional"
+arguments = { direction = "up" }
+[[keymap]]
+id = "builtin.explorer.surface.window-resize-down.ctrl-down"
+context = "explorer"
+keys = "ctrl-down"
+command = "window.resize.directional"
+arguments = { direction = "down" }
+
 # Pane and tab layout commands.
 [[keymap]]
 id = "builtin.editor.normal.pane-split-vertical.ctrl-w-s"
@@ -1971,10 +2027,16 @@ context = "terminal"
 keys = "ctrl-l"
 command = "surface.focus.right"
 [[keymap]]
-id = "builtin.terminal.surface.terminal-unfocus.escape"
+id = "builtin.terminal.surface.terminal-send.escape"
 context = "terminal"
 keys = "escape"
-command = "terminal.unfocus"
+command = "terminal.send"
+arguments = { text = "\u001b" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-mode-normal.double-escape"
+context = "terminal"
+keys = "escape escape"
+command = "terminal.mode.normal"
 [[keymap]]
 id = "builtin.terminal.surface.terminal-send.enter"
 context = "terminal"
@@ -2035,6 +2097,276 @@ context = "terminal"
 keys = "ctrl-z"
 command = "terminal.send"
 arguments = { text = "\u001a" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-cycle-previous.ctrl-shift-h"
+context = "terminal"
+keys = "ctrl-shift-h"
+command = "terminal.cycle"
+arguments = { direction = -1 }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-cycle-next.ctrl-shift-l"
+context = "terminal"
+keys = "ctrl-shift-l"
+command = "terminal.cycle"
+arguments = { direction = 1 }
+
+# Terminal normal mode is host-owned over bounded scrollback. The PTY keeps
+# running, but navigation and yanks never become process input.
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-mode-input.i"
+context = "terminal_normal"
+keys = "i"
+command = "terminal.mode.input"
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-mode-input.a"
+context = "terminal_normal"
+keys = "a"
+command = "terminal.mode.input"
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-mode-input.enter"
+context = "terminal_normal"
+keys = "enter"
+command = "terminal.mode.input"
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-move-left.h"
+context = "terminal_normal"
+keys = "h"
+command = "terminal.normal.move"
+arguments = { motion = "left" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-move-down.j"
+context = "terminal_normal"
+keys = "j"
+command = "terminal.normal.move"
+arguments = { motion = "down" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-move-up.k"
+context = "terminal_normal"
+keys = "k"
+command = "terminal.normal.move"
+arguments = { motion = "up" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-move-right.l"
+context = "terminal_normal"
+keys = "l"
+command = "terminal.normal.move"
+arguments = { motion = "right" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-move-left.arrow"
+context = "terminal_normal"
+keys = "left"
+command = "terminal.normal.move"
+arguments = { motion = "left" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-move-down.arrow"
+context = "terminal_normal"
+keys = "down"
+command = "terminal.normal.move"
+arguments = { motion = "down" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-move-up.arrow"
+context = "terminal_normal"
+keys = "up"
+command = "terminal.normal.move"
+arguments = { motion = "up" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-move-right.arrow"
+context = "terminal_normal"
+keys = "right"
+command = "terminal.normal.move"
+arguments = { motion = "right" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-line-start.zero"
+context = "terminal_normal"
+keys = "0"
+command = "terminal.normal.move"
+arguments = { motion = "line_start" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-line-end.dollar"
+context = "terminal_normal"
+keys = "$"
+command = "terminal.normal.move"
+arguments = { motion = "line_end" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-first.g-g"
+context = "terminal_normal"
+keys = "g g"
+command = "terminal.normal.move"
+arguments = { motion = "first" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-last.upper-g"
+context = "terminal_normal"
+keys = "G"
+command = "terminal.normal.move"
+arguments = { motion = "last" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-visual.v"
+context = "terminal_normal"
+keys = "v"
+command = "terminal.visual.start"
+arguments = { linewise = false }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-visual-line.upper-v"
+context = "terminal_normal"
+keys = "V"
+command = "terminal.visual.start"
+arguments = { linewise = true }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-yank-line.y-y"
+context = "terminal_normal"
+keys = "y y"
+command = "terminal.yank"
+arguments = { line = true }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-toggle.ctrl-slash"
+context = "terminal_normal"
+keys = "ctrl-/"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-toggle.ctrl-backslash"
+context = "terminal_normal"
+keys = "ctrl-\\"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.terminal-normal.surface.surface-focus-left.ctrl-h"
+context = "terminal_normal"
+keys = "ctrl-h"
+command = "surface.focus.left"
+[[keymap]]
+id = "builtin.terminal-normal.surface.surface-focus-down.ctrl-j"
+context = "terminal_normal"
+keys = "ctrl-j"
+command = "surface.focus.down"
+[[keymap]]
+id = "builtin.terminal-normal.surface.surface-focus-up.ctrl-k"
+context = "terminal_normal"
+keys = "ctrl-k"
+command = "surface.focus.up"
+[[keymap]]
+id = "builtin.terminal-normal.surface.surface-focus-right.ctrl-l"
+context = "terminal_normal"
+keys = "ctrl-l"
+command = "surface.focus.right"
+[[keymap]]
+id = "builtin.terminal-normal.surface.window-resize-left.ctrl-left"
+context = "terminal_normal"
+keys = "ctrl-left"
+command = "window.resize.directional"
+arguments = { direction = "left" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.window-resize-right.ctrl-right"
+context = "terminal_normal"
+keys = "ctrl-right"
+command = "window.resize.directional"
+arguments = { direction = "right" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.window-resize-up.ctrl-up"
+context = "terminal_normal"
+keys = "ctrl-up"
+command = "window.resize.directional"
+arguments = { direction = "up" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.window-resize-down.ctrl-down"
+context = "terminal_normal"
+keys = "ctrl-down"
+command = "window.resize.directional"
+arguments = { direction = "down" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-cycle-previous.ctrl-shift-h"
+context = "terminal_normal"
+keys = "ctrl-shift-h"
+command = "terminal.cycle"
+arguments = { direction = -1 }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-cycle-next.ctrl-shift-l"
+context = "terminal_normal"
+keys = "ctrl-shift-l"
+command = "terminal.cycle"
+arguments = { direction = 1 }
+
+[[keymap]]
+id = "builtin.terminal-visual.surface.terminal-mode-normal.escape"
+context = "terminal_visual"
+keys = "escape"
+command = "terminal.mode.normal"
+[[keymap]]
+id = "builtin.terminal-visual.surface.terminal-yank.y"
+context = "terminal_visual"
+keys = "y"
+command = "terminal.yank"
+arguments = { line = false }
+[[keymap]]
+id = "builtin.terminal-visual.surface.terminal-move-left.h"
+context = "terminal_visual"
+keys = "h"
+command = "terminal.normal.move"
+arguments = { motion = "left" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.terminal-move-down.j"
+context = "terminal_visual"
+keys = "j"
+command = "terminal.normal.move"
+arguments = { motion = "down" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.terminal-move-up.k"
+context = "terminal_visual"
+keys = "k"
+command = "terminal.normal.move"
+arguments = { motion = "up" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.terminal-move-right.l"
+context = "terminal_visual"
+keys = "l"
+command = "terminal.normal.move"
+arguments = { motion = "right" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.terminal-move-left.arrow"
+context = "terminal_visual"
+keys = "left"
+command = "terminal.normal.move"
+arguments = { motion = "left" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.terminal-move-down.arrow"
+context = "terminal_visual"
+keys = "down"
+command = "terminal.normal.move"
+arguments = { motion = "down" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.terminal-move-up.arrow"
+context = "terminal_visual"
+keys = "up"
+command = "terminal.normal.move"
+arguments = { motion = "up" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.terminal-move-right.arrow"
+context = "terminal_visual"
+keys = "right"
+command = "terminal.normal.move"
+arguments = { motion = "right" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.window-resize-left.ctrl-left"
+context = "terminal_visual"
+keys = "ctrl-left"
+command = "window.resize.directional"
+arguments = { direction = "left" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.window-resize-right.ctrl-right"
+context = "terminal_visual"
+keys = "ctrl-right"
+command = "window.resize.directional"
+arguments = { direction = "right" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.window-resize-up.ctrl-up"
+context = "terminal_visual"
+keys = "ctrl-up"
+command = "window.resize.directional"
+arguments = { direction = "up" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.window-resize-down.ctrl-down"
+context = "terminal_visual"
+keys = "ctrl-down"
+command = "window.resize.directional"
+arguments = { direction = "down" }
 
 [[keymap]]
 id = "builtin.tool-manager.surface.tools-menu-next.j"

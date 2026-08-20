@@ -15,6 +15,8 @@ const BUILTIN_SURFACES: &[&str] = &[
     "explorer",
     "panel",
     "terminal",
+    "terminal_normal",
+    "terminal_visual",
     "focus",
     "editor_mouse",
     "explorer_mouse",

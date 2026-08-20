@@ -20,10 +20,11 @@ use crate::document::{
     TextBuffer, TextEdit, TextEditSet, display_column_at, next_grapheme_boundary,
 };
 use crate::editing::{
-    ArgumentSchema, CommandError, CommandId, CommandInvocation, CommandOutcome, CommandRegistry,
-    CommandSource, CommandSpec, CommandValue, ContextRequirement, EditorMode, EditorOperation,
-    EditorState, EditorTransaction, FocusDirection, InvocationSource, Precondition, TransactionId,
-    UndoPolicy, ViewId, register_builtin_commands,
+    ArgumentSchema, Axis, CommandError, CommandId, CommandInvocation, CommandOutcome,
+    CommandRegistry, CommandSource, CommandSpec, CommandValue, ContextRequirement, EditorMode,
+    EditorOperation, EditorState, EditorTransaction, FocusDirection, InvocationSource,
+    Precondition, RegisterShape, RegisterValue, TransactionId, UndoPolicy, ViewId,
+    register_builtin_commands,
 };
 use crate::filesystem::{
     CheckedResourceIntent, DirectoryEntryKind, DirectoryService, ExplorerWatchBatch,
@@ -79,12 +80,12 @@ use crate::terminal_ui::{
     ExplorerUiRow, ExplorerUiSegment, ExplorerUiState, KeyHintUiRow, KeyHintUiState, KeyInputKind,
     LanguageCompletionState, NativeSurfaceWindowBinding, PickerRow, PickerSurfaceKind,
     PickerUiState, PromptKind, PromptState, PtyScreen, TerminalError, TerminalOptions,
-    TerminalPanelState, TerminalSession, ToolMenuRow, ToolMenuState, UiDiagnostic, UiEvent, UiFold,
-    UiGhostText, UiInlayHint, UiState, UiSyntaxSpan, VisualRowAnchor, VisualRowModel,
-    active_pane_viewport, editor_state_content_width, editor_state_gutter_width,
-    editor_workspace_insets, explorer_panel_width, pane_viewports, picker_geometry,
-    prompt_geometry, render, snap_display_column, snap_display_column_forward,
-    terminal_panel_geometry,
+    TerminalPanelMode, TerminalPanelState, TerminalSession, TerminalTabState, ToolMenuRow,
+    ToolMenuState, UiDiagnostic, UiEvent, UiFold, UiGhostText, UiInlayHint, UiState, UiSyntaxSpan,
+    VisualRowAnchor, VisualRowModel, active_pane_viewport, editor_state_content_width,
+    editor_state_gutter_width, editor_workspace_insets, explorer_panel_width, pane_viewports,
+    picker_geometry, prompt_geometry, render, snap_display_column, snap_display_column_forward,
+    terminal_panel_geometry, terminal_tab_at_column,
 };
 use crate::workspace::{
     Diagnostic, DiagnosticOwner, DiagnosticSeverity, DiagnosticStore, ExecutionSource,
@@ -663,6 +664,89 @@ struct TerminalRuntime {
     running: bool,
     exit_code: Option<u32>,
     truncated: bool,
+    mode: TerminalPanelMode,
+    normal_cursor: Option<(usize, usize)>,
+    visual_anchor: Option<(usize, usize)>,
+    visual_linewise: bool,
+    scroll_offset: usize,
+}
+
+fn terminal_row_end(row: &[crate::terminal_ui::PtyCell]) -> usize {
+    row.iter()
+        .rposition(|cell| !cell.continuation && cell.text != " ")
+        .unwrap_or(0)
+}
+
+fn clamp_terminal_cursor(screen: &PtyScreen, cursor: (usize, usize)) -> (usize, usize) {
+    let row = cursor.0.min(screen.history_len().saturating_sub(1));
+    let column = cursor.1.min(
+        screen
+            .history_row(row)
+            .map_or(0, |cells| cells.len().saturating_sub(1)),
+    );
+    (row, column)
+}
+
+fn terminal_yank_text(
+    screen: &PtyScreen,
+    first: (usize, usize),
+    second: (usize, usize),
+    linewise: bool,
+) -> String {
+    if screen.history_len() == 0 {
+        return String::new();
+    }
+    let (start, end) = if first <= second {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    let mut output = String::new();
+    for row_index in start.0..=end.0.min(screen.history_len().saturating_sub(1)) {
+        let Some(row) = screen.history_row(row_index) else {
+            continue;
+        };
+        let first_column = if linewise || row_index > start.0 {
+            0
+        } else {
+            start.1
+        };
+        let last_column = if linewise || row_index < end.0 {
+            terminal_row_end(row)
+        } else {
+            end.1.min(row.len().saturating_sub(1))
+        };
+        if first_column <= last_column {
+            for cell in row
+                .iter()
+                .take(last_column.saturating_add(1))
+                .skip(first_column)
+            {
+                if !cell.continuation {
+                    output.push_str(&cell.text);
+                }
+            }
+        }
+        if row_index < end.0 || linewise {
+            output.push('\n');
+        }
+    }
+    output
+}
+
+fn keep_terminal_cursor_visible(terminal: &mut TerminalRuntime) {
+    let total = terminal.screen.scrollback_len() + terminal.screen.dimensions().1;
+    let visible = terminal.screen.dimensions().1.max(1);
+    let Some((row, _)) = terminal.normal_cursor else {
+        terminal.scroll_offset = total.saturating_sub(visible);
+        return;
+    };
+    if row < terminal.scroll_offset {
+        terminal.scroll_offset = row;
+    } else if row >= terminal.scroll_offset.saturating_add(visible) {
+        terminal.scroll_offset = row.saturating_add(1).saturating_sub(visible);
+    }
+    terminal.scroll_offset = terminal.scroll_offset.min(total.saturating_sub(visible));
 }
 
 struct RunningTask {
@@ -5015,6 +5099,11 @@ impl InteractiveApplication {
                                             running: true,
                                             exit_code: None,
                                             truncated: false,
+                                            mode: TerminalPanelMode::Input,
+                                            normal_cursor: None,
+                                            visual_anchor: None,
+                                            visual_linewise: false,
+                                            scroll_offset: 0,
                                         },
                                     );
                                     self.terminal_set_revision =
@@ -5080,6 +5169,9 @@ impl InteractiveApplication {
 
     fn process_pty_events(&mut self) {
         if let Ok(events) = self.ptys.poll() {
+            if events.is_empty() {
+                return;
+            }
             for event in events {
                 match event {
                     PtyEvent::Started { id, root_revision } => {
@@ -5106,13 +5198,27 @@ impl InteractiveApplication {
                         }) {
                             terminal.screen.feed_bytes(&bytes);
                             terminal.truncated |= truncated;
+                            if terminal.mode != TerminalPanelMode::Input {
+                                if let Some(cursor) = terminal.normal_cursor {
+                                    terminal.normal_cursor =
+                                        Some(clamp_terminal_cursor(&terminal.screen, cursor));
+                                }
+                                keep_terminal_cursor_visible(terminal);
+                            }
                         }
                     }
                     PtyEvent::Exited { id, code } => {
-                        if let Some(terminal) = self.terminals.get_mut(&id) {
+                        if code == Some(0) {
+                            self.retire_terminal(id, false);
+                        } else if let Some(terminal) = self.terminals.get_mut(&id) {
                             terminal.screen.finish_bytes();
                             terminal.running = false;
                             terminal.exit_code = code;
+                            let diagnostic = code.map_or_else(
+                                || "terminal exited by signal".to_owned(),
+                                |code| format!("terminal exited with code {code}"),
+                            );
+                            self.show_error(diagnostic);
                         }
                     }
                     PtyEvent::Failed { id, message } => {
@@ -5443,6 +5549,95 @@ impl InteractiveApplication {
         self.apply_authoritative_editor_transaction(&transaction)
     }
 
+    fn resize_focused_window(&mut self, direction: FocusDirection) -> Result<(), String> {
+        self.reconcile_editor_windows();
+        if self.terminal_focused {
+            let id = self
+                .active_terminal
+                .ok_or_else(|| "no terminal is selected".to_owned())?;
+            return self
+                .resize_native_window_direction(NativeSurfaceTarget::Terminal(id.0), direction);
+        }
+        if self.ui.explorer_focused {
+            return self.resize_native_window_direction(NativeSurfaceTarget::Explorer, direction);
+        }
+        let (axis, grow) = match direction {
+            FocusDirection::Left => (Axis::Horizontal, false),
+            FocusDirection::Right => (Axis::Horizontal, true),
+            FocusDirection::Up => (Axis::Vertical, true),
+            FocusDirection::Down => (Axis::Vertical, false),
+        };
+        let step =
+            i16::try_from(self.configuration.settings.ui.panes.resize_step).unwrap_or(i16::MAX);
+        let transaction = EditorTransaction::new(self.transaction_id())
+            .with_operation(EditorOperation::ResizePaneOnAxis {
+                axis,
+                delta: if grow { step } else { -step },
+            })
+            .with_undo_policy(UndoPolicy::Ignore);
+        self.apply_authoritative_editor_transaction(&transaction)
+    }
+
+    fn resize_native_window_direction(
+        &mut self,
+        target: NativeSurfaceTarget,
+        direction: FocusDirection,
+    ) -> Result<(), String> {
+        let placement = self.current_native_placement(target)?;
+        let step = i16::try_from(self.configuration.settings.ui.terminal_panel.resize_step)
+            .unwrap_or(i16::MAX);
+        let placement = match placement {
+            WindowPlacement::Docked { edge, size } => {
+                let grow = match (edge, direction) {
+                    (DockEdge::Bottom, FocusDirection::Up)
+                    | (DockEdge::Top, FocusDirection::Down)
+                    | (DockEdge::Left, FocusDirection::Right)
+                    | (DockEdge::Right, FocusDirection::Left) => true,
+                    (DockEdge::Bottom, FocusDirection::Down)
+                    | (DockEdge::Top, FocusDirection::Up)
+                    | (DockEdge::Left, FocusDirection::Left)
+                    | (DockEdge::Right, FocusDirection::Right) => false,
+                    _ => return Ok(()),
+                };
+                WindowPlacement::Docked {
+                    edge,
+                    size: size
+                        .saturating_add_signed(if grow { step } else { -step })
+                        .max(1),
+                }
+            }
+            WindowPlacement::Floating(mut rect) => {
+                match direction {
+                    FocusDirection::Left => {
+                        rect.width = rect.width.saturating_add_signed(-step).max(1)
+                    }
+                    FocusDirection::Right => {
+                        rect.width = rect.width.saturating_add_signed(step).max(1)
+                    }
+                    FocusDirection::Up => {
+                        rect.height = rect.height.saturating_add_signed(step).max(1)
+                    }
+                    FocusDirection::Down => {
+                        rect.height = rect.height.saturating_add_signed(-step).max(1)
+                    }
+                }
+                WindowPlacement::Floating(rect)
+            }
+            WindowPlacement::Tiled => {
+                return Err("native tiled window resizing is unsupported".into());
+            }
+            WindowPlacement::Fullscreen | WindowPlacement::Hidden | WindowPlacement::Overlay(_) => {
+                return Err("focused window cannot be directionally resized".into());
+            }
+        };
+        if matches!(target, NativeSurfaceTarget::Terminal(_))
+            && let WindowPlacement::Docked { size, .. } = placement
+        {
+            self.terminal_panel_height = size;
+        }
+        self.apply_native_window_placement(target, placement)
+    }
+
     fn close_graph_window(&mut self, target: &str) -> Result<(), String> {
         if self.compositor_projection().is_none() {
             return Err("universal compositor projection is missing or stale".into());
@@ -5622,6 +5817,196 @@ impl InteractiveApplication {
         Ok(())
     }
 
+    fn retire_terminal(&mut self, id: PtyId, request_close: bool) {
+        if request_close {
+            let _ = self.ptys.close(id);
+        }
+        let was_active = self.active_terminal == Some(id);
+        let was_focused = was_active && self.terminal_focused;
+        if self.terminals.remove(&id).is_some() {
+            self.terminal_set_revision = self.terminal_set_revision.saturating_add(1);
+        }
+        self.dap_terminal_responses.remove(&id);
+        if was_active {
+            let mut remaining = self.terminals.keys().copied().collect::<Vec<_>>();
+            remaining.sort_unstable_by_key(|candidate| candidate.0);
+            self.active_terminal = remaining.first().copied();
+            self.terminal_focused = was_focused && self.active_terminal.is_some();
+        }
+        self.resize_active_terminal_to_panel();
+        self.sync_terminal_panel();
+        self.sync_explorer_ui();
+        self.ensure_cursor_visible();
+    }
+
+    fn enter_terminal_normal_mode(&mut self) {
+        let Some(id) = self.active_terminal else {
+            return;
+        };
+        let Some(terminal) = self.terminals.get_mut(&id) else {
+            return;
+        };
+        let (column, row) = terminal.screen.cursor();
+        let cursor = if terminal.mode == TerminalPanelMode::Input {
+            (terminal.screen.scrollback_len().saturating_add(row), column)
+        } else {
+            terminal
+                .normal_cursor
+                .unwrap_or((terminal.screen.scrollback_len().saturating_add(row), column))
+        };
+        terminal.mode = TerminalPanelMode::Normal;
+        terminal.normal_cursor = Some(cursor);
+        terminal.visual_anchor = None;
+        terminal.visual_linewise = false;
+        keep_terminal_cursor_visible(terminal);
+        self.cancel_pending_mapping();
+        self.sync_terminal_panel();
+    }
+
+    fn enter_terminal_input_mode(&mut self) {
+        let Some(id) = self.active_terminal else {
+            return;
+        };
+        let Some(terminal) = self.terminals.get_mut(&id) else {
+            return;
+        };
+        terminal.mode = TerminalPanelMode::Input;
+        terminal.normal_cursor = None;
+        terminal.visual_anchor = None;
+        terminal.visual_linewise = false;
+        terminal.scroll_offset = 0;
+        self.cancel_pending_mapping();
+        self.sync_terminal_panel();
+    }
+
+    fn move_terminal_normal_cursor(&mut self, motion: &str) {
+        let Some(id) = self.active_terminal else {
+            return;
+        };
+        let Some(terminal) = self.terminals.get_mut(&id) else {
+            return;
+        };
+        if terminal.mode == TerminalPanelMode::Input {
+            return;
+        }
+        let history_len = terminal.screen.history_len();
+        if history_len == 0 {
+            return;
+        }
+        let mut cursor = clamp_terminal_cursor(
+            &terminal.screen,
+            terminal.normal_cursor.unwrap_or((history_len - 1, 0)),
+        );
+        match motion {
+            "left" => cursor.1 = cursor.1.saturating_sub(1),
+            "right" => {
+                cursor.1 = cursor.1.saturating_add(1).min(
+                    terminal
+                        .screen
+                        .history_row(cursor.0)
+                        .map_or(0, |row| row.len().saturating_sub(1)),
+                );
+            }
+            "up" => cursor.0 = cursor.0.saturating_sub(1),
+            "down" => cursor.0 = cursor.0.saturating_add(1).min(history_len - 1),
+            "line_start" => cursor.1 = 0,
+            "line_end" => {
+                cursor.1 = terminal
+                    .screen
+                    .history_row(cursor.0)
+                    .map_or(0, terminal_row_end);
+            }
+            "first" => cursor = (0, 0),
+            "last" => {
+                cursor.0 = history_len - 1;
+                cursor.1 = terminal
+                    .screen
+                    .history_row(cursor.0)
+                    .map_or(0, terminal_row_end);
+            }
+            _ => {
+                self.show_error("unknown terminal normal-mode motion");
+                return;
+            }
+        }
+        cursor = clamp_terminal_cursor(&terminal.screen, cursor);
+        terminal.normal_cursor = Some(cursor);
+        keep_terminal_cursor_visible(terminal);
+        self.sync_terminal_panel();
+    }
+
+    fn start_terminal_visual(&mut self, linewise: bool) {
+        let Some(id) = self.active_terminal else {
+            return;
+        };
+        let Some(terminal) = self.terminals.get_mut(&id) else {
+            return;
+        };
+        if terminal.mode == TerminalPanelMode::Input {
+            return;
+        }
+        let cursor = terminal.normal_cursor.unwrap_or((
+            terminal.screen.scrollback_len() + terminal.screen.cursor().1,
+            terminal.screen.cursor().0,
+        ));
+        terminal.mode = TerminalPanelMode::Visual;
+        terminal.visual_anchor = Some(cursor);
+        terminal.visual_linewise = linewise;
+        keep_terminal_cursor_visible(terminal);
+        self.sync_terminal_panel();
+    }
+
+    fn yank_terminal_text(&mut self, line: bool) {
+        let Some(id) = self.active_terminal else {
+            return;
+        };
+        let Some(terminal) = self.terminals.get_mut(&id) else {
+            return;
+        };
+        if terminal.mode == TerminalPanelMode::Input {
+            return;
+        }
+        let cursor = clamp_terminal_cursor(
+            &terminal.screen,
+            terminal
+                .normal_cursor
+                .unwrap_or((terminal.screen.history_len().saturating_sub(1), 0)),
+        );
+        let (anchor, linewise) = if line {
+            (cursor, true)
+        } else if terminal.mode == TerminalPanelMode::Visual {
+            (
+                terminal.visual_anchor.unwrap_or(cursor),
+                terminal.visual_linewise,
+            )
+        } else {
+            (cursor, true)
+        };
+        let text = terminal_yank_text(&terminal.screen, anchor, cursor, linewise);
+        if text.is_empty() {
+            return;
+        }
+        terminal.mode = TerminalPanelMode::Normal;
+        terminal.visual_anchor = None;
+        terminal.visual_linewise = false;
+        self.state.registers.set(
+            '"',
+            RegisterValue {
+                text,
+                shape: if linewise {
+                    RegisterShape::Line
+                } else {
+                    RegisterShape::Character
+                },
+            },
+            self.state.policy.registers_enabled,
+            self.state.policy.mirror_named_to_unnamed,
+        );
+        self.ui.notification = Some(self.message("terminal_yanked", &[]));
+        self.ui.notification_error = false;
+        self.sync_terminal_panel();
+    }
+
     fn sync_terminal_panel(&mut self) {
         let Some(id) = self.active_terminal else {
             self.terminal_focused = false;
@@ -5638,9 +6023,58 @@ impl InteractiveApplication {
         };
         let (cursor_column, cursor_row) = terminal.screen.cursor();
         let (columns, rows) = terminal.screen.dimensions();
+        let input_cursor = (
+            cursor_column.min(columns.saturating_sub(1)),
+            terminal
+                .screen
+                .scrollback_len()
+                .saturating_add(cursor_row.min(rows.saturating_sub(1))),
+        );
+        let cursor = match terminal.mode {
+            TerminalPanelMode::Input => terminal.screen.cursor_visible().then_some(input_cursor),
+            TerminalPanelMode::Normal | TerminalPanelMode::Visual => {
+                terminal.normal_cursor.map(|(row, column)| (column, row))
+            }
+        };
+        let selection = (terminal.mode == TerminalPanelMode::Visual).then(|| {
+            (
+                terminal.visual_anchor.unwrap_or((
+                    terminal.screen.scrollback_len().saturating_add(cursor_row),
+                    cursor_column,
+                )),
+                terminal.normal_cursor.unwrap_or((
+                    terminal.screen.scrollback_len().saturating_add(cursor_row),
+                    cursor_column,
+                )),
+                terminal.visual_linewise,
+            )
+        });
+        let history_rows = terminal.screen.history_len();
+        let visible_rows = rows.max(1);
+        let cells_start = if terminal.mode == TerminalPanelMode::Input {
+            history_rows.saturating_sub(visible_rows)
+        } else {
+            terminal
+                .scroll_offset
+                .min(history_rows.saturating_sub(visible_rows))
+        };
+        let cells = terminal.screen.history_window(cells_start, visible_rows);
+        let mut tabs = self
+            .terminals
+            .iter()
+            .map(|(tab_id, tab)| TerminalTabState {
+                id: tab_id.0,
+                profile: tab.profile.clone(),
+                running: tab.running,
+                exit_code: tab.exit_code,
+            })
+            .collect::<Vec<_>>();
+        tabs.sort_by_key(|tab| tab.id);
         self.ui.terminal_panel = Some(TerminalPanelState {
             id: id.0,
             profile: terminal.profile.clone(),
+            tabs,
+            mode: terminal.mode,
             running: terminal.running,
             exit_code: terminal.exit_code,
             truncated: terminal.truncated,
@@ -5648,13 +6082,12 @@ impl InteractiveApplication {
             focused: self.terminal_focused,
             columns: u16::try_from(columns).unwrap_or(u16::MAX),
             rows: u16::try_from(rows).unwrap_or(u16::MAX),
-            cells: terminal.screen.cells().to_vec(),
-            cursor: (columns > 0 && rows > 0 && terminal.screen.cursor_visible()).then_some((
-                u16::try_from(cursor_column.min(columns.saturating_sub(1))).unwrap_or(u16::MAX),
-                u16::try_from(cursor_row.min(rows.saturating_sub(1))).unwrap_or(u16::MAX),
-            )),
+            cells,
+            cells_start,
+            cursor,
+            selection,
             scrollback_lines: terminal.screen.scrollback_len(),
-            scroll_offset: 0,
+            scroll_offset: terminal.scroll_offset,
             requested_height: self.terminal_panel_height,
         });
         self.reconcile_editor_windows();
@@ -8891,6 +9324,11 @@ impl InteractiveApplication {
                 &[("diagnostic", "workspace root identity changed".into())],
             ));
             return;
+        }
+        let validating = self.message("workspace_execution_validating", &[]);
+        if self.ui.notification.as_deref() == Some(validating.as_str()) {
+            self.ui.notification = None;
+            self.ui.notification_error = false;
         }
         self.execution_revalidated = true;
         match pending.action {
@@ -12730,6 +13168,22 @@ impl InteractiveApplication {
                     && self
                         .explorer_window_rect()
                         .is_some_and(|rect| rect_contains_point(rect, column, row));
+                if over_terminal
+                    && key.terminal_mouse() == Some(crate::input::TerminalMouseInput::LeftDown)
+                    && let Some(rect) = self.terminal_window_rect()
+                    && row == rect.y
+                    && let Some(id) = self.ui.terminal_panel.as_ref().and_then(|terminal| {
+                        terminal_tab_at_column(
+                            terminal,
+                            &self.configuration.settings,
+                            rect.width,
+                            column.saturating_sub(rect.x),
+                        )
+                    })
+                {
+                    self.process_effect(AppEffect::TerminalFocus(id));
+                    return;
+                }
                 if over_explorer && let Some(mouse) = key.terminal_mouse() {
                     match mouse {
                         crate::input::TerminalMouseInput::ScrollUp => {
@@ -12790,6 +13244,7 @@ impl InteractiveApplication {
                     && self.terminal_focused
                     && let Some(id) = self.active_terminal
                     && let Some(terminal) = self.terminals.get(&id)
+                    && terminal.mode == TerminalPanelMode::Input
                     && let Some(rect) = self.terminal_window_rect()
                     && let Some(event) = key.terminal_mouse()
                 {
@@ -12833,7 +13288,15 @@ impl InteractiveApplication {
             && self.active_terminal.is_some()
             && self.terminal_window_rect().is_some()
         {
-            return "terminal".into();
+            return self
+                .active_terminal
+                .and_then(|id| self.terminals.get(&id))
+                .map_or("terminal", |terminal| match terminal.mode {
+                    TerminalPanelMode::Input => "terminal",
+                    TerminalPanelMode::Normal => "terminal_normal",
+                    TerminalPanelMode::Visual => "terminal_visual",
+                })
+                .into();
         }
         if self.workspace_proposal.is_some() {
             return "workspace_edit".into();
@@ -12892,7 +13355,12 @@ impl InteractiveApplication {
     }
 
     fn handle_configured_key(&mut self, key: KeyEvent) {
-        if self.terminal_focused {
+        if self.terminal_focused
+            && self
+                .active_terminal
+                .and_then(|id| self.terminals.get(&id))
+                .is_some_and(|terminal| terminal.mode == TerminalPanelMode::Input)
+        {
             let encoded = key.terminal_navigation().map(|key| match key {
                 crate::input::TerminalNavigationKey::Up => crate::terminal_ui::PtyInputKey::Up,
                 crate::input::TerminalNavigationKey::Down => crate::terminal_ui::PtyInputKey::Down,
@@ -13037,6 +13505,7 @@ impl InteractiveApplication {
         if self.terminal_focused
             && let Some(id) = self.active_terminal
             && let Some(terminal) = self.terminals.get(&id)
+            && terminal.mode == TerminalPanelMode::Input
         {
             if let Some(bytes) = crate::terminal_ui::encode_paste(
                 &text,
@@ -13828,6 +14297,11 @@ impl InteractiveApplication {
                     self.show_error(error);
                 }
             }
+            AppEffect::WindowResizeDirectional(direction) => {
+                if let Err(error) = self.resize_focused_window(direction) {
+                    self.show_error(error);
+                }
+            }
             AppEffect::WindowMove { target, x, y } => {
                 let result = self
                     .resolve_native_window_target(&target)
@@ -14258,10 +14732,15 @@ impl InteractiveApplication {
             }
             AppEffect::TerminalToggle => {
                 if self.terminal_focused {
-                    self.terminal_focused = false;
-                    self.sync_terminal_panel();
-                    self.ensure_cursor_visible();
-                } else if self.active_terminal.is_some() {
+                    self.place_active_terminal(WindowPlacement::Hidden);
+                } else if let Some(id) = self.active_terminal {
+                    if self.terminal_window_rect().is_none()
+                        && let Err(error) =
+                            self.show_native_window(NativeSurfaceTarget::Terminal(id.0))
+                    {
+                        self.show_error(error);
+                        return;
+                    }
                     self.terminal_focused = true;
                     self.resize_active_terminal_to_panel();
                     self.sync_terminal_panel();
@@ -14353,6 +14832,29 @@ impl InteractiveApplication {
                             ),
                     )
                     .unwrap_or(policy.height);
+                    if let Some(id) = self.active_terminal {
+                        let target = NativeSurfaceTarget::Terminal(id.0);
+                        let placement = self.current_native_placement(target).ok();
+                        let updated = match placement {
+                            Some(WindowPlacement::Docked { edge, .. }) => {
+                                Some(WindowPlacement::Docked {
+                                    edge,
+                                    size: self.terminal_panel_height,
+                                })
+                            }
+                            Some(WindowPlacement::Floating(mut rect)) => {
+                                rect.height = self.terminal_panel_height;
+                                Some(WindowPlacement::Floating(rect))
+                            }
+                            _ => None,
+                        };
+                        if let Some(placement) = updated
+                            && let Err(error) =
+                                self.apply_native_window_placement(target, placement)
+                        {
+                            self.show_error(error);
+                        }
+                    }
                     self.resize_active_terminal_to_panel();
                     self.sync_terminal_panel();
                     self.sync_explorer_ui();
@@ -14403,21 +14905,18 @@ impl InteractiveApplication {
                     }
                 }
             }
+            AppEffect::TerminalModeNormal => self.enter_terminal_normal_mode(),
+            AppEffect::TerminalModeInput => self.enter_terminal_input_mode(),
+            AppEffect::TerminalNormalMove(motion) => {
+                self.move_terminal_normal_cursor(&motion);
+            }
+            AppEffect::TerminalVisualStart(linewise) => {
+                self.start_terminal_visual(linewise);
+            }
+            AppEffect::TerminalYank { line } => self.yank_terminal_text(line),
             AppEffect::TerminalClose => {
-                if let Some(id) = self.active_terminal.take() {
-                    let _ = self.ptys.close(id);
-                    if self.terminals.remove(&id).is_some() {
-                        self.terminal_set_revision = self.terminal_set_revision.saturating_add(1);
-                    }
-                    self.dap_terminal_responses.remove(&id);
-                    let mut remaining = self.terminals.keys().copied().collect::<Vec<_>>();
-                    remaining.sort_unstable_by_key(|candidate| candidate.0);
-                    self.active_terminal = remaining.first().copied();
-                    self.terminal_focused = self.active_terminal.is_some();
-                    self.resize_active_terminal_to_panel();
-                    self.sync_terminal_panel();
-                    self.sync_explorer_ui();
-                    self.ensure_cursor_visible();
+                if let Some(id) = self.active_terminal {
+                    self.retire_terminal(id, true);
                 }
             }
             AppEffect::PluginValidate => self.load_configured_plugins(),
@@ -19869,8 +20368,8 @@ mod tests {
         ContentTabDiagnostic, ContentTabDiagnosticSeverity, ContentTabKind,
         DocumentationMarkupKind, DocumentationPopupKind, DocumentationPopupState,
         DocumentationSection, ExplorerSegmentRole, ExplorerUiState, PickerSurfaceKind, PromptKind,
-        PtyScreen, UiEvent, UiFold, VisualRowAnchor, VisualRowModel, active_pane_viewport,
-        explorer_panel_width, render, snap_display_column,
+        PtyScreen, TerminalPanelMode, UiEvent, UiFold, VisualRowAnchor, VisualRowModel,
+        active_pane_viewport, explorer_panel_width, render, snap_display_column,
     };
     use tempfile::tempdir;
 
@@ -23088,6 +23587,21 @@ mod tests {
         );
         assert_eq!(app.windows.focused(), Some(focused));
 
+        let width_before_directional = app
+            .compositor_projection()
+            .and_then(|projection| projection.window(focused))
+            .expect("focused before directional resize")
+            .rect
+            .width;
+        app.handle_configured_key("ctrl-right".parse::<KeyEvent>().expect("Ctrl-Right"));
+        let width_after_directional = app
+            .compositor_projection()
+            .and_then(|projection| projection.window(focused))
+            .expect("focused after directional resize")
+            .rect
+            .width;
+        assert!(width_after_directional > width_before_directional);
+
         let before_resize = app.windows.clone();
         app.process_effect(crate::application::AppEffect::WindowResize {
             target: format!("window:{}", focused.0),
@@ -23308,6 +23822,11 @@ mod tests {
                 running: true,
                 exit_code: None,
                 truncated: false,
+                mode: TerminalPanelMode::Input,
+                normal_cursor: None,
+                visual_anchor: None,
+                visual_linewise: false,
+                scroll_offset: 0,
             },
         );
         app.active_terminal = Some(PtyId(7));
@@ -23653,6 +24172,11 @@ mod tests {
                 running: true,
                 exit_code: None,
                 truncated: false,
+                mode: TerminalPanelMode::Input,
+                normal_cursor: None,
+                visual_anchor: None,
+                visual_linewise: false,
+                scroll_offset: 0,
             },
         );
         app.terminals.insert(
@@ -23664,6 +24188,11 @@ mod tests {
                 running: false,
                 exit_code: Some(7),
                 truncated: true,
+                mode: TerminalPanelMode::Input,
+                normal_cursor: None,
+                visual_anchor: None,
+                visual_linewise: false,
+                scroll_offset: 0,
             },
         );
         app.active_terminal = Some(PtyId(1));
@@ -23694,12 +24223,10 @@ mod tests {
         app.process_effect(crate::application::AppEffect::TerminalToggle);
         assert!(!app.terminal_focused);
         assert_eq!(app.active_terminal, Some(PtyId(1)));
-        app.handle_event(crate::terminal_ui::UiEvent::Mouse {
-            key: crate::input::KeyEvent::plain(crate::input::KeyCode::MouseLeftDown),
-            column: 4,
-            row: 16,
-        });
+        assert!(app.terminal_window_rect().is_none());
+        app.process_effect(crate::application::AppEffect::TerminalToggle);
         assert!(app.terminal_focused);
+        assert!(app.terminal_window_rect().is_some());
         assert_eq!(app.active_terminal, Some(PtyId(1)));
         app.process_effect(crate::application::AppEffect::TerminalUnfocus);
 
@@ -23714,6 +24241,32 @@ mod tests {
                 .profile,
             "second"
         );
+        assert_eq!(
+            app.ui
+                .terminal_panel
+                .as_ref()
+                .expect("terminal tabs")
+                .tabs
+                .len(),
+            2
+        );
+        app.handle_configured_key("escape".parse::<KeyEvent>().expect("first Escape"));
+        assert_eq!(app.active_input_context(), "terminal");
+        app.handle_configured_key("escape".parse::<KeyEvent>().expect("second Escape"));
+        assert_eq!(app.active_input_context(), "terminal_normal");
+        app.handle_configured_key("v".parse::<KeyEvent>().expect("visual"));
+        assert_eq!(app.active_input_context(), "terminal_visual");
+        app.handle_configured_key("h".parse::<KeyEvent>().expect("move selection"));
+        app.handle_configured_key("y".parse::<KeyEvent>().expect("yank selection"));
+        assert_eq!(app.active_input_context(), "terminal_normal");
+        assert!(
+            app.state
+                .registers
+                .get('"')
+                .is_some_and(|value| !value.text.is_empty())
+        );
+        app.handle_configured_key("i".parse::<KeyEvent>().expect("terminal input"));
+        assert_eq!(app.active_input_context(), "terminal");
         app.process_effect(crate::application::AppEffect::TerminalCycle(-1));
         assert_eq!(app.active_terminal, Some(PtyId(1)));
         assert!(app.terminals[&PtyId(2)].screen.lines()[0].contains("second"));
@@ -23721,6 +24274,15 @@ mod tests {
         app.process_effect(crate::application::AppEffect::TerminalResize(1));
         assert_eq!(app.terminal_panel_height, 12);
         assert_eq!(app.terminals[&PtyId(1)].screen.dimensions(), (80, 10));
+        app.process_effect(crate::application::AppEffect::WindowResizeDirectional(
+            crate::editing::FocusDirection::Up,
+        ));
+        assert_eq!(app.terminal_panel_height, 14);
+        assert_eq!(app.terminals[&PtyId(1)].screen.dimensions(), (80, 12));
+        app.process_effect(crate::application::AppEffect::WindowResizeDirectional(
+            crate::editing::FocusDirection::Down,
+        ));
+        assert_eq!(app.terminal_panel_height, 12);
         assert_eq!(app.workspace_render_height(), 12);
         app.handle_event(crate::terminal_ui::UiEvent::Resize(60, 20));
         assert_eq!(app.terminals[&PtyId(1)].screen.dimensions(), (60, 10));

@@ -205,7 +205,7 @@ pub fn manifest() -> Result<ApiManifest, String> {
             ),
             (
                 "terminal_emulation".into(),
-                "bounded-xterm-live-external-fixture-v1".into(),
+                "bounded-xterm-tabs-normal-visual-directional-v2".into(),
             ),
         ]),
     })

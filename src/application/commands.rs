@@ -87,6 +87,7 @@ pub enum AppEffect {
         target: String,
         amount: i16,
     },
+    WindowResizeDirectional(FocusDirection),
     WindowMove {
         target: String,
         x: u16,
@@ -193,6 +194,13 @@ pub enum AppEffect {
     TerminalFullscreen,
     TerminalHide,
     TerminalSend(String),
+    TerminalModeNormal,
+    TerminalModeInput,
+    TerminalNormalMove(String),
+    TerminalVisualStart(bool),
+    TerminalYank {
+        line: bool,
+    },
     TerminalUnfocus,
     TerminalClose,
     FormatRun(String),
@@ -1493,6 +1501,27 @@ pub fn register_app_commands(
     )?;
     register(
         registry,
+        "window.resize.directional",
+        "Resize the focused window in one direction",
+        ContextRequirement::Application,
+        ArgumentSchema::default().field("direction", ArgumentType::String, true),
+        |invocation| {
+            let direction = match string_arg(invocation, "direction")? {
+                "left" => FocusDirection::Left,
+                "down" => FocusDirection::Down,
+                "up" => FocusDirection::Up,
+                "right" => FocusDirection::Right,
+                _ => {
+                    return Err(CommandError::InvalidArguments(
+                        "window resize direction must be left, down, up, or right".into(),
+                    ));
+                }
+            };
+            Ok(AppEffect::WindowResizeDirectional(direction))
+        },
+    )?;
+    register(
+        registry,
         "window.move",
         "Move an ordinary floating native window",
         ContextRequirement::Application,
@@ -1673,6 +1702,58 @@ pub fn register_app_commands(
             Ok(AppEffect::TerminalSend(
                 string_arg(invocation, "text")?.to_owned(),
             ))
+        },
+    )?;
+    register(
+        registry,
+        "terminal.mode.normal",
+        "Enter terminal normal mode",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_| AppEffect::TerminalModeNormal,
+    )?;
+    register(
+        registry,
+        "terminal.mode.input",
+        "Return to terminal input mode",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_| AppEffect::TerminalModeInput,
+    )?;
+    register(
+        registry,
+        "terminal.normal.move",
+        "Move the terminal normal-mode cursor",
+        ContextRequirement::Application,
+        ArgumentSchema::default().field("motion", ArgumentType::String, true),
+        |invocation| {
+            Ok(AppEffect::TerminalNormalMove(
+                string_arg(invocation, "motion")?.to_owned(),
+            ))
+        },
+    )?;
+    register(
+        registry,
+        "terminal.visual.start",
+        "Start a terminal visual selection",
+        ContextRequirement::Application,
+        ArgumentSchema::default().field("linewise", ArgumentType::Bool, false),
+        |invocation| {
+            Ok(AppEffect::TerminalVisualStart(
+                optional_bool_arg(invocation, "linewise").unwrap_or(false),
+            ))
+        },
+    )?;
+    register(
+        registry,
+        "terminal.yank",
+        "Yank terminal text into Dust registers",
+        ContextRequirement::Application,
+        ArgumentSchema::default().field("line", ArgumentType::Bool, false),
+        |invocation| {
+            Ok(AppEffect::TerminalYank {
+                line: optional_bool_arg(invocation, "line").unwrap_or(false),
+            })
         },
     )?;
     register(

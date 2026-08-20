@@ -458,7 +458,7 @@ def main() -> None:
                     b"printf '%b' '\\033\\133?2004h\\033\\1331;32mDOCKED-TERMINAL\\033\\1330m\\033\\1350;title\\a\\n'\r",
                     None,
                 ),
-                (1.5, b"\x1f", None),  # allow bounded PTY output, then return focus
+                (1.5, b"\x1f", None),  # allow bounded PTY output, then hide the focused terminal
                 (0.3, b"", (20, 60)),
                 (0.7, b"\x1c", None),  # legacy Ctrl+\\ focuses the same PTY
                 (0.4, b"exit\r", None),
@@ -472,26 +472,30 @@ def main() -> None:
         focused = terminal_screen(snapshots[7], 100, 30)
         focused_rows = focused.splitlines()
         assert "Explorer" in focused and "EDITOR-TOP" in focused
-        assert "TERMINAL #" in focused_rows[20]
+        assert "1: shell" in focused_rows[20]
         assert any("DOCKED-TERMINAL" in row for row in focused_rows[21:29])
         assert "[?2004h" not in focused and "[1;32m" not in focused
         assert "]0;title" not in focused
-        assert "TERMINAL" in focused_rows[29] and "RUNNING" in focused_rows[29]
+        assert "TERMINAL" in focused_rows[29]
+        assert "unsupported" not in focused_rows[29]
         assert focused_rows[21][40] != "⎸"  # terminal spans beneath explorer
 
-        unfocused = terminal_screen(snapshots[8], 100, 30)
-        assert "TERMINAL #" in unfocused.splitlines()[20]
-        assert "EDITOR" in unfocused.splitlines()[29]
-        assert terminal_cursor(snapshots[8], 100, 30)[1] < 20
+        hidden = terminal_screen(snapshots[8], 100, 30)
+        assert "1: shell" not in hidden
+        assert "unsupported" not in hidden
+        assert "EDITOR-TOP" in hidden
+        assert terminal_cursor(snapshots[8], 100, 30)[1] < 30
 
         resized = terminal_screen(snapshots[9], 60, 20)
-        assert "TERMINAL #" in resized.splitlines()[10]
-        assert "EDITOR" in resized.splitlines()[19]
+        assert "1: shell" not in resized
+        assert "EDITOR-TOP" in resized
         refocused = terminal_screen(snapshots[10], 60, 20)
         assert "TERMINAL" in refocused.splitlines()[19]
         assert terminal_cursor(snapshots[10], 60, 20)[1] >= 11
         exited = terminal_screen(snapshots[11], 60, 20)
-        assert "EXIT 0" in exited.splitlines()[19]
+        assert "1: shell" not in exited
+        assert "EXIT 0" not in exited
+        assert "EDITOR-TOP" in exited
         assert_restored(output)
 
     if shutil.which("rust-analyzer"):
