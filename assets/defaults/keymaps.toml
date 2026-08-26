@@ -888,6 +888,16 @@ id = "builtin.dashboard.surface.workspace-file-find.e"
 context = "dashboard"
 keys = "e"
 command = "workspace.file.find"
+[[keymap]]
+id = "builtin.dashboard.surface.explorer-open.leader-f-e"
+context = "dashboard"
+keys = "<leader> f e"
+command = "explorer.open"
+[[keymap]]
+id = "builtin.dashboard.surface.explorer-open.shortcut-f"
+context = "dashboard"
+keys = "f"
+command = "explorer.open"
 
 # Command/search prompt controls.
 [[keymap]]
@@ -2409,6 +2419,36 @@ id = "builtin.tool-manager.surface.tools-activate.enter"
 context = "tool_manager"
 keys = "enter"
 command = "tools.activate"
+
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-runtime-toggle.p"
+context = "tool_manager"
+keys = "p"
+command = "tools.runtime.toggle"
+
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-install.i"
+context = "tool_manager"
+keys = "i"
+command = "tools.install"
+
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-uninstall.u"
+context = "tool_manager"
+keys = "u"
+command = "tools.uninstall"
+
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-lsp-stop.x"
+context = "tool_manager"
+keys = "x"
+command = "tools.lsp.stop"
+
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-lsp-restart.upper-r"
+context = "tool_manager"
+keys = "R"
+command = "tools.lsp.restart"
 
 [[keymap]]
 id = "builtin.tool-manager.surface.tools-refresh.r"

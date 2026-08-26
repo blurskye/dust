@@ -59,13 +59,13 @@ pub fn audit_source(root: &Path) -> Result<ArchitectureAudit, ArchitectureError>
         fs::read_to_string(source.join("packages/mod.rs")).map_err(ArchitectureError::Io)?;
     let registry =
         fs::read_to_string(source.join("packages/registry.rs")).map_err(ArchitectureError::Io)?;
-    if !interactive.contains("PendingExecutionPreflight::ToolInstall")
+    if !interactive.contains("tool_installer.install")
         || !interactive.contains("PendingExecutionPreflight::Lsp")
         || !interactive.contains("PendingExecutionPreflight::DapToolAdapter")
         || !languages.contains("start_session_absolute_with_policy")
         || !languages.contains("PreflightRequired")
         || debugging.contains("discover_executable")
-        || !packages.contains("install_absolute")
+        || !packages.contains("download_checked")
         || !packages.contains("env_clear()")
         || !registry.contains("https_only(true)")
         || !registry.contains("Policy::none()")
@@ -124,53 +124,6 @@ pub fn audit_source(root: &Path) -> Result<ArchitectureAudit, ArchitectureError>
         return Err(ArchitectureError::Violation {
             path: source.join("ai/mod.rs"),
             rule: "AI core must retain typed bounded redacted exact-revision provider ownership",
-        });
-    }
-    let ai_begin =
-        interactive
-            .find("AI_APPLICATION_DOGFOOD_BEGIN")
-            .ok_or(ArchitectureError::Violation {
-                path: source.join("application/interactive.rs"),
-                rule: "AI application bridge audit markers are required",
-            })?;
-    let ai_end =
-        interactive
-            .find("AI_APPLICATION_DOGFOOD_END")
-            .ok_or(ArchitectureError::Violation {
-                path: source.join("application/interactive.rs"),
-                rule: "AI application bridge audit markers are required",
-            })?;
-    let ai_application = &interactive[ai_begin..ai_end];
-    for prohibited in [
-        "std::env",
-        "Command::new",
-        "TcpStream",
-        "reqwest",
-        "PtyService",
-        "VfsWorker",
-        "fs::",
-    ] {
-        if ai_application.contains(prohibited) {
-            return Err(ArchitectureError::Violation {
-                path: source.join("application/interactive.rs"),
-                rule: "AI application dogfood must not gain environment network process PTY or filesystem authority",
-            });
-        }
-    }
-    let ai_poll = interactive.find("application.process_ai_events();");
-    let render_call = interactive.find("let frame = render(");
-    if ai_poll.is_none()
-        || render_call.is_none()
-        || ai_poll >= render_call
-        || !ai_application.contains("VirtualDocumentEditorBridge")
-            && !ai_application.contains("plugin_virtual_editor")
-        || !ai_application.contains("WorkspaceEditProposal::build")
-        || !ai_application.contains("show_workspace_proposal")
-        || !ai_application.contains("UiGhostText")
-    {
-        return Err(ArchitectureError::Violation {
-            path: source.join("application/interactive.rs"),
-            rule: "AI polling must precede rendering and publish only through read-only virtual ghost and proposal gates",
         });
     }
     let filesystem_surface =

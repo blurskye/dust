@@ -11,6 +11,7 @@ use std::{
 };
 
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::{
@@ -42,15 +43,131 @@ impl Default for LspPolicy {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LspServerConfiguration {
+    initialization_options: Option<Value>,
+    settings: Value,
+}
+
+impl LspServerConfiguration {
+    #[must_use]
+    pub fn standard() -> Self {
+        Self {
+            initialization_options: None,
+            settings: json!({}),
+        }
+    }
+
+    #[must_use]
+    pub fn maximum_inlay_hints(server_id: &str) -> Self {
+        match server_id {
+            "rust-analyzer" => {
+                let hints = json!({
+                    "bindingModeHints":{"enable":true},
+                    "chainingHints":{"enable":true},
+                    "closingBraceHints":{"enable":true,"minLines":0},
+                    "closureCaptureHints":{"enable":true},
+                    "closureReturnTypeHints":{"enable":"always"},
+                    "discriminantHints":{"enable":"always"},
+                    "expressionAdjustmentHints":{
+                        "disableReborrows":false,"enable":"always","hideOutsideUnsafe":false,"mode":"prefix"
+                    },
+                    "genericParameterHints":{
+                        "const":{"enable":true},"lifetime":{"enable":true},"type":{"enable":true}
+                    },
+                    "implicitDrops":{"enable":true},
+                    "implicitSizedBoundHints":{"enable":true},
+                    "impliedDynTraitHints":{"enable":true},
+                    "lifetimeElisionHints":{"enable":"always","useParameterNames":true},
+                    "maxLength":null,
+                    "parameterHints":{"enable":true,"missingArguments":{"enable":true}},
+                    "rangeExclusiveHints":{"enable":true},
+                    "renderColons":true,
+                    "typeHints":{
+                        "enable":true,
+                        "hideClosureInitialization":false,
+                        "hideClosureParameter":false,
+                        "hideInferredTypes":false,
+                        "hideNamedConstructor":false,
+                        "location":"inline"
+                    }
+                });
+                Self {
+                    initialization_options: Some(json!({"inlayHints":hints.clone()})),
+                    settings: json!({"rust-analyzer":{"inlayHints":hints}}),
+                }
+            }
+            "typescript-language-server" => {
+                let hints = json!({
+                    "includeInlayEnumMemberValueHints":true,
+                    "includeInlayFunctionLikeReturnTypeHints":true,
+                    "includeInlayFunctionParameterTypeHints":true,
+                    "includeInlayParameterNameHints":"all",
+                    "includeInlayParameterNameHintsWhenArgumentMatchesName":true,
+                    "includeInlayPropertyDeclarationTypeHints":true,
+                    "includeInlayVariableTypeHints":true,
+                    "includeInlayVariableTypeHintsWhenTypeMatchesName":true
+                });
+                let preferences = json!({
+                    "includeInlayEnumMemberValueHints":true,
+                    "includeInlayFunctionLikeReturnTypeHints":true,
+                    "includeInlayFunctionParameterTypeHints":true,
+                    "includeInlayParameterNameHints":"all",
+                    "includeInlayParameterNameHintsWhenArgumentMatchesName":true,
+                    "includeInlayPropertyDeclarationTypeHints":true,
+                    "includeInlayVariableTypeHints":true,
+                    "includeInlayVariableTypeHintsWhenTypeMatchesName":true
+                });
+                Self {
+                    initialization_options: Some(json!({"preferences":preferences})),
+                    settings: json!({
+                        "typescript":{"inlayHints":hints.clone()},
+                        "javascript":{"inlayHints":hints}
+                    }),
+                }
+            }
+            "gopls" => {
+                let hints = json!({
+                    "assignVariableTypes":true,
+                    "compositeLiteralFields":true,
+                    "compositeLiteralTypes":true,
+                    "constantValues":true,
+                    "functionTypeParameters":true,
+                    "parameterNames":true,
+                    "rangeVariableTypes":true
+                });
+                Self {
+                    initialization_options: Some(json!({"hints":hints.clone()})),
+                    settings: json!({"gopls":{"hints":hints}}),
+                }
+            }
+            _ => Self::standard(),
+        }
+    }
+}
+
+impl Default for LspServerConfiguration {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct LspSessionKey {
+    /// Identity/trust owner of the enclosing Dust workspace root.
     pub root_id: u64,
+    /// Canonical adapter project root selected by the generic project resolver.
+    pub project_root: PathBuf,
     pub server_id: String,
 }
 impl LspSessionKey {
     #[must_use]
     pub fn transport_key(&self) -> String {
-        format!("root:{}:{}", self.root_id, self.server_id)
+        let digest = Sha256::digest(self.project_root.as_os_str().as_encoded_bytes());
+        format!(
+            "root:{}:project:{digest:x}:{}",
+            self.root_id, self.server_id
+        )
     }
 }
 
@@ -410,6 +527,13 @@ impl ServerRequestId {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LspProgressKind {
+    Begin,
+    Report,
+    End,
+}
+
 #[derive(Clone, Debug)]
 pub enum LspEvent {
     Starting {
@@ -422,6 +546,9 @@ pub enum LspEvent {
     CapabilitiesChanged {
         server: String,
         capabilities: LspCapabilities,
+    },
+    InlayHintsRefresh {
+        server: String,
     },
     Diagnostics {
         server: String,
@@ -445,8 +572,11 @@ pub enum LspEvent {
     },
     Progress {
         server: String,
+        token: String,
+        kind: LspProgressKind,
         title: String,
         message: String,
+        percentage: Option<u8>,
     },
     Log {
         server: String,
@@ -488,6 +618,7 @@ enum SessionCommand {
         generation: u64,
     },
     Cancel(u64),
+    Configure(LspServerConfiguration),
     Health,
     RespondApplyEdit {
         request_id: ServerRequestId,
@@ -553,9 +684,12 @@ impl LspService {
         session_key: &str,
         definition: &ToolDefinition,
         executable: PathBuf,
+        args: Vec<String>,
         root: PathBuf,
         document: Option<LspDocument>,
         policy: LspPolicy,
+        configuration: LspServerConfiguration,
+        environment: BTreeMap<String, String>,
     ) -> Result<(), LspError> {
         if definition.kind != ToolKind::Lsp {
             return Err(LspError::NotLanguageServer(definition.id.clone()));
@@ -571,8 +705,11 @@ impl LspService {
         let (sender, commands) = mpsc::sync_channel(COMMAND_QUEUE);
         let events = self.events.clone();
         let server = session_key.to_owned();
-        let args = definition.launch_args.clone();
-        let executable_name = definition.executable.clone();
+        let executable_name = executable
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(&definition.executable)
+            .to_owned();
         send_event(
             &events,
             LspEvent::Starting {
@@ -590,6 +727,8 @@ impl LspService {
                     root,
                     document,
                     policy,
+                    configuration,
+                    environment,
                     commands,
                     events,
                 );
@@ -642,6 +781,14 @@ impl LspService {
 
     pub fn cancel(&self, server: &str, generation: u64) -> Result<(), LspError> {
         self.send(server, SessionCommand::Cancel(generation))
+    }
+
+    pub fn configure(
+        &self,
+        server: &str,
+        configuration: LspServerConfiguration,
+    ) -> Result<(), LspError> {
+        self.send(server, SessionCommand::Configure(configuration))
     }
 
     pub fn health(&self, server: &str) -> Result<(), LspError> {
@@ -730,6 +877,8 @@ fn run_session(
     root: PathBuf,
     initial_document: Option<LspDocument>,
     policy: LspPolicy,
+    mut configuration: LspServerConfiguration,
+    environment: BTreeMap<String, String>,
     commands: Receiver<SessionCommand>,
     events: SyncSender<LspEvent>,
 ) {
@@ -742,6 +891,7 @@ fn run_session(
     let mut child = match command
         .args(args)
         .current_dir(&root)
+        .envs(environment)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -815,7 +965,7 @@ fn run_session(
         })
     });
 
-    let initialize = initialize_message(&root);
+    let initialize = initialize_message(&root, configuration.initialization_options.as_ref());
     if let Err(error) = write_content_length_message(&mut stdin, &initialize) {
         send_event(
             &events,
@@ -866,6 +1016,7 @@ fn run_session(
                     logs.len(),
                     &events,
                     &mut stopping,
+                    &mut configuration,
                 ),
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
@@ -898,6 +1049,18 @@ fn run_session(
                         &mut stdin,
                         &json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
                     );
+                    // Configuration-capable servers such as Pyright defer document
+                    // work until the client publishes its initial settings snapshot.
+                    // Dust has no adapter settings here, so the explicit empty object
+                    // is the protocol-correct initial state rather than no state.
+                    let _ = write_content_length_message(
+                        &mut stdin,
+                        &json!({
+                            "jsonrpc":"2.0",
+                            "method":"workspace/didChangeConfiguration",
+                            "params":{"settings":configuration.settings.clone()}
+                        }),
+                    );
                     for document in documents.values() {
                         send_open(&mut stdin, document);
                         opened_documents.insert(document.uri());
@@ -919,6 +1082,7 @@ fn run_session(
                         &base_capabilities,
                         &mut capabilities,
                         &mut dynamic_registrations,
+                        &configuration,
                     );
                 } else if let Some(id) = message.get("id").and_then(Value::as_i64)
                     && let Some(request) = pending.remove(&id)
@@ -1005,6 +1169,7 @@ fn handle_command(
     recent_logs: usize,
     events: &SyncSender<LspEvent>,
     stopping: &mut bool,
+    configuration: &mut LspServerConfiguration,
 ) {
     match command {
         SessionCommand::Sync(document) => {
@@ -1126,6 +1291,19 @@ fn handle_command(
                 );
             }
         }
+        SessionCommand::Configure(updated) => {
+            *configuration = updated;
+            if initialized {
+                let _ = write_content_length_message(
+                    stdin,
+                    &json!({
+                        "jsonrpc":"2.0",
+                        "method":"workspace/didChangeConfiguration",
+                        "params":{"settings":configuration.settings.clone()}
+                    }),
+                );
+            }
+        }
         SessionCommand::Cancel(generation) => {
             let ids = pending
                 .iter()
@@ -1169,8 +1347,8 @@ fn handle_command(
     }
 }
 
-fn initialize_message(root: &Path) -> Value {
-    json!({
+fn initialize_message(root: &Path, initialization_options: Option<&Value>) -> Value {
+    let mut message = json!({
         "jsonrpc":"2.0", "id":1, "method":"initialize",
         "params":{
             "processId":std::process::id(),
@@ -1196,11 +1374,16 @@ fn initialize_message(root: &Path) -> Value {
                     "rename":{"dynamicRegistration":true,"prepareSupport":false},
                     "formatting":{"dynamicRegistration":true},
                     "rangeFormatting":{"dynamicRegistration":true},
-                    "codeAction":{"dynamicRegistration":true,"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix","refactor","source"]}}}
+                    "codeAction":{"dynamicRegistration":true,"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix","refactor","source"]}}},
+                    "inlayHint":{"dynamicRegistration":true}
                 }
             }
         }
-    })
+    });
+    if let Some(options) = initialization_options {
+        message["params"]["initializationOptions"] = options.clone();
+    }
+    message
 }
 
 fn initialize_capabilities(result: Option<&Value>) -> Result<LspCapabilities, String> {
@@ -1481,7 +1664,10 @@ fn handle_response(
 
 fn normalize_result(feature: &LspFeature, result: &Value) -> Result<LspFeatureResult, String> {
     if result.is_null() {
-        return Ok(LspFeatureResult::Empty);
+        return Ok(match feature {
+            LspFeature::InlayHints { .. } => LspFeatureResult::InlayHints(Vec::new()),
+            _ => LspFeatureResult::Empty,
+        });
     }
     match feature {
         LspFeature::Hover => Ok(LspFeatureResult::Hover(hover_result(result))),
@@ -1673,7 +1859,7 @@ fn inlay_hints(value: &Value) -> Vec<LspInlayHint> {
         .take(10_000)
         .filter_map(|item| {
             let value = item.get("label")?;
-            let label = if let Some(text) = value.as_str() {
+            let label: String = if let Some(text) = value.as_str() {
                 text.to_owned()
             } else {
                 value
@@ -1682,10 +1868,25 @@ fn inlay_hints(value: &Value) -> Vec<LspInlayHint> {
                     .filter_map(|part| part.get("value").and_then(Value::as_str))
                     .collect()
             };
-            Some(LspInlayHint {
-                position: parse_position(item.get("position")?)?,
-                label: sanitize_log(&label, 4096),
-            })
+            let mut label = sanitize_log(&label, 4096);
+            if item
+                .get("paddingLeft")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                && !label.starts_with(char::is_whitespace)
+            {
+                label.insert(0, ' ');
+            }
+            if item
+                .get("paddingRight")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                && !label.ends_with(char::is_whitespace)
+            {
+                label.push(' ');
+            }
+            let position = parse_position(item.get("position")?)?;
+            (!label.is_empty()).then_some(LspInlayHint { position, label })
         })
         .collect()
 }
@@ -2030,6 +2231,7 @@ fn handle_server_message(
     base_capabilities: &LspCapabilities,
     capabilities: &mut LspCapabilities,
     registrations: &mut HashMap<String, String>,
+    configuration: &LspServerConfiguration,
 ) {
     let method = message
         .get("method")
@@ -2058,23 +2260,9 @@ fn handle_server_message(
             );
         }
         "$/progress" => {
-            let value = message.pointer("/params/value").unwrap_or(&Value::Null);
-            send_event(
-                events,
-                LspEvent::Progress {
-                    server: server.into(),
-                    title: value
-                        .get("title")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .into(),
-                    message: value
-                        .get("message")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .into(),
-                },
-            );
+            if let Some(event) = lsp_progress_event(server, message) {
+                send_event(events, event);
+            }
         }
         "window/logMessage" | "window/showMessage" => {
             let text = sanitize_log(
@@ -2157,6 +2345,21 @@ fn handle_server_message(
         }
         return;
     }
+    if method == "workspace/inlayHint/refresh" {
+        send_event(
+            events,
+            LspEvent::InlayHintsRefresh {
+                server: server.into(),
+            },
+        );
+        if let Some(id) = message.get("id") {
+            let _ = write_content_length_message(
+                stdin,
+                &json!({"jsonrpc":"2.0","id":id,"result":null}),
+            );
+        }
+        return;
+    }
     if method == "workspace/applyEdit" {
         let request_id = message.get("id").and_then(ServerRequestId::from_value);
         let edit = message
@@ -2189,7 +2392,25 @@ fn handle_server_message(
     }
     if let Some(id) = message.get("id") {
         let response = match method {
-            "workspace/configuration" => json!([]),
+            "workspace/configuration" => Value::Array(
+                message
+                    .pointer("/params/items")
+                    .and_then(Value::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .take(256)
+                            .map(|item| {
+                                let section = item.get("section").and_then(Value::as_str);
+                                section
+                                    .and_then(|section| configuration.settings.get(section))
+                                    .cloned()
+                                    .unwrap_or(Value::Null)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            ),
             "workspace/workspaceFolders" => Value::Null,
             "window/workDoneProgress/create"
             | "client/registerCapability"
@@ -2315,6 +2536,47 @@ fn sanitize_log(text: &str, limit: usize) -> String {
         .filter(|character| !character.is_control() || matches!(character, '\n' | '\t'))
         .take(limit)
         .collect()
+}
+
+fn lsp_progress_event(server: &str, message: &Value) -> Option<LspEvent> {
+    let token = message.pointer("/params/token").and_then(|token| {
+        token
+            .as_str()
+            .map(str::to_owned)
+            .or_else(|| token.as_i64().map(|value| value.to_string()))
+            .or_else(|| token.as_u64().map(|value| value.to_string()))
+    })?;
+    if token.is_empty() || token.chars().count() > 128 || token.chars().any(char::is_control) {
+        return None;
+    }
+    let value = message.pointer("/params/value")?;
+    let kind = match value.get("kind").and_then(Value::as_str)? {
+        "begin" => LspProgressKind::Begin,
+        "report" => LspProgressKind::Report,
+        "end" => LspProgressKind::End,
+        _ => return None,
+    };
+    let one_line = |field: &str| {
+        sanitize_log(
+            value.get(field).and_then(Value::as_str).unwrap_or_default(),
+            512,
+        )
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+    };
+    Some(LspEvent::Progress {
+        server: server.into(),
+        token,
+        kind,
+        title: one_line("title"),
+        message: one_line("message"),
+        percentage: value
+            .get("percentage")
+            .and_then(Value::as_u64)
+            .filter(|percentage| *percentage <= 100)
+            .map(|percentage| percentage as u8),
+    })
 }
 
 fn send_event(events: &SyncSender<LspEvent>, event: LspEvent) {
@@ -2578,11 +2840,12 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        LspDocument, LspEvent, LspFeature, LspFeatureResult, LspMarkupKind, LspPolicy, LspService,
-        PositionEncoding, SyncKind, completion_items, file_uri, hover_result, incremental_change,
-        initialize_capabilities, language_id_for_path, path_from_file_uri, workspace_edit,
+        LspDocument, LspEvent, LspFeature, LspFeatureResult, LspMarkupKind, LspPolicy,
+        LspProgressKind, LspService, PositionEncoding, SyncKind, completion_items, file_uri,
+        hover_result, incremental_change, initialize_capabilities, initialize_message, inlay_hints,
+        language_id_for_path, lsp_progress_event, path_from_file_uri, workspace_edit,
     };
-    use crate::packages::{ToolDefinition, ToolKind};
+    use crate::packages::{ToolDefinition, ToolKind, tool_launch_environment};
 
     #[test]
     fn language_and_uri_mapping_are_deterministic() {
@@ -2604,6 +2867,47 @@ mod tests {
     }
 
     #[test]
+    fn work_done_progress_preserves_token_kind_and_bounded_one_line_content() {
+        let event = lsp_progress_event(
+            "root:1:rust-analyzer",
+            &json!({
+                "method":"$/progress",
+                "params":{
+                    "token":"cargo-check",
+                    "value":{
+                        "kind":"report",
+                        "title":"Building\ncrate",
+                        "message":"ring\u{001b}[31m (lib)",
+                        "percentage":72
+                    }
+                }
+            }),
+        )
+        .expect("progress event");
+        assert!(matches!(
+            event,
+            LspEvent::Progress {
+                server,
+                token,
+                kind: LspProgressKind::Report,
+                title,
+                message,
+                percentage: Some(72),
+            } if server == "root:1:rust-analyzer"
+                && token == "cargo-check"
+                && title == "Building crate"
+                && message == "ring[31m (lib)"
+        ));
+        assert!(
+            lsp_progress_event(
+                "server",
+                &json!({"params":{"token":{},"value":{"kind":"begin"}}})
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
     fn hover_markup_kind_sections_and_range_are_preserved_and_sanitized() {
         let hover = hover_result(&json!({
             "contents":{"kind":"markdown","value":"**type**\u{001b}[31m"},
@@ -2613,6 +2917,93 @@ mod tests {
         assert_eq!(hover.sections[0].kind, LspMarkupKind::Markdown);
         assert_eq!(hover.sections[0].value, "**type**");
         assert_eq!(hover.range.unwrap().start.line, 1);
+    }
+
+    #[test]
+    fn initialization_advertises_inlay_hints_and_parsing_preserves_inline_padding() {
+        let initialize = initialize_message(Path::new("/tmp/project"), None);
+        assert_eq!(
+            initialize.pointer("/params/capabilities/textDocument/inlayHint/dynamicRegistration"),
+            Some(&json!(true))
+        );
+        let hints = inlay_hints(&json!([{
+            "position":{"line":2,"character":7},
+            "label":[{"value":":"},{"value":" Result"}],
+            "paddingLeft":true,
+            "paddingRight":true
+        }]));
+        assert_eq!(hints.len(), 1);
+        assert_eq!(hints[0].position.line, 2);
+        assert_eq!(hints[0].label, " : Result ");
+    }
+
+    #[test]
+    fn maximum_inlay_hint_profiles_are_adapter_specific_and_exhaustive() {
+        let rust = super::LspServerConfiguration::maximum_inlay_hints("rust-analyzer");
+        let initialize = initialize_message(
+            Path::new("/tmp/project"),
+            rust.initialization_options.as_ref(),
+        );
+        assert_eq!(
+            initialize.pointer(
+                "/params/initializationOptions/inlayHints/expressionAdjustmentHints/enable"
+            ),
+            Some(&json!("always"))
+        );
+        assert_eq!(
+            initialize.pointer("/params/initializationOptions/inlayHints/maxLength"),
+            Some(&Value::Null)
+        );
+        assert_eq!(
+            rust.settings
+                .pointer("/rust-analyzer/inlayHints/closingBraceHints/minLines"),
+            Some(&json!(0))
+        );
+
+        let typescript =
+            super::LspServerConfiguration::maximum_inlay_hints("typescript-language-server");
+        assert_eq!(
+            typescript.initialization_options.as_ref().and_then(
+                |settings| settings.pointer("/preferences/includeInlayParameterNameHints")
+            ),
+            Some(&json!("all"))
+        );
+        assert_eq!(
+            typescript
+                .settings
+                .pointer("/typescript/inlayHints/includeInlayFunctionLikeReturnTypeHints"),
+            Some(&json!(true))
+        );
+
+        let gopls = super::LspServerConfiguration::maximum_inlay_hints("gopls");
+        assert_eq!(
+            gopls
+                .settings
+                .pointer("/gopls/hints/compositeLiteralFields"),
+            Some(&json!(true))
+        );
+        assert_eq!(
+            super::LspServerConfiguration::maximum_inlay_hints("clangd"),
+            super::LspServerConfiguration::standard()
+        );
+        assert!(matches!(
+            super::normalize_result(
+                &LspFeature::InlayHints {
+                    range: super::LspRange {
+                        start: super::LspPosition {
+                            line: 0,
+                            character: 0,
+                        },
+                        end: super::LspPosition {
+                            line: 1,
+                            character: 0,
+                        },
+                    },
+                },
+                &Value::Null,
+            ),
+            Ok(LspFeatureResult::InlayHints(items)) if items.is_empty()
+        ));
     }
 
     #[test]
@@ -2695,16 +3086,21 @@ while True:
         send({'jsonrpc':'2.0','id':message['id'],'result':{'capabilities':{
           'positionEncoding':'utf-8','textDocumentSync':{'change':2},'hoverProvider':True,
           'completionProvider':{},'definitionProvider':True,'referencesProvider':True,
-          'documentFormattingProvider':True,'renameProvider':True,'codeActionProvider':True}}})
+          'documentFormattingProvider':True,'renameProvider':True,'codeActionProvider':True,
+          'inlayHintProvider':True}}})
     elif method=='textDocument/didOpen':
         d=message['params']['textDocument']; send({'jsonrpc':'2.0','method':'textDocument/publishDiagnostics','params':{
           'uri':d['uri'],'version':d['version'],'diagnostics':[{'range':{'start':{'line':0,'character':0},'end':{'line':0,'character':1}},'severity':2,'message':'fake warning'}]}})
         send({'jsonrpc':'2.0','id':99,'method':'workspace/applyEdit','params':{'label':'fake edit','edit':{'changes':{d['uri']:[{
           'range':{'start':{'line':0,'character':0},'end':{'line':0,'character':1}},'newText':'b'}]}}}})
+        send({'jsonrpc':'2.0','id':98,'method':'workspace/inlayHint/refresh','params':{}})
+        send({'jsonrpc':'2.0','id':97,'method':'workspace/configuration','params':{'items':[{'section':'fake.one'},{'section':'fake.two'}]}})
     elif method=='textDocument/hover':
         send({'jsonrpc':'2.0','id':message['id'],'result':{'contents':{'kind':'markdown','value':'fake hover'}}})
     elif method=='textDocument/completion':
         send({'jsonrpc':'2.0','id':message['id'],'result':[{'label':'fakeItem','insertText':'fakeItem'}]})
+    elif method=='textDocument/inlayHint':
+        send({'jsonrpc':'2.0','id':message['id'],'result':[{'position':{'line':0,'character':1},'label':': str','paddingRight':True}]})
     elif method=='shutdown': send({'jsonrpc':'2.0','id':message['id'],'result':None})
     elif method=='exit': break
 "#,
@@ -2716,12 +3112,18 @@ while True:
             kind: ToolKind::Lsp,
             languages: vec!["rust".into()],
             executable: python.display().to_string(),
+            version: None,
+            release: None,
             launch_args: vec![
                 script.display().to_string(),
                 trace_path.display().to_string(),
             ],
-            install_program: None,
-            install_args: Vec::new(),
+            probe_args: Vec::new(),
+            debug_program_policy: crate::packages::DebugProgramPolicy::default(),
+            project_root_markers: vec!["Cargo.toml".into()],
+            project_root_strategy: crate::filesystem::ProjectRootStrategy::Cargo,
+            install: None,
+            pins: Vec::new(),
         };
         let document = LspDocument {
             path: workspace.path().join("main.rs"),
@@ -2735,19 +3137,25 @@ while True:
                 &definition.id,
                 &definition,
                 python.clone(),
+                definition.launch_args.clone(),
                 workspace.path().into(),
                 Some(document.clone()),
                 LspPolicy {
                     request_timeout: Duration::from_millis(100),
                     maximum_log_lines: 20,
                 },
+                super::LspServerConfiguration::standard(),
+                tool_launch_environment(&definition),
             )
             .expect("start");
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut running = false;
         let mut diagnostics_seen = false;
         let mut apply_edit_seen = false;
-        while Instant::now() < deadline && !(running && diagnostics_seen && apply_edit_seen) {
+        let mut inlay_refresh_seen = false;
+        while Instant::now() < deadline
+            && !(running && diagnostics_seen && apply_edit_seen && inlay_refresh_seen)
+        {
             if let Some(event) = service.try_event() {
                 match event {
                     LspEvent::Running { capabilities, .. } => {
@@ -2758,6 +3166,10 @@ while True:
                     LspEvent::Diagnostics { diagnostics, .. } => {
                         assert_eq!(diagnostics[0].message, "fake warning");
                         diagnostics_seen = true;
+                    }
+                    LspEvent::InlayHintsRefresh { server } => {
+                        assert_eq!(server, "fake");
+                        inlay_refresh_seen = true;
                     }
                     LspEvent::ApplyEditRequest {
                         server,
@@ -2782,7 +3194,7 @@ while True:
                 thread::sleep(Duration::from_millis(10));
             }
         }
-        assert!(running && diagnostics_seen && apply_edit_seen);
+        assert!(running && diagnostics_seen && apply_edit_seen && inlay_refresh_seen);
         service
             .request(
                 "fake",
@@ -2802,6 +3214,26 @@ while True:
             )
             .expect("completion");
         service
+            .request(
+                "fake",
+                LspFeature::InlayHints {
+                    range: super::LspRange {
+                        start: super::LspPosition {
+                            line: 0,
+                            character: 0,
+                        },
+                        end: super::LspPosition {
+                            line: 0,
+                            character: 5,
+                        },
+                    },
+                },
+                document.clone(),
+                crate::document::ByteOffset(0),
+                14,
+            )
+            .expect("inlay hints");
+        service
             .sync(
                 "fake",
                 LspDocument {
@@ -2813,7 +3245,8 @@ while True:
             .expect("sync");
         let mut hover = false;
         let mut completion = false;
-        while Instant::now() < deadline && !(hover && completion) {
+        let mut inlay = false;
+        while Instant::now() < deadline && !(hover && completion && inlay) {
             if let Some(LspEvent::Result {
                 generation, result, ..
             }) = service.try_event()
@@ -2828,13 +3261,16 @@ while True:
                     (12, LspFeatureResult::Completion(items)) => {
                         completion = items[0].label == "fakeItem";
                     }
+                    (14, LspFeatureResult::InlayHints(items)) => {
+                        inlay = items[0].label == ": str ";
+                    }
                     _ => {}
                 }
             } else {
                 thread::sleep(Duration::from_millis(10));
             }
         }
-        assert!(hover && completion);
+        assert!(hover && completion && inlay);
         service
             .request(
                 "fake",
@@ -2859,11 +3295,38 @@ while True:
             }
         }
         assert!(timed_out);
+        service
+            .configure(
+                "fake",
+                super::LspServerConfiguration::maximum_inlay_hints("rust-analyzer"),
+            )
+            .expect("configure maximum inlay hints");
+        thread::sleep(Duration::from_millis(30));
         service.close("fake", document.uri()).expect("close");
         service.stop("fake").expect("stop");
         let trace = std::fs::read_to_string(trace_path).expect("trace");
         assert!(trace.contains("textDocument/didClose"));
         assert!(trace.contains("test rejection"));
+        assert!(
+            trace
+                .lines()
+                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                .any(|message| {
+                    message.get("id") == Some(&json!(97))
+                        && message.get("result") == Some(&json!([null, null]))
+                })
+        );
+        assert!(
+            trace
+                .lines()
+                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                .any(|message| {
+                    message.get("method") == Some(&json!("workspace/didChangeConfiguration"))
+                        && message.pointer(
+                            "/params/settings/rust-analyzer/inlayHints/implicitDrops/enable",
+                        ) == Some(&json!(true))
+                })
+        );
         let change = trace
             .lines()
             .filter_map(|line| serde_json::from_str::<Value>(line).ok())

@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path, time::Instant};
 
 use crate::configuration::{
     AmbiguousWidth, BorderStyle, CommandLineConfig, Config, CursorShape, DashboardConfig,
@@ -26,8 +26,6 @@ pub enum PromptKind {
     SearchBackward,
     WorkspaceTrust,
     GitReset,
-    AiChat,
-    AiComposer,
 }
 
 impl PromptKind {
@@ -38,8 +36,6 @@ impl PromptKind {
             Self::SearchForward => &text.search_forward_title,
             Self::SearchBackward => &text.search_backward_title,
             Self::WorkspaceTrust | Self::GitReset => &text.workspace_trust_title,
-            Self::AiChat => &text.ai_chat_title,
-            Self::AiComposer => &text.ai_composer_title,
         }
     }
 
@@ -50,8 +46,6 @@ impl PromptKind {
             Self::SearchForward => &text.search_forward_marker,
             Self::SearchBackward => &text.search_backward_marker,
             Self::WorkspaceTrust | Self::GitReset => &text.workspace_trust_marker,
-            Self::AiChat => &text.ai_chat_marker,
-            Self::AiComposer => &text.ai_composer_marker,
         }
     }
 }
@@ -99,9 +93,43 @@ pub struct ToolMenuRow {
     pub name: String,
     pub kind: String,
     pub languages: String,
-    pub status: String,
+    pub version: String,
+    pub release: String,
+    pub runtime: String,
+    pub lifecycle: String,
+    pub executable: String,
+    pub note: String,
+    pub sessions: Vec<String>,
+    pub managed_status: String,
+    pub nix_status: String,
     pub installed: bool,
     pub can_install: bool,
+    pub can_uninstall: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ToolRuntimeOption {
+    pub source: String,
+    /// Exact managed catalog pin; PATH and the fixed Nix workspace use `None`.
+    pub version_pin: Option<String>,
+    pub label: String,
+    pub version: String,
+    pub release: String,
+    pub location: String,
+    pub status: String,
+    pub note: String,
+    pub selected: bool,
+    pub installed: bool,
+    pub installable: bool,
+    pub uninstallable: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ToolRuntimePickerState {
+    pub server_id: String,
+    pub selected: usize,
+    pub scroll: usize,
+    pub options: Vec<ToolRuntimeOption>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -205,6 +233,7 @@ impl DocumentationPopupState {
 pub struct LanguageCompletionState {
     pub items: Vec<CompletionItem>,
     pub selected: usize,
+    pub scroll: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -381,6 +410,7 @@ pub struct ToolMenuState {
     pub selected: usize,
     pub scroll: usize,
     pub rows: Vec<ToolMenuRow>,
+    pub runtime_picker: Option<ToolRuntimePickerState>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -486,6 +516,18 @@ pub struct UiGitSign {
     pub kind: UiGitSignKind,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UiLspProgress {
+    pub(crate) server_key: String,
+    pub(crate) token: String,
+    pub server: String,
+    pub title: String,
+    pub message: String,
+    pub percentage: Option<u8>,
+    pub done: bool,
+    pub(crate) completed_at: Option<Instant>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct UiState {
     pub dashboard: bool,
@@ -522,6 +564,8 @@ pub struct UiState {
     pub git_signs: Vec<UiGitSign>,
     pub lsp_folds: Vec<UiFold>,
     pub lsp_server: Option<String>,
+    pub lsp_progress: Vec<UiLspProgress>,
+    pub lsp_progress_frame: usize,
     pub syntax_folds: Vec<UiFold>,
     pub large_file_buffers: Vec<crate::editing::BufferId>,
 }
@@ -781,6 +825,20 @@ pub fn render(
             workspace.map_or(0, |bounds| bounds.x),
             content_width,
             workspace_height,
+        );
+    }
+    if config.ui.lsp_progress.enabled && !ui.lsp_progress.is_empty() {
+        render_lsp_progress(
+            &mut frame,
+            &ui.lsp_progress,
+            ui.lsp_progress_frame,
+            config,
+            workspace.unwrap_or(WindowRect {
+                x: 0,
+                y: 0,
+                width,
+                height: workspace_height,
+            }),
         );
     }
     let message = ui
@@ -1682,10 +1740,20 @@ fn render_language_completion(
         .len()
         .min(usize::from(config.ui.command_line.completion_max_rows))
         .min(usize::from(height.saturating_sub(1)));
-    let content_width = completion
-        .items
-        .iter()
-        .take(rows)
+    if rows == 0 {
+        return;
+    }
+    let selected = completion.selected.min(completion.items.len() - 1);
+    let maximum_scroll = completion.items.len().saturating_sub(rows);
+    let mut scroll = completion.scroll.min(maximum_scroll);
+    if selected < scroll {
+        scroll = selected;
+    } else if selected >= scroll.saturating_add(rows) {
+        scroll = selected.saturating_add(1).saturating_sub(rows);
+    }
+    let visible = completion.items.iter().skip(scroll).take(rows);
+    let content_width = visible
+        .clone()
         .map(|item| {
             text_width(&item.label, config.editor.ambiguous_width)
                 .saturating_add(config.ui.command_line.completion_detail_gap.into())
@@ -1700,14 +1768,14 @@ fn render_language_completion(
         .min(width);
     let left = cursor_x.min(width.saturating_sub(panel_width));
     let below = cursor_y.saturating_add(1);
-    let top = if below.saturating_add(u16::try_from(rows).unwrap_or(0)) < height {
+    let top = if below.saturating_add(u16::try_from(rows).unwrap_or(0)) <= height {
         below
     } else {
         cursor_y.saturating_sub(u16::try_from(rows).unwrap_or(0))
     };
-    for (row, item) in completion.items.iter().take(rows).enumerate() {
+    for (row, item) in visible.enumerate() {
         let y = top.saturating_add(u16::try_from(row).unwrap_or(0));
-        let style = if row == completion.selected {
+        let style = if scroll.saturating_add(row) == selected {
             Style::Selection
         } else {
             Style::Status
@@ -1837,6 +1905,9 @@ fn truncate_content_title(
     maximum_width: usize,
     ambiguous_width: AmbiguousWidth,
 ) -> String {
+    if maximum_width == 0 {
+        return String::new();
+    }
     if text_width(title, ambiguous_width) <= maximum_width {
         return title.to_owned();
     }
@@ -1854,6 +1925,99 @@ fn truncate_content_title(
     }
     suffix.reverse();
     format!("{ellipsis}{}", suffix.concat())
+}
+
+fn render_lsp_progress(
+    frame: &mut Frame,
+    progress: &[UiLspProgress],
+    spinner_frame: usize,
+    config: &Config,
+    bounds: WindowRect,
+) {
+    let policy = &config.ui.lsp_progress;
+    let available_rows = bounds.height.saturating_sub(policy.rows_from_bottom);
+    let row_count = usize::from(policy.max_rows.min(available_rows)).min(progress.len());
+    if row_count == 0 {
+        return;
+    }
+    let available_width = bounds.width.saturating_sub(policy.right_margin);
+    let maximum_width = usize::from(policy.max_width.min(available_width));
+    if maximum_width == 0 {
+        return;
+    }
+    let spinner = &policy.spinner_frames[spinner_frame % policy.spinner_frames.len()];
+    let right = bounds
+        .x
+        .saturating_add(bounds.width)
+        .saturating_sub(policy.right_margin);
+    let top = bounds
+        .y
+        .saturating_add(bounds.height)
+        .saturating_sub(policy.rows_from_bottom)
+        .saturating_sub(u16::try_from(row_count).unwrap_or(u16::MAX));
+    let first = progress.len().saturating_sub(row_count);
+
+    for (row, item) in progress[first..].iter().enumerate() {
+        let marker = if item.done {
+            &policy.completed_symbol
+        } else {
+            spinner
+        };
+        let activity = match (item.title.is_empty(), item.message.is_empty()) {
+            (false, false) if item.title != item.message => {
+                format!("{}: {}", item.title, item.message)
+            }
+            (false, _) => item.title.clone(),
+            (_, false) => item.message.clone(),
+            _ => "Working".into(),
+        };
+        let mut server = truncate_content_title(
+            &item.server,
+            maximum_width.saturating_sub(2),
+            config.editor.ambiguous_width,
+        );
+        if server.is_empty() {
+            server = "LSP".into();
+        }
+        let server_width = text_width(&server, config.editor.ambiguous_width);
+        let mut percentage = item
+            .percentage
+            .map(|percentage| format!("{percentage:>3}% "))
+            .unwrap_or_default();
+        let fixed = 2_usize
+            .saturating_add(server_width)
+            .saturating_add(text_width(&percentage, config.editor.ambiguous_width));
+        if fixed > maximum_width {
+            percentage.clear();
+        }
+        let suffix_width =
+            server_width.saturating_add(text_width(&percentage, config.editor.ambiguous_width));
+        let activity_width = maximum_width.saturating_sub(3).saturating_sub(suffix_width);
+        let activity =
+            truncate_content_title(&activity, activity_width, config.editor.ambiguous_width);
+        let line = if activity.is_empty() {
+            format!("{marker} {percentage}{server}")
+        } else {
+            format!("{marker} {activity} {percentage}{server}")
+        };
+        let line_width = u16::try_from(text_width(&line, config.editor.ambiguous_width))
+            .unwrap_or(u16::MAX)
+            .min(available_width);
+        let x = right.saturating_sub(line_width);
+        let y = top.saturating_add(u16::try_from(row).unwrap_or(u16::MAX));
+        frame
+            .grid
+            .put_text_clipped(x, y, &line, Style::Muted, right);
+        frame.grid.put_text(x, y, marker, Style::Accent);
+        let server_x = right.saturating_sub(u16::try_from(server_width).unwrap_or(u16::MAX));
+        frame.grid.put_text_clipped(
+            server_x,
+            y,
+            &server,
+            Style::Accent,
+            right.saturating_sub(server_x),
+        );
+    }
 }
 
 fn formatted_content_tab(
@@ -2379,6 +2543,7 @@ pub struct VisualRowModel<'a> {
     content_width: usize,
     tab_width: usize,
     ambiguous_width: AmbiguousWidth,
+    inlay_widths: BTreeMap<ByteOffset, usize>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2407,6 +2572,7 @@ impl<'a> VisualRowModel<'a> {
             pane_width,
             wrap,
             line_number_digits(text),
+            BTreeMap::new(),
         )
     }
 
@@ -2420,6 +2586,33 @@ impl<'a> VisualRowModel<'a> {
         pane_width: u16,
         wrap: bool,
     ) -> Self {
+        let mut inlay_widths = BTreeMap::<ByteOffset, usize>::new();
+        if let Some(buffer) = state.views.get(view).map(|view| view.buffer) {
+            let revision = text.revision();
+            let mut hints = ui
+                .lsp_inlay_hints
+                .iter()
+                .filter(|hint| hint.buffer == buffer && hint.revision == revision)
+                .take(10_000)
+                .collect::<Vec<_>>();
+            hints.sort_unstable_by_key(|hint| hint.position);
+            let mut per_line = BTreeMap::<usize, usize>::new();
+            for hint in hints {
+                let Ok(line) = text.byte_to_line(hint.position) else {
+                    continue;
+                };
+                let count = per_line.entry(line).or_default();
+                if *count >= 32 {
+                    continue;
+                }
+                *count = count.saturating_add(1);
+                let width = text_width(&hint.label, config.editor.ambiguous_width);
+                inlay_widths
+                    .entry(hint.position)
+                    .and_modify(|current| *current = current.saturating_add(width))
+                    .or_insert(width);
+            }
+        }
         Self::new_with_minimum_digits(
             text,
             view,
@@ -2428,6 +2621,7 @@ impl<'a> VisualRowModel<'a> {
             pane_width,
             wrap,
             editor_line_number_digits(state),
+            inlay_widths,
         )
     }
 
@@ -2439,6 +2633,7 @@ impl<'a> VisualRowModel<'a> {
         pane_width: u16,
         wrap: bool,
         minimum_digits: usize,
+        inlay_widths: BTreeMap<ByteOffset, usize>,
     ) -> Self {
         let maximum = text.len_lines().saturating_sub(1);
         let mut folds = ui
@@ -2476,6 +2671,7 @@ impl<'a> VisualRowModel<'a> {
             .max(1),
             tab_width: config.editor.tab_width.max(1),
             ambiguous_width: config.editor.ambiguous_width,
+            inlay_widths,
         }
     }
 
@@ -2509,12 +2705,18 @@ impl<'a> VisualRowModel<'a> {
                 used_cells: display_column(content, self.tab_width, self.ambiguous_width),
             }];
         }
+        let line_start = self.text.line_to_byte(line).unwrap_or(ByteOffset(0));
         if content.is_empty() {
             return vec![VisualRowSlice {
                 byte_start: 0,
                 byte_end: 0,
                 source_column_start: 0,
-                used_cells: 0,
+                used_cells: self
+                    .inlay_widths
+                    .get(&line_start)
+                    .copied()
+                    .unwrap_or(0)
+                    .min(self.content_width),
             }];
         }
         let mut rows = Vec::new();
@@ -2523,9 +2725,20 @@ impl<'a> VisualRowModel<'a> {
         let mut row_used = 0usize;
         let mut source_column = 0usize;
         for (relative, grapheme) in content.grapheme_indices(true) {
+            let virtual_width = self
+                .inlay_widths
+                .get(&ByteOffset(line_start.get().saturating_add(relative)))
+                .copied()
+                .unwrap_or(0)
+                .min(self.content_width);
             let source_width = self.grapheme_width(grapheme, source_column);
             let visible_width = source_width.min(self.content_width);
-            if row_used > 0 && row_used.saturating_add(visible_width) > self.content_width {
+            if row_used > 0
+                && row_used
+                    .saturating_add(virtual_width)
+                    .saturating_add(visible_width)
+                    > self.content_width
+            {
                 rows.push(VisualRowSlice {
                     byte_start: row_start,
                     byte_end: relative,
@@ -2536,9 +2749,20 @@ impl<'a> VisualRowModel<'a> {
                 row_source_column = source_column;
                 row_used = 0;
             }
-            row_used = row_used.saturating_add(visible_width);
+            row_used = row_used
+                .saturating_add(virtual_width)
+                .saturating_add(visible_width)
+                .min(self.content_width);
             source_column = source_column.saturating_add(source_width);
         }
+        row_used = row_used
+            .saturating_add(
+                self.inlay_widths
+                    .get(&ByteOffset(line_start.get().saturating_add(content.len())))
+                    .copied()
+                    .unwrap_or(0),
+            )
+            .min(self.content_width);
         rows.push(VisualRowSlice {
             byte_start: row_start,
             byte_end: content.len(),
@@ -2566,11 +2790,22 @@ impl<'a> VisualRowModel<'a> {
         let text = self.text.line(line).unwrap_or_default();
         let content = text.strip_suffix('\n').unwrap_or(&text);
         let end = row.byte_end.min(content.len());
+        let line_start = self.text.line_to_byte(line).unwrap_or(ByteOffset(0));
         let mut source_column = row.source_column_start;
         let mut cell = 0usize;
         for (relative, grapheme) in content[row.byte_start..end].grapheme_indices(true) {
             let relative = row.byte_start.saturating_add(relative);
-            if byte <= relative {
+            if byte < relative {
+                return cell.min(self.content_width.saturating_sub(1));
+            }
+            cell = cell.saturating_add(
+                self.inlay_widths
+                    .get(&ByteOffset(line_start.get().saturating_add(relative)))
+                    .copied()
+                    .unwrap_or(0)
+                    .min(self.content_width),
+            );
+            if byte == relative {
                 return cell.min(self.content_width.saturating_sub(1));
             }
             let source_width = self.grapheme_width(grapheme, source_column);
@@ -2580,6 +2815,15 @@ impl<'a> VisualRowModel<'a> {
             }
             cell = cell.saturating_add(visible_width);
             source_column = source_column.saturating_add(source_width);
+        }
+        if end == content.len() && byte >= end {
+            cell = cell.saturating_add(
+                self.inlay_widths
+                    .get(&ByteOffset(line_start.get().saturating_add(content.len())))
+                    .copied()
+                    .unwrap_or(0)
+                    .min(self.content_width),
+            );
         }
         // Exact-width line endings stay on the final owned cell; no synthetic
         // empty row is introduced between adjacent logical lines.
@@ -2599,10 +2843,21 @@ impl<'a> VisualRowModel<'a> {
         let text = self.text.line(anchor.line).unwrap_or_default();
         let content = text.strip_suffix('\n').unwrap_or(&text);
         let end = row.byte_end.min(content.len());
+        let line_start = self.text.line_to_byte(anchor.line).unwrap_or(ByteOffset(0));
         let mut source_column = row.source_column_start;
         let mut used = 0usize;
         for (relative, grapheme) in content[row.byte_start..end].grapheme_indices(true) {
             let relative = row.byte_start.saturating_add(relative);
+            let virtual_width = self
+                .inlay_widths
+                .get(&ByteOffset(line_start.get().saturating_add(relative)))
+                .copied()
+                .unwrap_or(0)
+                .min(self.content_width);
+            if cell < used.saturating_add(virtual_width) {
+                return relative;
+            }
+            used = used.saturating_add(virtual_width);
             let source_width = self.grapheme_width(grapheme, source_column);
             let visible_width = source_width.min(self.content_width);
             if cell < used.saturating_add(visible_width) {
@@ -2786,7 +3041,7 @@ impl<'a> VisualRowModel<'a> {
     }
 }
 
-fn one_cell_git_symbol<'a>(
+fn one_cell_symbol<'a>(
     symbol: &'a str,
     fallback: &'static str,
     ambiguous_width: AmbiguousWidth,
@@ -2796,6 +3051,149 @@ fn one_cell_git_symbol<'a>(
     } else {
         fallback
     }
+}
+
+fn leading_indentation_width(text: &str, tab_width: usize) -> usize {
+    let mut column = 0usize;
+    for byte in text.bytes() {
+        match byte {
+            b' ' => column = column.saturating_add(1),
+            b'\t' => {
+                column = column.saturating_add(tab_width - (column % tab_width));
+            }
+            _ => break,
+        }
+    }
+    column
+}
+
+fn is_indent_guide_column(column: usize, indentation: usize, indent_width: usize) -> bool {
+    column < indentation && column.is_multiple_of(indent_width)
+}
+
+const INDENT_GUIDE_SCOPE_SCAN_LIMIT: usize = 1_024;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ActiveIndentGuide {
+    column: usize,
+    first_line: usize,
+    last_line: usize,
+}
+
+impl ActiveIndentGuide {
+    fn contains(self, line: usize, column: usize) -> bool {
+        (self.first_line..=self.last_line).contains(&line) && self.column == column
+    }
+}
+
+fn line_indentation(
+    text: &crate::document::TextBuffer,
+    line: usize,
+    tab_width: usize,
+) -> Option<(usize, bool)> {
+    let source = text.line(line).ok()?;
+    let content = source.trim_end_matches(['\r', '\n']);
+    Some((
+        leading_indentation_width(content, tab_width),
+        content.trim().is_empty(),
+    ))
+}
+
+fn active_indent_guide(
+    text: &crate::document::TextBuffer,
+    cursor: ByteOffset,
+    current_line: usize,
+    tab_width: usize,
+    indent_width: usize,
+    ambiguous_wide: bool,
+) -> Option<ActiveIndentGuide> {
+    let source = text.line(current_line).ok()?;
+    let content = source.trim_end_matches(['\r', '\n']);
+    let indentation = leading_indentation_width(content, tab_width);
+    let trimmed = content.trim_start();
+    let closes_scope = trimmed.starts_with(['}', ')', ']']);
+    let opens_scope = trimmed.ends_with('{') || trimmed.ends_with(':');
+    let line_start = text.line_to_byte(current_line).ok()?;
+    let cursor_column = display_column_at(
+        content,
+        cursor
+            .get()
+            .saturating_sub(line_start.get())
+            .min(content.len()),
+        DisplayWidthPolicy {
+            tab_width,
+            ambiguous_wide,
+        },
+    );
+    let cursor_on_scope_delimiter = (opens_scope || closes_scope) && cursor_column >= indentation;
+    let column = if cursor_on_scope_delimiter {
+        indentation
+    } else if indentation > 0 {
+        cursor_column
+            .min(indentation.saturating_sub(1))
+            .checked_div(indent_width)?
+            .saturating_mul(indent_width)
+    } else {
+        return None;
+    };
+    let minimum_indentation = column.saturating_add(indent_width);
+    let (mut seed, scan_direction) = if closes_scope {
+        (current_line.checked_sub(1)?, -1_i8)
+    } else if opens_scope {
+        (current_line.checked_add(1)?, 1_i8)
+    } else {
+        (current_line, 1_i8)
+    };
+
+    for _ in 0..INDENT_GUIDE_SCOPE_SCAN_LIMIT {
+        let (candidate_indentation, blank) = line_indentation(text, seed, tab_width)?;
+        if !blank {
+            if candidate_indentation < minimum_indentation {
+                return None;
+            }
+            break;
+        }
+        seed = match scan_direction {
+            -1 => seed.checked_sub(1)?,
+            1 => seed
+                .checked_add(1)
+                .filter(|line| *line < text.len_lines())?,
+            _ => unreachable!(),
+        };
+    }
+
+    let mut first_line = seed;
+    for _ in 0..INDENT_GUIDE_SCOPE_SCAN_LIMIT {
+        let Some(previous) = first_line.checked_sub(1) else {
+            break;
+        };
+        let (candidate_indentation, blank) = line_indentation(text, previous, tab_width)?;
+        if !blank && candidate_indentation < minimum_indentation {
+            break;
+        }
+        first_line = previous;
+    }
+
+    let mut last_line = seed;
+    for _ in 0..INDENT_GUIDE_SCOPE_SCAN_LIMIT {
+        let Some(next) = last_line
+            .checked_add(1)
+            .filter(|line| *line < text.len_lines())
+        else {
+            break;
+        };
+        let (candidate_indentation, blank) = line_indentation(text, next, tab_width)?;
+        if !blank && candidate_indentation < minimum_indentation {
+            break;
+        }
+        last_line = next;
+    }
+
+    Some(ActiveIndentGuide {
+        column,
+        first_line,
+        last_line,
+    })
 }
 
 fn line_number_digits(text: &crate::document::TextBuffer) -> usize {
@@ -2826,9 +3224,17 @@ fn configured_editor_gutter_width(
             &config.line_number_separator,
             config.ambiguous_width,
         ))
-        .saturating_add(
-            usize::from(config.gutter_padding).max(usize::from(config.git_signs.enabled)),
-        )
+        .saturating_add(usize::from(config.git_signs.enabled))
+        .saturating_add(usize::from(config.gutter_padding))
+}
+
+fn git_sign_column(gutter_width: u16, config: &EditorConfig) -> Option<u16> {
+    config.git_signs.enabled.then(|| {
+        let trailing_padding = u16::from(config.gutter_padding).min(gutter_width.saturating_sub(1));
+        gutter_width
+            .saturating_sub(trailing_padding)
+            .saturating_sub(1)
+    })
 }
 
 fn editor_gutter_width_with_digits(
@@ -2911,6 +3317,58 @@ fn render_editor_view(
     let digits = editor_line_number_digits(state);
     let gutter_width = editor_state_gutter_width(state, &buffer.text, &config.editor, width);
     let content_width = editor_state_content_width(state, &buffer.text, &config.editor, width);
+    let neutral_git_sign = (config.editor.git_signs.enabled && gutter_width > 0).then(|| {
+        one_cell_symbol(
+            &config.editor.git_signs.unchanged,
+            "|",
+            config.editor.ambiguous_width,
+        )
+    });
+    if let (Some(symbol), Some(column)) = (
+        neutral_git_sign,
+        git_sign_column(gutter_width, &config.editor),
+    ) {
+        for row in 0..body_height {
+            grid.set_cell(column, row, symbol, Style::Muted);
+        }
+    }
+    let indent_guide_symbol = config.editor.indent_guides.enabled.then(|| {
+        one_cell_symbol(
+            &config.editor.indent_guides.character,
+            "|",
+            config.editor.ambiguous_width,
+        )
+    });
+    let active_indent_scope = config
+        .editor
+        .indent_guides
+        .active_scope
+        .then_some(())
+        .and(indent_guide_symbol)
+        .and_then(|_| {
+            active_indent_guide(
+                &buffer.text,
+                view.cursor,
+                current_line,
+                config.editor.tab_width,
+                config.editor.indent_width,
+                config.editor.ambiguous_width == AmbiguousWidth::Wide,
+            )
+        });
+    let end_of_buffer_label = if config.editor.line_numbers == LineNumbers::Off {
+        config.editor.end_of_buffer_marker.clone()
+    } else {
+        let marker_width = text_width(
+            &config.editor.end_of_buffer_marker,
+            config.editor.ambiguous_width,
+        );
+        format!(
+            "{}{}{}",
+            " ".repeat(digits.saturating_sub(marker_width)),
+            config.editor.end_of_buffer_marker,
+            config.editor.line_number_separator
+        )
+    };
     let large_file = ui.large_file_buffers.contains(&view.buffer);
     let wrap_enabled = content_width > 0
         && config.editor.wrap
@@ -2986,11 +3444,13 @@ fn render_editor_view(
         .collect::<Vec<_>>();
     highlight_spans.sort_unstable_by_key(|span| (span.range.start, span.range.end));
     let mut highlight_cursor = 0usize;
-    let inlay_hints = ui
+    let mut inlay_hints = ui
         .lsp_inlay_hints
         .iter()
         .filter(|hint| hint.buffer == view.buffer && hint.revision == buffer.text.revision())
         .collect::<Vec<_>>();
+    inlay_hints.sort_unstable_by_key(|hint| hint.position);
+    let mut inlay_cursor = 0usize;
     let mut screen_row = 0_u16;
     let mut line_index = start_anchor.line;
     while screen_row < body_height && line_index < buffer.text.len_lines() {
@@ -3047,11 +3507,13 @@ fn render_editor_view(
                 gutter_width,
             );
         }
-        if config.editor.git_signs.enabled && gutter_width > 0 && first_line_row == 0 {
+        if let Some(git_sign_column) =
+            git_sign_column(gutter_width, &config.editor).filter(|_| first_line_row == 0)
+        {
             grid.set_cell(
-                gutter_width - 1,
+                git_sign_column,
                 screen_row,
-                one_cell_git_symbol(
+                one_cell_symbol(
                     &config.editor.git_signs.unchanged,
                     "|",
                     config.editor.ambiguous_width,
@@ -3075,9 +3537,9 @@ fn render_editor_view(
                     }
                 };
                 grid.set_cell(
-                    gutter_width - 1,
+                    git_sign_column,
                     screen_row,
-                    one_cell_git_symbol(symbol, fallback, config.editor.ambiguous_width),
+                    one_cell_symbol(symbol, fallback, config.editor.ambiguous_width),
                     style,
                 );
             }
@@ -3088,6 +3550,7 @@ fn render_editor_view(
             .unwrap_or(ByteOffset(0));
         let line = buffer.text.line(line_index).unwrap_or_default();
         let full_content = line.strip_suffix('\n').unwrap_or(&line);
+        let leading_indentation = leading_indentation_width(full_content, config.editor.tab_width);
         let can_wrap = wrap_enabled;
         let skipped_bytes = if can_wrap {
             line_rows[first_line_row].byte_start
@@ -3109,6 +3572,20 @@ fn render_editor_view(
             )
         };
         let visible_content = &full_content[skipped_bytes..];
+        let visible_start = ByteOffset(line_start.get().saturating_add(skipped_bytes));
+        let line_end = ByteOffset(
+            line_start
+                .get()
+                .saturating_add(skipped_bytes)
+                .saturating_add(visible_content.len()),
+        );
+        while inlay_hints
+            .get(inlay_cursor)
+            .is_some_and(|hint| hint.position < visible_start)
+        {
+            inlay_cursor = inlay_cursor.saturating_add(1);
+        }
+        let mut rendered_inlays = 0usize;
         let mut x = gutter_width;
         let mut source_column = skipped_column;
         let mut visual_row_index = first_line_row;
@@ -3127,6 +3604,16 @@ fn render_editor_view(
                 x = gutter_width;
             }
             let global = ByteOffset(line_start.get() + skipped_bytes + relative);
+            while let Some(hint) = inlay_hints
+                .get(inlay_cursor)
+                .filter(|hint| hint.position == global)
+            {
+                if rendered_inlays < 32 {
+                    x = grid.put_text_clipped(x, screen_row, &hint.label, Style::Muted, width);
+                    rendered_inlays = rendered_inlays.saturating_add(1);
+                }
+                inlay_cursor = inlay_cursor.saturating_add(1);
+            }
             let style = if is_selected(
                 view.selection,
                 global,
@@ -3193,6 +3680,7 @@ fn render_editor_view(
             } else {
                 Style::Default
             };
+            let grapheme_column = source_column;
             let cells = if grapheme == "\t" {
                 config.editor.tab_width - (source_column % config.editor.tab_width)
             } else {
@@ -3209,11 +3697,36 @@ fn render_editor_view(
             }
             source_column = source_column.saturating_add(cells);
             if grapheme == "\t" {
-                for _ in 0..visible_cells {
+                for cell in 0..visible_cells {
                     if x >= width {
                         break;
                     }
-                    grid.set_cell(x, screen_row, " ", style);
+                    let guide = indent_guide_symbol.filter(|_| {
+                        is_indent_guide_column(
+                            grapheme_column.saturating_add(cell),
+                            leading_indentation,
+                            config.editor.indent_width,
+                        )
+                    });
+                    let active_guide = guide.is_some_and(|_| {
+                        active_indent_scope.is_some_and(|scope| {
+                            scope.contains(line_index, grapheme_column.saturating_add(cell))
+                        })
+                    });
+                    grid.set_cell(
+                        x,
+                        screen_row,
+                        guide.unwrap_or(" "),
+                        if guide.is_some() && style == Style::Default {
+                            if active_guide {
+                                Style::Muted
+                            } else {
+                                Style::Border
+                            }
+                        } else {
+                            style
+                        },
+                    );
                     x = x.saturating_add(1);
                 }
             } else if x < width {
@@ -3228,40 +3741,46 @@ fn render_editor_view(
                         "?"
                     };
                     grid.set_cell(x, screen_row, replacement, style);
+                } else if grapheme == " "
+                    && let Some(guide) = indent_guide_symbol.filter(|_| {
+                        is_indent_guide_column(
+                            grapheme_column,
+                            leading_indentation,
+                            config.editor.indent_width,
+                        )
+                    })
+                {
+                    let active_guide = active_indent_scope
+                        .is_some_and(|scope| scope.contains(line_index, grapheme_column));
+                    grid.set_cell(
+                        x,
+                        screen_row,
+                        guide,
+                        if style == Style::Default {
+                            if active_guide {
+                                Style::Muted
+                            } else {
+                                Style::Border
+                            }
+                        } else {
+                            style
+                        },
+                    );
                 } else {
                     grid.set_cell(x, screen_row, grapheme, style);
                 }
                 x = x.saturating_add(advance);
             }
         }
-        let line_end = ByteOffset(
-            line_start
-                .get()
-                .saturating_add(skipped_bytes)
-                .saturating_add(visible_content.len()),
-        );
-        let visible_start = ByteOffset(line_start.get().saturating_add(skipped_bytes));
-        for hint in inlay_hints
-            .iter()
-            .filter(|hint| hint.position >= visible_start && hint.position <= line_end)
-            .take(32)
+        while let Some(hint) = inlay_hints
+            .get(inlay_cursor)
+            .filter(|hint| hint.position <= line_end)
         {
-            let (hint_anchor, absolute_hint_cell) = visual_rows.cursor_projection(hint.position);
-            let hint_cell = if can_wrap {
-                absolute_hint_cell
-            } else {
-                absolute_hint_cell.saturating_sub(skipped_column)
-            };
-            if let Some(hint_row) =
-                visual_rows.screen_row(start_anchor, hint_anchor, usize::from(body_height))
-            {
-                let hint_x =
-                    gutter_width.saturating_add(u16::try_from(hint_cell).unwrap_or(u16::MAX));
-                let hint_y = u16::try_from(hint_row).unwrap_or(u16::MAX);
-                if hint_x < width && hint_y < body_height {
-                    grid.put_text(hint_x, hint_y, &hint.label, Style::Muted);
-                }
+            if hint.position == line_end && rendered_inlays < 32 {
+                x = grid.put_text_clipped(x, screen_row, &hint.label, Style::Muted, width);
+                rendered_inlays = rendered_inlays.saturating_add(1);
             }
+            inlay_cursor = inlay_cursor.saturating_add(1);
         }
         if let Some(ghost) = ui.ai_ghost_text.as_ref().filter(|ghost| {
             ghost.buffer == view.buffer
@@ -3299,12 +3818,27 @@ fn render_editor_view(
         line_index = line_index.saturating_add(1);
     }
     while screen_row < body_height {
-        grid.put_text(
+        grid.put_text_clipped(
             0,
             screen_row,
-            &config.editor.end_of_buffer_marker,
+            &end_of_buffer_label,
             Style::Muted,
+            if gutter_width > 0 {
+                gutter_width
+            } else {
+                width
+            },
         );
+        if let (Some(symbol), Some(column)) = (
+            neutral_git_sign,
+            git_sign_column(gutter_width, &config.editor),
+        ) {
+            // The sign column is a viewport rule, not a property of only
+            // materialized buffer lines. Keep it continuous through the
+            // end-of-buffer region, including a one-cell gutter where the
+            // marker and sign occupy the same cell.
+            grid.set_cell(column, screen_row, symbol, Style::Muted);
+        }
         screen_row = screen_row.saturating_add(1);
     }
 
@@ -3315,6 +3849,7 @@ fn render_editor_view(
     let cursor = editor_cursor(
         state,
         view_id,
+        ui,
         config,
         width,
         body_height,
@@ -3444,6 +3979,7 @@ fn render_status_line(
 fn editor_cursor(
     state: &EditorState,
     view_id: crate::editing::ViewId,
+    ui: &UiState,
     config: &Config,
     width: u16,
     body_height: u16,
@@ -3473,7 +4009,36 @@ fn editor_cursor(
             config.editor.tab_width,
             config.editor.ambiguous_width,
         );
-        let visible_column = column.checked_sub(snapped_scroll)?;
+        let skipped_bytes = byte_offset_at_display_column(
+            content,
+            view.scroll_column,
+            config.editor.tab_width,
+            config.editor.ambiguous_width,
+        );
+        let line_start = buffer
+            .text
+            .line_to_byte(point.line)
+            .unwrap_or(ByteOffset(0));
+        let visible_start = ByteOffset(line_start.get().saturating_add(skipped_bytes));
+        let mut hints = ui
+            .lsp_inlay_hints
+            .iter()
+            .filter(|hint| {
+                hint.buffer == view.buffer
+                    && hint.revision == buffer.text.revision()
+                    && hint.position >= visible_start
+                    && hint.position <= view.cursor
+            })
+            .collect::<Vec<_>>();
+        hints.sort_unstable_by_key(|hint| hint.position);
+        let virtual_cells = hints
+            .into_iter()
+            .take(32)
+            .map(|hint| text_width(&hint.label, config.editor.ambiguous_width))
+            .fold(0usize, usize::saturating_add);
+        let visible_column = column
+            .checked_sub(snapped_scroll)?
+            .saturating_add(virtual_cells);
         let x = gutter.saturating_add(u16::try_from(visible_column).ok()?);
         let y = u16::try_from(visual_rows.screen_row(
             start_anchor,
@@ -3945,15 +4510,180 @@ fn render_tool_menu(
             .grid
             .set_cell(x, y, &character.to_string(), Style::Border);
     }
-    let title = format!(" {} ", configured.title);
+    let title = menu.runtime_picker.as_ref().map_or_else(
+        || format!(" {} ", configured.title),
+        |picker| {
+            format!(
+                " {} · {} · choose build ",
+                configured.title, picker.server_id
+            )
+        },
+    );
     frame.grid.put_text(left + 2, top, &title, Style::Accent);
     let content_left = left + 2;
     let content_width = width.saturating_sub(4);
+    let clip = |text: &str| {
+        text.chars()
+            .take(usize::from(content_width))
+            .collect::<String>()
+    };
+    let clip_indented = |text: &str| {
+        text.chars()
+            .take(usize::from(content_width.saturating_sub(2)))
+            .collect::<String>()
+    };
+    let field = |text: &str, width: usize| {
+        let text = text.chars().take(width).collect::<String>();
+        format!("{text:<width$}")
+    };
     let mut y = top + 1;
-    frame
-        .grid
-        .put_text(content_left, y, &configured.help, Style::Muted);
-    y += 2;
+
+    if let Some(picker) = &menu.runtime_picker {
+        frame.grid.put_text(
+            content_left,
+            y,
+            &clip("Choose between PATH and this host's Dust fallback; only ACTIVE is used."),
+            Style::Muted,
+        );
+        y += 1;
+        let source_help = if picker.options.iter().any(|option| option.source == "nix") {
+            "PATH: external  Dust via Nix: verified artifact + private compatibility"
+        } else {
+            "PATH: external  Dust download: portable non-NixOS copy"
+        };
+        frame
+            .grid
+            .put_text(content_left, y, &clip(source_help), Style::Muted);
+        y += 1;
+        frame.grid.put_text(
+            content_left,
+            y,
+            &clip("j/k choose  Enter select  i install  u uninstall  r probe  Esc back"),
+            Style::Muted,
+        );
+        y += 1;
+        frame.grid.put_text(
+            content_left,
+            y,
+            &clip(&format!(
+                "  {} {} {} {} {}",
+                field("VERSION", 14),
+                field("BUILD / RELEASE", 17),
+                field("INSTALL VIA", 14),
+                field("STATE", 20),
+                "ACTIVE"
+            )),
+            Style::Muted,
+        );
+        y += 1;
+
+        let detail_top = top.saturating_add(height).saturating_sub(5);
+        let visible = usize::from(detail_top.saturating_sub(y) / 2).max(1);
+        for (index, option) in picker
+            .options
+            .iter()
+            .enumerate()
+            .skip(picker.scroll)
+            .take(visible)
+        {
+            let focused = index == picker.selected;
+            let marker = if focused {
+                &configured.selected_marker
+            } else {
+                &configured.row_marker
+            };
+            let active = if option.selected { "yes" } else { "" };
+            let heading = format!(
+                "{} {} {} {} {} {}",
+                marker,
+                field(&option.version, 14),
+                field(&option.release, 17),
+                field(&option.label, 14),
+                field(&option.status, 20),
+                active
+            );
+            frame.grid.put_text(
+                content_left,
+                y,
+                &clip(&heading),
+                if focused {
+                    Style::Selection
+                } else if option.selected {
+                    Style::Accent
+                } else if option.installable || option.installed {
+                    Style::Default
+                } else {
+                    Style::Muted
+                },
+            );
+            y += 1;
+            frame.grid.put_text(
+                content_left + 2,
+                y,
+                &clip_indented(&option.location),
+                if option.installed {
+                    Style::Accent
+                } else {
+                    Style::Muted
+                },
+            );
+            y += 1;
+        }
+
+        if let Some(option) = picker.options.get(picker.selected) {
+            y = detail_top;
+            frame.grid.put_text(
+                content_left,
+                y,
+                &clip(&horizontal.to_string().repeat(usize::from(content_width))),
+                Style::Border,
+            );
+            y += 1;
+            let action = if option.source == "path" {
+                "Enter: launch this external PATH build"
+            } else if option.installed {
+                "Enter: make this build ACTIVE   u: uninstall this copy"
+            } else if option.installable {
+                "Enter: make this build ACTIVE   i: install this build"
+            } else {
+                "This version is unavailable on the current host"
+            };
+            frame
+                .grid
+                .put_text(content_left, y, &clip(action), Style::Accent);
+            y += 1;
+            frame
+                .grid
+                .put_text(content_left, y, &clip(&option.note), Style::Muted);
+        }
+        frame.cursor = None;
+        return;
+    }
+
+    let mut help_lines = Vec::new();
+    let mut help_line = String::new();
+    for word in configured.help.split_whitespace() {
+        let extra = usize::from(!help_line.is_empty()) + word.chars().count();
+        if !help_line.is_empty()
+            && help_line.chars().count().saturating_add(extra) > usize::from(content_width)
+        {
+            help_lines.push(std::mem::take(&mut help_line));
+        }
+        if !help_line.is_empty() {
+            help_line.push(' ');
+        }
+        help_line.push_str(word);
+    }
+    if !help_line.is_empty() {
+        help_lines.push(help_line);
+    }
+    for line in help_lines.into_iter().take(2) {
+        frame
+            .grid
+            .put_text(content_left, y, &clip(&line), Style::Muted);
+        y += 1;
+    }
+    y += 1;
     let mut category_x = content_left;
     for category in &configured.category_order {
         let label = configured
@@ -3976,38 +4706,34 @@ fn render_tool_menu(
         }
     }
     y += 2;
-    let visible_rows = usize::from(height.saturating_sub(y - top).saturating_sub(2));
-    let rows = menu
+    frame.grid.put_text(
+        content_left,
+        y,
+        &clip(&format!(
+            "  {} {} {} {}",
+            field("SERVER", 28),
+            field("VERSION", 20),
+            field("RUNTIME", 14),
+            "STATE"
+        )),
+        Style::Muted,
+    );
+    y += 1;
+
+    let remaining = top
+        .saturating_add(height)
+        .saturating_sub(1)
+        .saturating_sub(y);
+    let detail_rows = 10u16.min(remaining.saturating_sub(1));
+    let list_bottom = top + height - 1 - detail_rows;
+    let visible_rows = usize::from(list_bottom.saturating_sub(y));
+    for (index, row) in menu
         .rows
         .iter()
         .enumerate()
         .skip(menu.scroll)
-        .take(visible_rows);
-    let mut installed_heading_drawn = false;
-    let mut available_heading_drawn = false;
-    for (index, row) in rows {
-        if row.installed && !installed_heading_drawn {
-            frame.grid.put_text(
-                content_left,
-                y,
-                &configured.installed_heading,
-                Style::Accent,
-            );
-            installed_heading_drawn = true;
-            y += 1;
-        } else if !row.installed && !available_heading_drawn {
-            frame.grid.put_text(
-                content_left,
-                y,
-                &configured.available_heading,
-                Style::Accent,
-            );
-            available_heading_drawn = true;
-            y += 1;
-        }
-        if y >= top + height - 1 {
-            break;
-        }
+        .take(visible_rows)
+    {
         let selected = index == menu.selected;
         let marker = if selected {
             &configured.selected_marker
@@ -4015,16 +4741,17 @@ fn render_tool_menu(
             &configured.row_marker
         };
         let row_text = format!(
-            "{} {:<28} {:<10} {}",
-            marker, row.name, row.kind, row.languages
+            "{} {} {} {} {}",
+            marker,
+            field(&row.name, 28),
+            field(&row.version, 20),
+            field(&row.runtime, 14),
+            row.lifecycle
         );
         frame.grid.put_text(
             content_left,
             y,
-            &row_text
-                .chars()
-                .take(usize::from(content_width))
-                .collect::<String>(),
+            &clip(&row_text),
             if selected {
                 Style::Selection
             } else if row.installed {
@@ -4033,19 +4760,57 @@ fn render_tool_menu(
                 Style::Muted
             },
         );
-        let status_width = text_width(&row.status, config.editor.ambiguous_width);
-        let status_x = left + width - 2 - u16::try_from(status_width).unwrap_or(0);
+        y += 1;
+    }
+
+    if let Some(row) = menu.rows.get(menu.selected) {
+        y = list_bottom;
         frame.grid.put_text(
-            status_x.max(content_left),
+            content_left,
             y,
-            &row.status,
-            if row.installed {
-                Style::Accent
-            } else {
-                Style::Muted
-            },
+            &clip(&horizontal.to_string().repeat(usize::from(content_width))),
+            Style::Border,
         );
         y += 1;
+        let mut details = vec![
+            format!("{} · {} · {}", row.name, row.kind, row.languages),
+            format!("State       {}", row.lifecycle),
+            format!("Install via {}", row.runtime),
+            format!("Version     {}", row.version),
+            format!("Build       {}", row.release),
+            format!("Executable  {}", row.executable),
+        ];
+        if !row.managed_status.is_empty() {
+            details.push(format!("Dust install {}", row.managed_status));
+        }
+        if !row.nix_status.is_empty() {
+            details.push(format!("Dust via Nix {}", row.nix_status));
+        }
+        details.push(format!(
+            "Sessions     {}",
+            if row.sessions.is_empty() {
+                "none".into()
+            } else {
+                row.sessions.join(" · ")
+            }
+        ));
+        details.push(format!("Note         {}", row.note));
+        for (index, detail) in details.iter().enumerate() {
+            if y >= top + height - 1 {
+                break;
+            }
+            frame.grid.put_text(
+                content_left,
+                y,
+                &clip(detail),
+                if index == 0 {
+                    Style::Accent
+                } else {
+                    Style::Muted
+                },
+            );
+            y += 1;
+        }
     }
     frame.cursor = None;
 }
@@ -4200,18 +4965,32 @@ fn render_prompt(
             right,
         );
     } else if !prompt.completions.is_empty() {
-        let available = height.saturating_sub(geometry.top.saturating_add(3));
+        let completion_top = geometry
+            .top
+            .saturating_add(3)
+            .saturating_add(config.ui.command_line.attachment_gap);
+        let available = height.saturating_sub(completion_top);
         let rows = u16::try_from(prompt.completions.len())
             .unwrap_or(u16::MAX)
             .min(config.ui.command_line.completion_max_rows)
             .min(available);
+        let rows = usize::from(rows);
+        let maximum_scroll = prompt.completions.len().saturating_sub(rows);
+        // Prompt selection is global to the candidate list, while rendering is bounded to a
+        // terminal-sized viewport. Keep the selected candidate visible instead of leaving the
+        // terminal cursor on a row that is no longer drawn.
+        let scroll = prompt
+            .selected_completion
+            .filter(|index| *index < prompt.completions.len())
+            .map_or(0, |selected| {
+                selected
+                    .saturating_add(1)
+                    .saturating_sub(rows)
+                    .min(maximum_scroll)
+            });
         for row in 0..rows {
-            let index = usize::from(row);
-            let y = geometry
-                .top
-                .saturating_add(3)
-                .saturating_add(config.ui.command_line.attachment_gap)
-                .saturating_add(row);
+            let index = scroll.saturating_add(row);
+            let y = completion_top.saturating_add(u16::try_from(row).unwrap_or(u16::MAX));
             let style = if prompt.selected_completion == Some(index) {
                 Style::Selection
             } else {
@@ -4702,6 +5481,34 @@ mod tests {
     }
 
     #[test]
+    fn prompt_completion_viewport_follows_a_selected_item_beyond_its_first_page() {
+        let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
+        let mut prompt = PromptState::new(PromptKind::Command);
+        prompt.completions = (0..6)
+            .map(|index| CompletionItem {
+                label: format!("candidate-{index}"),
+                detail: format!("detail-{index}"),
+            })
+            .collect();
+        prompt.selected_completion = Some(5);
+        let ui = UiState {
+            dashboard: true,
+            prompt: Some(prompt),
+            ..UiState::default()
+        };
+        let loaded = crate::configuration::load_bundled_config();
+        let mut config = loaded.config;
+        config.ui.command_line.completion_max_rows = 3;
+        let frame = render(&state, &ui, &config, &loaded.dashboard, 100, 20);
+        let screen = (0..frame.grid.height())
+            .map(|y| frame.grid.row_text(y))
+            .collect::<Vec<_>>();
+
+        assert!(screen.iter().any(|line| line.contains("candidate-5")));
+        assert!(!screen.iter().any(|line| line.contains("candidate-0")));
+    }
+
+    #[test]
     fn block_selection_projection_uses_shared_display_cell_ranges() {
         let mut state = EditorState::new(PathBuf::from("/workspace"));
         let (_, view) = state.open_text(crate::document::TextBuffer::from_text("\tZ\n界ab"), None);
@@ -4715,7 +5522,12 @@ mod tests {
         let loaded = crate::configuration::load_bundled_config();
         let ui = ui_with_editor_layout(&state);
         let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 20, 6);
-        let gutter = 3;
+        let gutter = super::editor_state_gutter_width(
+            &state,
+            &state.buffers[state.views[view].buffer].text,
+            &loaded.config.editor,
+            20,
+        );
         assert_eq!(
             frame.grid.get(gutter + 3, 0).expect("tab cell").style,
             crate::terminal_ui::Style::Selection
@@ -4983,6 +5795,87 @@ mod tests {
             .collect::<String>();
         assert!(editor_line.contains("one.rs"));
         assert!(editor_line.contains("two.rs"));
+    }
+
+    #[test]
+    fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity() {
+        let mut state = EditorState::new(PathBuf::from("/workspace"));
+        state.open_text(
+            crate::document::TextBuffer::from_text("fn main() {}"),
+            Some(PathBuf::from("/workspace/main.rs")),
+        );
+        let mut ui = UiState {
+            editor_window_layout: Some(editor_layout(&state)),
+            explorer: Some(super::ExplorerUiState {
+                title: "Explorer".into(),
+                rows: Vec::new(),
+                scroll: 0,
+                loading: false,
+                total: 0,
+                preview_lines: Vec::new(),
+            }),
+            lsp_progress: vec![
+                super::UiLspProgress {
+                    server_key: "root:1:rust-analyzer".into(),
+                    token: "roots".into(),
+                    server: "rust-analyzer".into(),
+                    title: "Roots Scanned".into(),
+                    message: String::new(),
+                    percentage: None,
+                    done: true,
+                    completed_at: Some(std::time::Instant::now()),
+                },
+                super::UiLspProgress {
+                    server_key: "root:1:rust-analyzer".into(),
+                    token: "cargo-check".into(),
+                    server: "rust-analyzer".into(),
+                    title: "Building".into(),
+                    message: "ring (lib)".into(),
+                    percentage: Some(72),
+                    done: false,
+                    completed_at: None,
+                },
+            ],
+            lsp_progress_frame: 8,
+            ..UiState::default()
+        };
+        let loaded = crate::configuration::load_bundled_config();
+        let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 10);
+        let panel = super::explorer_panel_width(&loaded.config, 80).expect("explorer width");
+        let row = (0..10)
+            .find(|row| frame.grid.row_text(*row).contains("ring (lib)"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "progress row: {:?}",
+                    (0..10)
+                        .map(|row| frame.grid.row_text(row))
+                        .collect::<Vec<_>>()
+                )
+            });
+        assert!(!frame.grid.row_text(row).contains("root:1"));
+        assert!((panel.saturating_add(1)..79).any(|x| {
+            frame.grid.get(x, row).is_some_and(|cell| {
+                cell.symbol == "⠇" && cell.style == crate::terminal_ui::Style::Accent
+            })
+        }));
+        assert_eq!(frame.grid.get(78, row).unwrap().symbol, "r");
+        assert_eq!(frame.grid.get(79, row).unwrap().symbol, " ");
+        let completed_row = (0..10)
+            .find(|row| frame.grid.row_text(*row).contains("Roots Scanned"))
+            .expect("completed progress row");
+        assert!((panel.saturating_add(1)..79).any(|x| {
+            frame
+                .grid
+                .get(x, completed_row)
+                .is_some_and(|cell| cell.symbol == "✓")
+        }));
+
+        ui.lsp_progress_frame = 4;
+        let next = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 10);
+        assert!(
+            (panel.saturating_add(1)..79)
+                .any(|x| next.grid.get(x, row).is_some_and(|cell| cell.symbol == "⠼"))
+        );
     }
 
     #[test]
@@ -5303,6 +6196,57 @@ mod tests {
     }
 
     #[test]
+    fn inlay_hints_are_inline_virtual_text_that_shift_following_source_and_cursor() {
+        let text = "let value = build();";
+        let mut state = EditorState::new(PathBuf::from("/tmp"));
+        let (buffer, view) = state.open_text(crate::document::TextBuffer::from_text(text), None);
+        state.views[view].cursor = crate::document::ByteOffset("let value".len());
+        let loaded = crate::configuration::load_bundled_config();
+        let mut config = loaded.config;
+        config.editor.wrap = false;
+        config.editor.line_numbers = crate::configuration::LineNumbers::Off;
+        config.ui.status_line.enabled = false;
+        let ui = UiState {
+            editor_window_layout: Some(editor_layout(&state)),
+            lsp_inlay_hints: vec![super::UiInlayHint {
+                buffer,
+                revision: state.buffers[buffer].text.revision(),
+                position: crate::document::ByteOffset("let value".len()),
+                label: ": Result ".into(),
+            }],
+            ..UiState::default()
+        };
+        let frame = render(&state, &ui, &config, &loaded.dashboard, 32, 2);
+        assert!(
+            frame
+                .grid
+                .row_text(0)
+                .starts_with("let value: Result  = build();")
+        );
+        for column in "let value".len().."let value: Result ".len() {
+            assert_eq!(
+                frame.grid.get(column as u16, 0).expect("inlay cell").style,
+                crate::terminal_ui::Style::Muted
+            );
+        }
+        assert!(
+            frame
+                .cursor
+                .is_some_and(|(x, y, _)| x == "let value: Result ".len() as u16 && y == 0)
+        );
+
+        config.editor.wrap = true;
+        let frame = render(&state, &ui, &config, &loaded.dashboard, 16, 3);
+        assert!(frame.grid.row_text(0).starts_with("let value"));
+        assert!(frame.grid.row_text(1).starts_with(": Result  = buil"));
+        assert!(
+            frame
+                .cursor
+                .is_some_and(|(x, y, _)| x == ": Result ".len() as u16 && y == 1)
+        );
+    }
+
+    #[test]
     fn non_wrapped_horizontal_projection_snaps_graphemes_and_preserves_source_tabs() {
         let text = "a\t界e\u{301}bcdef";
         let mut state = EditorState::new(PathBuf::from("/tmp"));
@@ -5392,6 +6336,206 @@ mod tests {
     }
 
     #[test]
+    fn configurable_indent_guides_follow_leading_space_and_tab_display_columns() {
+        let mut state = EditorState::new(PathBuf::from("/workspace"));
+        let (_, view) = state.open_text(
+            crate::document::TextBuffer::from_text("root\n    one\n        two\n\t\ttab\n"),
+            Some(PathBuf::from("/workspace/file.rs")),
+        );
+        let loaded = crate::configuration::load_bundled_config();
+        let mut config = loaded.config;
+        config.editor.line_numbers = crate::configuration::LineNumbers::Off;
+        config.ui.status_line.enabled = false;
+        let ui = ui_with_editor_layout(&state);
+        let frame = super::render_editor_view(&state, view, &ui, &config, 20, 5);
+
+        assert_eq!(frame.grid.get(0, 1).unwrap().symbol, "│");
+        assert_eq!(frame.grid.get(3, 1).unwrap().symbol, " ");
+        assert_eq!(frame.grid.get(4, 1).unwrap().symbol, "o");
+        assert_eq!(frame.grid.get(0, 2).unwrap().symbol, "│");
+        assert_eq!(frame.grid.get(4, 2).unwrap().symbol, "│");
+        assert_eq!(
+            frame.grid.get(4, 2).unwrap().style,
+            crate::terminal_ui::Style::Border
+        );
+        assert_eq!(frame.grid.get(8, 2).unwrap().symbol, "t");
+        assert_eq!(frame.grid.get(0, 3).unwrap().symbol, "│");
+        assert_eq!(frame.grid.get(4, 3).unwrap().symbol, "│");
+        assert_eq!(frame.grid.get(8, 3).unwrap().symbol, "t");
+
+        config.editor.indent_guides.enabled = false;
+        let disabled = super::render_editor_view(&state, view, &ui, &config, 20, 5);
+        assert_eq!(disabled.grid.get(0, 1).unwrap().symbol, " ");
+        assert_eq!(disabled.grid.get(4, 2).unwrap().symbol, " ");
+        assert_eq!(disabled.grid.get(4, 3).unwrap().symbol, " ");
+
+        config.editor.indent_guides.enabled = true;
+        config.editor.ambiguous_width = crate::configuration::AmbiguousWidth::Wide;
+        let wide = super::render_editor_view(&state, view, &ui, &config, 20, 5);
+        assert_eq!(wide.grid.get(4, 2).unwrap().symbol, "|");
+        assert!(!wide.grid.get(4, 2).unwrap().continuation);
+    }
+
+    #[test]
+    fn active_indent_scope_guide_is_subtly_elevated_from_normal_guides() {
+        let mut state = EditorState::new(PathBuf::from("/workspace"));
+        let (_, view) = state.open_text(
+            crate::document::TextBuffer::from_text(
+                "fn first() {\n    first();\n}\nfn second() {\n    second();\n}\n",
+            ),
+            Some(PathBuf::from("/workspace/file.rs")),
+        );
+        state.views[view].cursor = state.buffers[state.views[view].buffer]
+            .text
+            .line_to_byte(5)
+            .expect("closing brace line");
+        let loaded = crate::configuration::load_bundled_config();
+        let mut config = loaded.config;
+        config.editor.line_numbers = crate::configuration::LineNumbers::Off;
+        config.ui.status_line.enabled = false;
+        let ui = ui_with_editor_layout(&state);
+        let frame = super::render_editor_view(&state, view, &ui, &config, 30, 7);
+
+        assert_eq!(
+            frame.grid.get(0, 1).expect("inactive guide").style,
+            crate::terminal_ui::Style::Border
+        );
+        assert_eq!(
+            frame.grid.get(0, 4).expect("active scope guide").style,
+            crate::terminal_ui::Style::Muted
+        );
+        assert_eq!(frame.grid.get(0, 5).expect("closing brace").symbol, "}");
+
+        config.editor.indent_guides.active_scope = false;
+        let inactive_only = super::render_editor_view(&state, view, &ui, &config, 30, 7);
+        assert_eq!(
+            inactive_only
+                .grid
+                .get(0, 4)
+                .expect("inactive-only guide")
+                .style,
+            crate::terminal_ui::Style::Border
+        );
+    }
+
+    #[test]
+    fn active_indent_scope_tracks_the_cursor_display_column() {
+        let mut state = EditorState::new(PathBuf::from("/workspace"));
+        let (_, view) = state.open_text(
+            crate::document::TextBuffer::from_text(
+                "fn run() {\n    if outer {\n        if inner {\n            work();\n        }\n    }\n}\n",
+            ),
+            Some(PathBuf::from("/workspace/file.rs")),
+        );
+        let work_start = state.buffers[state.views[view].buffer]
+            .text
+            .line_to_byte(3)
+            .expect("work line")
+            .get();
+        let loaded = crate::configuration::load_bundled_config();
+        let mut config = loaded.config;
+        config.editor.line_numbers = crate::configuration::LineNumbers::Off;
+        config.ui.status_line.enabled = false;
+        let ui = ui_with_editor_layout(&state);
+
+        state.views[view].cursor = crate::document::ByteOffset(work_start.saturating_add(1));
+        let outer = super::render_editor_view(&state, view, &ui, &config, 30, 8);
+        assert_eq!(
+            outer.grid.get(0, 3).expect("outer guide").style,
+            crate::terminal_ui::Style::Muted
+        );
+        assert_eq!(
+            outer.grid.get(4, 3).expect("middle guide").style,
+            crate::terminal_ui::Style::Border
+        );
+        assert_eq!(
+            outer.grid.get(8, 3).expect("inner guide").style,
+            crate::terminal_ui::Style::Border
+        );
+
+        state.views[view].cursor = crate::document::ByteOffset(work_start.saturating_add(4));
+        let middle = super::render_editor_view(&state, view, &ui, &config, 30, 8);
+        assert_eq!(
+            middle.grid.get(0, 3).expect("outer guide").style,
+            crate::terminal_ui::Style::Border
+        );
+        assert_eq!(
+            middle.grid.get(4, 3).expect("middle guide").style,
+            crate::terminal_ui::Style::Muted
+        );
+        assert_eq!(
+            middle.grid.get(8, 3).expect("inner guide").style,
+            crate::terminal_ui::Style::Border
+        );
+
+        state.views[view].cursor = crate::document::ByteOffset(work_start.saturating_add(8));
+        let inner = super::render_editor_view(&state, view, &ui, &config, 30, 8);
+        assert_eq!(
+            inner.grid.get(0, 3).expect("outer guide").style,
+            crate::terminal_ui::Style::Border
+        );
+        assert_eq!(
+            inner.grid.get(4, 3).expect("middle guide").style,
+            crate::terminal_ui::Style::Border
+        );
+        assert_eq!(
+            inner.grid.get(8, 3).expect("inner guide").style,
+            crate::terminal_ui::Style::Muted
+        );
+    }
+
+    #[test]
+    fn closing_delimiter_scope_uses_cursor_column_before_the_delimiter() {
+        let mut state = EditorState::new(PathBuf::from("/workspace"));
+        let (_, view) = state.open_text(
+            crate::document::TextBuffer::from_text(
+                "fn run() {\n    if outer {\n        if inner {\n            work();\n        }\n    }\n}\n",
+            ),
+            Some(PathBuf::from("/workspace/file.rs")),
+        );
+        let closing_start = state.buffers[state.views[view].buffer]
+            .text
+            .line_to_byte(4)
+            .expect("inner closing brace")
+            .get();
+        let loaded = crate::configuration::load_bundled_config();
+        let mut config = loaded.config;
+        config.editor.line_numbers = crate::configuration::LineNumbers::Off;
+        config.ui.status_line.enabled = false;
+        let ui = ui_with_editor_layout(&state);
+
+        state.views[view].cursor = crate::document::ByteOffset(closing_start);
+        let before_delimiter = super::render_editor_view(&state, view, &ui, &config, 30, 8);
+        assert_eq!(
+            before_delimiter
+                .grid
+                .get(0, 4)
+                .expect("outer guide before delimiter")
+                .style,
+            crate::terminal_ui::Style::Muted
+        );
+        assert_eq!(
+            before_delimiter
+                .grid
+                .get(4, 4)
+                .expect("middle guide before delimiter")
+                .style,
+            crate::terminal_ui::Style::Border
+        );
+
+        state.views[view].cursor = crate::document::ByteOffset(closing_start.saturating_add(8));
+        let on_delimiter = super::render_editor_view(&state, view, &ui, &config, 30, 8);
+        assert_eq!(
+            on_delimiter
+                .grid
+                .get(8, 3)
+                .expect("inner guide on delimiter")
+                .style,
+            crate::terminal_ui::Style::Muted
+        );
+    }
+
+    #[test]
     fn immutable_git_signs_use_the_reserved_gutter_and_exact_buffer_revision() {
         let mut state = EditorState::new(PathBuf::from("/workspace"));
         let (buffer, _) = state.open_text(
@@ -5433,31 +6577,32 @@ mod tests {
         let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 20, 5);
         let gutter =
             super::editor_gutter_width(&state.buffers[buffer].text, &loaded.config.editor, 20);
+        let sign_column = super::git_sign_column(gutter, &loaded.config.editor).unwrap();
         assert_eq!(
             (
-                frame.grid.get(gutter - 1, 0).unwrap().symbol.as_str(),
-                frame.grid.get(gutter - 1, 0).unwrap().style,
+                frame.grid.get(sign_column, 0).unwrap().symbol.as_str(),
+                frame.grid.get(sign_column, 0).unwrap().style,
             ),
             ("│", crate::terminal_ui::Style::GitSignAdded)
         );
         assert_eq!(
             (
-                frame.grid.get(gutter - 1, 1).unwrap().symbol.as_str(),
-                frame.grid.get(gutter - 1, 1).unwrap().style,
+                frame.grid.get(sign_column, 1).unwrap().symbol.as_str(),
+                frame.grid.get(sign_column, 1).unwrap().style,
             ),
             ("│", crate::terminal_ui::Style::GitSignChanged)
         );
         assert_eq!(
             (
-                frame.grid.get(gutter - 1, 2).unwrap().symbol.as_str(),
-                frame.grid.get(gutter - 1, 2).unwrap().style,
+                frame.grid.get(sign_column, 2).unwrap().symbol.as_str(),
+                frame.grid.get(sign_column, 2).unwrap().style,
             ),
             ("_", crate::terminal_ui::Style::GitSignDeleted)
         );
         assert_eq!(
             (
-                frame.grid.get(gutter - 1, 3).unwrap().symbol.as_str(),
-                frame.grid.get(gutter - 1, 3).unwrap().style,
+                frame.grid.get(sign_column, 3).unwrap().symbol.as_str(),
+                frame.grid.get(sign_column, 3).unwrap().style,
             ),
             ("│", crate::terminal_ui::Style::Muted)
         );
@@ -5465,18 +6610,79 @@ mod tests {
         let mut wide_config = loaded.config.clone();
         wide_config.editor.ambiguous_width = crate::configuration::AmbiguousWidth::Wide;
         let wide = render(&state, &ui, &wide_config, &loaded.dashboard, 20, 5);
-        assert_eq!(wide.grid.get(gutter - 1, 0).unwrap().symbol, "|");
-        assert!(!wide.grid.get(gutter - 1, 0).unwrap().continuation);
-        assert_eq!(wide.grid.get(gutter - 1, 3).unwrap().symbol, "|");
+        assert_eq!(wide.grid.get(sign_column, 0).unwrap().symbol, "|");
+        assert!(!wide.grid.get(sign_column, 0).unwrap().continuation);
+        assert_eq!(wide.grid.get(sign_column, 3).unwrap().symbol, "|");
 
         ui.git_signs[0].buffer_revision = revision.saturating_add(1);
         let stale = render(&state, &ui, &loaded.config, &loaded.dashboard, 20, 5);
         assert_ne!(
-            stale.grid.get(gutter - 1, 0).unwrap().style,
+            stale.grid.get(sign_column, 0).unwrap().style,
             crate::terminal_ui::Style::GitSignAdded
         );
         let tiny = render(&state, &ui, &loaded.config, &loaded.dashboard, 1, 3);
         assert_eq!(tiny.grid.width(), 1);
+    }
+
+    #[test]
+    fn neutral_git_sign_column_continues_through_wraps_and_end_of_buffer_rows() {
+        let mut state = EditorState::new(PathBuf::from("/workspace"));
+        let (_, view) = state.open_text(
+            crate::document::TextBuffer::from_text("a deliberately wrapped line"),
+            Some(PathBuf::from("/workspace/file.rs")),
+        );
+        let loaded = crate::configuration::load_bundled_config();
+        let mut config = loaded.config;
+        config.editor.wrap = true;
+        config.ui.status_line.enabled = false;
+        let ui = ui_with_editor_layout(&state);
+        let frame = super::render_editor_view(&state, view, &ui, &config, 10, 8);
+        let gutter = super::editor_state_gutter_width(
+            &state,
+            &state.buffers[state.views[view].buffer].text,
+            &config.editor,
+            10,
+        );
+
+        let sign_column = super::git_sign_column(gutter, &config.editor).unwrap();
+        assert!(
+            (0..frame.grid.height()).all(|row| {
+                frame.grid.get(sign_column, row).is_some_and(|cell| {
+                    cell.symbol == "│" && cell.style == crate::terminal_ui::Style::Muted
+                })
+            }),
+            "the neutral sign rule must span content, wrapped, and end-of-buffer rows"
+        );
+    }
+
+    #[test]
+    fn end_of_buffer_markers_right_align_with_line_number_digits() {
+        let mut state = EditorState::new(PathBuf::from("/workspace"));
+        let source = (0..1_000).map(|_| "line").collect::<Vec<_>>().join("\n");
+        let (_, view) = state.open_text(
+            crate::document::TextBuffer::from_text(&source),
+            Some(PathBuf::from("/workspace/file.rs")),
+        );
+        state.views[view].scroll_line = 999;
+        let loaded = crate::configuration::load_bundled_config();
+        let mut config = loaded.config;
+        config.ui.status_line.enabled = false;
+        let ui = ui_with_editor_layout(&state);
+        let frame = super::render_editor_view(&state, view, &ui, &config, 20, 4);
+        let gutter = super::editor_state_gutter_width(
+            &state,
+            &state.buffers[state.views[view].buffer].text,
+            &config.editor,
+            20,
+        );
+
+        assert_eq!(super::editor_line_number_digits(&state), 4);
+        let sign_column = super::git_sign_column(gutter, &config.editor).unwrap();
+        for row in 1..frame.grid.height() {
+            assert_eq!(frame.grid.get(0, row).unwrap().symbol, " ");
+            assert_eq!(frame.grid.get(3, row).unwrap().symbol, "~");
+            assert_eq!(frame.grid.get(sign_column, row).unwrap().symbol, "│");
+        }
     }
 
     #[test]
@@ -5508,20 +6714,24 @@ mod tests {
             80,
         );
         assert_eq!(short_gutter, long_gutter);
-        assert_eq!(short_gutter, 6);
+        assert_eq!(short_gutter, 7);
         state.focus_tab(-1, true).unwrap();
         assert_eq!(state.active_tab, Some(first_tab));
         let ui = ui_with_editor_layout(&state);
         let frame = super::render_editor_view(&state, short_view, &ui, &loaded.config, 80, 4);
+        let short_sign = super::git_sign_column(short_gutter, &loaded.config.editor).unwrap();
+        let long_sign = super::git_sign_column(long_gutter, &loaded.config.editor).unwrap();
         assert_eq!(frame.grid.get(3, 0).unwrap().symbol, "1");
-        assert_eq!(frame.grid.get(short_gutter - 1, 0).unwrap().symbol, "│");
+        assert_eq!(frame.grid.get(short_sign, 0).unwrap().symbol, "│");
         assert_eq!(
-            frame.grid.get(short_gutter - 1, 0).unwrap().style,
+            frame.grid.get(short_sign, 0).unwrap().style,
             crate::terminal_ui::Style::Muted
         );
+        assert_eq!(frame.grid.get(short_sign + 1, 0).unwrap().symbol, " ");
         assert_eq!(frame.grid.get(short_gutter, 0).unwrap().symbol, "s");
         let long_frame = super::render_editor_view(&state, long_view, &ui, &loaded.config, 80, 4);
-        assert_eq!(long_frame.grid.get(long_gutter - 1, 0).unwrap().symbol, "│");
+        assert_eq!(long_frame.grid.get(long_sign, 0).unwrap().symbol, "│");
+        assert_eq!(long_frame.grid.get(long_sign + 1, 0).unwrap().symbol, " ");
         assert_eq!(long_frame.grid.get(long_gutter, 0).unwrap().symbol, "l");
     }
 
@@ -5988,16 +7198,61 @@ mod tests {
                     detail: "fake LSP".into(),
                 }],
                 selected: 0,
+                scroll: 0,
             }),
             ..UiState::default()
         };
         let loaded = crate::configuration::load_bundled_config();
         let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 40, 10);
+        let view = state.active_view.expect("active view");
+        let gutter = super::editor_state_gutter_width(
+            &state,
+            &state.buffers[state.views[view].buffer].text,
+            &loaded.config.editor,
+            40,
+        );
         assert_eq!(
-            frame.grid.get(3, 0).expect("diagnostic text").style,
+            frame.grid.get(gutter, 0).expect("diagnostic text").style,
             crate::terminal_ui::Style::Error
         );
         assert!((0..10).any(|row| frame.grid.row_text(row).contains("better")));
+    }
+
+    #[test]
+    fn language_completion_keeps_the_selected_item_inside_its_bounded_viewport() {
+        let mut state = EditorState::new(PathBuf::from("/tmp"));
+        state.open_text(
+            crate::document::TextBuffer::from_text("value"),
+            Some(PathBuf::from("/tmp/main.rs")),
+        );
+        let ui = UiState {
+            editor_window_layout: Some(editor_layout(&state)),
+            language_completion: Some(super::LanguageCompletionState {
+                items: (0..20)
+                    .map(|index| CompletionItem {
+                        label: format!("item-{index:02}"),
+                        detail: "candidate".into(),
+                    })
+                    .collect(),
+                selected: 15,
+                scroll: 0,
+            }),
+            ..UiState::default()
+        };
+        let loaded = crate::configuration::load_bundled_config();
+        let mut config = loaded.config;
+        config.ui.command_line.completion_max_rows = 4;
+        let frame = render(&state, &ui, &config, &loaded.dashboard, 40, 10);
+        let selected_row = (0..10)
+            .find(|row| frame.grid.row_text(*row).contains("item-15"))
+            .expect("selected completion remains visible");
+        assert!(!((0..10).any(|row| frame.grid.row_text(row).contains("item-00"))));
+        assert!((0..40).any(|column| {
+            frame
+                .grid
+                .get(column, selected_row)
+                .is_some_and(|cell| cell.style == crate::terminal_ui::Style::Selection)
+        }));
     }
 
     #[test]

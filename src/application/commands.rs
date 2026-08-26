@@ -147,9 +147,6 @@ pub enum AppEffect {
     VirtualDocumentRefresh,
     HealthVirtualOpen,
     HealthVirtualRefresh,
-    AiChatOpen,
-    AiGhostRequest,
-    AiComposerRequest,
     PackageInstall {
         package_manifest: PathBuf,
         plugin_manifest: PathBuf,
@@ -259,6 +256,11 @@ pub enum AppEffect {
     CycleToolCategory(i8),
     RefreshTools,
     ActivateTool,
+    InstallSelectedTool,
+    UninstallSelectedTool,
+    StopSelectedLsp,
+    RestartSelectedLsp,
+    ToggleToolRuntime,
     LspStart,
     LspStop,
     LspRestart,
@@ -268,6 +270,7 @@ pub enum AppEffect {
     LspSessionSelect(String),
     LspAttach,
     LspDetach,
+    LspInlayHintsToggle,
     LspRequest(crate::languages::LspFeature),
     LspDocumentationScroll(isize),
     LspDocumentationClose,
@@ -505,8 +508,33 @@ pub fn register_app_commands(
         ),
         (
             "tools.activate",
-            "Install or start selected tool",
+            "Start selected tool or accept selected runtime",
             AppEffect::ActivateTool,
+        ),
+        (
+            "tools.install",
+            "Install selected managed runtime",
+            AppEffect::InstallSelectedTool,
+        ),
+        (
+            "tools.uninstall",
+            "Uninstall selected Dust-owned runtime",
+            AppEffect::UninstallSelectedTool,
+        ),
+        (
+            "tools.lsp.stop",
+            "Stop all sessions for selected language server",
+            AppEffect::StopSelectedLsp,
+        ),
+        (
+            "tools.lsp.restart",
+            "Restart selected language server",
+            AppEffect::RestartSelectedLsp,
+        ),
+        (
+            "tools.runtime.toggle",
+            "Choose a language-server build and installation",
+            AppEffect::ToggleToolRuntime,
         ),
         (
             "lsp.server.start",
@@ -640,6 +668,27 @@ pub fn register_app_commands(
             "lsp.semantic_tokens",
             "Refresh semantic tokens",
             AppEffect::LspRequest(crate::languages::LspFeature::SemanticTokensFull),
+        ),
+        (
+            "lsp.inlay_hints.toggle",
+            "Toggle inline inlay hints",
+            AppEffect::LspInlayHintsToggle,
+        ),
+        (
+            "lsp.inlay_hints",
+            "Refresh inline inlay hints",
+            AppEffect::LspRequest(crate::languages::LspFeature::InlayHints {
+                range: crate::languages::LspRange {
+                    start: crate::languages::LspPosition {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: crate::languages::LspPosition {
+                        line: 0,
+                        character: 0,
+                    },
+                },
+            }),
         ),
         (
             "lsp.code_lens",
@@ -1237,32 +1286,6 @@ pub fn register_app_commands(
         ArgumentSchema::default(),
         |_| AppEffect::HealthVirtualRefresh,
     )?;
-    for (id, title, effect) in [
-        (
-            "ai.chat.open",
-            "Open fake-provider AI chat",
-            AppEffect::AiChatOpen,
-        ),
-        (
-            "ai.ghost.request",
-            "Request fake-provider ghost text",
-            AppEffect::AiGhostRequest,
-        ),
-        (
-            "ai.composer.request",
-            "Request fake-provider edit proposal",
-            AppEffect::AiComposerRequest,
-        ),
-    ] {
-        register(
-            registry,
-            id,
-            title,
-            ContextRequirement::Application,
-            ArgumentSchema::default(),
-            move |_| effect.clone(),
-        )?;
-    }
     register(
         registry,
         "buffer.virtual.refresh",

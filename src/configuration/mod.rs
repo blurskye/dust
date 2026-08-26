@@ -499,6 +499,24 @@ impl Default for GitSignsConfig {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct IndentGuideConfig {
+    pub enabled: bool,
+    pub active_scope: bool,
+    pub character: String,
+}
+
+impl Default for IndentGuideConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            active_scope: true,
+            character: "│".into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct EditorConfig {
     pub line_numbers: LineNumbers,
     pub tab_width: usize,
@@ -520,6 +538,7 @@ pub struct EditorConfig {
     pub ambiguous_width: AmbiguousWidth,
     pub viewport: EditorViewportConfig,
     pub git_signs: GitSignsConfig,
+    pub indent_guides: IndentGuideConfig,
     pub registers: RegisterConfig,
     pub large_file: LargeFileConfig,
 }
@@ -547,6 +566,7 @@ impl Default for EditorConfig {
             ambiguous_width: AmbiguousWidth::Narrow,
             viewport: EditorViewportConfig::default(),
             git_signs: GitSignsConfig::default(),
+            indent_guides: IndentGuideConfig::default(),
             registers: RegisterConfig::default(),
             large_file: LargeFileConfig::default(),
         }
@@ -573,10 +593,6 @@ pub struct PromptTextConfig {
     pub search_backward_marker: String,
     pub workspace_trust_title: String,
     pub workspace_trust_marker: String,
-    pub ai_chat_title: String,
-    pub ai_chat_marker: String,
-    pub ai_composer_title: String,
-    pub ai_composer_marker: String,
 }
 
 impl Default for PromptTextConfig {
@@ -590,10 +606,6 @@ impl Default for PromptTextConfig {
             search_backward_marker: "? ".into(),
             workspace_trust_title: "Confirm workspace trust".into(),
             workspace_trust_marker: "> ".into(),
-            ai_chat_title: "AI chat · fake.local".into(),
-            ai_chat_marker: "? ".into(),
-            ai_composer_title: "AI composer · fake.local".into(),
-            ai_composer_marker: "> ".into(),
         }
     }
 }
@@ -708,6 +720,39 @@ impl Default for NotificationConfig {
             rows_from_bottom: 2,
             max_width: 120,
             timeout_ms: 0,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LspProgressConfig {
+    pub enabled: bool,
+    pub max_rows: u16,
+    pub max_width: u16,
+    pub right_margin: u16,
+    pub rows_from_bottom: u16,
+    pub spinner_frames: Vec<String>,
+    pub spinner_interval_ms: u64,
+    pub completed_symbol: String,
+    pub completed_timeout_ms: u64,
+}
+
+impl Default for LspProgressConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_rows: 8,
+            max_width: 72,
+            right_margin: 1,
+            rows_from_bottom: 1,
+            spinner_frames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+            spinner_interval_ms: 80,
+            completed_symbol: "✓".into(),
+            completed_timeout_ms: 3_000,
         }
     }
 }
@@ -854,7 +899,7 @@ impl Default for ToolManagerConfig {
     fn default() -> Self {
         Self {
             title: "Dust tools".into(),
-            help: "j/k move  Tab category  Enter install/start  r refresh  Esc close".into(),
+            help: "j/k select  Enter start  p versions  i install  u uninstall  x stop  R restart  r probe  Esc close".into(),
             installed_heading: "Installed".into(),
             available_heading: "Available".into(),
             installing_label: "installing".into(),
@@ -1195,6 +1240,7 @@ pub struct UiConfig {
     pub tab_line: TabLineConfig,
     pub panes: PaneConfig,
     pub notifications: NotificationConfig,
+    pub lsp_progress: LspProgressConfig,
     pub key_hints: KeyHintConfig,
     pub documentation_popup: DocumentationPopupConfig,
     pub terminal_panel: TerminalPanelConfig,
@@ -1220,6 +1266,7 @@ impl Default for UiConfig {
             tab_line: TabLineConfig::default(),
             panes: PaneConfig::default(),
             notifications: NotificationConfig::default(),
+            lsp_progress: LspProgressConfig::default(),
             key_hints: KeyHintConfig::default(),
             documentation_popup: DocumentationPopupConfig::default(),
             terminal_panel: TerminalPanelConfig::default(),
@@ -1476,10 +1523,22 @@ impl Default for WorkspaceSearchConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InlayHintLevel {
+    #[default]
+    Standard,
+    Max,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LspConfig {
     pub enabled: bool,
+    pub auto_start: bool,
+    pub inlay_hints: bool,
+    pub inlay_hint_level: InlayHintLevel,
+    pub nix_workspace_fallback: bool,
     pub request_timeout_ms: u64,
     pub restart_limit: u8,
     pub restart_backoff_ms: u64,
@@ -1490,6 +1549,10 @@ impl Default for LspConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            auto_start: true,
+            inlay_hints: true,
+            inlay_hint_level: InlayHintLevel::Standard,
+            nix_workspace_fallback: true,
             request_timeout_ms: 10_000,
             restart_limit: 3,
             restart_backoff_ms: 250,
@@ -2333,7 +2396,7 @@ impl Config {
         if self.ui.command_line.outer_margin > 20 {
             return Err("ui.command_line.outer_margin must not exceed 20");
         }
-        if self.ui.command_line.completion_max_rows > 1_000
+        if !(1..=1_000).contains(&self.ui.command_line.completion_max_rows)
             || self.ui.command_line.input_padding > 20
             || self.ui.command_line.attachment_gap > 20
             || self.ui.command_line.completion_detail_gap > 40
@@ -2732,6 +2795,35 @@ impl Config {
         if self.ui.notifications.timeout_ms > 86_400_000 {
             return Err("ui.notifications.timeout_ms exceeds 24 hours");
         }
+        if !(1..=16).contains(&self.ui.lsp_progress.max_rows)
+            || !(16..=240).contains(&self.ui.lsp_progress.max_width)
+            || self.ui.lsp_progress.right_margin > 40
+            || self.ui.lsp_progress.rows_from_bottom > 40
+            || !(2..=32).contains(&self.ui.lsp_progress.spinner_frames.len())
+            || !(16..=1_000).contains(&self.ui.lsp_progress.spinner_interval_ms)
+            || !(100..=60_000).contains(&self.ui.lsp_progress.completed_timeout_ms)
+            || self.ui.lsp_progress.spinner_frames.iter().any(|frame| {
+                frame.graphemes(true).count() != 1
+                    || UnicodeWidthStr::width(frame.as_str()) != 1
+                    || frame.chars().any(char::is_control)
+            })
+            || self
+                .ui
+                .lsp_progress
+                .completed_symbol
+                .graphemes(true)
+                .count()
+                != 1
+            || UnicodeWidthStr::width(self.ui.lsp_progress.completed_symbol.as_str()) != 1
+            || self
+                .ui
+                .lsp_progress
+                .completed_symbol
+                .chars()
+                .any(char::is_control)
+        {
+            return Err("ui.lsp_progress layout or presentation policy is invalid");
+        }
         if self.ui.theme.is_empty()
             || !self.ui.theme.bytes().all(|byte| {
                 byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
@@ -2772,6 +2864,16 @@ impl Config {
             symbol.chars().any(char::is_control) || UnicodeWidthStr::width(symbol.as_str()) != 1
         }) {
             return Err("editor.git_signs symbols must each occupy one narrow display cell");
+        }
+        if self
+            .editor
+            .indent_guides
+            .character
+            .chars()
+            .any(char::is_control)
+            || UnicodeWidthStr::width(self.editor.indent_guides.character.as_str()) != 1
+        {
+            return Err("editor.indent_guides.character must occupy one narrow display cell");
         }
         if self.editor.viewport.horizontal_margin > 100 {
             return Err("editor.viewport.horizontal_margin must not exceed 100");
@@ -2903,8 +3005,6 @@ impl Config {
             "tool_install_succeeded",
             "tool_install_failed",
             "tool_no_installer",
-            "lsp_started",
-            "lsp_running",
             "lsp_stopped",
             "lsp_failed",
             "lsp_status",
@@ -2912,9 +3012,7 @@ impl Config {
             "lsp_no_buffer",
             "lsp_disabled",
             "lsp_restart_disabled",
-            "lsp_diagnostics",
             "lsp_hover",
-            "lsp_progress",
             "lsp_health",
             "lsp_unsupported",
             "lsp_request_failed",
@@ -4205,6 +4303,23 @@ mod tests {
     }
 
     #[test]
+    fn inlay_hint_level_defaults_to_standard_and_accepts_maximum_testing_mode() {
+        assert_eq!(
+            load_bundled_config().config.lsp.inlay_hint_level,
+            super::InlayHintLevel::Standard
+        );
+        let root = tempdir().expect("tempdir");
+        let path = root.path().join("config.toml");
+        fs::write(&path, "[lsp]\ninlay_hint_level = 'max'\n").expect("write");
+        let loaded = load_config(&path);
+        assert!(loaded.diagnostic.is_none());
+        assert_eq!(
+            loaded.config.lsp.inlay_hint_level,
+            super::InlayHintLevel::Max
+        );
+    }
+
+    #[test]
     fn valid_partial_config_merges_with_defaults() {
         let root = tempdir().expect("tempdir");
         let path = root.path().join("config.toml");
@@ -4308,6 +4423,27 @@ mod tests {
             assert!(load_config(&path).diagnostic.is_some());
         }
         fs::write(&path, "[editor.git_signs]\nunknown=\"x\"\n").unwrap();
+        assert!(load_config(&path).diagnostic.is_some());
+    }
+
+    #[test]
+    fn indent_guide_policy_keeps_scope_highlighting_independently_configurable() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        fs::write(
+            &path,
+            "[editor.indent_guides]\nenabled=true\nactive_scope=false\ncharacter=\"│\"\n",
+        )
+        .unwrap();
+        let loaded = load_config(&path);
+        assert!(loaded.diagnostic.is_none());
+        assert!(loaded.config.editor.indent_guides.enabled);
+        assert!(!loaded.config.editor.indent_guides.active_scope);
+        assert_eq!(loaded.config.editor.indent_guides.character, "│");
+
+        fs::write(&path, "[editor.indent_guides]\nactive_scope=\"yes\"\n").unwrap();
+        assert!(load_config(&path).diagnostic.is_some());
+        fs::write(&path, "[editor.indent_guides]\nunknown=true\n").unwrap();
         assert!(load_config(&path).diagnostic.is_some());
     }
 
@@ -4853,7 +4989,17 @@ mod tests {
         assert!(loaded.config.input.keymaps.load_bundled_defaults);
         assert_eq!(loaded.config.input.keymaps.leader, "space");
         assert_eq!(loaded.config.input.keymaps.local_leader, "\\");
-        assert_eq!(loaded.dashboard.action.len(), 5);
+        assert!(loaded.config.editor.indent_guides.enabled);
+        assert!(loaded.config.editor.indent_guides.active_scope);
+        assert_eq!(loaded.config.editor.indent_guides.character, "│");
+        assert_eq!(loaded.dashboard.action.len(), 6);
+        assert!(
+            loaded
+                .dashboard
+                .action
+                .iter()
+                .any(|action| action.command == "explorer.open")
+        );
         let explained = loaded.explain("ui.command_line.width").expect("explain");
         assert_eq!(explained.value, "60");
         assert_eq!(explained.source, "bundled defaults");

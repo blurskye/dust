@@ -1,16 +1,10 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
-    path::PathBuf,
+    path::{Path, PathBuf},
     str::FromStr,
     time::{Duration, Instant},
 };
 
-use crate::ai::{
-    AiBufferContext, AiCapability, AiComposerProposal, AiHostBufferId, AiLimits, AiModelId,
-    AiOutput, AiProviderConfig, AiProviderId, AiProviderRegistry, AiProviderService, AiRequest,
-    AiRequestContext, AiRequestId, AiStreamRevision, AiStreamState, AiTextEdit, AiTextRange,
-    FakeChunk, FakeProviderScript, FakeTerminal,
-};
 use crate::configuration::LoadedConfig;
 use crate::debugging::{
     DapControl, DapEvent, DapResponse, DapService, DapSourceBreakpoint, DapStackFrame,
@@ -29,10 +23,10 @@ use crate::editing::{
 use crate::filesystem::{
     CheckedResourceIntent, DirectoryEntryKind, DirectoryService, ExplorerWatchBatch,
     ExplorerWatchEvent, ExplorerWatchGeneration, ExplorerWatchPolicy, ExplorerWatchService,
-    RecoveryRecord, RequestId, ResourceIntentKind, VfsError, VfsResult, VfsWorker,
-    WorkspaceFileEntry, WorkspaceFileEvent, WorkspaceFilePolicy, WorkspaceFileService,
-    WorkspaceSearchEvent, WorkspaceSearchMatch, WorkspaceSearchPolicy, WorkspaceSearchService,
-    WriteExpectation,
+    ProjectRootResolution, ProjectRootService, RecoveryRecord, RequestId, ResourceIntentKind,
+    VfsError, VfsResult, VfsWorker, WorkspaceFileEntry, WorkspaceFileEvent, WorkspaceFilePolicy,
+    WorkspaceFileService, WorkspaceSearchEvent, WorkspaceSearchMatch, WorkspaceSearchPolicy,
+    WorkspaceSearchService, WriteExpectation,
 };
 use crate::input::{
     InputAction, InputContextLayer, InputContextRegistry, KeyEvent, KeymapLayer, KeymapResolver,
@@ -40,16 +34,21 @@ use crate::input::{
 };
 use crate::languages::{
     LspCapabilities, LspCompletionItem, LspDocument, LspDocumentEdit, LspEvent, LspFeature,
-    LspFeatureResult, LspMarkupContent, LspMarkupKind, LspPosition, LspRange, LspService,
-    LspTextEdit, LspWorkspaceEdit, file_uri, language_id_for_path, path_from_file_uri,
+    LspFeatureResult, LspMarkupContent, LspMarkupKind, LspPosition, LspProgressKind, LspRange,
+    LspService, LspTextEdit, LspWorkspaceEdit, file_uri, language_id_for_path, path_from_file_uri,
 };
 use crate::observability::{
     CrashSnapshotWriter, LiveCrashSnapshot, LogLevel, LogPolicy, StructuredLogs,
 };
 use crate::packages::{
-    PackageOperation, PackageService, PackageServiceEvent, RegistryPackageMetadata,
-    RegistryPackageSummary, RegistryRequest, RegistryResult, RegistryService, ToolDefinition,
-    ToolEntry, ToolInstaller, ToolKind, ToolStatus, discover_executable, inspect_tools,
+    NIX_LSP_NIXPKGS_REVISION, NixWorkspaceService, PackageOperation, PackageService,
+    PackageServiceEvent, RegistryPackageMetadata, RegistryPackageSummary, RegistryRequest,
+    RegistryResult, RegistryService, ToolDefinition, ToolEntry, ToolInstaller, ToolKind,
+    ToolOperation, ToolStatus, ToolVersionRequest, ToolVersionService, discover_executable,
+    inspect_tools, is_nixos_host, managed_tool_executable, managed_tool_installed_version,
+    nix_lsp_launch_environment, nix_lsp_launch_environment_for_workspace_at,
+    nix_lsp_profile_installed, nix_lsp_shell, nix_lsp_tool_installed, nix_lsp_workspace_root,
+    tool_launch_environment,
 };
 use crate::persistence::{
     PersistedBreakpoint, PersistedLargeFileOverride, PersistedLayout, PersistedLocation,
@@ -81,10 +80,11 @@ use crate::terminal_ui::{
     LanguageCompletionState, NativeSurfaceWindowBinding, PickerRow, PickerSurfaceKind,
     PickerUiState, PromptKind, PromptState, PtyScreen, TerminalError, TerminalOptions,
     TerminalPanelMode, TerminalPanelState, TerminalSession, TerminalTabState, ToolMenuRow,
-    ToolMenuState, UiDiagnostic, UiEvent, UiFold, UiGhostText, UiInlayHint, UiState, UiSyntaxSpan,
-    VisualRowAnchor, VisualRowModel, active_pane_viewport, editor_state_content_width,
-    editor_state_gutter_width, editor_workspace_insets, explorer_panel_width, pane_viewports,
-    picker_geometry, prompt_geometry, render, snap_display_column, snap_display_column_forward,
+    ToolMenuState, ToolRuntimeOption, ToolRuntimePickerState, UiDiagnostic, UiEvent, UiFold,
+    UiInlayHint, UiLspProgress, UiState, UiSyntaxSpan, VisualRowAnchor, VisualRowModel,
+    active_pane_viewport, editor_state_content_width, editor_state_gutter_width,
+    editor_workspace_insets, explorer_panel_width, pane_viewports, picker_geometry,
+    prompt_geometry, render, snap_display_column, snap_display_column_forward,
     terminal_panel_geometry, terminal_tab_at_column,
 };
 use crate::workspace::{
@@ -112,6 +112,11 @@ use crate::windows::{
     CompositorProjection, ContentTypeId, DockEdge, SpatialDirection, WindowGraph, WindowPlacement,
     WindowRect, WindowTarget,
 };
+
+const LSP_INLAY_HINT_DEBOUNCE: Duration = Duration::from_millis(120);
+const LSP_INLAY_HINT_EMPTY_RETRY_BASE: Duration = Duration::from_millis(500);
+const LSP_INLAY_HINT_WARMUP_RETRY_LIMIT: u8 = 5;
+const LSP_INLAY_HINT_MAX_STARTUP_DELAY: Duration = Duration::from_secs(8);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum KeymapOperation {
@@ -541,9 +546,6 @@ enum AdapterContext {
     },
 }
 enum PendingExecutionPreflight {
-    ToolInstall {
-        definition: ToolDefinition,
-    },
     Task {
         requested: String,
         name: String,
@@ -559,13 +561,17 @@ enum PendingExecutionPreflight {
     Lsp {
         session_key: String,
         definition: ToolDefinition,
+        launch: LspLaunch,
         root_id: crate::workspace::RootId,
+        project_root: PathBuf,
         buffer: crate::editing::BufferId,
         document: LspDocument,
         restart: bool,
     },
     DapToolAdapter {
         definition: ToolDefinition,
+        /// Canonical catalog-proven project root, distinct from Dust workspace trust scope.
+        project_root: PathBuf,
         program: PathBuf,
     },
     DapToolProgram {
@@ -634,13 +640,136 @@ struct LspProjectionOwner {
     uri: String,
     language: String,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct LspAutostartObservation {
+    buffer: crate::editing::BufferId,
+    path: PathBuf,
+    language: String,
+    root_revision: u64,
+    trust: WorkspaceTrust,
+    enabled: bool,
+    auto_start: bool,
+    nix_workspace_fallback: bool,
+    execution_busy: bool,
+    launchable_server: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LspRuntimeSource {
+    Path,
+    Managed,
+    Nix,
+}
+
+impl LspRuntimeSource {
+    const fn key(self) -> &'static str {
+        match self {
+            Self::Path => "path",
+            Self::Managed => "managed",
+            Self::Nix => "nix",
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Path => "PATH",
+            Self::Managed => "Dust download",
+            Self::Nix => "Dust via Nix",
+        }
+    }
+}
+
+const fn lsp_runtime_source_allowed_on_host(source: LspRuntimeSource, nixos_host: bool) -> bool {
+    match source {
+        LspRuntimeSource::Path => true,
+        LspRuntimeSource::Managed => !nixos_host,
+        LspRuntimeSource::Nix => nixos_host,
+    }
+}
+
+#[derive(Clone, Debug)]
+enum LspLaunch {
+    Direct {
+        executable: PathBuf,
+        managed: bool,
+    },
+    NixWorkspace {
+        nix: PathBuf,
+        workspace_root: PathBuf,
+        shell: String,
+    },
+}
+
+impl LspLaunch {
+    fn executable(&self) -> &PathBuf {
+        match self {
+            Self::Direct { executable, .. } => executable,
+            Self::NixWorkspace { nix, .. } => nix,
+        }
+    }
+
+    fn arguments(&self, definition: &ToolDefinition) -> Vec<String> {
+        match self {
+            Self::Direct { .. } => definition.launch_args.clone(),
+            Self::NixWorkspace { .. } => definition.launch_args.clone(),
+        }
+    }
+
+    fn environment(&self, definition: &ToolDefinition) -> Result<BTreeMap<String, String>, String> {
+        match self {
+            Self::Direct { managed, .. } if *managed => Ok(tool_launch_environment(definition)),
+            Self::Direct { .. } => Ok(BTreeMap::new()),
+            Self::NixWorkspace { workspace_root, .. } => {
+                nix_lsp_launch_environment_for_workspace_at(workspace_root, definition)
+            }
+        }
+    }
+
+    fn with_preflighted_executable(self, executable: PathBuf) -> Self {
+        match self {
+            Self::Direct { managed, .. } => Self::Direct {
+                executable,
+                managed,
+            },
+            Self::NixWorkspace {
+                workspace_root,
+                shell,
+                ..
+            } => Self::NixWorkspace {
+                nix: executable,
+                workspace_root,
+                shell,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum LspLaunchSource {
+    Direct { executable: PathBuf, managed: bool },
+    NixWorkspace { nix: PathBuf, shell: String },
+}
+
+fn nix_workspace_shell_for_host(
+    definition: &ToolDefinition,
+    fallback_enabled: bool,
+    nixos_host: bool,
+) -> Option<&str> {
+    fallback_enabled
+        .then_some(())
+        .filter(|()| nixos_host)
+        .and_then(|()| nix_lsp_shell(definition))
+}
+
 #[derive(Clone, Debug)]
 struct LspRuntimeState {
     root: crate::workspace::RootId,
+    /// Canonical project root accepted by the selected tool policy.
     root_path: PathBuf,
     server_id: String,
     definition: ToolDefinition,
-    executable: PathBuf,
+    launch: LspLaunch,
     capabilities: Option<LspCapabilities>,
     documents: HashMap<crate::editing::BufferId, LspDocument>,
     restart_count: u8,
@@ -648,6 +777,39 @@ struct LspRuntimeState {
     circuit_open: bool,
     desired_running: bool,
     activate_on_restart: bool,
+}
+
+#[derive(Clone, Debug)]
+struct PendingLspProjectRoot {
+    definition: ToolDefinition,
+    launch_source: LspLaunchSource,
+    root_id: crate::workspace::RootId,
+    workspace_root: PathBuf,
+    buffer: crate::editing::BufferId,
+    document: LspDocument,
+}
+
+#[derive(Clone, Debug)]
+struct PendingNixLspWorkspace {
+    session_key: String,
+    definition: ToolDefinition,
+    nix: PathBuf,
+    shell: String,
+    root_id: crate::workspace::RootId,
+    project_root: PathBuf,
+    buffer: crate::editing::BufferId,
+    document: LspDocument,
+    restart: bool,
+}
+
+#[derive(Clone, Debug)]
+struct PendingDapProjectRoot {
+    definition: ToolDefinition,
+    adapter_executable: PathBuf,
+    root_id: crate::workspace::RootId,
+    workspace_root: PathBuf,
+    document: LspDocument,
+    program: PathBuf,
 }
 
 #[derive(Clone, Debug)]
@@ -773,23 +935,6 @@ enum LargeFileOverride {
     On,
     Off,
 }
-#[derive(Clone, Debug)]
-struct AiEditorCapture {
-    root_revision: u64,
-    buffer: crate::editing::BufferId,
-    revision: BufferRevision,
-    view: ViewId,
-    cursor: ByteOffset,
-    mode: EditorMode,
-    path: Option<PathBuf>,
-    range: ByteRange,
-}
-#[derive(Clone, Debug)]
-enum ActiveAiRequest {
-    Chat { root_revision: u64 },
-    Ghost(AiEditorCapture),
-    Composer(AiEditorCapture),
-}
 fn explorer_watch_policy(
     config: &crate::configuration::ExplorerWatchConfig,
 ) -> ExplorerWatchPolicy {
@@ -804,28 +949,6 @@ fn explorer_watch_policy(
         queue_capacity: config.queue_capacity,
     }
 }
-fn fake_ai_service() -> (AiProviderService, AiProviderId, AiModelId) {
-    let provider = AiProviderId::new("fake.local").expect("static AI provider");
-    let model = AiModelId::new("deterministic-v1").expect("static AI model");
-    let config = AiProviderConfig::fake_local(
-        provider.clone(),
-        [model.clone()],
-        [
-            AiCapability::Chat,
-            AiCapability::GhostText,
-            AiCapability::Composer,
-        ],
-    )
-    .expect("static AI contract");
-    let mut registry = AiProviderRegistry::new(false, 1);
-    registry.register(config).expect("single static provider");
-    (
-        AiProviderService::new(registry, AiLimits::default()),
-        provider,
-        model,
-    )
-}
-
 struct InteractiveApplication {
     state: EditorState,
     windows: WindowGraph,
@@ -845,12 +968,6 @@ struct InteractiveApplication {
     plugin_providers: PluginProviderBroker,
     plugin_virtual_documents: PluginVirtualDocumentBroker,
     plugin_virtual_editor: VirtualDocumentEditorBridge,
-    ai_service: AiProviderService,
-    ai_provider: AiProviderId,
-    ai_model: AiModelId,
-    ai_epoch: Instant,
-    active_ai_request: Option<(AiRequestId, ActiveAiRequest, AiStreamRevision)>,
-    ai_composer_prompt: Option<AiEditorCapture>,
     content_line_order: Vec<crate::editing::BufferId>,
     content_line_pins: BTreeSet<crate::editing::BufferId>,
     content_line_order_revision: u64,
@@ -902,15 +1019,38 @@ struct InteractiveApplication {
     startup_reads_pending: usize,
     startup_primary_buffer: Option<crate::editing::BufferId>,
     tools: Vec<ToolEntry>,
+    /// Catalog LSP IDs explicitly switched from PATH preference to the verified
+    /// upstream artifact processed by Dust's private Nix compatibility runtime.
+    lsp_nix_workspace_preferred: BTreeSet<String>,
+    /// Catalog LSP IDs explicitly switched to Dust's direct managed artifact.
+    lsp_managed_preferred: BTreeSet<String>,
+    /// Exact catalog-managed version selected per LSP ID.
+    lsp_managed_versions: BTreeMap<String, String>,
     tool_installer: ToolInstaller,
+    tool_version_service: ToolVersionService,
+    tool_version_pending: BTreeSet<String>,
+    tool_versions: BTreeMap<String, Result<String, String>>,
+    lsp_last_errors: BTreeMap<String, String>,
     lsp: LspService,
     active_lsp_server: Option<String>,
+    lsp_project_roots: ProjectRootService,
+    pending_lsp_project_root: Option<(u64, PendingLspProjectRoot)>,
+    nix_lsp_workspace: NixWorkspaceService,
+    pending_nix_lsp_workspace: Option<(u64, PendingNixLspWorkspace)>,
+    dap_project_roots: ProjectRootService,
+    pending_dap_project_root: Option<(u64, PendingDapProjectRoot)>,
+    lsp_autostart_observation: Option<LspAutostartObservation>,
     lsp_sessions: HashMap<String, LspRuntimeState>,
     lsp_session_synced: HashMap<(String, crate::editing::BufferId), BufferRevision>,
     lsp_synced_revisions: HashMap<crate::editing::BufferId, BufferRevision>,
     lsp_capabilities: Option<LspCapabilities>,
     lsp_request_generation: u64,
+    lsp_inlay_request_generation: u64,
+    lsp_inlay_request_owner: Option<(u64, LspProjectionOwner)>,
+    lsp_inlay_refresh_due: Option<Instant>,
+    lsp_inlay_empty_retries: u8,
     lsp_logs: VecDeque<String>,
+    lsp_progress_epoch: Instant,
     lsp_completion_items: Vec<LspCompletionItem>,
     snippet_session: Option<SnippetSession>,
     lsp_selection_ranges: Vec<ByteRange>,
@@ -1092,7 +1232,10 @@ struct PendingWorkspaceProposal {
 
 #[derive(Clone, Debug)]
 enum DeferredExecution {
-    InstallTool(String),
+    InstallTool {
+        id: String,
+        source: Option<LspRuntimeSource>,
+    },
     StartLsp(Option<String>),
     RestartLsp(String),
     StartDap {
@@ -1704,7 +1847,6 @@ pub fn run_interactive(
     .map_err(|error| InteractiveError::Configuration(error.to_string()))?;
     let pty_queue_capacity = configuration.settings.terminals.queue_capacity;
     let terminal_panel_height = configuration.settings.ui.terminal_panel.height;
-    let (ai_service, ai_provider, ai_model) = fake_ai_service();
     let explorer_watch = ExplorerWatchService::start(explorer_watch_policy(
         &configuration.settings.ui.explorer.watch,
     ))
@@ -1723,12 +1865,6 @@ pub fn run_interactive(
         plugin_providers: PluginProviderBroker::default(),
         plugin_virtual_documents: PluginVirtualDocumentBroker::default(),
         plugin_virtual_editor: VirtualDocumentEditorBridge::default(),
-        ai_service,
-        ai_provider,
-        ai_model,
-        ai_epoch: Instant::now(),
-        active_ai_request: None,
-        ai_composer_prompt: None,
         content_line_order: Vec::new(),
         content_line_pins: BTreeSet::new(),
         content_line_order_revision: 0,
@@ -1789,15 +1925,34 @@ pub fn run_interactive(
         startup_reads_pending: 0,
         startup_primary_buffer: None,
         tools: inspect_tools(),
+        lsp_nix_workspace_preferred: BTreeSet::new(),
+        lsp_managed_preferred: BTreeSet::new(),
+        lsp_managed_versions: BTreeMap::new(),
         tool_installer: ToolInstaller::start(),
+        tool_version_service: ToolVersionService::start(),
+        tool_version_pending: BTreeSet::new(),
+        tool_versions: BTreeMap::new(),
+        lsp_last_errors: BTreeMap::new(),
         lsp: LspService::new(),
         active_lsp_server: None,
+        lsp_project_roots: ProjectRootService::default(),
+        pending_lsp_project_root: None,
+        nix_lsp_workspace: NixWorkspaceService::default(),
+        pending_nix_lsp_workspace: None,
+        dap_project_roots: ProjectRootService::default(),
+        pending_dap_project_root: None,
+        lsp_autostart_observation: None,
         lsp_sessions: HashMap::new(),
         lsp_session_synced: HashMap::new(),
         lsp_synced_revisions: HashMap::new(),
         lsp_capabilities: None,
         lsp_request_generation: 0,
+        lsp_inlay_request_generation: 0,
+        lsp_inlay_request_owner: None,
+        lsp_inlay_refresh_due: None,
+        lsp_inlay_empty_retries: 0,
         lsp_logs: VecDeque::new(),
+        lsp_progress_epoch: Instant::now(),
         lsp_completion_items: Vec::new(),
         snippet_session: None,
         lsp_selection_ranges: Vec::new(),
@@ -2014,7 +2169,12 @@ pub fn run_interactive(
         application.process_explorer_result();
         application.process_trust_events();
         application.process_configuration_result();
+        application.process_tool_progress();
         application.process_tool_results();
+        application.process_tool_version_results();
+        application.process_lsp_project_root();
+        application.process_nix_lsp_workspace();
+        application.process_dap_project_root();
         application.process_lsp_events();
         application.restart_lsp_if_due();
         application.process_dap_events();
@@ -2026,11 +2186,12 @@ pub fn run_interactive(
         application.process_package_events();
         application.process_job_events();
         application.process_large_file_modes();
-        application.process_ai_events();
         application.process_syntax();
         application.process_persistence_events();
         application.sync_lsp_document();
+        application.process_lsp_inlay_refresh();
         application.sync_lsp_status_ui();
+        application.update_lsp_progress_animation();
         application.flush_keymap_timeout();
         application.update_key_hint_ui();
         application.update_notification_timer();
@@ -2063,8 +2224,6 @@ pub fn run_interactive(
         }
     }
     drop(terminal);
-    application.cancel_ai_request();
-    application.ui.ai_ghost_text = None;
     application.save_persistence();
     let persistence_deadline = Instant::now() + Duration::from_secs(2);
     while application.persistence_pending.is_some() && Instant::now() < persistence_deadline {
@@ -2541,15 +2700,645 @@ impl InteractiveApplication {
         }
     }
 
+    fn nix_workspace_available_for(&self, definition: &ToolDefinition) -> bool {
+        nix_workspace_shell_for_host(
+            definition,
+            self.configuration.settings.lsp.nix_workspace_fallback,
+            is_nixos_host(),
+        )
+        .is_some()
+            && discover_executable("nix").is_some()
+    }
+
+    fn explicit_lsp_runtime_source(&self, definition: &ToolDefinition) -> Option<LspRuntimeSource> {
+        let nixos_host = is_nixos_host();
+        if self.lsp_nix_workspace_preferred.contains(&definition.id)
+            && lsp_runtime_source_allowed_on_host(LspRuntimeSource::Nix, nixos_host)
+        {
+            Some(LspRuntimeSource::Nix)
+        } else if self.lsp_managed_preferred.contains(&definition.id)
+            && lsp_runtime_source_allowed_on_host(LspRuntimeSource::Managed, nixos_host)
+        {
+            Some(LspRuntimeSource::Managed)
+        } else {
+            None
+        }
+    }
+
+    fn selected_lsp_runtime_source(&self, definition: &ToolDefinition) -> LspRuntimeSource {
+        self.explicit_lsp_runtime_source(definition)
+            .unwrap_or_else(|| {
+                if discover_executable(&definition.executable).is_some() {
+                    LspRuntimeSource::Path
+                } else if is_nixos_host() {
+                    if self.nix_workspace_available_for(definition) {
+                        LspRuntimeSource::Nix
+                    } else {
+                        LspRuntimeSource::Path
+                    }
+                } else if managed_tool_executable(definition).is_some() {
+                    LspRuntimeSource::Managed
+                } else {
+                    LspRuntimeSource::Path
+                }
+            })
+    }
+
+    fn selected_managed_definition(&self, definition: &ToolDefinition) -> ToolDefinition {
+        let selected = self
+            .lsp_managed_versions
+            .get(&definition.id)
+            .filter(|version| definition.managed_version(version).is_some())
+            .cloned()
+            .or_else(|| {
+                managed_tool_installed_version(definition)
+                    .filter(|version| definition.managed_version(version).is_some())
+            })
+            .or_else(|| definition.version.clone());
+        selected
+            .as_deref()
+            .and_then(|version| definition.managed_version(version))
+            .unwrap_or_else(|| definition.clone())
+    }
+
+    fn managed_variant_installed(&self, base: &ToolDefinition, variant: &ToolDefinition) -> bool {
+        if managed_tool_executable(base).is_none() {
+            return false;
+        }
+        match managed_tool_installed_version(base) {
+            Some(installed) => {
+                variant.version.as_deref() == Some(installed.as_str())
+                    || variant.release.as_deref() == Some(installed.as_str())
+            }
+            None => variant.version == base.version,
+        }
+    }
+
+    fn selected_managed_executable(&self, definition: &ToolDefinition) -> Option<PathBuf> {
+        let selected = self.selected_managed_definition(definition);
+        self.managed_variant_installed(definition, &selected)
+            .then(|| managed_tool_executable(definition))
+            .flatten()
+    }
+
+    fn selected_lsp_runtime_available(&self, definition: &ToolDefinition) -> bool {
+        match self.selected_lsp_runtime_source(definition) {
+            LspRuntimeSource::Path => discover_executable(&definition.executable).is_some(),
+            LspRuntimeSource::Managed => self.selected_managed_executable(definition).is_some(),
+            LspRuntimeSource::Nix => {
+                nix_lsp_tool_installed(definition)
+                    && self.selected_managed_executable(definition).is_some()
+            }
+        }
+    }
+
+    fn tool_version_key(
+        definition: &ToolDefinition,
+        source: LspRuntimeSource,
+        executable: Option<&PathBuf>,
+    ) -> String {
+        executable.map_or_else(
+            || format!("{}:{}", definition.id, source.key()),
+            |path| format!("{}:{}:{}", definition.id, source.key(), path.display()),
+        )
+    }
+
+    fn compact_tool_version(definition: &ToolDefinition, version: &str) -> String {
+        let mut value = version.trim();
+        for prefix in [&definition.name, &definition.executable] {
+            if let Some(rest) = value.strip_prefix(prefix)
+                && rest.starts_with(char::is_whitespace)
+            {
+                value = rest.trim_start();
+                break;
+            }
+        }
+        let module_suffix = format!("/{} ", definition.name);
+        if let Some(index) = value.find(&module_suffix) {
+            value = value[index + module_suffix.len()..].trim_start();
+        }
+        value = value.strip_prefix("version ").unwrap_or(value);
+        if value.is_empty() {
+            version.into()
+        } else {
+            value.into()
+        }
+    }
+
+    fn rust_analyzer_is_rustup_proxy(path: &Path) -> bool {
+        crate::packages::rust_analyzer_is_rustup_proxy(path)
+    }
+
+    fn rust_analyzer_path_version(version: &str, rustup_bundled: bool) -> (String, String) {
+        let reported = version.trim();
+        let executable = reported
+            .split_whitespace()
+            .next()
+            .unwrap_or(reported)
+            .trim_end_matches("-standalone");
+        let release = reported
+            .split_whitespace()
+            .map(|part| {
+                part.trim_matches(|character: char| !character.is_ascii_digit() && character != '-')
+            })
+            .find(|part| {
+                part.len() == 10
+                    && part.as_bytes().get(4) == Some(&b'-')
+                    && part.as_bytes().get(7) == Some(&b'-')
+            })
+            .map(str::to_owned);
+        if rustup_bundled {
+            return (
+                "rustup bundled".into(),
+                release.unwrap_or_else(|| "toolchain build".into()),
+            );
+        }
+        if executable.starts_with("0.") {
+            return (executable.into(), "standalone build".into());
+        }
+        (
+            format!("Rust {executable}"),
+            release.unwrap_or_else(|| "toolchain build".into()),
+        )
+    }
+
+    fn observed_tool_version(
+        &self,
+        definition: &ToolDefinition,
+        source: LspRuntimeSource,
+        executable: Option<&PathBuf>,
+    ) -> (String, Option<String>) {
+        let key = Self::tool_version_key(definition, source, executable);
+        if self.tool_version_pending.contains(&key) {
+            return ("probing…".into(), None);
+        }
+        match self.tool_versions.get(&key) {
+            Some(Ok(version)) => (Self::compact_tool_version(definition, version), None),
+            Some(Err(error)) => ("probe failed".into(), Some(error.clone())),
+            None if source == LspRuntimeSource::Managed => (
+                definition
+                    .version
+                    .clone()
+                    .unwrap_or_else(|| "unknown".into()),
+                None,
+            ),
+            None if source == LspRuntimeSource::Nix => (
+                definition
+                    .version
+                    .clone()
+                    .unwrap_or_else(|| "unknown".into()),
+                None,
+            ),
+            None => ("not probed".into(), None),
+        }
+    }
+
+    fn queue_tool_version_probe(
+        &mut self,
+        definition: &ToolDefinition,
+        source: LspRuntimeSource,
+        executable: PathBuf,
+    ) {
+        if definition.probe_args.is_empty() {
+            return;
+        }
+        let key = Self::tool_version_key(definition, source, Some(&executable));
+        if self.tool_version_pending.contains(&key) || self.tool_versions.contains_key(&key) {
+            return;
+        }
+        let (arguments, environment, current_directory, timeout) = (
+            definition.probe_args.clone(),
+            match source {
+                LspRuntimeSource::Managed => tool_launch_environment(definition),
+                LspRuntimeSource::Nix => match nix_lsp_launch_environment(definition) {
+                    Ok(environment) => environment,
+                    Err(error) => {
+                        self.tool_versions.insert(key, Err(error));
+                        return;
+                    }
+                },
+                LspRuntimeSource::Path => BTreeMap::new(),
+            },
+            None,
+            Duration::from_secs(2),
+        );
+        match self.tool_version_service.probe(ToolVersionRequest {
+            id: key.clone(),
+            executable,
+            arguments,
+            environment,
+            current_directory,
+            timeout,
+        }) {
+            Ok(()) => {
+                self.tool_version_pending.insert(key);
+            }
+            Err(error) => {
+                self.tool_versions.insert(key, Err(error));
+            }
+        }
+    }
+
+    fn queue_tool_version_probes(&mut self, category: &str) {
+        let nixos_host = is_nixos_host();
+        let definitions = self
+            .tools
+            .iter()
+            .filter(|entry| category == "all" || tool_kind_key(entry.definition.kind) == category)
+            .map(|entry| entry.definition.clone())
+            .collect::<Vec<_>>();
+        for definition in definitions {
+            if let Some(path) = discover_executable(&definition.executable) {
+                self.queue_tool_version_probe(&definition, LspRuntimeSource::Path, path);
+            }
+            if definition.kind != ToolKind::Lsp
+                || lsp_runtime_source_allowed_on_host(LspRuntimeSource::Managed, nixos_host)
+            {
+                let managed_definition = if definition.kind == ToolKind::Lsp {
+                    self.selected_managed_definition(&definition)
+                } else {
+                    definition.clone()
+                };
+                let managed = if definition.kind == ToolKind::Lsp {
+                    self.selected_managed_executable(&definition)
+                } else {
+                    managed_tool_executable(&definition)
+                };
+                if let Some(path) = managed {
+                    self.queue_tool_version_probe(
+                        &managed_definition,
+                        LspRuntimeSource::Managed,
+                        path,
+                    );
+                }
+            }
+            if definition.kind == ToolKind::Lsp
+                && lsp_runtime_source_allowed_on_host(LspRuntimeSource::Nix, nixos_host)
+                && nix_lsp_tool_installed(&definition)
+                && let Some(executable) = self.selected_managed_executable(&definition)
+            {
+                let selected = self.selected_managed_definition(&definition);
+                self.queue_tool_version_probe(&selected, LspRuntimeSource::Nix, executable);
+            }
+        }
+    }
+
     fn open_tool_menu(&mut self, category: String) {
         self.cancel_pending_mapping();
         self.input.cancel_pending();
         self.ui.prompt = None;
-        self.rebuild_tool_menu(&category, None);
+        // `:lsp` is normally opened from a source buffer. Put the matching
+        // server under the cursor so Enter and runtime selection act on the
+        // server the user is actually editing, not an alphabetically earlier
+        // unrelated adapter.
+        let selected = (category == "lsp")
+            .then(|| {
+                self.active_lsp_document()
+                    .map(|(_, document)| document.language_id)
+            })
+            .flatten()
+            .and_then(|language| {
+                self.tools
+                    .iter()
+                    .find(|entry| {
+                        entry.definition.kind == ToolKind::Lsp
+                            && entry.definition.languages.contains(&language)
+                            && matches!(entry.status, ToolStatus::Installed(_))
+                    })
+                    .or_else(|| {
+                        self.tools.iter().find(|entry| {
+                            entry.definition.kind == ToolKind::Lsp
+                                && entry.definition.languages.contains(&language)
+                        })
+                    })
+                    .map(|entry| entry.definition.id.clone())
+            });
+        self.queue_tool_version_probes(&category);
+        self.rebuild_tool_menu(&category, selected.as_deref());
+    }
+
+    fn lsp_menu_lifecycle(&self, id: &str) -> (String, Vec<String>) {
+        let running_servers = self.lsp.running_servers();
+        let mut running = 0usize;
+        let mut starting = false;
+        let mut backoff = false;
+        let mut failed = false;
+        let mut sessions = self
+            .lsp_sessions
+            .iter()
+            .filter(|(_, session)| session.server_id == id)
+            .map(|(key, session)| {
+                let state = if session.capabilities.is_some() {
+                    running = running.saturating_add(1);
+                    "running"
+                } else if session.circuit_open {
+                    failed = true;
+                    "failed"
+                } else if session.restart_due.is_some() {
+                    backoff = true;
+                    "backoff"
+                } else if running_servers.contains(key) {
+                    starting = true;
+                    "starting"
+                } else {
+                    "stopped"
+                };
+                format!("{} ({state})", session.root_path.display())
+            })
+            .collect::<Vec<_>>();
+        sessions.sort();
+        starting = starting
+            || self
+                .pending_lsp_project_root
+                .as_ref()
+                .is_some_and(|(_, pending)| pending.definition.id == id)
+            || self
+                .pending_nix_lsp_workspace
+                .as_ref()
+                .is_some_and(|(_, pending)| pending.definition.id == id)
+            || self.pending_execution_preflight.values().any(|pending| {
+                matches!(pending, PendingExecutionPreflight::Lsp { definition, .. } if definition.id == id)
+            });
+        let lifecycle = if running > 0 {
+            if running == 1 {
+                "running".into()
+            } else {
+                format!("running ×{running}")
+            }
+        } else if starting {
+            "starting".into()
+        } else if backoff {
+            "backoff".into()
+        } else if failed || self.lsp_last_errors.contains_key(id) {
+            "failed".into()
+        } else {
+            "stopped".into()
+        };
+        (lifecycle, sessions)
+    }
+
+    fn runtime_options_for(&self, definition: &ToolDefinition) -> Vec<ToolRuntimeOption> {
+        let nixos_host = is_nixos_host();
+        let selected_source = self.selected_lsp_runtime_source(definition);
+        let selected_managed = self.selected_managed_definition(definition);
+        let path = discover_executable(&definition.executable);
+        let managed_path = managed_tool_executable(definition);
+        let nix_available = self.nix_workspace_available_for(definition);
+        let nix_profile_installed = nix_lsp_profile_installed(definition);
+        let (path_version, path_error) =
+            self.observed_tool_version(definition, LspRuntimeSource::Path, path.as_ref());
+        let rustup_bundled = definition.id == "rust-analyzer"
+            && path
+                .as_deref()
+                .is_some_and(Self::rust_analyzer_is_rustup_proxy);
+        let (path_display_version, path_release) = if rustup_bundled {
+            if path_error.is_none() && path_version != "probing…" && path_version != "not probed"
+            {
+                Self::rust_analyzer_path_version(&path_version, true)
+            } else {
+                ("rustup bundled".into(), "toolchain build".into())
+            }
+        } else if definition.id == "rust-analyzer"
+            && path_error.is_none()
+            && path_version != "probing…"
+            && path_version != "not probed"
+        {
+            Self::rust_analyzer_path_version(&path_version, false)
+        } else {
+            (path_version.clone(), "detected PATH build".into())
+        };
+        let mut options = vec![ToolRuntimeOption {
+            source: LspRuntimeSource::Path.key().into(),
+            version_pin: None,
+            label: LspRuntimeSource::Path.label().into(),
+            version: path_display_version,
+            release: path_release,
+            location: path.as_ref().map_or_else(
+                || "not found on PATH".into(),
+                |path| path.display().to_string(),
+            ),
+            status: if path.is_none() {
+                "missing"
+            } else if selected_source == LspRuntimeSource::Path {
+                "in use"
+            } else {
+                "available"
+            }
+            .into(),
+            note: path_error.unwrap_or_else(|| {
+                if definition.id == "rust-analyzer" {
+                    if rustup_bundled {
+                        format!(
+                            "The PATH executable is a rustup proxy reporting `{path_version}`. VERSION identifies it as rustup bundled; BUILD / RELEASE shows its reported date."
+                        )
+                    } else {
+                        format!(
+                            "The PATH executable reports `{path_version}`. VERSION shows its executable version and BUILD / RELEASE shows its reported date."
+                        )
+                    }
+                } else {
+                    format!(
+                        "The external PATH executable reports `{path_version}`; Dust can select it but never replaces or removes it."
+                    )
+                }
+            }),
+            selected: selected_source == LspRuntimeSource::Path,
+            installed: path.is_some(),
+            installable: false,
+            uninstallable: false,
+        }];
+
+        if lsp_runtime_source_allowed_on_host(LspRuntimeSource::Managed, nixos_host) {
+            for variant in definition.managed_versions() {
+                let version = variant.version.clone().unwrap_or_else(|| "unknown".into());
+                let installed = self.managed_variant_installed(definition, &variant);
+                let (observed_version, probe_error) = installed
+                    .then(|| {
+                        self.observed_tool_version(
+                            &variant,
+                            LspRuntimeSource::Managed,
+                            managed_path.as_ref(),
+                        )
+                    })
+                    .unwrap_or_else(|| (String::new(), None));
+                options.push(ToolRuntimeOption {
+                source: LspRuntimeSource::Managed.key().into(),
+                version_pin: Some(version.clone()),
+                label: LspRuntimeSource::Managed.label().into(),
+                version: version.clone(),
+                release: variant.release.clone().unwrap_or_else(|| "catalog build".into()),
+                location: if installed {
+                    managed_path.as_ref().map_or_else(
+                        || "installed path unavailable".into(),
+                        |path| path.display().to_string(),
+                    )
+                } else {
+                    "not installed".into()
+                },
+                status: if installed && selected_source == LspRuntimeSource::Managed
+                    && selected_managed.version.as_deref() == Some(version.as_str())
+                {
+                    "in use"
+                } else if installed {
+                    "installed copy"
+                } else if selected_source == LspRuntimeSource::Managed
+                    && selected_managed.version.as_deref() == Some(version.as_str())
+                {
+                    "selected, not installed"
+                } else {
+                    "available to install"
+                }
+                .into(),
+                note: probe_error.unwrap_or_else(|| {
+                    if installed && !observed_version.is_empty() && observed_version != "probing…" {
+                        format!(
+                            "{} {version} is an installed Dust download; the executable reports {observed_version}.",
+                            definition.name
+                        )
+                    } else if installed {
+                        format!(
+                            "{} {version} is installed as a separate Dust-owned copy.",
+                            definition.name
+                        )
+                    } else if managed_path.is_some() {
+                        format!(
+                            "{} {version} is available; i replaces the other Dust-download version only. PATH is untouched.",
+                            definition.name
+                        )
+                    } else {
+                        format!(
+                            "{} {version} is available as a verified Dust download; press i to install it.",
+                            definition.name
+                        )
+                    }
+                }),
+                selected: selected_source == LspRuntimeSource::Managed
+                    && selected_managed.version.as_deref() == Some(version.as_str()),
+                installed,
+                installable: variant.install.is_some(),
+                uninstallable: installed,
+            });
+            }
+
+            if definition.managed_versions().is_empty() {
+                options.push(ToolRuntimeOption {
+                    source: LspRuntimeSource::Managed.key().into(),
+                    version_pin: None,
+                    label: LspRuntimeSource::Managed.label().into(),
+                    version: "none".into(),
+                    release: "none".into(),
+                    location: "no Dust download available".into(),
+                    status: "unavailable".into(),
+                    note: "No portable managed artifact is published for this server.".into(),
+                    selected: selected_source == LspRuntimeSource::Managed,
+                    installed: false,
+                    installable: false,
+                    uninstallable: false,
+                });
+            }
+        }
+
+        if lsp_runtime_source_allowed_on_host(LspRuntimeSource::Nix, nixos_host) {
+            for variant in definition.managed_versions() {
+                let version = variant.version.clone().unwrap_or_else(|| "unknown".into());
+                let installed =
+                    nix_profile_installed && self.managed_variant_installed(definition, &variant);
+                let (observed_version, probe_error) = installed
+                    .then(|| {
+                        self.observed_tool_version(
+                            &variant,
+                            LspRuntimeSource::Nix,
+                            managed_path.as_ref(),
+                        )
+                    })
+                    .unwrap_or_else(|| (String::new(), None));
+                options.push(ToolRuntimeOption {
+                    source: LspRuntimeSource::Nix.key().into(),
+                    version_pin: Some(version.clone()),
+                    label: LspRuntimeSource::Nix.label().into(),
+                    version: version.clone(),
+                    release: variant.release.clone().unwrap_or_else(|| "catalog build".into()),
+                    location: if installed {
+                        managed_path.as_ref().map_or_else(
+                            || "installed artifact path unavailable".into(),
+                            |path| {
+                                format!(
+                                    "{} · compatibility {}",
+                                    path.display(),
+                                    nix_lsp_workspace_root()
+                                        .join("profiles")
+                                        .join(&definition.id)
+                                        .display()
+                                )
+                            },
+                        )
+                    } else {
+                        "not installed".into()
+                    },
+                    status: if installed
+                        && selected_source == LspRuntimeSource::Nix
+                        && selected_managed.version.as_deref() == Some(version.as_str())
+                    {
+                        "in use"
+                    } else if installed {
+                        "installed copy"
+                    } else if nix_available
+                        && selected_source == LspRuntimeSource::Nix
+                        && selected_managed.version.as_deref() == Some(version.as_str())
+                    {
+                        "selected, not installed"
+                    } else if nix_available {
+                        "available to install"
+                    } else {
+                        "unavailable"
+                    }
+                    .into(),
+                    note: probe_error.unwrap_or_else(|| {
+                        if installed && !observed_version.is_empty() && observed_version != "probing…" {
+                            format!(
+                                "Verified upstream {} {version} runs through Dust's private Nix compatibility environment and reports {observed_version}.",
+                                definition.name
+                            )
+                        } else {
+                            format!(
+                                "The same checksum-pinned upstream {} {version} is processed by Dust's private Nix runtime at snapshot {}.",
+                                definition.name,
+                                &NIX_LSP_NIXPKGS_REVISION[..8]
+                            )
+                        }
+                    }),
+                    selected: selected_source == LspRuntimeSource::Nix
+                        && selected_managed.version.as_deref() == Some(version.as_str()),
+                    installed,
+                    installable: nix_available && variant.install.is_some(),
+                    uninstallable: installed,
+                });
+            }
+        }
+        options
     }
 
     fn rebuild_tool_menu(&mut self, category: &str, selected_id: Option<&str>) {
-        let configured = &self.configuration.settings.ui.tool_manager;
+        let nixos_host = is_nixos_host();
+        let configured = self.configuration.settings.ui.tool_manager.clone();
+        let previous_picker = self.ui.tool_menu.as_ref().and_then(|menu| {
+            menu.runtime_picker.as_ref().map(|picker| {
+                (
+                    picker.server_id.clone(),
+                    picker
+                        .options
+                        .get(picker.selected)
+                        .map(|option| (option.source.clone(), option.version_pin.clone())),
+                    picker.scroll,
+                )
+            })
+        });
+        let previous_scroll = self
+            .ui
+            .tool_menu
+            .as_ref()
+            .filter(|menu| menu.category == category)
+            .map_or(0, |menu| menu.scroll);
         let category = if configured.categories.contains_key(category) {
             category.to_owned()
         } else {
@@ -2560,53 +3349,300 @@ impl InteractiveApplication {
             .iter()
             .filter(|entry| category == "all" || tool_kind_key(entry.definition.kind) == category)
             .collect::<Vec<_>>();
-        entries.sort_by_key(|entry| {
-            (
-                !matches!(entry.status, ToolStatus::Installed(_)),
-                entry.definition.name.to_lowercase(),
-            )
-        });
+        // Stable ordering is deliberate: installation, runtime selection, and
+        // lifecycle changes must never make the focused row jump elsewhere.
+        entries.sort_by_key(|entry| entry.definition.name.to_lowercase());
         let rows = entries
             .into_iter()
             .map(|entry| {
-                let (status, installed) = match &entry.status {
-                    ToolStatus::Installed(_) => (configured.installed_label.clone(), true),
-                    ToolStatus::Available if entry.definition.install_program.is_some() => {
-                        (configured.available_label.clone(), false)
-                    }
-                    ToolStatus::Available => {
-                        (configured.unavailable_installer_label.clone(), false)
-                    }
-                    ToolStatus::Installing => (configured.installing_label.clone(), false),
-                    ToolStatus::Failed(diagnostic) => (diagnostic.clone(), false),
+                let definition = &entry.definition;
+                let is_lsp = definition.kind == ToolKind::Lsp;
+                let source = if is_lsp {
+                    self.selected_lsp_runtime_source(definition)
+                } else if discover_executable(&definition.executable).is_some() {
+                    LspRuntimeSource::Path
+                } else {
+                    LspRuntimeSource::Managed
                 };
+                let path = discover_executable(&definition.executable);
+                let managed_definition = if is_lsp {
+                    self.selected_managed_definition(definition)
+                } else {
+                    definition.clone()
+                };
+                let managed = if is_lsp {
+                    self.selected_managed_executable(definition)
+                } else {
+                    managed_tool_executable(definition)
+                };
+                let source_executable = match source {
+                    LspRuntimeSource::Path => path.as_ref(),
+                    LspRuntimeSource::Managed | LspRuntimeSource::Nix => managed.as_ref(),
+                };
+                let observed_definition = if matches!(
+                    source,
+                    LspRuntimeSource::Managed | LspRuntimeSource::Nix
+                ) {
+                    &managed_definition
+                } else {
+                    definition
+                };
+                let (reported_version, probe_error) =
+                    self.observed_tool_version(observed_definition, source, source_executable);
+                let rustup_bundled = source == LspRuntimeSource::Path
+                    && definition.id == "rust-analyzer"
+                    && path
+                        .as_deref()
+                        .is_some_and(Self::rust_analyzer_is_rustup_proxy);
+                let path_presentation = (source == LspRuntimeSource::Path
+                    && definition.id == "rust-analyzer"
+                    && (rustup_bundled
+                        || (probe_error.is_none()
+                            && reported_version != "probing…"
+                            && reported_version != "not probed")))
+                    .then(|| {
+                        Self::rust_analyzer_path_version(&reported_version, rustup_bundled)
+                    });
+                let version = match source {
+                    LspRuntimeSource::Path => path_presentation
+                        .as_ref()
+                        .map_or_else(|| reported_version.clone(), |(version, _)| version.clone()),
+                    LspRuntimeSource::Managed => managed_definition
+                        .version
+                        .clone()
+                        .unwrap_or_else(|| reported_version.clone()),
+                    LspRuntimeSource::Nix => managed_definition
+                        .version
+                        .clone()
+                        .unwrap_or_else(|| reported_version.clone()),
+                };
+                let release = match source {
+                    LspRuntimeSource::Path => path_presentation
+                        .map_or_else(|| "reported by executable".into(), |(_, release)| release),
+                    LspRuntimeSource::Managed => managed_definition
+                        .release
+                        .clone()
+                        .unwrap_or_else(|| "catalog build".into()),
+                    LspRuntimeSource::Nix => managed_definition
+                        .release
+                        .clone()
+                        .unwrap_or_else(|| "catalog build".into()),
+                };
+                let (mut lifecycle, sessions) = if is_lsp {
+                    self.lsp_menu_lifecycle(&definition.id)
+                } else {
+                    ("idle".into(), Vec::new())
+                };
+                if let ToolStatus::Installing {
+                    phase,
+                    completed,
+                    total,
+                } = &entry.status
+                {
+                    lifecycle = tool_install_progress_label(phase, *completed, *total);
+                }
+                let source_installed = match source {
+                    LspRuntimeSource::Path => path.is_some(),
+                    LspRuntimeSource::Managed => managed.is_some(),
+                    LspRuntimeSource::Nix => {
+                        nix_lsp_profile_installed(definition)
+                            && self.managed_variant_installed(definition, &managed_definition)
+                    },
+                };
+                let executable = match source {
+                    LspRuntimeSource::Path => path.as_ref().map_or_else(
+                        || "not found on PATH".into(),
+                        |path| path.display().to_string(),
+                    ),
+                    LspRuntimeSource::Managed => managed.as_ref().map_or_else(
+                        || "not installed in Dust state".into(),
+                        |path| path.display().to_string(),
+                    ),
+                    LspRuntimeSource::Nix => managed.as_ref().map_or_else(
+                        || "verified upstream artifact is not installed".into(),
+                        |path| {
+                            format!(
+                                "{} · Nix compatibility {}",
+                                path.display(),
+                                nix_lsp_workspace_root()
+                                    .join("profiles")
+                                    .join(&definition.id)
+                                    .display()
+                            )
+                        },
+                    ),
+                };
+                let installed_managed_version = managed_tool_installed_version(definition)
+                    .map(|installed| {
+                        definition
+                            .managed_version(&installed)
+                            .and_then(|version| version.version)
+                            .unwrap_or(installed)
+                    })
+                    .or_else(|| {
+                        managed_tool_executable(definition).and_then(|_| definition.version.clone())
+                    });
+                let managed_status = if is_lsp && nixos_host {
+                    String::new()
+                } else {
+                    installed_managed_version.map_or_else(
+                        || {
+                            format!(
+                                "{} · selected · not installed · {} available version(s)",
+                                managed_definition
+                                    .version
+                                    .as_deref()
+                                    .unwrap_or("version unknown"),
+                                definition.managed_versions().len()
+                            )
+                        },
+                        |version| {
+                            format!(
+                                "{version} · installed copy · {} available version(s)",
+                                definition.managed_versions().len()
+                            )
+                        },
+                    )
+                };
+                let nix_status = if !is_lsp || !nixos_host {
+                    String::new()
+                } else if !self.nix_workspace_available_for(definition) {
+                    "unavailable on this host".into()
+                } else {
+                    format!(
+                        "{} · release {} · {} · compatibility {}",
+                        managed_definition.version.as_deref().unwrap_or("unknown"),
+                        managed_definition.release.as_deref().unwrap_or("catalog"),
+                        if nix_lsp_profile_installed(definition)
+                            && self.managed_variant_installed(definition, &managed_definition)
+                        {
+                            "installed upstream artifact"
+                        } else {
+                            "not installed"
+                        },
+                        &NIX_LSP_NIXPKGS_REVISION[..8]
+                    )
+                };
+                let note = self
+                    .lsp_last_errors
+                    .get(&definition.id)
+                    .cloned()
+                    .or(probe_error)
+                    .or_else(|| match &entry.status {
+                        ToolStatus::Failed(error) | ToolStatus::Unavailable(error) => {
+                            Some(error.clone())
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| match source {
+                        LspRuntimeSource::Path if path.is_some() => {
+                            "PATH has priority; Dust will not modify or uninstall this executable."
+                                .into()
+                        }
+                        LspRuntimeSource::Path => {
+                            "PATH runtime is missing; press p to choose an installed runtime."
+                                .into()
+                        }
+                        LspRuntimeSource::Managed if managed.is_some() => format!(
+                            "Dust download {} is ACTIVE; u removes this private copy.",
+                            managed_definition.version.as_deref().unwrap_or("unknown")
+                        ),
+                        LspRuntimeSource::Managed => format!(
+                            "Dust download {} is ACTIVE but not installed; press i.",
+                            managed_definition.version.as_deref().unwrap_or("unknown")
+                        ),
+                        LspRuntimeSource::Nix
+                            if nix_lsp_profile_installed(definition)
+                                && self.managed_variant_installed(
+                                    definition,
+                                    &managed_definition,
+                                ) =>
+                        {
+                            "The verified upstream artifact is ACTIVE through Dust's private Nix compatibility environment.".into()
+                        }
+                        LspRuntimeSource::Nix => {
+                            "The Dust via Nix artifact is ACTIVE but not installed; press i."
+                                .into()
+                        }
+                    });
                 ToolMenuRow {
-                    id: entry.definition.id.clone(),
-                    name: entry.definition.name.clone(),
+                    id: definition.id.clone(),
+                    name: definition.name.clone(),
                     kind: configured
                         .categories
-                        .get(tool_kind_key(entry.definition.kind))
+                        .get(tool_kind_key(definition.kind))
                         .cloned()
-                        .unwrap_or_else(|| entry.definition.kind.label().into()),
-                    languages: entry
-                        .definition
-                        .languages
-                        .join(&configured.language_separator),
-                    status,
-                    installed,
-                    can_install: entry.definition.install_program.is_some(),
+                        .unwrap_or_else(|| definition.kind.label().into()),
+                    languages: definition.languages.join(&configured.language_separator),
+                    version,
+                    release,
+                    runtime: source.label().into(),
+                    lifecycle,
+                    executable,
+                    note,
+                    sessions,
+                    managed_status,
+                    nix_status,
+                    installed: source_installed,
+                    can_install: if is_lsp && nixos_host {
+                        self.nix_workspace_available_for(definition)
+                    } else {
+                        !definition.managed_versions().is_empty()
+                    },
+                    can_uninstall: if is_lsp && nixos_host {
+                        nix_lsp_profile_installed(definition)
+                            && self.managed_variant_installed(definition, &managed_definition)
+                    } else {
+                        managed.is_some()
+                    },
                 }
             })
             .collect::<Vec<_>>();
         let selected = selected_id
             .and_then(|id| rows.iter().position(|row| row.id == id))
+            .or_else(|| {
+                self.ui
+                    .tool_menu
+                    .as_ref()
+                    .and_then(|menu| menu.rows.get(menu.selected))
+                    .and_then(|previous| rows.iter().position(|row| row.id == previous.id))
+            })
             .unwrap_or(0)
             .min(rows.len().saturating_sub(1));
+        let runtime_picker = previous_picker.and_then(|(server_id, focused, scroll)| {
+            let definition = self
+                .tools
+                .iter()
+                .find(|entry| {
+                    entry.definition.id == server_id && entry.definition.kind == ToolKind::Lsp
+                })
+                .map(|entry| entry.definition.clone())?;
+            let options = self.runtime_options_for(&definition);
+            let selected = focused
+                .and_then(|(source, version_pin)| {
+                    options.iter().position(|option| {
+                        option.source == source && option.version_pin == version_pin
+                    })
+                })
+                .unwrap_or_else(|| {
+                    options
+                        .iter()
+                        .position(|option| option.selected)
+                        .unwrap_or(0)
+                });
+            Some(ToolRuntimePickerState {
+                server_id,
+                selected,
+                scroll: scroll.min(options.len().saturating_sub(1)),
+                options,
+            })
+        });
         self.ui.tool_menu = Some(ToolMenuState {
             category,
             selected,
-            scroll: 0,
+            scroll: previous_scroll.min(rows.len().saturating_sub(1)),
             rows,
+            runtime_picker,
         });
     }
 
@@ -2614,6 +3650,26 @@ impl InteractiveApplication {
         let Some(menu) = &mut self.ui.tool_menu else {
             return;
         };
+        if let Some(picker) = &mut menu.runtime_picker {
+            if picker.options.is_empty() {
+                return;
+            }
+            picker.selected = if direction < 0 {
+                picker.selected.saturating_sub(1)
+            } else {
+                picker
+                    .selected
+                    .saturating_add(1)
+                    .min(picker.options.len() - 1)
+            };
+            let visible = usize::from(self.terminal_height.saturating_sub(10) / 2).max(1);
+            if picker.selected < picker.scroll {
+                picker.scroll = picker.selected;
+            } else if picker.selected >= picker.scroll.saturating_add(visible) {
+                picker.scroll = picker.selected.saturating_add(1).saturating_sub(visible);
+            }
+            return;
+        }
         if menu.rows.is_empty() {
             return;
         }
@@ -2622,7 +3678,7 @@ impl InteractiveApplication {
         } else {
             menu.selected.saturating_add(1).min(menu.rows.len() - 1)
         };
-        let visible = usize::from(self.terminal_height.saturating_sub(12)).max(1);
+        let visible = usize::from(self.terminal_height.saturating_sub(22)).max(1);
         if menu.selected < menu.scroll {
             menu.scroll = menu.selected;
         } else if menu.selected >= menu.scroll.saturating_add(visible) {
@@ -2634,6 +3690,9 @@ impl InteractiveApplication {
         let Some(menu) = &self.ui.tool_menu else {
             return;
         };
+        if menu.runtime_picker.is_some() {
+            return;
+        }
         let order = &self.configuration.settings.ui.tool_manager.category_order;
         let current = order
             .iter()
@@ -2652,30 +3711,220 @@ impl InteractiveApplication {
         self.rebuild_tool_menu(&category, None);
     }
 
+    fn selected_tool_id(&self) -> Option<String> {
+        let menu = self.ui.tool_menu.as_ref()?;
+        menu.runtime_picker
+            .as_ref()
+            .map(|picker| picker.server_id.clone())
+            .or_else(|| menu.rows.get(menu.selected).map(|row| row.id.clone()))
+    }
+
+    fn focused_runtime_source(&self, definition: &ToolDefinition) -> LspRuntimeSource {
+        self.ui
+            .tool_menu
+            .as_ref()
+            .and_then(|menu| menu.runtime_picker.as_ref())
+            .filter(|picker| picker.server_id == definition.id)
+            .and_then(|picker| picker.options.get(picker.selected))
+            .and_then(|option| match option.source.as_str() {
+                "path" => Some(LspRuntimeSource::Path),
+                "managed" => Some(LspRuntimeSource::Managed),
+                "nix" => Some(LspRuntimeSource::Nix),
+                _ => None,
+            })
+            .unwrap_or_else(|| self.selected_lsp_runtime_source(definition))
+    }
+
+    fn focused_managed_version(&self, definition: &ToolDefinition) -> Option<String> {
+        self.ui
+            .tool_menu
+            .as_ref()
+            .and_then(|menu| menu.runtime_picker.as_ref())
+            .filter(|picker| picker.server_id == definition.id)
+            .and_then(|picker| picker.options.get(picker.selected))
+            .filter(|option| {
+                matches!(
+                    option.source.as_str(),
+                    source if source == LspRuntimeSource::Managed.key()
+                        || source == LspRuntimeSource::Nix.key()
+                )
+            })
+            .and_then(|option| option.version_pin.clone())
+            .or_else(|| self.selected_managed_definition(definition).version)
+    }
+
+    fn toggle_selected_lsp_runtime(&mut self) {
+        let Some(id) = self.selected_tool_id() else {
+            return;
+        };
+        let Some(definition) = self
+            .tools
+            .iter()
+            .find(|entry| entry.definition.id == id)
+            .map(|entry| entry.definition.clone())
+        else {
+            return;
+        };
+        if definition.kind != ToolKind::Lsp {
+            self.show_error("runtime selection is available only for language servers");
+            return;
+        }
+        let options = self.runtime_options_for(&definition);
+        let selected = options
+            .iter()
+            .position(|option| option.selected)
+            .unwrap_or(0);
+        if let Some(menu) = &mut self.ui.tool_menu {
+            menu.runtime_picker = Some(ToolRuntimePickerState {
+                server_id: id,
+                selected,
+                scroll: selected.saturating_sub(2),
+                options,
+            });
+        }
+    }
+
+    fn accept_selected_lsp_runtime(&mut self) {
+        let Some((id, source, version_pin)) = self.ui.tool_menu.as_ref().and_then(|menu| {
+            let picker = menu.runtime_picker.as_ref()?;
+            let option = picker.options.get(picker.selected)?;
+            Some((
+                picker.server_id.clone(),
+                option.source.clone(),
+                option.version_pin.clone(),
+            ))
+        }) else {
+            return;
+        };
+        let source = match source.as_str() {
+            "path" => LspRuntimeSource::Path,
+            "managed" => LspRuntimeSource::Managed,
+            "nix" => LspRuntimeSource::Nix,
+            _ => return,
+        };
+        self.lsp_nix_workspace_preferred.remove(&id);
+        self.lsp_managed_preferred.remove(&id);
+        match source {
+            LspRuntimeSource::Path => {}
+            LspRuntimeSource::Managed => {
+                let Some(version) = version_pin else {
+                    self.show_error("this managed runtime has no installable version");
+                    return;
+                };
+                self.lsp_managed_preferred.insert(id.clone());
+                self.lsp_managed_versions.insert(id.clone(), version);
+            }
+            LspRuntimeSource::Nix => {
+                let Some(version) = version_pin else {
+                    self.show_error("this Dust via Nix runtime has no installable version");
+                    return;
+                };
+                self.lsp_nix_workspace_preferred.insert(id.clone());
+                self.lsp_managed_versions.insert(id.clone(), version);
+            }
+        }
+        self.stop_lsp_sessions_for_server(&id);
+        self.lsp_autostart_observation = None;
+        self.ui.notification = Some(match source {
+            LspRuntimeSource::Managed => format!(
+                "{id} ACTIVE build: Dust download {}",
+                self.lsp_managed_versions
+                    .get(&id)
+                    .map(String::as_str)
+                    .unwrap_or("unknown")
+            ),
+            _ => format!("{id} ACTIVE installation: {}", source.label()),
+        });
+        self.ui.notification_error = false;
+        if let Some(menu) = &mut self.ui.tool_menu {
+            menu.runtime_picker = None;
+        }
+        let category = self
+            .ui
+            .tool_menu
+            .as_ref()
+            .map_or_else(|| "lsp".into(), |menu| menu.category.clone());
+        self.rebuild_tool_menu(&category, Some(&id));
+    }
+
+    fn close_tool_menu(&mut self) {
+        let Some(menu) = &mut self.ui.tool_menu else {
+            return;
+        };
+        if menu.runtime_picker.take().is_some() {
+            let category = menu.category.clone();
+            let selected = menu.rows.get(menu.selected).map(|row| row.id.clone());
+            self.rebuild_tool_menu(&category, selected.as_deref());
+        } else {
+            self.ui.tool_menu = None;
+        }
+    }
+
+    fn stop_lsp_sessions_for_server(&mut self, id: &str) {
+        let sessions = self
+            .lsp_sessions
+            .iter()
+            .filter_map(|(key, session)| (session.server_id == id).then_some(key.clone()))
+            .collect::<Vec<_>>();
+        for key in sessions {
+            if let Some(session) = self.lsp_sessions.get_mut(&key) {
+                session.desired_running = false;
+                session.restart_due = None;
+            }
+            let _ = self.lsp.stop(&key);
+            self.clear_lsp_progress(&key);
+            self.clear_lsp_server_ownership(&key);
+            self.lsp_sessions.remove(&key);
+            self.lsp_session_synced
+                .retain(|(server, _), _| server != &key);
+            if self.active_lsp_server.as_deref() == Some(&key) {
+                self.clear_lsp_session_state();
+            }
+        }
+    }
+
     fn refresh_tools(&mut self) {
         let category = self
             .ui
             .tool_menu
             .as_ref()
             .map_or_else(|| "all".into(), |menu| menu.category.clone());
-        let selected = self
-            .ui
-            .tool_menu
-            .as_ref()
-            .and_then(|menu| menu.rows.get(menu.selected))
-            .map(|row| row.id.clone());
+        let selected = self.selected_tool_id();
         self.tools = inspect_tools();
+        self.tool_version_service = ToolVersionService::start();
+        self.tool_versions.clear();
+        self.tool_version_pending.clear();
+        self.queue_tool_version_probes(&category);
         self.rebuild_tool_menu(&category, selected.as_deref());
     }
 
+    fn process_tool_version_results(&mut self) {
+        let mut changed = false;
+        while let Some(result) = self.tool_version_service.try_result() {
+            self.tool_version_pending.remove(&result.id);
+            self.tool_versions.insert(result.id, result.result);
+            changed = true;
+        }
+        if changed {
+            let category = self.ui.tool_menu.as_ref().map(|menu| menu.category.clone());
+            let selected = self.selected_tool_id();
+            if let Some(category) = category {
+                self.rebuild_tool_menu(&category, selected.as_deref());
+            }
+        }
+    }
+
     fn activate_selected_tool(&mut self) {
-        let selected = self
+        if self
             .ui
             .tool_menu
             .as_ref()
-            .and_then(|menu| menu.rows.get(menu.selected))
-            .map(|row| row.id.clone());
-        let Some(id) = selected else {
+            .is_some_and(|menu| menu.runtime_picker.is_some())
+        {
+            self.accept_selected_lsp_runtime();
+            return;
+        }
+        let Some(id) = self.selected_tool_id() else {
             return;
         };
         self.activate_tool_by_id(&id);
@@ -2689,75 +3938,55 @@ impl InteractiveApplication {
         else {
             return;
         };
-        if matches!(self.tools[index].status, ToolStatus::Installed(_)) {
-            match self.tools[index].definition.kind {
-                ToolKind::Lsp => self.start_lsp(Some(id.into())),
+        let definition = self.tools[index].definition.clone();
+        let path_available = matches!(self.tools[index].status, ToolStatus::Installed(_));
+        if definition.kind == ToolKind::Lsp {
+            self.start_lsp(Some(id.into()));
+            return;
+        }
+        if path_available {
+            match definition.kind {
+                ToolKind::Lsp => unreachable!("handled before installed-tool dispatch"),
                 ToolKind::Dap => self.start_dap(Some(id.into()), None),
                 ToolKind::Formatter | ToolKind::Linter => {
                     self.ui.notification = Some(self.message(
                         "tool_install_succeeded",
-                        &[("tool", self.tools[index].definition.name.clone())],
+                        &[("tool", definition.name.clone())],
                     ));
                     self.ui.notification_error = false;
                 }
             }
             return;
         }
-        let definition = self.tools[index].definition.clone();
-        if !self.execution_revalidated {
-            self.defer_trusted_execution(DeferredExecution::InstallTool(id.into()));
+        if let ToolStatus::Unavailable(diagnostic) = &self.tools[index].status {
+            self.show_error(diagnostic.clone());
             return;
         }
-        if definition.install_program.is_none() {
+        if !self.execution_revalidated {
+            self.defer_trusted_execution(DeferredExecution::InstallTool {
+                id: id.into(),
+                source: None,
+            });
+            return;
+        }
+        if definition.install.is_none() {
             self.show_error(self.message("tool_no_installer", &[("tool", definition.name)]));
             return;
         }
-        let program = definition
-            .install_program
-            .as_ref()
-            .and_then(|program| discover_executable(program));
-        let Some(program) = program else {
-            self.show_error(self.message(
-                "tool_install_failed",
-                &[
-                    ("tool", definition.name),
-                    ("diagnostic", "installer executable is unavailable".into()),
-                ],
-            ));
-            return;
-        };
-        let Some(root_id) = self.workspace.active_root() else {
-            return;
-        };
-        let Some(cwd) = self
+        if let Err(error) = self
             .workspace
-            .roots()
-            .iter()
-            .find(|root| root.id == root_id)
-            .map(|root| root.identity.canonical_path.clone())
-        else {
+            .authorize_execution(ExecutionSource::ProjectLocal)
+        {
+            self.show_error(error);
             return;
-        };
-        let request = ExecutionPreflightRequest {
-            executable: program,
-            cwd,
-            roots: self
-                .workspace
-                .roots()
-                .iter()
-                .map(|root| root.identity.canonical_path.clone())
-                .collect(),
-            root_revision: self.workspace.root_revision(),
-        };
-        match self.execution_preflight.request(request) {
-            Ok(preflight) => {
-                self.pending_execution_preflight.insert(
-                    preflight,
-                    PendingExecutionPreflight::ToolInstall {
-                        definition: definition.clone(),
-                    },
-                );
-                self.tools[index].status = ToolStatus::Installing;
+        }
+        match self.tool_installer.install(definition.clone()) {
+            Ok(()) => {
+                self.tools[index].status = ToolStatus::Installing {
+                    phase: "preparing".into(),
+                    completed: 0,
+                    total: None,
+                };
                 self.ui.notification =
                     Some(self.message("tool_install_started", &[("tool", definition.name)]));
                 self.ui.notification_error = false;
@@ -2773,41 +4002,354 @@ impl InteractiveApplication {
         }
     }
 
-    fn process_tool_results(&mut self) {
-        while let Ok(Some(result)) = self.tool_installer.try_result() {
-            let Some(index) = self
+    fn install_selected_tool(&mut self) {
+        let Some(id) = self.selected_tool_id() else {
+            return;
+        };
+        let focused = self
+            .tools
+            .iter()
+            .find(|entry| entry.definition.id == id)
+            .filter(|entry| entry.definition.kind == ToolKind::Lsp)
+            .map(|entry| {
+                (
+                    self.focused_runtime_source(&entry.definition),
+                    self.focused_managed_version(&entry.definition),
+                )
+            });
+        let source = focused.as_ref().map(|(source, _)| *source);
+        if let Some((source, Some(version))) = focused
+            && matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix)
+        {
+            self.lsp_managed_versions.insert(id.clone(), version);
+        }
+        self.install_tool_by_id(&id, source);
+    }
+
+    fn install_tool_by_id(&mut self, id: &str, source: Option<LspRuntimeSource>) {
+        let Some(index) = self
+            .tools
+            .iter()
+            .position(|entry| entry.definition.id == id)
+        else {
+            return;
+        };
+        let base_definition = self.tools[index].definition.clone();
+        let source = source.unwrap_or(LspRuntimeSource::Managed);
+        if base_definition.kind == ToolKind::Lsp
+            && !lsp_runtime_source_allowed_on_host(source, is_nixos_host())
+        {
+            self.show_error(if is_nixos_host() {
+                "NixOS language servers are installed only through Dust's private Nix compatibility runtime"
+            } else {
+                "non-NixOS language servers are installed only as verified Dust downloads"
+            });
+            return;
+        }
+        let definition = if base_definition.kind == ToolKind::Lsp
+            && matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix)
+        {
+            self.selected_managed_definition(&base_definition)
+        } else {
+            base_definition
+        };
+        if definition.kind == ToolKind::Lsp {
+            match source {
+                LspRuntimeSource::Path => {
+                    self.show_error(if is_nixos_host() {
+                        "PATH builds are external; choose Dust via Nix with p"
+                    } else {
+                        "PATH builds are external; choose a Dust download with p"
+                    });
+                    return;
+                }
+                LspRuntimeSource::Managed
+                    if self
+                        .managed_variant_installed(&self.tools[index].definition, &definition) =>
+                {
+                    self.ui.notification = Some(format!(
+                        "{} {} is already installed",
+                        definition.name,
+                        definition.version.as_deref().unwrap_or("unknown")
+                    ));
+                    self.ui.notification_error = false;
+                    return;
+                }
+                LspRuntimeSource::Nix
+                    if nix_lsp_profile_installed(&definition)
+                        && self.managed_variant_installed(
+                            &self.tools[index].definition,
+                            &definition,
+                        ) =>
+                {
+                    self.ui.notification = Some(format!(
+                        "{} {} is already installed through Dust's Nix compatibility environment",
+                        definition.name,
+                        definition.version.as_deref().unwrap_or("unknown")
+                    ));
+                    self.ui.notification_error = false;
+                    return;
+                }
+                LspRuntimeSource::Managed | LspRuntimeSource::Nix => {}
+            }
+        }
+        if !self.execution_revalidated {
+            self.defer_trusted_execution(DeferredExecution::InstallTool {
+                id: id.into(),
+                source: (definition.kind == ToolKind::Lsp).then_some(source),
+            });
+            return;
+        }
+        if let Err(error) = self
+            .workspace
+            .authorize_execution(ExecutionSource::ProjectLocal)
+        {
+            self.show_error(error);
+            return;
+        }
+        let operation = if definition.kind == ToolKind::Lsp && source == LspRuntimeSource::Nix {
+            let Some(nix) = discover_executable("nix") else {
+                self.show_error("Dust via Nix is unavailable: nix was not found");
+                return;
+            };
+            if !self.nix_workspace_available_for(&definition) {
+                self.show_error("no verified upstream artifact or Dust Nix runtime is available for this language server");
+                return;
+            }
+            self.tool_installer.install_nix(definition.clone(), nix)
+        } else {
+            if let ToolStatus::Unavailable(diagnostic) = &self.tools[index].status {
+                self.show_error(diagnostic.clone());
+                return;
+            }
+            if definition.install.is_none() {
+                self.show_error(self.message("tool_no_installer", &[("tool", definition.name)]));
+                return;
+            }
+            self.tool_installer.install(definition.clone())
+        };
+        match operation {
+            Ok(()) => {
+                self.tools[index].status = ToolStatus::Installing {
+                    phase: "preparing".into(),
+                    completed: 0,
+                    total: None,
+                };
+                self.ui.notification = Some(format!(
+                    "installing {} {} {}…",
+                    definition.name,
+                    source.label(),
+                    if matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix) {
+                        definition.version.as_deref().unwrap_or("unknown")
+                    } else {
+                        "runtime"
+                    }
+                ));
+                self.ui.notification_error = false;
+                let category = self
+                    .ui
+                    .tool_menu
+                    .as_ref()
+                    .map_or("all", |menu| &menu.category)
+                    .to_owned();
+                self.rebuild_tool_menu(&category, Some(id));
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+
+    fn uninstall_selected_tool(&mut self) {
+        let Some(id) = self.selected_tool_id() else {
+            return;
+        };
+        let Some(index) = self
+            .tools
+            .iter()
+            .position(|entry| entry.definition.id == id)
+        else {
+            return;
+        };
+        let base_definition = self.tools[index].definition.clone();
+        let source = if base_definition.kind == ToolKind::Lsp {
+            self.focused_runtime_source(&base_definition)
+        } else {
+            LspRuntimeSource::Managed
+        };
+        if base_definition.kind == ToolKind::Lsp
+            && !lsp_runtime_source_allowed_on_host(source, is_nixos_host())
+        {
+            self.show_error("that installation mechanism is not used on this host");
+            return;
+        }
+        let definition = if base_definition.kind == ToolKind::Lsp
+            && matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix)
+        {
+            self.focused_managed_version(&base_definition)
+                .as_deref()
+                .and_then(|version| base_definition.managed_version(version))
+                .unwrap_or_else(|| base_definition.clone())
+        } else {
+            base_definition.clone()
+        };
+        let operation = match source {
+            LspRuntimeSource::Path => {
+                self.show_error("Dust never uninstalls executables owned by PATH");
+                return;
+            }
+            LspRuntimeSource::Managed => {
+                if !self.managed_variant_installed(&base_definition, &definition) {
+                    self.show_error(format!(
+                        "Dust-download version {} is not installed",
+                        definition.version.as_deref().unwrap_or("unknown")
+                    ));
+                    return;
+                }
+                self.stop_lsp_sessions_for_server(&id);
+                self.tool_installer.uninstall(definition.clone())
+            }
+            LspRuntimeSource::Nix => {
+                if !nix_lsp_profile_installed(&definition)
+                    || !self.managed_variant_installed(&base_definition, &definition)
+                {
+                    self.show_error(format!(
+                        "Dust via Nix version {} is not installed",
+                        definition.version.as_deref().unwrap_or("unknown")
+                    ));
+                    return;
+                }
+                self.stop_lsp_sessions_for_server(&id);
+                self.tool_installer.uninstall_nix(definition.clone())
+            }
+        };
+        match operation {
+            Ok(()) => {
+                self.tools[index].status = ToolStatus::Installing {
+                    phase: "uninstalling".into(),
+                    completed: 0,
+                    total: None,
+                };
+                self.ui.notification = Some(format!(
+                    "uninstalling {} {} runtime…",
+                    definition.name,
+                    source.label()
+                ));
+                self.ui.notification_error = false;
+                let category = self
+                    .ui
+                    .tool_menu
+                    .as_ref()
+                    .map_or("all", |menu| &menu.category)
+                    .to_owned();
+                self.rebuild_tool_menu(&category, Some(&id));
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+
+    fn stop_selected_lsp(&mut self) {
+        let Some(id) = self.selected_tool_id() else {
+            return;
+        };
+        self.stop_lsp_sessions_for_server(&id);
+        let category = self
+            .ui
+            .tool_menu
+            .as_ref()
+            .map_or_else(|| "lsp".into(), |menu| menu.category.clone());
+        self.rebuild_tool_menu(&category, Some(&id));
+    }
+
+    fn restart_selected_lsp(&mut self) {
+        let Some(id) = self.selected_tool_id() else {
+            return;
+        };
+        self.stop_lsp_sessions_for_server(&id);
+        self.start_lsp(Some(id.clone()));
+        let category = self
+            .ui
+            .tool_menu
+            .as_ref()
+            .map_or_else(|| "lsp".into(), |menu| menu.category.clone());
+        self.rebuild_tool_menu(&category, Some(&id));
+    }
+
+    fn process_tool_progress(&mut self) {
+        let mut changed = None;
+        while let Ok(Some(progress)) = self.tool_installer.try_progress() {
+            let Some(entry) = self
                 .tools
-                .iter()
-                .position(|entry| entry.definition.id == result.id)
+                .iter_mut()
+                .find(|entry| entry.definition.id == progress.id)
             else {
                 continue;
             };
-            let name = self.tools[index].definition.name.clone();
-            self.tools[index].status = match result.result {
-                Ok(Some(path)) => {
-                    self.ui.notification =
-                        Some(self.message("tool_install_succeeded", &[("tool", name)]));
-                    self.ui.notification_error = false;
-                    ToolStatus::Installed(path)
-                }
-                Ok(None) => {
-                    let diagnostic = "installer succeeded but executable is not on PATH".to_owned();
-                    self.show_error(self.message(
-                        "tool_install_failed",
-                        &[("tool", name), ("diagnostic", diagnostic.clone())],
-                    ));
-                    ToolStatus::Failed(diagnostic)
-                }
-                Err(diagnostic) => {
-                    self.show_error(self.message(
-                        "tool_install_failed",
-                        &[("tool", name), ("diagnostic", diagnostic.clone())],
-                    ));
-                    ToolStatus::Failed(diagnostic)
-                }
+            entry.status = ToolStatus::Installing {
+                phase: progress.phase,
+                completed: progress.completed,
+                total: progress.total,
             };
+            changed = Some(entry.definition.id.clone());
+        }
+        if let (Some(id), Some(menu)) = (changed, &self.ui.tool_menu) {
+            self.rebuild_tool_menu(&menu.category.clone(), Some(&id));
+        }
+    }
+
+    fn process_tool_results(&mut self) {
+        while let Ok(Some(result)) = self.tool_installer.try_result() {
+            let name = self
+                .tools
+                .iter()
+                .find(|entry| entry.definition.id == result.id)
+                .map_or_else(|| result.id.clone(), |entry| entry.definition.name.clone());
+            let diagnostic = result.result.err();
+            self.tools = inspect_tools();
+            if let Some(diagnostic) = diagnostic {
+                if let Some(entry) = self
+                    .tools
+                    .iter_mut()
+                    .find(|entry| entry.definition.id == result.id)
+                {
+                    entry.status = ToolStatus::Failed(diagnostic.clone());
+                }
+                self.show_error(format!(
+                    "{} {} failed: {diagnostic}",
+                    match result.operation {
+                        ToolOperation::InstallManaged | ToolOperation::InstallNix => "installing",
+                        ToolOperation::UninstallManaged | ToolOperation::UninstallNix => {
+                            "uninstalling"
+                        }
+                    },
+                    name
+                ));
+            } else {
+                self.ui.notification = Some(format!(
+                    "{} {} {} runtime",
+                    match result.operation {
+                        ToolOperation::InstallManaged | ToolOperation::InstallNix => "installed",
+                        ToolOperation::UninstallManaged | ToolOperation::UninstallNix => {
+                            "uninstalled"
+                        }
+                    },
+                    name,
+                    match result.operation {
+                        ToolOperation::InstallManaged | ToolOperation::UninstallManaged => {
+                            "Dust download"
+                        }
+                        ToolOperation::InstallNix | ToolOperation::UninstallNix => "Dust via Nix",
+                    }
+                ));
+                self.ui.notification_error = false;
+            }
+            self.tool_version_service = ToolVersionService::start();
+            let prefix = format!("{}:", result.id);
+            self.tool_versions
+                .retain(|key, _| !key.starts_with(&prefix));
+            self.tool_version_pending
+                .retain(|key| !key.starts_with(&prefix));
             if let Some(menu) = &self.ui.tool_menu {
                 let category = menu.category.clone();
+                self.queue_tool_version_probes(&category);
                 self.rebuild_tool_menu(&category, Some(&result.id));
             }
         }
@@ -2838,32 +4380,107 @@ impl InteractiveApplication {
             self.show_error(self.message("lsp_no_buffer", &[]));
             return;
         };
-        let entry = requested
-            .as_ref()
-            .and_then(|id| {
-                self.tools.iter().find(|entry| {
-                    entry.definition.id == *id
-                        && entry.definition.kind == ToolKind::Lsp
-                        && entry.definition.languages.contains(&document.language_id)
-                })
-            })
-            .or_else(|| {
-                self.tools.iter().find(|entry| {
+        let entry = if let Some(id) = requested.as_ref() {
+            let entry = self
+                .tools
+                .iter()
+                .find(|entry| entry.definition.id == *id && entry.definition.kind == ToolKind::Lsp);
+            if !entry
+                .is_some_and(|entry| entry.definition.languages.contains(&document.language_id))
+            {
+                self.show_error(format!(
+                    "language server `{id}` does not support {}",
+                    document.language_id
+                ));
+                return;
+            }
+            entry
+        } else {
+            self.tools
+                .iter()
+                .find(|entry| {
                     entry.definition.kind == ToolKind::Lsp
                         && entry.definition.languages.contains(&document.language_id)
                         && matches!(entry.status, ToolStatus::Installed(_))
                 })
-            });
+                .or_else(|| {
+                    self.tools.iter().find(|entry| {
+                        entry.definition.kind == ToolKind::Lsp
+                            && entry.definition.languages.contains(&document.language_id)
+                    })
+                })
+        };
         let Some(entry) = entry else {
             self.show_error(self.message("lsp_no_server", &[]));
             return;
         };
-        let ToolStatus::Installed(executable) = &entry.status else {
-            self.show_error(self.message("lsp_no_server", &[]));
-            return;
+        let base_definition = entry.definition.clone();
+        let source = self.selected_lsp_runtime_source(&base_definition);
+        let definition = if matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix) {
+            self.selected_managed_definition(&base_definition)
+        } else {
+            base_definition.clone()
         };
-        let definition = entry.definition.clone();
-        let executable = executable.clone();
+        let launch_source = match source {
+            LspRuntimeSource::Path => {
+                let Some(executable) = discover_executable(&definition.executable) else {
+                    self.show_error(format!(
+                        "{} is not available on PATH; press p to choose another runtime",
+                        definition.name
+                    ));
+                    return;
+                };
+                LspLaunchSource::Direct {
+                    executable,
+                    managed: false,
+                }
+            }
+            LspRuntimeSource::Managed => {
+                let Some(executable) = self.selected_managed_executable(&base_definition) else {
+                    self.show_error(format!(
+                        "{} Dust-download version {} is not installed; press i to install it",
+                        definition.name,
+                        definition.version.as_deref().unwrap_or("unknown")
+                    ));
+                    return;
+                };
+                LspLaunchSource::Direct {
+                    executable,
+                    managed: true,
+                }
+            }
+            LspRuntimeSource::Nix => {
+                let Some(shell) = nix_workspace_shell_for_host(
+                    &definition,
+                    self.configuration.settings.lsp.nix_workspace_fallback,
+                    is_nixos_host(),
+                ) else {
+                    self.show_error("Dust via Nix is unavailable on this host");
+                    return;
+                };
+                if !nix_lsp_profile_installed(&definition) {
+                    self.show_error("Dust via Nix is not installed; press i to install it");
+                    return;
+                }
+                let Some(executable) = self.selected_managed_executable(&base_definition) else {
+                    self.show_error(format!(
+                        "{} Dust via Nix version {} is not installed; press i",
+                        definition.name,
+                        definition.version.as_deref().unwrap_or("unknown")
+                    ));
+                    return;
+                };
+                if let Err(error) = nix_lsp_launch_environment(&definition) {
+                    self.show_error(error);
+                    return;
+                }
+                LspLaunchSource::NixWorkspace {
+                    nix: executable,
+                    shell: shell.into(),
+                }
+            }
+        };
+        self.lsp_last_errors.remove(&definition.id);
         let Ok(root_id) = self.workspace.require_path(&document.path) else {
             self.show_error(self.message("lsp_no_buffer", &[]));
             return;
@@ -2877,46 +4494,295 @@ impl InteractiveApplication {
         else {
             return;
         };
-        let session_key = crate::languages::LspSessionKey {
-            root_id: root_id.0,
-            server_id: definition.id.clone(),
-        }
-        .transport_key();
-        let running = self.lsp.running_servers().contains(&session_key);
-        let starting=self.pending_execution_preflight.values().any(|pending|matches!(pending,PendingExecutionPreflight::Lsp{session_key:key,..}if key==&session_key));
-        if running || starting {
-            self.active_lsp_server = Some(session_key);
-            return;
-        }
         if !self.execution_revalidated {
             self.defer_trusted_execution(DeferredExecution::StartLsp(Some(definition.id.clone())));
             return;
         }
+        if let Err(error) = self.workspace.authorize_execution(
+            if matches!(launch_source, LspLaunchSource::NixWorkspace { .. }) {
+                ExecutionSource::ProjectLocal
+            } else {
+                ExecutionSource::SystemTool
+            },
+        ) {
+            self.show_error(error);
+            return;
+        }
+        match self.lsp_project_roots.resolve(
+            document.path.clone(),
+            root_path.clone(),
+            self.workspace.root_revision(),
+            definition.project_root_markers.clone(),
+            definition.project_root_strategy,
+        ) {
+            Ok(generation) => {
+                self.pending_lsp_project_root = Some((
+                    generation,
+                    PendingLspProjectRoot {
+                        definition,
+                        launch_source,
+                        root_id,
+                        workspace_root: root_path,
+                        buffer,
+                        document,
+                    },
+                ));
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+
+    fn process_lsp_project_root(&mut self) {
+        let Some(result) = self.lsp_project_roots.try_result() else {
+            return;
+        };
+        let Some((generation, pending)) = self.pending_lsp_project_root.take() else {
+            return;
+        };
+        let resolution = match result {
+            Ok(resolution) if resolution.generation == generation => resolution,
+            Ok(_) => return,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        self.finish_lsp_project_root(pending, resolution);
+    }
+
+    fn queue_nix_lsp_workspace(&mut self, pending: PendingNixLspWorkspace) {
         if let Err(error) = self
             .workspace
-            .authorize_execution(ExecutionSource::SystemTool)
+            .authorize_execution(ExecutionSource::ProjectLocal)
         {
             self.show_error(error);
             return;
         }
-        let restart = self.lsp_sessions.contains_key(&session_key);
+        match self.nix_lsp_workspace.prepare() {
+            Ok(generation) => {
+                self.pending_nix_lsp_workspace = Some((generation, pending));
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+
+    fn process_nix_lsp_workspace(&mut self) {
+        let Some(result) = self.nix_lsp_workspace.try_result() else {
+            return;
+        };
+        let Some((generation, pending)) = self.pending_nix_lsp_workspace.take() else {
+            return;
+        };
+        if result.generation != generation {
+            return;
+        }
+        let workspace_root = match result.result {
+            Ok(root) => root,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        if !self
+            .state
+            .buffers
+            .get(pending.buffer)
+            .and_then(|buffer| buffer.path.as_ref())
+            .is_some_and(|path| path == &pending.document.path)
+            || !self
+                .workspace
+                .require_path(&pending.document.path)
+                .is_ok_and(|root| root == pending.root_id)
+            || self
+                .workspace
+                .authorize_execution(ExecutionSource::ProjectLocal)
+                .is_err()
+        {
+            return;
+        }
+        if self.lsp.running_servers().contains(&pending.session_key) {
+            self.attach_lsp_document(&pending.session_key, pending.buffer, pending.document);
+            return;
+        }
         self.queue_lsp_preflight(
-            session_key,
-            definition,
-            executable,
-            root_id,
-            root_path,
-            buffer,
-            document,
-            restart,
+            pending.session_key,
+            pending.definition,
+            LspLaunch::NixWorkspace {
+                nix: pending.nix,
+                workspace_root,
+                shell: pending.shell,
+            },
+            pending.root_id,
+            pending.project_root,
+            pending.buffer,
+            pending.document,
+            pending.restart,
         );
+    }
+
+    fn process_dap_project_root(&mut self) {
+        let Some(result) = self.dap_project_roots.try_result() else {
+            return;
+        };
+        let Some((generation, pending)) = self.pending_dap_project_root.take() else {
+            return;
+        };
+        let resolution = match result {
+            Ok(resolution) if resolution.generation == generation => resolution,
+            Ok(_) => return,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        if resolution.root_revision != self.workspace.root_revision()
+            || resolution.document != pending.document.path
+            || resolution.workspace_root != pending.workspace_root
+            || !self
+                .workspace
+                .require_path(&pending.document.path)
+                .is_ok_and(|root| root == pending.root_id)
+            || !self
+                .workspace
+                .require_path(&pending.program)
+                .is_ok_and(|root| root == pending.root_id)
+        {
+            return;
+        }
+        let Some(project_root) = resolution.project_root else {
+            self.show_error("debug adapter requires a valid catalog-backed project root");
+            return;
+        };
+        let request = ExecutionPreflightRequest {
+            executable: pending.adapter_executable,
+            cwd: project_root.clone(),
+            roots: self
+                .workspace
+                .roots()
+                .iter()
+                .map(|root| root.identity.canonical_path.clone())
+                .collect(),
+            root_revision: self.workspace.root_revision(),
+        };
+        match self.execution_preflight.request(request) {
+            Ok(id) => {
+                self.pending_execution_preflight.insert(
+                    id,
+                    PendingExecutionPreflight::DapToolAdapter {
+                        definition: pending.definition,
+                        project_root,
+                        program: pending.program,
+                    },
+                );
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+
+    fn finish_lsp_project_root(
+        &mut self,
+        pending: PendingLspProjectRoot,
+        resolution: ProjectRootResolution,
+    ) {
+        if resolution.root_revision != self.workspace.root_revision()
+            || resolution.document != pending.document.path
+            || resolution.workspace_root != pending.workspace_root
+            || self
+                .state
+                .buffers
+                .get(pending.buffer)
+                .and_then(|buffer| buffer.path.as_ref())
+                != Some(&pending.document.path)
+            || !self
+                .workspace
+                .require_path(&pending.document.path)
+                .is_ok_and(|root| root == pending.root_id)
+        {
+            return;
+        }
+        let Some(project_root) = resolution.project_root else {
+            // An opened source file is not enough evidence to launch a project
+            // server. Standalone support must be declared by a future adapter.
+            return;
+        };
+        let session_key = crate::languages::LspSessionKey {
+            root_id: pending.root_id.0,
+            project_root: project_root.clone(),
+            server_id: pending.definition.id.clone(),
+        }
+        .transport_key();
+        let running = self.lsp.running_servers().contains(&session_key);
+        let starting = self.pending_execution_preflight.values().any(|pending| {
+            matches!(pending, PendingExecutionPreflight::Lsp { session_key: key, .. } if key == &session_key)
+        });
+        if running {
+            self.attach_lsp_document(&session_key, pending.buffer, pending.document);
+            return;
+        }
+        if starting {
+            self.active_lsp_server = Some(session_key);
+            // The pending launch owns another document in the same project. A
+            // fresh observation after it starts attaches this document exactly.
+            self.lsp_autostart_observation = None;
+            return;
+        }
+        let restart = self.lsp_sessions.contains_key(&session_key);
+        match pending.launch_source {
+            LspLaunchSource::Direct {
+                executable,
+                managed,
+            } => self.queue_lsp_preflight(
+                session_key,
+                pending.definition,
+                LspLaunch::Direct {
+                    executable,
+                    managed,
+                },
+                pending.root_id,
+                project_root,
+                pending.buffer,
+                pending.document,
+                restart,
+            ),
+            LspLaunchSource::NixWorkspace { nix, shell } => {
+                self.queue_nix_lsp_workspace(PendingNixLspWorkspace {
+                    session_key,
+                    definition: pending.definition,
+                    nix,
+                    shell,
+                    root_id: pending.root_id,
+                    project_root,
+                    buffer: pending.buffer,
+                    document: pending.document,
+                    restart,
+                });
+            }
+        };
+    }
+
+    fn attach_lsp_document(
+        &mut self,
+        session_key: &str,
+        buffer: crate::editing::BufferId,
+        document: LspDocument,
+    ) {
+        if self.lsp.change(session_key, document.clone()).is_ok() {
+            self.lsp_session_synced.insert(
+                (session_key.into(), buffer),
+                BufferRevision(document.version),
+            );
+            if let Some(state) = self.lsp_sessions.get_mut(session_key) {
+                state.documents.insert(buffer, document);
+            }
+        }
+        self.active_lsp_server = Some(session_key.into());
     }
 
     fn queue_lsp_preflight(
         &mut self,
         session_key: String,
         definition: ToolDefinition,
-        executable: PathBuf,
+        launch: LspLaunch,
         root_id: crate::workspace::RootId,
         root_path: PathBuf,
         buffer: crate::editing::BufferId,
@@ -2924,8 +4790,8 @@ impl InteractiveApplication {
         restart: bool,
     ) {
         let request = ExecutionPreflightRequest {
-            executable,
-            cwd: root_path,
+            executable: launch.executable().clone(),
+            cwd: root_path.clone(),
             roots: self
                 .workspace
                 .roots()
@@ -2941,7 +4807,9 @@ impl InteractiveApplication {
                     PendingExecutionPreflight::Lsp {
                         session_key,
                         definition,
+                        launch,
                         root_id,
+                        project_root: root_path,
                         buffer,
                         document,
                         restart,
@@ -2956,7 +4824,9 @@ impl InteractiveApplication {
         &mut self,
         session_key: String,
         definition: ToolDefinition,
+        launch: LspLaunch,
         root_id: crate::workspace::RootId,
+        project_root: PathBuf,
         buffer: crate::editing::BufferId,
         mut document: LspDocument,
         result: crate::processes::ExecutionPreflightResult,
@@ -2972,6 +4842,8 @@ impl InteractiveApplication {
             || !language_id_for_path(&document.path)
                 .is_some_and(|language| language == document.language_id)
             || !definition.languages.contains(&document.language_id)
+            || !document.path.starts_with(&project_root)
+            || result.cwd != project_root
             || !self
                 .workspace
                 .require_path(&document.path)
@@ -2981,20 +4853,38 @@ impl InteractiveApplication {
         }
         document.version = current.text.revision().0;
         document.text = current.text.to_string();
+        let launch = launch.with_preflighted_executable(result.executable.clone());
+        let arguments = launch.arguments(&definition);
+        let environment = match launch.environment(&definition) {
+            Ok(environment) => environment,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
         let policy = crate::languages::LspPolicy {
             request_timeout: Duration::from_millis(
                 self.configuration.settings.lsp.request_timeout_ms,
             ),
             maximum_log_lines: self.configuration.settings.lsp.maximum_log_lines,
         };
-        let server_name = definition.name.clone();
+        let server_configuration = if self.configuration.settings.lsp.inlay_hint_level
+            == crate::configuration::InlayHintLevel::Max
+        {
+            crate::languages::LspServerConfiguration::maximum_inlay_hints(&definition.id)
+        } else {
+            crate::languages::LspServerConfiguration::standard()
+        };
         match self.lsp.start_session_absolute_with_policy(
             &session_key,
             &definition,
             result.executable.clone(),
+            arguments,
             result.cwd.clone(),
             Some(document.clone()),
             policy,
+            server_configuration,
+            environment,
         ) {
             Ok(()) => {
                 let mut documents = self
@@ -3024,7 +4914,7 @@ impl InteractiveApplication {
                         root_path: result.cwd,
                         server_id: definition.id.clone(),
                         definition,
-                        executable: result.executable,
+                        launch,
                         capabilities: None,
                         documents,
                         restart_count,
@@ -3040,9 +4930,6 @@ impl InteractiveApplication {
                 }
                 self.lsp_session_synced
                     .insert((session_key, buffer), BufferRevision(document.version));
-                self.ui.notification =
-                    Some(self.message("lsp_started", &[("server", server_name)]));
-                self.ui.notification_error = false;
             }
             Err(error) => self.show_error(error),
         }
@@ -3062,15 +4949,15 @@ impl InteractiveApplication {
         let Some((&buffer, document)) = state.documents.iter().next() else {
             return;
         };
-        let (definition, executable, root, root_path, document) = (
+        let (definition, launch, root, root_path, document) = (
             state.definition.clone(),
-            state.executable.clone(),
+            state.launch.clone(),
             state.root,
             state.root_path.clone(),
             document.clone(),
         );
         self.queue_lsp_preflight(
-            key, definition, executable, root, root_path, buffer, document, true,
+            key, definition, launch, root, root_path, buffer, document, true,
         );
     }
 
@@ -3082,6 +4969,8 @@ impl InteractiveApplication {
             session.activate_on_restart = true;
             self.active_lsp_server = Some(key.into());
             self.lsp_capabilities = session.capabilities.clone();
+            self.ui.lsp_inlay_hints.clear();
+            self.schedule_lsp_inlay_refresh(true);
         }
     }
     fn show_lsp_sessions(&mut self) {
@@ -3168,10 +5057,84 @@ impl InteractiveApplication {
             .active_lsp_server
             .as_ref()
             .and_then(|server| self.lsp_sessions.get(server))
-            .map(|session| session.server_id.clone());
+            .map(|session| {
+                if session.capabilities.is_some() {
+                    session.server_id.clone()
+                } else {
+                    format!("starting {}", session.server_id)
+                }
+            });
+        let refresh = self.ui.tool_menu.as_ref().is_some_and(|menu| {
+            menu.rows.iter().any(|row| {
+                self.tools
+                    .iter()
+                    .find(|entry| {
+                        entry.definition.id == row.id && entry.definition.kind == ToolKind::Lsp
+                    })
+                    .is_some_and(|entry| {
+                        !matches!(entry.status, ToolStatus::Installing { .. })
+                            && self.lsp_menu_lifecycle(&row.id).0 != row.lifecycle
+                    })
+            })
+        });
+        if refresh {
+            let category = self
+                .ui
+                .tool_menu
+                .as_ref()
+                .map_or_else(|| "lsp".into(), |menu| menu.category.clone());
+            let selected = self.selected_tool_id();
+            self.rebuild_tool_menu(&category, selected.as_deref());
+        }
     }
+
+    fn reconcile_lsp_autostart(
+        &mut self,
+        buffer: crate::editing::BufferId,
+        document: &LspDocument,
+        matching_session: bool,
+    ) {
+        let launchable_server = self
+            .tools
+            .iter()
+            .find(|entry| {
+                entry.definition.kind == ToolKind::Lsp
+                    && entry.definition.languages.contains(&document.language_id)
+                    && self.selected_lsp_runtime_available(&entry.definition)
+            })
+            .map(|entry| entry.definition.id.clone());
+        let observation = LspAutostartObservation {
+            buffer,
+            path: document.path.clone(),
+            language: document.language_id.clone(),
+            root_revision: self.workspace.root_revision(),
+            trust: self.workspace.trust(),
+            enabled: self.configuration.settings.lsp.enabled,
+            auto_start: self.configuration.settings.lsp.auto_start,
+            nix_workspace_fallback: self.configuration.settings.lsp.nix_workspace_fallback,
+            execution_busy: self.execution_validation.is_some(),
+            launchable_server,
+        };
+        if self.lsp_autostart_observation.as_ref() == Some(&observation) {
+            return;
+        }
+        let server = observation.launchable_server.clone();
+        let should_start = !matching_session
+            && observation.enabled
+            && observation.auto_start
+            && !observation.execution_busy
+            && observation.trust == WorkspaceTrust::Trusted
+            && !self.safe_mode
+            && server.is_some();
+        self.lsp_autostart_observation = Some(observation);
+        if should_start {
+            self.start_lsp(server);
+        }
+    }
+
     fn sync_lsp_document(&mut self) {
         let Some(buffer) = self.state.active_buffer_id() else {
+            self.lsp_autostart_observation = None;
             return;
         };
         let Some((_, document)) = self.active_lsp_document() else {
@@ -3189,27 +5152,25 @@ impl InteractiveApplication {
             self.clear_lsp_ui_projection();
             self.active_lsp_server = None;
             self.lsp_capabilities = None;
+            self.lsp_autostart_observation = None;
             return;
         };
         let revision = BufferRevision(document.version);
         let mut sessions = Vec::new();
         let mut detach = Vec::new();
         for (key, state) in &self.lsp_sessions {
-            let owns = self
-                .workspace
-                .roots()
-                .iter()
-                .find(|root| root.id == state.root)
-                .is_some_and(|root| document.path.starts_with(&root.identity.canonical_path));
+            // A lexical `starts_with` check would let a session for an outer
+            // project absorb a nested, independently resolved project. Only
+            // the asynchronous resolver may attach a new document to a server.
+            let owns = state.documents.contains_key(&buffer);
             let supports = state.definition.languages.contains(&document.language_id);
             if owns && supports {
                 sessions.push(key.clone());
-                if let Some(previous) = state.documents.get(&buffer) {
-                    if previous.path != document.path
-                        || previous.language_id != document.language_id
-                    {
-                        detach.push((key.clone(), previous.uri()));
-                    }
+                if let Some(previous) = state.documents.get(&buffer)
+                    && (previous.path != document.path
+                        || previous.language_id != document.language_id)
+                {
+                    detach.push((key.clone(), previous.uri()));
                 }
             } else if let Some(previous) = state.documents.get(&buffer) {
                 detach.push((key.clone(), previous.uri()));
@@ -3230,11 +5191,13 @@ impl InteractiveApplication {
         }
         self.detach_lsp_documents(buffer, detach);
         self.refresh_lsp_projection_owner();
+        let mut changed = false;
         for server in &sessions {
             if self.lsp_session_synced.get(&(server.clone(), buffer)) == Some(&revision) {
                 continue;
             }
             if self.lsp.change(server, document.clone()).is_ok() {
+                changed = true;
                 self.lsp_session_synced
                     .insert((server.clone(), buffer), revision);
                 if let Some(state) = self.lsp_sessions.get_mut(server) {
@@ -3242,6 +5205,15 @@ impl InteractiveApplication {
                 }
             }
         }
+        if changed
+            && !(self.configuration.settings.lsp.inlay_hint_level
+                == crate::configuration::InlayHintLevel::Max
+                && self.ui.lsp_inlay_hints.is_empty()
+                && self.lsp_inlay_refresh_due.is_some())
+        {
+            self.schedule_lsp_inlay_refresh(false);
+        }
+        self.reconcile_lsp_autostart(buffer, &document, !sessions.is_empty());
         if self.ui.language_completion.is_some()
             && self
                 .active_lsp_server
@@ -3249,6 +5221,147 @@ impl InteractiveApplication {
                 .is_some_and(|active| sessions.contains(active))
         {
             self.request_lsp(LspFeature::Completion);
+        }
+    }
+
+    fn lsp_server_label(&self, server_key: &str) -> String {
+        self.lsp_sessions
+            .get(server_key)
+            .map(|session| session.server_id.clone())
+            .or_else(|| {
+                server_key
+                    .strip_prefix("root:")
+                    .and_then(|key| key.rsplit_once(':'))
+                    .map(|(_, server)| server.to_owned())
+            })
+            .unwrap_or_else(|| server_key.to_owned())
+    }
+
+    fn update_lsp_progress(
+        &mut self,
+        server_key: String,
+        token: String,
+        kind: LspProgressKind,
+        title: String,
+        message: String,
+        percentage: Option<u8>,
+    ) {
+        if !self.configuration.settings.ui.lsp_progress.enabled {
+            self.ui.lsp_progress.clear();
+            self.ui.lsp_progress_frame = 0;
+            return;
+        }
+        let server = self.lsp_server_label(&server_key);
+        let had_active = self.ui.lsp_progress.iter().any(|item| !item.done);
+        if let Some(item) = self
+            .ui
+            .lsp_progress
+            .iter_mut()
+            .find(|item| item.server_key == server_key && item.token == token)
+        {
+            if kind == LspProgressKind::End {
+                if !title.is_empty() {
+                    item.title = title;
+                }
+                if !message.is_empty() {
+                    item.message = message;
+                }
+                item.percentage = None;
+                item.done = true;
+                item.completed_at = Some(Instant::now());
+                return;
+            }
+            if item.done && kind != LspProgressKind::Begin {
+                return;
+            }
+            item.server = server;
+            if kind == LspProgressKind::Begin || !title.is_empty() {
+                item.title = title;
+            }
+            if kind == LspProgressKind::Begin || !message.is_empty() {
+                item.message = message;
+            }
+            if kind == LspProgressKind::Begin || percentage.is_some() {
+                item.percentage = percentage;
+            }
+            if kind == LspProgressKind::Begin {
+                item.done = false;
+                item.completed_at = None;
+                if !had_active {
+                    self.lsp_progress_epoch = Instant::now();
+                    self.ui.lsp_progress_frame = 0;
+                }
+            }
+            return;
+        }
+        if kind == LspProgressKind::End {
+            return;
+        }
+
+        let was_empty = self.ui.lsp_progress.is_empty();
+        let maximum = usize::from(self.configuration.settings.ui.lsp_progress.max_rows);
+        if self.ui.lsp_progress.len() == maximum {
+            self.ui.lsp_progress.remove(0);
+        }
+        self.ui.lsp_progress.push(UiLspProgress {
+            server_key,
+            token,
+            server,
+            title,
+            message,
+            percentage,
+            done: false,
+            completed_at: None,
+        });
+        if was_empty {
+            self.lsp_progress_epoch = Instant::now();
+            self.ui.lsp_progress_frame = 0;
+        }
+    }
+
+    fn clear_lsp_progress(&mut self, server_key: &str) {
+        self.ui
+            .lsp_progress
+            .retain(|item| item.server_key != server_key);
+        if self.ui.lsp_progress.is_empty() {
+            self.ui.lsp_progress_frame = 0;
+        }
+    }
+
+    fn update_lsp_progress_animation(&mut self) {
+        if self.ui.lsp_progress.is_empty() {
+            return;
+        }
+        if !self.configuration.settings.ui.lsp_progress.enabled {
+            self.ui.lsp_progress.clear();
+            self.ui.lsp_progress_frame = 0;
+            return;
+        }
+        let now = Instant::now();
+        let policy = &self.configuration.settings.ui.lsp_progress;
+        let maximum = usize::from(policy.max_rows);
+        if self.ui.lsp_progress.len() > maximum {
+            let excess = self.ui.lsp_progress.len().saturating_sub(maximum);
+            self.ui.lsp_progress.drain(..excess);
+        }
+        let completed_timeout = Duration::from_millis(policy.completed_timeout_ms);
+        self.ui.lsp_progress.retain(|item| {
+            item.completed_at.is_none_or(|completed| {
+                now.saturating_duration_since(completed) < completed_timeout
+            })
+        });
+        if self.ui.lsp_progress.is_empty() {
+            self.ui.lsp_progress_frame = 0;
+            return;
+        }
+        if !self.ui.lsp_progress.iter().any(|item| !item.done) {
+            return;
+        }
+        let elapsed = now.saturating_duration_since(self.lsp_progress_epoch);
+        let phase = elapsed.as_millis() / u128::from(policy.spinner_interval_ms);
+        let frame = usize::try_from(phase % policy.spinner_frames.len() as u128).unwrap_or(0);
+        if self.ui.lsp_progress_frame != frame {
+            self.ui.lsp_progress_frame = frame;
         }
     }
 
@@ -3261,13 +5374,16 @@ impl InteractiveApplication {
                     capabilities,
                 } => {
                     if let Some(session) = self.lsp_sessions.get_mut(&server) {
+                        self.lsp_last_errors.remove(&session.server_id);
                         session.capabilities = Some(capabilities.clone());
                     }
                     if self.active_lsp_server.as_deref() == Some(&server) {
                         self.lsp_capabilities = Some(capabilities);
+                        self.schedule_lsp_inlay_startup_refresh();
                     }
-                    self.ui.notification = Some(self.message("lsp_running", &[("server", server)]));
-                    self.ui.notification_error = false;
+                    // Successful lifecycle transitions are reflected by the
+                    // status line and bounded progress surface. They must not
+                    // leave persistent bottom-left notifications.
                 }
                 LspEvent::CapabilitiesChanged {
                     server,
@@ -3278,6 +5394,12 @@ impl InteractiveApplication {
                     }
                     if self.active_lsp_server.as_deref() == Some(&server) {
                         self.lsp_capabilities = Some(capabilities);
+                        self.schedule_lsp_inlay_refresh(true);
+                    }
+                }
+                LspEvent::InlayHintsRefresh { server } => {
+                    if self.active_lsp_server.as_deref() == Some(&server) {
+                        self.schedule_lsp_inlay_refresh(true);
                     }
                 }
                 LspEvent::Diagnostics {
@@ -3286,6 +5408,7 @@ impl InteractiveApplication {
                     version,
                     diagnostics,
                 } => {
+                    let server_label = self.lsp_server_label(&server);
                     let current = self.state.buffers.iter().find_map(|(_, buffer)| {
                         buffer.path.as_ref().and_then(|path| {
                             (crate::languages::file_uri(path) == uri)
@@ -3337,7 +5460,7 @@ impl InteractiveApplication {
                                             source: diagnostic
                                                 .source
                                                 .clone()
-                                                .unwrap_or_else(|| server.clone()),
+                                                .unwrap_or_else(|| server_label.clone()),
                                             code: diagnostic.code.clone(),
                                             message: diagnostic.message.clone(),
                                             related: Vec::new(),
@@ -3350,7 +5473,6 @@ impl InteractiveApplication {
                             })
                         })
                         .unwrap_or_default();
-                    let count = normalized.len();
                     let owner = DiagnosticOwner::new(format!("lsp.{server}"));
                     match owner.and_then(|owner| {
                         self.diagnostics.replace(
@@ -3363,11 +5485,6 @@ impl InteractiveApplication {
                     }) {
                         Ok(()) => {
                             self.sync_ui_diagnostics();
-                            self.ui.notification = Some(self.message(
-                                "lsp_diagnostics",
-                                &[("server", server), ("count", count.to_string())],
-                            ));
-                            self.ui.notification_error = false;
                         }
                         Err(error) => {
                             self.lsp_logs.push_back(error.to_string());
@@ -3383,24 +5500,38 @@ impl InteractiveApplication {
                     result,
                 } => {
                     let current = self.active_lsp_document();
-                    if generation != self.lsp_request_generation
-                        || !current.as_ref().is_some_and(|(_, document)| {
-                            document.uri() == uri && document.version == version
-                        })
-                    {
+                    if !current.as_ref().is_some_and(|(_, document)| {
+                        document.uri() == uri && document.version == version
+                    }) {
                         continue;
                     }
                     self.refresh_lsp_projection_owner();
-                    if !self
-                        .lsp_request_owner
-                        .as_ref()
-                        .is_some_and(|(owned_generation, owner)| {
-                            *owned_generation == generation
-                                && Some(owner) == self.lsp_projection_owner.as_ref()
-                                && owner.server == server
-                                && owner.uri == uri
-                                && owner.revision.0 == version
-                        })
+                    if method == "textDocument/inlayHint" {
+                        if !self.lsp_inlay_request_owner.as_ref().is_some_and(
+                            |(owned_generation, owner)| {
+                                *owned_generation == generation
+                                    && Some(owner) == self.lsp_projection_owner.as_ref()
+                                    && owner.server == server
+                                    && owner.uri == uri
+                                    && owner.revision.0 == version
+                            },
+                        ) {
+                            continue;
+                        }
+                        self.lsp_inlay_request_owner = None;
+                        self.present_lsp_result(&server, generation, &method, &uri, result);
+                        continue;
+                    }
+                    if generation != self.lsp_request_generation
+                        || !self.lsp_request_owner.as_ref().is_some_and(
+                            |(owned_generation, owner)| {
+                                *owned_generation == generation
+                                    && Some(owner) == self.lsp_projection_owner.as_ref()
+                                    && owner.server == server
+                                    && owner.uri == uri
+                                    && owner.revision.0 == version
+                            },
+                        )
                     {
                         continue;
                     }
@@ -3422,22 +5553,21 @@ impl InteractiveApplication {
                 }
                 LspEvent::Progress {
                     server,
+                    token,
+                    kind,
                     title,
                     message,
-                } => {
-                    self.ui.notification = Some(self.message(
-                        "lsp_progress",
-                        &[("server", server), ("title", title), ("progress", message)],
-                    ));
-                    self.ui.notification_error = false;
-                }
+                    percentage,
+                } => self.update_lsp_progress(server, token, kind, title, message, percentage),
                 LspEvent::Log { server, message } => {
                     if self.lsp_logs.len() == 200 {
                         self.lsp_logs.pop_front();
                     }
+                    let server = self.lsp_server_label(&server);
                     self.lsp_logs.push_back(format!("{server}: {message}"));
                 }
                 LspEvent::Health { server, health } => {
+                    let server = self.lsp_server_label(&server);
                     self.ui.notification = Some(self.message(
                         "lsp_health",
                         &[
@@ -3452,31 +5582,56 @@ impl InteractiveApplication {
                     ));
                     self.ui.notification_error = false;
                 }
-                LspEvent::Unsupported { server, method } => self.show_error(
-                    self.message("lsp_unsupported", &[("server", server), ("method", method)]),
-                ),
+                LspEvent::Unsupported { server, method } => {
+                    let server = self.lsp_server_label(&server);
+                    self.show_error(
+                        self.message("lsp_unsupported", &[("server", server), ("method", method)]),
+                    );
+                }
                 LspEvent::RequestFailed {
                     server,
+                    generation,
                     method,
                     message,
-                    ..
-                } => self.show_error(self.message(
-                    "lsp_request_failed",
-                    &[
-                        ("server", server),
-                        ("method", method),
-                        ("diagnostic", message),
-                    ],
-                )),
+                } => {
+                    if method == "textDocument/inlayHint"
+                        && self
+                            .lsp_inlay_request_owner
+                            .as_ref()
+                            .is_some_and(|(owned_generation, _)| *owned_generation == generation)
+                    {
+                        self.lsp_inlay_request_owner = None;
+                        self.schedule_lsp_inlay_warmup_retry();
+                        let server = self.lsp_server_label(&server);
+                        if self.lsp_logs.len() == self.configuration.settings.lsp.maximum_log_lines
+                        {
+                            self.lsp_logs.pop_front();
+                        }
+                        self.lsp_logs
+                            .push_back(format!("{server}: inlay hint refresh failed: {message}"));
+                        continue;
+                    }
+                    let server = self.lsp_server_label(&server);
+                    self.show_error(self.message(
+                        "lsp_request_failed",
+                        &[
+                            ("server", server),
+                            ("method", method),
+                            ("diagnostic", message),
+                        ],
+                    ));
+                }
                 LspEvent::Stopped { server, .. } => {
-                    let desired = self
-                        .lsp_sessions
-                        .get(&server)
-                        .is_some_and(|state| state.desired_running);
+                    let desired = self.lsp_sessions.get_mut(&server).is_some_and(|state| {
+                        state.capabilities = None;
+                        state.desired_running
+                    });
                     let _ = self.lsp.stop(&server);
                     self.lsp_session_synced.retain(|(key, _), _| key != &server);
+                    self.clear_lsp_progress(&server);
+                    let server_label = self.lsp_server_label(&server);
                     self.ui.notification =
-                        Some(self.message("lsp_stopped", &[("server", server.clone())]));
+                        Some(self.message("lsp_stopped", &[("server", server_label)]));
                     self.ui.notification_error = false;
                     if self.active_lsp_server.as_deref() == Some(&server) {
                         self.clear_lsp_session_state();
@@ -3486,15 +5641,19 @@ impl InteractiveApplication {
                     }
                 }
                 LspEvent::Failed { server, message } => {
-                    let desired = self
-                        .lsp_sessions
-                        .get(&server)
-                        .is_some_and(|state| state.desired_running);
+                    let desired = self.lsp_sessions.get_mut(&server).is_some_and(|state| {
+                        state.capabilities = None;
+                        state.desired_running
+                    });
                     let _ = self.lsp.stop(&server);
                     self.lsp_session_synced.retain(|(key, _), _| key != &server);
+                    self.clear_lsp_progress(&server);
+                    let server_label = self.lsp_server_label(&server);
+                    self.lsp_last_errors
+                        .insert(server_label.clone(), message.clone());
                     self.show_error(self.message(
                         "lsp_failed",
-                        &[("server", server.clone()), ("diagnostic", message)],
+                        &[("server", server_label), ("diagnostic", message)],
                     ));
                     if self.active_lsp_server.as_deref() == Some(&server) {
                         self.clear_lsp_session_state();
@@ -3586,6 +5745,8 @@ impl InteractiveApplication {
         self.lsp_selection_ranges.clear();
         self.lsp_projection_owner = None;
         self.lsp_request_owner = None;
+        self.lsp_inlay_request_owner = None;
+        self.lsp_inlay_empty_retries = 0;
         self.lsp_completion_owner = None;
     }
     fn current_lsp_projection_owner(&self) -> Option<LspProjectionOwner> {
@@ -3594,6 +5755,7 @@ impl InteractiveApplication {
         let (buffer, document) = self.active_lsp_document()?;
         let session = self.lsp_sessions.get(&server)?;
         if !session.definition.languages.contains(&document.language_id)
+            || !session.documents.contains_key(&buffer)
             || !document.path.starts_with(&session.root_path)
         {
             return None;
@@ -3612,6 +5774,9 @@ impl InteractiveApplication {
         if self.lsp_projection_owner != current {
             self.clear_lsp_ui_projection();
             self.lsp_projection_owner = current;
+            if self.lsp_projection_owner.is_some() {
+                self.schedule_lsp_inlay_refresh(true);
+            }
         }
     }
     fn clear_lsp_session_state(&mut self) {
@@ -3625,7 +5790,129 @@ impl InteractiveApplication {
         self.clear_lsp_ui_projection();
     }
 
+    fn schedule_lsp_inlay_startup_refresh(&mut self) {
+        self.lsp_inlay_empty_retries = 0;
+        self.lsp_inlay_refresh_due = Some(
+            Instant::now()
+                + if self.configuration.settings.lsp.inlay_hint_level
+                    == crate::configuration::InlayHintLevel::Max
+                {
+                    LSP_INLAY_HINT_MAX_STARTUP_DELAY
+                } else {
+                    Duration::ZERO
+                },
+        );
+    }
+
+    fn schedule_lsp_inlay_warmup_retry(&mut self) -> bool {
+        if !self.configuration.settings.lsp.inlay_hints
+            || self.configuration.settings.lsp.inlay_hint_level
+                != crate::configuration::InlayHintLevel::Max
+            || self.lsp_inlay_empty_retries >= LSP_INLAY_HINT_WARMUP_RETRY_LIMIT
+        {
+            return false;
+        }
+        let multiplier = 1_u32 << u32::from(self.lsp_inlay_empty_retries.min(4));
+        self.lsp_inlay_empty_retries = self.lsp_inlay_empty_retries.saturating_add(1);
+        self.lsp_inlay_refresh_due =
+            Some(Instant::now() + LSP_INLAY_HINT_EMPTY_RETRY_BASE.saturating_mul(multiplier));
+        true
+    }
+
+    fn schedule_lsp_inlay_refresh(&mut self, immediate: bool) {
+        if !self.configuration.settings.lsp.inlay_hints {
+            self.lsp_inlay_refresh_due = None;
+            self.lsp_inlay_request_owner = None;
+            self.lsp_inlay_empty_retries = 0;
+            self.ui.lsp_inlay_hints.clear();
+            return;
+        }
+        self.lsp_inlay_empty_retries = 0;
+        self.lsp_inlay_refresh_due = Some(if immediate {
+            Instant::now()
+        } else {
+            Instant::now() + LSP_INLAY_HINT_DEBOUNCE
+        });
+    }
+
+    fn process_lsp_inlay_refresh(&mut self) {
+        if !self.configuration.settings.lsp.inlay_hints {
+            self.lsp_inlay_refresh_due = None;
+            self.lsp_inlay_request_owner = None;
+            self.lsp_inlay_empty_retries = 0;
+            self.ui.lsp_inlay_hints.clear();
+            return;
+        }
+        let Some(due) = self.lsp_inlay_refresh_due else {
+            return;
+        };
+        if Instant::now() < due {
+            return;
+        }
+        self.lsp_inlay_refresh_due = None;
+        self.request_lsp_inlay_hints();
+    }
+
+    fn request_lsp_inlay_hints(&mut self) {
+        self.refresh_lsp_projection_owner();
+        self.lsp_inlay_refresh_due = None;
+        let Some(owner) = self.lsp_projection_owner.clone() else {
+            return;
+        };
+        if self.ui.large_file_buffers.contains(&owner.buffer) {
+            self.ui.lsp_inlay_hints.clear();
+            return;
+        }
+        let Some(capabilities) = self
+            .lsp_sessions
+            .get(&owner.server)
+            .and_then(|session| session.capabilities.as_ref())
+            .filter(|capabilities| capabilities.inlay_hints)
+            .cloned()
+        else {
+            self.ui.lsp_inlay_hints.clear();
+            return;
+        };
+        let Some((buffer, document)) = self.active_lsp_document() else {
+            return;
+        };
+        if buffer != owner.buffer || document.uri() != owner.uri {
+            return;
+        }
+        let text = TextBuffer::from_text(&document.text);
+        let end = PositionCodec::new(&text)
+            .byte_to_lsp(ByteOffset(text.len_bytes()), capabilities.position_encoding)
+            .ok()
+            .map(|(line, character)| crate::languages::LspPosition { line, character });
+        let Some(end) = end else { return };
+        let feature = LspFeature::InlayHints {
+            range: crate::languages::LspRange {
+                start: crate::languages::LspPosition {
+                    line: 0,
+                    character: 0,
+                },
+                end,
+            },
+        };
+        self.lsp_inlay_request_generation = self.lsp_inlay_request_generation.saturating_add(1);
+        let generation = u64::MAX
+            .saturating_sub(self.lsp_inlay_request_generation)
+            .max(u64::MAX / 2);
+        if self
+            .lsp
+            .request(&owner.server, feature, document, ByteOffset(0), generation)
+            .is_ok()
+        {
+            self.lsp_inlay_request_owner = Some((generation, owner));
+        }
+    }
+
     fn request_lsp(&mut self, mut feature: LspFeature) {
+        if matches!(feature, LspFeature::InlayHints { .. }) {
+            self.schedule_lsp_inlay_refresh(true);
+            self.process_lsp_inlay_refresh();
+            return;
+        }
         self.ui.documentation_popup = None;
         let Some(view_id) = self.state.active_view else {
             return;
@@ -3633,11 +5920,12 @@ impl InteractiveApplication {
         let view = &self.state.views[view_id];
         let offset = view.cursor;
         let selection = view.selection;
-        let Some((_, document)) = self.active_lsp_document() else {
+        let Some((buffer, document)) = self.active_lsp_document() else {
             return;
         };
         let supports = |state: &LspRuntimeState| {
             state.definition.languages.contains(&document.language_id)
+                && state.documents.contains_key(&buffer)
                 && document.path.starts_with(&state.root_path)
         };
         let server = self
@@ -3660,6 +5948,17 @@ impl InteractiveApplication {
         };
         if self.active_lsp_server.as_ref() != Some(&server) {
             self.select_lsp_session(&server);
+        }
+        // The application owns a session record while its process is still
+        // initializing. Do not expose that record as a runnable server or
+        // send a request that can race the worker's startup/disconnect path.
+        // `Running` publishes capabilities before this becomes requestable.
+        if self
+            .lsp_sessions
+            .get(&server)
+            .is_none_or(|session| session.capabilities.is_none())
+        {
+            return;
         }
         if matches!(feature, LspFeature::CodeAction { .. }) {
             let encoding = self
@@ -3722,6 +6021,14 @@ impl InteractiveApplication {
             .request(&server, feature, document, offset, generation)
         {
             Ok(()) => self.lsp_request_owner = Some((generation, owner)),
+            // The worker has already reported (or will imminently report) its
+            // real startup/exit failure. Avoid replacing that diagnostic with
+            // a misleading raw transport-key "not running" error.
+            Err(crate::languages::LspError::NotRunning(_)) => {
+                if let Some(session) = self.lsp_sessions.get_mut(&server) {
+                    session.capabilities = None;
+                }
+            }
             Err(error) => self.show_error(error),
         }
     }
@@ -3834,11 +6141,12 @@ impl InteractiveApplication {
             self.show_error("selected completion has no documentation");
             return;
         };
+        let server_label = self.lsp_server_label(&owner.server);
         self.present_documentation_popup(
             DocumentationPopupKind::Completion,
             self.message(
                 "lsp_completion_documentation_title",
-                &[("server", owner.server.clone()), ("label", label)],
+                &[("server", server_label), ("label", label)],
             ),
             owner.server,
             None,
@@ -3854,6 +6162,7 @@ impl InteractiveApplication {
         uri: &str,
         result: LspFeatureResult,
     ) {
+        let server_label = self.lsp_server_label(server);
         match result {
             LspFeatureResult::Hover(hover) => {
                 let source_range = hover.range.and_then(|range| {
@@ -3871,7 +6180,7 @@ impl InteractiveApplication {
                 });
                 self.present_documentation_popup(
                     DocumentationPopupKind::Hover,
-                    self.message("lsp_hover_title", &[("server", server.into())]),
+                    self.message("lsp_hover_title", &[("server", server_label.clone())]),
                     server.into(),
                     source_range,
                     hover.sections,
@@ -3880,7 +6189,7 @@ impl InteractiveApplication {
             LspFeatureResult::Signature(content) => {
                 self.present_documentation_popup(
                     DocumentationPopupKind::Signature,
-                    self.message("lsp_signature_title", &[("server", server.into())]),
+                    self.message("lsp_signature_title", &[("server", server_label.clone())]),
                     server.into(),
                     None,
                     vec![content],
@@ -3903,6 +6212,7 @@ impl InteractiveApplication {
                             })
                             .collect(),
                         selected: 0,
+                        scroll: 0,
                     });
                 if self.ui.language_completion.is_none() {
                     self.show_error(self.message("lsp_no_result", &[]));
@@ -3994,7 +6304,7 @@ impl InteractiveApplication {
                                     3 => DiagnosticSeverity::Information,
                                     _ => DiagnosticSeverity::Hint,
                                 },
-                                source: item.source.unwrap_or_else(|| server.into()),
+                                source: item.source.unwrap_or_else(|| server_label.clone()),
                                 code: item.code,
                                 message: item.message,
                                 related: Vec::new(),
@@ -4112,6 +6422,15 @@ impl InteractiveApplication {
                 }
             }
             LspFeatureResult::InlayHints(items) => {
+                let provisional = items
+                    .iter()
+                    .any(|item| item.label.to_ascii_lowercase().contains("{unknown}"));
+                if items.is_empty() || provisional {
+                    self.schedule_lsp_inlay_warmup_retry();
+                } else {
+                    self.lsp_inlay_empty_retries = 0;
+                    self.lsp_inlay_refresh_due = None;
+                }
                 if let Some(path) = path_from_file_uri(uri)
                     && let Some((buffer_id, buffer)) = self
                         .state
@@ -4856,32 +7175,21 @@ impl InteractiveApplication {
                         continue;
                     }
                     match action {
-                        PendingExecutionPreflight::ToolInstall { definition } => {
-                            if let Err(error) = self
-                                .tool_installer
-                                .install_absolute(definition.clone(), result.executable)
-                            {
-                                if let Some(entry) = self
-                                    .tools
-                                    .iter_mut()
-                                    .find(|entry| entry.definition.id == definition.id)
-                                {
-                                    entry.status = ToolStatus::Failed(error.to_string());
-                                }
-                                self.show_error(error)
-                            }
-                        }
                         PendingExecutionPreflight::Lsp {
                             session_key,
                             definition,
+                            launch,
                             root_id,
+                            project_root,
                             buffer,
                             document,
                             restart,
                         } => self.launch_preflighted_lsp(
                             session_key,
                             definition,
+                            launch,
                             root_id,
+                            project_root,
                             buffer,
                             document,
                             result,
@@ -4939,8 +7247,12 @@ impl InteractiveApplication {
                         }
                         PendingExecutionPreflight::DapToolAdapter {
                             definition,
+                            project_root,
                             program,
                         } => {
+                            if result.cwd != project_root {
+                                continue;
+                            }
                             let request = ExecutionPreflightRequest {
                                 executable: program,
                                 cwd: result.cwd.clone(),
@@ -5150,14 +7462,6 @@ impl InteractiveApplication {
                             message: Some(message.clone()),
                             process_id: None,
                         });
-                    }
-                    if let Some(PendingExecutionPreflight::ToolInstall { definition }) = action
-                        && let Some(entry) = self
-                            .tools
-                            .iter_mut()
-                            .find(|entry| entry.definition.id == definition.id)
-                    {
-                        entry.status = ToolStatus::Failed(message.clone());
                     }
                     if root_revision == self.workspace.root_revision() {
                         self.show_error(message)
@@ -7269,7 +9573,7 @@ impl InteractiveApplication {
                 match event {
                     PackageServiceEvent::Completed(mut result) => {
                         let prepared_operation = result.prepared.is_some();
-                        let activation_operation = !result.activations.is_empty();
+                        let activation_operation = result.operation == "activations";
                         if let Some(prepared) = result.prepared.take() {
                             let id = prepared.plugin.id.clone();
                             let token = prepared.token;
@@ -8322,7 +10626,21 @@ impl InteractiveApplication {
                     expression: expression.clone(),
                 })
                 .collect(),
-            metadata: BTreeMap::new(),
+            metadata: self
+                .lsp_nix_workspace_preferred
+                .iter()
+                .map(|id| (format!("lsp.runtime.{id}"), "nix".into()))
+                .chain(
+                    self.lsp_managed_preferred
+                        .iter()
+                        .map(|id| (format!("lsp.runtime.{id}"), "managed".into())),
+                )
+                .chain(
+                    self.lsp_managed_versions
+                        .iter()
+                        .map(|(id, version)| (format!("lsp.version.{id}"), version.clone())),
+                )
+                .collect(),
         };
         if let Ok(id) = self.persistence.write(
             self.persistence_path.clone(),
@@ -8340,6 +10658,44 @@ impl InteractiveApplication {
                     if self.persistence_pending == Some(generation) =>
                 {
                     let session = state.session.clone();
+                    let valid_lsp = |id: &str| {
+                        self.tools.iter().any(|entry| {
+                            entry.definition.id == id && entry.definition.kind == ToolKind::Lsp
+                        })
+                    };
+                    self.lsp_nix_workspace_preferred = state
+                        .metadata
+                        .iter()
+                        .filter_map(|(key, value)| {
+                            let id = key.strip_prefix("lsp.runtime.")?;
+                            (value == "nix" && valid_lsp(id)).then(|| id.to_owned())
+                        })
+                        .collect();
+                    self.lsp_managed_preferred = state
+                        .metadata
+                        .iter()
+                        .filter_map(|(key, value)| {
+                            let id = key.strip_prefix("lsp.runtime.")?;
+                            (value == "managed" && valid_lsp(id)).then(|| id.to_owned())
+                        })
+                        .collect();
+                    self.lsp_managed_versions = state
+                        .metadata
+                        .iter()
+                        .filter_map(|(key, version)| {
+                            let id = key.strip_prefix("lsp.version.")?;
+                            self.tools
+                                .iter()
+                                .find(|entry| {
+                                    entry.definition.id == id
+                                        && entry.definition.kind == ToolKind::Lsp
+                                })
+                                .and_then(|entry| entry.definition.managed_version(version))
+                                .and_then(|definition| {
+                                    definition.version.map(|version| (id.to_owned(), version))
+                                })
+                        })
+                        .collect();
                     if let Some(session) = &session
                         && let Err(diagnostic) =
                             self.apply_persisted_window_rules(&session.window_rules)
@@ -9061,7 +11417,7 @@ impl InteractiveApplication {
             || self
                 .tools
                 .iter()
-                .any(|tool| matches!(tool.status, ToolStatus::Installing))
+                .any(|tool| matches!(tool.status, ToolStatus::Installing { .. }))
             || self.workspace_search_generation.is_some()
             || self.pending_workspace_proposal.is_some()
             || self.workspace_proposal.is_some()
@@ -9099,6 +11455,7 @@ impl InteractiveApplication {
         let removed_lsp = !stale.is_empty();
         for key in stale {
             let _ = self.lsp.stop(&key);
+            self.clear_lsp_progress(&key);
             self.clear_lsp_server_ownership(&key);
             self.lsp_sessions.remove(&key);
             self.lsp_session_synced
@@ -9332,7 +11689,7 @@ impl InteractiveApplication {
         }
         self.execution_revalidated = true;
         match pending.action {
-            DeferredExecution::InstallTool(id) => self.activate_tool_by_id(&id),
+            DeferredExecution::InstallTool { id, source } => self.install_tool_by_id(&id, source),
             DeferredExecution::StartLsp(requested) => self.start_lsp(requested),
             DeferredExecution::RestartLsp(key) => self.restart_lsp_session(key),
             DeferredExecution::StartDap { requested, program } => {
@@ -10689,6 +13046,7 @@ impl InteractiveApplication {
         server: &str,
         locations: Vec<crate::languages::LspLocation>,
     ) {
+        let server = self.lsp_server_label(server);
         let items = locations
             .into_iter()
             .enumerate()
@@ -10705,7 +13063,7 @@ impl InteractiveApplication {
                             location.range.start.line + 1,
                             location.range.start.character + 1
                         ),
-                        source: server.into(),
+                        source: server.clone(),
                         action: PickerAction::None,
                     },
                     PickerPayload::LspLocation(location),
@@ -10716,6 +13074,7 @@ impl InteractiveApplication {
     }
 
     fn open_lsp_symbols_picker(&mut self, server: &str, symbols: Vec<crate::languages::LspSymbol>) {
+        let server = self.lsp_server_label(server);
         let items = symbols
             .into_iter()
             .enumerate()
@@ -10732,7 +13091,7 @@ impl InteractiveApplication {
                         detail: symbol.kind.map_or_else(String::new, |kind| {
                             self.message("picker_symbol_kind", &[("kind", kind.to_string())])
                         }),
-                        source: server.into(),
+                        source: server.clone(),
                         action: PickerAction::None,
                     },
                     payload,
@@ -10747,6 +13106,7 @@ impl InteractiveApplication {
         server: &str,
         actions: Vec<crate::languages::LspCodeAction>,
     ) {
+        let server = self.lsp_server_label(server);
         let items = actions
             .into_iter()
             .enumerate()
@@ -10757,7 +13117,7 @@ impl InteractiveApplication {
                         id,
                         label: action.title.clone(),
                         detail: action.kind.clone().unwrap_or_default(),
-                        source: server.into(),
+                        source: server.clone(),
                         action: PickerAction::None,
                     },
                     PickerPayload::CodeAction(action),
@@ -11591,6 +13951,22 @@ impl InteractiveApplication {
         } else {
             (completion.selected + 1) % completion.items.len()
         };
+        let visible_rows = usize::from(
+            self.configuration
+                .settings
+                .ui
+                .command_line
+                .completion_max_rows
+                .max(1),
+        );
+        if completion.selected < completion.scroll {
+            completion.scroll = completion.selected;
+        } else if completion.selected >= completion.scroll.saturating_add(visible_rows) {
+            completion.scroll = completion
+                .selected
+                .saturating_add(1)
+                .saturating_sub(visible_rows);
+        }
     }
 
     fn accept_lsp_completion(&mut self) {
@@ -12593,12 +14969,33 @@ impl InteractiveApplication {
             self.show_error(error);
             return;
         }
-        let program = program.unwrap_or(document.path);
-        let Ok(root_id) = self.workspace.require_path(&program) else {
+        let program = match program {
+            Some(program) => program,
+            None if definition.debug_program_policy
+                == crate::packages::DebugProgramPolicy::Source =>
+            {
+                document.path.clone()
+            }
+            None => {
+                self.show_error(
+                    "this adapter requires a compiled program; use :dap.session.start <program>",
+                );
+                return;
+            }
+        };
+        let Ok(root_id) = self.workspace.require_path(&document.path) else {
             self.show_error(self.message("dap_no_buffer", &[]));
             return;
         };
-        let Some(cwd) = self
+        if !self
+            .workspace
+            .require_path(&program)
+            .is_ok_and(|owner| owner == root_id)
+        {
+            self.show_error(self.message("dap_no_buffer", &[]));
+            return;
+        }
+        let Some(workspace_root) = self
             .workspace
             .roots()
             .iter()
@@ -12607,26 +15004,25 @@ impl InteractiveApplication {
         else {
             return;
         };
-        let request = ExecutionPreflightRequest {
-            executable: adapter_executable,
-            cwd,
-            roots: self
-                .workspace
-                .roots()
-                .iter()
-                .map(|root| root.identity.canonical_path.clone())
-                .collect(),
-            root_revision: self.workspace.root_revision(),
-        };
-        match self.execution_preflight.request(request) {
-            Ok(id) => {
-                self.pending_execution_preflight.insert(
-                    id,
-                    PendingExecutionPreflight::DapToolAdapter {
+        match self.dap_project_roots.resolve(
+            document.path.clone(),
+            workspace_root.clone(),
+            self.workspace.root_revision(),
+            definition.project_root_markers.clone(),
+            definition.project_root_strategy,
+        ) {
+            Ok(generation) => {
+                self.pending_dap_project_root = Some((
+                    generation,
+                    PendingDapProjectRoot {
                         definition,
+                        adapter_executable,
+                        root_id,
+                        workspace_root,
+                        document,
                         program,
                     },
-                );
+                ));
             }
             Err(error) => self.show_error(error),
         }
@@ -13144,16 +15540,11 @@ impl InteractiveApplication {
                 if self.ui.prompt.as_ref().is_some_and(|prompt| {
                     matches!(
                         prompt.kind,
-                        PromptKind::WorkspaceTrust
-                            | PromptKind::GitReset
-                            | PromptKind::AiChat
-                            | PromptKind::AiComposer
+                        PromptKind::WorkspaceTrust | PromptKind::GitReset
                     )
                 }) {
                     self.close_prompt();
                 }
-                self.cancel_ai_request();
-                self.ui.ai_ghost_text = None;
                 self.handle_key_in_context("focus", KeyEvent::focus_lost());
             }
             UiEvent::Mouse { key, column, row } => {
@@ -13315,7 +15706,6 @@ impl InteractiveApplication {
                 PromptKind::Command => "command_prompt",
                 PromptKind::SearchForward | PromptKind::SearchBackward => "search_prompt",
                 PromptKind::WorkspaceTrust | PromptKind::GitReset => "workspace_trust_prompt",
-                PromptKind::AiChat | PromptKind::AiComposer => "command_prompt",
             }
             .into();
         }
@@ -13729,388 +16119,6 @@ impl InteractiveApplication {
         }
     }
 
-    // AI_APPLICATION_DOGFOOD_BEGIN: audited data-only foreground bridge.
-    fn ai_now(&self) -> u64 {
-        u64::try_from(self.ai_epoch.elapsed().as_millis()).unwrap_or(u64::MAX)
-    }
-    fn cancel_ai_request(&mut self) {
-        if let Some((request, _, _)) = self.active_ai_request.take() {
-            let _ = self.ai_service.cancel(request);
-        }
-        self.ai_composer_prompt = None;
-    }
-    fn capture_ai_editor(&mut self, composer: bool) -> Option<AiEditorCapture> {
-        let view_id = self.state.active_view?;
-        let view = self.state.views[view_id].clone();
-        let buffer = self.state.buffers[view.buffer].clone();
-        if buffer.is_virtual_read_only() || buffer.read_only {
-            self.show_error("AI request requires a writable text buffer");
-            return None;
-        }
-        if composer
-            && (self.workspace.trust() != WorkspaceTrust::Trusted
-                || buffer.path.is_none()
-                || buffer.dirty)
-        {
-            self.show_error("AI composer requires a trusted clean path-backed buffer");
-            return None;
-        }
-        if let Some(path) = &buffer.path
-            && self.workspace.require_path(path).is_err()
-        {
-            self.show_error("AI buffer is outside workspace roots");
-            return None;
-        }
-        let (start, end) = view
-            .selection
-            .map_or((view.cursor, view.cursor), |selection| {
-                (
-                    selection.anchor.min(selection.head),
-                    selection.anchor.max(selection.head),
-                )
-            });
-        let range = ByteRange::new(start, end).ok()?;
-        Some(AiEditorCapture {
-            root_revision: self.workspace.root_revision(),
-            buffer: view.buffer,
-            revision: buffer.text.revision(),
-            view: view_id,
-            cursor: view.cursor,
-            mode: view.mode,
-            path: buffer.path,
-            range,
-        })
-    }
-    fn ai_context(&self, capture: Option<&AiEditorCapture>) -> AiRequestContext {
-        let (buffer, text) = capture.map_or((None, String::new()), |capture| {
-            let source = self.state.buffers[capture.buffer].text.to_string();
-            let start = capture.cursor.get().saturating_sub(2048);
-            let mut start = start.min(source.len());
-            while !source.is_char_boundary(start) {
-                start = start.saturating_sub(1)
-            }
-            let mut end = capture.cursor.get().saturating_add(2048).min(source.len());
-            while !source.is_char_boundary(end) {
-                end = end.saturating_sub(1)
-            }
-            (
-                Some(AiBufferContext {
-                    buffer: AiHostBufferId(capture.buffer.data().as_ffi()),
-                    revision: capture.revision.0,
-                    cursor: capture.cursor.get(),
-                    range: Some(
-                        AiTextRange::new(capture.range.start.get(), capture.range.end.get())
-                            .expect("ordered capture"),
-                    ),
-                }),
-                source[start..end].to_owned(),
-            )
-        });
-        AiRequestContext {
-            workspace_root_revision: capture
-                .map_or(self.workspace.root_revision(), |c| c.root_revision),
-            buffer,
-            text,
-        }
-    }
-    fn start_ai(
-        &mut self,
-        capability: AiCapability,
-        prompt: String,
-        capture: Option<AiEditorCapture>,
-    ) {
-        self.cancel_ai_request();
-        self.ui.ai_ghost_text = None;
-        let chunks = match capability {
-            AiCapability::Chat => vec!["Dust fake chat: ", "héllo ", "界 🙂"],
-            AiCapability::GhostText => vec![" · fake suggestion"],
-            AiCapability::Composer => vec!["bounded proposal"],
-        };
-        let composer_edits = if capability == AiCapability::Composer {
-            let capture = capture.as_ref().expect("composer capture");
-            vec![AiTextEdit {
-                range: AiTextRange::new(capture.range.start.get(), capture.range.end.get())
-                    .expect("ordered capture"),
-                replacement: "/* deterministic AI proposal */".into(),
-            }]
-        } else {
-            Vec::new()
-        };
-        let now = self.ai_now();
-        let request = AiRequest {
-            provider: self.ai_provider.clone(),
-            model: self.ai_model.clone(),
-            capability,
-            context: self.ai_context(capture.as_ref()),
-            prompt,
-            deadline_millis: now.saturating_add(5_000),
-        };
-        let script = FakeProviderScript {
-            chunks: chunks
-                .into_iter()
-                .map(|text| FakeChunk {
-                    delay_millis: 0,
-                    text: text.into(),
-                })
-                .collect(),
-            terminal: FakeTerminal::Complete,
-            composer_edits,
-        };
-        match self.ai_service.start_fake(request, script, now) {
-            Ok(id) => {
-                let owner = match capability {
-                    AiCapability::Chat => ActiveAiRequest::Chat {
-                        root_revision: self.workspace.root_revision(),
-                    },
-                    AiCapability::GhostText => {
-                        ActiveAiRequest::Ghost(capture.expect("ghost capture"))
-                    }
-                    AiCapability::Composer => {
-                        ActiveAiRequest::Composer(capture.expect("composer capture"))
-                    }
-                };
-                let revision = self
-                    .ai_service
-                    .snapshot()
-                    .expect("started AI snapshot")
-                    .revision;
-                self.active_ai_request = Some((id, owner, revision));
-            }
-            Err(error) => self.show_error(format!("AI request rejected: {error}")),
-        }
-    }
-    fn publish_ai_chat(&mut self, text: &str) {
-        let load = PluginLoadId(1);
-        let source = "builtin.ai.chat";
-        let key = "chat";
-        let revision = self
-            .plugin_virtual_editor
-            .find("builtin.ai", load, source, key)
-            .map_or(1, |entry| entry.revision.saturating_add(1));
-        let snapshot = crate::plugins::PluginVirtualDocumentSnapshot {
-            plugin: "builtin.ai".into(),
-            load,
-            source: source.into(),
-            document: 2,
-            key: key.into(),
-            title: "AI chat · fake.local".into(),
-            language: "markdown".into(),
-            text: format!("# AI chat · fake.local\n\n{text}\n"),
-            revision,
-            closed: false,
-        };
-        let mut state = self.state.clone();
-        let mut bridge = self.plugin_virtual_editor.clone();
-        if bridge.publish(&mut state, &snapshot).is_err() {
-            self.show_error("AI chat virtual document rejected");
-            return;
-        }
-        let mut graph = self.windows.clone();
-        let mut editor = self.editor_windows.clone();
-        if editor
-            .reconcile(
-                &state,
-                &mut graph,
-                &self.configuration.settings.ui.buffer_line.scratch_label,
-            )
-            .is_err()
-        {
-            self.show_error("AI chat graph rejected");
-            return;
-        }
-        self.state = state;
-        self.plugin_virtual_editor = bridge;
-        self.windows = graph;
-        self.editor_windows = editor;
-        self.ui.dashboard = false;
-    }
-    fn publish_ai_composer(&mut self, capture: &AiEditorCapture, proposal: &AiComposerProposal) {
-        if self.pending_workspace_proposal.is_some() || self.workspace_proposal.is_some() {
-            self.show_error("another workspace edit is already being previewed");
-            return;
-        }
-        if self.workspace.trust() != WorkspaceTrust::Trusted
-            || capture.root_revision != self.workspace.root_revision()
-        {
-            self.show_error("AI composer ownership is stale");
-            return;
-        }
-        let Some(path) = capture.path.clone() else {
-            return;
-        };
-        let Some(buffer) = self.state.buffers.get(capture.buffer) else {
-            return;
-        };
-        if buffer.text.revision() != capture.revision
-            || buffer.dirty
-            || buffer.path.as_ref() != Some(&path)
-            || proposal.buffer_revision != capture.revision.0
-            || proposal.workspace_root_revision != capture.root_revision
-            || proposal.buffer != AiHostBufferId(capture.buffer.data().as_ffi())
-        {
-            self.show_error("AI composer ownership is stale");
-            return;
-        }
-        let edits = proposal
-            .edits
-            .iter()
-            .map(|edit| {
-                Ok(TextEdit::new(
-                    ByteRange::new(ByteOffset(edit.range.start), ByteOffset(edit.range.end))
-                        .map_err(|e| e.to_string())?,
-                    edit.replacement.clone(),
-                ))
-            })
-            .collect::<Result<Vec<_>, String>>();
-        let Ok(edits) = edits else {
-            self.show_error("AI composer proposal is invalid");
-            return;
-        };
-        let snapshot = FileSnapshot {
-            canonical_path: path.clone(),
-            revision: Some(capture.revision),
-            bytes: buffer.text.to_bytes(),
-        };
-        let draft = WorkspaceEditDraft {
-            canonical_path: path,
-            expected_revision: Some(capture.revision),
-            edits,
-        };
-        let id = ProposalId(self.next_proposal);
-        self.next_proposal = self.next_proposal.saturating_add(1);
-        match WorkspaceEditProposal::build(
-            id,
-            "AI composer · fake.local".into(),
-            &self.workspace,
-            vec![draft],
-            vec![snapshot],
-        ) {
-            Ok(proposal) => {
-                self.workspace_proposal_root_revision = Some(capture.root_revision);
-                self.workspace_proposal = Some(proposal);
-                self.show_workspace_proposal();
-            }
-            Err(_) => self.show_error("AI composer proposal rejected"),
-        }
-    }
-    fn invalidate_ai_ownership(&mut self) {
-        let valid = self
-            .active_ai_request
-            .as_ref()
-            .is_none_or(|(_, owner, _)| match owner {
-                ActiveAiRequest::Chat { root_revision } => {
-                    *root_revision == self.workspace.root_revision()
-                        && self.ai_service.snapshot().is_none_or(|snapshot| {
-                            snapshot.text.is_empty()
-                                || self
-                                    .plugin_virtual_editor
-                                    .find("builtin.ai", PluginLoadId(1), "builtin.ai.chat", "chat")
-                                    .is_some_and(|entry| {
-                                        self.state.buffers.contains_key(entry.buffer)
-                                    })
-                        })
-                }
-                ActiveAiRequest::Ghost(capture) | ActiveAiRequest::Composer(capture) => {
-                    self.workspace.root_revision() == capture.root_revision
-                        && self.state.active_view == Some(capture.view)
-                        && self.state.views.get(capture.view).is_some_and(|view| {
-                            view.buffer == capture.buffer
-                                && view.cursor == capture.cursor
-                                && view.mode == capture.mode
-                        })
-                        && self
-                            .state
-                            .buffers
-                            .get(capture.buffer)
-                            .is_some_and(|buffer| buffer.text.revision() == capture.revision)
-                }
-            });
-        if !valid {
-            self.cancel_ai_request();
-            self.ui.ai_ghost_text = None
-        }
-        let ghost_valid = self.ui.ai_ghost_text.as_ref().is_none_or(|ghost| {
-            self.workspace.root_revision() == ghost.workspace_root_revision
-                && self.state.active_view == Some(ghost.view)
-                && self.state.views.get(ghost.view).is_some_and(|view| {
-                    view.buffer == ghost.buffer
-                        && view.cursor == ghost.cursor
-                        && view.mode == ghost.mode
-                })
-                && self
-                    .state
-                    .buffers
-                    .get(ghost.buffer)
-                    .is_some_and(|buffer| buffer.text.revision() == ghost.revision)
-        });
-        if !ghost_valid {
-            self.ui.ai_ghost_text = None
-        }
-    }
-    fn process_ai_events(&mut self) {
-        self.invalidate_ai_ownership();
-        let Some((request, owner, observed)) = self.active_ai_request.clone() else {
-            return;
-        };
-        let now = self.ai_now();
-        match self.ai_service.process_one(now) {
-            Ok(false) => return,
-            Ok(true) => {}
-            Err(_) => {
-                self.cancel_ai_request();
-                self.show_error("AI provider request failed");
-                return;
-            }
-        }
-        let Some(snapshot) = self.ai_service.snapshot().cloned() else {
-            return;
-        };
-        if snapshot.request != request || snapshot.revision == observed {
-            return;
-        }
-        if let Some(active) = &mut self.active_ai_request {
-            active.2 = snapshot.revision
-        }
-        match &owner {
-            ActiveAiRequest::Chat { .. } => {
-                if !snapshot.text.is_empty() {
-                    self.publish_ai_chat(&snapshot.text)
-                }
-            }
-            ActiveAiRequest::Ghost(capture) => {
-                if let AiStreamState::Complete(AiOutput::GhostText(ghost)) = &snapshot.state {
-                    if snapshot.validate_ownership(
-                        capture.root_revision,
-                        Some((
-                            AiHostBufferId(capture.buffer.data().as_ffi()),
-                            capture.revision.0,
-                        )),
-                    ) && ghost.cursor == capture.cursor.get()
-                    {
-                        self.ui.ai_ghost_text = Some(UiGhostText {
-                            workspace_root_revision: capture.root_revision,
-                            buffer: capture.buffer,
-                            revision: capture.revision,
-                            view: capture.view,
-                            cursor: capture.cursor,
-                            mode: capture.mode,
-                            text: ghost.text.clone(),
-                        });
-                    }
-                }
-            }
-            ActiveAiRequest::Composer(capture) => {
-                if let AiStreamState::Complete(AiOutput::Composer(proposal)) = &snapshot.state {
-                    self.publish_ai_composer(capture, proposal)
-                }
-            }
-        }
-        if !matches!(snapshot.state, AiStreamState::Running) {
-            self.active_ai_request = None;
-        }
-    }
-
-    // AI_APPLICATION_DOGFOOD_END
     fn process_effect(&mut self, effect: AppEffect) {
         match effect {
             AppEffect::Quit { force } => {
@@ -14172,10 +16180,7 @@ impl InteractiveApplication {
             AppEffect::PromptHistory(direction) => self.prompt_history(direction),
             AppEffect::PromptComplete(direction) => self.prompt_complete(direction),
             AppEffect::PromptSubmit => self.submit_prompt(),
-            AppEffect::PromptCancel => {
-                self.ai_composer_prompt = None;
-                self.close_prompt()
-            }
+            AppEffect::PromptCancel => self.close_prompt(),
             AppEffect::SearchRepeat { reverse } => {
                 let forward = if reverse {
                     !self.last_search_forward
@@ -15010,22 +17015,6 @@ impl InteractiveApplication {
                     Err(error) => self.show_error(error.detail),
                 }
             }
-            AppEffect::AiChatOpen => {
-                self.cancel_ai_request();
-                self.open_prompt(PromptKind::AiChat, String::new())
-            }
-            AppEffect::AiGhostRequest => {
-                if let Some(capture) = self.capture_ai_editor(false) {
-                    self.start_ai(AiCapability::GhostText, String::new(), Some(capture))
-                }
-            }
-            AppEffect::AiComposerRequest => {
-                self.cancel_ai_request();
-                if let Some(capture) = self.capture_ai_editor(true) {
-                    self.ai_composer_prompt = Some(capture);
-                    self.open_prompt(PromptKind::AiComposer, String::new())
-                }
-            }
             kind @ (AppEffect::HealthVirtualOpen | AppEffect::HealthVirtualRefresh) => {
                 let load = PluginLoadId(1);
                 let source = "builtin.health.virtual";
@@ -15390,11 +17379,16 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::OpenToolMenu(category) => self.open_tool_menu(category),
-            AppEffect::CloseToolMenu => self.ui.tool_menu = None,
+            AppEffect::CloseToolMenu => self.close_tool_menu(),
             AppEffect::MoveToolMenu(direction) => self.move_tool_menu(direction),
             AppEffect::CycleToolCategory(direction) => self.cycle_tool_category(direction),
             AppEffect::RefreshTools => self.refresh_tools(),
             AppEffect::ActivateTool => self.activate_selected_tool(),
+            AppEffect::InstallSelectedTool => self.install_selected_tool(),
+            AppEffect::UninstallSelectedTool => self.uninstall_selected_tool(),
+            AppEffect::StopSelectedLsp => self.stop_selected_lsp(),
+            AppEffect::RestartSelectedLsp => self.restart_selected_lsp(),
+            AppEffect::ToggleToolRuntime => self.toggle_selected_lsp_runtime(),
             AppEffect::LspStart => {
                 if let Some(key) = self.active_lsp_server.clone() {
                     if let Some(state) = self.lsp_sessions.get_mut(&key) {
@@ -15415,6 +17409,7 @@ impl InteractiveApplication {
                     if let Err(error) = self.lsp.stop(&server) {
                         self.show_error(error)
                     }
+                    self.clear_lsp_progress(&server);
                     self.lsp_sessions.remove(&server);
                     self.clear_lsp_session_state();
                 }
@@ -15428,12 +17423,20 @@ impl InteractiveApplication {
                         state.desired_running = true;
                     }
                     let _ = self.lsp.stop(&server);
+                    self.clear_lsp_progress(&server);
                 } else {
                     self.start_lsp(None);
                 }
             }
             AppEffect::LspStatus => {
-                let servers = self.lsp.running_servers();
+                let mut servers = self
+                    .lsp
+                    .running_servers()
+                    .iter()
+                    .map(|server| self.lsp_server_label(server))
+                    .collect::<Vec<_>>();
+                servers.sort();
+                servers.dedup();
                 self.ui.notification = Some(self.message(
                     "lsp_status",
                     &[(
@@ -15503,6 +17506,17 @@ impl InteractiveApplication {
                     self.message("lsp_logs", &[("logs", String::new())]),
                     items,
                 );
+            }
+            AppEffect::LspInlayHintsToggle => {
+                self.configuration.settings.lsp.inlay_hints =
+                    !self.configuration.settings.lsp.inlay_hints;
+                let enabled = self.configuration.settings.lsp.inlay_hints;
+                self.schedule_lsp_inlay_refresh(true);
+                self.ui.notification = Some(format!(
+                    "inlay hints {}",
+                    if enabled { "enabled" } else { "disabled" }
+                ));
+                self.ui.notification_error = false;
             }
             AppEffect::LspRequest(feature) => self.request_lsp(feature),
             AppEffect::LspDocumentationScroll(direction) => {
@@ -16584,26 +18598,69 @@ impl InteractiveApplication {
             );
             let target_column =
                 usize::from(column.saturating_sub(gutter)).saturating_add(snapped_scroll);
+            let skipped_bytes = configured_byte_offset_at_display_column(
+                content,
+                view.scroll_column,
+                self.configuration.settings.editor.tab_width,
+                self.configuration.settings.editor.ambiguous_width,
+            );
+            let visible_start = ByteOffset(line_start.get().saturating_add(skipped_bytes));
+            let line_end = ByteOffset(line_start.get().saturating_add(content.len()));
+            let mut hints = self
+                .ui
+                .lsp_inlay_hints
+                .iter()
+                .filter(|hint| {
+                    hint.buffer == buffer_id
+                        && hint.revision == revision
+                        && hint.position >= visible_start
+                        && hint.position <= line_end
+                })
+                .collect::<Vec<_>>();
+            hints.sort_unstable_by_key(|hint| hint.position);
+            hints.truncate(32);
+            let mut hint_cursor = 0usize;
             let mut display_column = 0_usize;
-            let mut byte = 0_usize;
-            for (relative, grapheme) in content.grapheme_indices(true) {
-                let width = if grapheme == "\t" {
-                    self.configuration.settings.editor.tab_width
-                        - (display_column % self.configuration.settings.editor.tab_width)
-                } else {
-                    configured_grapheme_width(
-                        grapheme,
-                        self.configuration.settings.editor.ambiguous_width,
-                    )
-                };
-                if display_column.saturating_add(width) > target_column {
-                    byte = relative;
-                    break;
+            let mut virtual_cells = 0usize;
+            'target: {
+                for (relative, grapheme) in content.grapheme_indices(true) {
+                    let global = ByteOffset(line_start.get().saturating_add(relative));
+                    while let Some(hint) = hints
+                        .get(hint_cursor)
+                        .filter(|hint| hint.position == global)
+                    {
+                        let width = configured_text_width(
+                            &hint.label,
+                            self.configuration.settings.editor.tab_width,
+                            self.configuration.settings.editor.ambiguous_width,
+                        );
+                        let start = display_column.saturating_add(virtual_cells);
+                        if start.saturating_add(width) > target_column {
+                            break 'target relative;
+                        }
+                        virtual_cells = virtual_cells.saturating_add(width);
+                        hint_cursor = hint_cursor.saturating_add(1);
+                    }
+                    let width = if grapheme == "\t" {
+                        self.configuration.settings.editor.tab_width
+                            - (display_column % self.configuration.settings.editor.tab_width)
+                    } else {
+                        configured_grapheme_width(
+                            grapheme,
+                            self.configuration.settings.editor.ambiguous_width,
+                        )
+                    };
+                    if display_column
+                        .saturating_add(virtual_cells)
+                        .saturating_add(width)
+                        > target_column
+                    {
+                        break 'target relative;
+                    }
+                    display_column = display_column.saturating_add(width);
                 }
-                display_column = display_column.saturating_add(width);
-                byte = relative.saturating_add(grapheme.len());
+                content.len()
             }
-            byte
         };
         let position = ByteOffset(line_start.get().saturating_add(byte));
         let mut transaction = EditorTransaction::new(self.transaction_id())
@@ -17137,6 +19194,22 @@ impl InteractiveApplication {
         }
         self.ui.documentation_popup = None;
         self.configuration = candidate;
+        let maximum_inlays = self.configuration.settings.lsp.inlay_hint_level
+            == crate::configuration::InlayHintLevel::Max;
+        let sessions = self
+            .lsp_sessions
+            .iter()
+            .map(|(key, state)| (key.clone(), state.server_id.clone()))
+            .collect::<Vec<_>>();
+        for (key, server_id) in sessions {
+            let configuration = if maximum_inlays {
+                crate::languages::LspServerConfiguration::maximum_inlay_hints(&server_id)
+            } else {
+                crate::languages::LspServerConfiguration::standard()
+            };
+            let _ = self.lsp.configure(&key, configuration);
+        }
+        self.schedule_lsp_inlay_refresh(true);
         if let Some(watch) = replacement_explorer_watch {
             self.explorer_watch = watch;
             self.explorer_watch_generation = None;
@@ -17872,9 +19945,7 @@ impl InteractiveApplication {
                     PromptKind::SearchForward
                     | PromptKind::SearchBackward
                     | PromptKind::WorkspaceTrust
-                    | PromptKind::GitReset
-                    | PromptKind::AiChat
-                    | PromptKind::AiComposer => EditorMode::Prompt,
+                    | PromptKind::GitReset => EditorMode::Prompt,
                 });
             }
         }
@@ -17946,13 +20017,7 @@ impl InteractiveApplication {
         let Some(kind) = self.ui.prompt.as_ref().map(|prompt| prompt.kind) else {
             return;
         };
-        if matches!(
-            kind,
-            PromptKind::WorkspaceTrust
-                | PromptKind::GitReset
-                | PromptKind::AiChat
-                | PromptKind::AiComposer
-        ) {
+        if matches!(kind, PromptKind::WorkspaceTrust | PromptKind::GitReset) {
             return;
         }
         let (enabled, history) = if kind == PromptKind::Command {
@@ -18172,10 +20237,7 @@ impl InteractiveApplication {
         if input.is_empty() {
             return;
         }
-        if matches!(
-            kind,
-            PromptKind::WorkspaceTrust | PromptKind::AiChat | PromptKind::AiComposer
-        ) {
+        if kind == PromptKind::WorkspaceTrust {
             return;
         }
         let configured = if kind == PromptKind::Command {
@@ -18254,42 +20316,6 @@ impl InteractiveApplication {
             PromptKind::GitReset => {
                 self.close_prompt();
                 self.confirm_reset_selected_git_hunk(prompt.input);
-            }
-            PromptKind::AiChat => {
-                if prompt.input.is_empty() {
-                    if let Some(active) = &mut self.ui.prompt {
-                        active.error = Some("AI chat prompt must not be empty".into())
-                    }
-                    return;
-                }
-                self.close_prompt();
-                self.start_ai(AiCapability::Chat, prompt.input, None);
-            }
-            PromptKind::AiComposer => {
-                let Some(capture) = self.ai_composer_prompt.take() else {
-                    self.close_prompt();
-                    self.show_error("AI composer context expired");
-                    return;
-                };
-                if prompt.input.is_empty() {
-                    self.ai_composer_prompt = Some(capture);
-                    if let Some(active) = &mut self.ui.prompt {
-                        active.error = Some("AI composer instruction must not be empty".into())
-                    }
-                    return;
-                }
-                self.close_prompt();
-                if self.workspace.root_revision() != capture.root_revision
-                    || self
-                        .state
-                        .buffers
-                        .get(capture.buffer)
-                        .is_none_or(|buffer| buffer.text.revision() != capture.revision)
-                {
-                    self.show_error("AI composer context expired");
-                    return;
-                }
-                self.start_ai(AiCapability::Composer, prompt.input, Some(capture));
             }
             PromptKind::SearchForward | PromptKind::SearchBackward => {
                 if prompt.input.is_empty() {
@@ -18621,6 +20647,29 @@ fn configured_grapheme_width(
         UnicodeWidthStr::width(grapheme)
     };
     width.max(1)
+}
+
+fn configured_byte_offset_at_display_column(
+    text: &str,
+    target: usize,
+    tab_width: usize,
+    ambiguous_width: crate::configuration::AmbiguousWidth,
+) -> usize {
+    let mut column = 0usize;
+    let mut byte = 0usize;
+    for (relative, grapheme) in text.grapheme_indices(true) {
+        let width = if grapheme == "\t" {
+            tab_width - (column % tab_width)
+        } else {
+            configured_grapheme_width(grapheme, ambiguous_width)
+        };
+        if column.saturating_add(width) > target {
+            return relative;
+        }
+        column = column.saturating_add(width);
+        byte = relative.saturating_add(grapheme.len());
+    }
+    byte
 }
 
 fn configured_text_width(
@@ -19995,6 +22044,25 @@ fn compile_typed_keymap_entries(
     }
 }
 
+fn tool_install_progress_label(phase: &str, completed: u64, total: Option<u64>) -> String {
+    let bytes = |value: u64| {
+        if value >= 1024 * 1024 {
+            format!("{:.1} MiB", value as f64 / (1024.0 * 1024.0))
+        } else {
+            format!("{} KiB", value / 1024)
+        }
+    };
+    match total.filter(|total| *total > 0) {
+        Some(total) => format!(
+            "{phase} {} / {} ({}%)",
+            bytes(completed),
+            bytes(total),
+            completed.saturating_mul(100).min(total.saturating_mul(100)) / total
+        ),
+        None => phase.into(),
+    }
+}
+
 const fn tool_kind_key(kind: ToolKind) -> &'static str {
     match kind {
         ToolKind::Lsp => "lsp",
@@ -20357,25 +22425,23 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use crate::document::{ByteOffset, ByteRange, TextBuffer, TextEdit, TextEditSet};
-    use crate::editing::{
-        CommandSource, CommandValue, EditorMode, EditorOperation, EditorTransaction,
-        InvocationSource, TransactionId,
-    };
+    use crate::document::{ByteOffset, ByteRange, TextBuffer};
+    use crate::editing::{CommandSource, CommandValue, InvocationSource};
     use crate::filesystem::{ExplorerWatchBatch, ExplorerWatchGeneration, ExplorerWatchService};
     use crate::input::{InputContextLayer, KeyEvent, MappingResolution};
     use crate::terminal_ui::{
         ContentTabDiagnostic, ContentTabDiagnosticSeverity, ContentTabKind,
         DocumentationMarkupKind, DocumentationPopupKind, DocumentationPopupState,
-        DocumentationSection, ExplorerSegmentRole, ExplorerUiState, PickerSurfaceKind, PromptKind,
-        PtyScreen, TerminalPanelMode, UiEvent, UiFold, VisualRowAnchor, VisualRowModel,
-        active_pane_viewport, explorer_panel_width, render, snap_display_column,
+        DocumentationSection, ExplorerSegmentRole, ExplorerUiState, PickerSurfaceKind, PtyScreen,
+        TerminalPanelMode, UiEvent, UiFold, VisualRowAnchor, VisualRowModel, active_pane_viewport,
+        explorer_panel_width, render, snap_display_column,
     };
     use tempfile::tempdir;
 
     use super::{
-        InteractiveApplication, KeymapOperation, build_restored_layout, capture_persisted_layout,
-        compile_keymaps, explorer_watch_policy, fake_ai_service, make_logs, reload_keymaps,
+        InteractiveApplication, KeymapOperation, LspRuntimeSource, build_restored_layout,
+        capture_persisted_layout, compile_keymaps, explorer_watch_policy,
+        lsp_runtime_source_allowed_on_host, make_logs, reload_keymaps,
         validate_configured_commands,
     };
     use crate::application::{
@@ -20383,14 +22449,53 @@ mod tests {
     };
     use crate::{
         observability::CrashSnapshotWriter,
-        packages::{PackageService, RegistryService},
+        packages::{PackageService, RegistryService, ToolKind, ToolStatus, is_nixos_host},
         persistence::{PersistedWindowPlacement, PersistedWindowRule, PersistenceService},
         plugins::{PluginLoadId, PluginManager},
         processes::{ExecutionPreflightService, JobSupervisor, PtyId, PtyService},
         syntax::SyntaxService,
         windows::{DockEdge, WindowPlacement, WindowRect},
-        workspace::{DiagnosticSeverity, RootIdentity, WorkspaceTrust},
+        workspace::{DiagnosticSeverity, WorkspaceTrust},
     };
+
+    #[test]
+    fn nix_workspace_fallback_is_reserved_for_nixos_hosts() {
+        let definition = crate::packages::bundled_tool_catalog()
+            .into_iter()
+            .find(|tool| tool.id == "rust-analyzer")
+            .expect("Rust analyzer catalog definition");
+        assert_eq!(
+            super::nix_workspace_shell_for_host(&definition, true, true),
+            Some("rust-analyzer")
+        );
+        assert_eq!(
+            super::nix_workspace_shell_for_host(&definition, true, false),
+            None
+        );
+        assert_eq!(
+            super::nix_workspace_shell_for_host(&definition, false, true),
+            None
+        );
+    }
+
+    #[test]
+    fn nix_lsp_launch_runs_the_processed_upstream_artifact_without_nix_evaluation() {
+        let definition = crate::packages::bundled_tool_catalog()
+            .into_iter()
+            .find(|tool| tool.id == "rust-analyzer")
+            .expect("Rust analyzer catalog definition");
+        let launch = super::LspLaunch::NixWorkspace {
+            nix: PathBuf::from(
+                "/home/user/.local/state/dust/tools/rust-analyzer/bin/rust-analyzer",
+            ),
+            workspace_root: PathBuf::from("/home/user/.local/state/dust/tools/nix-lsp-workspace"),
+            shell: "rust-analyzer".into(),
+        };
+        assert!(launch.arguments(&definition).is_empty());
+        // The synthetic path has no profile, so environment resolution fails
+        // closed rather than launching without compatibility.
+        assert!(launch.environment(&definition).is_err());
+    }
 
     fn app() -> InteractiveApplication {
         let root = tempdir().expect("tempdir").keep();
@@ -20425,7 +22530,6 @@ mod tests {
         let plugin_storage_root = state.workspace_root.join("plugin-storage-test");
         let pty_queue_capacity = configuration.settings.terminals.queue_capacity;
         let terminal_panel_height = configuration.settings.ui.terminal_panel.height;
-        let (ai_service, ai_provider, ai_model) = fake_ai_service();
         let explorer_watch = ExplorerWatchService::start(explorer_watch_policy(
             &configuration.settings.ui.explorer.watch,
         ))
@@ -20455,12 +22559,6 @@ mod tests {
             plugin_virtual_documents: crate::plugins::PluginVirtualDocumentBroker::default(),
             plugin_virtual_editor:
                 crate::application::virtual_documents::VirtualDocumentEditorBridge::default(),
-            ai_service,
-            ai_provider,
-            ai_model,
-            ai_epoch: Instant::now(),
-            active_ai_request: None,
-            ai_composer_prompt: None,
             content_line_order: Vec::new(),
             content_line_pins: BTreeSet::new(),
             content_line_order_revision: 0,
@@ -20519,15 +22617,34 @@ mod tests {
             startup_reads_pending: 0,
             startup_primary_buffer: None,
             tools: crate::packages::inspect_tools(),
+            lsp_nix_workspace_preferred: BTreeSet::new(),
+            lsp_managed_preferred: BTreeSet::new(),
+            lsp_managed_versions: BTreeMap::new(),
             tool_installer: crate::packages::ToolInstaller::start(),
+            tool_version_service: crate::packages::ToolVersionService::start(),
+            tool_version_pending: BTreeSet::new(),
+            tool_versions: BTreeMap::new(),
+            lsp_last_errors: BTreeMap::new(),
             lsp: crate::languages::LspService::new(),
             active_lsp_server: None,
+            lsp_project_roots: crate::filesystem::ProjectRootService::default(),
+            pending_lsp_project_root: None,
+            nix_lsp_workspace: crate::packages::NixWorkspaceService::default(),
+            pending_nix_lsp_workspace: None,
+            dap_project_roots: crate::filesystem::ProjectRootService::default(),
+            pending_dap_project_root: None,
+            lsp_autostart_observation: None,
             lsp_sessions: HashMap::new(),
             lsp_session_synced: HashMap::new(),
             lsp_synced_revisions: Default::default(),
             lsp_capabilities: None,
             lsp_request_generation: 0,
+            lsp_inlay_request_generation: 0,
+            lsp_inlay_request_owner: None,
+            lsp_inlay_refresh_due: None,
+            lsp_inlay_empty_retries: 0,
             lsp_logs: Default::default(),
+            lsp_progress_epoch: Instant::now(),
             lsp_completion_items: Default::default(),
             snippet_session: None,
             lsp_selection_ranges: Vec::new(),
@@ -20776,6 +22893,18 @@ mod tests {
             app.process_trust_events();
             assert!(Instant::now() < deadline, "trust persistence timed out");
             thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn bundled_fake_ai_commands_and_labels_are_not_shipped() {
+        let app = app();
+        for id in ["ai.chat.open", "ai.ghost.request", "ai.composer.request"] {
+            assert!(
+                !app.commands.specs().any(|spec| spec.id.as_str() == id),
+                "bundled fake AI command `{id}` must not be public"
+            );
+            assert!(!app.configuration.settings.command_labels.contains_key(id));
         }
     }
 
@@ -21263,7 +23392,10 @@ mod tests {
     #[test]
     fn same_session_root_replacement_cancels_all_protected_action_kinds() {
         let actions = [
-            super::DeferredExecution::InstallTool("missing".into()),
+            super::DeferredExecution::InstallTool {
+                id: "missing".into(),
+                source: None,
+            },
             super::DeferredExecution::StartLsp(Some("missing".into())),
             super::DeferredExecution::StartDap {
                 requested: Some("missing".into()),
@@ -21304,7 +23436,10 @@ mod tests {
             app.trust_store.trust(root.identity.clone());
         }
         app.reconcile_workspace_trust();
-        app.defer_trusted_execution(super::DeferredExecution::InstallTool("missing".into()));
+        app.defer_trusted_execution(super::DeferredExecution::InstallTool {
+            id: "missing".into(),
+            source: None,
+        });
         app.defer_trusted_execution(super::DeferredExecution::StartLsp(None));
         assert!(
             app.ui.notification_error,
@@ -21978,6 +24113,215 @@ mod tests {
     }
 
     #[test]
+    fn installed_language_server_autostarts_after_workspace_trust_is_exact() {
+        let mut app = app();
+        let path = app.state.workspace_root.join("main.rs");
+        app.state.open_text(
+            crate::document::TextBuffer::from_text("fn main() {}"),
+            Some(path),
+        );
+        app.ui.dashboard = false;
+        app.tools
+            .retain(|entry| entry.definition.kind != crate::packages::ToolKind::Lsp);
+        let false_executable =
+            crate::packages::discover_executable("false").expect("false executable");
+        app.tools.push(crate::packages::ToolEntry {
+            definition: crate::packages::ToolDefinition {
+                id: "automatic-rust".into(),
+                name: "Automatic Rust".into(),
+                kind: crate::packages::ToolKind::Lsp,
+                languages: vec!["rust".into()],
+                executable: false_executable.display().to_string(),
+                version: None,
+                release: None,
+                launch_args: Vec::new(),
+                probe_args: Vec::new(),
+                debug_program_policy: crate::packages::DebugProgramPolicy::default(),
+                project_root_markers: vec!["Cargo.toml".into()],
+                project_root_strategy: crate::filesystem::ProjectRootStrategy::Cargo,
+                install: None,
+                pins: Vec::new(),
+            },
+            status: crate::packages::ToolStatus::Installed(false_executable),
+        });
+
+        app.sync_lsp_document();
+        assert!(app.execution_validation.is_none());
+        assert!(!app.ui.notification_error);
+
+        prepare_trust_identity(&mut app);
+        for root in app.workspace.roots() {
+            app.trust_store.trust(root.identity.clone());
+        }
+        app.reconcile_workspace_trust();
+        app.sync_lsp_document();
+        assert!(matches!(
+            app.execution_validation.as_ref().map(|pending| &pending.action),
+            Some(super::DeferredExecution::StartLsp(Some(server)))
+                if server == "automatic-rust"
+        ));
+        assert_eq!(app.workspace.trust(), WorkspaceTrust::Trusted);
+    }
+
+    #[test]
+    fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
+        let mut app = app();
+        let nested = app.state.workspace_root.join("nested");
+        fs::create_dir_all(nested.join("src")).unwrap();
+        fs::write(
+            app.state.workspace_root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"nested\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            nested.join("Cargo.toml"),
+            "[package]\nname = \"nested\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let source = nested.join("src/main.rs");
+        fs::write(&source, "fn main() {}\n").unwrap();
+        let source = fs::canonicalize(source).unwrap();
+        let nested = fs::canonicalize(nested).unwrap();
+        app.state
+            .open_text(TextBuffer::from_text("fn main() {}"), Some(source));
+        app.tools
+            .retain(|entry| entry.definition.kind != ToolKind::Lsp);
+        let false_executable =
+            crate::packages::discover_executable("false").expect("false executable");
+        app.tools.push(crate::packages::ToolEntry {
+            definition: crate::packages::ToolDefinition {
+                id: "nested-rust".into(),
+                name: "Nested Rust".into(),
+                kind: ToolKind::Lsp,
+                languages: vec!["rust".into()],
+                executable: false_executable.display().to_string(),
+                version: None,
+                release: None,
+                launch_args: Vec::new(),
+                probe_args: Vec::new(),
+                debug_program_policy: crate::packages::DebugProgramPolicy::default(),
+                project_root_markers: vec!["Cargo.toml".into()],
+                project_root_strategy: crate::filesystem::ProjectRootStrategy::Cargo,
+                install: None,
+                pins: Vec::new(),
+            },
+            status: ToolStatus::Installed(false_executable),
+        });
+        prepare_trust_identity(&mut app);
+        for root in app.workspace.roots() {
+            app.trust_store.trust(root.identity.clone());
+        }
+        app.reconcile_workspace_trust();
+        app.execution_revalidated = true;
+        app.start_lsp(Some("nested-rust".into()));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while app.pending_lsp_project_root.is_some() {
+            app.process_lsp_project_root();
+            assert!(
+                Instant::now() < deadline,
+                "project-root resolution timed out"
+            );
+            thread::yield_now();
+        }
+        let action = app
+            .pending_execution_preflight
+            .values()
+            .find_map(|action| match action {
+                super::PendingExecutionPreflight::Lsp {
+                    session_key,
+                    project_root,
+                    ..
+                } => Some((session_key, project_root)),
+                _ => None,
+            })
+            .expect("nested project must queue an LSP preflight");
+        assert_eq!(action.1, &nested);
+        let expected_key = crate::languages::LspSessionKey {
+            root_id: app.workspace.active_root().expect("root").0,
+            project_root: nested,
+            server_id: "nested-rust".into(),
+        }
+        .transport_key();
+        assert_eq!(action.0, &expected_key);
+    }
+
+    #[test]
+    fn nested_marker_backed_project_gets_its_own_dap_preflight_root() {
+        let mut app = app();
+        let nested = app.state.workspace_root.join("nested-debug");
+        fs::create_dir_all(nested.join("src")).unwrap();
+        fs::write(
+            app.state.workspace_root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"nested-debug\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            nested.join("Cargo.toml"),
+            "[package]\nname = \"nested-debug\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let source = nested.join("src/main.rs");
+        fs::write(&source, "fn main() {}\n").unwrap();
+        let source = fs::canonicalize(source).unwrap();
+        let nested = fs::canonicalize(nested).unwrap();
+        app.state
+            .open_text(TextBuffer::from_text("fn main() {}"), Some(source.clone()));
+        app.tools
+            .retain(|entry| entry.definition.kind != ToolKind::Dap);
+        let false_executable =
+            crate::packages::discover_executable("false").expect("false executable");
+        app.tools.push(crate::packages::ToolEntry {
+            definition: crate::packages::ToolDefinition {
+                id: "nested-rust-dap".into(),
+                name: "Nested Rust DAP".into(),
+                kind: ToolKind::Dap,
+                languages: vec!["rust".into()],
+                executable: false_executable.display().to_string(),
+                version: None,
+                release: None,
+                launch_args: Vec::new(),
+                probe_args: Vec::new(),
+                debug_program_policy: crate::packages::DebugProgramPolicy::default(),
+                project_root_markers: vec!["Cargo.toml".into()],
+                project_root_strategy: crate::filesystem::ProjectRootStrategy::Cargo,
+                install: None,
+                pins: Vec::new(),
+            },
+            status: ToolStatus::Installed(false_executable),
+        });
+        prepare_trust_identity(&mut app);
+        for root in app.workspace.roots() {
+            app.trust_store.trust(root.identity.clone());
+        }
+        app.reconcile_workspace_trust();
+        app.execution_revalidated = true;
+        app.start_dap(Some("nested-rust-dap".into()), Some(source.clone()));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while app.pending_dap_project_root.is_some() {
+            app.process_dap_project_root();
+            assert!(
+                Instant::now() < deadline,
+                "DAP project-root resolution timed out"
+            );
+            thread::yield_now();
+        }
+        let action = app
+            .pending_execution_preflight
+            .values()
+            .find_map(|action| match action {
+                super::PendingExecutionPreflight::DapToolAdapter {
+                    project_root,
+                    program,
+                    ..
+                } => Some((project_root, program)),
+                _ => None,
+            })
+            .expect("nested project must queue a DAP preflight");
+        assert_eq!(action.0, &nested);
+        assert_eq!(action.1, &source);
+    }
+
+    #[test]
     fn untrusted_workspace_blocks_project_local_language_server_launch() {
         let mut app = app();
         let path = app.state.workspace_root.join("main.rs");
@@ -21985,6 +24329,12 @@ mod tests {
             crate::document::TextBuffer::from_text("fn main() {}"),
             Some(path),
         );
+        fs::create_dir_all(app.state.workspace_root.join("bin")).expect("server bin");
+        fs::write(
+            app.state.workspace_root.join("bin/server"),
+            b"not executable",
+        )
+        .expect("project-local server");
         app.tools.push(crate::packages::ToolEntry {
             definition: crate::packages::ToolDefinition {
                 id: "project-local".into(),
@@ -21997,9 +24347,15 @@ mod tests {
                     .join("bin/server")
                     .display()
                     .to_string(),
+                version: None,
+                release: None,
                 launch_args: Vec::new(),
-                install_program: None,
-                install_args: Vec::new(),
+                probe_args: Vec::new(),
+                debug_program_policy: crate::packages::DebugProgramPolicy::default(),
+                project_root_markers: vec!["Cargo.toml".into()],
+                project_root_strategy: crate::filesystem::ProjectRootStrategy::Cargo,
+                install: None,
+                pins: Vec::new(),
             },
             status: crate::packages::ToolStatus::Installed(
                 app.state.workspace_root.join("bin/server"),
@@ -22019,9 +24375,18 @@ mod tests {
             app.trust_store.trust(root.identity.clone());
         }
         app.reconcile_workspace_trust();
+        fs::write(
+            app.state.workspace_root.join("Cargo.toml"),
+            "[package]\nname = \"project-local\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
         app.start_lsp(Some("project-local".into()));
         wait_execution_validation(&mut app);
         let deadline = Instant::now() + Duration::from_secs(2);
+        while app.pending_lsp_project_root.is_some() && Instant::now() < deadline {
+            app.process_lsp_project_root();
+            thread::sleep(Duration::from_millis(5));
+        }
         while !app.pending_execution_preflight.is_empty() && Instant::now() < deadline {
             app.process_execution_preflight();
             thread::sleep(Duration::from_millis(5));
@@ -22137,6 +24502,79 @@ mod tests {
     }
 
     #[test]
+    fn lsp_progress_hides_transport_keys_preserves_begin_titles_and_animates() {
+        let mut app = app();
+        let server = "root:1:rust-analyzer".to_owned();
+        let token = "cargo-check".to_owned();
+        app.update_lsp_progress(
+            server.clone(),
+            token.clone(),
+            crate::languages::LspProgressKind::Begin,
+            "Building".into(),
+            "workspace".into(),
+            Some(0),
+        );
+        app.update_lsp_progress(
+            server.clone(),
+            token.clone(),
+            crate::languages::LspProgressKind::Report,
+            String::new(),
+            "ring (lib)".into(),
+            Some(72),
+        );
+        let progress = app.ui.lsp_progress.first().expect("active progress");
+        assert_eq!(progress.server, "rust-analyzer");
+        assert_eq!(progress.title, "Building");
+        assert_eq!(progress.message, "ring (lib)");
+        assert_eq!(progress.percentage, Some(72));
+        assert!(!progress.server.contains("root:1"));
+        assert!(
+            app.configuration
+                .settings
+                .ui
+                .lsp_progress
+                .spinner_frames
+                .iter()
+                .any(|frame| frame == "⠇")
+        );
+        app.configuration
+            .settings
+            .ui
+            .lsp_progress
+            .spinner_interval_ms = 1_000;
+        app.lsp_progress_epoch = Instant::now() - Duration::from_millis(1_500);
+        app.update_lsp_progress_animation();
+        assert_eq!(app.ui.lsp_progress_frame, 1);
+
+        app.update_lsp_progress(
+            server,
+            token,
+            crate::languages::LspProgressKind::End,
+            String::new(),
+            "Finished".into(),
+            None,
+        );
+        let timeout = app
+            .configuration
+            .settings
+            .ui
+            .lsp_progress
+            .completed_timeout_ms;
+        assert_eq!(
+            app.configuration.settings.ui.lsp_progress.completed_symbol,
+            "✓"
+        );
+        let completed = app.ui.lsp_progress.first_mut().expect("completed progress");
+        assert!(completed.done);
+        assert_eq!(completed.message, "Finished");
+        completed.completed_at =
+            Some(Instant::now() - Duration::from_millis(timeout.saturating_add(1)));
+        app.update_lsp_progress_animation();
+        assert!(app.ui.lsp_progress.is_empty());
+        assert!(app.ui.notification.is_none());
+    }
+
+    #[test]
     fn lsp_completion_applies_through_one_validated_transaction() {
         let mut app = app();
         let path = app.state.workspace_root.join("main.rs");
@@ -22167,12 +24605,44 @@ mod tests {
                 detail: "function".into(),
             }],
             selected: 0,
+            scroll: 0,
         });
         app.accept_lsp_completion();
         let buffer = app.state.active_buffer_id().expect("buffer");
         assert_eq!(app.state.buffers[buffer].text.to_string(), "fn main");
         assert!(app.ui.language_completion.is_none());
         assert!(app.state.buffers[buffer].dirty);
+    }
+
+    #[test]
+    fn lsp_completion_selection_scrolls_and_wraps_inside_the_visible_window() {
+        let mut app = app();
+        app.configuration
+            .settings
+            .ui
+            .command_line
+            .completion_max_rows = 3;
+        app.ui.language_completion = Some(crate::terminal_ui::LanguageCompletionState {
+            items: (0..5)
+                .map(|index| crate::terminal_ui::CompletionItem {
+                    label: format!("item-{index}"),
+                    detail: String::new(),
+                })
+                .collect(),
+            selected: 0,
+            scroll: 0,
+        });
+        for _ in 0..4 {
+            app.move_lsp_completion(1);
+        }
+        let completion = app.ui.language_completion.as_ref().expect("completion");
+        assert_eq!((completion.selected, completion.scroll), (4, 2));
+        app.move_lsp_completion(1);
+        let completion = app.ui.language_completion.as_ref().expect("completion");
+        assert_eq!((completion.selected, completion.scroll), (0, 0));
+        app.move_lsp_completion(-1);
+        let completion = app.ui.language_completion.as_ref().expect("completion");
+        assert_eq!((completion.selected, completion.scroll), (4, 2));
     }
 
     #[test]
@@ -22208,6 +24678,112 @@ mod tests {
     }
 
     #[test]
+    fn rust_analyzer_toolchain_and_standalone_versions_are_not_conflated() {
+        assert_eq!(
+            InteractiveApplication::rust_analyzer_path_version("1.96.1 (31fca3a 2026-08-21)", true,),
+            ("rustup bundled".into(), "2026-08-21".into())
+        );
+        assert_eq!(
+            InteractiveApplication::rust_analyzer_path_version("0.3.3025-standalone", false),
+            ("0.3.3025".into(), "standalone build".into())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rust_analyzer_rustup_proxy_detection_accepts_symlinks_and_hardlinks() {
+        let directory = tempdir().expect("temporary proxy directory");
+        let rustup = directory.path().join("rustup");
+        fs::write(&rustup, b"rustup").expect("rustup fixture");
+        let hardlink = directory.path().join("rust-analyzer");
+        fs::hard_link(&rustup, &hardlink).expect("rustup hardlink proxy");
+        assert!(InteractiveApplication::rust_analyzer_is_rustup_proxy(
+            &hardlink
+        ));
+        fs::remove_file(&hardlink).expect("remove hardlink proxy");
+        std::os::unix::fs::symlink(&rustup, &hardlink).expect("rustup symlink proxy");
+        assert!(InteractiveApplication::rust_analyzer_is_rustup_proxy(
+            &hardlink
+        ));
+    }
+
+    #[test]
+    fn lsp_installation_mechanisms_are_host_specific() {
+        assert!(lsp_runtime_source_allowed_on_host(
+            LspRuntimeSource::Path,
+            true
+        ));
+        assert!(lsp_runtime_source_allowed_on_host(
+            LspRuntimeSource::Path,
+            false
+        ));
+        assert!(!lsp_runtime_source_allowed_on_host(
+            LspRuntimeSource::Managed,
+            true
+        ));
+        assert!(lsp_runtime_source_allowed_on_host(
+            LspRuntimeSource::Managed,
+            false
+        ));
+        assert!(lsp_runtime_source_allowed_on_host(
+            LspRuntimeSource::Nix,
+            true
+        ));
+        assert!(!lsp_runtime_source_allowed_on_host(
+            LspRuntimeSource::Nix,
+            false
+        ));
+    }
+
+    #[test]
+    fn lsp_tool_menu_reports_real_path_version_executable_and_lifecycle() {
+        let mut app = app();
+        let source = app.state.workspace_root.join("main.rs");
+        app.state
+            .open_text(TextBuffer::from_text("fn main() {}"), Some(source));
+        app.ui.dashboard = false;
+        app.tools
+            .retain(|entry| entry.definition.kind != ToolKind::Lsp);
+        let echo = crate::packages::discover_executable("echo").expect("echo executable");
+        app.tools.push(crate::packages::ToolEntry {
+            definition: crate::packages::ToolDefinition {
+                id: "observed-rust".into(),
+                name: "Observed Rust".into(),
+                kind: ToolKind::Lsp,
+                languages: vec!["rust".into()],
+                executable: echo.display().to_string(),
+                version: Some("managed-9.9.9".into()),
+                release: None,
+                launch_args: Vec::new(),
+                probe_args: vec!["path-1.2.3".into()],
+                debug_program_policy: crate::packages::DebugProgramPolicy::default(),
+                project_root_markers: vec!["Cargo.toml".into()],
+                project_root_strategy: crate::filesystem::ProjectRootStrategy::Cargo,
+                install: None,
+                pins: Vec::new(),
+            },
+            status: ToolStatus::Installed(echo.clone()),
+        });
+
+        app.open_tool_menu("lsp".into());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            app.process_tool_version_results();
+            let row = &app.ui.tool_menu.as_ref().expect("menu").rows[0];
+            if row.version != "probing…" {
+                assert_eq!(row.version, "path-1.2.3");
+                assert_eq!(row.runtime, "PATH");
+                assert_eq!(row.executable, echo.display().to_string());
+                assert_eq!(row.lifecycle, "stopped");
+                assert!(row.note.contains("uninstall"));
+                break;
+            }
+            assert!(Instant::now() < deadline, "version probe timed out");
+            thread::yield_now();
+        }
+    }
+
+    #[test]
     fn lsp_tool_menu_is_registry_driven_filterable_and_configurable() {
         let mut app = app();
         app.process_effect(crate::application::AppEffect::OpenToolMenu("lsp".into()));
@@ -22215,8 +24791,128 @@ mod tests {
         assert_eq!(menu.category, "lsp");
         assert!(menu.rows.iter().all(|row| row.kind == "LSP"));
         assert!(menu.rows.iter().any(|row| row.id == "rust-analyzer"));
+        let rust = menu
+            .rows
+            .iter()
+            .position(|row| row.id == "rust-analyzer")
+            .expect("Rust analyzer row");
+        app.ui.tool_menu.as_mut().expect("tool menu").selected = rust;
+        app.handle_configured_key(KeyEvent::character('p'));
+        let picker = app
+            .ui
+            .tool_menu
+            .as_ref()
+            .and_then(|menu| menu.runtime_picker.as_ref())
+            .expect("runtime picker");
+        assert_eq!(picker.options.first().unwrap().source, "path");
+        if is_nixos_host() {
+            assert!(
+                picker
+                    .options
+                    .iter()
+                    .all(|option| option.source != "managed")
+            );
+            assert_eq!(
+                picker
+                    .options
+                    .iter()
+                    .filter(|option| option.source == "nix")
+                    .filter_map(|option| option.version_pin.as_deref())
+                    .collect::<Vec<_>>(),
+                vec!["0.3.3025", "0.3.3016", "0.3.3008", "0.3.2997", "0.3.2989"]
+            );
+            assert_eq!(
+                picker
+                    .options
+                    .iter()
+                    .filter(|option| option.source == "nix")
+                    .map(|option| option.release.as_str())
+                    .collect::<Vec<_>>(),
+                vec![
+                    "2026-08-24",
+                    "2026-08-17.4",
+                    "2026-08-10.1",
+                    "2026-08-03",
+                    "2026-07-27",
+                ]
+            );
+            app.ui
+                .tool_menu
+                .as_mut()
+                .unwrap()
+                .runtime_picker
+                .as_mut()
+                .unwrap()
+                .selected = 1;
+            app.handle_configured_key(KeyEvent::plain(crate::input::KeyCode::Enter));
+            assert!(app.lsp_nix_workspace_preferred.contains("rust-analyzer"));
+            assert_eq!(
+                app.lsp_managed_versions
+                    .get("rust-analyzer")
+                    .map(String::as_str),
+                Some("0.3.3025")
+            );
+            assert_eq!(
+                app.ui.tool_menu.as_ref().expect("tool menu").rows[rust].runtime,
+                "Dust via Nix"
+            );
+        } else {
+            assert!(picker.options.iter().all(|option| option.source != "nix"));
+            assert_eq!(
+                picker
+                    .options
+                    .iter()
+                    .filter(|option| option.source == "managed")
+                    .filter_map(|option| option.version_pin.as_deref())
+                    .collect::<Vec<_>>(),
+                vec!["0.3.3025", "0.3.3016", "0.3.3008", "0.3.2997", "0.3.2989",]
+            );
+            assert_eq!(
+                picker
+                    .options
+                    .iter()
+                    .filter(|option| option.source == "managed")
+                    .map(|option| option.release.as_str())
+                    .collect::<Vec<_>>(),
+                vec![
+                    "2026-08-24",
+                    "2026-08-17.4",
+                    "2026-08-10.1",
+                    "2026-08-03",
+                    "2026-07-27",
+                ]
+            );
+            let older = picker
+                .options
+                .iter()
+                .position(|option| option.version_pin.as_deref() == Some("0.3.3008"))
+                .expect("older exact pin");
+            app.ui
+                .tool_menu
+                .as_mut()
+                .unwrap()
+                .runtime_picker
+                .as_mut()
+                .unwrap()
+                .selected = older;
+            app.handle_configured_key(KeyEvent::plain(crate::input::KeyCode::Enter));
+            assert!(app.lsp_managed_preferred.contains("rust-analyzer"));
+            assert_eq!(
+                app.lsp_managed_versions
+                    .get("rust-analyzer")
+                    .map(String::as_str),
+                Some("0.3.3008")
+            );
+            assert_eq!(
+                app.ui.tool_menu.as_ref().expect("tool menu").rows[rust].runtime,
+                "Dust download"
+            );
+        }
         app.handle_configured_key(KeyEvent::character('j'));
-        assert_eq!(app.ui.tool_menu.as_ref().expect("menu").selected, 1);
+        assert_eq!(
+            app.ui.tool_menu.as_ref().expect("menu").selected,
+            rust.saturating_add(1)
+        );
         app.handle_configured_key(KeyEvent::plain(crate::input::KeyCode::Tab));
         assert_eq!(app.ui.tool_menu.as_ref().expect("menu").category, "dap");
         app.handle_configured_key(KeyEvent::plain(crate::input::KeyCode::Escape));
@@ -22496,11 +25192,39 @@ mod tests {
         app.state
             .open_text(crate::document::TextBuffer::from_text("abcdef"), None);
         app.ui.dashboard = false;
-        app.mouse_position = Some((5, 0));
-        app.apply_mouse_cursor(false);
+        app.reconcile_editor_windows();
         let view = app.state.active_view.expect("view");
+        let workspace = app.workspace_bounds().expect("workspace");
+        let viewport = active_pane_viewport(
+            &app.state,
+            &app.ui,
+            &app.configuration.settings,
+            workspace.width,
+            app.workspace_render_height(),
+        )
+        .expect("editor viewport");
+        let gutter = crate::terminal_ui::editor_state_gutter_width(
+            &app.state,
+            &app.state.buffers[app.state.views[view].buffer].text,
+            &app.configuration.settings.editor,
+            viewport.width,
+        );
+        app.mouse_position = Some((
+            workspace
+                .x
+                .saturating_add(viewport.x)
+                .saturating_add(gutter + 2),
+            workspace.y.saturating_add(viewport.y),
+        ));
+        app.apply_mouse_cursor(false);
         assert_eq!(app.state.views[view].cursor, crate::document::ByteOffset(2));
-        app.mouse_position = Some((7, 0));
+        app.mouse_position = Some((
+            workspace
+                .x
+                .saturating_add(viewport.x)
+                .saturating_add(gutter + 4),
+            workspace.y.saturating_add(viewport.y),
+        ));
         app.apply_mouse_cursor(true);
         let selection = app.state.views[view].selection.expect("mouse selection");
         assert_eq!(selection.anchor, crate::document::ByteOffset(2));
@@ -22562,7 +25286,20 @@ mod tests {
         .into_iter()
         .find(|viewport| viewport.view == first)
         .expect("generic first-window viewport");
-        app.mouse_position = Some((viewport.x.saturating_add(4), viewport.y));
+        let workspace = app.workspace_bounds().expect("workspace");
+        let gutter = crate::terminal_ui::editor_state_gutter_width(
+            &app.state,
+            &app.state.buffers[app.state.views[first].buffer].text,
+            &app.configuration.settings.editor,
+            viewport.width,
+        );
+        app.mouse_position = Some((
+            workspace
+                .x
+                .saturating_add(viewport.x)
+                .saturating_add(gutter + 1),
+            workspace.y.saturating_add(viewport.y),
+        ));
         let geometry = app.mouse_pane_geometry().expect("mouse geometry");
         assert_eq!(geometry.0, viewport.pane);
         assert_eq!((geometry.3, geometry.4), (viewport.width, viewport.height));
@@ -22572,239 +25309,6 @@ mod tests {
             app.state.views[first].cursor,
             crate::document::ByteOffset(1)
         );
-    }
-
-    #[test]
-    fn ai_chat_streams_into_one_read_only_virtual_identity_and_focus_cancel_is_late_safe() {
-        let mut app = app();
-        app.process_effect(AppEffect::AiChatOpen);
-        assert_eq!(
-            app.ui.prompt.as_ref().map(|p| p.kind),
-            Some(PromptKind::AiChat)
-        );
-        app.reconcile_editor_windows();
-        assert_eq!(
-            app.compositor_projection().unwrap().protected_regions.len(),
-            1
-        );
-        app.ui.prompt.as_mut().unwrap().input = "secret-like prompt text".into();
-        app.submit_prompt();
-        app.process_ai_events();
-        let entry = app
-            .plugin_virtual_editor
-            .find("builtin.ai", PluginLoadId(1), "builtin.ai.chat", "chat")
-            .unwrap()
-            .clone();
-        let buffer = entry.buffer;
-        assert!(app.state.buffers[buffer].is_virtual_read_only());
-        while app.active_ai_request.is_some() {
-            app.process_ai_events()
-        }
-        let final_entry = app
-            .plugin_virtual_editor
-            .find("builtin.ai", PluginLoadId(1), "builtin.ai.chat", "chat")
-            .unwrap();
-        assert_eq!(final_entry.buffer, buffer);
-        assert!(final_entry.revision > 1);
-        assert!(
-            app.state.buffers[buffer]
-                .text
-                .to_string()
-                .contains("héllo 界 🙂")
-        );
-        assert!(
-            !app.ui
-                .notification
-                .as_deref()
-                .unwrap_or_default()
-                .contains("secret-like")
-        );
-        let mut cancelled = self::app();
-        cancelled.process_effect(AppEffect::AiChatOpen);
-        cancelled.ui.prompt.as_mut().unwrap().input = "cancel me".into();
-        cancelled.submit_prompt();
-        cancelled.handle_event(UiEvent::FocusLost);
-        for _ in 0..8 {
-            cancelled.process_ai_events()
-        }
-        assert!(
-            cancelled
-                .plugin_virtual_editor
-                .find("builtin.ai", PluginLoadId(1), "builtin.ai.chat", "chat")
-                .is_none()
-        );
-        let mut closed = self::app();
-        closed.process_effect(AppEffect::AiChatOpen);
-        closed.ui.prompt.as_mut().unwrap().input = "close".into();
-        closed.submit_prompt();
-        closed.process_ai_events();
-        let buffer = closed.state.active_buffer_id().unwrap();
-        closed.close_active_buffer(true);
-        closed.process_ai_events();
-        assert!(closed.active_ai_request.is_none() && !closed.state.buffers.contains_key(buffer));
-    }
-
-    #[test]
-    fn ai_ghost_is_exact_non_mutating_and_idle() {
-        let mut app = app();
-        let (buffer, view) = app.state.open_text(TextBuffer::from_text("abc"), None);
-        app.state.views[view].cursor = ByteOffset(3);
-        app.ui.dashboard = false;
-        let before = app.state.buffers[buffer].text.to_string();
-        app.process_effect(AppEffect::AiGhostRequest);
-        while app.active_ai_request.is_some() {
-            app.process_ai_events()
-        }
-        let ghost = app.ui.ai_ghost_text.clone().expect("ghost");
-        assert_eq!(
-            (ghost.buffer, ghost.view, ghost.cursor),
-            (buffer, view, ByteOffset(3))
-        );
-        assert_eq!(app.state.buffers[buffer].text.to_string(), before);
-        let processed = app.ai_service.processed_events();
-        for _ in 0..256 {
-            app.process_ai_events()
-        }
-        assert_eq!(app.ai_service.processed_events(), processed);
-        assert_eq!(app.ui.ai_ghost_text.as_ref(), Some(&ghost));
-        app.state.views[view].cursor = ByteOffset(2);
-        app.invalidate_ai_ownership();
-        assert!(app.ui.ai_ghost_text.is_none());
-        app.state.views[view].cursor = ByteOffset(3);
-        app.process_effect(AppEffect::AiGhostRequest);
-        app.set_specific_mode(view, EditorMode::Insert);
-        app.invoke_insert_text("x".into());
-        app.process_ai_events();
-        assert!(app.active_ai_request.is_none());
-        assert!(app.ui.ai_ghost_text.is_none());
-        assert_ne!(app.state.buffers[buffer].text.revision(), ghost.revision);
-        app.set_specific_mode(view, EditorMode::Normal);
-        app.process_effect(AppEffect::AiGhostRequest);
-        while app.active_ai_request.is_some() {
-            app.process_ai_events()
-        }
-        assert!(app.ui.ai_ghost_text.is_some());
-        let extra = tempdir().unwrap().keep();
-        let identity = RootIdentity::capture(&extra).unwrap();
-        app.workspace.add_root("extra".into(), identity).unwrap();
-        app.invalidate_ai_ownership();
-        assert!(app.ui.ai_ghost_text.is_none());
-    }
-
-    #[test]
-    fn ai_composer_uses_trusted_exact_workspace_proposal_gate() {
-        let mut app = app();
-        let path = app.state.workspace_root.join("ai.rs");
-        fs::write(&path, "abc").unwrap();
-        let path = fs::canonicalize(path).unwrap();
-        let (buffer, view) = app
-            .state
-            .open_text(TextBuffer::from_text("abc"), Some(path));
-        app.state.views[view].cursor = ByteOffset(3);
-        app.workspace.set_trust(WorkspaceTrust::Trusted);
-        app.process_effect(AppEffect::AiComposerRequest);
-        assert_eq!(
-            app.ui.prompt.as_ref().map(|p| p.kind),
-            Some(PromptKind::AiComposer)
-        );
-        app.ui.prompt.as_mut().unwrap().input = "make an edit".into();
-        app.submit_prompt();
-        while app.active_ai_request.is_some() {
-            app.process_ai_events()
-        }
-        assert!(app.workspace_proposal.is_some());
-        assert_eq!(app.state.buffers[buffer].text.to_string(), "abc");
-        app.accept_workspace_proposal();
-        assert_eq!(
-            app.state.buffers[buffer].text.to_string(),
-            "abc/* deterministic AI proposal */"
-        );
-        let mut rejected = self::app();
-        let path = rejected.state.workspace_root.join("reject.rs");
-        fs::write(&path, "abc").unwrap();
-        let path = fs::canonicalize(path).unwrap();
-        let (buffer, view) = rejected
-            .state
-            .open_text(TextBuffer::from_text("abc"), Some(path));
-        rejected.state.views[view].cursor = ByteOffset(3);
-        rejected.workspace.set_trust(WorkspaceTrust::Trusted);
-        rejected.process_effect(AppEffect::AiComposerRequest);
-        rejected.ui.prompt.as_mut().unwrap().input = "proposal".into();
-        rejected.submit_prompt();
-        while rejected.active_ai_request.is_some() {
-            rejected.process_ai_events()
-        }
-        rejected.reject_workspace_proposal();
-        assert_eq!(rejected.state.buffers[buffer].text.to_string(), "abc");
-        let mut untrusted = self::app();
-        untrusted.state.open_text(
-            TextBuffer::from_text("abc"),
-            Some(untrusted.state.workspace_root.join("missing.rs")),
-        );
-        untrusted.process_effect(AppEffect::AiComposerRequest);
-        assert!(untrusted.ui.prompt.is_none() && untrusted.active_ai_request.is_none());
-        untrusted.process_effect(AppEffect::HealthVirtualOpen);
-        untrusted.workspace.set_trust(WorkspaceTrust::Trusted);
-        untrusted.process_effect(AppEffect::AiComposerRequest);
-        assert!(untrusted.ui.prompt.is_none());
-    }
-
-    #[test]
-    fn ai_composer_stale_root_revision_and_scratch_fail_without_mutation() {
-        let mut stale = self::app();
-        let path = stale.state.workspace_root.join("stale.rs");
-        fs::write(&path, "abc").unwrap();
-        let path = fs::canonicalize(path).unwrap();
-        let (buffer, view) = stale
-            .state
-            .open_text(TextBuffer::from_text("abc"), Some(path));
-        stale.state.views[view].cursor = ByteOffset(3);
-        stale.workspace.set_trust(WorkspaceTrust::Trusted);
-        stale.process_effect(AppEffect::AiComposerRequest);
-        let revision = stale.state.buffers[buffer].text.revision();
-        let transaction = EditorTransaction::new(TransactionId(700)).with_operation(
-            EditorOperation::ApplyEdits {
-                buffer,
-                edits: TextEditSet::new(
-                    revision,
-                    vec![TextEdit::new(
-                        ByteRange::new(ByteOffset(3), ByteOffset(3)).unwrap(),
-                        "x",
-                    )],
-                ),
-            },
-        );
-        stale.state.apply_transaction(&transaction).unwrap();
-        stale.ui.prompt.as_mut().unwrap().input = "stale".into();
-        stale.submit_prompt();
-        assert!(stale.active_ai_request.is_none() && stale.workspace_proposal.is_none());
-        assert_eq!(stale.state.buffers[buffer].text.to_string(), "abcx");
-        let mut rooted = self::app();
-        let path = rooted.state.workspace_root.join("root.rs");
-        fs::write(&path, "abc").unwrap();
-        let path = fs::canonicalize(path).unwrap();
-        let (_, view) = rooted
-            .state
-            .open_text(TextBuffer::from_text("abc"), Some(path));
-        rooted.state.views[view].cursor = ByteOffset(3);
-        rooted.workspace.set_trust(WorkspaceTrust::Trusted);
-        rooted.process_effect(AppEffect::AiComposerRequest);
-        rooted.ui.prompt.as_mut().unwrap().input = "root".into();
-        rooted.submit_prompt();
-        let extra = tempdir().unwrap().keep();
-        rooted
-            .workspace
-            .add_root("new".into(), RootIdentity::capture(&extra).unwrap())
-            .unwrap();
-        for _ in 0..4 {
-            rooted.process_ai_events()
-        }
-        assert!(rooted.active_ai_request.is_none() && rooted.workspace_proposal.is_none());
-        let mut scratch = self::app();
-        scratch.state.open_text(TextBuffer::from_text("abc"), None);
-        scratch.workspace.set_trust(WorkspaceTrust::Trusted);
-        scratch.process_effect(AppEffect::AiComposerRequest);
-        assert!(scratch.ui.prompt.is_none() && scratch.active_ai_request.is_none());
     }
 
     #[test]
@@ -22984,6 +25488,26 @@ mod tests {
             .expect("reopen forced-close buffer");
         assert_eq!(app.state.active_buffer_id(), Some(dirty));
         app.state.validate_layout().expect("reopened layout valid");
+    }
+
+    #[test]
+    fn dashboard_exposes_and_dispatches_the_file_explorer_without_picker_fallback() {
+        let mut app = app();
+        app.ui.dashboard_actions = super::dashboard_actions(&app.configuration);
+        assert!(app.ui.dashboard);
+        assert!(
+            app.ui.dashboard_actions.iter().any(|action| {
+                action.label == "File explorer" && action.key.as_deref() == Some("f")
+            }),
+            "resolved dashboard actions: {:?}",
+            app.ui.dashboard_actions
+        );
+        for key in ["space", "f", "e"] {
+            app.handle_configured_key(key.parse::<KeyEvent>().expect("dashboard explorer key"));
+        }
+        assert!(app.ui.explorer.is_some());
+        assert!(app.ui.explorer_focused);
+        assert!(app.ui.picker.is_none());
     }
 
     #[test]
@@ -26542,6 +29066,73 @@ mod tests {
     }
 
     #[test]
+    fn inlay_hint_results_are_revision_owned_and_projected_at_exact_unicode_offsets() {
+        let mut app = app();
+        let path = app.state.workspace_root.join("hints.rs");
+        let (buffer, _) = app.state.open_text(
+            crate::document::TextBuffer::from_text("let 界 = build();"),
+            Some(path.clone()),
+        );
+        app.configuration.settings.lsp.inlay_hint_level = crate::configuration::InlayHintLevel::Max;
+        app.present_lsp_result(
+            "rust-analyzer",
+            6,
+            "textDocument/inlayHint",
+            &crate::languages::file_uri(&path),
+            crate::languages::LspFeatureResult::InlayHints(Vec::new()),
+        );
+        assert_eq!(app.lsp_inlay_empty_retries, 1);
+        assert!(app.lsp_inlay_refresh_due.is_some());
+        app.present_lsp_result(
+            "rust-analyzer",
+            7,
+            "textDocument/inlayHint",
+            &crate::languages::file_uri(&path),
+            crate::languages::LspFeatureResult::InlayHints(vec![crate::languages::LspInlayHint {
+                position: crate::languages::LspPosition {
+                    line: 0,
+                    character: 5,
+                },
+                label: " -> {unknown}".into(),
+            }]),
+        );
+        assert_eq!(app.lsp_inlay_empty_retries, 2);
+        assert!(app.lsp_inlay_refresh_due.is_some());
+        assert_eq!(app.ui.lsp_inlay_hints[0].label, " -> {unknown}");
+        app.present_lsp_result(
+            "rust-analyzer",
+            8,
+            "textDocument/inlayHint",
+            &crate::languages::file_uri(&path),
+            crate::languages::LspFeatureResult::InlayHints(vec![crate::languages::LspInlayHint {
+                position: crate::languages::LspPosition {
+                    line: 0,
+                    character: 5,
+                },
+                label: ": Value".into(),
+            }]),
+        );
+        assert_eq!(app.ui.lsp_inlay_hints.len(), 1);
+        let hint = &app.ui.lsp_inlay_hints[0];
+        assert_eq!(hint.buffer, buffer);
+        assert_eq!(hint.revision, app.state.buffers[buffer].text.revision());
+        assert_eq!(hint.position, ByteOffset("let 界".len()));
+        assert_eq!(hint.label, ": Value");
+        assert_eq!(app.lsp_inlay_empty_retries, 0);
+        assert!(app.lsp_inlay_refresh_due.is_none());
+
+        app.configuration.settings.lsp.inlay_hint_level =
+            crate::configuration::InlayHintLevel::Standard;
+        assert!(!app.schedule_lsp_inlay_warmup_retry());
+        app.configuration.settings.lsp.inlay_hint_level = crate::configuration::InlayHintLevel::Max;
+        for retry in 1..=super::LSP_INLAY_HINT_WARMUP_RETRY_LIMIT {
+            assert!(app.schedule_lsp_inlay_warmup_retry());
+            assert_eq!(app.lsp_inlay_empty_retries, retry);
+        }
+        assert!(!app.schedule_lsp_inlay_warmup_retry());
+    }
+
+    #[test]
     fn completion_documentation_is_typed_and_exact_request_owned() {
         let mut app = app();
         let path = app.state.workspace_root.join("completion.rs");
@@ -26581,6 +29172,7 @@ mod tests {
                 detail: "usize".into(),
             }],
             selected: 0,
+            scroll: 0,
         });
         app.invoke_mapped_command("lsp.completion.documentation.open");
         let popup = app.ui.documentation_popup.as_ref().expect("documentation");

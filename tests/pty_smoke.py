@@ -21,6 +21,27 @@ from collections.abc import Callable
 Stage = tuple[float, bytes, tuple[int, int] | None]
 
 
+def rust_analyzer_is_rustup_proxy() -> bool:
+    executable = shutil.which("rust-analyzer")
+    if executable is None:
+        return False
+    path = pathlib.Path(executable)
+    try:
+        if path.resolve(strict=True).name == "rustup":
+            return True
+        return path.samefile(path.with_name("rustup"))
+    except OSError:
+        return False
+
+
+def is_nixos_host() -> bool:
+    try:
+        values = pathlib.Path("/etc/os-release").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    return any(line.removeprefix("ID=").strip('"') == "nixos" for line in values if line.startswith("ID="))
+
+
 def set_size(descriptor: int, rows: int, columns: int) -> None:
     fcntl.ioctl(descriptor, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
 
@@ -163,11 +184,16 @@ def main() -> None:
             binary,
             directory,
             [],
-            [(0.25, b":", None), (0.25, b"q\r", None)],
+            [(0.8, b":", None), (0.25, b"q\r", None)],
         )
         assert code == 0, code
-        assert pathlib.Path(directory).as_posix() in terminal_screen(snapshots[0])
-        assert "Command" in terminal_screen(snapshots[1])
+        dashboard = terminal_screen(snapshots[0])
+        assert pathlib.Path(directory).as_posix() in dashboard
+        assert "File explorer" in dashboard
+        assert "package activations complete" not in dashboard
+        command_screen = terminal_screen(snapshots[1])
+        assert "package activations complete" not in command_screen
+        assert "Command" in command_screen
         assert_restored(output)
 
     with tempfile.TemporaryDirectory() as directory:
@@ -175,9 +201,29 @@ def main() -> None:
             binary,
             directory,
             [],
+            [(0.8, b" fe", None), (0.8, b"\x1b", None), (0.2, b"q", None)],
+        )
+        assert code == 0
+        explorer_screen = terminal_screen(snapshots[1])
+        assert "Explorer" in explorer_screen
+        assert "Workspace files" not in explorer_screen
+        assert_restored(output)
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = pathlib.Path(directory)
+        (root / "main.rs").write_text("fn main() {}\n", encoding="utf-8")
+        (root / "Cargo.toml").write_text(
+            '[package]\nname = "menu-probe"\nversion = "0.1.0"\n', encoding="utf-8"
+        )
+        code, output, snapshots = run(
+            binary,
+            directory,
+            ["main.rs"],
             [
-                (0.2, b":lsp\r", None),
+                (0.7, b":lsp\r", None),
+                (0.5, b"p", None),
                 (0.3, b"", None),
+                (0.1, b"\x1b", None),
                 (0.1, b"\x1b", None),
                 (0.1, b":q\r", None),
             ],
@@ -186,7 +232,30 @@ def main() -> None:
         tool_screen = terminal_screen(snapshots[1])
         assert "Dust tool manager" in tool_screen
         assert "rust-analyzer" in tool_screen
-        assert "LSP" in tool_screen and ("Available" in tool_screen or "Installed" in tool_screen)
+        assert all(column in tool_screen for column in ("SERVER", "VERSION", "RUNTIME", "STATE"))
+        runtime_screen = terminal_screen(snapshots[2])
+        assert "rust-analyzer · choose build" in runtime_screen
+        assert "this host's Dust fallback; only ACTIVE is used" in runtime_screen
+        assert "BUILD / RELEASE" in runtime_screen
+        assert "PATH" in runtime_screen
+        if rust_analyzer_is_rustup_proxy():
+            assert "rustup bundled" in runtime_screen
+            assert "Rust 1." not in runtime_screen
+        if is_nixos_host():
+            assert "Dust via Nix" in runtime_screen
+            assert "Dust download" not in runtime_screen
+            assert "0.3.3025" in runtime_screen and "2026-08-24" in runtime_screen
+            assert "0.3.3016" in runtime_screen and "2026-08-17.4" in runtime_screen
+            assert "0.3.3008" in runtime_screen and "2026-08-10.1" in runtime_screen
+            assert "0.3.2660" not in runtime_screen
+        else:
+            assert "Dust download" in runtime_screen
+            assert "Dust via Nix" not in runtime_screen
+            assert "0.3.3025" in runtime_screen and "2026-08-24" in runtime_screen
+            assert "0.3.3016" in runtime_screen and "2026-08-17.4" in runtime_screen
+            assert "0.3.3008" in runtime_screen and "2026-08-10.1" in runtime_screen
+            assert "0.3.2660" not in runtime_screen
+        assert "i install" in runtime_screen and "u uninstall" in runtime_screen
         assert_restored(output)
 
     with tempfile.TemporaryDirectory() as directory:
@@ -244,7 +313,7 @@ def main() -> None:
             directory,
             [],
             [
-                (0.4, b":workspace.trust.status\r", None),
+                (0.8, b":workspace.trust.status\r", None),
                 (0.2, b":workspace.trust\r", None),
                 (0.2, b"wrong\r", None),
                 (0.3, b":workspace.trust\r", None),
@@ -500,35 +569,60 @@ def main() -> None:
 
     if shutil.which("rust-analyzer"):
         with tempfile.TemporaryDirectory() as directory:
-            path = pathlib.Path(directory) / "main.rs"
+            root = pathlib.Path(directory)
+            (root / "Cargo.toml").write_text(
+                "[package]\nname = \"dust-pty-lsp\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+                encoding="utf-8",
+            )
+            path = root / "main.rs"
             path.write_text("fn main() {}\n", encoding="utf-8")
             code, output, snapshots = run(
                 binary,
                 directory,
                 [str(path)],
-                [(0.4,b":workspace.trust\r",None),(0.2,b"trust this workspace\r",None),(0.5,b":lsp.server.start\r",None),(1.2,b":lsp.server.status\r",None),(0.2,b":q\r",None)],
+                [(0.4,b":workspace.trust\r",None),(0.2,b"trust this workspace\r",None),(1.7,b"",None),(0.1,b":lsp.server.status\r",None),(0.2,b":q\r",None)],
             )
             assert code == 0
-            assert "rust-analyzer" in terminal_screen(snapshots[4])
+            lsp_status = terminal_screen(snapshots[4])
+            assert "rust-analyzer" in lsp_status
+            assert "root:" not in lsp_status
             assert_restored(output)
 
-    for executable, suffix, source, server in [
-        ("typescript-language-server", ".ts", "const value: number = 1;\n", "typescript-language-server"),
-        ("gopls", ".go", "package main\nfunc main() {}\n", "gopls"),
+    for executable, suffix, source, server, marker, marker_source in [
+        (
+            "typescript-language-server",
+            ".ts",
+            "const value: number = 1;\n",
+            "typescript-language-server",
+            "package.json",
+            "{\"name\": \"dust-pty-lsp\", \"private\": true}\n",
+        ),
+        (
+            "gopls",
+            ".go",
+            "package main\nfunc main() {}\n",
+            "gopls",
+            "go.mod",
+            "module example.com/dust-pty-lsp\n\ngo 1.20\n",
+        ),
     ]:
         if not shutil.which(executable):
             continue
         with tempfile.TemporaryDirectory() as directory:
-            path = pathlib.Path(directory) / f"main{suffix}"
+            root = pathlib.Path(directory)
+            (root / marker).write_text(marker_source, encoding="utf-8")
+            path = root / f"main{suffix}"
             path.write_text(source, encoding="utf-8")
             code, output, snapshots = run(
                 binary,
                 directory,
                 [str(path)],
-                [(0.4,b":workspace.trust\r",None),(0.2,b"trust this workspace\r",None),(0.5,b":lsp.server.start\r",None),(1.2,b":lsp.server.status\r",None),(0.2,b":q\r",None)],
+                [(0.4,b":workspace.trust\r",None),(0.2,b"trust this workspace\r",None),(1.7,b"",None),(0.1,b":lsp.server.status\r",None),(0.2,b":q\r",None)],
             )
             assert code == 0
-            assert server in terminal_screen(snapshots[4])
+            lsp_status = terminal_screen(snapshots[4])
+            assert server in lsp_status
+            assert "root:" not in lsp_status
             assert_restored(output)
 
     with tempfile.TemporaryDirectory() as directory:
@@ -1013,7 +1107,7 @@ arguments = { force = false }
             binary,
             directory,
             [str(path)],
-            [(0.25, b"z", None)],
+            [(0.8, b"z", None)],
             clean=False,
             config_home=config_home,
         )
@@ -1099,10 +1193,10 @@ arguments = { force = false }
             directory,
             [str(path)],
             [
-                (0.25, b"", None),
-                (0.4, b"", None),
-                (0.4, b"", None),
                 (0.8, b"", None),
+                (0.4, b"", None),
+                (0.4, b"", None),
+                (4.0, b"", None),
                 (0.8, b":bd\r", None),
                 (0.2, b"y", None),
             ],

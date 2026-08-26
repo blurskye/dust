@@ -345,12 +345,13 @@ fn run_adapter(
         json!({
             "clientID":"dust", "clientName":"Dust", "adapterID":adapter,
             "pathFormat":"path", "linesStartAt1":true, "columnsStartAt1":true,
-            "supportsVariableType":true, "supportsRunInTerminalRequest":false
+            "supportsVariableType":true, "supportsRunInTerminalRequest":true
         }),
     );
     let initialize_sequence = sequence;
     sequence += 1;
     let mut launched = false;
+    let mut supports_configuration_done = false;
     let mut thread_id = None;
     let mut stopping = false;
     let mut stop_generation = 0_u64;
@@ -443,6 +444,10 @@ fn run_adapter(
                         == Some(initialize_sequence)
                         && !launched =>
                 {
+                    supports_configuration_done = message
+                        .pointer("/body/supportsConfigurationDoneRequest")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
                     send_request(&mut stdin, sequence, &request, request_arguments.clone());
                     sequence += 1;
                     launched = true;
@@ -478,10 +483,11 @@ fn run_adapter(
                         .and_then(Value::as_str)
                         .unwrap_or_default();
                     match event {
-                        "initialized" => {
+                        "initialized" if supports_configuration_done => {
                             send_request(&mut stdin, sequence, "configurationDone", json!({}));
                             sequence += 1;
                         }
+                        "initialized" => {}
                         "stopped" => {
                             stop_generation = stop_generation.saturating_add(1);
                             pending.retain(|_, (_, generation)| *generation == stop_generation);

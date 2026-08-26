@@ -18,13 +18,19 @@ case "$mode" in
     ;;
   pty)
     test -x target/release/dust || { echo 'release binary required' >&2; exit 2; }
-    python3 tests/pty_smoke.py target/release/dust
+    python3 tests/pty_smoke.py --binary target/release/dust
     ;;
   release)
     cargo build --release --locked
     rm -f target/dust-linux.tar.zst
     target/release/dust --release-archive target/release/dust --output "$PWD/target/dust-linux.tar.zst"
     target/release/dust --release-manifest target/release/dust --output "$PWD/target/release-manifest.json"
+    ;;
+  bun-runtime)
+    scripts/qualify-bun-runtime.sh
+    ;;
+  nix-lsp)
+    scripts/qualify-nix-lsp-fallback.sh
     ;;
   advisory)
     if ! cargo audit --version >/dev/null 2>&1; then echo 'cargo-audit unavailable; not executed' >&2; exit 77; fi

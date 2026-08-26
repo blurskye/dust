@@ -4,6 +4,7 @@
 __pycache__/
 *.pyc
 /references/
+/.dust-state/
 
 # Local credentials and agent artifacts
 .env

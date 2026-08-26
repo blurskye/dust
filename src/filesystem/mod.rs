@@ -1085,6 +1085,259 @@ fn sync_parent(_parent: &Path) -> Result<(), VfsError> {
     Ok(())
 }
 
+pub const PROJECT_ROOT_MARKER_CEILING: usize = 16;
+pub const PROJECT_ROOT_ANCESTOR_CEILING: usize = 64;
+const PROJECT_ROOT_MANIFEST_BYTE_CEILING: u64 = 512 * 1024;
+
+/// Adapter-defined project evidence. The filesystem worker never branches on a
+/// document language; it validates the policy selected by the tool catalog.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectRootStrategy {
+    /// Any non-symlink marker is sufficient.
+    #[default]
+    Marker,
+    /// A syntactically valid Cargo package or workspace manifest.
+    Cargo,
+    /// A declared Go module or workspace.
+    Go,
+    /// A syntactically valid TypeScript config or package manifest.
+    Node,
+    /// A syntactically valid pyproject, or one of Python's conventional build files.
+    Python,
+}
+
+/// A bounded, workspace-scoped project-root decision for a saved document.
+///
+/// This is deliberately generic: tool definitions supply evidence markers and
+/// a validator strategy, while the filesystem worker owns canonicalization and
+/// ancestor inspection. `project_root = None` means no launchable project was
+/// proven; it is never replaced with an arbitrary containing directory.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProjectRootResolution {
+    pub generation: u64,
+    pub root_revision: u64,
+    pub document: PathBuf,
+    pub workspace_root: PathBuf,
+    pub project_root: Option<PathBuf>,
+}
+
+#[derive(Default)]
+pub struct ProjectRootService {
+    generation: u64,
+    receiver: Option<Receiver<Result<ProjectRootResolution, VfsError>>>,
+}
+
+impl ProjectRootService {
+    pub fn resolve(
+        &mut self,
+        document: PathBuf,
+        workspace_root: PathBuf,
+        root_revision: u64,
+        markers: Vec<String>,
+        strategy: ProjectRootStrategy,
+    ) -> Result<u64, VfsError> {
+        if markers.len() > PROJECT_ROOT_MARKER_CEILING
+            || markers
+                .iter()
+                .any(|marker| !valid_project_root_marker(marker))
+        {
+            return Err(VfsError::ProjectRootMarker);
+        }
+        self.generation = self.generation.saturating_add(1);
+        let generation = self.generation;
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let worker_document = document.clone();
+        thread::Builder::new()
+            .name(format!("dust-project-root-{generation}"))
+            .spawn(move || {
+                let result = resolve_project_root(
+                    generation,
+                    root_revision,
+                    &worker_document,
+                    &workspace_root,
+                    &markers,
+                    strategy,
+                );
+                let _ = sender.send(result);
+            })
+            .map_err(|source| VfsError::Io {
+                operation: "start project-root worker for",
+                path: document,
+                source,
+            })?;
+        self.receiver = Some(receiver);
+        Ok(generation)
+    }
+
+    pub fn try_result(&self) -> Option<Result<ProjectRootResolution, VfsError>> {
+        self.receiver
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok())
+    }
+}
+
+fn valid_project_root_marker(marker: &str) -> bool {
+    !marker.is_empty()
+        && marker.len() <= 255
+        && marker != "."
+        && marker != ".."
+        && !marker.contains('/')
+        && !marker.contains('\\')
+        && !marker.contains('\0')
+}
+
+fn resolve_project_root(
+    generation: u64,
+    root_revision: u64,
+    document: &Path,
+    workspace_root: &Path,
+    markers: &[String],
+    strategy: ProjectRootStrategy,
+) -> Result<ProjectRootResolution, VfsError> {
+    let document = canonical_path(document)?;
+    let workspace_root = canonical_path(workspace_root)?;
+    if !document.starts_with(&workspace_root) {
+        return Err(VfsError::OutsideScope(document));
+    }
+    let mut directory = document
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| VfsError::OutsideScope(document.clone()))?;
+    let mut project_root = None;
+    for _ in 0..PROJECT_ROOT_ANCESTOR_CEILING {
+        if !directory.starts_with(&workspace_root) {
+            break;
+        }
+        if project_root_evidence(&directory, markers, strategy) {
+            // A malformed nearest project boundary must not silently fall back
+            // to an outer project and attach the file to the wrong server.
+            if project_root_is_valid(&directory, markers, strategy) {
+                project_root = Some(directory.clone());
+            }
+            break;
+        }
+        if directory == workspace_root {
+            break;
+        }
+        let Some(parent) = directory.parent() else {
+            break;
+        };
+        directory = parent.to_path_buf();
+    }
+    Ok(ProjectRootResolution {
+        generation,
+        root_revision,
+        document,
+        workspace_root,
+        project_root,
+    })
+}
+
+fn regular_project_marker(directory: &Path, marker: &str) -> Option<fs::Metadata> {
+    let metadata = fs::symlink_metadata(directory.join(marker)).ok()?;
+    (!metadata.file_type().is_symlink()).then_some(metadata)
+}
+
+fn bounded_project_marker(directory: &Path, marker: &str) -> Option<String> {
+    let metadata = regular_project_marker(directory, marker)?;
+    metadata.file_type().is_file().then(|| {
+        fs::File::open(directory.join(marker))
+            .ok()
+            .and_then(|file| {
+                read_bounded_utf8(file, PROJECT_ROOT_MANIFEST_BYTE_CEILING, "project marker").ok()
+            })
+    })?
+}
+
+fn project_root_evidence(
+    directory: &Path,
+    markers: &[String],
+    strategy: ProjectRootStrategy,
+) -> bool {
+    let supported = |marker: &str| match strategy {
+        ProjectRootStrategy::Marker => true,
+        ProjectRootStrategy::Cargo => marker == "Cargo.toml",
+        ProjectRootStrategy::Go => matches!(marker, "go.mod" | "go.work"),
+        ProjectRootStrategy::Node => {
+            matches!(marker, "tsconfig.json" | "jsconfig.json" | "package.json")
+        }
+        ProjectRootStrategy::Python => {
+            matches!(
+                marker,
+                "pyproject.toml" | "setup.py" | "setup.cfg" | "requirements.txt"
+            )
+        }
+    };
+    markers
+        .iter()
+        .filter(|marker| supported(marker))
+        .any(|marker| regular_project_marker(directory, marker).is_some())
+}
+
+fn project_root_is_valid(
+    directory: &Path,
+    markers: &[String],
+    strategy: ProjectRootStrategy,
+) -> bool {
+    match strategy {
+        ProjectRootStrategy::Marker => markers
+            .iter()
+            .any(|marker| regular_project_marker(directory, marker).is_some()),
+        ProjectRootStrategy::Cargo => {
+            markers.iter().any(|marker| marker == "Cargo.toml")
+                && bounded_project_marker(directory, "Cargo.toml").is_some_and(|source| {
+                    toml::from_str::<toml::Value>(&source).is_ok_and(|value| {
+                        value.get("package").is_some() || value.get("workspace").is_some()
+                    })
+                })
+        }
+        ProjectRootStrategy::Go => {
+            (markers.iter().any(|marker| marker == "go.mod")
+                && bounded_project_marker(directory, "go.mod").is_some_and(|source| {
+                    source.lines().any(|line| {
+                        let line = line.trim();
+                        line.strip_prefix("module ")
+                            .is_some_and(|module| !module.trim().is_empty())
+                    })
+                }))
+                || (markers.iter().any(|marker| marker == "go.work")
+                    && bounded_project_marker(directory, "go.work").is_some_and(|source| {
+                        source
+                            .lines()
+                            .any(|line| line.trim_start().starts_with("go "))
+                    }))
+        }
+        ProjectRootStrategy::Node => markers
+            .iter()
+            .filter(|marker| {
+                matches!(
+                    marker.as_str(),
+                    "tsconfig.json" | "jsconfig.json" | "package.json"
+                )
+            })
+            .filter_map(|marker| bounded_project_marker(directory, marker))
+            .any(|source| {
+                serde_json::from_str::<serde_json::Value>(&source)
+                    .is_ok_and(|value| value.is_object())
+            }),
+        ProjectRootStrategy::Python => {
+            (markers.iter().any(|marker| marker == "pyproject.toml")
+                && bounded_project_marker(directory, "pyproject.toml")
+                    .is_some_and(|source| toml::from_str::<toml::Value>(&source).is_ok()))
+                || markers
+                    .iter()
+                    .filter(|marker| {
+                        matches!(
+                            marker.as_str(),
+                            "setup.py" | "setup.cfg" | "requirements.txt"
+                        )
+                    })
+                    .any(|marker| regular_project_marker(directory, marker).is_some())
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DirectoryEntryKind {
     Directory,
@@ -2126,6 +2379,8 @@ pub enum VfsError {
     CrossFilesystem,
     #[error("directory entry limit is outside safe bounds")]
     DirectoryLimit,
+    #[error("project-root markers must be bounded single path segments")]
+    ProjectRootMarker,
     #[error("failed to walk directory `{}`: {reason}", path.display())]
     DirectoryWalk { path: PathBuf, reason: String },
     #[error("filesystem worker queue is full")]
@@ -2400,15 +2655,105 @@ mod tests {
 
     use super::{
         DirectoryEntryKind, DirectoryService, ExplorerWatchEntryKind, ExplorerWatchError,
-        ExplorerWatchPolicy, ExplorerWatchService, RECOVERY_DIRECTORY_ENTRY_CEILING,
-        RECOVERY_JOURNAL_BYTE_CEILING, RECOVERY_PAYLOAD_BYTE_CEILING, RecoveryRecord, VfsError,
-        VfsResult, VfsWorker, WorkspaceSearchEvent, WorkspaceSearchMatch, WorkspaceSearchPolicy,
-        WorkspaceSearchService, WorkspaceSearchSummary, WriteExpectation, atomic_write,
-        bounded_recovery_entries, checked_atomic_write, cleanup_recovery,
-        diff_explorer_fingerprints, discover_recovery, explorer_directory_fingerprint,
-        list_scoped_directory, natural_name_key, read_bounded_bytes, read_bounded_utf8,
-        recovery_journal_size_allowed, recovery_payload_size_allowed, write_recovery,
+        ExplorerWatchPolicy, ExplorerWatchService, ProjectRootService, ProjectRootStrategy,
+        RECOVERY_DIRECTORY_ENTRY_CEILING, RECOVERY_JOURNAL_BYTE_CEILING,
+        RECOVERY_PAYLOAD_BYTE_CEILING, RecoveryRecord, VfsError, VfsResult, VfsWorker,
+        WorkspaceSearchEvent, WorkspaceSearchMatch, WorkspaceSearchPolicy, WorkspaceSearchService,
+        WorkspaceSearchSummary, WriteExpectation, atomic_write, bounded_recovery_entries,
+        checked_atomic_write, cleanup_recovery, diff_explorer_fingerprints, discover_recovery,
+        explorer_directory_fingerprint, list_scoped_directory, natural_name_key,
+        read_bounded_bytes, read_bounded_utf8, recovery_journal_size_allowed,
+        recovery_payload_size_allowed, write_recovery,
     };
+
+    #[test]
+    fn project_root_resolution_requires_valid_tool_evidence_and_prefers_the_nested_project() {
+        let workspace = tempdir().unwrap();
+        let nested = workspace.path().join("nested");
+        let source = nested.join("src");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(
+            workspace.path().join("Cargo.toml"),
+            "[workspace]\nmembers = [\"nested\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            nested.join("Cargo.toml"),
+            "[package]\nname = \"nested\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let document = source.join("main.rs");
+        fs::write(&document, "fn main() {}\n").unwrap();
+        let workspace = fs::canonicalize(workspace.path()).unwrap();
+        let document = fs::canonicalize(document).unwrap();
+        let mut service = ProjectRootService::default();
+        let generation = service
+            .resolve(
+                document.clone(),
+                workspace.clone(),
+                7,
+                vec!["Cargo.toml".into()],
+                ProjectRootStrategy::Cargo,
+            )
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let resolution = loop {
+            if let Some(result) = service.try_result() {
+                break result.unwrap();
+            }
+            assert!(Instant::now() < deadline, "project-root worker timed out");
+            std::thread::yield_now();
+        };
+        assert_eq!(resolution.generation, generation);
+        assert_eq!(resolution.root_revision, 7);
+        assert_eq!(resolution.document, document);
+        assert_eq!(resolution.project_root, Some(workspace.join("nested")));
+
+        let broken_source = workspace.join("broken/src");
+        fs::create_dir_all(&broken_source).unwrap();
+        fs::write(workspace.join("broken/Cargo.toml"), "[package\n").unwrap();
+        let broken = broken_source.join("lib.rs");
+        fs::write(&broken, "pub fn broken() {}\n").unwrap();
+        service
+            .resolve(
+                fs::canonicalize(broken).unwrap(),
+                workspace.clone(),
+                8,
+                vec!["Cargo.toml".into()],
+                ProjectRootStrategy::Cargo,
+            )
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let resolution = loop {
+            if let Some(result) = service.try_result() {
+                break result.unwrap();
+            }
+            assert!(Instant::now() < deadline, "project-root worker timed out");
+            std::thread::yield_now();
+        };
+        assert_eq!(resolution.project_root, None);
+
+        fs::write(workspace.join("orphan.rs"), "fn orphan() {}\n").unwrap();
+        let orphan = fs::canonicalize(workspace.join("orphan.rs")).unwrap();
+        service
+            .resolve(
+                orphan,
+                workspace,
+                9,
+                vec!["Cargo.toml".into()],
+                ProjectRootStrategy::Go,
+            )
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let resolution = loop {
+            if let Some(result) = service.try_result() {
+                break result.unwrap();
+            }
+            assert!(Instant::now() < deadline, "project-root worker timed out");
+            std::thread::yield_now();
+        };
+        assert_eq!(resolution.project_root, None);
+    }
 
     #[test]
     fn explorer_watch_fingerprints_are_deterministic_metadata_only_and_bounded() {

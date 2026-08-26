@@ -91,7 +91,8 @@ impl SecretHandle {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AiProviderKind {
-    /// Deterministic provider used by tests and local host dogfood.
+    /// Deterministic transport is test-only qualification machinery.
+    #[cfg(test)]
     FakeLocal,
     /// Reserved contract. No remote transport is implemented in this release.
     RemoteUnsupported,
@@ -122,6 +123,7 @@ impl fmt::Debug for AiProviderConfig {
 }
 
 impl AiProviderConfig {
+    #[cfg(test)]
     pub fn fake_local(
         id: AiProviderId,
         models: impl IntoIterator<Item = AiModelId>,
@@ -185,6 +187,7 @@ impl AiProviderConfig {
 #[derive(Clone, Debug)]
 pub struct AiProviderRegistry {
     providers: BTreeMap<AiProviderId, AiProviderConfig>,
+    #[cfg(test)]
     network_allowed: bool,
     maximum_providers: usize,
 }
@@ -192,8 +195,10 @@ pub struct AiProviderRegistry {
 impl AiProviderRegistry {
     #[must_use]
     pub fn new(network_allowed: bool, maximum_providers: usize) -> Self {
+        let _ = network_allowed;
         Self {
             providers: BTreeMap::new(),
+            #[cfg(test)]
             network_allowed,
             maximum_providers,
         }
@@ -210,6 +215,7 @@ impl AiProviderRegistry {
         Ok(())
     }
 
+    #[cfg(test)]
     fn authorize(
         &self,
         provider: &AiProviderId,
@@ -392,18 +398,21 @@ impl AiProviderEvent {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FakeChunk {
     pub delay_millis: u64,
     pub text: String,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FakeTerminal {
     Complete,
     Failed,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FakeProviderScript {
     pub chunks: Vec<FakeChunk>,
@@ -456,8 +465,10 @@ impl Default for AiLimits {
 /// then fail closed. `apply_event` clone-validates before committing any state.
 #[derive(Clone, Debug)]
 pub struct AiProviderService {
+    #[cfg(test)]
     registry: AiProviderRegistry,
     limits: AiLimits,
+    #[cfg(test)]
     next_request: u64,
     next_revision: u64,
     active: Option<ActiveStream>,
@@ -468,9 +479,12 @@ pub struct AiProviderService {
 impl AiProviderService {
     #[must_use]
     pub fn new(registry: AiProviderRegistry, limits: AiLimits) -> Self {
+        let _ = registry;
         Self {
+            #[cfg(test)]
             registry,
             limits,
+            #[cfg(test)]
             next_request: 1,
             next_revision: 1,
             active: None,
@@ -479,6 +493,7 @@ impl AiProviderService {
         }
     }
 
+    #[cfg(test)]
     pub fn start_fake(
         &mut self,
         request: AiRequest,
@@ -534,6 +549,7 @@ impl AiProviderService {
         Ok(id)
     }
 
+    #[cfg(test)]
     fn validate_request(
         &self,
         request: &AiRequest,

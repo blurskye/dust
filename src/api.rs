@@ -168,12 +168,20 @@ pub fn manifest() -> Result<ApiManifest, String> {
                 "fold-wrap-visual-row-margin-page-mouse-v2".into(),
             ),
             (
+                "indent_guides".into(),
+                "configurable-display-column-scope-toggle-v7".into(),
+            ),
+            (
                 "documentation".into(),
                 "typed-sections-ranges-exact-completion-v1".into(),
             ),
             (
+                "lsp".into(),
+                "trusted-installed-project-root-autostart-selection-progress-v3".into(),
+            ),
+            (
                 "ai_providers".into(),
-                "typed-bounded-fake-application-v1".into(),
+                "typed-bounded-host-no-bundled-provider-v2".into(),
             ),
             (
                 "content_line".into(),
