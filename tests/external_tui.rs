@@ -1,9 +1,9 @@
 use dust::{
-    processes::{
+    process::{
         ExecutionPreflightEvent, ExecutionPreflightRequest, ExecutionPreflightService, PtyEvent,
         PtyPolicy, PtyRequest, PtyService,
     },
-    terminal_ui::{PtyInputKey, PtyScreen, encode_key, encode_paste},
+    ui::{PtyInputKey, PtyScreen, encode_key, encode_paste},
 };
 use std::{
     collections::BTreeMap,
@@ -12,10 +12,26 @@ use std::{
     time::{Duration, Instant},
 };
 
-struct PtyCloseGuard<'a>(&'a PtyService, dust::processes::PtyId);
+struct PtyCloseGuard<'a>(&'a PtyService, dust::process::PtyId);
 impl Drop for PtyCloseGuard<'_> {
     fn drop(&mut self) {
         let _ = self.0.close(self.1);
+    }
+}
+
+fn wait_for_preflight(
+    preflight: &ExecutionPreflightService,
+    deadline: Instant,
+) -> dust::process::ExecutionPreflightResult {
+    loop {
+        if let Some(event) = preflight.poll().unwrap().into_iter().next() {
+            match event {
+                ExecutionPreflightEvent::Ready(result) => return result,
+                ExecutionPreflightEvent::Failed { message, .. } => panic!("preflight: {message}"),
+            }
+        }
+        assert!(Instant::now() < deadline, "preflight timeout");
+        thread::sleep(Duration::from_millis(5));
     }
 }
 
@@ -34,16 +50,7 @@ fn lazygit_version_uses_canonical_preflight_and_portable_pty_without_shell() {
             root_revision: 9,
         })
         .unwrap();
-    let ready = 'wait: loop {
-        for event in preflight.poll().unwrap() {
-            match event {
-                ExecutionPreflightEvent::Ready(v) => break 'wait v,
-                ExecutionPreflightEvent::Failed { message, .. } => panic!("{message}"),
-            }
-        }
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(5));
-    };
+    let ready = wait_for_preflight(&preflight, deadline);
     let mut ptys = PtyService::start(8);
     let id = ptys
         .open(PtyRequest {
@@ -118,16 +125,7 @@ fn lazygit_launch_resize_and_quit_uses_preflight_pty() {
             root_revision: 11,
         })
         .unwrap();
-    let ready = 'wait: loop {
-        for event in preflight.poll().unwrap() {
-            match event {
-                ExecutionPreflightEvent::Ready(v) => break 'wait v,
-                ExecutionPreflightEvent::Failed { message, .. } => panic!("{message}"),
-            }
-        }
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(5));
-    };
+    let ready = wait_for_preflight(&preflight, deadline);
     let mut env = BTreeMap::new();
     env.insert("TERM".into(), "xterm-256color".into());
     let mut ptys = PtyService::start(32);
@@ -208,18 +206,7 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
         })
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
-    let ready = 'wait: loop {
-        for event in preflight.poll().unwrap() {
-            match event {
-                ExecutionPreflightEvent::Ready(v) => break 'wait v,
-                ExecutionPreflightEvent::Failed { message, .. } => panic!("preflight: {message}"),
-            }
-        }
-        if Instant::now() > deadline {
-            panic!("preflight timeout")
-        }
-        thread::sleep(Duration::from_millis(5));
-    };
+    let ready = wait_for_preflight(&preflight, deadline);
     let mut environment = BTreeMap::new();
     environment.insert("DUST_TEST_EXTERNAL_TUI_FIXTURE".into(), "1".into());
     environment.insert("TERM".into(), "xterm-256color".into());

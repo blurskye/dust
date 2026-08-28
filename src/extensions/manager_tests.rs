@@ -1,0 +1,798 @@
+use super::*;
+fn manager(sender: SyncSender<Request>, receiver: Receiver<WorkerEvent>) -> PluginManager {
+    PluginManager {
+        sender,
+        receiver,
+        statuses: BTreeMap::new(),
+        loads: BTreeMap::new(),
+        next_load: 1,
+        pending_disables: VecDeque::new(),
+        maximum_loads: 4,
+        stopped: false,
+    }
+}
+fn manifest() -> PluginManifest {
+    PluginManifest {
+        id: "demo".into(),
+        version: "1.0.0".into(),
+        component_sha256: "0".repeat(64),
+        capabilities: BTreeSet::new(),
+        commands: [(
+            "run".into(),
+            PluginCommandDeclaration {
+                title: "Run".into(),
+                description: "Run demo".into(),
+                arguments: BTreeMap::new(),
+                context: PluginCommandContext::Buffer,
+                activation: PluginActivationBehavior::ActiveOnly,
+            },
+        )]
+        .into_iter()
+        .collect(),
+        contributions: PluginContributions {
+            schema_version: 1,
+            input_contexts: vec![PluginInputContextContribution {
+                id: "plugin.demo.chat".into(),
+                title: "Chat".into(),
+                parent_surface: Some("panel".into()),
+            }],
+            keymaps: vec![PluginKeymapContribution {
+                id: "plugin.demo.keymap.open-chat".into(),
+                context: "plugin.demo.chat".into(),
+                mode: String::new(),
+                keys: "<leader> a".into(),
+                command: "plugin.demo.run".into(),
+                arguments: BTreeMap::new(),
+            }],
+            key_groups: vec![PluginKeyGroupContribution {
+                id: "plugin.demo.group.chat".into(),
+                context: "plugin.demo.chat".into(),
+                mode: String::new(),
+                prefix: "<leader>".into(),
+                label: "Chat".into(),
+                icon: None,
+                order: 1,
+            }],
+            content_types: vec![PluginContentTypeContribution {
+                id: "plugin.demo.chat-panel".into(),
+                title: "Demo Chat".into(),
+                presenter: PluginPresenterKind::RetainedDeclarative,
+                default_placement: PluginWindowPlacementKind::Floating,
+                allowed_placements: [
+                    PluginWindowPlacementKind::Floating,
+                    PluginWindowPlacementKind::Docked,
+                    PluginWindowPlacementKind::Hidden,
+                ]
+                .into_iter()
+                .collect(),
+                focusable: true,
+                maximum_instances: 1,
+                context: "plugin.demo.chat".into(),
+                command: "plugin.demo.run".into(),
+                private_cells: None,
+                provenance: None,
+            }],
+            subscriptions: Vec::new(),
+            providers: Vec::new(),
+            virtual_documents: Vec::new(),
+            storage: None,
+        },
+    }
+}
+
+#[test]
+fn component_host_queues_declared_ui_requests_without_graph_authority() {
+    use component_api::dust::plugin::host::{
+        Host, OpenWindowRequest, UiNode, UiNodeKind, UiRequest, UiStyle, UiTree, WindowPlacement,
+    };
+    let mut host = ComponentHostState {
+        limits: wasmtime::StoreLimitsBuilder::new().build(),
+        capabilities: BTreeSet::new(),
+        declared_content_types: ["plugin.demo.chat-panel".into()].into_iter().collect(),
+        snapshot: None,
+        proposals: Vec::new(),
+        messages: Vec::new(),
+        config: BTreeMap::new(),
+        ui_requests: Vec::new(),
+        ui_events: Vec::new(),
+        next_ui_token: 1,
+        host_events: Vec::new(),
+        delivered_host_event_ids: BTreeSet::new(),
+        host_event_acknowledgements: Vec::new(),
+        storage_policy: None,
+        storage_requests: Vec::new(),
+        storage_results: Vec::new(),
+        next_storage_token: 1,
+        provider_requests: Vec::new(),
+        delivered_provider_requests: BTreeSet::new(),
+        provider_chunks: Vec::new(),
+        virtual_document_requests: Vec::new(),
+        delivered_virtual_document_requests: BTreeSet::new(),
+        virtual_document_proposals: Vec::new(),
+    };
+    let request = |content_type: &str| {
+        UiRequest::OpenWindow(OpenWindowRequest {
+            expected_graph_revision: 4,
+            content_type: content_type.into(),
+            title: "Demo".into(),
+            placement: WindowPlacement::Floating,
+            x: 2,
+            y: 3,
+            width: 30,
+            height: 8,
+            size: 1,
+            tree: Some(UiTree {
+                revision: 1,
+                root: 1,
+                nodes: vec![UiNode {
+                    id: 1,
+                    kind: UiNodeKind::Text,
+                    text: "hello".into(),
+                    style: UiStyle::Accent,
+                    action: None,
+                    children: Vec::new(),
+                }],
+            }),
+        })
+    };
+    assert!(matches!(
+        host.queue_ui_request(request("plugin.demo.chat-panel")),
+        Ok(1)
+    ));
+    assert_eq!(host.ui_requests.len(), 1);
+    assert!(
+        host.queue_ui_request(request("plugin.other.stolen"))
+            .is_err()
+    );
+    assert_eq!(host.ui_requests.len(), 1);
+}
+
+#[test]
+fn component_storage_queue_is_capability_key_and_count_bounded() {
+    use component_api::dust::plugin::host::{Host, StorageRequest};
+    let policy = PluginStorageContribution {
+        maximum_items: 32,
+        maximum_value_bytes: 1_024,
+        maximum_total_bytes: 16_384,
+    };
+    let mut host = ComponentHostState {
+        limits: wasmtime::StoreLimitsBuilder::new().build(),
+        capabilities: [
+            PluginCapability::PluginStorage,
+            PluginCapability::VirtualDocuments,
+        ]
+        .into_iter()
+        .collect(),
+        declared_content_types: BTreeSet::new(),
+        snapshot: None,
+        proposals: Vec::new(),
+        messages: Vec::new(),
+        config: BTreeMap::new(),
+        ui_requests: Vec::new(),
+        ui_events: Vec::new(),
+        next_ui_token: 1,
+        host_events: Vec::new(),
+        delivered_host_event_ids: BTreeSet::new(),
+        host_event_acknowledgements: Vec::new(),
+        storage_policy: Some(policy),
+        storage_requests: Vec::new(),
+        storage_results: Vec::new(),
+        next_storage_token: 1,
+        provider_requests: Vec::new(),
+        delivered_provider_requests: BTreeSet::new(),
+        provider_chunks: Vec::new(),
+        virtual_document_requests: Vec::new(),
+        delivered_virtual_document_requests: BTreeSet::new(),
+        virtual_document_proposals: Vec::new(),
+    };
+    assert_eq!(
+        host.queue_storage_request(StorageRequest::Get("bad/key".into()))
+            .unwrap_err()
+            .code,
+        component_api::dust::plugin::host::StorageErrorCode::InvalidKey
+    );
+    for _ in 0..STORAGE_REQUEST_CEILING {
+        host.queue_storage_request(StorageRequest::Get("valid".into()))
+            .expect("bounded storage request");
+    }
+    assert_eq!(
+        host.queue_storage_request(StorageRequest::Get("valid".into()))
+            .unwrap_err()
+            .code,
+        component_api::dust::plugin::host::StorageErrorCode::QueueFull
+    );
+    assert_eq!(host.storage_requests.len(), STORAGE_REQUEST_CEILING);
+    use component_api::dust::plugin::host::{VirtualDocumentProposal, VirtualDocumentProposalKind};
+    assert_eq!(
+        host.queue_virtual_document_proposal(VirtualDocumentProposal {
+            request: 9,
+            document: 4,
+            cancellation_generation: 1,
+            kind: VirtualDocumentProposalKind::CloseAcknowledged
+        })
+        .unwrap_err()
+        .code,
+        component_api::dust::plugin::host::VirtualDocumentErrorCode::UnknownRequest
+    );
+    assert!(host.virtual_document_proposals.is_empty());
+}
+
+#[test]
+fn static_manifest_contribution_index_is_namespaced_deterministic_and_pure() {
+    let manifest = manifest();
+    let index =
+        index_manifest_contributions(&manifest, 9, "manifest.toml".into()).expect("static index");
+    assert_eq!(index.owner, "demo");
+    assert_eq!(index.generation, 9);
+    assert_eq!(index.contexts[0].id, "plugin.demo.chat");
+    assert_eq!(index.keymaps[0].id, "plugin.demo.keymap.open-chat");
+    assert_eq!(index.content_types[0].id, "plugin.demo.chat-panel");
+    let mut stolen = manifest;
+    stolen.contributions.keymaps[0].id = "plugin.other.keymap.stolen".into();
+    assert!(matches!(
+        index_manifest_contributions(&stolen, 10, "manifest.toml".into()),
+        Err(PluginError::InvalidManifest)
+    ));
+}
+
+fn renamed_manifest(owner: &str) -> PluginManifest {
+    let mut manifest = manifest();
+    manifest.id = owner.into();
+    for context in &mut manifest.contributions.input_contexts {
+        context.id = context
+            .id
+            .replace("plugin.demo.", &format!("plugin.{owner}."));
+    }
+    for keymap in &mut manifest.contributions.keymaps {
+        keymap.id = keymap
+            .id
+            .replace("plugin.demo.", &format!("plugin.{owner}."));
+        keymap.context = keymap
+            .context
+            .replace("plugin.demo.", &format!("plugin.{owner}."));
+        keymap.command = keymap
+            .command
+            .replace("plugin.demo.", &format!("plugin.{owner}."));
+    }
+    for group in &mut manifest.contributions.key_groups {
+        group.id = group
+            .id
+            .replace("plugin.demo.", &format!("plugin.{owner}."));
+        group.context = group
+            .context
+            .replace("plugin.demo.", &format!("plugin.{owner}."));
+    }
+    for content in &mut manifest.contributions.content_types {
+        content.id = content
+            .id
+            .replace("plugin.demo.", &format!("plugin.{owner}."));
+        content.context = content
+            .context
+            .replace("plugin.demo.", &format!("plugin.{owner}."));
+        content.command = content
+            .command
+            .replace("plugin.demo.", &format!("plugin.{owner}."));
+    }
+    manifest
+}
+
+#[test]
+fn contribution_catalog_orders_plugins_and_removes_exact_generations() {
+    let demo = index_manifest_contributions(&manifest(), 3, "demo.toml".into()).expect("demo");
+    let mut other_manifest = renamed_manifest("other");
+    other_manifest.contributions.keymaps[0].keys = "<leader> b".into();
+    other_manifest.contributions.key_groups[0].prefix = "<leader>".into();
+    let other =
+        index_manifest_contributions(&other_manifest, 4, "other.toml".into()).expect("other");
+    let mut catalog = PluginContributionCatalog::default();
+    catalog.install(other).expect("other first");
+    catalog.install(demo).expect("demo second");
+    assert_eq!(
+        catalog
+            .ordered()
+            .map(|index| index.owner.as_str())
+            .collect::<Vec<_>>(),
+        vec!["demo", "other"]
+    );
+    assert!(catalog.context_snapshot().is_ok());
+    assert!(!catalog.remove_generation("demo", 2));
+    assert!(catalog.get("demo").is_some());
+    assert!(catalog.remove_generation("demo", 3));
+    assert!(catalog.get("demo").is_none());
+
+    let mut demo_manifest = manifest();
+    demo_manifest.contributions.keymaps[0].context = "editor".into();
+    demo_manifest.contributions.keymaps[0].mode = "normal".into();
+    let demo =
+        index_manifest_contributions(&demo_manifest, 5, "demo.toml".into()).expect("editor demo");
+    let mut other_manifest = renamed_manifest("other");
+    other_manifest.contributions.keymaps[0].context = "editor".into();
+    other_manifest.contributions.keymaps[0].mode = "normal".into();
+    let other = index_manifest_contributions(&other_manifest, 6, "other.toml".into())
+        .expect("editor other");
+    let mut conflicts = PluginContributionCatalog::default();
+    conflicts.install(demo).expect("first default");
+    assert!(matches!(
+        conflicts.install(other),
+        Err(PluginError::ContributionConflict)
+    ));
+}
+
+#[test]
+fn index_worker_does_not_touch_component_and_requires_host_acceptance() {
+    let root = tempfile::tempdir().expect("store");
+    let manifest_source = toml::to_string(&manifest()).expect("serialize manifest");
+    fs::write(root.path().join("manifest.toml"), manifest_source).expect("manifest");
+    let mut manager = PluginManager::start(4);
+    let load = manager
+        .index_from_store(
+            "demo".into(),
+            root.path().to_path_buf(),
+            PathBuf::from("manifest.toml"),
+            PathBuf::from("missing-component.wasm"),
+            PluginLimits::default(),
+        )
+        .expect("queue index");
+    assert!(matches!(
+        manager.activate_indexed("demo", load, "0".repeat(64)),
+        Err(PluginError::IndexNotAccepted)
+    ));
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let index = loop {
+        let events = manager.poll().expect("poll");
+        if let Some(index) = events.into_iter().find_map(|event| match event {
+            PluginEvent::Indexed { index, .. } => Some(index),
+            _ => None,
+        }) {
+            break index;
+        }
+        assert!(std::time::Instant::now() < deadline, "index timed out");
+        std::thread::yield_now();
+    };
+    assert_eq!(index.owner, "demo");
+    let provenance = index.content_types[0]
+        .provenance
+        .as_ref()
+        .expect("content provenance");
+    assert_eq!(provenance.owner, "demo");
+    assert_eq!(provenance.generation, load.0);
+    assert!(provenance.span.is_some());
+    manager
+        .activate_indexed("demo", load, index.checksum)
+        .expect("accept index");
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let events = manager.poll().expect("poll activation");
+        if events.into_iter().any(|event| {
+                matches!(event, PluginEvent::Failed { load: candidate, .. } if candidate == load)
+            }) {
+                break;
+            }
+        assert!(std::time::Instant::now() < deadline, "activation timed out");
+        std::thread::yield_now();
+    }
+}
+
+#[test]
+fn hostile_static_contributions_are_rejected_before_component_access() {
+    let absent = format!(
+        "id='demo'\nversion='1'\ncomponent_sha256='{}'\ncapabilities=[]\n[commands]\n'plugin.demo.run'='Run'\n",
+        "0".repeat(64)
+    );
+    assert!(toml::from_str::<PluginManifest>(&absent).is_err());
+
+    let mut cases = Vec::new();
+    let mut candidate = manifest();
+    candidate.contributions.schema_version = 2;
+    cases.push(candidate);
+    let mut candidate = manifest();
+    candidate.id = "BAD".into();
+    cases.push(candidate);
+    let mut candidate = manifest();
+    candidate.commands = [("Stolen".into(), candidate.commands["run"].clone())]
+        .into_iter()
+        .collect();
+    cases.push(candidate);
+    let mut candidate = manifest();
+    candidate.contributions.keymaps[0].command = "plugin.demo.missing".into();
+    cases.push(candidate);
+    let mut candidate = manifest();
+    candidate.contributions.keymaps[0].context = "plugin.demo.missing".into();
+    cases.push(candidate);
+    let mut candidate = manifest();
+    let mut duplicate = candidate.contributions.keymaps[0].clone();
+    duplicate.id = "plugin.demo.keymap.duplicate".into();
+    candidate.contributions.keymaps.push(duplicate);
+    cases.push(candidate);
+    let mut candidate = manifest();
+    candidate.contributions.keymaps[0]
+        .arguments
+        .insert("nested".into(), toml::Value::Array(vec![]));
+    cases.push(candidate);
+    let mut candidate = manifest();
+    candidate.contributions.key_groups[0].icon = Some("\u{0301}".into());
+    cases.push(candidate);
+    let mut candidate = manifest();
+    candidate.contributions.content_types[0].id = "plugin.other.stolen".into();
+    cases.push(candidate);
+    let mut candidate = manifest();
+    candidate.contributions.content_types[0].command = "plugin.demo.missing".into();
+    cases.push(candidate);
+    let mut candidate = manifest();
+    candidate.contributions.content_types[0].maximum_instances = 17;
+    cases.push(candidate);
+    let mut candidate = manifest();
+    candidate.contributions.content_types[0]
+        .allowed_placements
+        .remove(&PluginWindowPlacementKind::Floating);
+    cases.push(candidate);
+    let mut candidate = manifest();
+    candidate.contributions.input_contexts = (0..65)
+        .map(|index| PluginInputContextContribution {
+            id: format!("plugin.demo.c{index}"),
+            title: format!("Context {index}"),
+            parent_surface: Some("panel".into()),
+        })
+        .collect();
+    cases.push(candidate);
+    let mut private = manifest();
+    private.capabilities.insert(PluginCapability::PrivateCells);
+    private.contributions.content_types[0].presenter = PluginPresenterKind::PrivateCells;
+    private.contributions.content_types[0].private_cells = Some(PluginPrivateCellPolicy {
+        maximum_cells: 256,
+        maximum_patch_cells: 128,
+        maximum_dirty_rectangles: 8,
+        maximum_styles: 8,
+        maximum_hit_regions: 8,
+        maximum_bytes: 8_192,
+        cursor: true,
+    });
+    assert!(index_manifest_contributions(&private, 1, "manifest.toml".into()).is_ok());
+    let mut no_capability = private.clone();
+    no_capability
+        .capabilities
+        .remove(&PluginCapability::PrivateCells);
+    cases.push(no_capability);
+    let mut excessive = private.clone();
+    excessive.contributions.content_types[0]
+        .private_cells
+        .as_mut()
+        .expect("policy")
+        .maximum_cells = 4_097;
+    cases.push(excessive);
+    let mut mismatched = manifest();
+    mismatched.contributions.content_types[0].private_cells =
+        private.contributions.content_types[0].private_cells.clone();
+    cases.push(mismatched);
+    for candidate in cases {
+        assert!(matches!(
+            index_manifest_contributions(&candidate, 1, "manifest.toml".into()),
+            Err(PluginError::InvalidManifest)
+        ));
+    }
+    let mut retained = manifest();
+    retained.contributions.keymaps[0].command = "surface.retained.activate".into();
+    assert!(index_manifest_contributions(&retained, 1, "manifest.toml".into()).is_ok());
+    retained.contributions.keymaps[0].command = "health.open".into();
+    assert!(matches!(
+        index_manifest_contributions(&retained, 1, "manifest.toml".into()),
+        Err(PluginError::InvalidManifest)
+    ));
+    assert!(matches!(
+        index_manifest_contributions(&manifest(), 1, "bad\nsource".into()),
+        Err(PluginError::InvalidManifest)
+    ));
+}
+
+#[test]
+fn static_events_providers_and_storage_are_capability_gated_and_bounded() {
+    let mut candidate = manifest();
+    candidate.capabilities.extend([
+        PluginCapability::EventSubscriptions,
+        PluginCapability::PickerProviders,
+        PluginCapability::PluginStorage,
+        PluginCapability::VirtualDocuments,
+    ]);
+    candidate.contributions.subscriptions = vec![PluginSubscriptionContribution {
+        id: "plugin.demo.subscription.workspace".into(),
+        kind: PluginSubscriptionKind::WorkspaceMetadataChanged,
+        maximum_queued: 8,
+        maximum_rate_per_second: 30,
+        coalesce: true,
+        provenance: None,
+    }];
+    candidate.contributions.providers = vec![PluginProviderContribution {
+        id: "plugin.demo.provider.files".into(),
+        kind: PluginProviderKind::PickerSource,
+        command: "plugin.demo.run".into(),
+        maximum_concurrent_requests: 2,
+        maximum_items: 128,
+        maximum_bytes: 16_384,
+        deadline_milliseconds: 500,
+        provenance: None,
+    }];
+    candidate.contributions.virtual_documents = vec![PluginVirtualDocumentContribution {
+        id: "plugin.demo.virtual.help".into(),
+        title: "Help".into(),
+        language: "markdown".into(),
+        mode: PluginVirtualDocumentMode::ReadOnly,
+        maximum_concurrent_documents: 2,
+        maximum_document_bytes: 16_384,
+        maximum_document_lines: 512,
+        maximum_patch_bytes: 4_096,
+        maximum_patches_per_request: 16,
+        deadline_milliseconds: 500,
+        command: "plugin.demo.run".into(),
+        context: "dashboard".into(),
+        provenance: None,
+    }];
+    candidate.contributions.storage = Some(PluginStorageContribution {
+        maximum_items: 32,
+        maximum_value_bytes: 1_024,
+        maximum_total_bytes: 16_384,
+    });
+    let indexed = index_manifest_contributions(&candidate, 7, "manifest.toml".into())
+        .expect("bounded static extension declarations");
+    assert_eq!(
+        indexed.subscriptions[0]
+            .provenance
+            .as_ref()
+            .unwrap()
+            .generation,
+        7
+    );
+    assert_eq!(indexed.providers[0].kind, PluginProviderKind::PickerSource);
+    assert!(indexed.storage.is_some());
+    assert_eq!(indexed.virtual_documents[0].language, "markdown");
+
+    let mut unsupported = candidate.clone();
+    unsupported.contributions.providers[0].kind = PluginProviderKind::VirtualDocument;
+    assert!(matches!(
+        index_manifest_contributions(&unsupported, 7, "manifest.toml".into()),
+        Err(PluginError::InvalidManifest)
+    ));
+    let mut no_capability = candidate.clone();
+    no_capability
+        .capabilities
+        .remove(&PluginCapability::EventSubscriptions);
+    assert!(matches!(
+        index_manifest_contributions(&no_capability, 7, "manifest.toml".into()),
+        Err(PluginError::InvalidManifest)
+    ));
+    let mut excessive = candidate;
+    excessive
+        .contributions
+        .storage
+        .as_mut()
+        .unwrap()
+        .maximum_total_bytes = MAXIMUM_STORAGE_TOTAL_BYTES + 1;
+    assert!(matches!(
+        index_manifest_contributions(&excessive, 7, "manifest.toml".into()),
+        Err(PluginError::InvalidManifest)
+    ));
+}
+
+#[test]
+fn host_events_coalesce_acknowledge_and_remove_exact_generation() {
+    let mut candidate = manifest();
+    candidate
+        .capabilities
+        .insert(PluginCapability::EventSubscriptions);
+    candidate.contributions.subscriptions = vec![
+        PluginSubscriptionContribution {
+            id: "plugin.demo.subscription.workspace".into(),
+            kind: PluginSubscriptionKind::WorkspaceMetadataChanged,
+            maximum_queued: 1,
+            maximum_rate_per_second: 30,
+            coalesce: true,
+            provenance: None,
+        },
+        PluginSubscriptionContribution {
+            id: "plugin.demo.subscription.surface".into(),
+            kind: PluginSubscriptionKind::ActiveSurfaceChanged,
+            maximum_queued: 1,
+            maximum_rate_per_second: 30,
+            coalesce: true,
+            provenance: None,
+        },
+    ];
+    let index =
+        index_manifest_contributions(&candidate, 9, "manifest.toml".into()).expect("event index");
+    let mut queue = PluginHostEventQueue::default();
+    queue.install(&index).expect("install");
+    assert!(
+        queue
+            .observe(
+                "demo",
+                PluginLoadId(9),
+                PluginSubscriptionKind::WorkspaceMetadataChanged,
+                1,
+                "roots=1"
+            )
+            .unwrap()
+    );
+    assert!(
+        !queue
+            .observe(
+                "demo",
+                PluginLoadId(9),
+                PluginSubscriptionKind::WorkspaceMetadataChanged,
+                1,
+                "roots=1"
+            )
+            .unwrap()
+    );
+    assert!(
+        queue
+            .observe(
+                "demo",
+                PluginLoadId(9),
+                PluginSubscriptionKind::WorkspaceMetadataChanged,
+                2,
+                "roots=2"
+            )
+            .unwrap()
+    );
+    let event = queue.deliver("demo", PluginLoadId(9)).pop().unwrap();
+    assert_eq!((event.revision, event.coalesced), (2, 1));
+    queue.acknowledge("demo", PluginLoadId(8), &[event.id]);
+    assert_eq!(queue.pending("demo", PluginLoadId(9)), 1);
+    queue.acknowledge("demo", PluginLoadId(9), &[event.id]);
+    assert_eq!(queue.pending("demo", PluginLoadId(9)), 0);
+    let stable = queue.clone();
+    for _ in 0..256 {
+        assert!(
+            !queue
+                .observe(
+                    "demo",
+                    PluginLoadId(9),
+                    PluginSubscriptionKind::WorkspaceMetadataChanged,
+                    2,
+                    "roots=2"
+                )
+                .unwrap()
+        );
+    }
+    assert_eq!(queue, stable);
+    assert!(!queue.remove_generation("demo", PluginLoadId(8)));
+    assert!(queue.remove_generation("demo", PluginLoadId(9)));
+}
+
+#[test]
+fn failed_enqueue_does_not_publish_loading() {
+    let (tx, rx) = mpsc::sync_channel(1);
+    drop(rx);
+    let (_etx, erx) = mpsc::sync_channel(1);
+    let mut manager = manager(tx, erx);
+    assert!(matches!(
+        manager.load_from_store(
+            "demo".into(),
+            PathBuf::from("store"),
+            PathBuf::from("manifest"),
+            PathBuf::from("component"),
+            PluginLimits::default()
+        ),
+        Err(PluginError::Stopped)
+    ));
+    assert!(!manager.statuses.contains_key("demo"));
+    assert!(manager.load_id("demo").is_none());
+    assert!(manager.stopped);
+}
+#[test]
+fn stale_failure_and_unload_cannot_replace_current_generation() {
+    let (tx, _rx) = mpsc::sync_channel(4);
+    let (etx, erx) = mpsc::sync_channel(4);
+    let mut manager = manager(tx, erx);
+    manager.loads.insert("demo".into(), PluginLoadId(2));
+    manager
+        .statuses
+        .insert("demo".into(), PluginStatus::Loading);
+    etx.send(WorkerEvent::Failed {
+        load: PluginLoadId(1),
+        plugin: "demo".into(),
+        error: PluginError::NotActive,
+    })
+    .unwrap();
+    assert!(manager.poll().unwrap().is_empty());
+    assert_eq!(manager.load_id("demo"), Some(PluginLoadId(2)));
+    manager.unload_generation("demo", PluginLoadId(1)).unwrap();
+    assert_eq!(manager.load_id("demo"), Some(PluginLoadId(2)));
+}
+#[test]
+fn active_load_ceiling_bounds_disable_ownership() {
+    let (tx, _rx) = mpsc::sync_channel(4);
+    let (_etx, erx) = mpsc::sync_channel(1);
+    let mut manager = manager(tx, erx);
+    manager.maximum_loads = 1;
+    manager.loads.insert("one".into(), PluginLoadId(1));
+    assert!(matches!(
+        manager.load_from_store(
+            "two".into(),
+            PathBuf::from("store"),
+            PathBuf::from("manifest"),
+            PathBuf::from("component"),
+            PluginLimits::default()
+        ),
+        Err(PluginError::LoadLimit)
+    ));
+    manager.unload_generation("one", PluginLoadId(1)).unwrap();
+    assert!(manager.pending_disables.len() <= manager.maximum_loads);
+}
+#[test]
+fn queue_full_cancellation_stays_pending_and_suppresses_events() {
+    let (tx, rx) = mpsc::sync_channel(1);
+    tx.try_send(Request::Disable {
+        load: PluginLoadId(9),
+        plugin: "occupied".into(),
+    })
+    .unwrap();
+    let (etx, erx) = mpsc::sync_channel(2);
+    let mut manager = manager(tx, erx);
+    manager.loads.insert("demo".into(), PluginLoadId(1));
+    manager
+        .statuses
+        .insert("demo".into(), PluginStatus::Loading);
+    manager.unload_generation("demo", PluginLoadId(1)).unwrap();
+    assert_eq!(manager.pending_disables.len(), 1);
+    assert!(matches!(
+        manager.load_from_store(
+            "demo".into(),
+            PathBuf::from("store"),
+            PathBuf::from("manifest"),
+            PathBuf::from("component"),
+            PluginLimits::default()
+        ),
+        Err(PluginError::QueueFull)
+    ));
+    etx.send(WorkerEvent::Failed {
+        load: PluginLoadId(1),
+        plugin: "demo".into(),
+        error: PluginError::NotActive,
+    })
+    .unwrap();
+    assert!(manager.poll().unwrap().is_empty());
+    assert_eq!(manager.pending_disables.len(), 1);
+    let _ = rx.recv().unwrap();
+    assert!(manager.poll().unwrap().is_empty());
+    assert!(manager.pending_disables.is_empty());
+    assert!(
+        matches!(rx.recv().unwrap(),Request::Disable{load:PluginLoadId(1),plugin}if plugin=="demo")
+    );
+}
+#[test]
+fn disable_is_ordered_before_same_id_replacement_and_duplicates_are_rejected() {
+    let (tx, rx) = mpsc::sync_channel(4);
+    let (_etx, erx) = mpsc::sync_channel(1);
+    let mut manager = manager(tx, erx);
+    manager.loads.insert("demo".into(), PluginLoadId(1));
+    manager.next_load = 2;
+    assert!(matches!(
+        manager.load_from_store(
+            "demo".into(),
+            PathBuf::from("store"),
+            PathBuf::from("manifest"),
+            PathBuf::from("component"),
+            PluginLimits::default()
+        ),
+        Err(PluginError::AlreadyActive)
+    ));
+    manager.unload_generation("demo", PluginLoadId(1)).unwrap();
+    let replacement = manager
+        .load_from_store(
+            "demo".into(),
+            PathBuf::from("store"),
+            PathBuf::from("manifest"),
+            PathBuf::from("component"),
+            PluginLimits::default(),
+        )
+        .unwrap();
+    assert_ne!(replacement, PluginLoadId(1));
+    assert!(matches!(
+        rx.recv().unwrap(),
+        Request::Disable {
+            load: PluginLoadId(1),
+            ..
+        }
+    ));
+    assert!(matches!(rx.recv().unwrap(),Request::LoadFromStore{load,..}if load==replacement));
+}

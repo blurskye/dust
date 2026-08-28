@@ -1,9 +1,9 @@
 use std::{path::PathBuf, time::Instant};
 
-use dust::configuration::load_bundled_config;
-use dust::document::TextBuffer;
-use dust::editing::EditorState;
-use dust::terminal_ui::{UiState, render};
+use dust::config::load_bundled_config;
+use dust::editor::EditorState;
+use dust::editor::text::TextBuffer;
+use dust::ui::{UiState, render};
 
 fn main() {
     const WIDTH: u16 = 120;

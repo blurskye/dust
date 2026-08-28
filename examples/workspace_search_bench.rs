@@ -1,6 +1,6 @@
 use std::{fs, time::Instant};
 
-use dust::filesystem::{WorkspaceSearchEvent, WorkspaceSearchPolicy, WorkspaceSearchService};
+use dust::files::{WorkspaceSearchEvent, WorkspaceSearchPolicy, WorkspaceSearchService};
 use tempfile::tempdir;
 
 fn main() {

@@ -1,0 +1,178 @@
+use super::*;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DirectoryEntryKind {
+    Directory,
+    File,
+    Symlink,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DirectoryEntry {
+    pub path: PathBuf,
+    pub name: String,
+    pub kind: DirectoryEntryKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DirectoryListing {
+    pub generation: u64,
+    pub root_revision: u64,
+    pub directory: PathBuf,
+    pub entries: Vec<DirectoryEntry>,
+    pub truncated: bool,
+}
+
+#[derive(Default)]
+pub struct DirectoryService {
+    generation: u64,
+    receiver: Option<Receiver<Result<DirectoryListing, VfsError>>>,
+}
+
+impl DirectoryService {
+    pub fn list(
+        &mut self,
+        directory: PathBuf,
+        canonical_roots: Vec<PathBuf>,
+        root_revision: u64,
+        include_hidden: bool,
+        include_ignored: bool,
+        maximum_entries: usize,
+    ) -> Result<u64, VfsError> {
+        if !(1..=100_000).contains(&maximum_entries) {
+            return Err(VfsError::DirectoryLimit);
+        }
+        self.generation = self.generation.saturating_add(1);
+        let generation = self.generation;
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let worker_directory = directory.clone();
+        thread::Builder::new()
+            .name(format!("dust-directory-{generation}"))
+            .spawn(move || {
+                let result = list_scoped_directory(
+                    generation,
+                    root_revision,
+                    &worker_directory,
+                    &canonical_roots,
+                    include_hidden,
+                    include_ignored,
+                    maximum_entries,
+                );
+                let _ = sender.send(result);
+            })
+            .map_err(|source| VfsError::Io {
+                operation: "start directory worker for",
+                path: directory,
+                source,
+            })?;
+        self.receiver = Some(receiver);
+        Ok(generation)
+    }
+
+    pub fn try_result(&self) -> Option<Result<DirectoryListing, VfsError>> {
+        self.receiver
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok())
+    }
+}
+
+pub(super) fn natural_name_key(value: &str) -> String {
+    let lowercase = value.to_lowercase();
+    let mut characters = lowercase.chars().peekable();
+    let mut key = String::with_capacity(lowercase.len());
+    while let Some(character) = characters.next() {
+        if character.is_ascii_digit() {
+            let mut digits = String::from(character);
+            while characters
+                .peek()
+                .is_some_and(|digit| digit.is_ascii_digit())
+            {
+                if let Some(digit) = characters.next() {
+                    digits.push(digit);
+                }
+            }
+            let significant = digits.trim_start_matches('0');
+            let significant = if significant.is_empty() {
+                "0"
+            } else {
+                significant
+            };
+            key.push('\u{1}');
+            key.push_str(&format!("{:09}", significant.len()));
+            key.push_str(significant);
+            key.push('\u{1}');
+            key.push_str(&format!("{:09}", digits.len()));
+        } else {
+            key.push(character);
+        }
+    }
+    key
+}
+
+pub(super) fn list_scoped_directory(
+    generation: u64,
+    root_revision: u64,
+    directory: &Path,
+    roots: &[PathBuf],
+    include_hidden: bool,
+    include_ignored: bool,
+    maximum_entries: usize,
+) -> Result<DirectoryListing, VfsError> {
+    let directory = canonical_path(directory)?;
+    if !roots.iter().any(|root| directory.starts_with(root)) {
+        return Err(VfsError::OutsideScope(directory));
+    }
+    let mut builder = WalkBuilder::new(&directory);
+    builder
+        .max_depth(Some(1))
+        .follow_links(false)
+        .hidden(!include_hidden)
+        .ignore(!include_ignored)
+        .git_ignore(!include_ignored)
+        .git_global(!include_ignored)
+        .git_exclude(!include_ignored)
+        .parents(!include_ignored);
+    let mut entries = Vec::new();
+    let mut truncated = false;
+    for entry in builder.build().skip(1) {
+        let entry = entry.map_err(|error| VfsError::DirectoryWalk {
+            path: directory.clone(),
+            reason: error.to_string(),
+        })?;
+        if entries.len() >= maximum_entries {
+            truncated = true;
+            break;
+        }
+        let kind = match entry.file_type() {
+            Some(kind) if kind.is_dir() => DirectoryEntryKind::Directory,
+            Some(kind) if kind.is_file() => DirectoryEntryKind::File,
+            _ => DirectoryEntryKind::Symlink,
+        };
+        entries.push(DirectoryEntry {
+            name: entry.file_name().to_string_lossy().into_owned(),
+            path: entry.into_path(),
+            kind,
+        });
+    }
+    let mut keyed_entries = entries
+        .into_iter()
+        .map(|entry| (natural_name_key(&entry.name), entry))
+        .collect::<Vec<_>>();
+    keyed_entries.sort_by(|(left_key, left), (right_key, right)| {
+        let left_rank = usize::from(left.kind != DirectoryEntryKind::Directory);
+        let right_rank = usize::from(right.kind != DirectoryEntryKind::Directory);
+        left_rank
+            .cmp(&right_rank)
+            .then_with(|| left_key.cmp(right_key))
+            .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    let entries = keyed_entries.into_iter().map(|(_, entry)| entry).collect();
+    Ok(DirectoryListing {
+        generation,
+        root_revision,
+        directory,
+        entries,
+        truncated,
+    })
+}

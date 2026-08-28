@@ -1,0 +1,394 @@
+use super::*;
+
+pub(super) fn validate_tiled_layout(
+    tab: WorkspaceTabId,
+    root: Option<&TiledLayoutNode>,
+    windows: &BTreeMap<WindowId, WindowDescriptor>,
+) -> Result<(), WindowError> {
+    fn collect(
+        node: &TiledLayoutNode,
+        tab: WorkspaceTabId,
+        windows: &BTreeMap<WindowId, WindowDescriptor>,
+        depth: usize,
+        leaves: &mut BTreeSet<WindowId>,
+    ) -> Result<(), WindowError> {
+        if depth > MAXIMUM_TILED_DEPTH {
+            return Err(WindowError::TiledLayoutTooDeep);
+        }
+        match node {
+            TiledLayoutNode::Window(window) => {
+                let descriptor = windows.get(window).ok_or(WindowError::StaleTiledWindow)?;
+                if descriptor.tab != tab || !matches!(descriptor.placement, WindowPlacement::Tiled)
+                {
+                    return Err(WindowError::NonTiledWindowInLayout);
+                }
+                if !leaves.insert(*window) {
+                    return Err(WindowError::DuplicateTiledWindow);
+                }
+                if leaves.len() > MAXIMUM_TILED_WINDOWS {
+                    return Err(WindowError::TooManyTiledWindows);
+                }
+            }
+            TiledLayoutNode::Split {
+                ratio,
+                first,
+                second,
+                ..
+            } => {
+                if !(1..=999).contains(ratio) {
+                    return Err(WindowError::InvalidPlacement);
+                }
+                collect(first, tab, windows, depth + 1, leaves)?;
+                collect(second, tab, windows, depth + 1, leaves)?;
+            }
+        }
+        Ok(())
+    }
+
+    let expected = windows
+        .values()
+        .filter_map(|window| {
+            (window.tab == tab && matches!(window.placement, WindowPlacement::Tiled))
+                .then_some(window.id)
+        })
+        .collect::<BTreeSet<_>>();
+    if expected.len() > MAXIMUM_TILED_WINDOWS {
+        return Err(WindowError::TooManyTiledWindows);
+    }
+    let mut leaves = BTreeSet::new();
+    if let Some(root) = root {
+        collect(root, tab, windows, 1, &mut leaves)?;
+    }
+    if leaves != expected {
+        return Err(WindowError::OrphanTiledWindow);
+    }
+    Ok(())
+}
+
+pub(super) fn tiled_contains(node: &TiledLayoutNode, target: WindowId) -> bool {
+    match node {
+        TiledLayoutNode::Window(window) => *window == target,
+        TiledLayoutNode::Split { first, second, .. } => {
+            tiled_contains(first, target) || tiled_contains(second, target)
+        }
+    }
+}
+
+pub(super) fn append_tiled_window(
+    root: Option<TiledLayoutNode>,
+    window: WindowId,
+) -> Option<TiledLayoutNode> {
+    Some(match root {
+        None => TiledLayoutNode::Window(window),
+        Some(root) => TiledLayoutNode::Split {
+            axis: TileAxis::Horizontal,
+            ratio: 500,
+            first: Box::new(root),
+            second: Box::new(TiledLayoutNode::Window(window)),
+        },
+    })
+}
+
+pub(super) fn remove_tiled_window(
+    node: TiledLayoutNode,
+    target: WindowId,
+) -> Option<TiledLayoutNode> {
+    match node {
+        TiledLayoutNode::Window(window) => (window != target).then_some(node),
+        TiledLayoutNode::Split {
+            axis,
+            ratio,
+            first,
+            second,
+        } => match (
+            remove_tiled_window(*first, target),
+            remove_tiled_window(*second, target),
+        ) {
+            (Some(first), Some(second)) => Some(TiledLayoutNode::Split {
+                axis,
+                ratio,
+                first: Box::new(first),
+                second: Box::new(second),
+            }),
+            (Some(node), None) | (None, Some(node)) => Some(node),
+            (None, None) => None,
+        },
+    }
+}
+
+pub(super) fn replace_tiled_window(node: &mut TiledLayoutNode, from: WindowId, to: WindowId) {
+    match node {
+        TiledLayoutNode::Window(window) if *window == from => *window = to,
+        TiledLayoutNode::Window(_) => {}
+        TiledLayoutNode::Split { first, second, .. } => {
+            replace_tiled_window(first, from, to);
+            replace_tiled_window(second, from, to);
+        }
+    }
+}
+
+pub(super) fn resize_tiled_parent(
+    node: &mut TiledLayoutNode,
+    target: WindowId,
+    delta: i16,
+) -> bool {
+    let TiledLayoutNode::Split {
+        ratio,
+        first,
+        second,
+        ..
+    } = node
+    else {
+        return false;
+    };
+    if resize_tiled_parent(first, target, delta) || resize_tiled_parent(second, target, delta) {
+        return true;
+    }
+    let signed = if tiled_contains(first, target) {
+        delta
+    } else if tiled_contains(second, target) {
+        -delta
+    } else {
+        return false;
+    };
+    let adjusted = i32::from(*ratio) + i32::from(signed);
+    *ratio = u16::try_from(adjusted.clamp(1, 999)).unwrap_or(*ratio);
+    true
+}
+
+pub(super) fn push_compositor_window(
+    output: &mut CompositorProjection,
+    window: CompositorWindowSnapshot,
+    rect: WindowRect,
+    layer: CompositorLayer,
+    focused: Option<WindowId>,
+) {
+    let z_index = u16::try_from(output.windows.len()).unwrap_or(u16::MAX);
+    output.windows.push(ProjectedCompositorWindow {
+        window: window.window,
+        rect,
+        layer,
+        z_index,
+        focused: focused == Some(window.window),
+        focusable: window.focusable,
+    });
+}
+
+pub(super) fn spatial_score(
+    source: WindowRect,
+    candidate: WindowRect,
+    direction: SpatialDirection,
+) -> Option<(u32, u32)> {
+    let source_left = u32::from(source.x);
+    let source_top = u32::from(source.y);
+    let source_right = source_left.saturating_add(u32::from(source.width));
+    let source_bottom = source_top.saturating_add(u32::from(source.height));
+    let candidate_left = u32::from(candidate.x);
+    let candidate_top = u32::from(candidate.y);
+    let candidate_right = candidate_left.saturating_add(u32::from(candidate.width));
+    let candidate_bottom = candidate_top.saturating_add(u32::from(candidate.height));
+    let source_center_x = source_left.saturating_add(u32::from(source.width) / 2);
+    let source_center_y = source_top.saturating_add(u32::from(source.height) / 2);
+    let candidate_center_x = candidate_left.saturating_add(u32::from(candidate.width) / 2);
+    let candidate_center_y = candidate_top.saturating_add(u32::from(candidate.height) / 2);
+    match direction {
+        SpatialDirection::Left if candidate_center_x < source_center_x => Some((
+            source_left.saturating_sub(candidate_right).max(1),
+            source_center_y.abs_diff(candidate_center_y),
+        )),
+        SpatialDirection::Right if candidate_center_x > source_center_x => Some((
+            candidate_left.saturating_sub(source_right).max(1),
+            source_center_y.abs_diff(candidate_center_y),
+        )),
+        SpatialDirection::Up if candidate_center_y < source_center_y => Some((
+            source_top.saturating_sub(candidate_bottom).max(1),
+            source_center_x.abs_diff(candidate_center_x),
+        )),
+        SpatialDirection::Down if candidate_center_y > source_center_y => Some((
+            candidate_top.saturating_sub(source_bottom).max(1),
+            source_center_x.abs_diff(candidate_center_x),
+        )),
+        _ => None,
+    }
+}
+
+pub(super) fn project_dock(
+    bounds: WindowRect,
+    edge: DockEdge,
+    requested: u16,
+    reserve_width: u16,
+    reserve_height: u16,
+) -> (WindowRect, WindowRect) {
+    match edge {
+        DockEdge::Left => {
+            let size = requested.min(bounds.width.saturating_sub(reserve_width));
+            (
+                WindowRect {
+                    width: size,
+                    ..bounds
+                },
+                WindowRect {
+                    x: bounds.x.saturating_add(size),
+                    width: bounds.width.saturating_sub(size),
+                    ..bounds
+                },
+            )
+        }
+        DockEdge::Right => {
+            let size = requested.min(bounds.width.saturating_sub(reserve_width));
+            let remaining = bounds.width.saturating_sub(size);
+            (
+                WindowRect {
+                    x: bounds.x.saturating_add(remaining),
+                    width: size,
+                    ..bounds
+                },
+                WindowRect {
+                    width: remaining,
+                    ..bounds
+                },
+            )
+        }
+        DockEdge::Top => {
+            let size = requested.min(bounds.height.saturating_sub(reserve_height));
+            (
+                WindowRect {
+                    height: size,
+                    ..bounds
+                },
+                WindowRect {
+                    y: bounds.y.saturating_add(size),
+                    height: bounds.height.saturating_sub(size),
+                    ..bounds
+                },
+            )
+        }
+        DockEdge::Bottom => {
+            let size = requested.min(bounds.height.saturating_sub(reserve_height));
+            let remaining = bounds.height.saturating_sub(size);
+            (
+                WindowRect {
+                    y: bounds.y.saturating_add(remaining),
+                    height: size,
+                    ..bounds
+                },
+                WindowRect {
+                    height: remaining,
+                    ..bounds
+                },
+            )
+        }
+    }
+}
+
+pub(super) fn intersect_rect(requested: WindowRect, bounds: WindowRect) -> Option<WindowRect> {
+    let left = requested.x.max(bounds.x);
+    let top = requested.y.max(bounds.y);
+    let right = requested
+        .x
+        .saturating_add(requested.width)
+        .min(bounds.x.saturating_add(bounds.width));
+    let bottom = requested
+        .y
+        .saturating_add(requested.height)
+        .min(bounds.y.saturating_add(bounds.height));
+    (right > left && bottom > top).then_some(WindowRect {
+        x: left,
+        y: top,
+        width: right.saturating_sub(left),
+        height: bottom.saturating_sub(top),
+    })
+}
+
+pub(super) fn rect_contains(rect: WindowRect, column: u16, row: u16) -> bool {
+    column >= rect.x
+        && column < rect.x.saturating_add(rect.width)
+        && row >= rect.y
+        && row < rect.y.saturating_add(rect.height)
+}
+
+pub(super) fn project_tiled_node(
+    node: &TiledLayoutNode,
+    bounds: WindowRect,
+    output: &mut TiledLayoutProjection,
+) {
+    match node {
+        TiledLayoutNode::Window(window) => output.windows.push(ProjectedWindow {
+            window: *window,
+            rect: bounds,
+        }),
+        TiledLayoutNode::Split {
+            axis,
+            ratio,
+            first,
+            second,
+        } => match axis {
+            TileAxis::Horizontal => {
+                let available = bounds.width.saturating_sub(1);
+                let first_width = available
+                    .saturating_mul(*ratio)
+                    .checked_div(1_000)
+                    .unwrap_or(0)
+                    .min(available);
+                let second_width = available.saturating_sub(first_width);
+                project_tiled_node(
+                    first,
+                    WindowRect {
+                        width: first_width,
+                        ..bounds
+                    },
+                    output,
+                );
+                let border_x = bounds.x.saturating_add(first_width);
+                output.borders.push(ProjectedBorder {
+                    x: border_x,
+                    y: bounds.y,
+                    length: bounds.height,
+                    axis: *axis,
+                });
+                project_tiled_node(
+                    second,
+                    WindowRect {
+                        x: border_x.saturating_add(1),
+                        width: second_width,
+                        ..bounds
+                    },
+                    output,
+                );
+            }
+            TileAxis::Vertical => {
+                let available = bounds.height.saturating_sub(1);
+                let first_height = available
+                    .saturating_mul(*ratio)
+                    .checked_div(1_000)
+                    .unwrap_or(0)
+                    .min(available);
+                let second_height = available.saturating_sub(first_height);
+                project_tiled_node(
+                    first,
+                    WindowRect {
+                        height: first_height,
+                        ..bounds
+                    },
+                    output,
+                );
+                let border_y = bounds.y.saturating_add(first_height);
+                output.borders.push(ProjectedBorder {
+                    x: bounds.x,
+                    y: border_y,
+                    length: bounds.width,
+                    axis: *axis,
+                });
+                project_tiled_node(
+                    second,
+                    WindowRect {
+                        y: border_y.saturating_add(1),
+                        height: second_height,
+                        ..bounds
+                    },
+                    output,
+                );
+            }
+        },
+    }
+}

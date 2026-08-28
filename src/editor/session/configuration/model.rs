@@ -1,0 +1,416 @@
+use super::*;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KeymapOperation {
+    Command,
+    Unmap,
+    Disable,
+    PassThrough,
+}
+
+impl KeymapOperation {
+    pub(in crate::editor::session) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Command => "command",
+            Self::Unmap => "unmap",
+            Self::Disable => "disable",
+            Self::PassThrough => "pass_through",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KeymapInspection {
+    pub id: String,
+    pub context: String,
+    pub contribution_layer: InputContextLayer,
+    pub contribution_owner: Option<String>,
+    pub contribution_generation: u64,
+    pub operation: KeymapOperation,
+    pub command: Option<String>,
+    pub arguments: BTreeMap<String, CommandValue>,
+    pub source_keys: String,
+    pub keys: String,
+    pub source: String,
+}
+
+#[derive(Clone)]
+pub(in crate::editor::session) struct ReverseBinding {
+    pub(in crate::editor::session) id: String,
+    pub(in crate::editor::session) keys: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedKeyGroup {
+    pub id: String,
+    pub context: String,
+    pub contribution_layer: InputContextLayer,
+    pub contribution_owner: Option<String>,
+    pub contribution_generation: u64,
+    pub source_prefix: String,
+    pub prefix: String,
+    pub label: String,
+    pub icon: Option<String>,
+    pub order: i32,
+    pub source: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KeyHintMapping {
+    pub id: String,
+    pub operation: KeymapOperation,
+    pub command: Option<String>,
+    pub source: String,
+    pub remaining_keys: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KeyHintRow {
+    pub next_key: String,
+    pub label: String,
+    pub direct: bool,
+    pub group_id: Option<String>,
+    pub icon: Option<String>,
+    pub order: i32,
+    pub mappings: Vec<KeyHintMapping>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KeyHintProjection {
+    pub context: String,
+    pub prefix: String,
+    pub rows: Vec<KeyHintRow>,
+}
+
+#[derive(Clone, Default)]
+pub struct ResolvedKeymaps {
+    pub(in crate::editor::session) resolvers: HashMap<String, KeymapResolver>,
+    pub(in crate::editor::session) reverse: HashMap<(String, String), ReverseBinding>,
+    pub(in crate::editor::session) inspections: Vec<KeymapInspection>,
+    pub(in crate::editor::session) groups: Vec<ResolvedKeyGroup>,
+    pub(in crate::editor::session) conflicts: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfigurationSources {
+    pub settings: PathBuf,
+    pub keymaps: PathBuf,
+    pub dashboard: PathBuf,
+    pub theme: PathBuf,
+}
+
+#[derive(Clone)]
+pub struct ResolvedConfiguration {
+    pub settings: crate::config::Config,
+    pub dashboard: crate::config::DashboardConfig,
+    pub theme: crate::config::ThemeConfig,
+    pub raw_keymaps: crate::config::LoadedKeymaps,
+    pub base_keymaps: crate::config::LoadedKeymaps,
+    pub raw_windows: crate::config::WindowsConfig,
+    pub deferred_plugin_keymaps: bool,
+    pub expected_plugin_indexes: BTreeSet<String>,
+    pub keymaps: ResolvedKeymaps,
+    pub sources: ConfigurationSources,
+    pub user_setting_keys: BTreeSet<String>,
+    pub user_setting_spans: BTreeMap<String, std::ops::Range<usize>>,
+    pub dashboard_spans: BTreeMap<String, std::ops::Range<usize>>,
+    pub theme_spans: BTreeMap<String, std::ops::Range<usize>>,
+}
+
+pub(in crate::editor::session) fn resolved_toml_value(
+    mut value: toml::Value,
+    segments: &[String],
+) -> Option<toml::Value> {
+    for segment in segments {
+        value = if let Some(table) = value.as_table() {
+            table.get(segment)?.clone()
+        } else if let Some(array) = value.as_array() {
+            array.get(segment.parse::<usize>().ok()?)?.clone()
+        } else {
+            return None;
+        };
+    }
+    Some(value)
+}
+
+impl ResolvedConfiguration {
+    #[must_use]
+    pub fn explain(&self, key: &str) -> Option<crate::config::ConfigExplanation> {
+        let (value, source, span, layered) = if let Some(key) = key.strip_prefix("theme.") {
+            let segments = crate::config::config_key_segments(key)?;
+            let canonical = segments.join(".");
+            let value = resolved_toml_value(toml::Value::try_from(&self.theme).ok()?, &segments)?;
+            (
+                value,
+                &self.sources.theme,
+                self.theme_spans.get(&canonical),
+                false,
+            )
+        } else if let Some(key) = key.strip_prefix("dashboard.") {
+            let segments = crate::config::config_key_segments(key)?;
+            let canonical = segments.join(".");
+            let value =
+                resolved_toml_value(toml::Value::try_from(&self.dashboard).ok()?, &segments)?;
+            (
+                value,
+                &self.sources.dashboard,
+                self.dashboard_spans.get(&canonical),
+                false,
+            )
+        } else {
+            let segments = crate::config::config_key_segments(key)?;
+            let canonical = segments.join(".");
+            let value =
+                resolved_toml_value(toml::Value::try_from(&self.settings).ok()?, &segments)?;
+            let source = if self.user_setting_keys.contains(&canonical) {
+                &self.sources.settings
+            } else {
+                // Inherited values continue to identify the bundled declaration.
+                static BUNDLED_SETTINGS: std::sync::LazyLock<PathBuf> =
+                    std::sync::LazyLock::new(|| PathBuf::from("<bundled:config>"));
+                &BUNDLED_SETTINGS
+            };
+            (value, source, self.user_setting_spans.get(&canonical), true)
+        };
+        let mut final_source = source.display().to_string();
+        if let Some(span) = span {
+            final_source = format!("{final_source}:bytes {}..{}", span.start, span.end);
+        }
+        let bundled = final_source.starts_with("<bundled:");
+        Some(crate::config::ConfigExplanation {
+            key: key.into(),
+            value: value.to_string(),
+            source: if bundled {
+                "bundled defaults".into()
+            } else {
+                final_source.clone()
+            },
+            contributors: if bundled {
+                vec!["bundled defaults".into()]
+            } else if layered {
+                vec!["bundled defaults".into(), final_source]
+            } else {
+                vec![final_source]
+            },
+        })
+    }
+}
+
+impl ResolvedKeymaps {
+    pub(crate) fn resolve(&mut self, context: &str, key: KeyEvent) -> MappingResolution {
+        self.resolvers
+            .get_mut(context)
+            .map_or(MappingResolution::Missing, |resolver| resolver.feed(key))
+    }
+
+    #[must_use]
+    pub(in crate::editor::session) fn pending_prefix(&self, context: &str) -> Option<String> {
+        let sequence = self.resolvers.get(context)?.pending_sequence();
+        (!sequence.is_empty()).then(|| display_key_sequence(sequence))
+    }
+
+    #[must_use]
+    pub fn binding_for(&self, context: &str, command: &str) -> Option<&str> {
+        self.reverse
+            .iter()
+            .find(|((mapped_context, fingerprint), _)| {
+                mapped_context == context
+                    && fingerprint
+                        .strip_prefix(command)
+                        .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with('|'))
+            })
+            .map(|(_, binding)| binding.keys.as_str())
+    }
+
+    #[must_use]
+    pub fn inspect(&self, context: &str, command: &str) -> Option<KeymapInspection> {
+        self.reverse
+            .iter()
+            .find(|((mapped_context, fingerprint), _)| {
+                mapped_context == context
+                    && fingerprint
+                        .strip_prefix(command)
+                        .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with('|'))
+            })
+            .and_then(|(_, binding)| self.inspect_id(&binding.id))
+    }
+
+    #[must_use]
+    pub fn inspect_id(&self, id: &str) -> Option<KeymapInspection> {
+        self.inspections
+            .iter()
+            .find(|inspection| inspection.id == id)
+            .cloned()
+    }
+
+    #[must_use]
+    pub fn inspect_key(&self, context: &str, keys: &str) -> Option<KeymapInspection> {
+        self.inspections
+            .iter()
+            .find(|inspection| {
+                inspection.context == context
+                    && (inspection.keys == keys || inspection.source_keys == keys)
+            })
+            .cloned()
+    }
+
+    #[must_use]
+    pub fn conflicts(&self) -> &[String] {
+        &self.conflicts
+    }
+
+    #[must_use]
+    pub fn groups(&self) -> &[ResolvedKeyGroup] {
+        &self.groups
+    }
+
+    /// Projects reachable continuations from the already-resolved mapping roster.
+    /// This is read-only presentation data, never an alternate dispatch table.
+    #[must_use]
+    pub fn hints_for_prefix(
+        &self,
+        context: &str,
+        effective_prefix: &str,
+        command_labels: &BTreeMap<String, String>,
+    ) -> Option<KeyHintProjection> {
+        let prefix = effective_prefix
+            .split_whitespace()
+            .map(KeyEvent::from_str)
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?;
+        if prefix.is_empty() {
+            return None;
+        }
+        let mut candidates = BTreeMap::<String, Vec<(Vec<KeyEvent>, &KeymapInspection)>>::new();
+        for inspection in &self.inspections {
+            if inspection.context != context
+                || matches!(
+                    inspection.operation,
+                    KeymapOperation::Disable
+                        | KeymapOperation::Unmap
+                        | KeymapOperation::PassThrough
+                )
+            {
+                continue;
+            }
+            let sequence = inspection
+                .keys
+                .split_whitespace()
+                .map(KeyEvent::from_str)
+                .collect::<Result<Vec<_>, _>>()
+                .ok()?;
+            if sequence.len() <= prefix.len() || !sequence.starts_with(&prefix) {
+                continue;
+            }
+            let next_key = sequence[prefix.len()].to_string();
+            candidates
+                .entry(next_key)
+                .or_default()
+                .push((sequence, inspection));
+        }
+        let mut rows = Vec::new();
+        for (next_key, mut mappings) in candidates {
+            mappings.sort_by(|(left_keys, left), (right_keys, right)| {
+                left_keys
+                    .len()
+                    .cmp(&right_keys.len())
+                    .then_with(|| left.id.cmp(&right.id))
+            });
+            let group = self
+                .groups
+                .iter()
+                .filter(|group| group.context == context)
+                .filter_map(|group| {
+                    let sequence = group
+                        .prefix
+                        .split_whitespace()
+                        .map(KeyEvent::from_str)
+                        .collect::<Result<Vec<_>, _>>()
+                        .ok()?;
+                    (sequence.len() == prefix.len() + 1
+                        && sequence.starts_with(&prefix)
+                        && sequence[prefix.len()].to_string() == next_key)
+                        .then_some((sequence, group))
+                })
+                .min_by(|(left_keys, left), (right_keys, right)| {
+                    left_keys
+                        .len()
+                        .cmp(&right_keys.len())
+                        .then_with(|| left.order.cmp(&right.order))
+                        .then_with(|| left.id.cmp(&right.id))
+                });
+            let direct_mapping = mappings
+                .iter()
+                .find(|(keys, _)| keys.len() == prefix.len() + 1)
+                .map(|(_, inspection)| *inspection);
+            let direct = direct_mapping.unwrap_or(mappings[0].1);
+            let (label, group_id, icon, order) = group.map_or_else(
+                || {
+                    let label = direct
+                        .command
+                        .as_ref()
+                        .and_then(|command| command_labels.get(command))
+                        .cloned()
+                        .or_else(|| direct.command.clone())
+                        .unwrap_or_else(|| direct.id.clone());
+                    (label, None, None, i32::MAX)
+                },
+                |(_, group)| {
+                    (
+                        group.label.clone(),
+                        Some(group.id.clone()),
+                        group.icon.clone(),
+                        group.order,
+                    )
+                },
+            );
+            let mapping_rows = mappings
+                .into_iter()
+                .map(|(keys, inspection)| KeyHintMapping {
+                    id: inspection.id.clone(),
+                    operation: inspection.operation,
+                    command: inspection.command.clone(),
+                    source: inspection.source.clone(),
+                    remaining_keys: display_key_sequence(&keys[prefix.len()..]),
+                })
+                .collect();
+            rows.push(KeyHintRow {
+                next_key,
+                label,
+                direct: direct_mapping.is_some(),
+                group_id,
+                icon,
+                order,
+                mappings: mapping_rows,
+            });
+        }
+        rows.sort_by(|left, right| {
+            left.order
+                .cmp(&right.order)
+                .then_with(|| left.next_key.cmp(&right.next_key))
+                .then_with(|| left.label.cmp(&right.label))
+        });
+        (!rows.is_empty()).then_some(KeyHintProjection {
+            context: context.into(),
+            prefix: display_key_sequence(&prefix),
+            rows,
+        })
+    }
+
+    pub(in crate::editor::session) fn binding_for_action(
+        &self,
+        context: &str,
+        command: &str,
+        arguments: &std::collections::BTreeMap<String, toml::Value>,
+    ) -> Option<&str> {
+        let mut invocation = CommandInvocation::new(command, InvocationSource::Keymap).ok()?;
+        for (name, value) in arguments {
+            invocation
+                .arguments
+                .insert(name.clone(), configuration_value(value).ok()?);
+        }
+        self.reverse
+            .get(&(context.to_owned(), invocation_fingerprint(&invocation)))
+            .map(|binding| binding.keys.as_str())
+    }
+}

@@ -123,7 +123,7 @@ executable_path = "clangd_22.1.6/bin/clangd"
 id = "gopls"
 name = "gopls"
 kind = "lsp"
-languages = ["go"]
+languages = ["go", "gomod", "gowork", "gotmpl"]
 executable = "gopls"
 version = "0.20.0"
 probe_args = ["version"]
@@ -133,6 +133,194 @@ project_root_strategy = "go"
 [tool.install]
 method = "go_package"
 package = "golang.org/x/tools/gopls@v0.20.0"
+
+[[tool]]
+id = "bash-language-server"
+name = "Bash Language Server"
+kind = "lsp"
+languages = ["shellscript"]
+executable = "bash-language-server"
+version = "5.6.0"
+launch_args = ["start"]
+probe_args = ["--version"]
+project_root_markers = [".git", ".bashrc"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["bash-language-server@5.6.0"]
+
+[[tool]]
+id = "vscode-html-language-server"
+name = "VS Code HTML Language Server"
+kind = "lsp"
+languages = ["html"]
+executable = "vscode-html-language-server"
+version = "4.10.0"
+launch_args = ["--stdio"]
+project_root_markers = ["package.json", ".git"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["vscode-langservers-extracted@4.10.0"]
+
+[[tool]]
+id = "vscode-css-language-server"
+name = "VS Code CSS Language Server"
+kind = "lsp"
+languages = ["css", "scss", "less"]
+executable = "vscode-css-language-server"
+version = "4.10.0"
+launch_args = ["--stdio"]
+project_root_markers = ["package.json", ".git"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["vscode-langservers-extracted@4.10.0"]
+
+[[tool]]
+id = "vscode-json-language-server"
+name = "VS Code JSON Language Server"
+kind = "lsp"
+languages = ["json", "jsonc"]
+executable = "vscode-json-language-server"
+version = "4.10.0"
+launch_args = ["--stdio"]
+project_root_markers = ["package.json", ".git"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["vscode-langservers-extracted@4.10.0"]
+
+[[tool]]
+id = "yaml-language-server"
+name = "YAML Language Server"
+kind = "lsp"
+languages = ["yaml"]
+executable = "yaml-language-server"
+version = "1.24.0"
+launch_args = ["--stdio"]
+project_root_markers = [".git", "package.json"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["yaml-language-server@1.24.0"]
+
+[[tool]]
+id = "marksman"
+name = "Marksman"
+kind = "lsp"
+languages = ["markdown", "markdown.mdx"]
+executable = "marksman"
+version = "2026-02-08"
+launch_args = ["server"]
+probe_args = ["--version"]
+project_root_markers = [".marksman.toml", ".git"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "archive"
+url = "https://github.com/artempyanykh/marksman/releases/download/2026-02-08/marksman-linux-x64"
+sha256 = "be5098e8213219269c47fc0d916a66fa31ce0602ec967475c722260aabf26087"
+archive = "raw"
+executable_path = "marksman"
+
+[[tool]]
+id = "emmylua-ls"
+name = "EmmyLua Language Server"
+kind = "lsp"
+languages = ["lua"]
+executable = "emmylua_ls"
+version = "0.25.1"
+probe_args = ["--version"]
+project_root_markers = [".emmyrc.json", ".luarc.json", ".luarc.jsonc", ".git"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "archive"
+url = "https://github.com/EmmyLuaLs/emmylua-analyzer-rust/releases/download/0.25.1/emmylua_ls-linux-x64-glibc.2.17.tar.gz"
+sha256 = "9731ec340b1b40916555dcb31c1c539beee9fa184997962c9af250c42b316950"
+archive = "tar_gzip"
+executable_path = "emmylua_ls"
+
+[[tool]]
+id = "intelephense"
+name = "Intelephense"
+kind = "lsp"
+languages = ["php"]
+executable = "intelephense"
+version = "1.18.5"
+launch_args = ["--stdio"]
+project_root_markers = ["composer.json", ".git"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["intelephense@1.18.5"]
+
+[[tool]]
+id = "svelte-language-server"
+name = "Svelte Language Server"
+kind = "lsp"
+languages = ["svelte"]
+executable = "svelteserver"
+version = "0.18.4"
+launch_args = ["--stdio"]
+project_root_markers = ["svelte.config.js", "package.json"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["svelte-language-server@0.18.4", "typescript@5.9.3"]
+
+[[tool]]
+id = "vue-language-server"
+name = "Vue Language Server"
+kind = "lsp"
+languages = ["vue"]
+executable = "vue-language-server"
+version = "3.3.11"
+launch_args = ["--stdio"]
+project_root_markers = ["package.json", "tsconfig.json", "jsconfig.json"]
+project_root_strategy = "node"
+
+[tool.install]
+method = "npm_package"
+packages = ["@vue/language-server@3.3.11", "typescript@5.9.3"]
+
+[[tool]]
+id = "dockerfile-language-server"
+name = "Dockerfile Language Server"
+kind = "lsp"
+languages = ["dockerfile"]
+executable = "docker-langserver"
+version = "0.15.0"
+launch_args = ["--stdio"]
+project_root_markers = ["Dockerfile", "compose.yaml", "compose.yml", ".git"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["dockerfile-language-server-nodejs@0.15.0"]
+
+[[tool]]
+id = "astro-language-server"
+name = "Astro Language Server"
+kind = "lsp"
+languages = ["astro"]
+executable = "astro-ls"
+version = "2.16.15"
+launch_args = ["--stdio"]
+project_root_markers = ["astro.config.js", "astro.config.mjs", "package.json"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["@astrojs/language-server@2.16.15", "typescript@5.9.3"]
 
 [[tool]]
 id = "debugpy"

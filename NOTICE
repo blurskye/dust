@@ -11,3 +11,12 @@ LICENSES/Apache-2.0.txt. This notice does not relicense the Dust editor.
 The separately operated registry service described by project policy is
 intended to be AGPL-3.0-or-later; no registry-server implementation is
 included in this repository.
+
+Explorer icon metadata is derived from mini.icons:
+Copyright (c) 2021 Evgeni Chasnovski, licensed under the MIT License. See
+LICENSES/MIT-mini.icons.txt.
+
+The pinned external language-server and filetype compatibility snapshot is
+derived from mason-lspconfig.nvim and nvim-lspconfig, both licensed under the
+Apache License 2.0. See LICENSES/Apache-2.0.txt. Mason package metadata is
+derived from mason-registry under the Apache License 2.0.

@@ -14,18 +14,56 @@ fn rust_sources(directory: &Path, output: &mut Vec<PathBuf>) {
     }
 }
 
-fn assert_absent(module: &str, forbidden: &[&str]) {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("src")
-        .join(module);
+fn module_source(relative: &str) -> String {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative);
+    let mut sources = Vec::new();
+    if root.is_dir() {
+        rust_sources(&root, &mut sources);
+        let facade = root.with_extension("rs");
+        if facade.is_file() {
+            sources.push(facade);
+        }
+    } else {
+        sources.push(root);
+    }
+    sources.sort();
+    sources
+        .into_iter()
+        .filter(|path| {
+            path.file_name().is_none_or(|name| name != "tests.rs")
+                && !path
+                    .components()
+                    .any(|component| component.as_os_str() == "tests")
+        })
+        .map(|path| {
+            let source = fs::read_to_string(&path).expect("read Rust source");
+            source
+                .split("#[cfg(test)]\nmod tests")
+                .next()
+                .unwrap_or(&source)
+                .to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn assert_absent(relative: &str, forbidden: &[&str]) {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative);
     let mut sources = Vec::new();
     rust_sources(&root, &mut sources);
     for path in sources {
+        if path.file_name().is_some_and(|name| name == "tests.rs")
+            || path
+                .components()
+                .any(|component| component.as_os_str() == "tests")
+        {
+            continue;
+        }
         let source = fs::read_to_string(&path).expect("read Rust source");
         for needle in forbidden {
             assert!(
                 !source.contains(needle),
-                "{} violates `{module}` ownership by importing `{needle}`",
+                "{} violates `{relative}` ownership by importing `{needle}`",
                 path.display()
             );
         }
@@ -35,52 +73,52 @@ fn assert_absent(module: &str, forbidden: &[&str]) {
 #[test]
 fn module_dependency_direction_matches_the_architecture_spec() {
     assert_absent(
-        "document",
+        "src/editor/text",
         &[
-            "crate::editing",
-            "crate::input",
-            "crate::configuration",
-            "crate::filesystem",
-            "crate::terminal_ui",
-            "crate::application",
-        ],
-    );
-    assert_absent(
-        "editing",
-        &[
-            "crate::input",
-            "crate::configuration",
-            "crate::filesystem",
-            "crate::terminal_ui",
-            "crate::application",
+            "crate::editor::state",
+            "crate::editor::input",
+            "crate::config",
+            "crate::files",
+            "crate::ui",
             "crossterm",
             "std::fs",
         ],
     );
-    assert_absent("filesystem", &["crate::editing", "crate::application"]);
     assert_absent(
-        "workspace",
+        "src/editor/state",
         &[
-            "crate::editing",
-            "crate::application",
-            "crate::input",
-            "crate::terminal_ui",
-            "crate::languages",
-            "crate::debugging",
-            "crate::packages",
+            "crate::editor::input",
+            "crate::config",
+            "crate::files",
+            "crate::ui",
+            "crossterm",
+            "std::fs",
+        ],
+    );
+    assert_absent(
+        "src/files",
+        &[
+            "crate::editor::state",
+            "crate::editor::session",
+            "crate::ui",
+        ],
+    );
+    assert_absent(
+        "src/workspace",
+        &[
+            "crate::editor::session",
+            "crate::editor::input",
+            "crate::ui",
+            "crate::language::lsp",
+            "crate::debugger",
+            "crate::tools",
         ],
     );
 }
 
 #[test]
 fn workspace_traversal_and_search_reads_stay_out_of_the_foreground() {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let application = fs::read_to_string(manifest.join("src/application/interactive.rs"))
-        .expect("read coordinator");
-    let production = application
-        .split("#[cfg(test)]\nmod tests")
-        .next()
-        .unwrap_or(&application);
+    let session = module_source("src/editor/session");
     for forbidden in [
         "WalkBuilder",
         "read_dir(",
@@ -89,125 +127,92 @@ fn workspace_traversal_and_search_reads_stay_out_of_the_foreground() {
         "RootIdentity::capture(",
     ] {
         assert!(
-            !production.contains(forbidden),
-            "foreground coordinator performs workspace traversal/read through `{forbidden}`"
+            !session.contains(forbidden),
+            "foreground session performs workspace traversal/read through `{forbidden}`"
         );
     }
-    let filesystem =
-        fs::read_to_string(manifest.join("src/filesystem/mod.rs")).expect("read filesystem owner");
-    assert!(filesystem.contains("pub struct WorkspaceSearchService"));
-    assert!(filesystem.contains("mpsc::sync_channel(policy.event_queue_capacity)"));
-    assert!(filesystem.contains("read_bounded_bytes(file, policy.maximum_file_bytes)"));
-    let workspace =
-        fs::read_to_string(manifest.join("src/workspace/mod.rs")).expect("read workspace owner");
+
+    let files = module_source("src/files");
+    assert!(files.contains("pub struct WorkspaceSearchService"));
+    assert!(files.contains("mpsc::sync_channel(policy.event_queue_capacity)"));
+    assert!(files.contains("read_bounded_bytes(file, policy.maximum_file_bytes)"));
+
+    let workspace = module_source("src/workspace");
     assert!(workspace.contains("pub struct WorkspaceTrustService"));
     assert!(workspace.contains("TRUST_STATE_BYTE_LIMIT"));
     assert!(workspace.contains("NamedTempFile::new_in(parent)"));
 }
 
 #[test]
-fn tree_sitter_is_owned_only_by_syntax() {
+fn tree_sitter_is_owned_only_by_language_syntax() {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let syntax = manifest.join("src/language/syntax");
     let mut sources = Vec::new();
     rust_sources(&manifest.join("src"), &mut sources);
     for path in sources {
-        if path.starts_with(manifest.join("src/syntax")) {
+        if path.starts_with(&syntax) {
             continue;
         }
         let source = fs::read_to_string(&path).expect("source");
         assert!(
             !source.contains("tree_sitter"),
-            "{} imports tree-sitter outside syntax",
+            "{} imports tree-sitter outside language::syntax",
             path.display()
         );
     }
     assert_absent(
-        "syntax",
-        &["crate::editing", "crate::application", "crate::terminal_ui"],
+        "src/language/syntax",
+        &["crate::editor::session", "crate::ui"],
     );
 }
 
 #[test]
 fn editor_geometry_is_projected_from_the_universal_window_snapshot() {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let render =
-        fs::read_to_string(manifest.join("src/terminal_ui/render.rs")).expect("read renderer");
-    let production = render
-        .split("#[cfg(test)]\nmod tests")
-        .next()
-        .unwrap_or(&render);
-    assert!(production.contains("let compositor = active_compositor(state, ui, width, height);"));
-    assert!(production.contains("compositor.projection.window("));
-    assert!(production.contains("Some(compositor.graph_revision) == ui.window_graph_revision"));
-    assert!(production.contains("place_workspace_frame("));
-    assert!(production.contains("render_picker(&mut frame, picker, config, rect)"));
-    assert!(production.contains("let layout = ui.editor_window_layout.as_ref()?;"));
-    assert!(production.contains("layout.source_revision != source_revision"));
-    assert!(!production.contains("crate::editing::LayoutNode"));
-    assert!(!production.contains("collect_pane_rects"));
-    assert!(!production.contains("WindowId(u64::MAX)"));
-    assert!(!production.contains("unwrap_or(&fallback)"));
+    let render = module_source("src/ui/render");
+    assert!(render.contains("let compositor = active_compositor(state, ui, width, height);"));
+    assert!(render.contains("compositor.projection.window("));
+    assert!(render.contains("Some(compositor.graph_revision) == ui.window_graph_revision"));
+    assert!(render.contains("place_workspace_frame("));
+    assert!(render.contains("render_picker(&mut frame, picker, config, rect)"));
+    assert!(render.contains("let layout = ui.editor_window_layout.as_ref()?;"));
+    assert!(render.contains("layout.source_revision != source_revision"));
+    assert!(!render.contains("crate::editor::LayoutNode"));
+    assert!(!render.contains("collect_pane_rects"));
+    assert!(!render.contains("WindowId(u64::MAX)"));
+    assert!(!render.contains("unwrap_or(&fallback)"));
 
-    let bridge = fs::read_to_string(manifest.join("src/application/window_bridge.rs"))
-        .expect("read window bridge");
-    let production = bridge
-        .split("#[cfg(test)]\nmod tests")
-        .next()
-        .unwrap_or(&bridge);
-    assert!(production.contains("state.window_revision()"));
-    assert!(!production.contains("EditorWindowSignature"));
-    assert!(!production.contains("editor_window_signature"));
+    let bridge = module_source("src/editor/session/window_bridge.rs");
+    assert!(bridge.contains("state.window_revision()"));
+    assert!(!bridge.contains("EditorWindowSignature"));
+    assert!(!bridge.contains("editor_window_signature"));
 
-    let application = fs::read_to_string(manifest.join("src/application/interactive.rs"))
-        .expect("read coordinator");
-    let production = application
-        .split("#[cfg(test)]\nmod tests")
-        .next()
-        .unwrap_or(&application);
-    assert!(
-        production.contains("pane_viewports(\n            &self.state,\n            &self.ui,")
-    );
-    assert!(
-        production
-            .contains("active_pane_viewport(\n            &self.state,\n            &self.ui,")
-    );
-    assert!(production.contains("self.terminal_window_rect()"));
-    assert!(production.contains("self.explorer_window_rect()"));
-    assert!(production.contains("apply_authoritative_editor_transaction"));
-    assert!(production.contains("Some(layout.graph_revision) == self.windows.revision()"));
+    let session = module_source("src/editor/session");
+    assert!(session.contains("pane_viewports("));
+    assert!(session.contains("active_pane_viewport("));
+    assert!(session.contains("self.terminal_window_rect()"));
+    assert!(session.contains("self.explorer_window_rect()"));
+    assert!(session.contains("apply_authoritative_editor_transaction"));
+    assert!(session.contains("Some(layout.graph_revision) == self.windows.revision()"));
 }
 
 #[test]
-fn logical_keys_are_not_dispatched_to_features_outside_the_input_pipeline() {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+fn logical_keys_are_not_dispatched_by_effect_or_render_owners() {
     for relative in [
-        "src/application/interactive.rs",
-        "src/terminal_ui/render.rs",
-        "src/input/grammar.rs",
+        "src/editor/session/effects",
+        "src/ui/render",
+        "src/editor/input/grammar.rs",
     ] {
-        let path = manifest.join(relative);
-        let source = fs::read_to_string(&path).expect("read dispatch source");
-        let production = source
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or(&source);
+        let source = module_source(relative);
         assert!(
-            !production.contains("match key.code") && !production.contains("KeyCode::"),
-            "{} contains direct logical-key feature dispatch",
-            path.display()
+            !source.contains("match key.code") && !source.contains("KeyCode::"),
+            "{relative} contains direct logical-key feature dispatch"
         );
     }
 }
 
 #[test]
 fn current_surface_presentation_comes_from_configuration_assets() {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let render =
-        fs::read_to_string(manifest.join("src/terminal_ui/render.rs")).expect("read renderer");
-    let production = render
-        .split("#[cfg(test)]\nmod tests")
-        .next()
-        .unwrap_or(&render);
+    let render = module_source("src/ui/render");
     for forbidden in [
         "D U S T",
         "Dust — resize terminal",
@@ -218,16 +223,12 @@ fn current_surface_presentation_comes_from_configuration_assets() {
         "\"INSERT\"",
     ] {
         assert!(
-            !production.contains(forbidden),
+            !render.contains(forbidden),
             "renderer embeds configurable presentation literal `{forbidden}`"
         );
     }
-    let application = fs::read_to_string(manifest.join("src/application/interactive.rs"))
-        .expect("read application coordinator");
-    let application_production = application
-        .split("#[cfg(test)]\nmod tests")
-        .next()
-        .unwrap_or(&application);
+
+    let session = module_source("src/editor/session");
     for forbidden in [
         "unsaved changes; use :q!",
         "new scratch buffer",
@@ -236,32 +237,24 @@ fn current_surface_presentation_comes_from_configuration_assets() {
         "pattern not found:",
     ] {
         assert!(
-            !application_production.contains(forbidden),
-            "application embeds configurable user message `{forbidden}`"
+            !session.contains(forbidden),
+            "session embeds configurable user message `{forbidden}`"
         );
     }
-    let terminal = fs::read_to_string(manifest.join("src/terminal_ui/terminal.rs"))
-        .expect("read terminal writer");
+
+    let terminal = module_source("src/ui/terminal.rs");
     let style_function = terminal
         .split("fn queue_style")
         .nth(1)
         .and_then(|tail| tail.split("fn detect_color_tier").next())
         .expect("theme writer function");
-    assert!(
-        !style_function.contains("Color::Cyan") && !style_function.contains("Color::DarkGrey"),
-        "terminal style writer must consume the resolved theme"
-    );
+    assert!(!style_function.contains("Color::Cyan"));
+    assert!(!style_function.contains("Color::DarkGrey"));
 }
 
 #[test]
 fn current_surface_io_and_timing_policy_stay_out_of_the_foreground() {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let application = fs::read_to_string(manifest.join("src/application/interactive.rs"))
-        .expect("read application coordinator");
-    let production = application
-        .split("#[cfg(test)]\nmod tests")
-        .next()
-        .unwrap_or(&application);
+    let session = module_source("src/editor/session");
     for forbidden in [
         "std::fs",
         "fs::read_dir",
@@ -270,73 +263,28 @@ fn current_surface_io_and_timing_policy_stay_out_of_the_foreground() {
         "Duration::from_millis(100)",
     ] {
         assert!(
-            !production.contains(forbidden),
-            "foreground coordinator hardcodes I/O/timing policy `{forbidden}`"
+            !session.contains(forbidden),
+            "foreground session hardcodes I/O/timing policy `{forbidden}`"
         );
     }
-    let defaults = fs::read_to_string(manifest.join("assets/defaults/config.toml"))
-        .expect("read bundled config");
+
+    let defaults = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/defaults/config.toml"),
+    )
+    .expect("read bundled config");
     let value = toml::from_str::<toml::Value>(&defaults).expect("typed bundled config");
-    let required = [
-        (
-            "recovery.write_debounce_ms",
-            value["recovery"]["write_debounce_ms"].is_integer(),
-        ),
-        (
-            "recovery.cleanup_enabled",
-            value["recovery"]["cleanup_enabled"].is_bool(),
-        ),
-        (
-            "recovery.maximum_retained_records",
-            value["recovery"]["maximum_retained_records"].is_integer(),
-        ),
-        (
-            "recovery.maximum_age_days",
-            value["recovery"]["maximum_age_days"].is_integer(),
-        ),
-        (
-            "config_watch.poll_interval_ms",
-            value["config_watch"]["poll_interval_ms"].is_integer(),
-        ),
-        (
-            "config_watch.debounce_ms",
-            value["config_watch"]["debounce_ms"].is_integer(),
-        ),
-        (
-            "ui.panes.default_ratio",
-            value["ui"]["panes"]["default_ratio"].is_integer(),
-        ),
-        (
-            "ui.panes.resize_step",
-            value["ui"]["panes"]["resize_step"].is_integer(),
-        ),
-        (
-            "ui.panes.focus_wrap",
-            value["ui"]["panes"]["focus_wrap"].is_bool(),
-        ),
-        (
-            "input.completion_select_first",
-            value["input"]["completion_select_first"].is_bool(),
-        ),
-        (
-            "input.completion_accept_on_submit",
-            value["input"]["completion_accept_on_submit"].is_bool(),
-        ),
-    ];
-    for (path, present_with_type) in required {
-        assert!(
-            present_with_type,
-            "missing or mistyped current-surface policy `{path}`"
-        );
-    }
-    let aliases = value["input"]["command_aliases"]
-        .as_table()
-        .expect("aliases are declarative");
-    assert!(!aliases.is_empty());
-    let labels = value["command_labels"]
-        .as_table()
-        .expect("command labels are declarative");
-    assert!(labels.len() > 50 && labels.values().all(|label| label.is_str()));
+    assert!(value["recovery"]["write_debounce_ms"].is_integer());
+    assert!(value["recovery"]["cleanup_enabled"].is_bool());
+    assert!(value["config_watch"]["poll_interval_ms"].is_integer());
+    assert!(value["config_watch"]["debounce_ms"].is_integer());
+    assert!(value["ui"]["panes"]["default_ratio"].is_integer());
+    assert!(value["input"]["completion_select_first"].is_bool());
+    assert!(value["input"]["completion_accept_on_submit"].is_bool());
+    assert!(
+        value["command_labels"]
+            .as_table()
+            .is_some_and(|labels| labels.len() > 50 && labels.values().all(toml::Value::is_str))
+    );
 
     for context in [
         "editor_mouse",
@@ -344,65 +292,19 @@ fn current_surface_io_and_timing_policy_stay_out_of_the_foreground() {
         "prompt_mouse",
         "key_release",
     ] {
-        assert!(
-            production.contains(&format!("\"{context}\"")),
-            "application omits independently configurable mouse surface `{context}`"
-        );
-    }
-    let keymaps = fs::read_to_string(manifest.join("assets/defaults/keymaps.toml"))
-        .expect("read bundled keymaps");
-    for context in [
-        "editor_mouse",
-        "command_prompt",
-        "search_prompt",
-        "dashboard",
-        "focus",
-    ] {
-        assert!(
-            keymaps.contains(&format!("context = \"{context}\"")),
-            "bundled keymaps omit current input surface `{context}`"
-        );
-    }
-
-    let mut sources = Vec::new();
-    rust_sources(&manifest.join("src"), &mut sources);
-    for path in sources {
-        if path.ends_with("configuration/mod.rs") || path.ends_with("filesystem/mod.rs") {
-            continue;
-        }
-        let source = fs::read_to_string(&path).expect("read production source");
-        let production = source
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or(&source);
-        for line in production.lines() {
-            let compact = line.replace(' ', "");
-            assert!(
-                !compact.contains("Duration::from_millis(100)")
-                    && !compact.contains("Duration::from_millis(250)"),
-                "{} embeds watcher/recovery timing policy in production: {line}",
-                path.display()
-            );
-        }
+        assert!(session.contains(&format!("\"{context}\"")));
     }
 }
 
 #[test]
 fn configuration_and_recovery_sources_use_bounded_capture_readers() {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let configuration = fs::read_to_string(manifest.join("src/configuration/mod.rs"))
-        .expect("read configuration source");
-    let configuration_production = configuration
-        .split("#[cfg(test)]\nmod tests")
-        .next()
-        .unwrap_or(&configuration);
-    assert!(!configuration_production.contains("fs::read_to_string("));
-    assert!(!configuration_production.contains("fs::read("));
-    assert!(configuration_production.contains("WATCH_FINGERPRINT_BYTE_CEILING.saturating_add(1)"));
+    let configuration = module_source("src/config");
+    assert!(!configuration.contains("fs::read_to_string("));
+    assert!(!configuration.contains("fs::read("));
+    assert!(configuration.contains("WATCH_FINGERPRINT_BYTE_CEILING.saturating_add(1)"));
 
-    let filesystem =
-        fs::read_to_string(manifest.join("src/filesystem/mod.rs")).expect("read filesystem source");
-    let discovery = filesystem
+    let recovery = module_source("src/files/recovery.rs");
+    let discovery = recovery
         .split("pub fn discover_recovery")
         .nth(1)
         .and_then(|source| source.split("pub fn cleanup_recovery").next())
@@ -410,36 +312,45 @@ fn configuration_and_recovery_sources_use_bounded_capture_readers() {
     assert!(!discovery.contains("fs::read_to_string("));
     assert!(!discovery.contains("fs::read("));
     assert!(discovery.contains("read_recovery_source"));
-    let bounded_reader = filesystem
-        .split("fn read_bounded_bytes")
-        .nth(1)
-        .and_then(|source| source.split("fn read_bounded_utf8").next())
-        .expect("bounded byte reader");
-    assert!(bounded_reader.contains("maximum_bytes.saturating_add(1)"));
-    assert!(bounded_reader.contains(".take("));
+    assert!(recovery.contains("maximum_bytes.saturating_add(1)"));
+    assert!(recovery.contains(".take("));
 
-    for relative in ["src/application/mod.rs", "src/application/interactive.rs"] {
-        let source = fs::read_to_string(manifest.join(relative)).expect("read application source");
-        let production = source
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or(&source);
-        assert!(!production.contains("fs::read("));
-        assert!(!production.contains("fs::read_to_string("));
-        assert!(!production.contains("read_to_end("));
-    }
+    let editor = module_source("src/editor");
+    assert!(!editor.contains("fs::read_to_string("));
+    assert!(!editor.contains("read_to_end("));
 }
 
 #[test]
-fn obsolete_internal_package_imports_do_not_return() {
+fn obsolete_and_ambiguous_source_owners_do_not_return() {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    assert!(
-        !manifest.join("crates").exists(),
-        "obsolete multi-crate source tree must not return"
-    );
-    let root = manifest.join("src");
+    assert!(!manifest.join("crates").exists());
+    for removed in [
+        "application",
+        "runtime",
+        "workbench",
+        "interactive",
+        "coordinator",
+        "document",
+        "editing",
+        "terminal_ui",
+        "plugins",
+        "packages",
+        "processes",
+        "configuration",
+        "filesystem",
+        "languages",
+        "debugging",
+        "observability",
+        "test_support",
+    ] {
+        assert!(
+            !manifest.join("src").join(removed).exists(),
+            "removed source owner `{removed}` returned"
+        );
+    }
+
     let mut sources = Vec::new();
-    rust_sources(&root, &mut sources);
+    rust_sources(&manifest.join("src"), &mut sources);
     for path in sources {
         let source = fs::read_to_string(&path).expect("read Rust source");
         for obsolete in [

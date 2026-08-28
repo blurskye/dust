@@ -13,8 +13,8 @@ use std::{
 };
 
 use clap::Parser;
-use dust::application::{resolve_startup, run_interactive};
-use dust::configuration::{load_bundled_config, load_user_config};
+use dust::config::{load_bundled_config, load_user_config};
+use dust::editor::{resolve_startup, run_interactive};
 
 #[derive(Debug, Parser)]
 #[command(name = "dust", version, about = "Dust modal terminal IDE")]
@@ -205,13 +205,13 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(root) = &cli.package_root {
         let manager =
-            dust::packages::PackageManager::new(root.clone(), 16 * 1024 * 1024, 64 * 1024 * 1024)?;
+            dust::tools::PackageManager::new(root.clone(), 16 * 1024 * 1024, 64 * 1024 * 1024)?;
         if let Some(path) = &cli.package_install {
             let source = fs::read(path)?;
             if source.len() > 1024 * 1024 {
                 return Err("package manifest exceeds ceiling".into());
             }
-            let manifest: dust::packages::PackageManifest = serde_json::from_slice(&source)?;
+            let manifest: dust::tools::PackageManifest = serde_json::from_slice(&source)?;
             let component_path = cli
                 .package_component
                 .as_ref()
@@ -243,7 +243,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             .package_store
             .as_ref()
             .ok_or("--package-store is required")?;
-        let count = dust::packages::verify_lock_store(lock, store, 16 * 1024 * 1024)?;
+        let count = dust::tools::verify_lock_store(lock, store, 16 * 1024 * 1024)?;
         println!("verified {count} package(s)");
         return Ok(());
     }
@@ -253,7 +253,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             return Err("configuration exceeds migration ceiling".into());
         }
         let source = fs::read_to_string(path)?;
-        let (migrated, changed) = dust::configuration::migrate_config_source(&source)
+        let (migrated, changed) = dust::config::migrate_config_source(&source)
             .map_err(|error| format!("migration failed: {error}"))?;
         if cli.apply_migration && changed {
             let temp = path.with_extension(format!("migrate.{}.tmp", std::process::id()));
@@ -302,13 +302,13 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         load_user_config()
     };
     if cli.check_config {
-        dust::application::validate_loaded_configuration(config.clone())?;
+        dust::editor::validate_loaded_configuration(config.clone())?;
         println!("configuration valid");
         return Ok(());
     }
     if cli.health {
-        let state = dust::configuration::user_state_directory();
-        let mut snapshot = dust::observability::HealthSnapshot {
+        let state = dust::config::user_state_directory();
+        let mut snapshot = dust::telemetry::HealthSnapshot {
             config_degraded: config.diagnostic.is_some(),
             ..Default::default()
         };
@@ -334,9 +334,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let safe_mode = cli.safe_mode
-        || previous_crash_count(
-            &dust::configuration::user_state_directory().join("last-crash.json"),
-        ) >= 2;
+        || previous_crash_count(&dust::config::user_state_directory().join("last-crash.json")) >= 2;
     run_interactive(startup, config, safe_mode)?;
     Ok(())
 }
@@ -360,7 +358,7 @@ fn install_crash_hook() {
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
         let _ = execute!(std::io::stderr(), LeaveAlternateScreen, Show);
-        let state = dust::configuration::user_state_directory();
+        let state = dust::config::user_state_directory();
         let _ = fs::create_dir_all(&state);
         #[cfg(unix)]
         {

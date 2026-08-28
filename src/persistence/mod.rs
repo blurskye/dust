@@ -300,7 +300,7 @@ enum Request {
     Write {
         generation: PersistenceId,
         path: PathBuf,
-        state: PersistedState,
+        state: Box<PersistedState>,
         policy: PersistencePolicy,
     },
 }
@@ -308,7 +308,7 @@ enum Request {
 pub enum PersistenceEvent {
     Loaded {
         generation: PersistenceId,
-        state: PersistedState,
+        state: Box<PersistedState>,
     },
     Saved {
         generation: PersistenceId,
@@ -340,7 +340,10 @@ impl PersistenceService {
                             path,
                             policy,
                         } => match read_state(&path, &policy) {
-                            Ok(state) => PersistenceEvent::Loaded { generation, state },
+                            Ok(state) => PersistenceEvent::Loaded {
+                                generation,
+                                state: Box::new(state),
+                            },
                             Err(error) => PersistenceEvent::Failed { generation, error },
                         },
                         Request::Write {
@@ -393,7 +396,7 @@ impl PersistenceService {
             .try_send(Request::Write {
                 generation,
                 path,
-                state,
+                state: Box::new(state),
                 policy,
             })
             .map_err(queue_error)?;

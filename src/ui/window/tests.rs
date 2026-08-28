@@ -1,0 +1,769 @@
+use super::*;
+
+fn balanced_layout(windows: &[WindowId]) -> TiledLayoutNode {
+    if windows.len() == 1 {
+        return TiledLayoutNode::Window(windows[0]);
+    }
+    let middle = windows.len() / 2;
+    TiledLayoutNode::Split {
+        axis: TileAxis::Horizontal,
+        ratio: 500,
+        first: Box::new(balanced_layout(&windows[..middle])),
+        second: Box::new(balanced_layout(&windows[middle..])),
+    }
+}
+
+fn graph_with_content() -> (WindowGraph, ContentId, ViewId, WorkspaceTabId) {
+    let mut graph = WindowGraph::default();
+    let content = graph
+        .create_content(
+            ContentTypeId::new("builtin.terminal").expect("type"),
+            ContentAdapterKind::TerminalSession,
+            "shell".into(),
+            false,
+            "builtin",
+            1,
+        )
+        .expect("content");
+    let view = graph.create_view(content, "builtin", 1).expect("view");
+    let tab = graph
+        .create_workspace_tab("builtin", 1)
+        .expect("workspace tab");
+    (graph, content, view, tab)
+}
+
+#[test]
+fn one_content_view_and_window_move_without_identity_replacement() {
+    let (mut graph, content, view, tab) = graph_with_content();
+    let window = graph
+        .open_window(
+            tab,
+            view,
+            WindowPlacement::Docked {
+                edge: DockEdge::Bottom,
+                size: 12,
+            },
+            true,
+            "builtin",
+            1,
+        )
+        .expect("window");
+    graph
+        .place(
+            window,
+            WindowPlacement::Floating(WindowRect {
+                x: 5,
+                y: 3,
+                width: 80,
+                height: 24,
+            }),
+        )
+        .expect("float");
+    graph
+        .place(window, WindowPlacement::Fullscreen)
+        .expect("fullscreen");
+    assert_eq!(graph.window(window).expect("same window").view, view);
+    assert_eq!(graph.view(view).expect("same view").content, content);
+    assert_eq!(graph.focused(), Some(window));
+    graph.validate().expect("valid graph");
+}
+
+#[test]
+fn content_can_own_independent_views_but_each_view_has_one_window() {
+    let (mut graph, content, first_view, tab) = graph_with_content();
+    let second_view = graph.create_view(content, "builtin", 1).expect("view");
+    let first = graph
+        .open_window(
+            tab,
+            first_view,
+            WindowPlacement::Fullscreen,
+            true,
+            "builtin",
+            1,
+        )
+        .expect("first");
+    graph
+        .open_window(
+            tab,
+            second_view,
+            WindowPlacement::Floating(WindowRect {
+                x: 1,
+                y: 1,
+                width: 10,
+                height: 5,
+            }),
+            true,
+            "builtin",
+            1,
+        )
+        .expect("second");
+    assert_eq!(
+        graph.open_window(
+            tab,
+            first_view,
+            WindowPlacement::Fullscreen,
+            true,
+            "builtin",
+            1,
+        ),
+        Err(WindowError::ViewAlreadyHosted)
+    );
+    graph.close_window(first).expect("close first window");
+    graph.remove_view(first_view).expect("remove first view");
+    assert!(graph.content(content).is_some());
+    assert_eq!(graph.content_snapshots()[0].view_count, 1);
+}
+
+#[test]
+fn tiled_topology_rejects_stale_duplicate_orphan_and_excess_depth() {
+    let (mut graph, content, first_view, tab) = graph_with_content();
+    let second_view = graph.create_view(content, "builtin", 1).expect("view");
+    let first = graph
+        .open_window(tab, first_view, WindowPlacement::Tiled, true, "builtin", 1)
+        .expect("first");
+    let second = graph
+        .open_window(tab, second_view, WindowPlacement::Tiled, true, "builtin", 1)
+        .expect("second");
+    let split = |left, right| TiledLayoutNode::Split {
+        axis: TileAxis::Horizontal,
+        ratio: 300,
+        first: Box::new(TiledLayoutNode::Window(left)),
+        second: Box::new(TiledLayoutNode::Window(right)),
+    };
+    assert_eq!(
+        graph.set_tiled_layout(tab, Some(split(first, first))),
+        Err(WindowError::DuplicateTiledWindow)
+    );
+    assert_eq!(
+        graph.set_tiled_layout(tab, Some(split(first, WindowId(999)))),
+        Err(WindowError::StaleTiledWindow)
+    );
+    assert_eq!(
+        graph.set_tiled_layout(tab, Some(TiledLayoutNode::Window(first))),
+        Err(WindowError::OrphanTiledWindow)
+    );
+    let floating_view = graph
+        .create_view(content, "builtin", 1)
+        .expect("floating view");
+    let floating = graph
+        .open_window(
+            tab,
+            floating_view,
+            WindowPlacement::Floating(WindowRect {
+                x: 1,
+                y: 1,
+                width: 10,
+                height: 5,
+            }),
+            true,
+            "builtin",
+            1,
+        )
+        .expect("floating window");
+    assert_eq!(
+        graph.set_tiled_layout(tab, Some(split(first, floating))),
+        Err(WindowError::NonTiledWindowInLayout)
+    );
+    let foreign_view = graph
+        .create_view(content, "builtin", 1)
+        .expect("foreign view");
+    let foreign_tab = graph
+        .create_workspace_tab("builtin", 1)
+        .expect("foreign tab");
+    let foreign = graph
+        .open_window(
+            foreign_tab,
+            foreign_view,
+            WindowPlacement::Tiled,
+            true,
+            "builtin",
+            1,
+        )
+        .expect("foreign tiled window");
+    assert_eq!(
+        graph.set_tiled_layout(tab, Some(split(first, foreign))),
+        Err(WindowError::NonTiledWindowInLayout)
+    );
+    let mut too_deep = TiledLayoutNode::Window(WindowId(999));
+    for _ in 0..MAXIMUM_TILED_DEPTH {
+        too_deep = TiledLayoutNode::Split {
+            axis: TileAxis::Horizontal,
+            ratio: 500,
+            first: Box::new(too_deep),
+            second: Box::new(TiledLayoutNode::Window(WindowId(998))),
+        };
+    }
+    assert_eq!(
+        graph.set_tiled_layout(tab, Some(too_deep)),
+        Err(WindowError::TiledLayoutTooDeep)
+    );
+    graph
+        .set_tiled_layout(tab, Some(split(first, second)))
+        .expect("valid layout");
+    graph.validate().expect("valid graph");
+}
+
+#[test]
+fn topology_count_ceiling_rejects_even_a_shallow_balanced_tree() {
+    let (mut graph, content, first_view, tab) = graph_with_content();
+    let mut windows = Vec::new();
+    for index in 0..=MAXIMUM_TILED_WINDOWS {
+        let view = if index == 0 {
+            first_view
+        } else {
+            let id = ViewId(u64::try_from(index + 1).expect("view id"));
+            graph.views.insert(
+                id,
+                ViewDescriptor {
+                    id,
+                    content,
+                    owner: "builtin".into(),
+                    generation: 1,
+                },
+            );
+            graph.next_view = graph.next_view.max(id.0);
+            id
+        };
+        let window = WindowId(u64::try_from(index + 1).expect("window id"));
+        graph.windows.insert(
+            window,
+            WindowDescriptor {
+                id: window,
+                tab,
+                view,
+                placement: WindowPlacement::Tiled,
+                focusable: true,
+                owner: "builtin".into(),
+                generation: 1,
+            },
+        );
+        graph.next_window = graph.next_window.max(window.0);
+        windows.push(window);
+    }
+    graph.workspace_tabs.get_mut(&tab).expect("tab").tiled_root = Some(balanced_layout(&windows));
+    assert_eq!(graph.validate(), Err(WindowError::TooManyTiledWindows));
+}
+
+#[test]
+fn checked_topology_mutations_reject_without_partial_graph_changes() {
+    let (mut graph, content, first_view, tab) = graph_with_content();
+    let mut tiled = Vec::new();
+    for index in 0..MAXIMUM_TILED_DEPTH {
+        let view = if index == 0 {
+            first_view
+        } else {
+            graph.create_view(content, "builtin", 1).expect("view")
+        };
+        tiled.push(
+            graph
+                .open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1)
+                .expect("window within topology ceiling"),
+        );
+    }
+    graph.validate().expect("ceiling graph remains valid");
+
+    let rejected_view = graph
+        .create_view(content, "builtin", 1)
+        .expect("extra view");
+    let before_open = graph.clone();
+    assert_eq!(
+        graph.open_window(
+            tab,
+            rejected_view,
+            WindowPlacement::Tiled,
+            true,
+            "builtin",
+            1,
+        ),
+        Err(WindowError::TiledLayoutTooDeep)
+    );
+    assert_eq!(graph, before_open);
+
+    let floating_view = graph
+        .create_view(content, "builtin", 1)
+        .expect("floating view");
+    let floating = graph
+        .open_window(
+            tab,
+            floating_view,
+            WindowPlacement::Floating(WindowRect {
+                x: 2,
+                y: 2,
+                width: 20,
+                height: 8,
+            }),
+            true,
+            "builtin",
+            1,
+        )
+        .expect("floating window");
+    let before_place = graph.clone();
+    assert_eq!(
+        graph.place(floating, WindowPlacement::Tiled),
+        Err(WindowError::TiledLayoutTooDeep)
+    );
+    assert_eq!(graph, before_place);
+    assert_eq!(
+        graph.rehost(floating, tab, floating_view, WindowPlacement::Tiled, true,),
+        Err(WindowError::TiledLayoutTooDeep)
+    );
+    assert_eq!(graph, before_place);
+
+    let before_stale = graph.clone();
+    assert_eq!(
+        graph.resize_tiled_split(tab, WindowId(u64::MAX), 100),
+        Err(WindowError::WindowNotInTiledLayout)
+    );
+    assert_eq!(
+        graph.swap_tiled_windows(tab, tiled[0], WindowId(u64::MAX)),
+        Err(WindowError::WindowNotInTiledLayout)
+    );
+    assert_eq!(graph, before_stale);
+    graph.validate().expect("all rejected mutations are atomic");
+}
+
+#[test]
+fn nested_projection_tiny_fallback_resize_and_swap_preserve_window_ids() {
+    let (mut graph, content, first_view, tab) = graph_with_content();
+    let second_view = graph
+        .create_view(content, "builtin", 1)
+        .expect("second view");
+    let third_view = graph
+        .create_view(content, "builtin", 1)
+        .expect("third view");
+    let open = |graph: &mut WindowGraph, view| {
+        graph
+            .open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1)
+            .expect("window")
+    };
+    let first = open(&mut graph, first_view);
+    let second = open(&mut graph, second_view);
+    let third = open(&mut graph, third_view);
+    graph
+        .set_tiled_layout(
+            tab,
+            Some(TiledLayoutNode::Split {
+                axis: TileAxis::Horizontal,
+                ratio: 300,
+                first: Box::new(TiledLayoutNode::Window(first)),
+                second: Box::new(TiledLayoutNode::Split {
+                    axis: TileAxis::Vertical,
+                    ratio: 600,
+                    first: Box::new(TiledLayoutNode::Window(second)),
+                    second: Box::new(TiledLayoutNode::Window(third)),
+                }),
+            }),
+        )
+        .expect("layout");
+    graph.focus(third).expect("focus third");
+    let snapshot = graph.tiled_layout_snapshot(tab).expect("snapshot");
+    let projected = snapshot.project(
+        WindowRect {
+            x: 0,
+            y: 1,
+            width: 100,
+            height: 30,
+        },
+        1,
+        1,
+    );
+    assert_eq!(projected.windows.len(), 3);
+    assert_eq!(projected.borders.len(), 2);
+    assert_eq!(projected.windows[0].window, first);
+    assert!(projected.windows[0].rect.width < projected.windows[1].rect.width);
+
+    let tiny = snapshot.project(
+        WindowRect {
+            x: 0,
+            y: 0,
+            width: 8,
+            height: 3,
+        },
+        5,
+        2,
+    );
+    assert!(tiny.collapsed_to_focused);
+    assert_eq!(
+        tiny.windows,
+        vec![ProjectedWindow {
+            window: third,
+            rect: WindowRect {
+                x: 0,
+                y: 0,
+                width: 8,
+                height: 3
+            },
+        }]
+    );
+
+    graph.resize_tiled_split(tab, first, 100).expect("resize");
+    let resized = graph.tiled_layout_snapshot(tab).expect("resized").project(
+        WindowRect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 30,
+        },
+        1,
+        1,
+    );
+    assert!(resized.windows[0].rect.width > projected.windows[0].rect.width);
+    graph.swap_tiled_windows(tab, first, third).expect("swap");
+    let swapped = graph.tiled_layout_snapshot(tab).expect("swapped").project(
+        WindowRect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 30,
+        },
+        1,
+        1,
+    );
+    assert_eq!(swapped.windows[0].window, third);
+    assert!(graph.window(first).is_some() && graph.window(third).is_some());
+    graph.validate().expect("valid graph");
+}
+
+#[test]
+fn compositor_projects_docks_tiles_floats_fullscreen_and_overlays_deterministically() {
+    let (mut graph, content, tiled_view, tab) = graph_with_content();
+    let open = |graph: &mut WindowGraph, placement| {
+        let view = graph.create_view(content, "builtin", 1).expect("view");
+        graph
+            .open_window(tab, view, placement, true, "builtin", 1)
+            .expect("window")
+    };
+    let tiled = graph
+        .open_window(tab, tiled_view, WindowPlacement::Tiled, true, "builtin", 1)
+        .expect("tiled");
+    let left = open(
+        &mut graph,
+        WindowPlacement::Docked {
+            edge: DockEdge::Left,
+            size: 20,
+        },
+    );
+    let bottom = open(
+        &mut graph,
+        WindowPlacement::Docked {
+            edge: DockEdge::Bottom,
+            size: 6,
+        },
+    );
+    let floating = open(
+        &mut graph,
+        WindowPlacement::Floating(WindowRect {
+            x: 95,
+            y: 28,
+            width: 20,
+            height: 10,
+        }),
+    );
+    let overlay = open(
+        &mut graph,
+        WindowPlacement::Overlay(WindowRect {
+            x: 2,
+            y: 2,
+            width: 12,
+            height: 4,
+        }),
+    );
+    let snapshot = graph.compositor_snapshot(tab).expect("snapshot");
+    let projection = snapshot.project(
+        WindowRect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 30,
+        },
+        5,
+        2,
+    );
+    assert_eq!(projection.window(left).expect("left").rect.width, 20);
+    assert_eq!(projection.window(bottom).expect("bottom").rect.height, 6);
+    assert_eq!(
+        projection.window(tiled).expect("tile").rect,
+        WindowRect {
+            x: 20,
+            y: 0,
+            width: 80,
+            height: 24,
+        }
+    );
+    assert_eq!(
+        projection.window(floating).expect("float clipped").rect,
+        WindowRect {
+            x: 95,
+            y: 28,
+            width: 5,
+            height: 2,
+        }
+    );
+    assert_eq!(
+        projection.windows.last().expect("top overlay").window,
+        overlay
+    );
+    assert_eq!(projection.hit_test(3, 3), Some(overlay));
+    assert_eq!(
+        projection.spatial_neighbor(tiled, SpatialDirection::Left),
+        Some(left)
+    );
+    assert_eq!(
+        projection.spatial_neighbor(tiled, SpatialDirection::Down),
+        Some(bottom)
+    );
+
+    let mut tiny = snapshot.project(
+        WindowRect {
+            x: 0,
+            y: 0,
+            width: 4,
+            height: 2,
+        },
+        5,
+        2,
+    );
+    assert_eq!(tiny.workspace_bounds.width, 1);
+    assert_eq!(tiny.workspace_bounds.height, 1);
+    assert_eq!(
+        tiny.window(tiled).expect("tiny tile").rect,
+        tiny.tiled_bounds
+    );
+    let protected = WindowRect {
+        x: 0,
+        y: 0,
+        width: 2,
+        height: 1,
+    };
+    tiny.set_protected_regions([protected]);
+    assert_eq!(tiny.protected_regions, vec![protected]);
+    assert_eq!(tiny.hit_test(0, 0), None);
+
+    let fullscreen = open(&mut graph, WindowPlacement::Fullscreen);
+    let before_second = graph.clone();
+    let second_fullscreen_view = graph.create_view(content, "builtin", 1).expect("view");
+    let before_rejected = graph.clone();
+    assert_eq!(
+        graph.open_window(
+            tab,
+            second_fullscreen_view,
+            WindowPlacement::Fullscreen,
+            true,
+            "builtin",
+            1,
+        ),
+        Err(WindowError::MultipleFullscreenWindows)
+    );
+    assert_eq!(graph, before_rejected);
+    assert_ne!(graph, before_second);
+    let fullscreen_projection = graph.compositor_snapshot(tab).expect("snapshot").project(
+        WindowRect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 30,
+        },
+        5,
+        2,
+    );
+    assert_eq!(fullscreen_projection.windows[0].window, fullscreen);
+    assert_eq!(
+        fullscreen_projection.windows[0].layer,
+        CompositorLayer::Fullscreen
+    );
+    assert_eq!(
+        fullscreen_projection
+            .windows
+            .last()
+            .expect("overlay")
+            .window,
+        overlay
+    );
+    assert!(fullscreen_projection.window(tiled).is_none());
+    graph.validate().expect("valid compositor graph");
+}
+
+#[test]
+fn graph_revision_and_typed_targets_cover_changes_rejection_and_exhaustion() {
+    let (mut graph, content, view, tab) = graph_with_content();
+    let window = graph
+        .open_window(
+            tab,
+            view,
+            WindowPlacement::Docked {
+                edge: DockEdge::Left,
+                size: 4,
+            },
+            true,
+            "builtin",
+            1,
+        )
+        .expect("window");
+    let opened = graph.revision().expect("revision");
+    graph
+        .update_content(content, "shell".into(), false)
+        .expect("no-op update");
+    assert_eq!(graph.revision(), Some(opened));
+    graph
+        .place(
+            window,
+            WindowPlacement::Floating(WindowRect {
+                x: 1,
+                y: 2,
+                width: 8,
+                height: 4,
+            }),
+        )
+        .expect("placement");
+    assert_eq!(graph.revision(), Some(opened + 1));
+    let before_rejection = graph.clone();
+    assert_eq!(
+        graph.place(
+            WindowId(999_999),
+            WindowPlacement::Docked {
+                edge: DockEdge::Right,
+                size: 2,
+            }
+        ),
+        Err(WindowError::UnknownWindow)
+    );
+    assert_eq!(graph, before_rejection);
+    assert_eq!(graph.resolve_target(&WindowTarget::Id(window)), Ok(window));
+    assert_eq!(
+        graph.resolve_target(&WindowTarget::ContentType(
+            ContentTypeId::new("builtin.terminal").expect("type")
+        )),
+        Ok(window)
+    );
+    let ambiguous_view = graph.create_view(content, "builtin", 1).expect("view");
+    let ambiguous = graph
+        .open_window(
+            tab,
+            ambiguous_view,
+            WindowPlacement::Floating(WindowRect {
+                x: 2,
+                y: 2,
+                width: 3,
+                height: 2,
+            }),
+            true,
+            "builtin",
+            1,
+        )
+        .expect("ambiguous window");
+    assert_eq!(
+        graph.resolve_target(&WindowTarget::ContentType(
+            ContentTypeId::new("builtin.terminal").expect("type")
+        )),
+        Err(WindowError::AmbiguousWindowTarget)
+    );
+    graph.close_window(ambiguous).expect("close ambiguous");
+    graph.remove_view(ambiguous_view).expect("remove view");
+
+    let second_tab = graph.create_workspace_tab("builtin", 1).expect("tab");
+    let second_view = graph.create_view(content, "builtin", 1).expect("view");
+    let second = graph
+        .open_window(
+            second_tab,
+            second_view,
+            WindowPlacement::Floating(WindowRect {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 2,
+            }),
+            true,
+            "builtin",
+            1,
+        )
+        .expect("second");
+    graph.set_active_tab(tab).expect("first tab");
+    assert_eq!(
+        graph.resolve_target(&WindowTarget::Id(second)),
+        Err(WindowError::WindowOutsideActiveTab)
+    );
+
+    let mut exhausted = graph.clone();
+    exhausted.exhaust_revision_for_test();
+    let before = exhausted.clone();
+    assert_eq!(
+        exhausted.update_content(content, "changed".into(), true),
+        Err(WindowError::RevisionExhausted)
+    );
+    assert_eq!(exhausted, before);
+    assert_eq!(exhausted.revision(), None);
+}
+
+#[test]
+fn generation_cleanup_removes_only_exact_owned_graph_resources() {
+    let mut graph = WindowGraph::default();
+    let old = graph
+        .create_content(
+            ContentTypeId::new("plugin.old").expect("type"),
+            ContentAdapterKind::DeclarativeUi,
+            "old".into(),
+            false,
+            "plugin",
+            1,
+        )
+        .expect("old");
+    let new = graph
+        .create_content(
+            ContentTypeId::new("plugin.new").expect("type"),
+            ContentAdapterKind::DeclarativeUi,
+            "new".into(),
+            false,
+            "plugin",
+            2,
+        )
+        .expect("new");
+    for (content, generation) in [(old, 1), (new, 2)] {
+        let view = graph
+            .create_view(content, "plugin", generation)
+            .expect("view");
+        let tab = graph
+            .create_workspace_tab("plugin", generation)
+            .expect("tab");
+        graph
+            .open_window(
+                tab,
+                view,
+                WindowPlacement::Fullscreen,
+                true,
+                "plugin",
+                generation,
+            )
+            .expect("window");
+    }
+    graph
+        .remove_owner_generation("plugin", 1)
+        .expect("remove owner generation");
+    assert!(graph.content(old).is_none());
+    assert!(graph.content(new).is_some());
+    assert_eq!(graph.counts(), (1, 1, 1, 1));
+    graph.validate().expect("valid graph");
+}
+
+#[test]
+fn ids_placements_focus_and_removal_order_are_validated() {
+    assert!(ContentTypeId::new("Plugin.Bad").is_err());
+    let (mut graph, content, view, tab) = graph_with_content();
+    assert_eq!(
+        graph.open_window(
+            tab,
+            view,
+            WindowPlacement::Docked {
+                edge: DockEdge::Left,
+                size: 0,
+            },
+            true,
+            "builtin",
+            1,
+        ),
+        Err(WindowError::InvalidPlacement)
+    );
+    assert_eq!(
+        graph.remove_content(content),
+        Err(WindowError::ContentStillViewed)
+    );
+}

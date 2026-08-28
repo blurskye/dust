@@ -252,15 +252,6 @@ foreground_16 = "white"
 background_16 = "black"
 attributes = []
 
-[styles.ai_ghost]
-foreground = "#6e7681"
-background = "#0d1117"
-foreground_256 = "indexed:242"
-background_256 = "indexed:233"
-foreground_16 = "dark_grey"
-background_16 = "black"
-attributes = ["italic"]
-
 [styles.git_sign_added]
 foreground = "#3fb950"
 background = "#0d1117"

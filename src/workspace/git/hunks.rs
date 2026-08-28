@@ -1,0 +1,636 @@
+use super::*;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum GitDiffLayer {
+    Unstaged,
+    Staged,
+}
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct GitHunkId(pub u64);
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct GitHunkGeneration(pub u64);
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GitDiffLineKind {
+    Context,
+    Add,
+    Delete,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitDiffLine {
+    pub kind: GitDiffLineKind,
+    pub old_line: Option<u32>,
+    pub new_line: Option<u32>,
+    pub text: String,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitHunk {
+    pub id: GitHunkId,
+    pub old_start: u32,
+    pub old_lines: u32,
+    pub new_start: u32,
+    pub new_lines: u32,
+    pub header: String,
+    pub lines: Vec<GitDiffLine>,
+}
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum GitHunkSignKind {
+    Added,
+    Changed,
+    Deleted,
+}
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct GitHunkSign {
+    pub line: usize,
+    pub kind: GitHunkSignKind,
+}
+
+#[must_use]
+pub fn git_hunk_signs(snapshot: &GitHunkSnapshot) -> Vec<GitHunkSign> {
+    let mut signs = std::collections::BTreeMap::new();
+    for hunk in &snapshot.hunks {
+        let has_add = hunk
+            .lines
+            .iter()
+            .any(|line| line.kind == GitDiffLineKind::Add);
+        let has_delete = hunk
+            .lines
+            .iter()
+            .any(|line| line.kind == GitDiffLineKind::Delete);
+        let kind = match (has_add, has_delete) {
+            (true, false) => GitHunkSignKind::Added,
+            (false, true) => GitHunkSignKind::Deleted,
+            _ => GitHunkSignKind::Changed,
+        };
+        let mut inserted = false;
+        for line in &hunk.lines {
+            if let Some(line_number) = line.new_line.filter(|_| line.kind == GitDiffLineKind::Add) {
+                let line = line_number.saturating_sub(1) as usize;
+                signs
+                    .entry(line)
+                    .and_modify(|existing| {
+                        if kind > *existing {
+                            *existing = kind;
+                        }
+                    })
+                    .or_insert(kind);
+                inserted = true;
+            }
+        }
+        if !inserted {
+            signs
+                .entry(hunk.new_start.saturating_sub(1) as usize)
+                .and_modify(|existing| {
+                    if kind > *existing {
+                        *existing = kind;
+                    }
+                })
+                .or_insert(kind);
+        }
+    }
+    signs
+        .into_iter()
+        .map(|(line, kind)| GitHunkSign { line, kind })
+        .collect()
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitHunkSnapshot {
+    pub generation: GitHunkGeneration,
+    pub revision: u64,
+    pub repository_id: GitRepositoryId,
+    pub status_revision: u64,
+    pub root_revision: u64,
+    pub file: PathBuf,
+    pub layer: GitDiffLayer,
+    pub buffer_revision: Option<u64>,
+    pub index_fingerprint: GitIndexFingerprint,
+    pub worktree_sha256: Option<[u8; 32]>,
+    pub hunks: Vec<GitHunk>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitHunkBufferInput {
+    pub revision: u64,
+    pub bytes: Vec<u8>,
+}
+#[derive(Clone, Debug)]
+pub struct GitHunkPolicy {
+    pub scope_root: PathBuf,
+    pub repository_id: GitRepositoryId,
+    pub status_revision: u64,
+    pub root_revision: u64,
+    pub file: PathBuf,
+    pub layer: GitDiffLayer,
+    pub maximum_hunks: usize,
+    pub maximum_lines: usize,
+    pub maximum_bytes: usize,
+    pub deadline: Duration,
+}
+#[derive(Debug, Error, Eq, PartialEq)]
+pub enum GitHunkError {
+    #[error("invalid hunk policy")]
+    InvalidPolicy,
+    #[error("stale repository identity")]
+    StaleRepository,
+    #[error("Git index changed during hunk calculation")]
+    StaleIndex,
+    #[error("hunk path is outside workspace scope")]
+    OutsideScope,
+    #[error("binary diffs are unsupported")]
+    BinaryUnsupported,
+    #[error("hunk limit exceeded")]
+    Limit,
+    #[error("hunk deadline exceeded")]
+    Deadline,
+    #[error("Git hunk request was cancelled")]
+    Cancelled,
+    #[error("Git hunk identity collision")]
+    IdentityCollision,
+    #[error("Git hunk worker stopped")]
+    Stopped,
+    #[error("Git hunk backend failed: {0}")]
+    Backend(String),
+}
+pub(super) enum GitHunkEvent {
+    Complete(Result<GitHunkSnapshot, GitHunkError>),
+}
+#[derive(Default)]
+pub struct GitHunkService {
+    next: u64,
+    active: Option<GitHunkGeneration>,
+    cancel: Option<Arc<AtomicBool>>,
+    receiver: Option<Receiver<GitHunkEvent>>,
+    accepted: Option<GitHunkSnapshot>,
+    revision: u64,
+}
+impl GitHunkService {
+    pub fn start(&mut self, policy: GitHunkPolicy) -> Result<GitHunkGeneration, GitHunkError> {
+        self.start_owned(policy, None)
+    }
+
+    pub fn start_buffer(
+        &mut self,
+        policy: GitHunkPolicy,
+        input: GitHunkBufferInput,
+    ) -> Result<GitHunkGeneration, GitHunkError> {
+        if policy.layer != GitDiffLayer::Unstaged {
+            return Err(GitHunkError::InvalidPolicy);
+        }
+        if input.bytes.len() > policy.maximum_bytes {
+            return Err(GitHunkError::Limit);
+        }
+        self.start_owned(policy, Some(input))
+    }
+
+    fn start_owned(
+        &mut self,
+        policy: GitHunkPolicy,
+        input: Option<GitHunkBufferInput>,
+    ) -> Result<GitHunkGeneration, GitHunkError> {
+        validate_hunk_policy(&policy)?;
+        self.cancel();
+        self.next = self.next.saturating_add(1);
+        let generation = GitHunkGeneration(self.next);
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let worker = Arc::clone(&cancellation);
+        let (tx, rx) = mpsc::sync_channel(1);
+        thread::Builder::new()
+            .name(format!("dust-git-hunk-{}", generation.0))
+            .spawn(move || {
+                let result = match input {
+                    Some(input) => read_buffer_hunks_owned(generation, &policy, input, &worker),
+                    None => read_hunks_owned(generation, &policy, &worker),
+                };
+                let _ = tx.send(GitHunkEvent::Complete(result));
+            })
+            .map_err(|_| GitHunkError::Stopped)?;
+        self.active = Some(generation);
+        self.cancel = Some(cancellation);
+        self.receiver = Some(rx);
+        Ok(generation)
+    }
+    pub fn cancel(&mut self) {
+        if let Some(c) = self.cancel.take() {
+            c.store(true, Ordering::Release)
+        }
+        self.active = None;
+        self.receiver = None
+    }
+    pub fn poll(&mut self) -> Result<Option<&GitHunkSnapshot>, GitHunkError> {
+        let event = match self.receiver.as_ref() {
+            Some(rx) => rx.try_recv(),
+            None => return Ok(None),
+        };
+        match event {
+            Ok(GitHunkEvent::Complete(result)) => {
+                let expected = self.active.take();
+                self.receiver = None;
+                self.cancel = None;
+                let mut snapshot = result?;
+                if expected != Some(snapshot.generation) {
+                    return Ok(None);
+                }
+                let changed = self.accepted.as_ref().is_none_or(|old| {
+                    old.repository_id != snapshot.repository_id
+                        || old.status_revision != snapshot.status_revision
+                        || old.root_revision != snapshot.root_revision
+                        || old.file != snapshot.file
+                        || old.layer != snapshot.layer
+                        || old.buffer_revision != snapshot.buffer_revision
+                        || old.hunks != snapshot.hunks
+                });
+                if changed {
+                    self.revision = self.revision.saturating_add(1)
+                }
+                snapshot.revision = self.revision;
+                self.accepted = Some(snapshot);
+                Ok(self.accepted.as_ref())
+            }
+            Err(TryRecvError::Empty) => Ok(None),
+            Err(TryRecvError::Disconnected) => {
+                self.active = None;
+                self.receiver = None;
+                self.cancel = None;
+                Err(GitHunkError::Stopped)
+            }
+        }
+    }
+    pub fn snapshot_if_changed(&self, last: u64) -> Option<&GitHunkSnapshot> {
+        self.accepted.as_ref().filter(|s| s.revision != last)
+    }
+    pub const fn generation(&self) -> u64 {
+        self.next
+    }
+}
+impl Drop for GitHunkService {
+    fn drop(&mut self) {
+        self.cancel()
+    }
+}
+pub(super) fn validate_hunk_policy(p: &GitHunkPolicy) -> Result<(), GitHunkError> {
+    if p.file.as_os_str().is_empty()
+        || p.file.is_absolute()
+        || p.file
+            .components()
+            .any(|c| !matches!(c, std::path::Component::Normal(_)))
+        || p.maximum_hunks == 0
+        || p.maximum_hunks > 10_000
+        || p.maximum_lines == 0
+        || p.maximum_lines > 100_000
+        || p.maximum_bytes == 0
+        || p.maximum_bytes > 8 * 1024 * 1024
+        || p.deadline.is_zero()
+        || p.deadline > Duration::from_secs(10)
+    {
+        Err(GitHunkError::InvalidPolicy)
+    } else {
+        Ok(())
+    }
+}
+
+pub fn read_hunks(p: &GitHunkPolicy) -> Result<GitHunkSnapshot, GitHunkError> {
+    read_hunks_owned(GitHunkGeneration(0), p, &AtomicBool::new(false))
+}
+
+pub(super) fn open_hunk_repository(
+    p: &GitHunkPolicy,
+) -> Result<(PathBuf, git2::Repository, PathBuf, PathBuf), GitHunkError> {
+    let root = std::fs::canonicalize(&p.scope_root)
+        .map_err(|e| GitHunkError::Backend(e.to_string().chars().take(1024).collect()))?;
+    let mut checked = root.clone();
+    for component in &p.file {
+        checked.push(component);
+        match std::fs::symlink_metadata(&checked) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(GitHunkError::OutsideScope);
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(error) => {
+                return Err(GitHunkError::Backend(
+                    error.to_string().chars().take(1024).collect(),
+                ));
+            }
+        }
+    }
+    let repo = git2::Repository::discover(&root)
+        .map_err(|e| GitHunkError::Backend(e.message().chars().take(1024).collect()))?;
+    let workdir = std::fs::canonicalize(repo.workdir().ok_or(GitHunkError::OutsideScope)?)
+        .map_err(|_| GitHunkError::OutsideScope)?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    workdir.hash(&mut hasher);
+    if GitRepositoryId(hasher.finish()) != p.repository_id {
+        return Err(GitHunkError::StaleRepository);
+    }
+    let prefix = root
+        .strip_prefix(&workdir)
+        .map_err(|_| GitHunkError::OutsideScope)?;
+    let repo_path = prefix.join(&p.file);
+    if repo_path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(GitHunkError::OutsideScope);
+    }
+    Ok((root, repo, workdir, repo_path))
+}
+
+pub(super) fn collect_hunks_from_diff(
+    diff: &git2::Diff<'_>,
+    p: &GitHunkPolicy,
+    cancel: &AtomicBool,
+) -> Result<Vec<GitHunk>, GitHunkError> {
+    if diff.deltas().any(|delta| delta.flags().is_binary()) {
+        return Err(GitHunkError::BinaryUnsupported);
+    }
+    let started = Instant::now();
+    let mut hunks: Vec<GitHunk> = Vec::new();
+    let mut current_header = Vec::new();
+    let mut lines = 0usize;
+    let mut bytes = 0usize;
+    let mut abort = None;
+    let print_result = diff.print(git2::DiffFormat::Patch, |delta, hunk, line| {
+        if cancel.load(Ordering::Acquire) {
+            abort = Some(GitHunkError::Cancelled);
+            return false;
+        }
+        if started.elapsed() > p.deadline {
+            abort = Some(GitHunkError::Deadline);
+            return false;
+        }
+        if delta.flags().contains(git2::DiffFlags::BINARY) {
+            abort = Some(GitHunkError::BinaryUnsupported);
+            return false;
+        }
+        let Some(h) = hunk else { return true };
+        let header = h.header().to_vec();
+        if header != current_header {
+            if hunks.len() >= p.maximum_hunks {
+                abort = Some(GitHunkError::Limit);
+                return false;
+            }
+            current_header = header.clone();
+            let mut hash = std::collections::hash_map::DefaultHasher::new();
+            p.layer.hash(&mut hash);
+            p.file.hash(&mut hash);
+            p.status_revision.hash(&mut hash);
+            header.hash(&mut hash);
+            hunks.push(GitHunk {
+                id: GitHunkId(hash.finish()),
+                old_start: h.old_start(),
+                old_lines: h.old_lines(),
+                new_start: h.new_start(),
+                new_lines: h.new_lines(),
+                header: String::from_utf8_lossy(&header)
+                    .chars()
+                    .take(1024)
+                    .collect(),
+                lines: Vec::new(),
+            });
+        }
+        let kind = match line.origin() {
+            ' ' => Some(GitDiffLineKind::Context),
+            '+' => Some(GitDiffLineKind::Add),
+            '-' => Some(GitDiffLineKind::Delete),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            lines += 1;
+            bytes = bytes.saturating_add(line.content().len());
+            if lines > p.maximum_lines || bytes > p.maximum_bytes {
+                abort = Some(GitHunkError::Limit);
+                return false;
+            }
+            hunks.last_mut().unwrap().lines.push(GitDiffLine {
+                kind,
+                old_line: line.old_lineno(),
+                new_line: line.new_lineno(),
+                text: String::from_utf8_lossy(line.content()).into_owned(),
+            });
+        }
+        true
+    });
+    if let Some(error) = abort {
+        return Err(error);
+    }
+    print_result.map_err(|e| GitHunkError::Backend(e.message().chars().take(1024).collect()))?;
+    if cancel.load(Ordering::Acquire) {
+        return Err(GitHunkError::Cancelled);
+    }
+    let mut identities = std::collections::BTreeSet::new();
+    if hunks.iter().any(|h| !identities.insert(h.id)) {
+        return Err(GitHunkError::IdentityCollision);
+    }
+    Ok(hunks)
+}
+
+pub(super) fn read_hunks_owned(
+    generation: GitHunkGeneration,
+    p: &GitHunkPolicy,
+    cancel: &AtomicBool,
+) -> Result<GitHunkSnapshot, GitHunkError> {
+    if cancel.load(Ordering::Acquire) {
+        return Err(GitHunkError::Cancelled);
+    }
+    if p.file.as_os_str().is_empty()
+        || p.file
+            .components()
+            .any(|c| !matches!(c, std::path::Component::Normal(_)))
+        || p.file.is_absolute()
+        || p.maximum_hunks == 0
+        || p.maximum_hunks > 10_000
+        || p.maximum_lines == 0
+        || p.maximum_lines > 100_000
+        || p.maximum_bytes == 0
+        || p.maximum_bytes > 8 * 1024 * 1024
+        || p.deadline.is_zero()
+        || p.deadline > Duration::from_secs(10)
+    {
+        return Err(GitHunkError::InvalidPolicy);
+    }
+    let (root, repo, workdir, repo_path) = open_hunk_repository(p)?;
+    let index_before =
+        git_index_fingerprint(&workdir).map_err(|_| GitHunkError::StaleRepository)?;
+    let mut options = git2::DiffOptions::new();
+    options.pathspec(&repo_path);
+    let diff = match p.layer {
+        GitDiffLayer::Unstaged => repo.diff_index_to_workdir(None, Some(&mut options)),
+        GitDiffLayer::Staged => {
+            let tree = repo.head().and_then(|h| h.peel_to_tree());
+            match tree {
+                Ok(tree) => repo.diff_tree_to_index(Some(&tree), None, Some(&mut options)),
+                Err(error) => Err(error),
+            }
+        }
+    }
+    .map_err(|e| GitHunkError::Backend(e.message().chars().take(1024).collect()))?;
+    let hunks = collect_hunks_from_diff(&diff, p, cancel)?;
+    let index_fingerprint =
+        git_index_fingerprint(&workdir).map_err(|_| GitHunkError::StaleRepository)?;
+    if index_fingerprint != index_before {
+        return Err(GitHunkError::StaleIndex);
+    }
+    let worktree_sha256 = worktree_hash(&root.join(&p.file)).ok().map(|value| value.0);
+    Ok(GitHunkSnapshot {
+        generation,
+        revision: 0,
+        repository_id: p.repository_id,
+        status_revision: p.status_revision,
+        root_revision: p.root_revision,
+        file: p.file.clone(),
+        layer: p.layer,
+        buffer_revision: None,
+        index_fingerprint,
+        worktree_sha256,
+        hunks,
+    })
+}
+
+pub(super) fn collect_hunks_from_patch(
+    patch: &git2::Patch<'_>,
+    p: &GitHunkPolicy,
+    cancel: &AtomicBool,
+) -> Result<Vec<GitHunk>, GitHunkError> {
+    if patch.delta().flags().contains(git2::DiffFlags::BINARY) {
+        return Err(GitHunkError::BinaryUnsupported);
+    }
+    let started = Instant::now();
+    let mut hunks = Vec::new();
+    let mut lines = 0usize;
+    let mut bytes = 0usize;
+    for hunk_index in 0..patch.num_hunks() {
+        if cancel.load(Ordering::Acquire) {
+            return Err(GitHunkError::Cancelled);
+        }
+        if started.elapsed() > p.deadline {
+            return Err(GitHunkError::Deadline);
+        }
+        if hunks.len() >= p.maximum_hunks {
+            return Err(GitHunkError::Limit);
+        }
+        let (hunk, line_count) = patch
+            .hunk(hunk_index)
+            .map_err(|e| GitHunkError::Backend(e.message().chars().take(1024).collect()))?;
+        let header = hunk.header().to_vec();
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        p.layer.hash(&mut hash);
+        p.file.hash(&mut hash);
+        p.status_revision.hash(&mut hash);
+        header.hash(&mut hash);
+        let mut accepted = GitHunk {
+            id: GitHunkId(hash.finish()),
+            old_start: hunk.old_start(),
+            old_lines: hunk.old_lines(),
+            new_start: hunk.new_start(),
+            new_lines: hunk.new_lines(),
+            header: String::from_utf8_lossy(&header)
+                .chars()
+                .take(1024)
+                .collect(),
+            lines: Vec::new(),
+        };
+        for line_index in 0..line_count {
+            if cancel.load(Ordering::Acquire) {
+                return Err(GitHunkError::Cancelled);
+            }
+            if started.elapsed() > p.deadline {
+                return Err(GitHunkError::Deadline);
+            }
+            let line = patch
+                .line_in_hunk(hunk_index, line_index)
+                .map_err(|e| GitHunkError::Backend(e.message().chars().take(1024).collect()))?;
+            let kind = match line.origin() {
+                ' ' => Some(GitDiffLineKind::Context),
+                '+' => Some(GitDiffLineKind::Add),
+                '-' => Some(GitDiffLineKind::Delete),
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                lines += 1;
+                bytes = bytes.saturating_add(line.content().len());
+                if lines > p.maximum_lines || bytes > p.maximum_bytes {
+                    return Err(GitHunkError::Limit);
+                }
+                accepted.lines.push(GitDiffLine {
+                    kind,
+                    old_line: line.old_lineno(),
+                    new_line: line.new_lineno(),
+                    text: String::from_utf8_lossy(line.content()).into_owned(),
+                });
+            }
+        }
+        hunks.push(accepted);
+    }
+    let mut identities = std::collections::BTreeSet::new();
+    if hunks.iter().any(|hunk| !identities.insert(hunk.id)) {
+        return Err(GitHunkError::IdentityCollision);
+    }
+    Ok(hunks)
+}
+
+pub(super) fn read_buffer_hunks_owned(
+    generation: GitHunkGeneration,
+    p: &GitHunkPolicy,
+    input: GitHunkBufferInput,
+    cancel: &AtomicBool,
+) -> Result<GitHunkSnapshot, GitHunkError> {
+    validate_hunk_policy(p)?;
+    if p.layer != GitDiffLayer::Unstaged || input.bytes.len() > p.maximum_bytes {
+        return Err(GitHunkError::InvalidPolicy);
+    }
+    if cancel.load(Ordering::Acquire) {
+        return Err(GitHunkError::Cancelled);
+    }
+    let (_root, repo, workdir, repo_path) = open_hunk_repository(p)?;
+    let index_before =
+        git_index_fingerprint(&workdir).map_err(|_| GitHunkError::StaleRepository)?;
+    let index = repo
+        .index()
+        .map_err(|e| GitHunkError::Backend(e.message().chars().take(1024).collect()))?;
+    let index_blob = index
+        .get_path(&repo_path, 0)
+        .map(|entry| {
+            repo.find_blob(entry.id)
+                .map_err(|e| GitHunkError::Backend(e.message().chars().take(1024).collect()))
+        })
+        .transpose()?;
+    let mut options = git2::DiffOptions::new();
+    let patch = match index_blob.as_ref() {
+        Some(blob) => git2::Patch::from_blob_and_buffer(
+            blob,
+            Some(&repo_path),
+            &input.bytes,
+            Some(&repo_path),
+            Some(&mut options),
+        ),
+        None => git2::Patch::from_buffers(
+            &[],
+            Some(&repo_path),
+            &input.bytes,
+            Some(&repo_path),
+            Some(&mut options),
+        ),
+    }
+    .map_err(|e| GitHunkError::Backend(e.message().chars().take(1024).collect()))?;
+    let hunks = collect_hunks_from_patch(&patch, p, cancel)?;
+    if cancel.load(Ordering::Acquire) {
+        return Err(GitHunkError::Cancelled);
+    }
+    let index_fingerprint =
+        git_index_fingerprint(&workdir).map_err(|_| GitHunkError::StaleRepository)?;
+    if index_fingerprint != index_before {
+        return Err(GitHunkError::StaleIndex);
+    }
+    Ok(GitHunkSnapshot {
+        generation,
+        revision: 0,
+        repository_id: p.repository_id,
+        status_revision: p.status_revision,
+        root_revision: p.root_revision,
+        file: p.file.clone(),
+        layer: p.layer,
+        buffer_revision: Some(input.revision),
+        index_fingerprint,
+        worktree_sha256: None,
+        hunks,
+    })
+}

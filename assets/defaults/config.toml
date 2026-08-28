@@ -190,7 +190,7 @@ visual_mode_label = "VISUAL"
 
 [ui.tool_manager]
 title = "Dust tool manager"
-help = "j/k select  Enter start  p versions  i install  u uninstall  x stop  R restart  r probe  Esc close"
+help = "j/k select  Enter install/start  i install  p versions  x stop  R restart  u remove Dust copy  r refresh  Esc close"
 installed_heading = "Installed"
 available_heading = "Available"
 installing_label = "installing"
