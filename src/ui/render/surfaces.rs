@@ -173,31 +173,124 @@ pub(super) fn render_picker(
             .grid
             .set_cell(x, y, &character.to_string(), Style::Border);
     }
+    let preview = picker
+        .preview
+        .as_ref()
+        .filter(|_| width >= 40 && height >= 12);
+    let preview_number_width = preview.map_or(1, |preview| {
+        preview
+            .first_line
+            .saturating_add(preview.lines.len())
+            .max(1)
+            .to_string()
+            .len()
+    });
+    let list_natural_width = picker
+        .rows
+        .iter()
+        .take(64)
+        .map(|row| {
+            text_width(&row.label, config.editor.ambiguous_width)
+                .saturating_add(text_width(&row.detail, config.editor.ambiguous_width))
+                .saturating_add(text_width(&row.source, config.editor.ambiguous_width))
+                .saturating_add(8)
+        })
+        .max()
+        .unwrap_or(28)
+        .clamp(28, 72);
+    let preview_natural_width = preview.map_or(0, |preview| {
+        preview
+            .lines
+            .iter()
+            .take(64)
+            .map(|line| text_width(line, config.editor.ambiguous_width))
+            .max()
+            .unwrap_or(28)
+            .saturating_add(preview_number_width)
+            .saturating_add(4)
+            .clamp(32, 88)
+    });
+    let side_by_side = preview.is_some()
+        && usize::from(width)
+            >= list_natural_width
+                .saturating_add(preview_natural_width)
+                .saturating_add(3);
+    let divider = side_by_side.then(|| {
+        left.saturating_add(u16::try_from(list_natural_width).unwrap_or(width - 1))
+            .saturating_add(1)
+            .min(left + width - 2)
+    });
+    let stacked_divider = (preview.is_some() && !side_by_side).then(|| {
+        let minimum = top.saturating_add(6);
+        let maximum = top.saturating_add(height.saturating_sub(4));
+        top.saturating_add(height.saturating_mul(2) / 3)
+            .clamp(minimum, maximum)
+    });
+    let list_right = divider.unwrap_or(left + width - 1);
+    let list_bottom = stacked_divider.unwrap_or(top + height - 1);
+    if let Some(divider) = divider {
+        for y in top + 1..top + height - 1 {
+            frame
+                .grid
+                .set_cell(divider, y, &vertical.to_string(), Style::Border);
+        }
+    }
+    if let Some(divider_y) = stacked_divider {
+        for x in left + 1..left + width - 1 {
+            frame
+                .grid
+                .set_cell(x, divider_y, &horizontal.to_string(), Style::Border);
+        }
+    }
     frame
         .grid
         .put_text(left + 2, top, &format!(" {} ", picker.title), Style::Accent);
+    if let Some(preview) = preview {
+        let (title_x, title_y, title_right) = if let Some(divider) = divider {
+            (divider + 2, top, left + width - 1)
+        } else {
+            (left + 2, stacked_divider.unwrap_or(top), left + width - 1)
+        };
+        frame.grid.put_text_clipped(
+            title_x,
+            title_y,
+            &format!(" {} ", preview.title),
+            Style::Accent,
+            title_right,
+        );
+    }
     let content_left = left + 2;
     let query_y = top + 1;
     frame
         .grid
         .put_text(content_left, query_y, &picker.query, Style::Default);
-    if picker.loading {
-        let loading_x = left + width
-            - 2
-            - u16::try_from(text_width(
-                &configured.loading_label,
-                config.editor.ambiguous_width,
-            ))
-            .unwrap_or(0);
-        frame.grid.put_text(
-            loading_x.max(content_left),
-            query_y,
-            &configured.loading_label,
-            Style::Muted,
-        );
+    let count = format!(
+        "{}/{}",
+        picker
+            .selected
+            .map_or(0, |selected| selected.saturating_add(1)),
+        picker.rows.len()
+    );
+    let status = if picker.loading {
+        format!("{}  {count}", configured.loading_label)
+    } else {
+        count
+    };
+    let status_width =
+        u16::try_from(text_width(&status, config.editor.ambiguous_width)).unwrap_or(0);
+    let status_x = list_right.saturating_sub(status_width).saturating_sub(1);
+    if status_x > content_left {
+        frame
+            .grid
+            .put_text_clipped(status_x, query_y, &status, Style::Muted, list_right);
+    }
+    for x in left + 1..list_right {
+        frame
+            .grid
+            .set_cell(x, top + 2, &horizontal.to_string(), Style::Border);
     }
     let first_row = top + 3;
-    let visible_rows = usize::from(height.saturating_sub(4));
+    let visible_rows = usize::from(list_bottom.saturating_sub(first_row));
     for (display_row, (index, row)) in picker
         .rows
         .iter()
@@ -213,31 +306,107 @@ pub(super) fn render_picker(
         } else {
             &configured.row_marker
         };
+        let detail = if row.detail.is_empty() {
+            String::new()
+        } else {
+            format!("  {}", row.detail)
+        };
         let source = if row.source.is_empty() {
             String::new()
         } else {
             format!("{}{}", configured.source_separator, row.source)
         };
-        let text = format!("{} {} {}{}", marker, row.label, row.detail, source);
-        frame.grid.put_text(
+        let text = format!("{} {}{}{}", marker, row.label, detail, source);
+        if selected {
+            for x in left + 1..list_right {
+                frame.grid.set_cell(x, y, " ", Style::Selection);
+            }
+        }
+        frame.grid.put_text_clipped(
             content_left,
             y,
-            &text
-                .chars()
-                .take(usize::from(width.saturating_sub(4)))
-                .collect::<String>(),
+            &text,
             if selected {
                 Style::Selection
             } else {
                 Style::Default
             },
+            list_right,
         );
+    }
+    if let Some(preview) = preview {
+        let (preview_left, preview_fill_left, preview_top) = if let Some(divider) = divider {
+            (divider + 2, divider + 1, top + 1)
+        } else {
+            (
+                left + 2,
+                left + 1,
+                stacked_divider.unwrap_or(top).saturating_add(1),
+            )
+        };
+        let preview_right = left + width - 1;
+        let preview_bottom = top + height - 1;
+        let available_rows = usize::from(preview_bottom.saturating_sub(preview_top));
+        let highlighted_offset = preview
+            .highlight_line
+            .and_then(|line| line.checked_sub(preview.first_line));
+        let first_visible_offset = highlighted_offset.map_or(0, |offset| {
+            offset.saturating_add(1).saturating_sub(available_rows)
+        });
+        for (visible_offset, (offset, line)) in preview
+            .lines
+            .iter()
+            .enumerate()
+            .skip(first_visible_offset)
+            .take(available_rows)
+            .enumerate()
+        {
+            let y = preview_top + u16::try_from(visible_offset).unwrap_or(u16::MAX);
+            if y >= preview_bottom {
+                break;
+            }
+            let line_index = preview.first_line.saturating_add(offset);
+            let highlighted = preview.highlight_line == Some(line_index);
+            if highlighted {
+                for x in preview_fill_left..preview_right {
+                    frame.grid.set_cell(x, y, " ", Style::Selection);
+                }
+            }
+            let number = format!("{:>preview_number_width$} ", line_index.saturating_add(1));
+            frame.grid.put_text_clipped(
+                preview_left,
+                y,
+                &number,
+                if highlighted {
+                    Style::Selection
+                } else {
+                    Style::Muted
+                },
+                preview_right,
+            );
+            let text_left = preview_left.saturating_add(
+                u16::try_from(preview_number_width)
+                    .unwrap_or(0)
+                    .saturating_add(1),
+            );
+            frame.grid.put_text_clipped(
+                text_left,
+                y,
+                line,
+                if highlighted {
+                    Style::Selection
+                } else {
+                    Style::Default
+                },
+                preview_right,
+            );
+        }
     }
     let cursor_x = content_left.saturating_add(
         u16::try_from(text_width(&picker.query, config.editor.ambiguous_width)).unwrap_or(0),
     );
     frame.cursor = Some((
-        cursor_x.min(left + width - 2),
+        cursor_x.min(list_right.saturating_sub(1)),
         query_y,
         cursor_style(config.ui.cursor.prompt),
     ));
@@ -708,7 +877,7 @@ pub(super) fn render_prompt(
         width,
         height,
         &config.ui.command_line,
-        prompt.error.is_some(),
+        prompt.error.is_some() || prompt.help.is_some(),
     );
     if geometry.width == 0 || geometry.height == 0 {
         return;
@@ -752,6 +921,8 @@ pub(super) fn render_prompt(
             BorderStyle::Rounded => ('─', '│', '╭', '╮', '╰', '╯'),
             BorderStyle::Single => ('─', '│', '┌', '┐', '└', '┘'),
         };
+    let show_help = prompt.error.is_none() && prompt.help.is_some() && geometry.height >= 4;
+    let bottom_y = geometry.top.saturating_add(if show_help { 3 } else { 2 });
     for x in geometry.left..geometry.left.saturating_add(geometry.width) {
         frame
             .grid
@@ -759,7 +930,7 @@ pub(super) fn render_prompt(
         if geometry.height >= 3 {
             frame
                 .grid
-                .set_cell(x, geometry.top + 2, &horizontal.to_string(), Style::Border);
+                .set_cell(x, bottom_y, &horizontal.to_string(), Style::Border);
         }
     }
     frame.grid.set_cell(
@@ -777,44 +948,59 @@ pub(super) fn render_prompt(
     if geometry.height >= 3 {
         frame.grid.set_cell(
             geometry.left,
-            geometry.top + 2,
+            bottom_y,
             &bottom_left.to_string(),
             Style::Border,
         );
         frame.grid.set_cell(
             geometry.left + geometry.width - 1,
-            geometry.top + 2,
+            bottom_y,
             &bottom_right.to_string(),
             Style::Border,
         );
     }
-    frame.grid.set_cell(
-        geometry.left,
-        geometry.top + 1,
-        &vertical.to_string(),
-        Style::Border,
-    );
-    frame.grid.set_cell(
-        geometry.left + geometry.width - 1,
-        geometry.top + 1,
-        &vertical.to_string(),
-        Style::Border,
-    );
+    for y in geometry.top.saturating_add(1)..bottom_y {
+        frame
+            .grid
+            .set_cell(geometry.left, y, &vertical.to_string(), Style::Border);
+        frame.grid.set_cell(
+            geometry.left + geometry.width - 1,
+            y,
+            &vertical.to_string(),
+            Style::Border,
+        );
+    }
     if config.ui.command_line.show_title && geometry.width > config.ui.command_line.title_min_width
     {
         let title = format!(" {} ", prompt.kind.title(&config.ui.command_line.text));
         let title_width =
             u16::try_from(text_width(&title, config.editor.ambiguous_width)).unwrap_or(0);
-        let title_x = geometry.left + geometry.width.saturating_sub(title_width) / 2;
-        frame
-            .grid
-            .put_text(title_x, geometry.top, &title, Style::Accent);
+        let title_x = geometry
+            .left
+            .saturating_add(geometry.width.saturating_sub(title_width) / 2)
+            .max(geometry.left.saturating_add(1));
+        frame.grid.put_text_clipped(
+            title_x,
+            geometry.top,
+            &title,
+            Style::Accent,
+            right.saturating_sub(1),
+        );
     }
     let input_x = geometry
         .left
         .saturating_add(config.ui.command_line.input_padding);
-    let input_y = geometry.top.saturating_add(1);
+    let input_y = geometry.top.saturating_add(if show_help { 2 } else { 1 });
     let content_right = right.saturating_sub(1);
+    if show_help && let Some(help) = &prompt.help {
+        frame.grid.put_text_clipped(
+            input_x,
+            geometry.top.saturating_add(1),
+            help,
+            Style::Muted,
+            content_right,
+        );
+    }
     let marker_end = frame.grid.put_text_clipped(
         input_x,
         input_y,

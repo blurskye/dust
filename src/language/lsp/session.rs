@@ -114,11 +114,9 @@ impl LspService {
         let (sender, commands) = mpsc::sync_channel(COMMAND_QUEUE);
         let events = self.events.clone();
         let server = session_key.to_owned();
-        let executable_name = executable
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or(&definition.executable)
-            .to_owned();
+        // Canonical preflight pins the executable identity, but multicall and
+        // rustup proxy binaries still dispatch from the requested argv[0].
+        let executable_name = requested_executable_name(definition);
         send_event(
             &events,
             LspEvent::Starting {
@@ -277,6 +275,14 @@ pub(super) struct PendingRequest {
     pub(super) deadline: Instant,
 }
 
+pub(super) fn requested_executable_name(definition: &ToolDefinition) -> String {
+    Path::new(&definition.executable)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&definition.executable)
+        .to_owned()
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run_session(
     server: String,
@@ -405,6 +411,10 @@ pub(super) fn run_session(
     let mut next_request_id = 2_i64;
     let mut logs = VecDeque::<String>::with_capacity(MAX_LOG_LINES);
     let mut stopping = false;
+    let initialize_deadline = Instant::now()
+        + policy
+            .request_timeout
+            .clamp(Duration::from_secs(1), Duration::from_secs(60));
 
     while !stopping {
         loop {
@@ -537,6 +547,16 @@ pub(super) fn run_session(
                 );
                 stopping = true;
             }
+        }
+        if !stopping && !initialized && Instant::now() >= initialize_deadline {
+            send_event(
+                &events,
+                LspEvent::Failed {
+                    server: server.clone(),
+                    message: "language server initialize request timed out".into(),
+                },
+            );
+            stopping = true;
         }
     }
     for id in pending.keys() {

@@ -11,6 +11,15 @@ icon = "󰈞"
 order = 10
 
 [[key_group]]
+id = "builtin.editor.normal.group.search"
+context = "editor"
+mode = "normal"
+prefix = "<leader> s"
+label = "Search"
+icon = "󰍉"
+order = 15
+
+[[key_group]]
 id = "builtin.editor.normal.group.diagnostics"
 context = "editor"
 mode = "normal"
@@ -27,6 +36,15 @@ prefix = "<leader> l"
 label = "Language"
 icon = "󰅩"
 order = 30
+
+[[key_group]]
+id = "builtin.editor.normal.group.git"
+context = "editor"
+mode = "normal"
+prefix = "<leader> g"
+label = "Git"
+icon = "󰊢"
+order = 40
 
 # Normal mode motions.
 [[keymap]]
@@ -176,11 +194,12 @@ keys = "G"
 command = "input.motion"
 arguments = { motion = "document_end", linewise = false }
 [[keymap]]
-id = "builtin.editor.normal.input-prefix-begin.g"
+id = "builtin.editor.normal.input-motion.g-g"
 context = "editor"
 mode = "normal"
-keys = "g"
-command = "input.prefix.begin"
+keys = "g g"
+command = "input.motion"
+arguments = { motion = "document_start", linewise = false }
 
 # Counts and register/operator grammar.
 [[keymap]]
@@ -1009,6 +1028,12 @@ context = "explorer"
 keys = "escape"
 command = "explorer.close"
 [[keymap]]
+id = "builtin.explorer.surface.command-line-open.colon"
+context = "explorer"
+keys = ":"
+command = "command_line.open"
+arguments = { kind = "command" }
+[[keymap]]
 id = "builtin.explorer.surface.explorer-next.j"
 context = "explorer"
 keys = "j"
@@ -1039,9 +1064,9 @@ context = "explorer"
 keys = "s"
 command = "explorer.file.split_open"
 [[keymap]]
-id = "builtin.explorer.surface.explorer-refresh.r"
+id = "builtin.explorer.surface.explorer-refresh.upper-r"
 context = "explorer"
-keys = "r"
+keys = "R"
 command = "explorer.refresh"
 [[keymap]]
 id = "builtin.explorer.surface.explorer-hidden-toggle.period"
@@ -1049,10 +1074,47 @@ context = "explorer"
 keys = "."
 command = "explorer.hidden.toggle"
 [[keymap]]
-id = "builtin.explorer.surface.explorer-ignored-toggle.i"
+id = "builtin.explorer.surface.explorer-ignored-toggle.upper-i"
 context = "explorer"
-keys = "i"
+keys = "I"
 command = "explorer.ignored.toggle"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-create.a"
+context = "explorer"
+keys = "a"
+command = "command_line.open"
+arguments = { kind = "command", initial = "exploreradd " }
+[[keymap]]
+id = "builtin.explorer.surface.explorer-rename.r"
+context = "explorer"
+keys = "r"
+command = "command_line.open"
+arguments = { kind = "command", initial = "explorerrename " }
+[[keymap]]
+id = "builtin.explorer.surface.explorer-delete.d"
+context = "explorer"
+keys = "d"
+command = "explorer.delete"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-copy.c"
+context = "explorer"
+keys = "c"
+command = "explorer.copy"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-move.m"
+context = "explorer"
+keys = "m"
+command = "explorer.move"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-paste.p"
+context = "explorer"
+keys = "p"
+command = "explorer.paste"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-path-yank.y"
+context = "explorer"
+keys = "y"
+command = "explorer.path.yank"
 [[keymap]]
 id = "builtin.explorer-mouse.surface.explorer-mouse-select.mouse-left-down"
 context = "explorer_mouse"
@@ -2463,6 +2525,54 @@ keys = "escape"
 command = "tools.menu.close"
 
 [[keymap]]
+id = "builtin.documentation.surface.scroll-down.j"
+context = "documentation"
+keys = "j"
+command = "lsp.documentation.scroll_down"
+
+[[keymap]]
+id = "builtin.documentation.surface.scroll-down.down"
+context = "documentation"
+keys = "down"
+command = "lsp.documentation.scroll_down"
+
+[[keymap]]
+id = "builtin.documentation.surface.scroll-down.ctrl-d"
+context = "documentation"
+keys = "ctrl-d"
+command = "lsp.documentation.scroll_down"
+
+[[keymap]]
+id = "builtin.documentation.surface.scroll-up.k"
+context = "documentation"
+keys = "k"
+command = "lsp.documentation.scroll_up"
+
+[[keymap]]
+id = "builtin.documentation.surface.scroll-up.up"
+context = "documentation"
+keys = "up"
+command = "lsp.documentation.scroll_up"
+
+[[keymap]]
+id = "builtin.documentation.surface.scroll-up.ctrl-u"
+context = "documentation"
+keys = "ctrl-u"
+command = "lsp.documentation.scroll_up"
+
+[[keymap]]
+id = "builtin.documentation.surface.close.q"
+context = "documentation"
+keys = "q"
+command = "lsp.documentation.close"
+
+[[keymap]]
+id = "builtin.documentation.surface.close.escape"
+context = "documentation"
+keys = "escape"
+command = "lsp.documentation.close"
+
+[[keymap]]
 id = "builtin.editor.normal.lsp-hover.upper-k"
 context = "editor"
 mode = "normal"
@@ -2533,6 +2643,34 @@ keys = "g r"
 command = "lsp.references"
 
 [[keymap]]
+id = "builtin.editor.normal.lsp-implementation.g-upper-i"
+context = "editor"
+mode = "normal"
+keys = "g I"
+command = "lsp.implementation"
+
+[[keymap]]
+id = "builtin.editor.normal.lsp-type-definition.g-y"
+context = "editor"
+mode = "normal"
+keys = "g y"
+command = "lsp.type_definition"
+
+[[keymap]]
+id = "builtin.editor.normal.lsp-signature-help.g-upper-k"
+context = "editor"
+mode = "normal"
+keys = "g K"
+command = "lsp.signature_help"
+
+[[keymap]]
+id = "builtin.editor.normal.lsp-document-symbols.g-upper-o"
+context = "editor"
+mode = "normal"
+keys = "g O"
+command = "lsp.document_symbols"
+
+[[keymap]]
 id = "builtin.editor.normal.lsp-format.leader-l-f"
 context = "editor"
 mode = "normal"
@@ -2585,6 +2723,18 @@ keys = "up"
 command = "completion.select_previous"
 
 [[keymap]]
+id = "builtin.completion.surface.documentation-scroll-down.ctrl-d"
+context = "completion"
+keys = "ctrl-d"
+command = "lsp.documentation.scroll_down"
+
+[[keymap]]
+id = "builtin.completion.surface.documentation-scroll-up.ctrl-u"
+context = "completion"
+keys = "ctrl-u"
+command = "lsp.documentation.scroll_up"
+
+[[keymap]]
 id = "builtin.completion.surface.completion-accept.enter"
 context = "completion"
 keys = "enter"
@@ -2615,6 +2765,55 @@ context = "editor"
 mode = "normal"
 keys = "[ d"
 command = "diagnostic.previous"
+
+[[keymap]]
+id = "builtin.editor.normal.diagnostic-error-next.right-bracket-e"
+context = "editor"
+mode = "normal"
+keys = "] e"
+command = "diagnostic.error.next"
+
+[[keymap]]
+id = "builtin.editor.normal.diagnostic-error-previous.left-bracket-e"
+context = "editor"
+mode = "normal"
+keys = "[ e"
+command = "diagnostic.error.previous"
+
+[[keymap]]
+id = "builtin.editor.normal.diagnostic-warning-next.right-bracket-w"
+context = "editor"
+mode = "normal"
+keys = "] w"
+command = "diagnostic.warning.next"
+
+[[keymap]]
+id = "builtin.editor.normal.diagnostic-warning-previous.left-bracket-w"
+context = "editor"
+mode = "normal"
+keys = "[ w"
+command = "diagnostic.warning.previous"
+
+[[keymap]]
+id = "builtin.editor.normal.git-hunk-next.right-bracket-h"
+context = "editor"
+mode = "normal"
+keys = "] h"
+command = "workspace.git.hunk.next"
+
+[[keymap]]
+id = "builtin.editor.normal.git-hunk-previous.left-bracket-h"
+context = "editor"
+mode = "normal"
+keys = "[ h"
+command = "workspace.git.hunk.previous"
+
+[[keymap]]
+id = "builtin.editor.normal.git-hunk-preview.leader-g-h-p"
+context = "editor"
+mode = "normal"
+keys = "<leader> g h p"
+command = "workspace.git.hunk.preview"
 
 [[keymap]]
 id = "builtin.editor.insert.lsp-completion-trigger.ctrl-space"
@@ -2676,8 +2875,15 @@ command = "workspace.file.find"
 id = "builtin.editor.normal.workspace-search-prompt.leader-s"
 context = "editor"
 mode = "normal"
-keys = "<leader> s"
+keys = "<leader> /"
 command = "workspace.search.prompt"
+
+[[keymap]]
+id = "builtin.editor.normal.workspace-file-find.leader-f-f"
+context = "editor"
+mode = "normal"
+keys = "<leader> f f"
+command = "workspace.file.find"
 
 [[keymap]]
 id = "builtin.editor.normal.buffer-picker-open.leader-f-b"
@@ -2706,6 +2912,56 @@ context = "editor"
 mode = "normal"
 keys = "<leader> f r"
 command = "workspace.replace.prompt"
+
+[[keymap]]
+id = "builtin.editor.normal.workspace-search-prompt.leader-s-g"
+context = "editor"
+mode = "normal"
+keys = "<leader> s g"
+command = "workspace.search.prompt"
+
+[[keymap]]
+id = "builtin.editor.normal.lsp-document-symbols.leader-s-s"
+context = "editor"
+mode = "normal"
+keys = "<leader> s s"
+command = "lsp.document_symbols"
+
+[[keymap]]
+id = "builtin.editor.normal.lsp-workspace-symbols.leader-s-upper-s"
+context = "editor"
+mode = "normal"
+keys = "<leader> s S"
+command = "lsp.workspace_symbols"
+arguments = { query = "" }
+
+[[keymap]]
+id = "builtin.editor.normal.diagnostic-open.leader-s-d"
+context = "editor"
+mode = "normal"
+keys = "<leader> s d"
+command = "diagnostic.open"
+
+[[keymap]]
+id = "builtin.editor.normal.navigation-jumps.leader-s-j"
+context = "editor"
+mode = "normal"
+keys = "<leader> s j"
+command = "navigation.jumps"
+
+[[keymap]]
+id = "builtin.editor.normal.navigation-marks.leader-s-m"
+context = "editor"
+mode = "normal"
+keys = "<leader> s m"
+command = "navigation.marks"
+
+[[keymap]]
+id = "builtin.editor.normal.navigation-recents.leader-s-r"
+context = "editor"
+mode = "normal"
+keys = "<leader> s r"
+command = "navigation.recents"
 
 [[keymap]]
 id = "builtin.editor.normal.workspace-root-list.leader-w-r"

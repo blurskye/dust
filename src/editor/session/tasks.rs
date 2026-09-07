@@ -442,6 +442,23 @@ impl InteractiveApplication {
     }
 
     pub(super) fn show_output_picker(&mut self, name: &str) {
+        let previous = if self.active_output_task.as_deref() == Some(name) {
+            self.picker.as_ref().map(|picker| {
+                (
+                    picker.presentation().query,
+                    picker.selected_item().map(|item| item.id.clone()),
+                )
+            })
+        } else {
+            None
+        };
+        let follow_tail = previous.is_none()
+            || self
+                .ui
+                .picker
+                .as_ref()
+                .is_some_and(|picker| picker.selected == picker.rows.len().checked_sub(1));
+        self.active_output_task = Some(name.to_owned());
         let items = self
             .task_output_rows
             .get(name)
@@ -470,6 +487,21 @@ impl InteractiveApplication {
             self.message("picker_output_title", &[("name", name.into())]),
             items,
         );
+        if let Some(picker) = &mut self.picker {
+            if let Some((query, selected)) = previous {
+                picker.set_query(query);
+                if let Some(selected) = selected {
+                    picker.select_id(&selected);
+                }
+            }
+            if follow_tail {
+                picker.select_last();
+            }
+            picker.ensure_selected_visible(
+                usize::from(self.configuration.settings.ui.picker.height_percent).max(1),
+            );
+        }
+        self.sync_picker_ui();
     }
 
     pub(super) fn show_test_picker(&mut self, name: &str) {
@@ -552,6 +584,11 @@ impl InteractiveApplication {
                         if rows.len() > 10_000 {
                             rows.drain(..rows.len() - 10_000);
                         }
+                    }
+                    if let Some(name) = self.active_output_task.clone()
+                        && self.picker_surface == PickerSurfaceKind::Output
+                    {
+                        self.show_output_picker(&name);
                     }
                 }
                 JobEvent::Exited { job, code, .. } => {

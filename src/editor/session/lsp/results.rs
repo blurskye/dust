@@ -356,7 +356,7 @@ impl InteractiveApplication {
                             .iter()
                             .map(|item| CompletionItem {
                                 label: item.label.clone(),
-                                detail: item.detail.clone(),
+                                detail: Self::lsp_completion_detail(item, &server_label),
                             })
                             .collect(),
                         selected: 0,
@@ -364,6 +364,8 @@ impl InteractiveApplication {
                     });
                 if self.ui.language_completion.is_none() {
                     self.show_error(self.message("lsp_no_result", &[]));
+                } else {
+                    self.refresh_lsp_completion_documentation();
                 }
             }
             LspFeatureResult::CompletionResolved(item) => {

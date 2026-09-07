@@ -17,18 +17,36 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn process_tool_version_results(&mut self) {
+        let rustup_key = self
+            .tools
+            .iter()
+            .find(|entry| entry.definition.id == "rust-analyzer")
+            .and_then(|entry| {
+                let path = discover_executable(&entry.definition.executable)?;
+                Self::rust_analyzer_is_rustup_proxy(&path).then(|| {
+                    Self::tool_version_key(&entry.definition, LspRuntimeSource::Path, Some(&path))
+                })
+            });
         let mut changed = false;
+        let mut unavailable_rustup = false;
         while let Some(result) = self.tool_version_service.try_result() {
             self.tool_version_pending.remove(&result.id);
+            if rustup_key.as_ref() == Some(&result.id) && result.result.is_err() {
+                unavailable_rustup = true;
+            }
             self.tool_versions.insert(result.id, result.result);
             changed = true;
         }
         if changed {
+            self.lsp_autostart_observation = None;
             let category = self.ui.tool_menu.as_ref().map(|menu| menu.category.clone());
             let selected = self.selected_tool_id();
             if let Some(category) = category {
                 self.rebuild_tool_menu(&category, selected.as_deref());
             }
+        }
+        if unavailable_rustup {
+            self.show_error(Self::unavailable_rust_analyzer_message());
         }
     }
 
@@ -78,6 +96,17 @@ impl InteractiveApplication {
                 ));
             } else {
                 let source = self.selected_lsp_runtime_source(&definition);
+                if source == LspRuntimeSource::Path
+                    && definition.id == "rust-analyzer"
+                    && let Some(path) = discover_executable(&definition.executable)
+                    && Self::rust_analyzer_is_rustup_proxy(&path)
+                {
+                    let key = Self::tool_version_key(&definition, source, Some(&path));
+                    if matches!(self.tool_versions.get(&key), Some(Err(_))) {
+                        self.show_error(Self::unavailable_rust_analyzer_message());
+                        return;
+                    }
+                }
                 self.install_tool_by_id(id, Some(source));
             }
             return;
@@ -195,9 +224,23 @@ impl InteractiveApplication {
         } else {
             base_definition
         };
+        let rustup_install = if definition.id == "rust-analyzer" && source == LspRuntimeSource::Path
+        {
+            discover_executable(&definition.executable).and_then(|proxy| {
+                if !Self::rust_analyzer_is_rustup_proxy(&proxy) {
+                    return None;
+                }
+                let key = Self::tool_version_key(&definition, source, Some(&proxy));
+                let rustup = proxy.with_file_name("rustup");
+                (matches!(self.tool_versions.get(&key), Some(Err(_))) && rustup.is_file())
+                    .then_some((rustup, proxy))
+            })
+        } else {
+            None
+        };
         if definition.kind == ToolKind::Lsp {
             match source {
-                LspRuntimeSource::Path => {
+                LspRuntimeSource::Path if rustup_install.is_none() => {
                     if discover_executable(&definition.executable).is_some() {
                         self.ui.notification = Some(format!(
                             "{} is already installed on PATH; Dust leaves external software unchanged",
@@ -212,6 +255,7 @@ impl InteractiveApplication {
                     }
                     return;
                 }
+                LspRuntimeSource::Path => {}
                 LspRuntimeSource::Managed
                     if self
                         .managed_variant_installed(&self.tools[index].definition, &definition) =>
@@ -256,7 +300,25 @@ impl InteractiveApplication {
             self.show_error(error);
             return;
         }
-        let operation = if definition.kind == ToolKind::Lsp && source == LspRuntimeSource::Nix {
+        let operation = if let Some((rustup, proxy)) = rustup_install {
+            let Some(cwd) = self.workspace.active_root().and_then(|root| {
+                self.workspace
+                    .roots()
+                    .iter()
+                    .find(|candidate| candidate.id == root)
+                    .map(|root| root.identity.canonical_path.clone())
+            }) else {
+                self.show_error("rustup installation requires an active workspace root");
+                return;
+            };
+            self.tool_installer.install_rustup_component(
+                definition.clone(),
+                rustup,
+                proxy,
+                cwd,
+                "rust-analyzer".into(),
+            )
+        } else if definition.kind == ToolKind::Lsp && source == LspRuntimeSource::Nix {
             let Some(nix) = discover_executable("nix") else {
                 self.show_error("Dust via Nix is unavailable: nix was not found");
                 return;
@@ -288,7 +350,9 @@ impl InteractiveApplication {
                     "installing {} {} {}…",
                     definition.name,
                     source.label(),
-                    if matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix) {
+                    if source == LspRuntimeSource::Path {
+                        "component"
+                    } else if matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix) {
                         definition.version.as_deref().unwrap_or("unknown")
                     } else {
                         "runtime"
@@ -468,7 +532,9 @@ impl InteractiveApplication {
                 self.show_error(format!(
                     "{} {} failed: {diagnostic}",
                     match result.operation {
-                        ToolOperation::InstallManaged | ToolOperation::InstallNix => "installing",
+                        ToolOperation::InstallManaged
+                        | ToolOperation::InstallRustup
+                        | ToolOperation::InstallNix => "installing",
                         ToolOperation::UninstallManaged | ToolOperation::UninstallNix => {
                             "uninstalling"
                         }
@@ -476,24 +542,27 @@ impl InteractiveApplication {
                     name
                 ));
             } else {
-                self.ui.notification = Some(format!(
-                    "{} {} {} runtime",
-                    match result.operation {
-                        ToolOperation::InstallManaged | ToolOperation::InstallNix => "installed",
-                        ToolOperation::UninstallManaged | ToolOperation::UninstallNix => {
-                            "uninstalled"
-                        }
-                    },
-                    name,
-                    match result.operation {
-                        ToolOperation::InstallManaged | ToolOperation::UninstallManaged => {
-                            "Dust download"
-                        }
-                        ToolOperation::InstallNix | ToolOperation::UninstallNix => "Dust via Nix",
+                self.ui.notification = Some(match result.operation {
+                    ToolOperation::InstallRustup => {
+                        format!("installed {name} in the active rustup toolchain")
                     }
-                ));
+                    ToolOperation::InstallManaged => {
+                        format!("installed {name} Dust download runtime")
+                    }
+                    ToolOperation::InstallNix => {
+                        format!("installed {name} Dust via Nix runtime")
+                    }
+                    ToolOperation::UninstallManaged => {
+                        format!("uninstalled {name} Dust download runtime")
+                    }
+                    ToolOperation::UninstallNix => {
+                        format!("uninstalled {name} Dust via Nix runtime")
+                    }
+                });
                 self.ui.notification_error = false;
+                self.lsp_last_errors.remove(&result.id);
             }
+            self.lsp_autostart_observation = None;
             self.tool_version_service = ToolVersionService::start();
             let prefix = format!("{}:", result.id);
             self.tool_versions

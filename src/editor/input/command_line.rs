@@ -83,12 +83,19 @@ pub fn parse_ex(
                 }
                 command(command_id)?.with_argument("force", CommandValue::Bool(force))
             }
-            "workspace.root.add" => {
+            "workspace.root.add" | "explorer.create" => {
                 if arguments.is_empty() {
                     return Err(ExParseError::MissingArgument("path"));
                 }
                 command(command_id)?
                     .with_argument("path", CommandValue::String(arguments.to_owned()))
+            }
+            "explorer.rename" => {
+                if arguments.is_empty() {
+                    return Err(ExParseError::MissingArgument("target"));
+                }
+                command(command_id)?
+                    .with_argument("target", CommandValue::String(arguments.to_owned()))
             }
             "workspace.root.activate" | "workspace.root.remove" | "terminal.focus" => {
                 let id = arguments
@@ -174,10 +181,28 @@ pub fn parse_ex(
                     )
             }
             _ => {
-                if force || !arguments.is_empty() {
+                if force {
                     return Err(ExParseError::UnexpectedArguments(arguments.into()));
                 }
-                command(command_id)?
+                let mut invocation = command(command_id)?;
+                for argument in arguments.split_whitespace() {
+                    let Some((name, value)) = argument.split_once('=') else {
+                        return Err(ExParseError::UnexpectedArguments(arguments.into()));
+                    };
+                    if name.is_empty() || value.is_empty() {
+                        return Err(ExParseError::UnexpectedArguments(arguments.into()));
+                    }
+                    let value = match value {
+                        "true" => CommandValue::Bool(true),
+                        "false" => CommandValue::Bool(false),
+                        value => value.parse::<i64>().map_or_else(
+                            |_| CommandValue::String(value.into()),
+                            CommandValue::Integer,
+                        ),
+                    };
+                    invocation = invocation.with_argument(name, value);
+                }
+                invocation
             }
         }
     };
@@ -306,6 +331,20 @@ mod tests {
         assert_eq!(
             debug.arguments.get("program"),
             Some(&CommandValue::String("target/debug/app".into()))
+        );
+        let generic = parse_ex("lint.run name=check retries=2 enabled=true", &aliases)
+            .expect("typed generic arguments");
+        assert_eq!(
+            generic.arguments.get("name"),
+            Some(&CommandValue::String("check".into()))
+        );
+        assert_eq!(
+            generic.arguments.get("retries"),
+            Some(&CommandValue::Integer(2))
+        );
+        assert_eq!(
+            generic.arguments.get("enabled"),
+            Some(&CommandValue::Bool(true))
         );
         let terminal = parse_ex("terminal.open shell", &aliases).expect("terminal profile");
         assert_eq!(terminal.id.as_str(), "terminal.open");

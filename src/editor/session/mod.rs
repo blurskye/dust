@@ -36,7 +36,9 @@ mod window_bridge;
 mod window_management;
 mod windowing;
 
-pub use commands::{AppEffect, LayoutAction, PickerKind, PromptMove, register_app_commands};
+pub use commands::{
+    AppEffect, DiagnosticFilter, LayoutAction, PickerKind, PromptMove, register_app_commands,
+};
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
@@ -71,12 +73,12 @@ use crate::extensions::{
     PluginVirtualDocumentBroker,
 };
 use crate::files::{
-    CheckedResourceIntent, DirectoryEntryKind, DirectoryService, ExplorerWatchBatch,
-    ExplorerWatchEvent, ExplorerWatchGeneration, ExplorerWatchPolicy, ExplorerWatchService,
-    ProjectRootResolution, ProjectRootService, RecoveryRecord, RequestId, ResourceIntentKind,
-    VfsError, VfsResult, VfsWorker, WorkspaceFileEntry, WorkspaceFileEvent, WorkspaceFilePolicy,
-    WorkspaceFileService, WorkspaceSearchEvent, WorkspaceSearchMatch, WorkspaceSearchPolicy,
-    WorkspaceSearchService, WriteExpectation,
+    CheckedResourceIntent, DirectoryEntryKind, DirectoryService, ExplorerMutation,
+    ExplorerWatchBatch, ExplorerWatchEvent, ExplorerWatchGeneration, ExplorerWatchPolicy,
+    ExplorerWatchService, ProjectRootResolution, ProjectRootService, RecoveryRecord, RequestId,
+    ResourceIntentKind, VfsError, VfsResult, VfsWorker, WorkspaceFileEntry, WorkspaceFileEvent,
+    WorkspaceFilePolicy, WorkspaceFileService, WorkspaceSearchEvent, WorkspaceSearchMatch,
+    WorkspaceSearchPolicy, WorkspaceSearchService, WriteExpectation,
 };
 use crate::language::lsp::{
     LspCapabilities, LspCompletionItem, LspDocument, LspDocumentEdit, LspEvent, LspFeature,
@@ -117,11 +119,11 @@ use crate::ui::{
     DocumentationPopupKind, DocumentationPopupState, DocumentationSection,
     EditorWindowBinding as UiEditorWindowBinding, EditorWindowLayoutState, ExplorerSegmentRole,
     ExplorerUiRow, ExplorerUiSegment, ExplorerUiState, KeyHintUiRow, KeyHintUiState, KeyInputKind,
-    LanguageCompletionState, NativeSurfaceWindowBinding, PickerRow, PickerSurfaceKind,
-    PickerUiState, PromptKind, PromptState, PtyScreen, TerminalError, TerminalOptions,
-    TerminalPanelMode, TerminalPanelState, TerminalSession, TerminalTabState, ToolMenuRow,
-    ToolMenuState, ToolRuntimeOption, ToolRuntimePickerState, UiDiagnostic, UiEvent, UiFold,
-    UiInlayHint, UiLspProgress, UiState, UiSyntaxSpan, VisualRowAnchor, VisualRowModel,
+    LanguageCompletionState, NativeSurfaceWindowBinding, PickerPreview, PickerRow,
+    PickerSurfaceKind, PickerUiState, PromptKind, PromptState, PtyScreen, TerminalError,
+    TerminalOptions, TerminalPanelMode, TerminalPanelState, TerminalSession, TerminalTabState,
+    ToolMenuRow, ToolMenuState, ToolRuntimeOption, ToolRuntimePickerState, UiDiagnostic, UiEvent,
+    UiFold, UiInlayHint, UiLspProgress, UiState, UiSyntaxSpan, VisualRowAnchor, VisualRowModel,
     active_pane_viewport, editor_state_content_width, editor_state_gutter_width,
     editor_workspace_insets, explorer_panel_width, pane_viewports, picker_geometry,
     prompt_geometry, render, snap_display_column, snap_display_column_forward,
@@ -218,6 +220,7 @@ struct InteractiveApplication {
     mouse_position: Option<(u16, u16)>,
     mouse_selection_anchor: Option<(ViewId, ByteOffset)>,
     observed_notification: Option<String>,
+    notification_history: VecDeque<(bool, String)>,
     notification_deadline: Option<Instant>,
     completion_generation: u64,
     startup_reads: VecDeque<(PathBuf, bool)>,
@@ -293,6 +296,7 @@ struct InteractiveApplication {
     git_hunks: crate::workspace::git::GitHunkService,
     git_hunk_generation: Option<crate::workspace::git::GitHunkGeneration>,
     git_hunk_expected: Option<(u64, u64, crate::workspace::git::GitRepositoryId, PathBuf)>,
+    git_hunk_action: Option<i8>,
     git_hunk_snapshot: Option<crate::workspace::git::GitHunkSnapshot>,
     git_sign_hunks: crate::workspace::git::GitHunkService,
     git_sign_generation: Option<crate::workspace::git::GitHunkGeneration>,
@@ -329,12 +333,15 @@ struct InteractiveApplication {
     trust_persist_target: Option<WorkspaceTrust>,
     trust_database_ready: bool,
     trust_identity_ready: bool,
+    startup_trust_prompt_checked: bool,
     execution_validation: Option<PendingExecutionValidation>,
     execution_validation_generations: HashMap<u64, (crate::workspace::RootId, RootIdentity)>,
     execution_revalidated: bool,
     safe_mode: bool,
     pending_root_operation: Option<PendingRootOperation>,
     workspace_search_root_revision: Option<u64>,
+    workspace_search_live: bool,
+    workspace_search_query: String,
     workspace_proposal_root_revision: Option<u64>,
     directory_service: DirectoryService,
     explorer: ExplorerState,
@@ -344,7 +351,12 @@ struct InteractiveApplication {
     explorer_preview_path: Option<PathBuf>,
     explorer_preview_lines: Vec<String>,
     explorer_preview_generation: u64,
+    picker_preview_path: Option<PathBuf>,
+    picker_preview: Option<PickerPreview>,
+    picker_preview_generation: u64,
     explorer_follow_path: Option<PathBuf>,
+    explorer_clipboard: Option<(PathBuf, bool)>,
+    explorer_delete_target: Option<PathBuf>,
     explorer_watch: ExplorerWatchService,
     explorer_watch_generation: Option<ExplorerWatchGeneration>,
     explorer_watch_observation: Option<(u64, u64)>,
@@ -371,6 +383,7 @@ struct InteractiveApplication {
     job_tasks: HashMap<JobId, RunningTask>,
     task_output: HashMap<String, Vec<u8>>,
     task_output_rows: HashMap<String, Vec<TaskOutputRecord>>,
+    active_output_task: Option<String>,
     task_truncated: HashSet<JobId>,
     task_status: HashMap<String, String>,
     test_results: HashMap<String, Vec<TestCaseResult>>,
@@ -573,6 +586,7 @@ pub fn run_interactive(
         mouse_position: None,
         mouse_selection_anchor: None,
         observed_notification: None,
+        notification_history: VecDeque::new(),
         notification_deadline: None,
         completion_generation: 0,
         startup_reads,
@@ -643,6 +657,7 @@ pub fn run_interactive(
         git_hunks: crate::workspace::git::GitHunkService::default(),
         git_hunk_generation: None,
         git_hunk_expected: None,
+        git_hunk_action: None,
         git_hunk_snapshot: None,
         git_sign_hunks: crate::workspace::git::GitHunkService::default(),
         git_sign_generation: None,
@@ -668,12 +683,15 @@ pub fn run_interactive(
         trust_persist_target: None,
         trust_database_ready: false,
         trust_identity_ready: false,
+        startup_trust_prompt_checked: false,
         execution_validation: None,
         execution_validation_generations: HashMap::new(),
         execution_revalidated: false,
         safe_mode,
         pending_root_operation: None,
         workspace_search_root_revision: None,
+        workspace_search_live: false,
+        workspace_search_query: String::new(),
         workspace_proposal_root_revision: None,
         directory_service: DirectoryService::default(),
         explorer: ExplorerState::default(),
@@ -683,7 +701,12 @@ pub fn run_interactive(
         explorer_preview_path: None,
         explorer_preview_lines: Vec::new(),
         explorer_preview_generation: 0,
+        picker_preview_path: None,
+        picker_preview: None,
+        picker_preview_generation: 0,
         explorer_follow_path: None,
+        explorer_clipboard: None,
+        explorer_delete_target: None,
         explorer_watch,
         explorer_watch_generation: None,
         explorer_watch_observation: None,
@@ -710,6 +733,7 @@ pub fn run_interactive(
         job_tasks: HashMap::new(),
         task_output: HashMap::new(),
         task_output_rows: HashMap::new(),
+        active_output_task: None,
         task_truncated: HashSet::new(),
         task_status: HashMap::new(),
         test_results: HashMap::new(),
@@ -822,6 +846,7 @@ pub fn run_interactive(
         application.process_explorer_watch_events();
         application.process_explorer_result();
         application.process_trust_events();
+        application.maybe_prompt_for_unseen_workspace();
         application.process_configuration_result();
         application.process_tool_progress();
         application.process_tool_results();
@@ -845,6 +870,7 @@ pub fn run_interactive(
         application.sync_lsp_document();
         application.process_lsp_inlay_refresh();
         application.sync_lsp_status_ui();
+        application.sync_status_summary_ui();
         application.update_lsp_progress_animation();
         application.flush_keymap_timeout();
         application.update_key_hint_ui();
@@ -871,7 +897,10 @@ pub fn run_interactive(
         if let Some(event) = terminal.poll_event(Duration::from_millis(
             application.configuration.settings.runtime.event_poll_ms,
         ))? {
-            if matches!(event, UiEvent::FocusGained | UiEvent::FocusLost) {
+            if matches!(
+                event,
+                UiEvent::Resize(_, _) | UiEvent::FocusGained | UiEvent::FocusLost
+            ) {
                 terminal.invalidate();
             }
             application.handle_event(event);

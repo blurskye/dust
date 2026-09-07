@@ -195,6 +195,84 @@ impl InteractiveApplication {
                         Err(error) => self.show_error(error),
                     }
                 }
+                VfsResult::ExplorerMutated {
+                    id,
+                    operation,
+                    result,
+                } => {
+                    let pending = self.pending_vfs.remove(&id);
+                    if !matches!(pending, Some(PendingVfs::ExplorerMutation)) {
+                        continue;
+                    }
+                    match result {
+                        Ok(()) => {
+                            match &operation {
+                                ExplorerMutation::Rename { source, target } => {
+                                    let affected = self
+                                        .state
+                                        .buffers
+                                        .iter()
+                                        .filter_map(|(id, buffer)| {
+                                            let path = buffer.path.as_ref()?;
+                                            let suffix = path.strip_prefix(source).ok()?;
+                                            Some((id, target.join(suffix), buffer.dirty))
+                                        })
+                                        .collect::<Vec<_>>();
+                                    for (buffer, path, dirty) in affected {
+                                        self.state.set_buffer_path_and_dirty(
+                                            buffer,
+                                            Some(path.clone()),
+                                            dirty,
+                                        );
+                                        self.record_recent_file(path);
+                                    }
+                                    if self
+                                        .explorer_clipboard
+                                        .as_ref()
+                                        .is_some_and(|(path, cut)| *cut && path == source)
+                                    {
+                                        self.explorer_clipboard = None;
+                                    }
+                                }
+                                ExplorerMutation::Delete { path } => {
+                                    let affected = self
+                                        .state
+                                        .buffers
+                                        .iter()
+                                        .filter_map(|(id, buffer)| {
+                                            buffer
+                                                .path
+                                                .as_ref()
+                                                .is_some_and(|candidate| {
+                                                    candidate.starts_with(path)
+                                                })
+                                                .then_some(id)
+                                        })
+                                        .collect::<Vec<_>>();
+                                    for buffer in affected {
+                                        self.state.set_buffer_path_and_dirty(buffer, None, true);
+                                    }
+                                }
+                                ExplorerMutation::Create { .. } | ExplorerMutation::Copy { .. } => {
+                                }
+                            }
+                            self.ui.notification = Some(format!(
+                                "explorer operation complete: {}",
+                                operation
+                                    .target()
+                                    .or_else(|| operation.source())
+                                    .map_or_else(
+                                        || "path".into(),
+                                        |path| path.display().to_string()
+                                    )
+                            ));
+                            self.ui.notification_error = false;
+                            self.refresh_explorer();
+                            self.start_git_status_refresh_silent();
+                        }
+                        Err(error) => self.show_error(error),
+                    }
+                }
                 VfsResult::CreateTarget { id, result } => {
                     let pending = self.pending_vfs.remove(&id);
                     match (pending, result) {
@@ -237,6 +315,35 @@ impl InteractiveApplication {
                         Some(PendingVfs::StartupOpen { primary }) => Some(*primary),
                         _ => None,
                     };
+                    if let Some(PendingVfs::PickerPreview {
+                        path: requested,
+                        generation,
+                    }) = &pending
+                    {
+                        if *generation == self.picker_preview_generation
+                            && self.picker_preview_path.as_ref() == Some(requested)
+                        {
+                            let title = self
+                                .picker_preview
+                                .as_ref()
+                                .map_or_else(String::new, |preview| preview.title.clone());
+                            let lines = match result {
+                                Ok(bytes) => match std::str::from_utf8(&bytes) {
+                                    Ok(text) => Self::picker_preview_lines(text, 512),
+                                    Err(_) => vec!["binary preview unavailable".into()],
+                                },
+                                Err(error) => vec![format!("preview unavailable: {error}")],
+                            };
+                            self.picker_preview = Some(PickerPreview {
+                                title,
+                                lines,
+                                first_line: 0,
+                                highlight_line: None,
+                            });
+                            self.sync_picker_ui();
+                        }
+                        continue;
+                    }
                     if let Some(PendingVfs::ExplorerPreview {
                         path: requested,
                         generation,

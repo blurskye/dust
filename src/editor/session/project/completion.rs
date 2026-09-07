@@ -1,37 +1,104 @@
 use super::*;
 
 impl InteractiveApplication {
+    pub(in crate::editor::session) fn lsp_completion_detail(
+        item: &crate::language::lsp::LspCompletionItem,
+        server: &str,
+    ) -> String {
+        let kind = match item.kind {
+            Some(1) => "Text",
+            Some(2) => "Method",
+            Some(3) => "Function",
+            Some(4) => "Constructor",
+            Some(5) => "Field",
+            Some(6) => "Variable",
+            Some(7) => "Class",
+            Some(8) => "Interface",
+            Some(9) => "Module",
+            Some(10) => "Property",
+            Some(11) => "Unit",
+            Some(12) => "Value",
+            Some(13) => "Enum",
+            Some(14) => "Keyword",
+            Some(15) => "Snippet",
+            Some(16) => "Color",
+            Some(17) => "File",
+            Some(18) => "Reference",
+            Some(19) => "Folder",
+            Some(20) => "Enum member",
+            Some(21) => "Constant",
+            Some(22) => "Struct",
+            Some(23) => "Event",
+            Some(24) => "Operator",
+            Some(25) => "Type parameter",
+            _ => "Item",
+        };
+        [kind, item.detail.as_str(), server]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ")
+    }
+
+    pub(in crate::editor::session) fn refresh_lsp_completion_documentation(&mut self) {
+        let Some(selected) = self
+            .ui
+            .language_completion
+            .as_ref()
+            .map(|completion| completion.selected)
+        else {
+            return;
+        };
+        if self
+            .lsp_completion_items
+            .get(selected)
+            .is_some_and(|item| item.documentation.is_some())
+        {
+            self.open_lsp_completion_documentation();
+        } else if self
+            .ui
+            .documentation_popup
+            .as_ref()
+            .is_some_and(|popup| popup.kind == DocumentationPopupKind::Completion)
+        {
+            self.ui.documentation_popup = None;
+        }
+    }
+
     pub(in crate::editor::session) fn move_lsp_completion(&mut self, direction: i8) {
-        let Some(completion) = &mut self.ui.language_completion else {
-            return;
-        };
-        if completion.items.is_empty() {
-            return;
+        {
+            let Some(completion) = &mut self.ui.language_completion else {
+                return;
+            };
+            if completion.items.is_empty() {
+                return;
+            }
+            completion.selected = if direction < 0 {
+                completion
+                    .selected
+                    .checked_sub(1)
+                    .unwrap_or(completion.items.len() - 1)
+            } else {
+                (completion.selected + 1) % completion.items.len()
+            };
+            let visible_rows = usize::from(
+                self.configuration
+                    .settings
+                    .ui
+                    .command_line
+                    .completion_max_rows
+                    .max(1),
+            );
+            if completion.selected < completion.scroll {
+                completion.scroll = completion.selected;
+            } else if completion.selected >= completion.scroll.saturating_add(visible_rows) {
+                completion.scroll = completion
+                    .selected
+                    .saturating_add(1)
+                    .saturating_sub(visible_rows);
+            }
         }
-        completion.selected = if direction < 0 {
-            completion
-                .selected
-                .checked_sub(1)
-                .unwrap_or(completion.items.len() - 1)
-        } else {
-            (completion.selected + 1) % completion.items.len()
-        };
-        let visible_rows = usize::from(
-            self.configuration
-                .settings
-                .ui
-                .command_line
-                .completion_max_rows
-                .max(1),
-        );
-        if completion.selected < completion.scroll {
-            completion.scroll = completion.selected;
-        } else if completion.selected >= completion.scroll.saturating_add(visible_rows) {
-            completion.scroll = completion
-                .selected
-                .saturating_add(1)
-                .saturating_sub(visible_rows);
-        }
+        self.refresh_lsp_completion_documentation();
     }
 
     pub(in crate::editor::session) fn accept_lsp_completion(&mut self) {

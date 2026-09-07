@@ -186,11 +186,17 @@ impl DiagnosticStore {
     }
 
     #[must_use]
-    pub fn adjacent(&self, uri: &str, offset: ByteOffset, direction: i8) -> Option<ProblemRow> {
+    pub fn adjacent(
+        &self,
+        uri: &str,
+        offset: ByteOffset,
+        direction: i8,
+        severities: &[DiagnosticSeverity],
+    ) -> Option<ProblemRow> {
         let rows = self
             .problems(None, None)
             .into_iter()
-            .filter(|row| row.uri == uri)
+            .filter(|row| row.uri == uri && severities.contains(&row.severity))
             .collect::<Vec<_>>();
         if direction < 0 {
             rows.iter()

@@ -271,6 +271,14 @@ fn resolved_key_hints_follow_leaders_groups_and_configured_command_labels() {
         files.group_id.as_deref(),
         Some("builtin.editor.normal.group.files")
     );
+    assert_eq!(
+        hints
+            .rows
+            .iter()
+            .find(|row| row.next_key == "s")
+            .and_then(|row| row.group_id.as_deref()),
+        Some("builtin.editor.normal.group.search")
+    );
     assert!(files.mappings.iter().all(|mapping| {
         mapping.id.starts_with("builtin.")
             && mapping.source.starts_with("<bundled:keymaps>")
@@ -292,6 +300,17 @@ fn resolved_key_hints_follow_leaders_groups_and_configured_command_labels() {
             .map(|row| row.label.as_str()),
         Some("Choose a buffer")
     );
+    let goto_hints = app
+        .configuration
+        .keymaps
+        .hints_for_prefix("editor.normal", "g", labels)
+        .expect("goto continuations");
+    for key in ["d", "D", "I", "y", "r", "K", "O"] {
+        assert!(
+            goto_hints.rows.iter().any(|row| row.next_key == key),
+            "missing g {key} navigation hint"
+        );
+    }
 
     let mut policy = app.configuration.settings.input.keymaps.clone();
     policy.leader = ",".into();

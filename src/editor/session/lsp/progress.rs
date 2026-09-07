@@ -1,6 +1,33 @@
 use super::*;
 
 impl InteractiveApplication {
+    fn reprobe_failed_path_runtime(&mut self, server: &str) {
+        let Some(definition) = self.lsp_sessions.get(server).and_then(|state| {
+            matches!(&state.launch, LspLaunch::Direct { managed: false, .. })
+                .then(|| state.definition.clone())
+        }) else {
+            return;
+        };
+        let Some(executable) = discover_executable(&definition.executable) else {
+            return;
+        };
+        let key = Self::tool_version_key(&definition, LspRuntimeSource::Path, Some(&executable));
+        self.tool_versions.remove(&key);
+        self.tool_version_pending.remove(&key);
+        self.queue_tool_version_probe(&definition, LspRuntimeSource::Path, executable);
+    }
+
+    pub(in crate::editor::session) fn append_lsp_log(&mut self, line: String) {
+        let maximum = self.configuration.settings.lsp.maximum_log_lines.max(1);
+        while self.lsp_logs.len() >= maximum {
+            self.lsp_logs.pop_front();
+        }
+        self.lsp_logs.push_back(line);
+        if self.picker_surface == PickerSurfaceKind::Logs && self.ui.picker.is_some() {
+            self.show_lsp_logs();
+        }
+    }
+
     pub(in crate::editor::session) fn lsp_server_label(&self, server_key: &str) -> String {
         self.lsp_sessions
             .get(server_key)
@@ -158,11 +185,7 @@ impl InteractiveApplication {
                 self.lsp_inlay_request_owner = None;
                 self.schedule_lsp_inlay_warmup_retry();
                 let server = self.lsp_server_label(&server);
-                if self.lsp_logs.len() == self.configuration.settings.lsp.maximum_log_lines {
-                    self.lsp_logs.pop_front();
-                }
-                self.lsp_logs
-                    .push_back(format!("{server}: inlay hint refresh failed: {message}"));
+                self.append_lsp_log(format!("{server}: inlay hint refresh failed: {message}"));
             }
             // Inlay hints are background, revision-owned projections. A failure
             // for any superseded generation is stale by definition, while a
@@ -301,9 +324,7 @@ impl InteractiveApplication {
                         Ok(()) => {
                             self.sync_ui_diagnostics();
                         }
-                        Err(error) => {
-                            self.lsp_logs.push_back(error.to_string());
-                        }
+                        Err(error) => self.append_lsp_log(error.to_string()),
                     }
                 }
                 LspEvent::Result {
@@ -375,11 +396,8 @@ impl InteractiveApplication {
                     percentage,
                 } => self.update_lsp_progress(server, token, kind, title, message, percentage),
                 LspEvent::Log { server, message } => {
-                    if self.lsp_logs.len() == 200 {
-                        self.lsp_logs.pop_front();
-                    }
                     let server = self.lsp_server_label(&server);
-                    self.lsp_logs.push_back(format!("{server}: {message}"));
+                    self.append_lsp_log(format!("{server}: {message}"));
                 }
                 LspEvent::Health { server, health } => {
                     let server = self.lsp_server_label(&server);
@@ -409,7 +427,10 @@ impl InteractiveApplication {
                     method,
                     message,
                 } => self.handle_lsp_request_failure(server, generation, method, message),
-                LspEvent::Stopped { server, .. } => {
+                LspEvent::Stopped { server, success } => {
+                    if !success {
+                        self.reprobe_failed_path_runtime(&server);
+                    }
                     let desired = self.lsp_sessions.get_mut(&server).is_some_and(|state| {
                         state.capabilities = None;
                         state.desired_running
@@ -429,6 +450,7 @@ impl InteractiveApplication {
                     }
                 }
                 LspEvent::Failed { server, message } => {
+                    self.reprobe_failed_path_runtime(&server);
                     let desired = self.lsp_sessions.get_mut(&server).is_some_and(|state| {
                         state.capabilities = None;
                         state.desired_running

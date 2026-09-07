@@ -14,6 +14,7 @@ pub enum Style {
     Selection,
     Search,
     Error,
+    Warning,
     Border,
     BufferLineBackground,
     BufferLineActive,

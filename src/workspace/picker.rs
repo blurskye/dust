@@ -90,9 +90,21 @@ impl PickerState {
         true
     }
 
+    #[must_use]
+    pub fn query(&self) -> &str {
+        &self.query
+    }
+
     pub fn set_query(&mut self, query: String) {
         self.query = query;
         self.recompute();
+    }
+
+    pub fn set_unfiltered_query(&mut self, query: String) {
+        self.query = query;
+        self.visible = (0..self.items.len()).collect();
+        self.selected = (!self.visible.is_empty()).then_some(0);
+        self.scroll = 0;
     }
 
     pub fn insert_query(&mut self, text: &str) {
@@ -122,6 +134,17 @@ impl PickerState {
         } else {
             (current + 1).min(self.visible.len() - 1)
         });
+    }
+
+    pub fn select_last(&mut self) {
+        self.selected = self.visible.len().checked_sub(1);
+    }
+
+    pub fn select_id(&mut self, id: &PickerItemId) {
+        self.selected = self
+            .visible
+            .iter()
+            .position(|index| &self.items[*index].id == id);
     }
 
     pub fn ensure_selected_visible(&mut self, visible_rows: usize) {
@@ -169,6 +192,19 @@ impl PickerState {
     }
 
     fn recompute(&mut self) {
+        if self.query.is_empty() {
+            let selected_id = self.selected_item().map(|item| item.id.clone());
+            self.visible = (0..self.items.len()).collect();
+            self.selected = selected_id
+                .and_then(|id| {
+                    self.visible
+                        .iter()
+                        .position(|index| self.items[*index].id == id)
+                })
+                .or_else(|| (!self.visible.is_empty()).then_some(0));
+            self.scroll = self.scroll.min(self.visible.len().saturating_sub(1));
+            return;
+        }
         let mut scored = self
             .items
             .iter()

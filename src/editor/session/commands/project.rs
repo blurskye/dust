@@ -134,6 +134,81 @@ pub(super) fn register_commands(
     }
     register(
         registry,
+        "explorer.create",
+        "Create explorer file or directory",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default().field("path", ArgumentType::String, true),
+        |invocation| {
+            Ok(AppEffect::ExplorerCreate(
+                string_arg(invocation, "path")?.into(),
+            ))
+        },
+    )?;
+    register(
+        registry,
+        "explorer.rename",
+        "Rename selected explorer path",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default().field("target", ArgumentType::String, true),
+        |invocation| {
+            Ok(AppEffect::ExplorerRename(
+                string_arg(invocation, "target")?.into(),
+            ))
+        },
+    )?;
+    register(
+        registry,
+        "explorer.delete",
+        "Delete selected explorer path",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::ExplorerDeleteRequest,
+    )?;
+    register(
+        registry,
+        "explorer.delete.confirm",
+        "Confirm explorer path deletion",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default().field("phrase", ArgumentType::String, true),
+        |invocation| {
+            Ok(AppEffect::ExplorerDeleteConfirm(
+                string_arg(invocation, "phrase")?.into(),
+            ))
+        },
+    )?;
+    for (id, title, effect) in [
+        (
+            "explorer.copy",
+            "Copy selected explorer path",
+            AppEffect::ExplorerClipboard { cut: false },
+        ),
+        (
+            "explorer.move",
+            "Move selected explorer path",
+            AppEffect::ExplorerClipboard { cut: true },
+        ),
+        (
+            "explorer.paste",
+            "Paste copied explorer path",
+            AppEffect::ExplorerPaste,
+        ),
+        (
+            "explorer.path.yank",
+            "Yank selected explorer path",
+            AppEffect::ExplorerYankPath,
+        ),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::Workspace,
+            ArgumentSchema::default(),
+            move |_| effect.clone(),
+        )?;
+    }
+    register(
+        registry,
         "lsp.sessions",
         "List language-server sessions",
         ContextRequirement::Workspace,

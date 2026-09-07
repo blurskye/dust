@@ -290,13 +290,51 @@ pub(super) fn register_commands(
     for (id, title, effect) in [
         (
             "diagnostic.next",
-            "Go to next diagnostic",
-            AppEffect::DiagnosticNavigate(1),
+            "Go to next error or warning",
+            AppEffect::DiagnosticNavigate {
+                direction: 1,
+                filter: DiagnosticFilter::ErrorOrWarning,
+            },
         ),
         (
             "diagnostic.previous",
-            "Go to previous diagnostic",
-            AppEffect::DiagnosticNavigate(-1),
+            "Go to previous error or warning",
+            AppEffect::DiagnosticNavigate {
+                direction: -1,
+                filter: DiagnosticFilter::ErrorOrWarning,
+            },
+        ),
+        (
+            "diagnostic.error.next",
+            "Go to next error",
+            AppEffect::DiagnosticNavigate {
+                direction: 1,
+                filter: DiagnosticFilter::Error,
+            },
+        ),
+        (
+            "diagnostic.error.previous",
+            "Go to previous error",
+            AppEffect::DiagnosticNavigate {
+                direction: -1,
+                filter: DiagnosticFilter::Error,
+            },
+        ),
+        (
+            "diagnostic.warning.next",
+            "Go to next warning",
+            AppEffect::DiagnosticNavigate {
+                direction: 1,
+                filter: DiagnosticFilter::Warning,
+            },
+        ),
+        (
+            "diagnostic.warning.previous",
+            "Go to previous warning",
+            AppEffect::DiagnosticNavigate {
+                direction: -1,
+                filter: DiagnosticFilter::Warning,
+            },
         ),
         (
             "completion.select_next",

@@ -614,7 +614,7 @@ fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
 }
 
 #[test]
-fn documentation_commands_scroll_clamp_and_close_through_registry() {
+fn documentation_keys_scroll_clamp_and_close_the_popup_context() {
     let mut app = app();
     app.configuration.settings.ui.documentation_popup.max_height = 5;
     app.configuration
@@ -634,7 +634,8 @@ fn documentation_commands_scroll_clamp_and_close_through_registry() {
         }],
         scroll: 0,
     });
-    app.invoke_mapped_command("lsp.documentation.scroll_down");
+    assert_eq!(app.active_input_context(), "documentation");
+    app.handle_configured_key(KeyEvent::character('j'));
     assert_eq!(
         app.ui
             .documentation_popup
@@ -642,7 +643,7 @@ fn documentation_commands_scroll_clamp_and_close_through_registry() {
             .map(|popup| popup.scroll),
         Some(4)
     );
-    app.invoke_mapped_command("lsp.documentation.scroll_down");
+    app.handle_configured_key("ctrl-d".parse::<KeyEvent>().expect("Ctrl-d"));
     assert_eq!(
         app.ui
             .documentation_popup
@@ -650,7 +651,7 @@ fn documentation_commands_scroll_clamp_and_close_through_registry() {
             .map(|popup| popup.scroll),
         Some(7)
     );
-    app.invoke_mapped_command("lsp.documentation.scroll_up");
+    app.handle_configured_key(KeyEvent::character('k'));
     assert_eq!(
         app.ui
             .documentation_popup
@@ -658,7 +659,7 @@ fn documentation_commands_scroll_clamp_and_close_through_registry() {
             .map(|popup| popup.scroll),
         Some(3)
     );
-    app.invoke_mapped_command("lsp.documentation.scroll_up");
+    app.handle_configured_key("ctrl-u".parse::<KeyEvent>().expect("Ctrl-u"));
     assert_eq!(
         app.ui
             .documentation_popup
@@ -666,8 +667,37 @@ fn documentation_commands_scroll_clamp_and_close_through_registry() {
             .map(|popup| popup.scroll),
         Some(0)
     );
-    app.invoke_mapped_command("lsp.documentation.close");
+    app.handle_configured_key(KeyEvent::character('q'));
     assert!(app.ui.documentation_popup.is_none());
     app.invoke_mapped_command("lsp.documentation.scroll_down");
     assert!(app.ui.documentation_popup.is_none());
+    assert_ne!(app.active_input_context(), "documentation");
+
+    app.ui.documentation_popup = Some(DocumentationPopupState {
+        kind: DocumentationPopupKind::Hover,
+        title: "Hover".into(),
+        provider: "test".into(),
+        source_range: None,
+        sections: vec![DocumentationSection {
+            heading: None,
+            markup: DocumentationMarkupKind::PlainText,
+            lines: (0..10).map(|line| format!("line {line}")).collect(),
+        }],
+        scroll: 0,
+    });
+    app.handle_event(crate::ui::UiEvent::Mouse {
+        key: KeyEvent::mouse(
+            crate::editor::input::KeyCode::MouseScrollDown,
+            crate::editor::input::Modifiers::default(),
+        ),
+        column: 0,
+        row: 0,
+    });
+    assert_eq!(
+        app.ui
+            .documentation_popup
+            .as_ref()
+            .map(|popup| popup.scroll),
+        Some(4)
+    );
 }

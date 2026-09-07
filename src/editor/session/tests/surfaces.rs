@@ -67,6 +67,7 @@ fn dashboard_and_picker_are_stable_graph_overlays_with_projected_geometry() {
         selected: None,
         scroll: 0,
         loading: false,
+        preview: None,
     });
     app.reconcile_editor_windows();
     let picker = app.surface_windows.picker().expect("picker resources");
@@ -120,6 +121,24 @@ fn dashboard_and_picker_are_stable_graph_overlays_with_projected_geometry() {
 }
 
 #[test]
+fn notifications_expire_but_remain_available_in_bounded_history() {
+    let mut app = app();
+    app.ui.notification = Some("first".into());
+    app.ui.notification_error = false;
+    app.update_notification_timer();
+    app.ui.notification = Some("second".into());
+    app.ui.notification_error = true;
+    app.update_notification_timer();
+    app.invoke_mapped_command("application.notifications.open");
+    let picker = app.ui.picker.as_ref().expect("notification history");
+    assert_eq!(picker.title, "Notifications");
+    assert_eq!(picker.rows.len(), 2);
+    assert_eq!(picker.rows[0].label, "second");
+    assert_eq!(picker.rows[0].detail, "error");
+    assert_eq!(picker.rows[1].label, "first");
+}
+
+#[test]
 fn problems_logs_output_and_debug_keep_distinct_graph_surface_identities() {
     let mut app = app();
     app.state.open_text(TextBuffer::from_text("editor"), None);
@@ -168,6 +187,22 @@ fn problems_logs_output_and_debug_keep_distinct_graph_surface_identities() {
             .as_str(),
         "builtin.logs"
     );
+    app.append_lsp_log("fake: live log".into());
+    assert!(
+        app.ui
+            .picker
+            .as_ref()
+            .is_some_and(|picker| picker.rows.iter().any(|row| row.label == "fake: live log"))
+    );
+    app.picker_insert("fake");
+    app.append_lsp_log("fake: second live log".into());
+    assert!(app.ui.picker.as_ref().is_some_and(|picker| {
+        picker.query == "fake"
+            && picker
+                .rows
+                .iter()
+                .any(|row| row.label == "fake: second live log")
+    }));
 
     app.open_dap_picker("threads", Vec::new());
     app.reconcile_editor_windows();
@@ -966,6 +1001,8 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
         path: path.clone(),
         range: ByteRange::new(ByteOffset(0), ByteOffset(1)).unwrap(),
         severity: DiagnosticSeverity::Error,
+        source: "rustc".into(),
+        code: Some("E0001".into()),
         message: "bad".into(),
     }];
     app.content_line_diagnostic_revision += 1;

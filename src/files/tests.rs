@@ -9,15 +9,16 @@ use crate::editor::text::TextBuffer;
 use tempfile::tempdir;
 
 use super::{
-    DirectoryEntryKind, DirectoryService, ExplorerWatchEntryKind, ExplorerWatchError,
-    ExplorerWatchPolicy, ExplorerWatchService, ProjectRootService, ProjectRootStrategy,
-    RECOVERY_DIRECTORY_ENTRY_CEILING, RECOVERY_JOURNAL_BYTE_CEILING, RECOVERY_PAYLOAD_BYTE_CEILING,
-    RecoveryRecord, VfsError, VfsResult, VfsWorker, WorkspaceSearchEvent, WorkspaceSearchMatch,
-    WorkspaceSearchPolicy, WorkspaceSearchService, WorkspaceSearchSummary, WriteExpectation,
-    atomic_write, bounded_recovery_entries, checked_atomic_write, cleanup_recovery,
-    diff_explorer_fingerprints, discover_recovery, explorer_directory_fingerprint,
-    list_scoped_directory, natural_name_key, read_bounded_bytes, read_bounded_utf8,
-    recovery_journal_size_allowed, recovery_payload_size_allowed, write_recovery,
+    DirectoryEntryKind, DirectoryService, ExplorerMutation, ExplorerWatchEntryKind,
+    ExplorerWatchError, ExplorerWatchPolicy, ExplorerWatchService, ProjectRootService,
+    ProjectRootStrategy, RECOVERY_DIRECTORY_ENTRY_CEILING, RECOVERY_JOURNAL_BYTE_CEILING,
+    RECOVERY_PAYLOAD_BYTE_CEILING, RecoveryRecord, VfsError, VfsResult, VfsWorker,
+    WorkspaceSearchEvent, WorkspaceSearchMatch, WorkspaceSearchPolicy, WorkspaceSearchService,
+    WorkspaceSearchSummary, WriteExpectation, atomic_write, bounded_recovery_entries,
+    checked_atomic_write, cleanup_recovery, diff_explorer_fingerprints, discover_recovery,
+    explorer_directory_fingerprint, list_scoped_directory, natural_name_key, read_bounded_bytes,
+    read_bounded_utf8, recovery_journal_size_allowed, recovery_payload_size_allowed,
+    write_recovery,
 };
 
 #[test]
@@ -742,6 +743,90 @@ fn directory_completion_is_bounded_and_runs_on_worker() {
         assert!(Instant::now() < deadline, "worker timed out");
         std::thread::sleep(Duration::from_millis(2));
     }
+}
+
+#[test]
+fn explorer_mutations_are_scoped_non_overwriting_and_worker_owned() {
+    fn apply(
+        worker: &mut VfsWorker,
+        root: &Path,
+        operation: ExplorerMutation,
+    ) -> Result<(), VfsError> {
+        let id = worker
+            .explorer_mutate(
+                operation,
+                vec![fs::canonicalize(root).expect("canonical root")],
+                1024,
+            )
+            .expect("queue mutation");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(VfsResult::ExplorerMutated {
+                id: result_id,
+                result,
+                ..
+            }) = worker.try_result().expect("worker")
+                && result_id == id
+            {
+                return result;
+            }
+            assert!(Instant::now() < deadline, "explorer mutation timed out");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    let root = tempdir().expect("root");
+    let mut worker = VfsWorker::start(4);
+    let first = root.path().join("first.txt");
+    apply(
+        &mut worker,
+        root.path(),
+        ExplorerMutation::Create {
+            path: first.clone(),
+            directory: false,
+        },
+    )
+    .expect("create");
+    fs::write(&first, "content").expect("seed copy source");
+    let renamed = root.path().join("renamed.txt");
+    apply(
+        &mut worker,
+        root.path(),
+        ExplorerMutation::Rename {
+            source: first,
+            target: renamed.clone(),
+        },
+    )
+    .expect("rename");
+    let copied = root.path().join("copied.txt");
+    apply(
+        &mut worker,
+        root.path(),
+        ExplorerMutation::Copy {
+            source: renamed.clone(),
+            target: copied.clone(),
+        },
+    )
+    .expect("copy");
+    assert_eq!(fs::read_to_string(&copied).unwrap(), "content");
+    assert!(matches!(
+        apply(
+            &mut worker,
+            root.path(),
+            ExplorerMutation::Copy {
+                source: renamed.clone(),
+                target: copied.clone(),
+            }
+        ),
+        Err(VfsError::DestinationExists(path)) if path == copied
+    ));
+    apply(
+        &mut worker,
+        root.path(),
+        ExplorerMutation::Delete { path: renamed },
+    )
+    .expect("delete");
+    assert!(!root.path().join("renamed.txt").exists());
 }
 
 #[test]

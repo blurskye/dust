@@ -41,25 +41,35 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::TerminalList => {
-                let status = self
+                let items = self
                     .terminals
                     .iter()
                     .map(|(id, terminal)| {
-                        format!(
-                            "#{} {} {}",
-                            id.0,
-                            terminal.profile,
-                            if terminal.running {
-                                "running"
-                            } else {
-                                "exited"
-                            }
+                        (
+                            PickerItem {
+                                id: PickerItemId(format!("terminal:{}", id.0)),
+                                label: format!("#{} {}", id.0, terminal.profile),
+                                detail: format!(
+                                    "{}{}",
+                                    if terminal.running {
+                                        "running"
+                                    } else {
+                                        "exited"
+                                    },
+                                    if Some(*id) == self.active_terminal {
+                                        " · active"
+                                    } else {
+                                        ""
+                                    }
+                                ),
+                                source: "terminal".into(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::Terminal(*id),
                         )
                     })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                self.ui.notification = Some(self.message("terminal_list", &[("status", status)]));
-                self.ui.notification_error = false;
+                    .collect();
+                self.install_picker("Terminals".into(), items);
             }
             AppEffect::TerminalFocus(id) => {
                 let id = PtyId(id);

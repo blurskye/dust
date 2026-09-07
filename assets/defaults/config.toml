@@ -69,13 +69,17 @@ prompt = "bar"
 
 [ui.status_line]
 enabled = true
-components = ["mode", "file", "large_file", "lsp", "position"]
+components = ["mode", "file", "diagnostics", "git", "tasks", "large_file", "lsp", "root", "position"]
 scratch_label = "[scratch]"
 dirty_marker = " [+]"
 mode_padding = " "
 component_separator = " "
 position_format = "{line}:{column} "
 lsp_format = "LSP {server}"
+diagnostic_format = "E{errors} W{warnings}"
+git_format = "Git {count} files"
+task_format = "Tasks {count}"
+root_format = "{root}"
 
 [ui.status_line.mode_labels]
 normal = "NORMAL"
@@ -215,8 +219,8 @@ linter = "Linter"
 formatter = "Formatter"
 
 [ui.picker]
-width_percent = 76
-height_percent = 70
+width_percent = 88
+height_percent = 82
 minimum_width = 40
 minimum_height = 10
 border = "single"
@@ -224,6 +228,7 @@ selected_marker = ">"
 row_marker = " "
 source_separator = " · "
 loading_label = "loading…"
+maximum_preview_bytes = 262144
 
 [ui.explorer]
 bundled_enabled = true
@@ -311,8 +316,12 @@ search_forward_title = "Search Forward"
 search_forward_marker = "/ "
 search_backward_title = "Search Backward"
 search_backward_marker = "? "
-workspace_trust_title = "Confirm workspace trust"
+workspace_trust_title = "Do you want to trust this workspace?"
 workspace_trust_marker = "> "
+git_reset_title = "Reset this Git hunk?"
+git_reset_marker = "> "
+explorer_delete_title = "Delete this path?"
+explorer_delete_marker = "> "
 
 [startup]
 show_dashboard = true
@@ -531,6 +540,7 @@ macro_replay = "input.macro.replay.select"
 
 [input.unmatched_commands]
 prefix = "input.cancel"
+documentation = "lsp.documentation.close"
 
 [input.command_aliases]
 w = "file.save"
@@ -553,6 +563,7 @@ bprevious = "buffer.previous"
 bp = "buffer.previous"
 health = "health.open"
 checkhealth = "health.open"
+messages = "application.notifications.open"
 split = "pane.split.vertical"
 vsplit = "pane.split.horizontal"
 tabnew = "tab.new"
@@ -577,6 +588,8 @@ vimgrep = "workspace.search"
 replaceall = "workspace.replace"
 searchcancel = "workspace.search.cancel"
 rootadd = "workspace.root.add"
+exploreradd = "explorer.create"
+explorerrename = "explorer.rename"
 roots = "workspace.root.list"
 rootactivate = "workspace.root.activate"
 rootremove = "workspace.root.remove"
@@ -707,7 +720,7 @@ workspace_untrusted = "workspace trust revoked; project execution is blocked"
 workspace_trust_trusted = "trusted"
 workspace_trust_untrusted = "untrusted"
 workspace_trust_status = "workspace is {state}"
-workspace_trust_confirmation = "Type `{phrase}` exactly to allow project execution"
+workspace_trust_confirmation = "Allows project commands. Type `{phrase}`."
 workspace_trust_confirmation_wrong = "workspace trust confirmation did not match; workspace remains untrusted"
 workspace_trust_not_ready = "workspace identity and trust state are not ready; workspace remains untrusted"
 workspace_trust_saving = "saving workspace trust state…"
@@ -814,7 +827,7 @@ workspace_search_failed = "workspace search failed: {diagnostic}"
 workspace_search_empty = "workspace search found no matches"
 workspace_search_cancelled = "workspace search cancelled"
 workspace_search_stale_result = "workspace search result is stale; search again"
-workspace_search_title = "Workspace search"
+workspace_search_title = "Grep"
 workspace_search_row = "{path}:{line}:{column}"
 workspace_replace_label = "Workspace replacement"
 picker_references_title = "References"
@@ -885,6 +898,8 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "command_line.move_home" = "Prompt home"
 "command_line.move_left" = "Prompt left"
 "command_line.move_right" = "Prompt right"
+"application.notifications.open" = "Open notification history"
+"application.notification.dismiss" = "Dismiss current notification"
 "command_line.open" = "Open command line"
 "command_line.submit" = "Submit prompt"
 "config.explain" = "Explain a resolved configuration value"
@@ -913,6 +928,9 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "workspace.git.status.refresh" = "Refresh Git status"
 "workspace.git.status.open" = "Open Git status"
 "workspace.git.hunks.open" = "Open Git hunks"
+"workspace.git.hunk.next" = "Go to next Git hunk"
+"workspace.git.hunk.previous" = "Go to previous Git hunk"
+"workspace.git.hunk.preview" = "Preview selected Git hunk"
 "workspace.git.hunk.stage" = "Stage selected Git hunk"
 "workspace.git.hunk.reset" = "Reset selected Git hunk"
 "application.safe_mode.status" = "Show safe-mode status"
@@ -1035,8 +1053,12 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "snippet.next" = "Next snippet placeholder"
 "snippet.previous" = "Previous snippet placeholder"
 "snippet.cancel" = "Cancel snippet session"
-"diagnostic.next" = "Go to next diagnostic"
-"diagnostic.previous" = "Go to previous diagnostic"
+"diagnostic.next" = "Go to next error or warning"
+"diagnostic.previous" = "Go to previous error or warning"
+"diagnostic.error.next" = "Go to next error"
+"diagnostic.error.previous" = "Go to previous error"
+"diagnostic.warning.next" = "Go to next warning"
+"diagnostic.warning.previous" = "Go to previous warning"
 "diagnostic.open" = "Open workspace problems"
 "buffer.picker.open" = "Open buffer picker"
 "command_palette.open" = "Open command picker"
@@ -1133,6 +1155,14 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "explorer.ignored.toggle" = "Toggle ignored explorer entries"
 "explorer.file.open" = "Open explorer file"
 "explorer.file.split_open" = "Split-open explorer file"
+"explorer.create" = "Create explorer file or directory"
+"explorer.rename" = "Rename selected explorer path"
+"explorer.delete" = "Delete selected explorer path"
+"explorer.delete.confirm" = "Confirm explorer path deletion"
+"explorer.copy" = "Copy selected explorer path"
+"explorer.move" = "Move selected explorer path"
+"explorer.paste" = "Paste copied explorer path"
+"explorer.path.yank" = "Yank selected explorer path"
 "explorer.mouse.select" = "Select explorer row at mouse"
 "picker.insert" = "Insert picker query text"
 "picker.backspace" = "Delete picker query character"

@@ -229,18 +229,24 @@ impl InteractiveApplication {
         }
     }
 
-    pub(in crate::editor::session) fn navigate_diagnostic(&mut self, direction: i8) {
+    pub(in crate::editor::session) fn navigate_diagnostic(
+        &mut self,
+        direction: i8,
+        filter: DiagnosticFilter,
+    ) {
         let Some(view_id) = self.state.active_view else {
             return;
         };
         let view = &self.state.views[view_id];
         let buffer_id = view.buffer;
         let cursor = view.cursor;
-        let Some(path) = self.state.buffers[buffer_id].path.as_ref() else {
+        let Some(path) = self.state.buffers[buffer_id].path.clone() else {
             return;
         };
-        let uri = crate::language::lsp::file_uri(path);
-        let target = self.diagnostics.adjacent(&uri, cursor, direction);
+        let uri = crate::language::lsp::file_uri(&path);
+        let target = self
+            .diagnostics
+            .adjacent(&uri, cursor, direction, filter.severities());
         let Some(target) = target else {
             self.show_error(self.message("diagnostic_none", &[]));
             return;
@@ -258,8 +264,16 @@ impl InteractiveApplication {
         if let Err(error) = self.state.apply_transaction(&transaction) {
             self.show_error(error);
         } else {
-            self.ui.notification =
-                Some(self.message("diagnostic_current", &[("message", target.message)]));
+            let line = self.state.buffers[buffer_id]
+                .text
+                .byte_to_line(target.range.start)
+                .unwrap_or(0);
+            self.ui.expanded_diagnostic = Some(crate::ui::ExpandedDiagnosticState {
+                path: path.clone(),
+                line,
+                severities: filter.severities().to_vec(),
+            });
+            self.ui.notification = None;
             self.ui.notification_error = false;
             self.ensure_cursor_visible();
         }

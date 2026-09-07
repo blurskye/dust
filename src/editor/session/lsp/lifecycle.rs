@@ -92,6 +92,34 @@ impl InteractiveApplication {
                     ));
                     return;
                 };
+                if definition.id == "rust-analyzer"
+                    && Self::rust_analyzer_is_rustup_proxy(&executable)
+                {
+                    let key = Self::tool_version_key(
+                        &definition,
+                        LspRuntimeSource::Path,
+                        Some(&executable),
+                    );
+                    match self.tool_versions.get(&key) {
+                        Some(Ok(_)) => {}
+                        Some(Err(_)) => {
+                            self.show_error(Self::unavailable_rust_analyzer_message());
+                            return;
+                        }
+                        None => {
+                            self.queue_tool_version_probe(
+                                &definition,
+                                LspRuntimeSource::Path,
+                                executable,
+                            );
+                            self.ui.notification = Some(
+                                "checking rust-analyzer in the active rustup toolchain…".into(),
+                            );
+                            self.ui.notification_error = false;
+                            return;
+                        }
+                    }
+                }
                 LspLaunchSource::Direct {
                     executable,
                     managed: false,

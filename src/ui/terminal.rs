@@ -17,8 +17,8 @@ use crossterm::{
         Attribute, Color, Print, ResetColor, SetAttribute, SetBackgroundColor, SetForegroundColor,
     },
     terminal::{
-        self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
-        enable_raw_mode,
+        self, BeginSynchronizedUpdate, Clear, ClearType, EndSynchronizedUpdate,
+        EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
     },
 };
 
@@ -26,7 +26,7 @@ use crate::config::{ColorMode, ThemeAttribute, ThemeColor, ThemeConfig};
 use crate::editor::input::{KeyCode, KeyEvent, Modifiers};
 use thiserror::Error;
 
-use crate::ui::{CellGrid, Frame, Style};
+use crate::ui::{Frame, Style};
 
 static PANIC_HOOK: Once = Once::new();
 
@@ -51,7 +51,7 @@ pub struct TerminalOptions {
 
 pub struct TerminalSession {
     stdout: Stdout,
-    previous: Option<CellGrid>,
+    previous: Option<Frame>,
     options: TerminalOptions,
     theme: ThemeConfig,
     color_tier: ColorTier,
@@ -161,44 +161,70 @@ impl TerminalSession {
     }
 
     pub fn draw(&mut self, frame: &Frame) -> Result<(), TerminalError> {
-        let size_changed = self.previous.as_ref().is_none_or(|previous| {
-            previous.width() != frame.grid.width() || previous.height() != frame.grid.height()
-        });
-        if size_changed {
-            queue!(self.stdout, Clear(ClearType::All))?;
+        let mut output = Vec::new();
+        if !queue_frame(
+            &mut output,
+            frame,
+            self.previous.as_ref(),
+            &self.theme,
+            self.color_tier,
+        )? {
+            return Ok(());
         }
-        let previous = self.previous.as_ref();
-        for y in 0..frame.grid.height() {
-            for x in 0..frame.grid.width() {
-                let cell = frame.grid.get(x, y).expect("grid bounds");
-                if cell.continuation {
-                    continue;
-                }
-                let unchanged = previous
-                    .and_then(|grid| grid.get(x, y))
-                    .is_some_and(|old| old == cell);
-                if unchanged && !size_changed {
-                    continue;
-                }
-                queue!(self.stdout, MoveTo(x, y))?;
-                queue_style(&mut self.stdout, cell.style, &self.theme, self.color_tier)?;
-                queue!(self.stdout, Print(&cell.symbol))?;
-            }
-        }
-        queue!(self.stdout, ResetColor, SetAttribute(Attribute::Reset))?;
-        if let Some((x, y, shape)) = frame.cursor {
-            queue!(self.stdout, MoveTo(x, y), shape, Show)?;
-        } else {
-            queue!(self.stdout, Hide)?;
-        }
+        self.stdout.write_all(&output)?;
         self.stdout.flush()?;
-        self.previous = Some(frame.grid.clone());
+        self.previous = Some(frame.clone());
         Ok(())
     }
 }
 
+// Paint with the hardware cursor hidden, then publish only its final location.
+// Synchronized updates also prevent supported terminals from exposing partial frames.
+fn queue_frame(
+    writer: &mut impl Write,
+    frame: &Frame,
+    previous: Option<&Frame>,
+    theme: &ThemeConfig,
+    color_tier: ColorTier,
+) -> io::Result<bool> {
+    if previous.is_some_and(|old| old.grid == frame.grid && old.cursor == frame.cursor) {
+        return Ok(false);
+    }
+    let size_changed = previous.is_none_or(|old| {
+        old.grid.width() != frame.grid.width() || old.grid.height() != frame.grid.height()
+    });
+    queue!(writer, BeginSynchronizedUpdate, Hide)?;
+    if size_changed {
+        queue!(writer, Clear(ClearType::All))?;
+    }
+    for y in 0..frame.grid.height() {
+        for x in 0..frame.grid.width() {
+            let cell = frame.grid.get(x, y).expect("grid bounds");
+            if cell.continuation {
+                continue;
+            }
+            let unchanged = previous
+                .and_then(|old| old.grid.get(x, y))
+                .is_some_and(|old| old == cell);
+            if unchanged && !size_changed {
+                continue;
+            }
+            queue!(writer, MoveTo(x, y))?;
+            queue_style(writer, cell.style, theme, color_tier)?;
+            queue!(writer, Print(&cell.symbol))?;
+        }
+    }
+    queue!(writer, ResetColor, SetAttribute(Attribute::Reset))?;
+    if let Some((x, y, shape)) = frame.cursor {
+        queue!(writer, MoveTo(x, y), shape, Show)?;
+    }
+    queue!(writer, EndSynchronizedUpdate)?;
+    Ok(true)
+}
+
 impl Drop for TerminalSession {
     fn drop(&mut self) {
+        let _ = execute!(self.stdout, EndSynchronizedUpdate);
         if self.options.mouse {
             let _ = execute!(self.stdout, DisableMouseCapture);
         }
@@ -219,6 +245,7 @@ fn restore_terminal(writer: &mut impl Write) -> io::Result<()> {
     let _ = disable_raw_mode();
     execute!(
         writer,
+        EndSynchronizedUpdate,
         ResetColor,
         SetAttribute(Attribute::Reset),
         SetCursorStyle::DefaultUserShape,
@@ -297,6 +324,7 @@ fn queue_style(
         Style::Selection => &theme.styles.selection,
         Style::Search => &theme.styles.search,
         Style::Error => &theme.styles.error,
+        Style::Warning => &theme.styles.warning,
         Style::Border => &theme.styles.border,
         Style::BufferLineBackground => &theme.styles.buffer_line_background,
         Style::BufferLineActive => &theme.styles.buffer_line_active,
@@ -603,6 +631,106 @@ mod tests {
     use super::{
         ColorTier, KeyInputKind, UiEvent, configured_color_tier, normalize_event, queue_style,
     };
+
+    #[test]
+    fn frame_painting_hides_intermediate_cursor_moves_and_publishes_one_final_cursor() {
+        use crate::ui::{CellGrid, Frame, Style};
+        use crossterm::cursor::SetCursorStyle;
+
+        let theme = crate::config::load_bundled_config().theme;
+        let mut frame = Frame {
+            grid: CellGrid::new(12, 4),
+            cursor: Some((2, 1, SetCursorStyle::SteadyBar)),
+        };
+        frame.grid.put_text(0, 0, "top", Style::Default);
+        frame.grid.put_text(0, 3, "status", Style::Status);
+        let mut output = Vec::new();
+        assert!(
+            super::queue_frame(&mut output, &frame, None, &theme, ColorTier::TrueColor).unwrap()
+        );
+        let emitted = String::from_utf8(output).unwrap();
+        assert!(emitted.starts_with("\x1b[?2026h\x1b[?25l\x1b[2J"));
+        assert!(emitted.ends_with("\x1b[2;3H\x1b[6 q\x1b[?25h\x1b[?2026l"));
+        assert_eq!(emitted.matches("\x1b[?25h").count(), 1);
+
+        // An unchanged frame must not move/show the cursor or restart its blink/trail.
+        let mut output = Vec::new();
+        assert!(
+            !super::queue_frame(
+                &mut output,
+                &frame,
+                Some(&frame),
+                &theme,
+                ColorTier::TrueColor
+            )
+            .unwrap()
+        );
+        assert!(output.is_empty());
+
+        // A background/status-only update keeps the real cursor in place.
+        let previous = frame.clone();
+        frame.grid.put_text(0, 3, "update", Style::Default);
+        super::queue_frame(
+            &mut output,
+            &frame,
+            Some(&previous),
+            &theme,
+            ColorTier::TrueColor,
+        )
+        .unwrap();
+        let emitted = String::from_utf8(output).unwrap();
+        assert!(emitted.starts_with("\x1b[?2026h\x1b[?25l"));
+        assert!(!emitted.contains("\x1b[2J"));
+        assert!(emitted.ends_with("\x1b[2;3H\x1b[6 q\x1b[?25h\x1b[?2026l"));
+
+        // Cursor-only moves are still delivered, and hidden-cursor surfaces stay hidden.
+        let previous = frame.clone();
+        frame.cursor = Some((3, 2, SetCursorStyle::SteadyBar));
+        let mut output = Vec::new();
+        super::queue_frame(
+            &mut output,
+            &frame,
+            Some(&previous),
+            &theme,
+            ColorTier::TrueColor,
+        )
+        .unwrap();
+        let emitted = String::from_utf8(output).unwrap();
+        assert!(emitted.ends_with("\x1b[3;4H\x1b[6 q\x1b[?25h\x1b[?2026l"));
+        assert!(!emitted.contains("\x1b[2J"));
+        let previous = frame.clone();
+        frame.cursor = None;
+        let mut output = Vec::new();
+        super::queue_frame(
+            &mut output,
+            &frame,
+            Some(&previous),
+            &theme,
+            ColorTier::TrueColor,
+        )
+        .unwrap();
+        let emitted = String::from_utf8(output).unwrap();
+        assert!(emitted.starts_with("\x1b[?2026h\x1b[?25l"));
+        assert!(emitted.ends_with("\x1b[?2026l"));
+        assert!(!emitted.contains("\x1b[?25h"));
+
+        // Invalidated/resize frames still clear and redraw under the same protection.
+        frame.grid = CellGrid::new(8, 3);
+        let mut output = Vec::new();
+        super::queue_frame(
+            &mut output,
+            &frame,
+            Some(&previous),
+            &theme,
+            ColorTier::TrueColor,
+        )
+        .unwrap();
+        assert!(
+            String::from_utf8(output)
+                .unwrap()
+                .starts_with("\x1b[?2026h\x1b[?25l\x1b[2J")
+        );
+    }
 
     #[test]
     fn configured_theme_controls_emitted_terminal_style() {

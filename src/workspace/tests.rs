@@ -194,6 +194,7 @@ fn trust_database_round_trips_exact_filesystem_identity_and_rejects_path_only_re
     let database = TrustDatabase {
         version: TRUST_STATE_VERSION,
         identities: vec![identity.clone()],
+        seen: vec![identity.clone()],
     };
     persist_trust_database(&path, &database).expect("persist");
     assert_eq!(load_trust_database(&path).expect("load"), database);
@@ -204,8 +205,14 @@ fn trust_database_round_trips_exact_filesystem_identity_and_rejects_path_only_re
             .map(|(device, inode)| (device, inode.saturating_add(1))),
     };
     let mut store = TrustStore::default();
-    store.replace(load_trust_database(&path).expect("load").identities);
+    let loaded = load_trust_database(&path).expect("load");
+    store.replace(loaded.identities);
+    store.replace_seen(loaded.seen);
+    assert!(store.is_seen(&identity));
     assert!(!store.is_trusted(&changed));
+    store.revoke(&identity);
+    assert!(!store.is_trusted(&identity));
+    assert!(store.is_seen(&identity));
     assert!(matches!(
         persist_trust_database(
             &path,
@@ -215,10 +222,30 @@ fn trust_database_round_trips_exact_filesystem_identity_and_rejects_path_only_re
                     canonical_path: identity.canonical_path,
                     filesystem_identity: None,
                 }],
+                seen: Vec::new(),
             }
         ),
         Err(TrustStateError::MissingFilesystemIdentity(_))
     ));
+}
+
+#[test]
+fn legacy_trusted_workspaces_migrate_to_seen_without_reprompting() {
+    let root = tempdir().expect("root");
+    let state = tempdir().expect("state");
+    let path = state.path().join("trust.toml");
+    let identity = RootIdentity::capture(root.path()).expect("identity");
+    let legacy = TrustDatabase {
+        version: 1,
+        identities: vec![identity.clone()],
+        seen: Vec::new(),
+    };
+    fs::write(&path, toml::to_string(&legacy).expect("legacy TOML")).expect("legacy state");
+
+    let migrated = load_trust_database(&path).expect("migrated state");
+    assert_eq!(migrated.version, TRUST_STATE_VERSION);
+    assert_eq!(migrated.identities, vec![identity.clone()]);
+    assert_eq!(migrated.seen, vec![identity]);
 }
 
 #[test]
@@ -267,6 +294,9 @@ fn persisted_trust_does_not_follow_replaced_root_inode() {
     let mut store = TrustStore::default();
     store.trust(original);
     assert!(!store.is_trusted(&replacement));
+    assert!(store.mark_seen(replacement.clone()));
+    assert!(store.identities().is_empty());
+    assert_eq!(store.seen_identities(), vec![replacement]);
 }
 
 #[test]
@@ -442,7 +472,12 @@ fn diagnostics_replace_by_owner_reject_stale_and_obey_bounds() {
     );
     assert_eq!(
         store
-            .adjacent("file:///a", ByteOffset(0), 1)
+            .adjacent(
+                "file:///a",
+                ByteOffset(0),
+                1,
+                &[DiagnosticSeverity::Error, DiagnosticSeverity::Warning],
+            )
             .map(|row| row.message),
         Some("two".into())
     );

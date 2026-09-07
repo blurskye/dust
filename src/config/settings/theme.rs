@@ -145,6 +145,7 @@ pub struct ThemeStyles {
     pub selection: ThemeStyle,
     pub search: ThemeStyle,
     pub error: ThemeStyle,
+    pub warning: ThemeStyle,
     pub border: ThemeStyle,
     pub buffer_line_background: ThemeStyle,
     pub buffer_line_active: ThemeStyle,
@@ -213,6 +214,7 @@ impl ThemeConfig {
             ("selection", &self.styles.selection),
             ("search", &self.styles.search),
             ("error", &self.styles.error),
+            ("warning", &self.styles.warning),
             ("border", &self.styles.border),
             (
                 "buffer_line_background",

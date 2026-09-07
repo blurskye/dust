@@ -2,15 +2,26 @@ use super::*;
 
 impl InteractiveApplication {
     pub(in crate::editor::session) fn sync_lsp_status_ui(&mut self) {
+        let running = self.lsp.running_servers();
         self.ui.lsp_server = self
             .active_lsp_server
             .as_ref()
-            .and_then(|server| self.lsp_sessions.get(server))
-            .map(|session| {
+            .and_then(|server| {
+                self.lsp_sessions
+                    .get(server)
+                    .map(|session| (server, session))
+            })
+            .map(|(server, session)| {
                 if session.capabilities.is_some() {
                     session.server_id.clone()
-                } else {
+                } else if session.circuit_open {
+                    format!("failed {}", session.server_id)
+                } else if session.restart_due.is_some() {
+                    format!("backoff {}", session.server_id)
+                } else if running.contains(server) {
                     format!("starting {}", session.server_id)
+                } else {
+                    format!("stopped {}", session.server_id)
                 }
             });
         let refresh = self.ui.tool_menu.as_ref().is_some_and(|menu| {

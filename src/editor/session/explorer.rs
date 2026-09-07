@@ -555,6 +555,169 @@ impl InteractiveApplication {
         }
     }
 
+    fn explorer_selected_parent(&self) -> Option<PathBuf> {
+        let node = self.explorer.selected_node()?;
+        match node.kind {
+            ExplorerKind::Root | ExplorerKind::Directory => Some(node.path.clone()),
+            ExplorerKind::File | ExplorerKind::Symlink => node.path.parent().map(Path::to_path_buf),
+        }
+    }
+
+    fn explorer_selected_mutable_path(&mut self) -> Option<PathBuf> {
+        let Some(node) = self.explorer.selected_node() else {
+            self.show_error("select an explorer path first");
+            return None;
+        };
+        if node.kind == ExplorerKind::Root {
+            self.show_error("workspace roots cannot be renamed or deleted from the explorer");
+            return None;
+        }
+        Some(node.path.clone())
+    }
+
+    fn queue_explorer_mutation(&mut self, operation: ExplorerMutation) {
+        let roots = self
+            .workspace
+            .roots()
+            .iter()
+            .map(|root| root.identity.canonical_path.clone())
+            .collect();
+        match self.vfs.explorer_mutate(
+            operation,
+            roots,
+            self.configuration
+                .settings
+                .workspace
+                .search
+                .maximum_file_bytes,
+        ) {
+            Ok(id) => {
+                self.pending_vfs.insert(id, PendingVfs::ExplorerMutation);
+                self.ui.notification = Some("applying explorer operation…".into());
+                self.ui.notification_error = false;
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+
+    pub(super) fn create_explorer_path(&mut self, input: String) {
+        let directory = input.ends_with('/') || input.ends_with(std::path::MAIN_SEPARATOR);
+        let input = input.trim_end_matches(['/', std::path::MAIN_SEPARATOR]);
+        if input.is_empty() {
+            self.show_error("explorer path must not be empty");
+            return;
+        }
+        let Some(parent) = self.explorer_selected_parent() else {
+            self.show_error("select an explorer directory first");
+            return;
+        };
+        let entered = PathBuf::from(input);
+        let path = if entered.is_absolute() {
+            entered
+        } else {
+            parent.join(entered)
+        };
+        self.queue_explorer_mutation(ExplorerMutation::Create { path, directory });
+    }
+
+    pub(super) fn rename_explorer_path(&mut self, target: String) {
+        if target.trim().is_empty() {
+            self.show_error("rename target must not be empty");
+            return;
+        }
+        let Some(source) = self.explorer_selected_mutable_path() else {
+            return;
+        };
+        let entered = PathBuf::from(target);
+        let target = if entered.is_absolute() {
+            entered
+        } else {
+            source
+                .parent()
+                .map_or_else(|| entered.clone(), |parent| parent.join(&entered))
+        };
+        self.queue_explorer_mutation(ExplorerMutation::Rename { source, target });
+    }
+
+    pub(super) fn request_explorer_delete(&mut self) {
+        let Some(path) = self.explorer_selected_mutable_path() else {
+            return;
+        };
+        self.explorer_delete_target = Some(path.clone());
+        self.open_prompt(PromptKind::ExplorerDelete, String::new());
+        if let Some(prompt) = &mut self.ui.prompt {
+            prompt.help = Some(format!(
+                "Permanently deletes `{}`. Type `delete`.",
+                path.display()
+            ));
+        }
+    }
+
+    pub(super) fn confirm_explorer_delete(&mut self, phrase: String) {
+        let Some(path) = self.explorer_delete_target.take() else {
+            self.show_error("explorer delete request is stale");
+            return;
+        };
+        if phrase.trim() != "delete" {
+            self.show_error("explorer delete confirmation did not match");
+            return;
+        }
+        self.queue_explorer_mutation(ExplorerMutation::Delete { path });
+    }
+
+    pub(super) fn set_explorer_clipboard(&mut self, cut: bool) {
+        let Some(path) = self.explorer_selected_mutable_path() else {
+            return;
+        };
+        self.explorer_clipboard = Some((path.clone(), cut));
+        self.ui.notification = Some(format!(
+            "{} `{}`; select a destination and press p",
+            if cut { "moving" } else { "copied" },
+            path.display()
+        ));
+        self.ui.notification_error = false;
+    }
+
+    pub(super) fn paste_explorer_clipboard(&mut self) {
+        let Some((source, cut)) = self.explorer_clipboard.clone() else {
+            self.show_error("explorer clipboard is empty");
+            return;
+        };
+        let Some(parent) = self.explorer_selected_parent() else {
+            self.show_error("select an explorer destination first");
+            return;
+        };
+        let Some(name) = source.file_name() else {
+            self.show_error("copied explorer path has no file name");
+            return;
+        };
+        let target = parent.join(name);
+        self.queue_explorer_mutation(if cut {
+            ExplorerMutation::Rename { source, target }
+        } else {
+            ExplorerMutation::Copy { source, target }
+        });
+    }
+
+    pub(super) fn yank_explorer_path(&mut self) {
+        let Some(node) = self.explorer.selected_node() else {
+            self.show_error("select an explorer path first");
+            return;
+        };
+        let text = node.path.display().to_string();
+        self.state.registers.set(
+            '"',
+            RegisterValue {
+                text: text.clone(),
+                shape: RegisterShape::Character,
+            },
+            self.state.policy.registers_enabled,
+            self.state.policy.mirror_named_to_unnamed,
+        );
+        self.ui.notification = Some(format!("yanked `{text}`"));
+        self.ui.notification_error = false;
+    }
+
     pub(super) fn explorer_mouse_select(&mut self) {
         let Some((column, row)) = self.mouse_position else {
             return;
@@ -587,5 +750,12 @@ impl InteractiveApplication {
         self.explorer
             .reset_roots(self.workspace.roots(), self.workspace.root_revision());
         self.sync_explorer_ui();
+        let root = self.explorer.selected_node().and_then(|node| {
+            (node.kind == ExplorerKind::Root && node.load != ExplorerLoadState::Loaded)
+                .then_some(node.id)
+        });
+        if let Some(root) = root {
+            self.load_explorer_node(root);
+        }
     }
 }

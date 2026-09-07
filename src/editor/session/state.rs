@@ -407,7 +407,7 @@ pub(in crate::editor::session) struct PendingKeymap {
     pub(in crate::editor::session) context: String,
     pub(in crate::editor::session) prefix: String,
     pub(in crate::editor::session) started_at: Instant,
-    pub(in crate::editor::session) deadline: Instant,
+    pub(in crate::editor::session) deadline: Option<Instant>,
     pub(in crate::editor::session) configuration_generation: u64,
 }
 
@@ -705,6 +705,7 @@ pub(in crate::editor::session) enum PickerPayload {
     Command(String),
     ProposalFile(usize),
     WorkspaceRoot(crate::workspace::RootId),
+    Terminal(crate::process::PtyId),
     LspSession(String),
     DapControl(DapControl),
     PersistedLocation(PersistedLocation),
@@ -769,6 +770,11 @@ pub(in crate::editor::session) enum PendingVfs {
         path: PathBuf,
         generation: u64,
     },
+    PickerPreview {
+        path: PathBuf,
+        generation: u64,
+    },
+    ExplorerMutation,
     StartupOpen {
         primary: bool,
     },

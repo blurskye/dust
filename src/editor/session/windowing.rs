@@ -407,7 +407,7 @@ impl InteractiveApplication {
                             self.terminal_width,
                             projection.workspace_bounds.height,
                             &self.configuration.settings.ui.command_line,
-                            prompt.error.is_some(),
+                            prompt.error.is_some() || prompt.help.is_some(),
                         );
                         projection.set_protected_regions([WindowRect {
                             x: geometry.left,

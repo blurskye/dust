@@ -289,14 +289,17 @@ fn key_hint_lifecycle_tracks_exact_prefix_delay_and_cancellation() {
     assert_eq!(
         app.pending_keymap
             .as_ref()
-            .map(|pending| pending.prefix.as_str()),
-        Some("space")
+            .map(|pending| (pending.prefix.as_str(), pending.deadline)),
+        Some(("space", None))
     );
     app.update_key_hint_ui();
     assert_eq!(
         app.ui.key_hints.as_ref().map(|hints| hints.prefix.as_str()),
         Some("space")
     );
+    app.flush_keymap_timeout();
+    assert!(app.pending_keymap.is_some());
+    assert!(app.ui.key_hints.is_some());
     app.handle_configured_key(KeyEvent::character('f'));
     assert_eq!(
         app.pending_keymap
@@ -405,7 +408,7 @@ fn key_hint_timeout_reload_and_pass_through_never_leave_stale_actions() {
     assert!(app.pending_keymap.is_some());
     assert!(app.ui.key_hints.is_some());
     app.pending_keymap.as_mut().expect("pending").deadline =
-        Instant::now() - Duration::from_millis(1);
+        Some(Instant::now() - Duration::from_millis(1));
     app.flush_keymap_timeout();
     assert!(app.pending_keymap.is_none());
     assert!(app.ui.key_hints.is_none());

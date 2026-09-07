@@ -36,6 +36,12 @@ pub enum VfsRequest {
         id: RequestId,
         intent: CheckedResourceIntent,
     },
+    ExplorerMutation {
+        id: RequestId,
+        operation: ExplorerMutation,
+        canonical_roots: Vec<PathBuf>,
+        maximum_bytes: u64,
+    },
     Write {
         id: RequestId,
         path: PathBuf,
@@ -89,6 +95,34 @@ pub struct CheckedResourceIntent {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ExplorerMutation {
+    Create { path: PathBuf, directory: bool },
+    Rename { source: PathBuf, target: PathBuf },
+    Copy { source: PathBuf, target: PathBuf },
+    Delete { path: PathBuf },
+}
+
+impl ExplorerMutation {
+    #[must_use]
+    pub fn source(&self) -> Option<&Path> {
+        match self {
+            Self::Rename { source, .. } | Self::Copy { source, .. } => Some(source),
+            Self::Delete { path } => Some(path),
+            Self::Create { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub fn target(&self) -> Option<&Path> {
+        match self {
+            Self::Create { path, .. } => Some(path),
+            Self::Rename { target, .. } | Self::Copy { target, .. } => Some(target),
+            Self::Delete { .. } => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WriteExpectation {
     Any,
     Missing,
@@ -104,6 +138,11 @@ pub enum VfsResult {
     ResourceApplied {
         id: RequestId,
         intent: CheckedResourceIntent,
+        result: Result<(), VfsError>,
+    },
+    ExplorerMutated {
+        id: RequestId,
+        operation: ExplorerMutation,
         result: Result<(), VfsError>,
     },
     CreateTarget {
@@ -246,6 +285,23 @@ impl VfsWorker {
                         VfsRequest::ApplyResource { id, intent } => {
                             let result = apply_resource_intent(&intent);
                             VfsResult::ResourceApplied { id, intent, result }
+                        }
+                        VfsRequest::ExplorerMutation {
+                            id,
+                            operation,
+                            canonical_roots,
+                            maximum_bytes,
+                        } => {
+                            let result = apply_explorer_mutation(
+                                &operation,
+                                &canonical_roots,
+                                maximum_bytes,
+                            );
+                            VfsResult::ExplorerMutated {
+                                id,
+                                operation,
+                                result,
+                            }
                         }
                         VfsRequest::ResolveCreate {
                             id,
@@ -438,6 +494,24 @@ impl VfsWorker {
         Ok(id)
     }
 
+    pub fn explorer_mutate(
+        &mut self,
+        operation: ExplorerMutation,
+        canonical_roots: Vec<PathBuf>,
+        maximum_bytes: u64,
+    ) -> Result<RequestId, VfsError> {
+        let id = self.next_request_id();
+        self.sender
+            .try_send(VfsRequest::ExplorerMutation {
+                id,
+                operation,
+                canonical_roots,
+                maximum_bytes,
+            })
+            .map_err(map_send_error)?;
+        Ok(id)
+    }
+
     pub fn resolve_create(
         &mut self,
         path: PathBuf,
@@ -571,6 +645,209 @@ impl Drop for VfsWorker {
         let _ = self.sender.send(VfsRequest::Shutdown);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
+        }
+    }
+}
+
+fn scoped_existing_path(path: &Path, roots: &[PathBuf]) -> Result<PathBuf, VfsError> {
+    let lexical = fs::symlink_metadata(path).map_err(|source| VfsError::Io {
+        operation: "inspect explorer path",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if lexical.file_type().is_symlink() {
+        return Err(VfsError::Io {
+            operation: "mutate symlink",
+            path: path.to_path_buf(),
+            source: io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "symlinks are not mutable from the explorer",
+            ),
+        });
+    }
+    let canonical = canonical_path(path)?;
+    if !roots.iter().any(|root| canonical.starts_with(root))
+        || roots.iter().any(|root| root == &canonical)
+    {
+        return Err(VfsError::OutsideScope(canonical));
+    }
+    Ok(canonical)
+}
+
+fn scoped_missing_target(path: &Path, roots: &[PathBuf]) -> Result<PathBuf, VfsError> {
+    let name = path
+        .file_name()
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| VfsError::OutsideScope(path.to_path_buf()))?;
+    let parent = canonical_path(
+        path.parent()
+            .ok_or_else(|| VfsError::OutsideScope(path.to_path_buf()))?,
+    )?;
+    if !roots.iter().any(|root| parent.starts_with(root)) {
+        return Err(VfsError::OutsideScope(parent));
+    }
+    let target = parent.join(name);
+    match fs::symlink_metadata(&target) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(target),
+        Ok(_) => Err(VfsError::DestinationExists(target)),
+        Err(source) => Err(VfsError::Io {
+            operation: "inspect explorer target",
+            path: target,
+            source,
+        }),
+    }
+}
+
+pub(super) fn apply_explorer_mutation(
+    operation: &ExplorerMutation,
+    roots: &[PathBuf],
+    maximum_bytes: u64,
+) -> Result<(), VfsError> {
+    match operation {
+        ExplorerMutation::Create { path, directory } => {
+            let target = scoped_missing_target(path, roots)?;
+            if *directory {
+                fs::create_dir(&target).map_err(|source| VfsError::Io {
+                    operation: "create explorer directory",
+                    path: target,
+                    source,
+                })
+            } else {
+                let mut options = fs::OpenOptions::new();
+                options.write(true).create_new(true);
+                let file = options.open(&target).map_err(|source| VfsError::Io {
+                    operation: "create explorer file",
+                    path: target.clone(),
+                    source,
+                })?;
+                file.sync_all().map_err(|source| VfsError::Io {
+                    operation: "sync explorer file",
+                    path: target,
+                    source,
+                })
+            }
+        }
+        ExplorerMutation::Rename { source, target } => {
+            let source = scoped_existing_path(source, roots)?;
+            let target = scoped_missing_target(target, roots)?;
+            fs::rename(&source, &target).map_err(|error| VfsError::Io {
+                operation: "rename explorer path",
+                path: source,
+                source: error,
+            })
+        }
+        ExplorerMutation::Copy { source, target } => {
+            let source = scoped_existing_path(source, roots)?;
+            let target = scoped_missing_target(target, roots)?;
+            let metadata = fs::metadata(&source).map_err(|error| VfsError::Io {
+                operation: "inspect explorer copy source",
+                path: source.clone(),
+                source: error,
+            })?;
+            if metadata.is_dir() {
+                let mut entries = fs::read_dir(&source).map_err(|error| VfsError::Io {
+                    operation: "inspect explorer directory",
+                    path: source.clone(),
+                    source: error,
+                })?;
+                if entries.next().is_some() {
+                    return Err(VfsError::Io {
+                        operation: "copy explorer directory",
+                        path: source,
+                        source: io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "recursive directory copy is not supported; select an empty directory",
+                        ),
+                    });
+                }
+                fs::create_dir(&target).map_err(|error| VfsError::Io {
+                    operation: "copy explorer directory",
+                    path: target,
+                    source: error,
+                })
+            } else if metadata.is_file() {
+                if metadata.len() > maximum_bytes {
+                    return Err(VfsError::DocumentTooLarge {
+                        path: source,
+                        maximum_bytes,
+                    });
+                }
+                let mut input = fs::File::open(&source).map_err(|error| VfsError::Io {
+                    operation: "open explorer copy source",
+                    path: source.clone(),
+                    source: error,
+                })?;
+                let mut output = fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&target)
+                    .map_err(|error| VfsError::Io {
+                        operation: "create explorer copy target",
+                        path: target.clone(),
+                        source: error,
+                    })?;
+                let copied = io::copy(
+                    &mut std::io::Read::by_ref(&mut input).take(maximum_bytes.saturating_add(1)),
+                    &mut output,
+                )
+                .map_err(|error| VfsError::Io {
+                    operation: "copy explorer file",
+                    path: source.clone(),
+                    source: error,
+                });
+                match copied {
+                    Ok(bytes) if bytes <= maximum_bytes => match output.sync_all() {
+                        Ok(()) => Ok(()),
+                        Err(error) => {
+                            drop(output);
+                            let _ = fs::remove_file(&target);
+                            Err(VfsError::Io {
+                                operation: "sync explorer copy",
+                                path: target,
+                                source: error,
+                            })
+                        }
+                    },
+                    Ok(_) => {
+                        drop(output);
+                        let _ = fs::remove_file(&target);
+                        Err(VfsError::DocumentTooLarge {
+                            path: source,
+                            maximum_bytes,
+                        })
+                    }
+                    Err(error) => {
+                        drop(output);
+                        let _ = fs::remove_file(&target);
+                        Err(error)
+                    }
+                }
+            } else {
+                Err(VfsError::NotRegularFile(source))
+            }
+        }
+        ExplorerMutation::Delete { path } => {
+            let path = scoped_existing_path(path, roots)?;
+            let metadata = fs::metadata(&path).map_err(|error| VfsError::Io {
+                operation: "inspect explorer delete target",
+                path: path.clone(),
+                source: error,
+            })?;
+            if metadata.is_dir() {
+                fs::remove_dir(&path).map_err(|error| VfsError::Io {
+                    operation: "delete explorer directory",
+                    path,
+                    source: error,
+                })
+            } else if metadata.is_file() {
+                fs::remove_file(&path).map_err(|error| VfsError::Io {
+                    operation: "delete explorer file",
+                    path,
+                    source: error,
+                })
+            } else {
+                Err(VfsError::NotRegularFile(path))
+            }
         }
     }
 }

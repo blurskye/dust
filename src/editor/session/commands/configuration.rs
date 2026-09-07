@@ -100,6 +100,30 @@ pub(super) fn register_commands(
     )?;
     register(
         registry,
+        "workspace.git.hunk.next",
+        "Go to next Git hunk",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::GitHunkNavigate(1),
+    )?;
+    register(
+        registry,
+        "workspace.git.hunk.previous",
+        "Go to previous Git hunk",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::GitHunkNavigate(-1),
+    )?;
+    register(
+        registry,
+        "workspace.git.hunk.preview",
+        "Preview selected Git hunk",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::GitHunkPreview,
+    )?;
+    register(
+        registry,
         "workspace.git.hunk.reset",
         "Reset selected Git hunk",
         ContextRequirement::Workspace,
@@ -148,10 +172,28 @@ pub(super) fn register_commands(
     )?;
     register(
         registry,
+        "application.notifications.open",
+        "Open notification history",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_| AppEffect::NotificationHistory,
+    )?;
+    register(
+        registry,
+        "application.notification.dismiss",
+        "Dismiss current notification",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_| AppEffect::NotificationDismiss,
+    )?;
+    register(
+        registry,
         "command_line.open",
         "Open command line",
         ContextRequirement::Application,
-        ArgumentSchema::default().field("kind", ArgumentType::String, true),
+        ArgumentSchema::default()
+            .field("kind", ArgumentType::String, true)
+            .field("initial", ArgumentType::String, false),
         |invocation| {
             let kind = match string_arg(invocation, "kind")? {
                 "command" => PromptKind::Command,
@@ -165,7 +207,9 @@ pub(super) fn register_commands(
             };
             Ok(AppEffect::OpenPrompt {
                 kind,
-                initial: String::new(),
+                initial: optional_string_arg(invocation, "initial")
+                    .unwrap_or_default()
+                    .to_owned(),
             })
         },
     )?;

@@ -3,24 +3,48 @@ use super::*;
 #[derive(Clone, Debug, Default)]
 pub struct TrustStore {
     trusted: HashSet<RootIdentity>,
+    seen: HashSet<RootIdentity>,
 }
 
 impl TrustStore {
     pub fn replace(&mut self, identities: impl IntoIterator<Item = RootIdentity>) {
         self.trusted = identities.into_iter().collect();
+        self.seen.extend(self.trusted.iter().cloned());
+    }
+
+    pub fn replace_seen(&mut self, identities: impl IntoIterator<Item = RootIdentity>) {
+        self.seen = identities.into_iter().collect();
+        self.seen.extend(self.trusted.iter().cloned());
     }
 
     #[must_use]
     pub fn identities(&self) -> Vec<RootIdentity> {
-        let mut identities = self.trusted.iter().cloned().collect::<Vec<_>>();
-        identities.sort_by(|left, right| left.canonical_path.cmp(&right.canonical_path));
-        identities
+        sorted_identities(&self.trusted)
+    }
+
+    #[must_use]
+    pub fn seen_identities(&self) -> Vec<RootIdentity> {
+        sorted_identities(&self.seen)
     }
 
     pub fn trust(&mut self, identity: RootIdentity) {
+        self.mark_seen(identity.clone());
         self.trusted
             .retain(|candidate| candidate.canonical_path != identity.canonical_path);
         self.trusted.insert(identity);
+    }
+
+    pub fn mark_seen(&mut self, identity: RootIdentity) -> bool {
+        self.trusted.retain(|candidate| {
+            candidate.canonical_path != identity.canonical_path || candidate == &identity
+        });
+        if self.seen.contains(&identity) {
+            return false;
+        }
+        self.seen
+            .retain(|candidate| candidate.canonical_path != identity.canonical_path);
+        self.seen.insert(identity);
+        true
     }
 
     pub fn revoke(&mut self, identity: &RootIdentity) {
@@ -31,9 +55,21 @@ impl TrustStore {
     pub fn is_trusted(&self, identity: &RootIdentity) -> bool {
         self.trusted.contains(identity)
     }
+
+    #[must_use]
+    pub fn is_seen(&self, identity: &RootIdentity) -> bool {
+        self.seen.contains(identity)
+    }
 }
 
-pub const TRUST_STATE_VERSION: u32 = 1;
+fn sorted_identities(identities: &HashSet<RootIdentity>) -> Vec<RootIdentity> {
+    let mut identities = identities.iter().cloned().collect::<Vec<_>>();
+    identities.sort_by(|left, right| left.canonical_path.cmp(&right.canonical_path));
+    identities
+}
+
+pub const TRUST_STATE_VERSION: u32 = 2;
+const LEGACY_TRUST_STATE_VERSION: u32 = 1;
 pub(super) const TRUST_STATE_BYTE_LIMIT: u64 = 1024 * 1024;
 pub(super) const TRUST_IDENTITY_LIMIT: usize = 256;
 
@@ -42,6 +78,8 @@ pub(super) const TRUST_IDENTITY_LIMIT: usize = 256;
 pub struct TrustDatabase {
     pub version: u32,
     pub identities: Vec<RootIdentity>,
+    #[serde(default)]
+    pub seen: Vec<RootIdentity>,
 }
 
 impl Default for TrustDatabase {
@@ -49,6 +87,7 @@ impl Default for TrustDatabase {
         Self {
             version: TRUST_STATE_VERSION,
             identities: Vec::new(),
+            seen: Vec::new(),
         }
     }
 }
@@ -85,12 +124,30 @@ pub(super) fn validate_trust_database(
     if database.version != TRUST_STATE_VERSION {
         return Err(TrustStateError::UnsupportedVersion(database.version));
     }
-    if database.identities.len() > TRUST_IDENTITY_LIMIT {
+    if database.identities.len() > TRUST_IDENTITY_LIMIT
+        || database.seen.len() > TRUST_IDENTITY_LIMIT
+    {
         return Err(TrustStateError::TooManyIdentities);
     }
+    validate_identities(path, &database.identities)?;
+    validate_identities(path, &database.seen)?;
+    if database
+        .identities
+        .iter()
+        .any(|identity| !database.seen.contains(identity))
+    {
+        return Err(TrustStateError::Invalid {
+            path: path.to_path_buf(),
+            reason: "every trusted identity must also be recorded as seen".into(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_identities(path: &Path, identities: &[RootIdentity]) -> Result<(), TrustStateError> {
     let mut unique = HashSet::new();
     let mut paths = HashSet::new();
-    for identity in &database.identities {
+    for identity in identities {
         if identity.filesystem_identity.is_none() {
             return Err(TrustStateError::MissingFilesystemIdentity(
                 identity.canonical_path.clone(),
@@ -138,11 +195,15 @@ pub(super) fn load_trust_database(path: &Path) -> Result<TrustDatabase, TrustSta
         path: path.to_path_buf(),
         reason: error.to_string(),
     })?;
-    let database =
+    let mut database =
         toml::from_str::<TrustDatabase>(&source).map_err(|error| TrustStateError::Invalid {
             path: path.to_path_buf(),
             reason: error.to_string(),
         })?;
+    if database.version == LEGACY_TRUST_STATE_VERSION {
+        database.version = TRUST_STATE_VERSION;
+        database.seen = database.identities.clone();
+    }
     validate_trust_database(path, &database)?;
     Ok(database)
 }
@@ -296,6 +357,7 @@ impl WorkspaceTrustService {
         &mut self,
         path: PathBuf,
         identities: Vec<RootIdentity>,
+        seen: Vec<RootIdentity>,
     ) -> Result<u64, TrustStateError> {
         let generation = self.next_generation();
         self.sender
@@ -305,6 +367,7 @@ impl WorkspaceTrustService {
                 database: TrustDatabase {
                     version: TRUST_STATE_VERSION,
                     identities,
+                    seen,
                 },
             })
             .map_err(map_trust_send_error)?;

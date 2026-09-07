@@ -686,7 +686,7 @@ fn bundled_assets_share_the_typed_configuration_loaders() {
         .collect::<BTreeSet<_>>();
     assert_eq!(bundled_ids.len(), loaded.keymaps.entries.len());
     assert!(bundled_ids.iter().all(|id| id.starts_with("builtin.")));
-    assert_eq!(loaded.keymaps.groups.len(), 3);
+    assert_eq!(loaded.keymaps.groups.len(), 5);
     assert_eq!(
         loaded.keymaps.bundled_group_count,
         loaded.keymaps.groups.len()

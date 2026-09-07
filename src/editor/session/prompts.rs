@@ -12,7 +12,8 @@ impl InteractiveApplication {
                     PromptKind::SearchForward
                     | PromptKind::SearchBackward
                     | PromptKind::WorkspaceTrust
-                    | PromptKind::GitReset => EditorMode::Prompt,
+                    | PromptKind::GitReset
+                    | PromptKind::ExplorerDelete => EditorMode::Prompt,
                 });
             }
         }
@@ -25,6 +26,14 @@ impl InteractiveApplication {
     }
 
     pub(super) fn close_prompt(&mut self) {
+        if self
+            .ui
+            .prompt
+            .as_ref()
+            .is_some_and(|prompt| prompt.kind == PromptKind::ExplorerDelete)
+        {
+            self.explorer_delete_target = None;
+        }
         self.ui.prompt = None;
         self.history_index = None;
         if let Some((view, mode)) = self.previous_mode.take() {
@@ -84,7 +93,10 @@ impl InteractiveApplication {
         let Some(kind) = self.ui.prompt.as_ref().map(|prompt| prompt.kind) else {
             return;
         };
-        if matches!(kind, PromptKind::WorkspaceTrust | PromptKind::GitReset) {
+        if matches!(
+            kind,
+            PromptKind::WorkspaceTrust | PromptKind::GitReset | PromptKind::ExplorerDelete
+        ) {
             return;
         }
         let (enabled, history) = if kind == PromptKind::Command {
@@ -345,7 +357,7 @@ impl InteractiveApplication {
         };
         if !matches!(
             prompt.kind,
-            PromptKind::WorkspaceTrust | PromptKind::GitReset
+            PromptKind::WorkspaceTrust | PromptKind::GitReset | PromptKind::ExplorerDelete
         ) {
             self.record_prompt_history(prompt.kind, &prompt.input);
         }
@@ -383,6 +395,10 @@ impl InteractiveApplication {
             PromptKind::GitReset => {
                 self.close_prompt();
                 self.confirm_reset_selected_git_hunk(prompt.input);
+            }
+            PromptKind::ExplorerDelete => {
+                self.confirm_explorer_delete(prompt.input);
+                self.close_prompt();
             }
             PromptKind::SearchForward | PromptKind::SearchBackward => {
                 if prompt.input.is_empty() {

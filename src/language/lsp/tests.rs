@@ -10,7 +10,8 @@ use super::{
     LspDocument, LspEvent, LspFeature, LspFeatureResult, LspMarkupKind, LspPolicy, LspProgressKind,
     LspService, PositionEncoding, SyncKind, completion_items, file_uri, hover_result,
     incremental_change, initialize_capabilities, initialize_message, inlay_hints,
-    language_id_for_path, lsp_progress_event, path_from_file_uri, workspace_edit,
+    language_id_for_path, lsp_progress_event, path_from_file_uri, requested_executable_name,
+    workspace_edit,
 };
 use crate::tools::{ToolDefinition, ToolKind, tool_launch_environment};
 
@@ -363,6 +364,83 @@ fn completion_and_workspace_edits_are_bounded_typed_data() {
     assert_eq!(edit.documents[0].edits[0].new_text, "b");
 }
 
+#[test]
+fn canonical_launch_preserves_the_requested_multicall_name() {
+    let definition = ToolDefinition {
+        id: "rust-analyzer".into(),
+        name: "Rust Analyzer".into(),
+        kind: ToolKind::Lsp,
+        languages: vec!["rust".into()],
+        executable: "/run/current-system/sw/bin/rust-analyzer".into(),
+        version: None,
+        release: None,
+        launch_args: Vec::new(),
+        probe_args: Vec::new(),
+        debug_program_policy: crate::tools::DebugProgramPolicy::default(),
+        project_root_markers: vec!["Cargo.toml".into()],
+        project_root_strategy: crate::files::ProjectRootStrategy::Cargo,
+        install: None,
+        pins: Vec::new(),
+    };
+    assert_eq!(requested_executable_name(&definition), "rust-analyzer");
+}
+
+#[test]
+fn server_that_never_initializes_fails_within_the_request_timeout() {
+    let Some(sleep) = crate::tools::discover_executable("sleep") else {
+        return;
+    };
+    let workspace = tempfile::tempdir().expect("workspace");
+    let definition = ToolDefinition {
+        id: "sleeping-server".into(),
+        name: "Sleeping Server".into(),
+        kind: ToolKind::Lsp,
+        languages: vec!["rust".into()],
+        executable: sleep.display().to_string(),
+        version: None,
+        release: None,
+        launch_args: vec!["2".into()],
+        probe_args: Vec::new(),
+        debug_program_policy: crate::tools::DebugProgramPolicy::default(),
+        project_root_markers: vec!["Cargo.toml".into()],
+        project_root_strategy: crate::files::ProjectRootStrategy::Cargo,
+        install: None,
+        pins: Vec::new(),
+    };
+    let mut service = LspService::new();
+    service
+        .start_session_absolute_with_policy(super::LspSessionLaunch {
+            session_key: &definition.id,
+            definition: &definition,
+            executable: sleep,
+            arguments: definition.launch_args.clone(),
+            root: workspace.path().into(),
+            document: None,
+            policy: LspPolicy {
+                request_timeout: Duration::from_millis(100),
+                maximum_log_lines: 20,
+            },
+            configuration: super::LspServerConfiguration::standard(),
+            environment: tool_launch_environment(&definition),
+        })
+        .expect("start");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let failed = loop {
+        if let Some(LspEvent::Failed { message, .. }) = service.try_event() {
+            break message;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "initialize timeout event missing"
+        );
+        thread::sleep(Duration::from_millis(10));
+    };
+    assert!(failed.contains("initialize request timed out"));
+    service
+        .stop(&definition.id)
+        .expect("stop timed-out session");
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn deterministic_fake_server_proves_lifecycle_sync_and_features() {
@@ -643,6 +721,11 @@ while True:
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
         .find(|message| message.get("method") == Some(&json!("textDocument/didChange")))
         .expect("change");
+    assert_eq!(
+        change.pointer("/params/textDocument/version"),
+        Some(&json!(2)),
+        "the unsaved buffer revision must be synchronized before any file save"
+    );
     assert_eq!(
         change.pointer("/params/contentChanges/0/range/start/character"),
         Some(&json!(5))

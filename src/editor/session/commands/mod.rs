@@ -44,6 +44,8 @@ pub enum AppEffect {
     GitStatusRefresh,
     GitStatusOpen,
     GitHunksOpen,
+    GitHunkNavigate(i8),
+    GitHunkPreview,
     GitHunkStage,
     GitHunkReset,
     OpenPrompt {
@@ -57,6 +59,8 @@ pub enum AppEffect {
     PromptComplete(i8),
     PromptSubmit,
     PromptCancel,
+    NotificationHistory,
+    NotificationDismiss,
     SearchRepeat {
         reverse: bool,
     },
@@ -245,7 +249,17 @@ pub enum AppEffect {
     ExplorerFileOpen {
         split: bool,
     },
+    ExplorerCreate(String),
+    ExplorerRename(String),
+    ExplorerDeleteRequest,
+    ExplorerDeleteConfirm(String),
+    ExplorerClipboard {
+        cut: bool,
+    },
+    ExplorerPaste,
+    ExplorerYankPath,
     ExplorerMouseSelect,
+    WorkspaceSearchPrompt,
     WorkspaceSearch(String),
     WorkspaceSearchCancel,
     WorkspaceReplace {
@@ -294,7 +308,10 @@ pub enum AppEffect {
     SnippetCancel,
     LspFoldToggle,
     LspSelectionExpand,
-    DiagnosticNavigate(i8),
+    DiagnosticNavigate {
+        direction: i8,
+        filter: DiagnosticFilter,
+    },
     DapStart(Option<PathBuf>),
     DapStop,
     DapContinue,
@@ -321,6 +338,24 @@ pub enum AppEffect {
     DapWatchAdd(String),
     DapWatchRemove(String),
     DapWatchList,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DiagnosticFilter {
+    Error,
+    Warning,
+    ErrorOrWarning,
+}
+
+impl DiagnosticFilter {
+    pub const fn severities(self) -> &'static [crate::workspace::DiagnosticSeverity] {
+        use crate::workspace::DiagnosticSeverity::{Error, Warning};
+        match self {
+            Self::Error => &[Error],
+            Self::Warning => &[Warning],
+            Self::ErrorOrWarning => &[Error, Warning],
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

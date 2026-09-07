@@ -20,6 +20,10 @@ pub struct PromptTextConfig {
     pub search_backward_marker: String,
     pub workspace_trust_title: String,
     pub workspace_trust_marker: String,
+    pub git_reset_title: String,
+    pub git_reset_marker: String,
+    pub explorer_delete_title: String,
+    pub explorer_delete_marker: String,
 }
 
 impl Default for PromptTextConfig {
@@ -31,8 +35,12 @@ impl Default for PromptTextConfig {
             search_forward_marker: "/ ".into(),
             search_backward_title: "Search Backward".into(),
             search_backward_marker: "? ".into(),
-            workspace_trust_title: "Confirm workspace trust".into(),
+            workspace_trust_title: "Do you want to trust this workspace?".into(),
             workspace_trust_marker: "> ".into(),
+            git_reset_title: "Reset this Git hunk?".into(),
+            git_reset_marker: "> ".into(),
+            explorer_delete_title: "Delete this path?".into(),
+            explorer_delete_marker: "> ".into(),
         }
     }
 }
@@ -113,6 +121,10 @@ pub struct StatusLineConfig {
     pub component_separator: String,
     pub position_format: String,
     pub lsp_format: String,
+    pub diagnostic_format: String,
+    pub git_format: String,
+    pub task_format: String,
+    pub root_format: String,
 }
 
 impl Default for StatusLineConfig {
@@ -127,6 +139,10 @@ impl Default for StatusLineConfig {
             component_separator: " ".into(),
             position_format: "{line}:{column} ".into(),
             lsp_format: "LSP {server}".into(),
+            diagnostic_format: "E{errors} W{warnings}".into(),
+            git_format: "Git {count} files".into(),
+            task_format: "Tasks {count}".into(),
+            root_format: "{root}".into(),
         }
     }
 }
@@ -373,13 +389,14 @@ pub struct PickerConfig {
     pub row_marker: String,
     pub source_separator: String,
     pub loading_label: String,
+    pub maximum_preview_bytes: usize,
 }
 
 impl Default for PickerConfig {
     fn default() -> Self {
         Self {
-            width_percent: 76,
-            height_percent: 70,
+            width_percent: 88,
+            height_percent: 82,
             minimum_width: 40,
             minimum_height: 10,
             border: BorderStyle::Single,
@@ -387,6 +404,7 @@ impl Default for PickerConfig {
             row_marker: " ".into(),
             source_separator: " · ".into(),
             loading_label: "loading…".into(),
+            maximum_preview_bytes: 256 * 1024,
         }
     }
 }

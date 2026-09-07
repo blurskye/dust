@@ -314,6 +314,7 @@ impl Config {
             || self.ui.picker.minimum_height < 6
             || self.ui.picker.selected_marker.chars().any(char::is_control)
             || self.ui.picker.row_marker.chars().any(char::is_control)
+            || !(128 * 1024..=8 * 1024 * 1024).contains(&self.ui.picker.maximum_preview_bytes)
         {
             return Err("ui.picker layout or presentation policy is invalid");
         }
@@ -926,7 +927,15 @@ impl Config {
         if self.ui.status_line.components.iter().any(|component| {
             !matches!(
                 component.as_str(),
-                "mode" | "file" | "large_file" | "lsp" | "position"
+                "mode"
+                    | "file"
+                    | "large_file"
+                    | "lsp"
+                    | "diagnostics"
+                    | "git"
+                    | "tasks"
+                    | "root"
+                    | "position"
             )
         }) {
             return Err("ui.status_line.components contains an unknown component");

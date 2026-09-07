@@ -3,6 +3,7 @@ use super::*;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ToolOperation {
     InstallManaged,
+    InstallRustup,
     UninstallManaged,
     InstallNix,
     UninstallNix,
@@ -34,6 +35,13 @@ pub(super) enum InstallerRequest {
     InstallNix {
         definition: ToolDefinition,
         nix: PathBuf,
+    },
+    InstallRustup {
+        definition: ToolDefinition,
+        rustup: PathBuf,
+        proxy: PathBuf,
+        cwd: PathBuf,
+        component: String,
     },
     UninstallNix {
         definition: ToolDefinition,
@@ -68,19 +76,53 @@ impl ToolInstaller {
             .name("dust-tool-installer".into())
             .spawn(move || {
                 while let Ok(request) = requests.recv() {
-                    let (definition, operation, nix) = match request {
-                        InstallerRequest::Install { definition } => {
-                            (definition, ToolOperation::InstallManaged, None)
-                        }
-                        InstallerRequest::Uninstall { definition } => {
-                            (definition, ToolOperation::UninstallManaged, None)
-                        }
-                        InstallerRequest::InstallNix { definition, nix } => {
-                            (definition, ToolOperation::InstallNix, Some(nix))
-                        }
-                        InstallerRequest::UninstallNix { definition } => {
-                            (definition, ToolOperation::UninstallNix, None)
-                        }
+                    let (definition, operation, executable, proxy, cwd, component) = match request {
+                        InstallerRequest::Install { definition } => (
+                            definition,
+                            ToolOperation::InstallManaged,
+                            None,
+                            None,
+                            None,
+                            None,
+                        ),
+                        InstallerRequest::InstallRustup {
+                            definition,
+                            rustup,
+                            proxy,
+                            cwd,
+                            component,
+                        } => (
+                            definition,
+                            ToolOperation::InstallRustup,
+                            Some(rustup),
+                            Some(proxy),
+                            Some(cwd),
+                            Some(component),
+                        ),
+                        InstallerRequest::Uninstall { definition } => (
+                            definition,
+                            ToolOperation::UninstallManaged,
+                            None,
+                            None,
+                            None,
+                            None,
+                        ),
+                        InstallerRequest::InstallNix { definition, nix } => (
+                            definition,
+                            ToolOperation::InstallNix,
+                            Some(nix),
+                            None,
+                            None,
+                            None,
+                        ),
+                        InstallerRequest::UninstallNix { definition } => (
+                            definition,
+                            ToolOperation::UninstallNix,
+                            None,
+                            None,
+                            None,
+                            None,
+                        ),
                         InstallerRequest::Shutdown => break,
                     };
                     let id = definition.id.clone();
@@ -97,9 +139,9 @@ impl ToolInstaller {
                     };
                     report(
                         match operation {
-                            ToolOperation::InstallManaged | ToolOperation::InstallNix => {
-                                "preparing"
-                            }
+                            ToolOperation::InstallManaged
+                            | ToolOperation::InstallRustup
+                            | ToolOperation::InstallNix => "preparing",
                             ToolOperation::UninstallManaged | ToolOperation::UninstallNix => {
                                 "uninstalling"
                             }
@@ -111,13 +153,28 @@ impl ToolInstaller {
                         ToolOperation::InstallManaged => {
                             install_tool(&definition, &root, &cancellations, &mut report, None)
                         }
+                        ToolOperation::InstallRustup => install_path_rustup_component(
+                            &definition,
+                            executable
+                                .as_deref()
+                                .expect("rustup install request has executable"),
+                            proxy.as_deref().expect("rustup install request has proxy"),
+                            cwd.as_deref().expect("rustup install request has cwd"),
+                            component
+                                .as_deref()
+                                .expect("rustup install request has component"),
+                            &cancellations,
+                            &mut report,
+                        ),
                         ToolOperation::UninstallManaged => {
                             uninstall_managed_tool(&definition, &root).map(|()| None)
                         }
                         ToolOperation::InstallNix => install_nix_lsp_profile(
                             &definition,
                             &root,
-                            nix.as_deref().expect("Nix install request has executable"),
+                            executable
+                                .as_deref()
+                                .expect("Nix install request has executable"),
                             &cancellations,
                             &mut report,
                         ),
@@ -158,6 +215,23 @@ impl ToolInstaller {
 
     pub fn uninstall(&self, definition: ToolDefinition) -> Result<(), ToolInstallerError> {
         self.submit(InstallerRequest::Uninstall { definition })
+    }
+
+    pub fn install_rustup_component(
+        &self,
+        definition: ToolDefinition,
+        rustup: PathBuf,
+        proxy: PathBuf,
+        cwd: PathBuf,
+        component: String,
+    ) -> Result<(), ToolInstallerError> {
+        self.submit(InstallerRequest::InstallRustup {
+            definition,
+            rustup,
+            proxy,
+            cwd,
+            component,
+        })
     }
 
     pub fn install_nix(

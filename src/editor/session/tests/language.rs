@@ -591,6 +591,86 @@ fn rust_analyzer_rustup_proxy_detection_accepts_symlinks_and_hardlinks() {
     ));
 }
 
+#[cfg(unix)]
+#[test]
+fn failed_rustup_proxy_probe_is_not_a_launchable_path_runtime() {
+    let mut app = app();
+    let directory = tempdir().expect("temporary proxy directory");
+    let rustup = directory.path().join("rustup");
+    fs::write(&rustup, b"rustup").expect("rustup fixture");
+    let proxy = directory.path().join("rust-analyzer");
+    fs::hard_link(&rustup, &proxy).expect("rustup proxy");
+    let mut definition = app
+        .tools
+        .iter()
+        .find(|entry| entry.definition.id == "rust-analyzer")
+        .expect("rust-analyzer catalog entry")
+        .definition
+        .clone();
+    definition.executable = proxy.display().to_string();
+    assert!(app.selected_lsp_runtime_available(&definition));
+    let key =
+        InteractiveApplication::tool_version_key(&definition, LspRuntimeSource::Path, Some(&proxy));
+    app.tool_versions
+        .insert(key, Err("active toolchain has no rust-analyzer".into()));
+    assert!(!app.selected_lsp_runtime_available(&definition));
+    let path_runtime = app
+        .runtime_options_for(&definition)
+        .into_iter()
+        .find(|option| option.source == LspRuntimeSource::Path.key())
+        .expect("PATH runtime");
+    assert!(!path_runtime.installed);
+    assert!(path_runtime.installable);
+    assert_eq!(path_runtime.status, "unavailable");
+    assert!(path_runtime.note.contains("press i"));
+    let message = InteractiveApplication::unavailable_rust_analyzer_message();
+    assert!(message.contains("Press i in :lsp"));
+    assert!(!message.contains("version probe exited"));
+}
+
+#[test]
+fn lsp_status_never_labels_failed_or_backing_off_sessions_as_starting() {
+    let mut app = app();
+    let definition = app
+        .tools
+        .iter()
+        .find(|entry| entry.definition.id == "rust-analyzer")
+        .expect("rust-analyzer catalog entry")
+        .definition
+        .clone();
+    let executable = crate::tools::discover_executable("false").expect("false executable");
+    let root = app.workspace.active_root().expect("workspace root");
+    let key = "failed-rust-analyzer".to_owned();
+    app.lsp_sessions.insert(
+        key.clone(),
+        crate::editor::session::LspRuntimeState {
+            root,
+            root_path: app.state.workspace_root.clone(),
+            server_id: definition.id.clone(),
+            definition,
+            launch: crate::editor::session::LspLaunch::Direct {
+                executable,
+                managed: false,
+            },
+            capabilities: None,
+            documents: HashMap::new(),
+            restart_count: 1,
+            restart_due: None,
+            circuit_open: true,
+            desired_running: true,
+            activate_on_restart: true,
+        },
+    );
+    app.active_lsp_server = Some(key.clone());
+    app.sync_lsp_status_ui();
+    assert_eq!(app.ui.lsp_server.as_deref(), Some("failed rust-analyzer"));
+    let session = app.lsp_sessions.get_mut(&key).expect("session");
+    session.circuit_open = false;
+    session.restart_due = Some(Instant::now() + Duration::from_secs(1));
+    app.sync_lsp_status_ui();
+    assert_eq!(app.ui.lsp_server.as_deref(), Some("backoff rust-analyzer"));
+}
+
 #[test]
 fn lsp_installation_mechanisms_are_host_specific() {
     assert!(lsp_runtime_source_allowed_on_host(

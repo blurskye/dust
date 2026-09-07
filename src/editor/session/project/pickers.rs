@@ -15,7 +15,21 @@ impl InteractiveApplication {
         title: String,
         items: Vec<(PickerItem, PickerPayload)>,
     ) {
+        self.install_surface_picker_state(surface, title, items, String::new(), true);
+    }
+
+    pub(in crate::editor::session) fn install_surface_picker_state(
+        &mut self,
+        surface: PickerSurfaceKind,
+        title: String,
+        items: Vec<(PickerItem, PickerPayload)>,
+        query: String,
+        complete: bool,
+    ) {
         self.completion_generation = self.completion_generation.saturating_add(1);
+        self.picker_preview_generation = self.picker_preview_generation.saturating_add(1);
+        self.picker_preview_path = None;
+        self.picker_preview = None;
         let generation = self.completion_generation;
         let mut picker = PickerState::new(
             generation,
@@ -30,7 +44,8 @@ impl InteractiveApplication {
                 item
             })
             .collect::<Vec<_>>();
-        picker.append(generation, rows, true);
+        picker.append(generation, rows, complete);
+        picker.set_unfiltered_query(query);
         self.picker_surface = surface;
         self.picker = Some(picker);
         self.sync_picker_ui();
@@ -437,21 +452,38 @@ impl InteractiveApplication {
                 selected: presentation.selected,
                 scroll: presentation.scroll,
                 loading: presentation.loading,
+                preview: self.picker_preview.clone(),
             }
         });
+        self.sync_picker_preview();
+        if let Some(picker) = &mut self.ui.picker {
+            picker.preview.clone_from(&self.picker_preview);
+        }
     }
 
     pub(in crate::editor::session) fn picker_insert(&mut self, text: &str) {
-        if let Some(picker) = &mut self.picker {
+        let query = self.picker.as_mut().map(|picker| {
             picker.insert_query(text);
-            self.sync_picker_ui();
+            picker.query().to_owned()
+        });
+        self.sync_picker_ui();
+        if self.workspace_search_live
+            && let Some(query) = query
+        {
+            self.restart_live_workspace_search(query);
         }
     }
 
     pub(in crate::editor::session) fn picker_backspace(&mut self) {
-        if let Some(picker) = &mut self.picker {
+        let query = self.picker.as_mut().map(|picker| {
             picker.backspace_query();
-            self.sync_picker_ui();
+            picker.query().to_owned()
+        });
+        self.sync_picker_ui();
+        if self.workspace_search_live
+            && let Some(query) = query
+        {
+            self.restart_live_workspace_search(query);
         }
     }
 
@@ -469,6 +501,140 @@ impl InteractiveApplication {
             picker.ensure_selected_visible(rows);
             self.sync_picker_ui();
         }
+    }
+
+    fn sync_picker_preview(&mut self) {
+        let Some((label, payload)) = self
+            .picker
+            .as_ref()
+            .and_then(PickerState::selected_item)
+            .and_then(|item| {
+                self.picker_payloads
+                    .get(&item.id)
+                    .cloned()
+                    .map(|payload| (item.label.clone(), payload))
+            })
+        else {
+            self.picker_preview_path = None;
+            self.picker_preview = None;
+            return;
+        };
+        match payload {
+            PickerPayload::WorkspaceSearch(found) => {
+                self.picker_preview_path = Some(found.canonical_path.clone());
+                self.picker_preview = Some(Self::search_picker_preview(
+                    &found,
+                    self.configuration.settings.ui.picker.maximum_preview_bytes,
+                ));
+            }
+            PickerPayload::MatcherSource(source) => {
+                if self.picker_preview_path.as_ref() == Some(&source.path) {
+                    return;
+                }
+                self.picker_preview_generation = self.picker_preview_generation.saturating_add(1);
+                let generation = self.picker_preview_generation;
+                self.picker_preview_path = Some(source.path.clone());
+                self.picker_preview = Some(PickerPreview {
+                    title: label,
+                    lines: vec![self.configuration.settings.ui.picker.loading_label.clone()],
+                    first_line: 0,
+                    highlight_line: None,
+                });
+                let roots = self
+                    .workspace
+                    .roots()
+                    .iter()
+                    .map(|root| root.identity.canonical_path.clone())
+                    .collect();
+                if let Ok(id) = self.vfs.read_scoped_bounded(
+                    source.path.clone(),
+                    roots,
+                    self.configuration.settings.ui.picker.maximum_preview_bytes as u64,
+                ) {
+                    self.pending_vfs.insert(
+                        id,
+                        PendingVfs::PickerPreview {
+                            path: source.path,
+                            generation,
+                        },
+                    );
+                }
+            }
+            _ => {
+                self.picker_preview_path = None;
+                self.picker_preview = None;
+            }
+        }
+    }
+
+    fn search_picker_preview(
+        found: &crate::files::WorkspaceSearchMatch,
+        maximum_bytes: usize,
+    ) -> PickerPreview {
+        let bytes = found.snapshot.as_ref();
+        let maximum_bytes = maximum_bytes.max(1);
+        let match_start = found.range.start.min(bytes.len());
+        let mut start = match_start.saturating_sub(maximum_bytes / 3);
+        while start < match_start
+            && bytes
+                .get(start)
+                .is_some_and(|byte| byte & 0b1100_0000 == 0b1000_0000)
+        {
+            start = start.saturating_add(1);
+        }
+        if start > 0
+            && let Some(line_break) = bytes[start..match_start]
+                .iter()
+                .position(|byte| *byte == b'\n')
+        {
+            start = start.saturating_add(line_break).saturating_add(1);
+        }
+        let mut end = start.saturating_add(maximum_bytes).min(bytes.len());
+        while end > start && std::str::from_utf8(&bytes[start..end]).is_err() {
+            end = end.saturating_sub(1);
+        }
+        let before_lines = bytes[start..match_start]
+            .iter()
+            .filter(|byte| **byte == b'\n')
+            .count();
+        let mut first_line = found.line.saturating_sub(before_lines);
+        let selected_offset = found.line.saturating_sub(first_line);
+        let first_visible_offset = selected_offset.saturating_sub(8);
+        let lines = std::str::from_utf8(&bytes[start..end]).map_or_else(
+            |_| vec!["binary preview unavailable".into()],
+            |text| Self::picker_preview_lines_from(text, first_visible_offset, 512),
+        );
+        first_line = first_line.saturating_add(first_visible_offset);
+        PickerPreview {
+            title: found.relative_path.display().to_string(),
+            lines,
+            first_line,
+            highlight_line: Some(found.line),
+        }
+    }
+
+    pub(in crate::editor::session) fn picker_preview_lines(
+        text: &str,
+        maximum_lines: usize,
+    ) -> Vec<String> {
+        Self::picker_preview_lines_from(text, 0, maximum_lines)
+    }
+
+    fn picker_preview_lines_from(
+        text: &str,
+        first_line: usize,
+        maximum_lines: usize,
+    ) -> Vec<String> {
+        text.lines()
+            .skip(first_line)
+            .take(maximum_lines)
+            .map(|line| {
+                line.chars()
+                    .filter(|character| !character.is_control() || *character == '\t')
+                    .take(4096)
+                    .collect()
+            })
+            .collect()
     }
 
     pub(in crate::editor::session) fn open_plugin_picker(
@@ -555,8 +721,21 @@ impl InteractiveApplication {
         if let Some(request) = self.active_plugin_picker.take() {
             self.plugin_providers.cancel(request);
         }
+        self.active_output_task = None;
+        if self.workspace_search_live {
+            self.workspace_search.cancel();
+            self.workspace_search_generation = None;
+            self.workspace_search_workflow = None;
+            self.workspace_search_matches.clear();
+            self.workspace_search_intent = None;
+            self.workspace_search_live = false;
+            self.workspace_search_query.clear();
+        }
         self.picker = None;
         self.picker_payloads.clear();
+        self.picker_preview_generation = self.picker_preview_generation.saturating_add(1);
+        self.picker_preview_path = None;
+        self.picker_preview = None;
         self.ui.picker = None;
     }
 
@@ -594,6 +773,16 @@ impl InteractiveApplication {
                 }
             }
             Some(PickerPayload::WorkspaceRoot(root)) => self.activate_workspace_root(root),
+            Some(PickerPayload::Terminal(id)) => {
+                if self.terminals.contains_key(&id) {
+                    self.active_terminal = Some(id);
+                    self.terminal_focused = true;
+                    self.resize_active_terminal_to_panel();
+                    self.sync_terminal_panel();
+                } else {
+                    self.show_error(self.message("terminal_missing", &[]));
+                }
+            }
             Some(PickerPayload::LspSession(key)) => self.select_lsp_session(&key),
             Some(PickerPayload::DapFrame(frame)) => {
                 let _ = self.dap.control(DapControl::Scopes { frame_id: frame.id });

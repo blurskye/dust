@@ -155,6 +155,12 @@ impl InteractiveApplication {
             && path
                 .as_deref()
                 .is_some_and(Self::rust_analyzer_is_rustup_proxy);
+        let rustup_installable = rustup_bundled
+            && path_error.is_some()
+            && path
+                .as_ref()
+                .is_some_and(|proxy| proxy.with_file_name("rustup").is_file());
+        let path_usable = path.is_some() && path_error.is_none();
         let (path_display_version, path_release) = if rustup_bundled {
             if path_version_reported {
                 Self::rust_analyzer_path_version(&path_version, true)
@@ -193,6 +199,8 @@ impl InteractiveApplication {
             ),
             status: if path.is_none() {
                 "not installed"
+            } else if path_error.is_some() {
+                "unavailable"
             } else if selected_source == LspRuntimeSource::Path {
                 "in use"
             } else {
@@ -201,6 +209,9 @@ impl InteractiveApplication {
             .into(),
             note: if path.is_none() {
                 "No external executable is installed on PATH; Dust cannot install or uninstall PATH-owned software."
+                    .into()
+            } else if rustup_installable {
+                "The rustup proxy has no rust-analyzer component for the active toolchain; press i to install it with rustup."
                     .into()
             } else if path_version == "version unavailable" {
                 "Installed on PATH; this compatibility entry has no qualified version command."
@@ -225,8 +236,8 @@ impl InteractiveApplication {
                 })
             },
             selected: selected_source == LspRuntimeSource::Path,
-            installed: path.is_some(),
-            installable: false,
+            installed: path_usable,
+            installable: rustup_installable,
             uninstallable: false,
         }];
 
@@ -559,6 +570,12 @@ impl InteractiveApplication {
                             && self.managed_variant_installed(definition, &managed_definition)
                     },
                 };
+                if source == LspRuntimeSource::Path
+                    && probe_error.is_some()
+                    && lifecycle == "stopped"
+                {
+                    lifecycle = "unavailable".into();
+                }
                 let runtime = if source_installed {
                     source.label().into()
                 } else {
@@ -992,7 +1009,13 @@ impl InteractiveApplication {
         if let Some(menu) = &mut self.ui.tool_menu {
             menu.runtime_picker = None;
         }
+        let category = self
+            .ui
+            .tool_menu
+            .as_ref()
+            .map_or_else(|| "lsp".into(), |menu| menu.category.clone());
         if !installed && installable {
+            self.rebuild_tool_menu(&category, Some(&id));
             self.install_tool_by_id(&id, Some(source));
             return;
         }
@@ -1007,11 +1030,6 @@ impl InteractiveApplication {
             _ => format!("{id} ACTIVE installation: {}", source.label()),
         });
         self.ui.notification_error = false;
-        let category = self
-            .ui
-            .tool_menu
-            .as_ref()
-            .map_or_else(|| "lsp".into(), |menu| menu.category.clone());
         self.rebuild_tool_menu(&category, Some(&id));
     }
 

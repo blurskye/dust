@@ -1,6 +1,40 @@
 use super::*;
 
 impl InteractiveApplication {
+    pub(in crate::editor::session) fn open_live_workspace_search(&mut self) {
+        self.close_picker();
+        self.workspace_search_live = true;
+        self.workspace_search_query.clear();
+        self.install_surface_picker_state(
+            PickerSurfaceKind::Generic,
+            self.message("workspace_search_title", &[]),
+            Vec::new(),
+            String::new(),
+            true,
+        );
+    }
+
+    pub(in crate::editor::session) fn restart_live_workspace_search(&mut self, query: String) {
+        self.workspace_search_query.clone_from(&query);
+        if query.is_empty() {
+            self.workspace_search.cancel();
+            self.workspace_search_generation = None;
+            self.workspace_search_workflow = None;
+            self.workspace_search_sequence = 0;
+            self.workspace_search_matches.clear();
+            self.workspace_search_intent = None;
+            self.install_surface_picker_state(
+                PickerSurfaceKind::Generic,
+                self.message("workspace_search_title", &[]),
+                Vec::new(),
+                query,
+                true,
+            );
+            return;
+        }
+        self.start_workspace_search(query, None);
+    }
+
     pub(in crate::editor::session) fn start_workspace_file_picker(&mut self) {
         self.close_picker();
         let configured = &self.configuration.settings.workspace.search;
@@ -25,7 +59,7 @@ impl InteractiveApplication {
                 self.workspace_file_generation = Some(generation);
                 self.workspace_file_root_revision = Some(root_revision);
                 self.workspace_file_entries.clear();
-                self.install_picker("Workspace files".into(), Vec::new());
+                self.install_picker("Files".into(), Vec::new());
             }
             Err(error) => self.show_error(error),
         }
@@ -59,6 +93,7 @@ impl InteractiveApplication {
                     && Some(root_revision) == self.workspace_file_root_revision =>
                 {
                     self.workspace_file_generation = None;
+                    let multi_root = self.workspace.roots().len() > 1;
                     let items = self
                         .workspace_file_entries
                         .iter()
@@ -67,8 +102,14 @@ impl InteractiveApplication {
                                 PickerItem {
                                     id: PickerItemId(entry.id.clone()),
                                     label: entry.relative_path.display().to_string(),
-                                    detail: entry.root.display().to_string(),
-                                    source: "files".into(),
+                                    detail: String::new(),
+                                    source: if multi_root {
+                                        entry.root.file_name().map_or_else(String::new, |name| {
+                                            name.to_string_lossy().into_owned()
+                                        })
+                                    } else {
+                                        String::new()
+                                    },
                                     action: PickerAction::None,
                                 },
                                 PickerPayload::MatcherSource(MatcherSource {
@@ -80,7 +121,7 @@ impl InteractiveApplication {
                         })
                         .collect();
                     match compose_workspace_file_items(items) {
-                        Ok(items) => self.install_picker("Workspace files".into(), items),
+                        Ok(items) => self.install_picker("Files".into(), items),
                         Err(error) => self.show_error(error.to_string()),
                     }
                 }
@@ -108,6 +149,7 @@ impl InteractiveApplication {
         replacement: Option<String>,
     ) {
         let configured = &self.configuration.settings.workspace.search;
+        self.workspace_search_query.clone_from(&query);
         let policy = WorkspaceSearchPolicy {
             roots: self
                 .workspace
@@ -165,9 +207,20 @@ impl InteractiveApplication {
                 self.workspace_search_intent = Some(
                     replacement.map_or(WorkspaceSearchIntent::Find, WorkspaceSearchIntent::Replace),
                 );
-                self.close_picker();
-                self.ui.notification = Some(self.message("workspace_search_started", &[]));
-                self.ui.notification_error = false;
+                if self.workspace_search_live {
+                    self.install_surface_picker_state(
+                        PickerSurfaceKind::Generic,
+                        self.message("workspace_search_title", &[]),
+                        Vec::new(),
+                        self.workspace_search_query.clone(),
+                        false,
+                    );
+                    self.ui.notification = None;
+                } else {
+                    self.close_picker();
+                    self.ui.notification = Some(self.message("workspace_search_started", &[]));
+                    self.ui.notification_error = false;
+                }
             }
             Err(error) => self.show_error(self.message(
                 "workspace_search_failed",
@@ -239,6 +292,9 @@ impl InteractiveApplication {
                     self.workspace_search_sequence =
                         self.workspace_search_sequence.saturating_add(1);
                     self.workspace_search_matches.extend(matches);
+                    if self.workspace_search_live {
+                        self.open_workspace_search_picker();
+                    }
                 }
                 WorkspaceSearchEvent::Complete {
                     generation,
@@ -273,18 +329,27 @@ impl InteractiveApplication {
                     let intent = self.workspace_search_intent.take();
                     match intent {
                         Some(WorkspaceSearchIntent::Find) => {
-                            if self.workspace_search_matches.is_empty() {
-                                self.show_error(self.message("workspace_search_empty", &[]));
-                            } else {
+                            if self.workspace_search_live
+                                || !self.workspace_search_matches.is_empty()
+                            {
                                 self.open_workspace_search_picker();
-                                self.ui.notification = Some(self.message(
-                                    "workspace_search_complete",
-                                    &[
-                                        ("count", self.workspace_search_matches.len().to_string()),
-                                        ("files", summary.files_searched.to_string()),
-                                    ],
-                                ));
-                                self.ui.notification_error = false;
+                                if self.workspace_search_live {
+                                    self.ui.notification = None;
+                                } else {
+                                    self.ui.notification = Some(self.message(
+                                        "workspace_search_complete",
+                                        &[
+                                            (
+                                                "count",
+                                                self.workspace_search_matches.len().to_string(),
+                                            ),
+                                            ("files", summary.files_searched.to_string()),
+                                        ],
+                                    ));
+                                    self.ui.notification_error = false;
+                                }
+                            } else {
+                                self.show_error(self.message("workspace_search_empty", &[]));
                             }
                         }
                         Some(WorkspaceSearchIntent::Replace(replacement)) => {
@@ -344,6 +409,7 @@ impl InteractiveApplication {
             .cloned()
             .map(|found| (found.id.clone(), found))
             .collect::<std::collections::BTreeMap<_, _>>();
+        let multi_root = self.workspace.roots().len() > 1;
         let items = snapshot
             .items
             .into_iter()
@@ -360,16 +426,30 @@ impl InteractiveApplication {
                         ],
                     ),
                     detail: found.line_text.trim().to_owned(),
-                    source: found
-                        .root
-                        .file_name()
-                        .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+                    source: if multi_root {
+                        found
+                            .root
+                            .file_name()
+                            .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+                    } else {
+                        String::new()
+                    },
                     action: PickerAction::None,
                 };
                 (item, PickerPayload::WorkspaceSearch(found))
             })
             .collect();
-        self.install_picker(self.message("workspace_search_title", &[]), items);
+        if self.workspace_search_live {
+            self.install_surface_picker_state(
+                PickerSurfaceKind::Generic,
+                self.message("workspace_search_title", &[]),
+                items,
+                self.workspace_search_query.clone(),
+                self.workspace_search_generation.is_none(),
+            );
+        } else {
+            self.install_picker(self.message("workspace_search_title", &[]), items);
+        }
     }
 
     pub(in crate::editor::session) fn begin_workspace_search_replacement(

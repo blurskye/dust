@@ -136,7 +136,18 @@ impl InteractiveApplication {
         definition: &ToolDefinition,
     ) -> bool {
         match self.selected_lsp_runtime_source(definition) {
-            LspRuntimeSource::Path => discover_executable(&definition.executable).is_some(),
+            LspRuntimeSource::Path => {
+                discover_executable(&definition.executable).is_some_and(|path| {
+                    if definition.id != "rust-analyzer"
+                        || !Self::rust_analyzer_is_rustup_proxy(&path)
+                    {
+                        return true;
+                    }
+                    let key =
+                        Self::tool_version_key(definition, LspRuntimeSource::Path, Some(&path));
+                    !matches!(self.tool_versions.get(&key), Some(Err(_)))
+                })
+            }
             LspRuntimeSource::Managed => self.selected_managed_executable(definition).is_some(),
             LspRuntimeSource::Nix => {
                 nix_lsp_tool_installed(definition)
@@ -183,6 +194,10 @@ impl InteractiveApplication {
 
     pub(in crate::editor::session) fn rust_analyzer_is_rustup_proxy(path: &Path) -> bool {
         crate::tools::rust_analyzer_is_rustup_proxy(path)
+    }
+
+    pub(in crate::editor::session) fn unavailable_rust_analyzer_message() -> String {
+        "rust-analyzer missing. Press i in :lsp to install it via rustup.".into()
     }
 
     pub(in crate::editor::session) fn rust_analyzer_path_version(

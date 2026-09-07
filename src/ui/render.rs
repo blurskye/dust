@@ -52,6 +52,7 @@ pub enum PromptKind {
     SearchBackward,
     WorkspaceTrust,
     GitReset,
+    ExplorerDelete,
 }
 
 impl PromptKind {
@@ -61,7 +62,9 @@ impl PromptKind {
             Self::Command => &text.command_title,
             Self::SearchForward => &text.search_forward_title,
             Self::SearchBackward => &text.search_backward_title,
-            Self::WorkspaceTrust | Self::GitReset => &text.workspace_trust_title,
+            Self::WorkspaceTrust => &text.workspace_trust_title,
+            Self::GitReset => &text.git_reset_title,
+            Self::ExplorerDelete => &text.explorer_delete_title,
         }
     }
 
@@ -71,7 +74,9 @@ impl PromptKind {
             Self::Command => &text.command_marker,
             Self::SearchForward => &text.search_forward_marker,
             Self::SearchBackward => &text.search_backward_marker,
-            Self::WorkspaceTrust | Self::GitReset => &text.workspace_trust_marker,
+            Self::WorkspaceTrust => &text.workspace_trust_marker,
+            Self::GitReset => &text.git_reset_marker,
+            Self::ExplorerDelete => &text.explorer_delete_marker,
         }
     }
 }
@@ -87,6 +92,7 @@ pub struct PromptState {
     pub kind: PromptKind,
     pub input: String,
     pub cursor: usize,
+    pub help: Option<String>,
     pub error: Option<String>,
     pub completions: Vec<CompletionItem>,
     pub selected_completion: Option<usize>,
@@ -99,6 +105,7 @@ impl PromptState {
             kind,
             input: String::new(),
             cursor: 0,
+            help: None,
             error: None,
             completions: Vec::new(),
             selected_completion: None,
@@ -186,7 +193,16 @@ pub struct UiDiagnostic {
     pub path: std::path::PathBuf,
     pub range: ByteRange,
     pub severity: crate::workspace::DiagnosticSeverity,
+    pub source: String,
+    pub code: Option<String>,
     pub message: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExpandedDiagnosticState {
+    pub path: std::path::PathBuf,
+    pub line: usize,
+    pub severities: Vec<crate::workspace::DiagnosticSeverity>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -194,6 +210,7 @@ pub enum DocumentationPopupKind {
     Hover,
     Signature,
     Completion,
+    Git,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -272,6 +289,14 @@ pub enum PickerSurfaceKind {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PickerPreview {
+    pub title: String,
+    pub lines: Vec<String>,
+    pub first_line: usize,
+    pub highlight_line: Option<usize>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PickerUiState {
     pub surface: PickerSurfaceKind,
     pub title: String,
@@ -280,6 +305,7 @@ pub struct PickerUiState {
     pub selected: Option<usize>,
     pub scroll: usize,
     pub loading: bool,
+    pub preview: Option<PickerPreview>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -569,6 +595,7 @@ pub struct UiState {
     pub language_completion: Option<LanguageCompletionState>,
     pub documentation_popup: Option<DocumentationPopupState>,
     pub diagnostics: Vec<UiDiagnostic>,
+    pub expanded_diagnostic: Option<ExpandedDiagnosticState>,
     pub picker: Option<PickerUiState>,
     pub plugin_surfaces: Vec<PluginSurfaceUiState>,
     pub private_surfaces: Vec<PrivateSurfaceUiState>,
@@ -591,6 +618,8 @@ pub struct UiState {
     pub git_signs: Vec<UiGitSign>,
     pub lsp_folds: Vec<UiFold>,
     pub lsp_server: Option<String>,
+    pub git_changed_files: usize,
+    pub running_tasks: usize,
     pub lsp_progress: Vec<UiLspProgress>,
     pub lsp_progress_frame: usize,
     pub syntax_folds: Vec<UiFold>,
@@ -831,8 +860,21 @@ pub fn render(
     {
         render_picker(&mut frame, picker, config, rect);
     }
-    if let Some(completion) = &ui.language_completion {
-        render_language_completion(&mut frame, completion, config, width, workspace_height);
+    if let Some(completion) = &ui.language_completion
+        && let Some(bounds) = content_bounds
+        && let Some(pane) = active_pane_viewport(state, ui, config, bounds.width, bounds.height)
+    {
+        render_language_completion(
+            &mut frame,
+            completion,
+            config,
+            WindowRect {
+                x: bounds.x.saturating_add(pane.x),
+                y: bounds.y.saturating_add(pane.y),
+                width: pane.width,
+                height: pane.height,
+            },
+        );
     }
     if let Some(documentation) = &ui.documentation_popup {
         render_documentation_popup(

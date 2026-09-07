@@ -1,8 +1,28 @@
 use super::*;
 
 impl InteractiveApplication {
+    pub(super) fn sync_status_summary_ui(&mut self) {
+        self.ui.git_changed_files = self
+            .git_status_snapshot
+            .as_ref()
+            .map_or(0, |snapshot| snapshot.entries.len());
+        self.ui.running_tasks = self.job_tasks.len();
+    }
+
     pub(super) fn update_notification_timer(&mut self) {
         if self.ui.notification != self.observed_notification {
+            if let Some(message) = self.ui.notification.as_ref()
+                && self
+                    .notification_history
+                    .back()
+                    .is_none_or(|(_, previous)| previous != message)
+            {
+                self.notification_history
+                    .push_back((self.ui.notification_error, message.clone()));
+                if self.notification_history.len() > 200 {
+                    self.notification_history.pop_front();
+                }
+            }
             self.observed_notification = self.ui.notification.clone();
             self.notification_deadline = self.ui.notification.as_ref().and_then(|_| {
                 let timeout = self.configuration.settings.ui.notifications.timeout_ms;
@@ -175,7 +195,9 @@ impl InteractiveApplication {
                 if self.ui.prompt.as_ref().is_some_and(|prompt| {
                     matches!(
                         prompt.kind,
-                        PromptKind::WorkspaceTrust | PromptKind::GitReset
+                        PromptKind::WorkspaceTrust
+                            | PromptKind::GitReset
+                            | PromptKind::ExplorerDelete
                     )
                 }) {
                     self.close_prompt();
@@ -184,6 +206,19 @@ impl InteractiveApplication {
             }
             UiEvent::Mouse { key, column, row } => {
                 self.mouse_position = Some((column, row));
+                if self.ui.documentation_popup.is_some() {
+                    match key.terminal_mouse() {
+                        Some(crate::editor::input::TerminalMouseInput::ScrollUp) => {
+                            self.process_effect(AppEffect::LspDocumentationScroll(-1));
+                            return;
+                        }
+                        Some(crate::editor::input::TerminalMouseInput::ScrollDown) => {
+                            self.process_effect(AppEffect::LspDocumentationScroll(1));
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
                 if self.handle_content_tab_mouse(&key, column, row) {
                     return;
                 }
@@ -313,6 +348,14 @@ impl InteractiveApplication {
             }
             .into();
         }
+        if self
+            .ui
+            .documentation_popup
+            .as_ref()
+            .is_some_and(|popup| popup.kind != DocumentationPopupKind::Completion)
+        {
+            return "documentation".into();
+        }
         if self.terminal_focused
             && self.active_terminal.is_some()
             && self.terminal_window_rect().is_some()
@@ -330,9 +373,6 @@ impl InteractiveApplication {
         if self.workspace_proposal.is_some() {
             return "workspace_edit".into();
         }
-        if self.ui.explorer.is_some() && self.ui.explorer_focused {
-            return "explorer".into();
-        }
         if self.ui.picker.is_some() {
             return "picker".into();
         }
@@ -343,12 +383,17 @@ impl InteractiveApplication {
             return match prompt.kind {
                 PromptKind::Command => "command_prompt",
                 PromptKind::SearchForward | PromptKind::SearchBackward => "search_prompt",
-                PromptKind::WorkspaceTrust | PromptKind::GitReset => "workspace_trust_prompt",
+                PromptKind::WorkspaceTrust | PromptKind::GitReset | PromptKind::ExplorerDelete => {
+                    "workspace_trust_prompt"
+                }
             }
             .into();
         }
         if self.ui.tool_menu.is_some() {
             return "tool_manager".into();
+        }
+        if self.ui.explorer.is_some() && self.ui.explorer_focused {
+            return "explorer".into();
         }
         if let Some(context) = self.windows.focused().and_then(|window| {
             self.plugin_windows
@@ -417,7 +462,13 @@ impl InteractiveApplication {
     }
 
     pub(super) fn handle_key_in_context(&mut self, context: &str, key: KeyEvent) {
-        self.ui.documentation_popup = None;
+        let scrolls_completion_documentation = context == "completion"
+            && key.modifiers.control
+            && matches!(key.code, crate::editor::input::KeyCode::Char('d' | 'u'));
+        if context != "documentation" && !scrolls_completion_documentation {
+            self.ui.documentation_popup = None;
+        }
+        self.ui.expanded_diagnostic = None;
         let context = context.to_owned();
         if self
             .pending_keymap
@@ -453,7 +504,7 @@ impl InteractiveApplication {
                 }
             }
             MappingResolution::Disabled => self.pending_keymap = None,
-            MappingResolution::Pending | MappingResolution::Ambiguous => {
+            resolution @ (MappingResolution::Pending | MappingResolution::Ambiguous) => {
                 let now = Instant::now();
                 let prefix = self
                     .configuration
@@ -473,10 +524,11 @@ impl InteractiveApplication {
                     context,
                     prefix,
                     started_at,
-                    deadline: now
-                        + Duration::from_millis(
+                    deadline: matches!(resolution, MappingResolution::Ambiguous).then(|| {
+                        now + Duration::from_millis(
                             self.configuration.settings.input.mapping_timeout_ms,
-                        ),
+                        )
+                    }),
                     configuration_generation: self.configuration_generation,
                 });
                 self.ui.key_hints = None;
@@ -605,7 +657,10 @@ impl InteractiveApplication {
             self.ui.key_hints = None;
             return;
         };
-        if Instant::now() < pending.deadline {
+        let Some(deadline) = pending.deadline else {
+            return;
+        };
+        if Instant::now() < deadline {
             return;
         }
         self.pending_keymap = None;
@@ -652,7 +707,7 @@ impl InteractiveApplication {
         if !policy.enabled
             || self.ui.prompt.is_some()
             || self.workspace_proposal.is_some()
-            || now >= pending.deadline
+            || pending.deadline.is_some_and(|deadline| now >= deadline)
             || now.duration_since(pending.started_at) < Duration::from_millis(policy.delay_ms)
         {
             return;

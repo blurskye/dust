@@ -280,6 +280,97 @@ pub(super) fn install_uv_tool(
     result
 }
 
+pub(super) fn valid_rustup_component(component: &str) -> bool {
+    !component.is_empty()
+        && component.len() <= 128
+        && component
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+}
+
+pub(super) fn install_path_rustup_component(
+    definition: &ToolDefinition,
+    rustup: &Path,
+    proxy: &Path,
+    cwd: &Path,
+    component: &str,
+    cancellations: &Receiver<()>,
+    report: &mut ToolProgressReporter,
+) -> Result<Option<PathBuf>, String> {
+    if !valid_rustup_component(component)
+        || definition.id != "rust-analyzer"
+        || definition.executable != "rust-analyzer"
+        || component != "rust-analyzer"
+    {
+        return Err("external rustup installation is restricted to rust-analyzer".into());
+    }
+    let rustup =
+        fs::canonicalize(rustup).map_err(|error| format!("cannot canonicalize rustup: {error}"))?;
+    let cwd = fs::canonicalize(cwd)
+        .map_err(|error| format!("cannot canonicalize rustup working directory: {error}"))?;
+    if !rustup.is_file() || !cwd.is_dir() || !rust_analyzer_is_rustup_proxy(proxy) {
+        return Err("the selected PATH runtime is not a valid rustup proxy".into());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let runtime =
+            fs::metadata(&rustup).map_err(|error| format!("cannot inspect rustup: {error}"))?;
+        let proxy =
+            fs::metadata(proxy).map_err(|error| format!("cannot inspect rustup proxy: {error}"))?;
+        if runtime.dev() != proxy.dev() || runtime.ino() != proxy.ino() {
+            return Err("the selected rustup executable does not own the PATH proxy".into());
+        }
+    }
+    #[cfg(not(unix))]
+    if fs::canonicalize(proxy).ok().as_deref() != Some(rustup.as_path()) {
+        return Err("the selected rustup executable does not own the PATH proxy".into());
+    }
+    report("installing rustup component", 0, None);
+    let mut child = Command::new(&rustup)
+        .args(["component", "add", component])
+        .current_dir(&cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("failed to launch rustup: {error}"))?;
+    let deadline = Instant::now() + TOOL_INSTALL_TIMEOUT;
+    loop {
+        if cancellations.try_recv().is_ok() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("rustup component installation cancelled".into());
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("rustup component installation exceeded the 15-minute ceiling".into());
+        }
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(Some(status)) => {
+                return Err(format!(
+                    "rustup component installation exited with {}",
+                    status
+                        .code()
+                        .map_or_else(|| "signal".into(), |code| code.to_string())
+                ));
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(50)),
+            Err(error) => return Err(format!("failed to wait for rustup: {error}")),
+        }
+    }
+    report("verifying rustup component", 0, None);
+    if !proxy.is_file() {
+        return Err(format!(
+            "rustup installed the component but {} is unavailable",
+            definition.executable
+        ));
+    }
+    Ok(Some(proxy.to_path_buf()))
+}
+
 pub(super) fn install_rustup_component(
     definition: &ToolDefinition,
     root: &Path,
@@ -288,12 +379,7 @@ pub(super) fn install_rustup_component(
     report: &mut ToolProgressReporter,
     compatibility: Option<&NixCompatibilityRuntime>,
 ) -> Result<Option<PathBuf>, String> {
-    if component.is_empty()
-        || component.len() > 128
-        || !component
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-    {
+    if !valid_rustup_component(component) {
         return Err("tool catalog has an invalid rustup component".into());
     }
     let initializer = managed_runtime(root, "rustup", cancellations, report, compatibility)?;

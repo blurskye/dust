@@ -228,9 +228,13 @@ impl InteractiveApplication {
                     self.trust_load_generation = None;
                     self.trust_database_ready = true;
                     match result {
-                        Ok(database) => self.trust_store.replace(database.identities),
+                        Ok(database) => {
+                            self.trust_store.replace(database.identities);
+                            self.trust_store.replace_seen(database.seen);
+                        }
                         Err(error) => {
                             self.trust_store.replace(Vec::new());
+                            self.trust_store.replace_seen(Vec::new());
                             self.show_error(self.message(
                                 "workspace_trust_state_failed",
                                 &[("diagnostic", error.to_string())],
@@ -325,13 +329,15 @@ impl InteractiveApplication {
                     match result {
                         Ok(()) => {
                             self.reconcile_workspace_trust();
-                            let key = if target == Some(WorkspaceTrust::Trusted) {
-                                "workspace_trusted"
-                            } else {
-                                "workspace_untrusted"
-                            };
-                            self.ui.notification = Some(self.message(key, &[]));
-                            self.ui.notification_error = false;
+                            if let Some(target) = target {
+                                let key = if target == WorkspaceTrust::Trusted {
+                                    "workspace_trusted"
+                                } else {
+                                    "workspace_untrusted"
+                                };
+                                self.ui.notification = Some(self.message(key, &[]));
+                                self.ui.notification_error = false;
+                            }
                         }
                         Err(error) => {
                             if target == Some(WorkspaceTrust::Trusted) {
@@ -353,10 +359,11 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn persist_workspace_trust(&mut self, target: WorkspaceTrust) {
-        match self
-            .trust_service
-            .persist(self.trust_state_path.clone(), self.trust_store.identities())
-        {
+        match self.trust_service.persist(
+            self.trust_state_path.clone(),
+            self.trust_store.identities(),
+            self.trust_store.seen_identities(),
+        ) {
             Ok(generation) => {
                 self.trust_persist_generation = Some(generation);
                 self.trust_persist_target = Some(target);
@@ -373,12 +380,76 @@ impl InteractiveApplication {
         }
     }
 
+    pub(in crate::editor::session) fn persist_seen_workspaces(&mut self) {
+        match self.trust_service.persist(
+            self.trust_state_path.clone(),
+            self.trust_store.identities(),
+            self.trust_store.seen_identities(),
+        ) {
+            Ok(generation) => {
+                self.trust_persist_generation = Some(generation);
+                self.trust_persist_target = None;
+            }
+            Err(error) => self.show_error(self.message(
+                "workspace_trust_state_failed",
+                &[("diagnostic", error.to_string())],
+            )),
+        }
+    }
+
+    pub(in crate::editor::session) fn maybe_prompt_for_unseen_workspace(&mut self) {
+        if self.startup_trust_prompt_checked
+            || !self.trust_database_ready
+            || !self.trust_identity_ready
+            || self.ui.prompt.is_some()
+            || self.ui.picker.is_some()
+            || self.ui.tool_menu.is_some()
+        {
+            return;
+        }
+        self.startup_trust_prompt_checked = true;
+        if self.safe_mode || self.workspace.trust() == WorkspaceTrust::Trusted {
+            return;
+        }
+        let Some(active_root) = self.workspace.active_root() else {
+            return;
+        };
+        let Some(identity) = self
+            .workspace
+            .roots()
+            .iter()
+            .find(|root| root.id == active_root)
+            .map(|root| &root.identity)
+        else {
+            return;
+        };
+        if self.trust_store.is_seen(identity) {
+            return;
+        }
+        self.request_workspace_trust();
+    }
+
     pub(in crate::editor::session) fn request_workspace_trust(&mut self) {
         if !self.trust_database_ready || !self.trust_identity_ready {
             self.show_error(self.message("workspace_trust_not_ready", &[]));
             return;
         }
         self.open_prompt(PromptKind::WorkspaceTrust, String::new());
+        self.ui.notification = None;
+        self.ui.notification_error = false;
+        let identities = self
+            .workspace
+            .roots()
+            .iter()
+            .map(|root| root.identity.clone())
+            .collect::<Vec<_>>();
+        let mut changed = false;
+        for identity in identities {
+            changed |= self.trust_store.mark_seen(identity);
+        }
+        if changed {
+            self.persist_seen_workspaces();
+        }
         let confirmation = self.message(
             "workspace_trust_confirmation",
             &[(
@@ -391,7 +462,7 @@ impl InteractiveApplication {
             )],
         );
         if let Some(prompt) = &mut self.ui.prompt {
-            prompt.error = Some(confirmation);
+            prompt.help = Some(confirmation);
         }
     }
 

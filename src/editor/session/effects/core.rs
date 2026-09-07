@@ -45,6 +45,8 @@ impl InteractiveApplication {
             AppEffect::GitStatusRefresh => self.start_git_status_refresh(),
             AppEffect::GitStatusOpen => self.open_git_status_picker(),
             AppEffect::GitHunksOpen => self.start_git_hunks(),
+            AppEffect::GitHunkNavigate(direction) => self.navigate_git_hunk(direction),
+            AppEffect::GitHunkPreview => self.preview_selected_git_hunk(),
             AppEffect::GitHunkStage => self.stage_selected_git_hunk(),
             AppEffect::GitHunkReset => self.request_reset_selected_git_hunk(),
             AppEffect::OpenFilePrompt => {
@@ -66,6 +68,35 @@ impl InteractiveApplication {
             AppEffect::PromptComplete(direction) => self.prompt_complete(direction),
             AppEffect::PromptSubmit => self.submit_prompt(),
             AppEffect::PromptCancel => self.close_prompt(),
+            AppEffect::NotificationHistory => {
+                let items = self
+                    .notification_history
+                    .iter()
+                    .rev()
+                    .enumerate()
+                    .map(|(index, (error, message))| {
+                        (
+                            PickerItem {
+                                id: PickerItemId(format!("notification:{index}")),
+                                label: message.clone(),
+                                detail: if *error {
+                                    "error".into()
+                                } else {
+                                    "info".into()
+                                },
+                                source: "application".into(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::Command(String::new()),
+                        )
+                    })
+                    .collect();
+                self.install_picker("Notifications".into(), items);
+            }
+            AppEffect::NotificationDismiss => {
+                self.ui.notification = None;
+                self.ui.notification_error = false;
+            }
             AppEffect::SearchRepeat { reverse } => {
                 let forward = if reverse {
                     !self.last_search_forward

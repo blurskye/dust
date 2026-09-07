@@ -49,6 +49,13 @@ impl InteractiveApplication {
                 self.refresh_explorer();
             }
             AppEffect::ExplorerFileOpen { split } => self.explorer_open_file(split),
+            AppEffect::ExplorerCreate(path) => self.create_explorer_path(path),
+            AppEffect::ExplorerRename(target) => self.rename_explorer_path(target),
+            AppEffect::ExplorerDeleteRequest => self.request_explorer_delete(),
+            AppEffect::ExplorerDeleteConfirm(phrase) => self.confirm_explorer_delete(phrase),
+            AppEffect::ExplorerClipboard { cut } => self.set_explorer_clipboard(cut),
+            AppEffect::ExplorerPaste => self.paste_explorer_clipboard(),
+            AppEffect::ExplorerYankPath => self.yank_explorer_path(),
             AppEffect::ExplorerMouseSelect => self.explorer_mouse_select(),
             AppEffect::WorkspaceRootAdd(path) => self.add_workspace_root(path),
             AppEffect::WorkspaceRootActivate(id) => {
@@ -73,6 +80,7 @@ impl InteractiveApplication {
                     self.ui.notification_error = false;
                 }
             }
+            AppEffect::WorkspaceSearchPrompt => self.open_live_workspace_search(),
             AppEffect::WorkspaceSearch(query) => self.start_workspace_search(query, None),
             AppEffect::WorkspaceSearchCancel => {
                 self.workspace_search.cancel();

@@ -1,13 +1,153 @@
 use super::*;
 
 #[test]
+fn diagnostic_navigation_filters_severity_wraps_and_expands_the_landed_line() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("diagnostic.rs");
+    let (buffer, view) = app.state.open_text(
+        TextBuffer::from_text("ok\nerror\nwarning\n"),
+        Some(path.clone()),
+    );
+    app.ui.dashboard = false;
+    let uri = crate::language::lsp::file_uri(&path);
+    let diagnostic = |range, severity, message: &str| crate::workspace::Diagnostic {
+        uri: uri.clone(),
+        version: None,
+        range,
+        severity,
+        source: "fake".into(),
+        code: None,
+        message: message.into(),
+        related: Vec::new(),
+        tags: Vec::new(),
+        fixes: Vec::new(),
+        timestamp: std::time::SystemTime::UNIX_EPOCH,
+    };
+    app.diagnostics
+        .replace(
+            crate::workspace::DiagnosticOwner::new("lsp.fake").unwrap(),
+            uri.clone(),
+            None,
+            None,
+            vec![
+                diagnostic(
+                    ByteRange::new(ByteOffset(3), ByteOffset(8)).unwrap(),
+                    DiagnosticSeverity::Error,
+                    "error",
+                ),
+                diagnostic(
+                    ByteRange::new(ByteOffset(9), ByteOffset(16)).unwrap(),
+                    DiagnosticSeverity::Warning,
+                    "warning",
+                ),
+            ],
+        )
+        .unwrap();
+    app.sync_ui_diagnostics();
+
+    app.invoke_mapped_command("diagnostic.warning.next");
+    assert_eq!(app.state.views[view].cursor, ByteOffset(9));
+    assert_eq!(
+        app.ui.expanded_diagnostic.as_ref().unwrap().severities,
+        vec![DiagnosticSeverity::Warning]
+    );
+
+    app.invoke_mapped_command("diagnostic.error.next");
+    assert_eq!(app.state.views[view].cursor, ByteOffset(3));
+    app.invoke_mapped_command("diagnostic.next");
+    assert_eq!(app.state.views[view].cursor, ByteOffset(9));
+    assert_eq!(app.state.views[view].buffer, buffer);
+}
+
+#[test]
+fn explorer_command_prompt_creates_a_file_from_the_selected_directory() {
+    let mut app = app();
+    app.open_explorer();
+    app.open_prompt(crate::ui::PromptKind::Command, "exploreradd ".into());
+    app.prompt_insert("new.txt");
+    app.submit_prompt();
+    assert!(app.ui.prompt.is_none(), "{:?}", app.ui.prompt);
+    assert!(
+        app.pending_vfs
+            .values()
+            .any(|pending| matches!(pending, PendingVfs::ExplorerMutation))
+    );
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline && !app.state.workspace_root.join("new.txt").exists() {
+        app.process_vfs_results();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(app.state.workspace_root.join("new.txt").is_file());
+}
+
+#[test]
+fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
+    let mut app = app();
+    let source = app.state.workspace_root.join("source.txt");
+    fs::write(&source, "kept").unwrap();
+    let (buffer, _) = app.state.open_text(
+        TextBuffer::from_text("kept plus unsaved"),
+        Some(source.clone()),
+    );
+    app.state.set_buffer_dirty(buffer, true);
+    app.open_explorer();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline && app.explorer.id_for_path(&source).is_none() {
+        app.process_explorer_result();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    app.explorer
+        .select(app.explorer.id_for_path(&source).expect("source node"));
+    app.rename_explorer_path("renamed.txt".into());
+    let target = app.state.workspace_root.join("renamed.txt");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline && app.state.buffers[buffer].path.as_ref() != Some(&target) {
+        app.process_vfs_results();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&target));
+    assert!(app.state.buffers[buffer].dirty);
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "kept plus unsaved"
+    );
+
+    app.explorer_delete_target = Some(target.clone());
+    app.confirm_explorer_delete("delete".into());
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline && app.state.buffers[buffer].path.is_some() {
+        app.process_vfs_results();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(!target.exists());
+    assert!(app.state.buffers[buffer].path.is_none());
+    assert!(app.state.buffers[buffer].dirty);
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "kept plus unsaved"
+    );
+}
+
+#[test]
 fn workspace_trust_requires_exact_confirmation_cancels_on_focus_loss_and_persists() {
     let mut app = app();
     prepare_trust_identity(&mut app);
+    app.ui.notification = Some("stale notification".into());
+    app.ui.notification_error = true;
     app.request_workspace_trust();
+    assert!(app.ui.notification.is_none());
+    assert!(!app.ui.notification_error);
     assert_eq!(
         app.ui.prompt.as_ref().map(|prompt| prompt.kind),
         Some(crate::ui::PromptKind::WorkspaceTrust)
+    );
+    let prompt = app.ui.prompt.as_ref().expect("trust prompt");
+    assert!(prompt.error.is_none());
+    assert!(
+        prompt
+            .help
+            .as_deref()
+            .is_some_and(|help| help.contains("Allows project commands"))
     );
     app.ui.prompt.as_mut().expect("prompt").input = "wrong".into();
     app.submit_prompt();
@@ -52,7 +192,49 @@ fn workspace_trust_requires_exact_confirmation_cancels_on_focus_loss_and_persist
     );
     wait_trust(&mut app);
     let source = fs::read_to_string(&app.trust_state_path).expect("persisted revocation");
-    assert!(!source.contains("filesystem_identity"));
+    assert!(source.contains("identities = []"));
+    assert!(source.contains("[[seen]]"));
+}
+
+#[test]
+fn unseen_workspace_prompts_once_after_identity_and_database_are_ready() {
+    let mut app = app();
+    prepare_trust_identity(&mut app);
+    let identity = app.workspace.roots()[0].identity.clone();
+    assert!(!app.trust_store.is_seen(&identity));
+
+    app.maybe_prompt_for_unseen_workspace();
+    assert_eq!(
+        app.ui.prompt.as_ref().map(|prompt| prompt.kind),
+        Some(crate::ui::PromptKind::WorkspaceTrust)
+    );
+    assert!(app.trust_store.is_seen(&identity));
+    app.close_prompt();
+    wait_trust(&mut app);
+    assert!(
+        fs::read_to_string(&app.trust_state_path)
+            .expect("seen workspace state")
+            .contains("[[seen]]")
+    );
+
+    app.maybe_prompt_for_unseen_workspace();
+    assert!(app.ui.prompt.is_none());
+}
+
+#[test]
+fn automatic_workspace_trust_prompt_never_steals_an_active_prompt_or_safe_mode() {
+    let mut app = app();
+    prepare_trust_identity(&mut app);
+    app.open_prompt(crate::ui::PromptKind::Command, String::new());
+    app.maybe_prompt_for_unseen_workspace();
+    assert_eq!(
+        app.ui.prompt.as_ref().map(|prompt| prompt.kind),
+        Some(crate::ui::PromptKind::Command)
+    );
+    app.close_prompt();
+    app.safe_mode = true;
+    app.maybe_prompt_for_unseen_workspace();
+    assert!(app.ui.prompt.is_none());
 }
 
 #[test]
@@ -803,6 +985,14 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
     );
     app.accept_picker();
     assert!(app.selected_git_hunk.is_some());
+    app.preview_selected_git_hunk();
+    assert_eq!(
+        app.ui.documentation_popup.as_ref().map(|popup| popup.kind),
+        Some(crate::ui::DocumentationPopupKind::Git)
+    );
+    app.navigate_git_hunk(1);
+    wait_vfs(&mut app);
+    assert!(app.selected_git_hunk.is_some());
     app.stage_selected_git_hunk();
     assert!(app.git_mutation_generation.is_none());
     assert!(app.ui.notification_error);
@@ -956,6 +1146,14 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
         app.ui.prompt.as_ref().map(|p| p.kind),
         Some(crate::ui::PromptKind::GitReset)
     );
+    let prompt = app.ui.prompt.as_ref().expect("Git reset prompt");
+    assert!(prompt.error.is_none());
+    assert!(
+        prompt
+            .help
+            .as_deref()
+            .is_some_and(|help| help.contains("Discards worktree changes"))
+    );
     app.close_prompt();
     assert_eq!(
         crate::workspace::git::git_index_fingerprint(&app.state.workspace_root).unwrap(),
@@ -990,7 +1188,10 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
 fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
     let mut app = app();
     let path = app.state.workspace_root.join("find-me.txt");
-    fs::write(&path, "found").unwrap();
+    let mut contents = String::from("found\n");
+    contents.push_str(&"x".repeat(140 * 1024));
+    fs::write(&path, contents).unwrap();
+    assert!(fs::metadata(&path).unwrap().len() > 120 * 1024);
     app.start_workspace_file_picker();
     let deadline = Instant::now() + Duration::from_secs(3);
     while app.workspace_file_generation.is_some() {
@@ -998,12 +1199,14 @@ fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
         assert!(Instant::now() < deadline);
         thread::yield_now();
     }
-    assert!(
-        app.ui
-            .picker
-            .as_ref()
-            .is_some_and(|p| p.title == "Workspace files")
-    );
+    wait_vfs(&mut app);
+    assert!(app.ui.picker.as_ref().is_some_and(|picker| {
+        picker.title == "Files"
+            && picker.preview.as_ref().is_some_and(|preview| {
+                preview.title == "find-me.txt"
+                    && preview.lines.first().map(String::as_str) == Some("found")
+            })
+    }));
     app.picker_insert("find-me");
     for _ in 0..256 {
         app.sync_picker_ui();
@@ -1023,20 +1226,47 @@ fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
 fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
     let mut app = app();
     let path = app.state.workspace_root.join("match.txt");
-    fs::write(&path, "before needle after\n").expect("fixture");
-    app.start_workspace_search("needle".into(), None);
+    let text = (0..1_200)
+        .map(|line| {
+            if line == 1_087 {
+                "before needle after".into()
+            } else {
+                format!("line {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let expected_cursor = text.find("needle").expect("needle offset");
+    fs::write(&path, text).expect("fixture");
+    app.invoke_mapped_command("workspace.search.prompt");
+    assert!(app.ui.prompt.is_none());
+    assert_eq!(
+        app.ui.picker.as_ref().map(|picker| picker.title.as_str()),
+        Some("Grep")
+    );
+    app.picker_insert("needle");
     wait_workspace_search(&mut app);
     assert_eq!(app.workspace_search_matches.len(), 1);
     assert_eq!(
         app.ui.picker.as_ref().map(|picker| picker.title.as_str()),
-        Some("Workspace search")
+        Some("Grep")
     );
+    assert!(app.ui.picker.as_ref().is_some_and(|picker| {
+        picker.preview.as_ref().is_some_and(|preview| {
+            preview.title == "match.txt"
+                && preview.highlight_line == Some(1_087)
+                && preview
+                    .highlight_line
+                    .is_some_and(|line| line.saturating_sub(preview.first_line) <= 8)
+        })
+    }));
     app.accept_picker();
     wait_vfs(&mut app);
     let buffer = app.state.active_buffer_id().expect("opened result");
     assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
     let view = app.state.active_view.expect("view");
-    assert_eq!(app.state.views[view].cursor, ByteOffset(7));
+    assert_eq!(app.state.views[view].cursor, ByteOffset(expected_cursor));
 }
 
 #[test]

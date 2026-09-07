@@ -72,6 +72,15 @@ foreground_16 = "red"
 background_16 = "black"
 attributes = ["bold"]
 
+[styles.warning]
+foreground = "#d29922"
+background = "#0d1117"
+foreground_256 = "indexed:178"
+background_256 = "indexed:233"
+foreground_16 = "yellow"
+background_16 = "black"
+attributes = []
+
 [styles.border]
 foreground = "#30363d"
 background = "#0d1117"

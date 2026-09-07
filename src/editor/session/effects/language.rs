@@ -1,6 +1,59 @@
 use super::*;
 
 impl InteractiveApplication {
+    pub(in crate::editor::session) fn show_lsp_logs(&mut self) {
+        let previous = if self.picker_surface == PickerSurfaceKind::Logs {
+            self.picker.as_ref().map(|picker| {
+                (
+                    picker.presentation().query,
+                    picker.selected_item().map(|item| item.id.clone()),
+                )
+            })
+        } else {
+            None
+        };
+        let follow_tail = previous.is_none()
+            || self
+                .ui
+                .picker
+                .as_ref()
+                .is_some_and(|picker| picker.selected == picker.rows.len().checked_sub(1));
+        let items = self
+            .lsp_logs
+            .iter()
+            .enumerate()
+            .map(|(index, line)| {
+                (
+                    PickerItem {
+                        id: PickerItemId(format!("lsp-log:{index}")),
+                        label: line.clone(),
+                        detail: String::new(),
+                        source: "lsp".into(),
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::Command(String::new()),
+                )
+            })
+            .collect();
+        self.install_surface_picker(
+            PickerSurfaceKind::Logs,
+            self.message("lsp_logs", &[("logs", String::new())]),
+            items,
+        );
+        if let Some(picker) = &mut self.picker {
+            if let Some((query, selected)) = previous {
+                picker.set_query(query);
+                if let Some(selected) = selected {
+                    picker.select_id(&selected);
+                }
+            }
+            if follow_tail {
+                picker.select_last();
+            }
+        }
+        self.sync_picker_ui();
+    }
+
     pub(in crate::editor::session) fn process_language_effect(
         &mut self,
         effect: AppEffect,
@@ -111,30 +164,7 @@ impl InteractiveApplication {
             }
             AppEffect::LspSessions => self.show_lsp_sessions(),
             AppEffect::LspSessionSelect(key) => self.select_lsp_session(&key),
-            AppEffect::LspLogs => {
-                let items = self
-                    .lsp_logs
-                    .iter()
-                    .enumerate()
-                    .map(|(index, line)| {
-                        (
-                            PickerItem {
-                                id: PickerItemId(format!("lsp-log:{index}")),
-                                label: line.clone(),
-                                detail: String::new(),
-                                source: "lsp".into(),
-                                action: PickerAction::None,
-                            },
-                            PickerPayload::Command(String::new()),
-                        )
-                    })
-                    .collect();
-                self.install_surface_picker(
-                    PickerSurfaceKind::Logs,
-                    self.message("lsp_logs", &[("logs", String::new())]),
-                    items,
-                );
-            }
+            AppEffect::LspLogs => self.show_lsp_logs(),
             AppEffect::LspInlayHintsToggle => {
                 self.configuration.settings.lsp.inlay_hints =
                     !self.configuration.settings.lsp.inlay_hints;
@@ -175,7 +205,9 @@ impl InteractiveApplication {
             AppEffect::LspDocumentationClose => self.ui.documentation_popup = None,
             AppEffect::LspCompletionDocumentationOpen => self.open_lsp_completion_documentation(),
             AppEffect::LspCompletionMove(direction) => self.move_lsp_completion(direction),
-            AppEffect::DiagnosticNavigate(direction) => self.navigate_diagnostic(direction),
+            AppEffect::DiagnosticNavigate { direction, filter } => {
+                self.navigate_diagnostic(direction, filter)
+            }
             AppEffect::LspCompletionAccept => self.accept_lsp_completion(),
             AppEffect::LspCompletionCancel => {
                 let generation = self.lsp_request_generation;

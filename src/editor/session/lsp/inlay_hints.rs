@@ -11,6 +11,8 @@ impl InteractiveApplication {
                     path: path_from_file_uri(&problem.uri)?,
                     range: problem.range,
                     severity: problem.severity,
+                    source: problem.source,
+                    code: problem.code,
                     message: problem.message,
                 })
             })

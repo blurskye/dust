@@ -167,6 +167,7 @@ impl InteractiveApplication {
         self.git_hunks.cancel();
         self.git_hunk_generation = None;
         self.git_hunk_expected = None;
+        self.git_hunk_action = None;
         self.git_hunk_snapshot = None;
         self.selected_git_hunk = None;
         self.git_mutation.cancel();
@@ -185,8 +186,13 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn start_git_hunks(&mut self) {
+        self.start_git_hunks_with_action(None);
+    }
+
+    pub(in crate::editor::session) fn start_git_hunks_with_action(&mut self, action: Option<i8>) {
         use crate::workspace::git::*;
         self.clear_git_hunks();
+        self.git_hunk_action = action;
         let Some(snapshot) = self
             .git_status_snapshot
             .clone()
@@ -254,6 +260,14 @@ impl InteractiveApplication {
                 self.git_hunk_generation = None;
                 self.git_hunk_expected = None;
                 self.git_hunk_snapshot = Some(snapshot.clone());
+                if let Some(action) = self.git_hunk_action.take() {
+                    if action == 0 {
+                        self.preview_selected_git_hunk();
+                    } else {
+                        self.navigate_git_hunk(action);
+                    }
+                    return;
+                }
                 let items = snapshot
                     .hunks
                     .iter()
@@ -289,6 +303,99 @@ impl InteractiveApplication {
         }
     }
 
+    pub(in crate::editor::session) fn navigate_git_hunk(&mut self, direction: i8) {
+        let Some(snapshot) = self.git_hunk_snapshot.clone() else {
+            self.start_git_hunks_with_action(Some(direction.signum()));
+            return;
+        };
+        if snapshot.hunks.is_empty() {
+            self.show_error("no Git hunk is available in this buffer");
+            return;
+        }
+        let line = self
+            .state
+            .active_view
+            .and_then(|view| {
+                let view = &self.state.views[view];
+                self.state.buffers[view.buffer]
+                    .text
+                    .byte_to_line(view.cursor)
+                    .ok()
+            })
+            .unwrap_or(0) as u32
+            + 1;
+        let hunk = if direction < 0 {
+            snapshot
+                .hunks
+                .iter()
+                .rev()
+                .find(|hunk| hunk.new_start < line)
+                .or_else(|| snapshot.hunks.last())
+        } else {
+            snapshot
+                .hunks
+                .iter()
+                .find(|hunk| hunk.new_start > line)
+                .or_else(|| snapshot.hunks.first())
+        }
+        .cloned()
+        .expect("non-empty hunk snapshot");
+        let path = self.git_status_snapshot.as_ref().map_or_else(
+            || self.state.workspace_root.join(&snapshot.file),
+            |status| status.scope_root.join(&snapshot.file),
+        );
+        self.selected_git_hunk = Some((snapshot, hunk.clone(), path.clone()));
+        self.navigate_matcher_source(MatcherSource {
+            path,
+            line: hunk.new_start.saturating_sub(1) as usize,
+            column: 0,
+        });
+    }
+
+    pub(in crate::editor::session) fn preview_selected_git_hunk(&mut self) {
+        let Some(snapshot) = self.git_hunk_snapshot.clone() else {
+            self.start_git_hunks_with_action(Some(0));
+            return;
+        };
+        let hunk = self
+            .selected_git_hunk
+            .as_ref()
+            .filter(|(selected, _, _)| selected.revision == snapshot.revision)
+            .map(|(_, hunk, _)| hunk.clone())
+            .or_else(|| snapshot.hunks.first().cloned());
+        let Some(hunk) = hunk else {
+            self.show_error("no Git hunk is available in this buffer");
+            return;
+        };
+        let lines = hunk
+            .lines
+            .iter()
+            .map(|line| {
+                let prefix = match line.kind {
+                    crate::workspace::git::GitDiffLineKind::Context => ' ',
+                    crate::workspace::git::GitDiffLineKind::Add => '+',
+                    crate::workspace::git::GitDiffLineKind::Delete => '-',
+                };
+                format!("{prefix}{}", line.text.trim_end_matches('\n'))
+            })
+            .collect::<Vec<_>>();
+        let path = self.git_status_snapshot.as_ref().map_or_else(
+            || self.state.workspace_root.join(&snapshot.file),
+            |status| status.scope_root.join(&snapshot.file),
+        );
+        self.selected_git_hunk = Some((snapshot.clone(), hunk.clone(), path));
+        self.present_documentation_popup(
+            DocumentationPopupKind::Git,
+            hunk.header.trim().into(),
+            "Git".into(),
+            None,
+            vec![LspMarkupContent {
+                kind: LspMarkupKind::PlainText,
+                value: lines.join("\n"),
+            }],
+        );
+    }
+
     pub(in crate::editor::session) fn request_reset_selected_git_hunk(&mut self) {
         if self.workspace.trust() != WorkspaceTrust::Trusted {
             self.show_error("Git reset requires a trusted workspace");
@@ -300,8 +407,7 @@ impl InteractiveApplication {
         }
         self.open_prompt(PromptKind::GitReset, String::new());
         if let Some(prompt) = &mut self.ui.prompt {
-            prompt.error =
-                Some("Type `reset this hunk` to confirm destructive worktree reset".into())
+            prompt.help = Some("Discards worktree changes. Type `reset this hunk`.".into())
         }
     }
 

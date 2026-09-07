@@ -18,20 +18,29 @@ pub(super) fn render_documentation_popup(
     if !policy.enabled || line_count == 0 || editor_width < 4 || available_height < 3 {
         return;
     }
+    let page_rows = usize::from(policy.max_height.saturating_sub(2))
+        .min(usize::from(available_height.saturating_sub(2)));
+    let scrollable = line_count > page_rows;
     let widest = (0..line_count)
         .filter_map(|index| popup.line_at(index))
         .map(UnicodeWidthStr::width)
         .chain(std::iter::once(UnicodeWidthStr::width(
             popup.title.as_str(),
         )))
+        .chain(scrollable.then_some(UnicodeWidthStr::width("j/k or wheel · 0000-0000/0000")))
         .max()
         .unwrap_or(1)
         .saturating_add(usize::from(policy.horizontal_padding).saturating_mul(2))
         .saturating_add(2);
+    let width_limit = if popup.kind == DocumentationPopupKind::Completion {
+        editor_width.saturating_div(2).max(4)
+    } else {
+        editor_width
+    };
     let box_width = u16::try_from(widest)
         .unwrap_or(policy.max_width)
         .min(policy.max_width)
-        .min(editor_width);
+        .min(width_limit);
     let visible_rows = line_count
         .saturating_sub(popup.scroll)
         .min(usize::from(policy.max_height.saturating_sub(2)))
@@ -50,7 +59,14 @@ pub(super) fn render_documentation_popup(
     } else {
         cursor_y.saturating_sub(box_height)
     };
-    let left = if cursor_x.saturating_add(box_width) <= editor_right {
+    let left = if popup.kind == DocumentationPopupKind::Completion {
+        let midpoint = editor_left.saturating_add(editor_width / 2);
+        if cursor_x < midpoint {
+            editor_right.saturating_sub(box_width)
+        } else {
+            editor_left
+        }
+    } else if cursor_x.saturating_add(box_width) <= editor_right {
         cursor_x.max(editor_left)
     } else {
         cursor_x
@@ -130,27 +146,43 @@ pub(super) fn render_documentation_popup(
                 .saturating_sub(policy.horizontal_padding),
         );
     }
+    if scrollable {
+        let footer = format!(
+            " j/k or wheel · {}-{}/{} ",
+            popup.scroll.saturating_add(1),
+            popup.scroll.saturating_add(visible_rows).min(line_count),
+            line_count
+        );
+        frame.grid.put_text_clipped(
+            left.saturating_add(1),
+            bottom,
+            &footer,
+            Style::DocumentationTitle,
+            right.saturating_sub(1),
+        );
+    }
 }
 
 pub(super) fn render_language_completion(
     frame: &mut Frame,
     completion: &LanguageCompletionState,
     config: &Config,
-    width: u16,
-    height: u16,
+    bounds: WindowRect,
 ) {
-    if completion.items.is_empty() || width < 4 || height < 3 {
+    if completion.items.is_empty() || bounds.width < 4 || bounds.height < 2 {
         return;
     }
     let (cursor_x, cursor_y, _) =
         frame
             .cursor
-            .unwrap_or((1, 1, cursor_style(config.ui.cursor.normal)));
+            .unwrap_or((bounds.x, bounds.y, cursor_style(config.ui.cursor.normal)));
+    let right = bounds.x.saturating_add(bounds.width);
+    let bottom = bounds.y.saturating_add(bounds.height);
     let rows = completion
         .items
         .len()
         .min(usize::from(config.ui.command_line.completion_max_rows))
-        .min(usize::from(height.saturating_sub(1)));
+        .min(usize::from(bounds.height.saturating_sub(1)));
     if rows == 0 {
         return;
     }
@@ -163,6 +195,12 @@ pub(super) fn render_language_completion(
         scroll = selected.saturating_add(1).saturating_sub(rows);
     }
     let visible = completion.items.iter().skip(scroll).take(rows);
+    let maximum_content_width = if bounds.width >= 12 {
+        bounds.width / 2
+    } else {
+        bounds.width
+    }
+    .saturating_sub(2);
     let content_width = visible
         .clone()
         .map(|item| {
@@ -172,17 +210,20 @@ pub(super) fn render_language_completion(
         })
         .max()
         .unwrap_or(1)
-        .min(usize::from(width.saturating_sub(2)));
+        .min(usize::from(maximum_content_width));
     let panel_width = u16::try_from(content_width)
-        .unwrap_or(width)
+        .unwrap_or(bounds.width)
         .saturating_add(2)
-        .min(width);
-    let left = cursor_x.min(width.saturating_sub(panel_width));
+        .min(bounds.width);
+    let left = cursor_x
+        .max(bounds.x)
+        .min(right.saturating_sub(panel_width));
+    let row_count = u16::try_from(rows).unwrap_or(bounds.height);
     let below = cursor_y.saturating_add(1);
-    let top = if below.saturating_add(u16::try_from(rows).unwrap_or(0)) <= height {
+    let top = if below.saturating_add(row_count) <= bottom {
         below
     } else {
-        cursor_y.saturating_sub(u16::try_from(rows).unwrap_or(0))
+        cursor_y.saturating_sub(row_count).max(bounds.y)
     };
     for (row, item) in visible.enumerate() {
         let y = top.saturating_add(u16::try_from(row).unwrap_or(0));
@@ -194,16 +235,26 @@ pub(super) fn render_language_completion(
         for x in left..left.saturating_add(panel_width) {
             frame.grid.set_cell(x, y, " ", style);
         }
-        frame
-            .grid
-            .put_text(left.saturating_add(1), y, &item.label, style);
+        frame.grid.put_text_clipped(
+            left.saturating_add(1),
+            y,
+            &item.label,
+            style,
+            left.saturating_add(panel_width).saturating_sub(1),
+        );
         let detail_x = left
             .saturating_add(1)
             .saturating_add(
                 u16::try_from(text_width(&item.label, config.editor.ambiguous_width)).unwrap_or(0),
             )
             .saturating_add(config.ui.command_line.completion_detail_gap);
-        frame.grid.put_text(detail_x, y, &item.detail, Style::Muted);
+        frame.grid.put_text_clipped(
+            detail_x,
+            y,
+            &item.detail,
+            Style::Muted,
+            left.saturating_add(panel_width).saturating_sub(1),
+        );
     }
 }
 

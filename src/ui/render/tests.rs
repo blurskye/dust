@@ -315,6 +315,53 @@ fn prompt_is_globally_centered_and_clamped() {
 }
 
 #[test]
+fn workspace_trust_prompt_is_one_centered_confirmation_panel() {
+    let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
+    let loaded = crate::config::load_bundled_config();
+    let mut prompt = PromptState::new(PromptKind::WorkspaceTrust);
+    prompt.help = Some("Allows project commands. Type `trust this workspace`.".into());
+    let frame = render(
+        &state,
+        &UiState {
+            dashboard: true,
+            prompt: Some(prompt),
+            ..UiState::default()
+        },
+        &loaded.config,
+        &loaded.dashboard,
+        100,
+        20,
+    );
+    let geometry = prompt_geometry(100, 20, &loaded.config.ui.command_line, true);
+
+    assert_eq!(geometry.left, 20);
+    assert_eq!(geometry.top, loaded.config.ui.command_line.top_rows);
+    assert_eq!(geometry.height, 4);
+    assert!(
+        frame
+            .grid
+            .row_text(geometry.top)
+            .contains("Do you want to trust this workspace?")
+    );
+    assert!(
+        frame
+            .grid
+            .row_text(geometry.top + 1)
+            .contains("Allows project commands. Type `trust this workspace`.")
+    );
+    assert_eq!(
+        frame
+            .grid
+            .get(geometry.left + 2, geometry.top + 1)
+            .expect("help text")
+            .style,
+        crate::ui::Style::Muted
+    );
+    assert!(frame.grid.row_text(geometry.top + 2).contains("> "));
+    assert!(frame.grid.row_text(geometry.top + 3).contains('└'));
+}
+
+#[test]
 fn prompt_clears_and_clips_the_editor_layer_beneath_its_box() {
     let mut state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
     state.open_text(
@@ -395,7 +442,10 @@ fn documentation_popup_preserves_lines_clamps_and_protects_status_row() {
             sections: vec![DocumentationSection {
                 heading: None,
                 markup: DocumentationMarkupKind::Markdown,
-                lines: vec!["first line".into(), "wide 界界 clipped safely".into()],
+                lines: std::iter::once("first line".into())
+                    .chain(std::iter::once("wide 界界 clipped safely".into()))
+                    .chain((2..20).map(|line| format!("line {line}")))
+                    .collect(),
             }],
             scroll: 0,
         }),
@@ -414,6 +464,7 @@ fn documentation_popup_preserves_lines_clamps_and_protects_status_row() {
     assert!(screen.iter().any(|line| line.contains("Hover")));
     assert!(screen.iter().any(|line| line.contains("first line")));
     assert!(screen.iter().any(|line| line.contains("wide 界")));
+    assert!(screen.iter().any(|line| line.contains("j/k")));
     assert!(screen.last().is_some_and(|line| line.contains("NORMAL")));
 }
 
@@ -1852,13 +1903,62 @@ fn generic_picker_is_centered_filtered_presentation_with_configured_markers() {
             selected: Some(0),
             scroll: 0,
             loading: false,
+            preview: Some(super::PickerPreview {
+                title: "health.rs".into(),
+                lines: vec!["fn health() {}".into()],
+                first_line: 0,
+                highlight_line: Some(0),
+            }),
         }),
         ..UiState::default()
     };
     let loaded = crate::config::load_bundled_config();
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 100, 30);
     assert!((0..30).any(|row| frame.grid.row_text(row).contains("health.open")));
+    assert!((0..30).any(|row| frame.grid.row_text(row).contains("fn health() {}")));
+    assert!((0..30).any(|row| frame.grid.row_text(row).contains("1/1")));
     assert!(frame.cursor.is_some());
+}
+
+#[test]
+fn picker_stacks_preview_when_two_readable_columns_do_not_fit() {
+    let state = EditorState::new(PathBuf::from("/tmp"));
+    let long = "x".repeat(80);
+    let ui = UiState {
+        dashboard: true,
+        picker: Some(super::PickerUiState {
+            surface: super::PickerSurfaceKind::Generic,
+            title: "Grep".into(),
+            query: "needle".into(),
+            rows: vec![super::PickerRow {
+                id: "match".into(),
+                label: format!("src/long.rs:309:5 {long}"),
+                detail: long.clone(),
+                source: String::new(),
+            }],
+            selected: Some(0),
+            scroll: 0,
+            loading: false,
+            preview: Some(super::PickerPreview {
+                title: "src/long.rs".into(),
+                lines: (300..320)
+                    .map(|line| format!("preview line {line} {long}"))
+                    .collect(),
+                first_line: 300,
+                highlight_line: Some(308),
+            }),
+        }),
+        ..UiState::default()
+    };
+    let loaded = crate::config::load_bundled_config();
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 100, 30);
+    let result_y = (0..30)
+        .find(|row| frame.grid.row_text(*row).contains("src/long.rs:309:5"))
+        .expect("result row");
+    let preview_y = (0..30)
+        .find(|row| frame.grid.row_text(*row).contains("309 preview line 308"))
+        .expect("highlighted preview row");
+    assert!(preview_y > result_y + 1);
 }
 
 #[test]
@@ -1880,6 +1980,44 @@ fn active_pane_viewport_uses_exact_focused_split_rectangle() {
     assert!(viewport.x > 0 && viewport.y > 0);
     assert!(viewport.width < 79 && viewport.height < 23);
     assert!(viewport.y.saturating_add(viewport.height) <= 23);
+}
+
+#[test]
+fn completion_is_clipped_to_the_focused_split() {
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    state.open_text(
+        crate::editor::text::TextBuffer::from_text("left and right"),
+        Some(PathBuf::from("/workspace/main.rs")),
+    );
+    state
+        .split_active(crate::editor::Axis::Horizontal, 500)
+        .expect("split");
+    let loaded = crate::config::load_bundled_config();
+    let mut ui = ui_with_editor_layout(&state);
+    ui.language_completion = Some(super::LanguageCompletionState {
+        items: vec![CompletionItem {
+            label: "selected-completion".into(),
+            detail: "Function · fake".into(),
+        }],
+        selected: 0,
+        scroll: 0,
+    });
+    attach_test_compositor(&state, &mut ui, &loaded.config, 80, 20);
+    let pane =
+        super::active_pane_viewport(&state, &ui, &loaded.config, 80, 20).expect("active pane");
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 20);
+    for row in 0..20 {
+        for column in 0..80 {
+            if frame
+                .grid
+                .get(column, row)
+                .is_some_and(|cell| cell.style == crate::ui::Style::Selection)
+            {
+                assert!(column >= pane.x && column < pane.x.saturating_add(pane.width));
+                assert!(row >= pane.y && row < pane.y.saturating_add(pane.height));
+            }
+        }
+    }
 }
 
 #[test]
@@ -2148,8 +2286,12 @@ fn language_diagnostics_and_completion_are_projected_without_service_calls() {
                 crate::editor::text::ByteOffset(3),
             )
             .expect("range"),
+            source: "rustc".into(),
+            code: Some("E0001".into()),
             message: "problem".into(),
         }],
+        git_changed_files: 3,
+        running_tasks: 2,
         language_completion: Some(super::LanguageCompletionState {
             items: vec![CompletionItem {
                 label: "better".into(),
@@ -2161,19 +2303,67 @@ fn language_diagnostics_and_completion_are_projected_without_service_calls() {
         ..UiState::default()
     };
     let loaded = crate::config::load_bundled_config();
-    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 40, 10);
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 100, 10);
     let view = state.active_view.expect("active view");
     let gutter = super::editor_state_gutter_width(
         &state,
         &state.buffers[state.views[view].buffer].text,
         &loaded.config.editor,
-        40,
+        100,
     );
     assert_eq!(
         frame.grid.get(gutter, 0).expect("diagnostic text").style,
         crate::ui::Style::Error
     );
+    assert!(frame.grid.row_text(0).contains("●● problem [E0001]"));
     assert!((0..10).any(|row| frame.grid.row_text(row).contains("better")));
+    let status = frame.grid.row_text(9);
+    assert!(
+        status.contains("E1 W0") && status.contains("Git 3 files") && status.contains("Tasks 2")
+    );
+}
+
+#[test]
+fn focused_diagnostic_expands_all_matching_messages_as_virtual_lines() {
+    let mut state = EditorState::new(PathBuf::from("/tmp"));
+    let path = PathBuf::from("/tmp/main.rs");
+    state.open_text(
+        crate::editor::text::TextBuffer::from_text("bad\nnext\n"),
+        Some(path.clone()),
+    );
+    let range = crate::editor::text::ByteRange::new(
+        crate::editor::text::ByteOffset(0),
+        crate::editor::text::ByteOffset(3),
+    )
+    .expect("range");
+    let diagnostic = |message: &str, code: &str| super::UiDiagnostic {
+        path: path.clone(),
+        range,
+        severity: crate::workspace::DiagnosticSeverity::Error,
+        source: "rustc".into(),
+        code: Some(code.into()),
+        message: message.into(),
+    };
+    let ui = UiState {
+        editor_window_layout: Some(editor_layout(&state)),
+        diagnostics: vec![
+            diagnostic("first error", "E0001"),
+            diagnostic("second error", "E0002"),
+        ],
+        expanded_diagnostic: Some(super::ExpandedDiagnosticState {
+            path,
+            line: 0,
+            severities: vec![crate::workspace::DiagnosticSeverity::Error],
+        }),
+        ..UiState::default()
+    };
+    let loaded = crate::config::load_bundled_config();
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 60, 10);
+    assert!(frame.grid.row_text(0).contains("●● first error [E0001]"));
+    assert!(frame.grid.row_text(1).contains("Diagnostics:"));
+    assert!(frame.grid.row_text(2).contains("1. first error [E0001]"));
+    assert!(frame.grid.row_text(3).contains("2. second error [E0002]"));
+    assert!(frame.grid.row_text(4).contains("next"));
 }
 
 #[test]

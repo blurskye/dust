@@ -758,6 +758,57 @@ fn installer_worker_routes_real_managed_uninstall_and_reports_its_operation() {
     assert!(!directory.path().join("rust-analyzer").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn installer_worker_can_explicitly_add_rust_analyzer_to_the_active_rustup_toolchain() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = tempfile::tempdir().expect("tool store");
+    let rustup = directory.path().join("rustup");
+    std::fs::write(
+        &rustup,
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PWD/.rustup-args\"\n",
+    )
+    .expect("rustup fixture");
+    std::fs::set_permissions(&rustup, std::fs::Permissions::from_mode(0o755))
+        .expect("rustup fixture permissions");
+    let proxy = directory.path().join("rust-analyzer");
+    std::fs::hard_link(&rustup, &proxy).expect("rustup proxy");
+    let definition = bundled_tool_catalog()
+        .into_iter()
+        .find(|tool| tool.id == "rust-analyzer")
+        .expect("catalog tool");
+    let installer = ToolInstaller::start_at(directory.path().join("managed"));
+
+    installer
+        .install_rustup_component(
+            definition,
+            rustup,
+            proxy.clone(),
+            directory.path().to_path_buf(),
+            "rust-analyzer".into(),
+        )
+        .expect("queue rustup component install");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let result = loop {
+        if let Some(result) = installer.try_result().expect("installer result") {
+            break result;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "rustup installer worker timed out"
+        );
+        std::thread::yield_now();
+    };
+
+    assert_eq!(result.operation, ToolOperation::InstallRustup);
+    assert_eq!(result.result.expect("rustup install"), Some(proxy));
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join(".rustup-args")).expect("rustup arguments"),
+        "component\nadd\nrust-analyzer\n"
+    );
+}
+
 #[test]
 fn managed_uninstall_atomically_removes_only_the_selected_tool() {
     let directory = tempfile::tempdir().expect("tool store");

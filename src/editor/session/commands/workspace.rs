@@ -55,10 +55,7 @@ pub(super) fn register_commands(
         "Open workspace search prompt",
         ContextRequirement::Workspace,
         ArgumentSchema::default(),
-        |_| AppEffect::OpenPrompt {
-            kind: PromptKind::Command,
-            initial: "workspace.search ".into(),
-        },
+        |_| AppEffect::WorkspaceSearchPrompt,
     )?;
     register(
         registry,

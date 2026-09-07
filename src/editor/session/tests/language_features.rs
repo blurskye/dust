@@ -244,11 +244,31 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
         selected: 0,
         scroll: 0,
     });
-    app.invoke_mapped_command("lsp.completion.documentation.open");
-    let popup = app.ui.documentation_popup.as_ref().expect("documentation");
+    app.refresh_lsp_completion_documentation();
+    let popup = app
+        .ui
+        .documentation_popup
+        .as_ref()
+        .expect("selected completion documentation opens automatically");
     assert_eq!(popup.kind, DocumentationPopupKind::Completion);
     assert_eq!(popup.provider, "fake-server");
     assert_eq!(popup.sections[0].markup, DocumentationMarkupKind::Markdown);
+    app.ui
+        .documentation_popup
+        .as_mut()
+        .expect("completion documentation")
+        .sections[0]
+        .lines = (0..40).map(|line| format!("line {line}")).collect();
+    assert_eq!(app.active_input_context(), "completion");
+    app.handle_configured_key("ctrl-d".parse::<KeyEvent>().expect("Ctrl-d"));
+    assert_eq!(
+        app.ui
+            .documentation_popup
+            .as_ref()
+            .map(|popup| popup.scroll),
+        Some(4)
+    );
+    assert!(app.ui.language_completion.is_some());
 
     app.lsp_request_generation = 8;
     app.invoke_mapped_command("lsp.completion.documentation.open");

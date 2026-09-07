@@ -1,5 +1,27 @@
 use super::*;
 
+fn diagnostic_style(severity: crate::workspace::DiagnosticSeverity) -> Style {
+    match severity {
+        crate::workspace::DiagnosticSeverity::Error => Style::Error,
+        crate::workspace::DiagnosticSeverity::Warning => Style::Warning,
+        crate::workspace::DiagnosticSeverity::Information
+        | crate::workspace::DiagnosticSeverity::Hint => Style::Muted,
+    }
+}
+
+fn diagnostic_label(diagnostic: &UiDiagnostic) -> String {
+    let message = diagnostic
+        .message
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let tag = diagnostic
+        .code
+        .as_deref()
+        .or((!diagnostic.source.is_empty()).then_some(diagnostic.source.as_str()));
+    tag.map_or(message.clone(), |tag| format!("{message} [{tag}]"))
+}
+
 pub(super) fn render_editor_view(
     state: &EditorState,
     view_id: crate::editor::ViewId,
@@ -129,6 +151,30 @@ pub(super) fn render_editor_view(
     } else {
         Vec::new()
     };
+    let mut diagnostic_lines = BTreeMap::<usize, Vec<&UiDiagnostic>>::new();
+    if !(large_file && config.editor.large_file.disable_diagnostics)
+        && let Some(path) = &buffer.path
+    {
+        for diagnostic in ui
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| &diagnostic.path == path)
+            .take(2_000)
+        {
+            if let Ok(line) = buffer.text.byte_to_line(diagnostic.range.start) {
+                diagnostic_lines.entry(line).or_default().push(diagnostic);
+            }
+        }
+        for diagnostics in diagnostic_lines.values_mut() {
+            diagnostics.sort_unstable_by_key(|diagnostic| {
+                (
+                    diagnostic.severity,
+                    diagnostic.range.start,
+                    &diagnostic.message,
+                )
+            });
+        }
+    }
 
     let mut syntax_spans = ui
         .syntax_spans
@@ -333,17 +379,17 @@ pub(super) fn render_editor_view(
                 Style::Selection
             } else if search_ranges.iter().any(|range| range.contains(global)) {
                 Style::Search
-            } else if !(large_file && config.editor.large_file.disable_diagnostics)
-                && buffer.path.as_ref().is_some_and(|path| {
-                    ui.diagnostics.iter().any(|diagnostic| {
-                        &diagnostic.path == path
-                            && (diagnostic.range.contains(global)
-                                || (diagnostic.range.is_empty()
-                                    && diagnostic.range.start == global))
+            } else if let Some(style) = diagnostic_lines.get(&line_index).and_then(|diagnostics| {
+                diagnostics
+                    .iter()
+                    .filter(|diagnostic| {
+                        diagnostic.range.contains(global)
+                            || (diagnostic.range.is_empty() && diagnostic.range.start == global)
                     })
-                })
-            {
-                Style::Error
+                    .map(|diagnostic| diagnostic_style(diagnostic.severity))
+                    .next()
+            }) {
+                style
             } else if let Some(span) = {
                 while highlight_spans
                     .get(highlight_cursor)
@@ -489,7 +535,68 @@ pub(super) fn render_editor_view(
             }
             inlay_cursor = inlay_cursor.saturating_add(1);
         }
+        if let Some(diagnostics) = diagnostic_lines.get(&line_index)
+            && let Some(diagnostic) = diagnostics.first()
+        {
+            let text = format!("  ●● {}", diagnostic_label(diagnostic));
+            grid.put_text_clipped(
+                x,
+                screen_row,
+                &text,
+                diagnostic_style(diagnostic.severity),
+                width,
+            );
+        }
         screen_row = screen_row.saturating_add(1);
+        if ui.expanded_diagnostic.as_ref().is_some_and(|expanded| {
+            expanded.line == line_index
+                && buffer.path.as_ref() == Some(&expanded.path)
+                && diagnostic_lines
+                    .get(&line_index)
+                    .is_some_and(|diagnostics| {
+                        diagnostics
+                            .iter()
+                            .any(|diagnostic| expanded.severities.contains(&diagnostic.severity))
+                    })
+        }) && let Some(diagnostics) = diagnostic_lines.get(&line_index)
+        {
+            if screen_row < body_height {
+                grid.put_text_clipped(
+                    gutter_width,
+                    screen_row,
+                    "Diagnostics:",
+                    Style::Muted,
+                    width,
+                );
+                screen_row = screen_row.saturating_add(1);
+            }
+            let severities = &ui
+                .expanded_diagnostic
+                .as_ref()
+                .expect("checked expanded diagnostic")
+                .severities;
+            for (index, diagnostic) in diagnostics
+                .iter()
+                .filter(|diagnostic| severities.contains(&diagnostic.severity))
+                .enumerate()
+            {
+                if screen_row >= body_height {
+                    break;
+                }
+                grid.put_text_clipped(
+                    gutter_width,
+                    screen_row,
+                    &format!(
+                        "{}. {}",
+                        index.saturating_add(1),
+                        diagnostic_label(diagnostic)
+                    ),
+                    diagnostic_style(diagnostic.severity),
+                    width,
+                );
+                screen_row = screen_row.saturating_add(1);
+            }
+        }
         line_index = line_index.saturating_add(1);
     }
     while screen_row < body_height {
@@ -604,6 +711,60 @@ pub(super) fn render_status_line(
         .as_ref()
         .map(|server| config.ui.status_line.lsp_format.replace("{server}", server))
         .unwrap_or_default();
+    let (errors, warnings) = buffer.path.as_ref().map_or((0, 0), |path| {
+        ui.diagnostics
+            .iter()
+            .filter(|diagnostic| &diagnostic.path == path)
+            .fold(
+                (0usize, 0usize),
+                |(errors, warnings), diagnostic| match diagnostic.severity {
+                    crate::workspace::DiagnosticSeverity::Error => {
+                        (errors.saturating_add(1), warnings)
+                    }
+                    crate::workspace::DiagnosticSeverity::Warning => {
+                        (errors, warnings.saturating_add(1))
+                    }
+                    crate::workspace::DiagnosticSeverity::Information
+                    | crate::workspace::DiagnosticSeverity::Hint => (errors, warnings),
+                },
+            )
+    });
+    let diagnostic_status = if errors + warnings > 0 {
+        config
+            .ui
+            .status_line
+            .diagnostic_format
+            .replace("{errors}", &errors.to_string())
+            .replace("{warnings}", &warnings.to_string())
+    } else {
+        String::new()
+    };
+    let git_status = if ui.git_changed_files > 0 {
+        config
+            .ui
+            .status_line
+            .git_format
+            .replace("{count}", &ui.git_changed_files.to_string())
+    } else {
+        String::new()
+    };
+    let task_status = if ui.running_tasks > 0 {
+        config
+            .ui
+            .status_line
+            .task_format
+            .replace("{count}", &ui.running_tasks.to_string())
+    } else {
+        String::new()
+    };
+    let root_status = config.ui.status_line.root_format.replace(
+        "{root}",
+        &state
+            .workspace_root
+            .file_name()
+            .unwrap_or(state.workspace_root.as_os_str())
+            .to_string_lossy(),
+    );
     let mut x = 0;
     for component in &config.ui.status_line.components {
         let (text, style, right_aligned) = match component.as_str() {
@@ -623,6 +784,18 @@ pub(super) fn render_status_line(
                 false,
             ),
             "lsp" => (lsp_status.as_str(), Style::StatusAccent, false),
+            "diagnostics" => (
+                diagnostic_status.as_str(),
+                if errors > 0 {
+                    Style::Error
+                } else {
+                    Style::Warning
+                },
+                false,
+            ),
+            "git" => (git_status.as_str(), Style::StatusAccent, false),
+            "tasks" => (task_status.as_str(), Style::StatusAccent, false),
+            "root" => (root_status.as_str(), Style::Muted, false),
             "position" => (position.as_str(), Style::Status, true),
             _ => continue,
         };
@@ -633,6 +806,9 @@ pub(super) fn render_status_line(
         } else {
             text
         };
+        if text.is_empty() {
+            continue;
+        }
         if right_aligned {
             let component_width =
                 u16::try_from(text_width(text, config.editor.ambiguous_width)).unwrap_or(0);

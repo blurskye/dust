@@ -124,10 +124,11 @@ pub(in crate::editor::session) fn resolved_toml_value(
     for segment in segments {
         value = if let Some(table) = value.as_table() {
             table.get(segment)?.clone()
-        } else if let Some(array) = value.as_array() {
-            array.get(segment.parse::<usize>().ok()?)?.clone()
         } else {
-            return None;
+            value
+                .as_array()?
+                .get(segment.parse::<usize>().ok()?)?
+                .clone()
         };
     }
     Some(value)
