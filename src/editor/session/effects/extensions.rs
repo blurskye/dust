@@ -9,8 +9,8 @@ impl InteractiveApplication {
             AppEffect::PluginValidate => self.load_configured_plugins(),
             AppEffect::PluginList => {
                 let items = self
-                    .plugins
-                    .statuses
+                    .extension
+                    .statuses()
                     .iter()
                     .take(4096)
                     .enumerate()
@@ -30,8 +30,8 @@ impl InteractiveApplication {
                 self.install_picker(self.message("plugin_picker_title", &[]), items);
             }
             AppEffect::PluginDisable(id) => {
-                let load = self.plugins.load_id(&id);
-                if let Err(error) = self.plugins.disable(&id) {
+                let load = self.extension.load_id(&id);
+                if let Err(error) = self.extension.disable(&id) {
                     self.show_error(error)
                 } else {
                     if let Some(load) = load {
@@ -116,7 +116,7 @@ impl InteractiveApplication {
                     .plugin_virtual_editor
                     .find("builtin.health", load, source, key)
                     .map_or(1, |entry| entry.revision.saturating_add(1));
-                let plugin_rows = self.plugins.statuses.len();
+                let plugin_rows = self.extension.statuses().len();
                 let text = format!(
                     "# Dust health\n\n- editor: ready\n- plugins indexed: {plugin_rows}\n- API commands: {}\n- persistence schema: {}\n",
                     self.commands.specs().count(),
@@ -211,11 +211,11 @@ impl InteractiveApplication {
                 });
             }
             AppEffect::PluginExecute { plugin, command } => {
-                let Some(load) = self.plugins.load_id(&plugin) else {
+                let Some(load) = self.extension.load_id(&plugin) else {
                     self.show_error(crate::extensions::PluginError::NotActive);
                     return Ok(());
                 };
-                if !self.plugins.is_active_generation(&plugin, load) {
+                if !self.extension.is_active_generation(&plugin, load) {
                     self.show_error(crate::extensions::PluginError::NotActive);
                     return Ok(());
                 }
@@ -229,43 +229,19 @@ impl InteractiveApplication {
                         .maximum_file_bytes,
                 )
                 .unwrap_or(usize::MAX);
-                let admitted = self.plugin_edits.prepare(
-                    &mut self.plugins,
+                let result = self.extension.execute(
                     &plugin,
                     &command,
-                    &self.state,
-                    &self.workspace,
-                    self.configuration.binding_revision_ref(),
-                    maximum,
-                );
-                let result = match admitted {
-                    Err(error) => Err(error),
-                    Ok(loan) => loan.submit(crate::extensions::PluginExecutionRequest {
-                        plugin: plugin.clone(),
-                        command: command.clone(),
-                        arguments: Vec::new(),
-                        snapshot: None,
-                        config: BTreeMap::new(),
-                        ui_events: self
-                            .pending_plugin_ui_events
-                            .remove(&(plugin.clone(), load))
-                            .unwrap_or_default(),
-                        host_events: self.plugin_host_events.deliver(&plugin, load),
-                        storage_results: self
-                            .pending_plugin_storage_results
-                            .remove(&(plugin.clone(), load))
-                            .unwrap_or_default(),
-                        provider_requests: self.plugin_providers.requests(&plugin, load),
-                        virtual_document_requests: self
-                            .plugin_virtual_documents
-                            .requests_for_command(
-                                &plugin,
-                                load,
-                                &format!("plugin.{plugin}.{command}"),
-                            ),
+                    crate::editor::session::extensions::InvocationContext {
+                        editor: &self.state,
+                        workspace: &self.workspace,
+                        configuration: self.configuration.binding_revision_ref(),
                         generation: self.configuration.generation(),
-                    }),
-                };
+                        maximum,
+                        providers: &self.plugin_providers,
+                        virtual_documents: self.plugin_virtual_documents.request_lane(),
+                    },
+                );
                 if let Err(error) = result {
                     self.show_error(error);
                 }

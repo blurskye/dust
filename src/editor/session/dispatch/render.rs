@@ -155,7 +155,7 @@ impl InteractiveApplication {
                     .count(),
                 jobs: self.tasks.running_count(),
                 ptys: self.terminal_session.len(),
-                lsp_sessions: self.lsp_sessions.len(),
+                lsp_sessions: self.language.sessions().len(),
                 dap_running: self.debugger_session.is_running(),
                 pending_effects: self
                     .pending_vfs
@@ -163,8 +163,8 @@ impl InteractiveApplication {
                     .saturating_add(self.pending_execution_preflight.len())
                     .saturating_add(self.tasks.linter_count()),
                 plugins_failed: self
-                    .plugins
-                    .statuses
+                    .extension
+                    .statuses()
                     .values()
                     .filter(|status| matches!(status, PluginStatus::Failed(_)))
                     .count(),
@@ -189,14 +189,7 @@ impl InteractiveApplication {
             .plugin_windows
             .synchronize_private_geometry(projection.as_ref());
         for (plugin, load, event) in events {
-            let pending = self
-                .pending_plugin_ui_events
-                .entry((plugin, PluginLoadId(load)))
-                .or_default();
-            pending.push(event);
-            if pending.len() > 64 {
-                pending.drain(..pending.len().saturating_sub(64));
-            }
+            self.extension.queue_ui(plugin, PluginLoadId(load), [event]);
         }
         self.ui.plugin_surfaces = self.plugin_windows.snapshots();
         self.ui.private_surfaces = self

@@ -51,39 +51,26 @@ impl InteractiveApplication {
             AppEffect::RestartSelectedLsp => self.restart_selected_lsp(),
             AppEffect::ToggleToolRuntime => self.toggle_selected_lsp_runtime(),
             AppEffect::LspStart => {
-                if let Some(key) = self.active_lsp_server.clone() {
-                    if let Some(state) = self.lsp_sessions.get_mut(&key) {
-                        state.restart_count = 0;
-                        state.restart_due = None;
-                        state.circuit_open = false;
-                        state.desired_running = true;
-                    }
+                if let Some(key) = self.language.active().cloned() {
+                    self.language.request_start(&key, None);
                 }
                 self.start_lsp(None);
             }
             AppEffect::LspStop => {
-                if let Some(server) = self.active_lsp_server.clone() {
-                    if let Some(state) = self.lsp_sessions.get_mut(&server) {
-                        state.desired_running = false;
-                        state.restart_due = None;
-                    }
-                    if let Err(error) = self.lsp.stop(&server) {
+                if let Some(server) = self.language.active().cloned() {
+                    self.language.request_stop(&server);
+                    if let Err(error) = self.language.stop(&server) {
                         self.show_error(error)
                     }
                     self.clear_lsp_progress(&server);
-                    self.lsp_sessions.remove(&server);
+                    self.language.remove(&server);
                     self.clear_lsp_session_state();
                 }
             }
             AppEffect::LspRestart => {
-                if let Some(server) = self.active_lsp_server.clone() {
-                    if let Some(state) = self.lsp_sessions.get_mut(&server) {
-                        state.restart_count = 0;
-                        state.restart_due = Some(Instant::now());
-                        state.circuit_open = false;
-                        state.desired_running = true;
-                    }
-                    let _ = self.lsp.stop(&server);
+                if let Some(server) = self.language.active().cloned() {
+                    self.language.request_start(&server, Some(Instant::now()));
+                    let _ = self.language.stop(&server);
                     self.clear_lsp_progress(&server);
                 } else {
                     self.start_lsp(None);
@@ -91,7 +78,7 @@ impl InteractiveApplication {
             }
             AppEffect::LspStatus => {
                 let mut servers = self
-                    .lsp
+                    .language
                     .running_servers()
                     .iter()
                     .map(|server| self.lsp_server_label(server))
@@ -112,22 +99,19 @@ impl InteractiveApplication {
                     ),
                     false,
                 );
-                if let Some(server) = self.active_lsp_server.as_deref() {
-                    let _ = self.lsp.health(server);
+                if let Some(server) = self.language.active().map(String::as_str) {
+                    let _ = self.language.health(server);
                 }
             }
             AppEffect::LspAttach => {
-                if let Some(server) = self.active_lsp_server.clone() {
+                if let Some(server) = self.language.active().cloned() {
                     if let Some((buffer, document)) = self.active_lsp_document() {
-                        let revision = BufferRevision(document.version);
-                        if let Err(error) = self.lsp.sync_owned(
-                            &server,
-                            document,
-                            (buffer, self.state.buffers[buffer].text.source_version()),
-                        ) {
+                        let source = self.state.buffers[buffer].text.source_version();
+                        if let Err(error) =
+                            self.language
+                                .sync_owned(&server, document, (buffer, source))
+                        {
                             self.show_error(error);
-                        } else {
-                            self.lsp_synced_revisions.insert(buffer, revision);
                         }
                     }
                 } else {
@@ -135,13 +119,12 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::LspDetach => {
-                if let (Some(server), Some((buffer, document))) = (
-                    self.active_lsp_server.as_deref(),
-                    self.active_lsp_document(),
-                ) {
+                if let (Some(server), Some((buffer, document))) =
+                    (self.language.active().cloned(), self.active_lsp_document())
+                {
                     let uri = document.uri();
-                    let _ = self.lsp.close(server, uri.clone());
-                    self.lsp_synced_revisions.remove(&buffer);
+                    let _ = self.language.close(&server, uri.clone());
+                    self.language.detach(&server, buffer);
                     if let Ok(owner) = DiagnosticOwner::new(format!("lsp.{server}")) {
                         self.diagnostics.clear_owner_uri(&owner, &uri);
                     }
@@ -182,8 +165,8 @@ impl InteractiveApplication {
             AppEffect::LspCompletionAccept => self.accept_lsp_completion(),
             AppEffect::LspCompletionCancel => {
                 let generation = self.lsp_request_generation;
-                if let Some(server) = self.active_lsp_server.as_deref() {
-                    let _ = self.lsp.cancel(server, generation);
+                if let Some(server) = self.language.active().map(String::as_str) {
+                    let _ = self.language.cancel(server, generation);
                 }
                 self.lsp_completion_items.clear();
                 self.lsp_completion_owner = None;

@@ -5,8 +5,12 @@ mod diagnostics;
 mod dispatch;
 mod documents;
 mod explorer;
+#[path = "extensions/session.rs"]
+mod extensions;
 mod git;
 mod input;
+#[path = "lsp/session.rs"]
+mod lsp;
 mod lsp_edits;
 mod notifications;
 mod persistence;

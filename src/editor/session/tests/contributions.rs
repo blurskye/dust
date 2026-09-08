@@ -54,7 +54,7 @@ fn indexed_plugin_defaults_install_before_activation_and_roll_back_on_failure() 
     )
     .expect("manifest");
     let load = app
-        .plugins
+        .extension
         .index_from_store(
             "demo".into(),
             root.path().to_path_buf(),
@@ -76,13 +76,13 @@ fn indexed_plugin_defaults_install_before_activation_and_roll_back_on_failure() 
         .expect("indexed binding");
     assert_eq!(indexed.contribution_owner.as_deref(), Some("demo"));
     assert_eq!(indexed.contribution_generation, load.0);
-    assert!(!app.plugins.is_active_generation("demo", load));
-    let previous = app.plugins.load_id("demo");
+    assert!(!app.extension.is_active_generation("demo", load));
+    let previous = app.extension.load_id("demo");
     app.invoke_mapped(
         crate::editor::CommandInvocation::new("plugin.demo.run", InvocationSource::Test)
             .expect("static command"),
     );
-    assert_eq!(app.plugins.load_id("demo"), previous);
+    assert_eq!(app.extension.load_id("demo"), previous);
     let deadline = Instant::now() + Duration::from_secs(2);
     while app.plugin_contributions.get("demo").is_some() {
         app.process_plugin_events();

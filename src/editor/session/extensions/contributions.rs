@@ -31,7 +31,7 @@ impl InteractiveApplication {
         };
         let limits = self.plugin_limits();
         for (id, entry) in policy.entries.iter().filter(|(_, entry)| entry.enabled) {
-            if let Err(error) = self.plugins.index_from_store(
+            if let Err(error) = self.extension.index_from_store(
                 id.clone(),
                 store.clone(),
                 entry.manifest.clone(),
@@ -53,7 +53,7 @@ impl InteractiveApplication {
         let managed = std::mem::take(&mut self.package_managed_plugins);
         let mut failed = HashMap::new();
         for (id, load) in managed {
-            match self.plugins.unload_generation(&id, load) {
+            match self.extension.unload_generation(&id, load) {
                 Ok(()) => self.remove_plugin_contribution_generation(&id, load),
                 Err(error) => {
                     failed.insert(id, load);
@@ -85,7 +85,13 @@ impl InteractiveApplication {
         self.plugin_worker_reported = true;
         self.pending_index_activation.clear();
         self.rejected_plugin_loads.clear();
-        for plugin in self.plugins.statuses.keys().cloned().collect::<Vec<_>>() {
+        for plugin in self
+            .extension
+            .statuses()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>()
+        {
             self.commands.unregister_plugin(&plugin);
         }
         let owned_generations = self
@@ -97,8 +103,7 @@ impl InteractiveApplication {
             self.remove_plugin_contribution_generation(&plugin, load);
         }
         self.plugin_contributions = PluginContributionCatalog::default();
-        self.plugin_host_events = PluginHostEventQueue::default();
-        self.plugin_host_event_observation = None;
+        self.extension.clear_events();
         if let Ok(candidate) = self.configuration.prepare_base_bindings(
             &self.commands,
             &self.plugin_contributions,
@@ -254,8 +259,6 @@ impl InteractiveApplication {
             .map(|()| self.plugin_windows.remove_generation(plugin, load.0))
         {
             Ok(removed) => {
-                self.pending_plugin_ui_events
-                    .remove(&(plugin.to_owned(), load));
                 if removed {
                     self.ui.plugin_surfaces = self.plugin_windows.snapshots();
                     self.window_session.invalidate_native();
@@ -267,9 +270,7 @@ impl InteractiveApplication {
                 return;
             }
         }
-        self.plugin_host_events.remove_generation(plugin, load);
-        self.plugin_host_event_observation = None;
-        self.plugin_storage.remove_generation(plugin, load);
+        self.extension.remove_generation(plugin, load);
         self.plugin_providers.remove_generation(plugin, load);
         self.plugin_virtual_documents
             .remove_generation(plugin, load);
@@ -287,8 +288,7 @@ impl InteractiveApplication {
             self.active_plugin_picker = None;
             self.close_picker();
         }
-        self.pending_plugin_storage_results
-            .remove(&(plugin.to_owned(), load));
+
         if self.plugin_contributions.remove_generation(plugin, load.0) {
             self.commands.unregister_plugin(plugin);
             if let Err(error) = self.recompile_plugin_contributions() {
@@ -313,7 +313,7 @@ impl InteractiveApplication {
             self.rejected_plugin_loads.insert((owner.clone(), load));
             self.remove_plugin_contribution_generation(&owner, load);
             self.commands.unregister_plugin(&owner);
-            let _ = self.plugins.disable_generation(&owner, load);
+            let _ = self.extension.disable_generation(&owner, load);
             if let Some((_, token)) = self
                 .package_prepared
                 .remove(&owner)
@@ -355,7 +355,7 @@ impl InteractiveApplication {
             let load = if owner == failed_plugin {
                 Some(failed_load)
             } else {
-                self.plugins.load_id(&owner)
+                self.extension.load_id(&owner)
             };
             if let Some(load) = load {
                 self.rejected_plugin_loads.insert((owner.clone(), load));

@@ -420,15 +420,13 @@ impl InteractiveApplication {
         {
             Ok((plugin, load, event)) => {
                 let action = event.action.clone();
-                let pending = self
-                    .pending_plugin_ui_events
-                    .entry((plugin, PluginLoadId(load)))
-                    .or_default();
-                if pending.len() >= 64 {
-                    self.show_error("private surface action queue is full");
+                if let Err(error) = self
+                    .extension
+                    .push_action(plugin, PluginLoadId(load), event)
+                {
+                    self.show_error(error);
                     return;
                 }
-                pending.push(event);
                 if let Some(action) = action {
                     self.invoke_mapped_command(&action);
                 }

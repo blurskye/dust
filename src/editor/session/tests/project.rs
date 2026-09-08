@@ -1000,7 +1000,7 @@ fn same_session_root_replacement_cancels_all_protected_action_kinds() {
             app.workspace.trust(),
             crate::workspace::WorkspaceTrust::Untrusted
         );
-        assert!(app.active_lsp_server.is_none());
+        assert!(app.language.active().is_none());
         assert!(app.ui.notification_error);
     }
 }

@@ -50,11 +50,11 @@ impl InteractiveApplication {
                                 self.pending_execution_preflight.len().to_string(),
                             ),
                             ("tasks", self.tasks.status_count().to_string()),
-                            ("plugins", self.plugins.statuses.len().to_string()),
+                            ("plugins", self.extension.statuses().len().to_string()),
                             (
                                 "plugin_failures",
-                                self.plugins
-                                    .statuses
+                                self.extension
+                                    .statuses()
                                     .values()
                                     .filter(|status| {
                                         matches!(status, crate::extensions::PluginStatus::Failed(_))
@@ -63,7 +63,7 @@ impl InteractiveApplication {
                                     .to_string(),
                             ),
                             ("packages", self.packages.pending_count().to_string()),
-                            ("lsp", self.lsp_sessions.len().to_string()),
+                            ("lsp", self.language.sessions().len().to_string()),
                             ("persistence", self.persistence.pending().to_string()),
                             ("safe", self.workspace.safe_mode().to_string()),
                             ("dap", self.debugger_session.is_running().to_string()),

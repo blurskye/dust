@@ -125,11 +125,44 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
     assert_eq!(action.1, &nested);
     let expected_key = crate::language::lsp::LspSessionKey {
         root_id: app.workspace.active_root().expect("root").0,
-        project_root: nested,
+        project_root: nested.clone(),
         server_id: "nested-rust".into(),
     }
     .transport_key();
     assert_eq!(action.0, &expected_key);
+    while !app.pending_execution_preflight.is_empty() {
+        app.process_execution_preflight();
+        assert!(Instant::now() < deadline, "LSP startup admission timed out");
+        thread::yield_now();
+    }
+    let registered = app
+        .language
+        .sessions()
+        .get(&expected_key)
+        .expect("actual transport-admitted session");
+    assert_eq!(registered.root_path, nested);
+    assert!(
+        registered
+            .documents
+            .contains_key(&app.state.active_buffer_id().unwrap())
+    );
+    assert!(app.language.capabilities().is_none()); // `false` is not an initialized language server.
+    let (buffer, document) = app.active_lsp_document().unwrap();
+    let source = app.state.buffers[buffer].text.source_version();
+    assert!(matches!(
+        app.language
+            .sync_owned("foreign", document.clone(), (buffer, source.clone())),
+        Err(crate::language::lsp::LspError::NotRunning(_))
+    ));
+    assert!(!app.language.synced("foreign", buffer, &source));
+    app.language.stop(&expected_key).unwrap();
+    app.language.invalidate_document(&expected_key, buffer);
+    assert!(matches!(
+        app.language
+            .sync_owned(&expected_key, document, (buffer, source.clone())),
+        Err(crate::language::lsp::LspError::NotRunning(_))
+    ));
+    assert!(!app.language.synced(&expected_key, buffer, &source));
 }
 
 #[test]
@@ -238,7 +271,7 @@ fn untrusted_workspace_blocks_project_local_language_server_launch() {
         status: crate::tools::ToolStatus::Installed(app.state.workspace_root.join("bin/server")),
     });
     app.start_lsp(Some("project-local".into()));
-    assert!(app.active_lsp_server.is_none());
+    assert!(app.language.active().is_none());
     assert!(app.ui.notification_error);
     assert!(
         app.ui
@@ -268,7 +301,7 @@ fn untrusted_workspace_blocks_project_local_language_server_launch() {
         thread::sleep(Duration::from_millis(5));
     }
     assert!(
-        app.active_lsp_server.is_none()
+        app.language.active().is_none()
             && app.ui.notification_error
             && app
                 .ui
@@ -528,10 +561,11 @@ fn lsp_completion_applies_through_one_validated_transaction() {
     );
     app.state.views[view].cursor = ByteOffset(5);
     app.set_dashboard_visibility(false);
-    app.lsp_capabilities = Some(crate::language::lsp::LspCapabilities {
-        position_encoding: crate::editor::text::PositionEncoding::Utf16,
-        ..Default::default()
-    });
+    app.language
+        .fixture_capabilities(crate::language::lsp::LspCapabilities {
+            position_encoding: crate::editor::text::PositionEncoding::Utf16,
+            ..Default::default()
+        });
     app.lsp_completion_items = vec![crate::language::lsp::LspCompletionItem {
         label: "main".into(),
         detail: "function".into(),
@@ -706,7 +740,7 @@ fn lsp_status_never_labels_failed_or_backing_off_sessions_as_starting() {
     let executable = crate::tools::discover_executable("false").expect("false executable");
     let root = app.workspace.active_root().expect("workspace root");
     let key = "failed-rust-analyzer".to_owned();
-    app.lsp_sessions.insert(
+    app.language.fixture_session(
         key.clone(),
         crate::editor::session::dispatch::LspRuntimeState {
             root,
@@ -726,14 +760,42 @@ fn lsp_status_never_labels_failed_or_backing_off_sessions_as_starting() {
             activate_on_restart: true,
         },
     );
-    app.active_lsp_server = Some(key.clone());
+    app.language.select(&key);
     app.sync_lsp_status_ui();
     assert_eq!(app.ui.lsp_server.as_deref(), Some("failed rust-analyzer"));
-    let session = app.lsp_sessions.get_mut(&key).expect("session");
-    session.circuit_open = false;
-    session.restart_due = Some(Instant::now() + Duration::from_secs(1));
+    app.language
+        .request_start(&key, Some(Instant::now() + Duration::from_secs(1)));
     app.sync_lsp_status_ui();
     assert_eq!(app.ui.lsp_server.as_deref(), Some("backoff rust-analyzer"));
+    assert!(!app.language.select("foreign-session"));
+    assert_eq!(app.language.active(), Some(&key));
+    app.language.running(&key, Default::default());
+    assert!(app.language.capabilities().is_some());
+    assert!(app.language.stopped(&key));
+    assert!(app.language.capabilities().is_none());
+    let now = Instant::now();
+    app.language.request_start(&key, None);
+    let policy = crate::config::LspConfig {
+        restart_limit: 1,
+        restart_backoff_ms: 10,
+        ..Default::default()
+    };
+    assert!(app.language.schedule_restart(&key, &policy, now).is_none());
+    assert!(app.language.restart_due(now).is_none());
+    assert_eq!(
+        app.language.restart_due(now + Duration::from_millis(10)),
+        Some(key.clone())
+    );
+    assert_eq!(
+        app.language.schedule_restart(&key, &policy, now),
+        Some("rust-analyzer".into())
+    );
+    app.language.request_stop(&key);
+    assert!(
+        app.language
+            .restart_due(now + Duration::from_secs(60))
+            .is_none()
+    );
 }
 
 #[test]
@@ -1115,7 +1177,7 @@ fn plugin_workspace_preview_uses_invocation_source_and_retires_on_dismissal() {
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let (manager, endpoint) = ExecutionFixture::new(2);
-    app.plugins = manager;
+    app.extension.fixture_manager(manager);
     let execute = AppEffect::PluginExecute {
         plugin: "demo".into(),
         command: "run".into(),
@@ -1185,9 +1247,9 @@ fn plugin_workspace_preview_uses_invocation_source_and_retires_on_dismissal() {
     );
     app.process_effect(execute);
     let late = endpoint.take();
-    app.plugins.disable("demo").unwrap();
+    app.extension.disable("demo").unwrap();
     endpoint.reply(&late, proposed(app.state.buffers[buffer].text.revision().0));
     app.process_plugin_events();
     assert!(app.workspace_edits.proposal().is_none());
-    app.plugin_edits.close();
+    app.extension.close_edits();
 }

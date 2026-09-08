@@ -407,7 +407,8 @@ impl InteractiveApplication {
                 );
             }
             let documents = self
-                .lsp_sessions
+                .language
+                .sessions()
                 .iter()
                 .filter_map(|(server, state)| {
                     state
@@ -417,14 +418,13 @@ impl InteractiveApplication {
                 })
                 .collect::<Vec<_>>();
             self.detach_lsp_documents(buffer_id, documents);
-            self.lsp_synced_revisions.remove(&buffer_id);
         }
         self.set_dashboard_visibility(self.state.active_view.is_none());
         if !self.window_session.dashboard_visible() {
             self.sync_lsp_document();
         } else {
-            self.active_lsp_server = None;
-            self.lsp_capabilities = None;
+            self.language.clear_active();
+
             self.clear_lsp_ui_projection();
         }
         self.notify_message(
@@ -560,13 +560,13 @@ impl InteractiveApplication {
                     },
                     false,
                 );
-                if let Some(server) = self.active_lsp_server.as_deref()
+                if let Some(server) = self.language.active().map(String::as_str)
                     && let Some(document) = lsp_document
                 {
-                    let _ = self.lsp.save(server, document);
+                    let _ = self.language.save(server, document);
                     // An older save snapshot must not leave the worker's document
                     // identity behind the current editor incarnation/content.
-                    self.lsp_session_synced.remove(&(server.to_owned(), buffer));
+                    self.language.invalidate_active_document(buffer);
                 }
                 if self.ui.explorer.is_some() {
                     self.start_git_status_refresh_with_feedback(false);

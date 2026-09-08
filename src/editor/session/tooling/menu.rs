@@ -75,13 +75,14 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn lsp_menu_lifecycle(&self, id: &str) -> (String, Vec<String>) {
-        let running_servers = self.lsp.running_servers();
+        let running_servers = self.language.running_servers();
         let mut running = 0usize;
         let mut starting = false;
         let mut backoff = false;
         let mut failed = false;
         let mut sessions = self
-            .lsp_sessions
+            .language
+            .sessions()
             .iter()
             .filter(|(_, session)| session.server_id == id)
             .map(|(key, session)| {
@@ -126,7 +127,7 @@ impl InteractiveApplication {
             "starting".into()
         } else if backoff {
             "backoff".into()
-        } else if failed || self.lsp_last_errors.contains_key(id) {
+        } else if failed || self.language.errors().contains_key(id) {
             "failed".into()
         } else {
             "stopped".into()
@@ -672,8 +673,7 @@ impl InteractiveApplication {
                         &NIX_LSP_NIXPKGS_REVISION[..8]
                     )
                 };
-                let note = self
-                    .lsp_last_errors
+                let note = self.language.errors()
                     .get(&definition.id)
                     .cloned()
                     .or(probe_error)
@@ -992,7 +992,7 @@ impl InteractiveApplication {
             return;
         }
         self.stop_lsp_sessions_for_server(&id);
-        self.lsp_autostart_observation = None;
+        self.language.reset_autostart();
         if let Some(menu) = &mut self.ui.tool_menu {
             menu.runtime_picker = None;
         }
@@ -1037,22 +1037,19 @@ impl InteractiveApplication {
 
     pub(in crate::editor::session) fn stop_lsp_sessions_for_server(&mut self, id: &str) {
         let sessions = self
-            .lsp_sessions
+            .language
+            .sessions()
             .iter()
             .filter_map(|(key, session)| (session.server_id == id).then_some(key.clone()))
             .collect::<Vec<_>>();
         for key in sessions {
-            if let Some(session) = self.lsp_sessions.get_mut(&key) {
-                session.desired_running = false;
-                session.restart_due = None;
-            }
-            let _ = self.lsp.stop(&key);
+            self.language.request_stop(&key);
+            let _ = self.language.stop(&key);
             self.clear_lsp_progress(&key);
             self.clear_lsp_server_ownership(&key);
-            self.lsp_sessions.remove(&key);
-            self.lsp_session_synced
-                .retain(|(server, _), _| server != &key);
-            if self.active_lsp_server.as_deref() == Some(&key) {
+            self.language.remove(&key);
+            self.language.forget_synced(&key);
+            if self.language.active().map(String::as_str) == Some(&key) {
                 self.clear_lsp_session_state();
             }
         }

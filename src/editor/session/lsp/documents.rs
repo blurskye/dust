@@ -2,12 +2,13 @@ use super::*;
 
 impl InteractiveApplication {
     pub(in crate::editor::session) fn sync_lsp_status_ui(&mut self) {
-        let running = self.lsp.running_servers();
+        let running = self.language.running_servers();
         self.ui.lsp_server = self
-            .active_lsp_server
-            .as_ref()
+            .language
+            .active()
             .and_then(|server| {
-                self.lsp_sessions
+                self.language
+                    .sessions()
                     .get(server)
                     .map(|session| (server, session))
             })
@@ -79,31 +80,23 @@ impl InteractiveApplication {
             execution_busy: self.execution_validation.is_some(),
             launchable_server,
         };
-        if self.lsp_autostart_observation.as_ref() == Some(&observation) {
-            return;
-        }
-        let server = observation.launchable_server.clone();
-        let should_start = !matching_session
-            && observation.enabled
-            && observation.auto_start
-            && !observation.execution_busy
-            && observation.trust == WorkspaceTrust::Trusted
-            && !self.workspace.safe_mode()
-            && server.is_some();
-        self.lsp_autostart_observation = Some(observation);
-        if should_start {
-            self.start_lsp(server);
+        if let Some(server) =
+            self.language
+                .observe(observation, matching_session, self.workspace.safe_mode())
+        {
+            self.start_lsp(Some(server));
         }
     }
 
     pub(in crate::editor::session) fn sync_lsp_document(&mut self) {
         let Some(buffer) = self.state.active_buffer_id() else {
-            self.lsp_autostart_observation = None;
+            self.language.reset_autostart();
             return;
         };
         let Some((_, document)) = self.active_lsp_document() else {
             let stale = self
-                .lsp_sessions
+                .language
+                .sessions()
                 .iter()
                 .filter_map(|(key, state)| {
                     state
@@ -114,15 +107,15 @@ impl InteractiveApplication {
                 .collect::<Vec<_>>();
             self.detach_lsp_documents(buffer, stale);
             self.clear_lsp_ui_projection();
-            self.active_lsp_server = None;
-            self.lsp_capabilities = None;
-            self.lsp_autostart_observation = None;
+            self.language.clear_active();
+
+            self.language.reset_autostart();
             return;
         };
         let revision = self.state.buffers[buffer].text.source_version();
         let mut sessions = Vec::new();
         let mut detach = Vec::new();
-        for (key, state) in &self.lsp_sessions {
+        for (key, state) in self.language.sessions() {
             // A lexical `starts_with` check would let a session for an outer
             // project absorb a nested, independently resolved project. Only
             // the asynchronous resolver may attach a new document to a server.
@@ -142,14 +135,14 @@ impl InteractiveApplication {
         }
         sessions.sort();
         if sessions.is_empty() {
-            self.active_lsp_server = None;
-            self.lsp_capabilities = None;
+            self.language.clear_active();
+
             self.clear_lsp_ui_projection();
         }
         if !sessions.is_empty()
             && !sessions
                 .iter()
-                .any(|key| self.active_lsp_server.as_ref() == Some(key))
+                .any(|key| self.language.active() == Some(key))
         {
             self.select_lsp_session(&sessions[0]);
         }
@@ -157,20 +150,15 @@ impl InteractiveApplication {
         self.refresh_lsp_projection_owner();
         let mut changed = false;
         for server in &sessions {
-            if self.lsp_session_synced.get(&(server.clone(), buffer)) == Some(&revision) {
+            if self.language.synced(server, buffer, &revision) {
                 continue;
             }
             if self
-                .lsp
+                .language
                 .sync_owned(server, document.clone(), (buffer, revision.clone()))
                 .is_ok()
             {
                 changed = true;
-                self.lsp_session_synced
-                    .insert((server.clone(), buffer), revision.clone());
-                if let Some(state) = self.lsp_sessions.get_mut(server) {
-                    state.documents.insert(buffer, document.clone());
-                }
             }
         }
         if changed
@@ -184,8 +172,8 @@ impl InteractiveApplication {
         self.reconcile_lsp_autostart(buffer, &document, !sessions.is_empty());
         if self.ui.language_completion.is_some()
             && self
-                .active_lsp_server
-                .as_ref()
+                .language
+                .active()
                 .is_some_and(|active| sessions.contains(active))
         {
             self.request_lsp(LspFeature::Completion);

@@ -94,29 +94,29 @@ fn plugin_host_events_are_snapshot_owned_coalesced_and_idle() {
     app.plugin_contributions
         .install(index.clone())
         .expect("catalog");
-    app.plugin_host_events.install(&index).expect("event owner");
+    app.extension.install_events(&index).expect("event owner");
     app.refresh_plugin_host_events();
-    assert_eq!(app.plugin_host_events.pending("demo", PluginLoadId(77)), 1);
-    let stable_queue = app.plugin_host_events.clone();
-    let stable_observation = app.plugin_host_event_observation.clone();
+    assert_eq!(app.extension.events().pending("demo", PluginLoadId(77)), 1);
+    let stable_queue = app.extension.events().clone();
+    let stable_observation = app.extension.observation().clone();
     for _ in 0..256 {
         app.refresh_plugin_host_events();
     }
-    assert_eq!(app.plugin_host_events, stable_queue);
-    assert_eq!(app.plugin_host_event_observation, stable_observation);
+    assert_eq!(*app.extension.events(), stable_queue);
+    assert_eq!(*app.extension.observation(), stable_observation);
 
     let view = app.state.active_view.expect("view");
     app.state.views[view].cursor = ByteOffset(1);
     app.refresh_plugin_host_events();
     let event = app
-        .plugin_host_events
+        .extension
         .deliver("demo", PluginLoadId(77))
         .pop()
         .expect("coalesced buffer event");
     assert_eq!(event.coalesced, 1);
     assert!(event.payload.contains("cursor=1"));
     app.remove_plugin_contribution_generation("demo", PluginLoadId(77));
-    assert_eq!(app.plugin_host_events.pending("demo", PluginLoadId(77)), 0);
+    assert_eq!(app.extension.events().pending("demo", PluginLoadId(77)), 0);
 }
 
 #[test]
@@ -272,7 +272,8 @@ fn private_plugin_surface_geometry_snapshot_and_idle_projection_are_application_
     app.window_session.invalidate_native();
     app.reconcile_editor_windows();
     let geometry = app
-        .pending_plugin_ui_events
+        .extension
+        .ui_events()
         .get(&("demo".into(), PluginLoadId(77)))
         .and_then(|events| events.iter().find_map(|event| event.geometry.clone()))
         .expect("local geometry event");
@@ -443,10 +444,10 @@ fn stale_generation_cleanup_preserves_replacement_ui_events() {
         action: None,
         error: None,
     };
-    app.pending_plugin_ui_events
-        .insert(("demo".into(), PluginLoadId(77)), vec![event(1)]);
-    app.pending_plugin_ui_events
-        .insert(("demo".into(), PluginLoadId(78)), vec![event(2)]);
+    app.extension
+        .queue_ui("demo".into(), PluginLoadId(77), [event(1)]);
+    app.extension
+        .queue_ui("demo".into(), PluginLoadId(78), [event(2)]);
     let storage_result = |load, token| crate::extensions::PluginStorageResult {
         plugin: "demo".into(),
         load: PluginLoadId(load),
@@ -457,16 +458,9 @@ fn stale_generation_cleanup_preserves_replacement_ui_events() {
         truncated: false,
         error: None,
     };
-    app.pending_plugin_storage_results.insert(
-        ("demo".into(), PluginLoadId(77)),
-        vec![storage_result(77, 1)],
-    );
-    app.pending_plugin_storage_results.insert(
-        ("demo".into(), PluginLoadId(78)),
-        vec![storage_result(78, 2)],
-    );
-    app.plugin_storage
-        .install_generation("demo", PluginLoadId(78));
+    app.extension.queue_storage(storage_result(77, 1));
+    app.extension.queue_storage(storage_result(78, 2));
+    app.extension.install_storage("demo", PluginLoadId(78));
     let manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
     let replacement = crate::extensions::index_manifest_contributions(
         &manifest,
@@ -479,11 +473,13 @@ fn stale_generation_cleanup_preserves_replacement_ui_events() {
         .expect("replacement catalog");
     app.remove_plugin_contribution_generation("demo", PluginLoadId(77));
     assert!(
-        !app.pending_plugin_ui_events
+        !app.extension
+            .ui_events()
             .contains_key(&("demo".into(), PluginLoadId(77)))
     );
     assert_eq!(
-        app.pending_plugin_ui_events
+        app.extension
+            .ui_events()
             .get(&("demo".into(), PluginLoadId(78)))
             .and_then(|events| events.first())
             .map(|event| event.token),
@@ -496,16 +492,33 @@ fn stale_generation_cleanup_preserves_replacement_ui_events() {
         Some(78)
     );
     assert!(
-        !app.pending_plugin_storage_results
+        !app.extension
+            .storage_results()
             .contains_key(&("demo".into(), PluginLoadId(77)))
     );
     assert_eq!(
-        app.pending_plugin_storage_results
+        app.extension
+            .storage_results()
             .get(&("demo".into(), PluginLoadId(78)))
             .and_then(|results| results.first())
             .map(|result| result.token),
         Some(2)
     );
+    app.extension
+        .queue_ui("demo".into(), PluginLoadId(78), (10..80).map(event));
+    assert_eq!(
+        app.extension.ui_events()[&("demo".into(), PluginLoadId(78))].len(),
+        64
+    );
+    assert!(
+        app.extension
+            .push_action("demo".into(), PluginLoadId(78), event(999))
+            .is_err()
+    );
+    let delivered = app.extension.take_ui("demo", PluginLoadId(78));
+    assert_eq!(delivered.len(), 64);
+    assert_eq!(delivered.last().unwrap().token, 79);
+    assert!(app.extension.take_ui("demo", PluginLoadId(78)).is_empty());
 }
 
 #[test]
@@ -527,7 +540,7 @@ fn expected_index_failure_before_sibling_index_aborts_the_complete_batch() {
     );
     let limits = app.plugin_limits();
     let bad_load = app
-        .plugins
+        .extension
         .index_from_store(
             "bad".into(),
             bad.path().to_path_buf(),
@@ -537,7 +550,7 @@ fn expected_index_failure_before_sibling_index_aborts_the_complete_batch() {
         )
         .expect("bad index request");
     let good_load = app
-        .plugins
+        .extension
         .index_from_store(
             "good".into(),
             good.path().to_path_buf(),
@@ -547,8 +560,8 @@ fn expected_index_failure_before_sibling_index_aborts_the_complete_batch() {
         )
         .expect("good index request");
     let deadline = Instant::now() + Duration::from_secs(2);
-    while app.plugins.load_id("good").is_some()
-        || app.plugins.load_id("bad").is_some()
+    while app.extension.load_id("good").is_some()
+        || app.extension.load_id("bad").is_some()
         || !app.pending_index_activation.is_empty()
     {
         app.process_plugin_events();
@@ -565,8 +578,8 @@ fn expected_index_failure_before_sibling_index_aborts_the_complete_batch() {
             .is_none()
     );
     assert!(app.pending_index_activation.is_empty());
-    assert!(!app.plugins.is_active_generation("bad", bad_load));
-    assert!(!app.plugins.is_active_generation("good", good_load));
+    assert!(!app.extension.is_active_generation("bad", bad_load));
+    assert!(!app.extension.is_active_generation("good", good_load));
 }
 
 #[test]
@@ -627,7 +640,7 @@ fn deferred_user_plugin_move_compiles_after_index_then_falls_back_after_activati
     assert_eq!(configuration.raw_windows.rules.len(), 1);
     app.configuration.install_fixture(configuration);
     let load = app
-        .plugins
+        .extension
         .index_from_store(
             "demo".into(),
             root.path().to_path_buf(),
@@ -671,7 +684,7 @@ fn deferred_user_plugin_move_compiles_after_index_then_falls_back_after_activati
         assert!(Instant::now() < deadline, "activation rollback timed out");
         thread::yield_now();
     }
-    assert!(!app.plugins.is_active_generation("demo", load));
+    assert!(!app.extension.is_active_generation("demo", load));
     assert!(
         app.configuration
             .keymaps()

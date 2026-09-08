@@ -178,7 +178,7 @@ impl InteractiveApplication {
                 }
             }
         };
-        self.lsp_last_errors.remove(&definition.id);
+        self.language.clear_error(&definition.id);
         let Ok(root_id) = self.workspace.require_path(&document.path) else {
             self.show_error(self.message("lsp_no_buffer", &[]));
             return;
@@ -309,7 +309,11 @@ impl InteractiveApplication {
         {
             return;
         }
-        if self.lsp.running_servers().contains(&pending.session_key) {
+        if self
+            .language
+            .running_servers()
+            .contains(&pending.session_key)
+        {
             self.attach_lsp_document(&pending.session_key, pending.buffer, pending.document);
             return;
         }
@@ -361,7 +365,7 @@ impl InteractiveApplication {
             server_id: pending.definition.id.clone(),
         }
         .transport_key();
-        let running = self.lsp.running_servers().contains(&session_key);
+        let running = self.language.running_servers().contains(&session_key);
         let starting = self.pending_execution_preflight.values().any(|pending| {
             matches!(pending, PendingExecutionPreflight::Lsp { session_key: key, .. } if key == &session_key)
         });
@@ -370,13 +374,13 @@ impl InteractiveApplication {
             return;
         }
         if starting {
-            self.active_lsp_server = Some(session_key);
+            self.language.select(&session_key);
             // The pending launch owns another document in the same project. A
             // fresh observation after it starts attaches this document exactly.
-            self.lsp_autostart_observation = None;
+            self.language.reset_autostart();
             return;
         }
-        let restart = self.lsp_sessions.contains_key(&session_key);
+        let restart = self.language.sessions().contains_key(&session_key);
         match pending.launch_source {
             LspLaunchSource::Direct {
                 executable,
@@ -427,18 +431,10 @@ impl InteractiveApplication {
         document.version = current.text.revision().0;
         document.text = current.text.to_string();
         let source = current.text.source_version();
-        if self
-            .lsp
-            .sync_owned(session_key, document.clone(), (buffer, source.clone()))
-            .is_ok()
-        {
-            self.lsp_session_synced
-                .insert((session_key.into(), buffer), source);
-            if let Some(state) = self.lsp_sessions.get_mut(session_key) {
-                state.documents.insert(buffer, document);
-            }
-        }
-        self.active_lsp_server = Some(session_key.into());
+        let _ = self
+            .language
+            .sync_owned(session_key, document, (buffer, source));
+        self.language.select(session_key);
     }
 
     pub(in crate::editor::session) fn queue_lsp_preflight(&mut self, pending: LspLaunchRequest) {
@@ -534,7 +530,7 @@ impl InteractiveApplication {
                 &result.executable,
             )
         };
-        match self.lsp.start_session_owned(
+        match self.language.start(
             crate::language::lsp::LspSessionLaunch {
                 session_key: &session_key,
                 definition: &definition,
@@ -546,72 +542,18 @@ impl InteractiveApplication {
                 configuration: server_configuration,
                 environment,
             },
-            Some((buffer, current.text.source_version())),
+            (buffer, current.text.source_version()),
+            (root_id, launch, restart),
+            &self.state,
         ) {
             Ok(()) => {
                 for prefix in ["lsp.", "lsp-pull:"] {
-                    if let Some(producer) = self.lsp.diagnostic_producer(&session_key, prefix) {
+                    if let Some(producer) = self.language.diagnostic_producer(&session_key, prefix)
+                    {
                         self.diagnostics.activate(producer);
                     }
                 }
                 self.sync_ui_diagnostics();
-                let mut documents = self
-                    .lsp_sessions
-                    .get(&session_key)
-                    .map_or_else(HashMap::new, |state| state.documents.clone());
-                documents.insert(buffer, document.clone());
-                if restart {
-                    for (replay_buffer, replay) in &mut documents {
-                        if *replay_buffer != buffer
-                            && let Some(current) = self
-                                .state
-                                .buffers
-                                .get(*replay_buffer)
-                                .filter(|current| current.path.as_ref() == Some(&replay.path))
-                        {
-                            replay.version = current.text.revision().0;
-                            replay.text = current.text.to_string();
-                            let _ = self.lsp.sync_owned(
-                                &session_key,
-                                replay.clone(),
-                                (*replay_buffer, current.text.source_version()),
-                            );
-                        }
-                    }
-                }
-                let restart_count = self
-                    .lsp_sessions
-                    .get(&session_key)
-                    .map_or(0, |state| state.restart_count);
-                let activate = self
-                    .lsp_sessions
-                    .get(&session_key)
-                    .is_none_or(|state| state.activate_on_restart);
-                self.lsp_sessions.insert(
-                    session_key.clone(),
-                    LspRuntimeState {
-                        root: root_id,
-                        root_path: result.cwd,
-                        server_id: definition.id.clone(),
-                        definition,
-                        launch,
-                        capabilities: None,
-                        documents,
-                        restart_count,
-                        restart_due: None,
-                        circuit_open: false,
-                        desired_running: true,
-                        activate_on_restart: activate,
-                    },
-                );
-                if activate {
-                    self.active_lsp_server = Some(session_key.clone());
-                    self.lsp_capabilities = None;
-                }
-                self.lsp_session_synced.insert(
-                    (session_key, buffer),
-                    self.state.buffers[buffer].text.source_version(),
-                );
             }
             Err(error) => self.show_error(error),
         }
@@ -625,7 +567,7 @@ impl InteractiveApplication {
         key: String,
         authorization: Option<ExecutionAuthorization>,
     ) {
-        let Some(state) = self.lsp_sessions.get(&key) else {
+        let Some(state) = self.language.sessions().get(&key) else {
             return;
         };
         if state.circuit_open || !state.desired_running {
@@ -660,22 +602,17 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn select_lsp_session(&mut self, key: &str) {
-        for state in self.lsp_sessions.values_mut() {
-            state.activate_on_restart = false
-        }
-        if let Some(session) = self.lsp_sessions.get_mut(key) {
-            session.activate_on_restart = true;
-            self.active_lsp_server = Some(key.into());
-            self.lsp_capabilities = session.capabilities.clone();
+        if self.language.select(key) {
             self.ui.lsp_inlay_hints.clear();
             self.schedule_lsp_inlay_refresh(true);
         }
     }
 
     pub(in crate::editor::session) fn show_lsp_sessions(&mut self) {
-        let active = self.active_lsp_server.as_deref();
+        let active = self.language.active().map(String::as_str);
         let items = self
-            .lsp_sessions
+            .language
+            .sessions()
             .iter()
             .map(|(key, session)| {
                 (
@@ -712,8 +649,7 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn clear_lsp_server_ownership(&mut self, server: &str) {
-        self.lsp_session_synced
-            .retain(|(candidate, _), _| candidate != server);
+        self.language.forget_synced(&server);
         self.lsp_semantic_raw
             .retain(|(candidate, _), _| candidate != server);
         self.lsp_pull_ids
@@ -732,8 +668,8 @@ impl InteractiveApplication {
     ) {
         let detached = !documents.is_empty();
         for (server, uri) in documents {
-            let _ = self.lsp.close(&server, uri.clone());
-            self.lsp_session_synced.remove(&(server.clone(), buffer));
+            let _ = self.language.close(&server, uri.clone());
+            self.language.invalidate_document(&server, buffer);
             self.lsp_semantic_raw.remove(&(server.clone(), uri.clone()));
             self.lsp_pull_ids.remove(&(server.clone(), uri.clone()));
             for prefix in ["lsp.", "lsp-pull:"] {
@@ -741,9 +677,7 @@ impl InteractiveApplication {
                     self.diagnostics.clear_owner_uri(&owner, &uri);
                 }
             }
-            if let Some(state) = self.lsp_sessions.get_mut(&server) {
-                state.documents.remove(&buffer);
-            }
+            self.language.detach(&server, buffer);
         }
         if detached {
             self.sync_ui_diagnostics();

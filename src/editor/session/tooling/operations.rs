@@ -16,7 +16,7 @@ impl InteractiveApplication {
     pub(in crate::editor::session) fn process_tool_version_results(&mut self) {
         let (changed, unavailable_rustup) = self.tooling.poll_versions();
         if changed {
-            self.lsp_autostart_observation = None;
+            self.language.reset_autostart();
             let category = self.ui.tool_menu.as_ref().map(|menu| menu.category.clone());
             let selected = self.selected_tool_id();
             if let Some(category) = category {
@@ -505,9 +505,9 @@ impl InteractiveApplication {
                     },
                     false,
                 );
-                self.lsp_last_errors.remove(&result.id);
+                self.language.clear_error(&result.id);
             }
-            self.lsp_autostart_observation = None;
+            self.language.reset_autostart();
             if let Some(menu) = &self.ui.tool_menu {
                 let category = menu.category.clone();
                 self.queue_tool_version_probes(&category);

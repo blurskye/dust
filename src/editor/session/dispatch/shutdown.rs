@@ -13,7 +13,7 @@ impl InteractiveApplication {
         if self.workspace_edits.preparing() || self.workspace_edits.proposal().is_some() {
             self.reject_workspace_proposal();
         }
-        let discarded = self.plugin_edits.close();
+        let discarded = self.extension.close_edits();
         if discarded != 0 {
             self.notices.record(
                 crate::telemetry::LogLevel::Info,
@@ -39,7 +39,7 @@ impl InteractiveApplication {
         self.drain_linter_sources();
         self.documents.close_admission();
         while (self.documents.has_work()
-            || self.lsp_edit_sources.pending_replies()
+            || self.language.pending_replies()
             || self.tasks.running_count() != 0
             || self.terminal_session.pending() != 0
             || self.debugger_session.pending() != 0)
@@ -51,7 +51,7 @@ impl InteractiveApplication {
             self.drain_job_events(Some(deadline));
             self.process_pty_events();
             self.process_vfs_results();
-            for error in self.lsp_edit_sources.flush() {
+            for error in self.language.flush_edit_replies() {
                 self.show_error(error);
             }
             std::thread::sleep(Duration::from_millis(2));
@@ -98,7 +98,7 @@ impl InteractiveApplication {
             self.process_persistence_events();
             std::thread::sleep(Duration::from_millis(2));
         }
-        if self.lsp_edit_sources.pending_replies() {
+        if self.language.pending_replies() {
             return Err(InteractiveError::Vfs(VfsError::Io {
                 operation: "finish requesting-server edit responses",
                 path: self.state.workspace_root.clone(),

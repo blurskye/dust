@@ -265,6 +265,9 @@ fn copied_production_tree_enforces_migrated_owner_privacy() {
     );
     let positive = r#"
 fn terminal_domain(owner:&mut super::terminal::TerminalSession) {let _=owner.selected();let _=owner.descriptions();}
+fn lsp_domain(owner:&super::lsp::LspSession) {let _=owner.sessions();let _=owner.capabilities();}
+fn extension_domain(owner:&super::extensions::ExtensionSession) {let _=owner.statuses();let _=owner.load_id("demo");}
+fn virtual_request_domain(broker:&mut crate::extensions::PluginVirtualDocumentBroker) {drop(broker.request_lane());}
 fn recovery_domain(owner:&super::recovery::RecoverySession) {let _=owner.records();}
 fn tooling_domain(owner:&super::tooling::ToolingSession) {let _=owner.entries();let _=owner.metadata();}
 fn recovery_io_domain(owner:&mut super::documents::DocumentSession) {drop(owner.recovery_io());}
@@ -649,6 +652,60 @@ fn legitimate_client(editor: &mut crate::editor::EditorState) { editor.workspace
             "debugger_selection",
             "fn bypass(selection:&mut super::debugger::DebugSelection) {let _=&mut selection.source;}",
             "source",
+            "E0616",
+        ),
+        (
+            "lsp_transport",
+            "fn bypass(owner:&mut super::lsp::LspSession) {let _=&mut owner.service;}",
+            "service",
+            "E0616",
+        ),
+        (
+            "lsp_edit_ledger",
+            "fn bypass(owner:&mut super::lsp::LspSession) {let _=&mut owner.edits;}",
+            "edits",
+            "E0616",
+        ),
+        (
+            "lsp_runtime_registry",
+            "fn bypass(owner:&mut super::lsp::LspSession) {owner.sessions.clear();}",
+            "sessions",
+            "E0616",
+        ),
+        (
+            "lsp_active_runtime",
+            "fn bypass(owner:&mut super::lsp::LspSession) {owner.active=None;}",
+            "active",
+            "E0616",
+        ),
+        (
+            "extension_manager",
+            "fn bypass(owner:&mut super::extensions::ExtensionSession) {let _=&mut owner.manager;}",
+            "manager",
+            "E0616",
+        ),
+        (
+            "extension_edits",
+            "fn bypass(owner:&mut super::extensions::ExtensionSession) {let _=&mut owner.edits;}",
+            "edits",
+            "E0616",
+        ),
+        (
+            "extension_delivery",
+            "fn bypass(owner:&mut super::extensions::ExtensionSession) {owner.ui.clear();}",
+            "ui",
+            "E0616",
+        ),
+        (
+            "virtual_request_loan",
+            "fn bypass(broker:&mut crate::extensions::PluginVirtualDocumentBroker) {let lane=broker.request_lane();broker.reset_runtime();drop(lane);}",
+            "broker",
+            "E0499",
+        ),
+        (
+            "virtual_request_authority",
+            "fn bypass(lane:&mut crate::extensions::PluginVirtualRequestLane) {let _=&mut lane.broker;}",
+            "broker",
             "E0616",
         ),
         (

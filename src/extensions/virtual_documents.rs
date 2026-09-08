@@ -160,7 +160,25 @@ pub struct PluginVirtualDocumentBroker {
     next_cancellation: u64,
 }
 
+/// Restricted delivery loan: cannot install sources or change document contents.
+pub(crate) struct PluginVirtualRequestLane<'a> {
+    broker: &'a mut PluginVirtualDocumentBroker,
+}
+impl PluginVirtualRequestLane<'_> {
+    pub(crate) fn deliver(
+        &mut self,
+        plugin: &str,
+        load: PluginLoadId,
+        command: &str,
+    ) -> Vec<PluginVirtualDocumentRequest> {
+        self.broker.requests_for_command(plugin, load, command)
+    }
+}
+
 impl PluginVirtualDocumentBroker {
+    pub(crate) fn request_lane(&mut self) -> PluginVirtualRequestLane<'_> {
+        PluginVirtualRequestLane { broker: self }
+    }
     pub fn install(
         &mut self,
         index: &PluginContributionIndex,

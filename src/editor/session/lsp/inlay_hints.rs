@@ -28,10 +28,10 @@ impl InteractiveApplication {
     pub(in crate::editor::session) fn current_lsp_projection_owner(
         &self,
     ) -> Option<LspProjectionOwner> {
-        let server = self.active_lsp_server.clone()?;
+        let server = self.language.active().cloned()?;
         let view = self.state.active_view?;
         let (buffer, document) = self.active_lsp_document()?;
-        let session = self.lsp_sessions.get(&server)?;
+        let session = self.language.sessions().get(&server)?;
         if !session.definition.supports_language(&document.language_id)
             || !session.documents.contains_key(&buffer)
             || !document.path.starts_with(&session.root_path)
@@ -60,12 +60,11 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn clear_lsp_session_state(&mut self) {
-        if let Some(server) = self.active_lsp_server.clone() {
+        if let Some(server) = self.language.active().cloned() {
             self.clear_lsp_server_ownership(&server);
         }
-        self.active_lsp_server = None;
-        self.lsp_synced_revisions.clear();
-        self.lsp_capabilities = None;
+        self.language.clear_active();
+
         self.sync_ui_diagnostics();
         self.clear_lsp_ui_projection();
     }

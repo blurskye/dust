@@ -371,6 +371,8 @@ impl Graph {
                         "git",
                         "recovery",
                         "tooling",
+                        "lsp",
+                        "extensions",
                     ]
                     .iter()
                     .any(|owner| {

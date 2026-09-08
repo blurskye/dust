@@ -365,19 +365,7 @@ impl InteractiveApplication {
             return;
         }
         self.plugin_windows.clear_runtime();
-        self.pending_plugin_ui_events.clear();
-        self.pending_plugin_storage_results.clear();
-        let storage_generations = self
-            .plugin_contributions
-            .ordered()
-            .filter(|index| index.storage.is_some())
-            .map(|index| (index.owner.clone(), PluginLoadId(index.generation)))
-            .collect::<Vec<_>>();
-        for (plugin, load) in storage_generations {
-            self.plugin_storage.reset_generation(&plugin, load);
-        }
-        self.plugin_host_events.reset_runtime();
-        self.plugin_host_event_observation = None;
+        self.extension.reset_runtime(&self.plugin_contributions);
         self.plugin_providers.reset_runtime();
         self.plugin_virtual_documents.reset_runtime();
         self.plugin_virtual_editor = VirtualDocumentEditorBridge::default();

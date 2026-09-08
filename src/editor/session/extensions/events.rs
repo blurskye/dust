@@ -1,35 +1,8 @@
 use super::*;
 
 impl InteractiveApplication {
-    pub(in crate::editor::session) fn queue_plugin_storage_result(
-        &mut self,
-        result: PluginStorageResult,
-    ) {
-        let key = (result.plugin.clone(), result.load);
-        let pending = self.pending_plugin_storage_results.entry(key).or_default();
-        pending.push(result);
-        while pending.len() > crate::extensions::STORAGE_REQUEST_CEILING
-            || pending
-                .iter()
-                .map(PluginStorageResult::bounded_bytes)
-                .sum::<usize>()
-                > crate::extensions::STORAGE_RESULT_QUEUE_BYTE_CEILING
-        {
-            pending.remove(0);
-        }
-    }
-
     pub(in crate::editor::session) fn process_plugin_storage_events(&mut self) {
-        for result in self.plugin_storage.poll() {
-            if self.plugins.load_id(&result.plugin) != Some(result.load)
-                || !self
-                    .plugins
-                    .is_active_generation(&result.plugin, result.load)
-            {
-                continue;
-            }
-            self.queue_plugin_storage_result(result);
-        }
+        self.extension.poll_storage();
     }
 
     pub(in crate::editor::session) fn refresh_plugin_host_events(&mut self) {
@@ -80,58 +53,18 @@ impl InteractiveApplication {
             buffer,
             graph_revision,
         );
-        if self.plugin_host_event_observation.as_ref() == Some(&observation) {
-            return;
-        }
-        self.plugin_host_event_observation = Some(observation.clone());
-        let generations = self
-            .plugin_contributions
-            .ordered()
-            .map(|index| (index.owner.clone(), PluginLoadId(index.generation)))
-            .collect::<Vec<_>>();
-        for (plugin, load) in generations {
-            let _ = self.plugin_host_events.observe(
-                &plugin,
-                load,
-                PluginSubscriptionKind::WorkspaceMetadataChanged,
-                observation.0,
-                format!("roots={}", self.workspace.roots().len()),
-            );
-            let _ = self.plugin_host_events.observe(
-                &plugin,
-                load,
-                PluginSubscriptionKind::ActiveSurfaceChanged,
-                graph_revision,
-                active_surface.clone(),
-            );
-            if let Some((id, revision, cursor, anchor, head, kind)) = buffer {
-                let _ = self.plugin_host_events.observe(
-                    &plugin,
-                    load,
-                    PluginSubscriptionKind::BufferSummaryChanged,
-                    revision,
-                    format!(
-                        "buffer={id};revision={revision};cursor={cursor};selection={anchor}:{head}:{kind}"
-                    ),
-                );
-            }
-            let _ = self.plugin_host_events.observe(
-                &plugin,
-                load,
-                PluginSubscriptionKind::PluginSurfaceChanged,
-                graph_revision,
-                format!(
-                    "retained={};private={}",
-                    self.ui.plugin_surfaces.len(),
-                    self.ui.private_surfaces.len()
-                ),
-            );
-        }
+        self.extension.observe(
+            &self.plugin_contributions,
+            observation,
+            self.workspace.roots().len(),
+            self.ui.plugin_surfaces.len(),
+            self.ui.private_surfaces.len(),
+        );
     }
 
     pub(in crate::editor::session) fn process_plugin_events(&mut self) {
         self.retire_plugin_edit_sources();
-        let events = match self.plugins.poll_owned() {
+        let events = match self.extension.poll_owned() {
             Ok(events) => events,
             Err(error) => {
                 self.retire_plugin_edit_sources();
@@ -154,7 +87,7 @@ impl InteractiveApplication {
                     index,
                 } => {
                     if self.rejected_plugin_loads.remove(&(plugin.clone(), load)) {
-                        let _ = self.plugins.disable_generation(&plugin, load);
+                        let _ = self.extension.disable_generation(&plugin, load);
                         continue;
                     }
                     let checksum = index.checksum.clone();
@@ -163,8 +96,8 @@ impl InteractiveApplication {
                         .install(index.clone())
                         .map_err(|error| error.to_string())
                         .and_then(|()| {
-                            self.plugin_host_events
-                                .install(&index)
+                            self.extension
+                                .install_events(&index)
                                 .map_err(|error| error.to_string())
                         })
                         .and_then(|()| {
@@ -178,9 +111,9 @@ impl InteractiveApplication {
                                 .map_err(|error| error.detail)
                         })
                         .and_then(|()| self.register_indexed_plugin_commands(&index));
-                    self.plugin_host_event_observation = None;
+                    self.extension.reset_observation();
                     if accepted.is_ok() && index.storage.is_some() {
-                        self.plugin_storage.install_generation(&plugin, load);
+                        self.extension.install_storage(&plugin, load);
                     }
                     self.pending_index_activation
                         .insert(plugin.clone(), (load, checksum.clone()));
@@ -209,14 +142,16 @@ impl InteractiveApplication {
                         activations
                             .into_iter()
                             .find_map(|(owner, (candidate, checksum))| {
-                                self.plugins
+                                self.extension
                                     .activate_indexed(&owner, candidate, checksum)
                                     .err()
                                     .map(|error| (owner, candidate, error))
                             });
                     if let Some((failed_plugin, failed_load, error)) = activation_error {
                         self.remove_plugin_contribution_generation(&failed_plugin, failed_load);
-                        let _ = self.plugins.disable_generation(&failed_plugin, failed_load);
+                        let _ = self
+                            .extension
+                            .disable_generation(&failed_plugin, failed_load);
                         if let Some((_, token)) = self
                             .package_prepared
                             .remove(&failed_plugin)
@@ -241,7 +176,7 @@ impl InteractiveApplication {
                 PluginEvent::Loaded { load, component } => {
                     let plugin = component.manifest.id.clone();
                     if self.rejected_plugin_loads.remove(&(plugin.clone(), load)) {
-                        let _ = self.plugins.disable_generation(&plugin, load);
+                        let _ = self.extension.disable_generation(&plugin, load);
                         continue;
                     }
                     let prepared = self
@@ -271,7 +206,7 @@ impl InteractiveApplication {
                                 let _ = self.packages.request(PackageOperation::Abort { token });
                             }
                             self.remove_plugin_contribution_generation(&plugin, load);
-                            let _ = self.plugins.disable_generation(&plugin, load);
+                            let _ = self.extension.disable_generation(&plugin, load);
                             self.show_error(crate::extensions::PluginError::UndeclaredCommand);
                             continue;
                         }
@@ -347,7 +282,7 @@ impl InteractiveApplication {
                                 self.package_commits.insert(request, (plugin.clone(), load));
                             }
                             Err(error) => {
-                                let _ = self.plugins.disable_generation(&plugin, load);
+                                let _ = self.extension.disable_generation(&plugin, load);
                                 self.remove_plugin_contribution_generation(&plugin, load);
                                 let _ = self.packages.request(PackageOperation::Abort { token });
                                 self.show_error(error)

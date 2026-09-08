@@ -134,14 +134,14 @@ impl InteractiveApplication {
                             let token = prepared.token;
                             let store =
                                 crate::config::user_state_directory().join("packages/store");
-                            if self.plugins.load_id(&id).is_some() {
+                            if self.extension.load_id(&id).is_some() {
                                 let _ = self.packages.request(PackageOperation::Abort { token });
                                 self.show_error(
                                     self.message("package_plugin_conflict", &[("plugin", id)]),
                                 );
                                 continue;
                             }
-                            match self.plugins.load(
+                            match self.extension.load(
                                 store,
                                 prepared.object,
                                 prepared.plugin,
@@ -166,7 +166,7 @@ impl InteractiveApplication {
                         }
                         for (manifest, path) in std::mem::take(&mut result.activations) {
                             let id = manifest.id.clone();
-                            if self.plugins.load_id(&id).is_some() {
+                            if self.extension.load_id(&id).is_some() {
                                 self.show_error(
                                     self.message("package_plugin_conflict", &[("plugin", id)]),
                                 );
@@ -176,7 +176,7 @@ impl InteractiveApplication {
                             let store =
                                 crate::config::user_state_directory().join("packages/store");
                             match self
-                                .plugins
+                                .extension
                                 .load(store, path, manifest, self.plugin_limits())
                             {
                                 Ok(load) => {
@@ -191,7 +191,7 @@ impl InteractiveApplication {
                             }
                         }
                         if let Some((plugin, load)) = self.package_commits.remove(&result.id) {
-                            if self.plugins.load_id(&plugin) == Some(load) {
+                            if self.extension.load_id(&plugin) == Some(load) {
                                 self.package_managed_plugins.insert(plugin, load);
                             } else {
                                 self.package_startup_rollback_attempted = false;
@@ -209,7 +209,7 @@ impl InteractiveApplication {
                             let managed = std::mem::take(&mut self.package_managed_plugins);
                             let mut failed = HashMap::new();
                             for (id, load) in managed {
-                                match self.plugins.unload_generation(&id, load) {
+                                match self.extension.unload_generation(&id, load) {
                                     Ok(()) => self.remove_plugin_contribution_generation(&id, load),
                                     Err(error) => {
                                         failed.insert(id, load);
@@ -286,7 +286,7 @@ impl InteractiveApplication {
                             if self.package_managed_plugins.get(&plugin) == Some(&load) {
                                 self.package_managed_plugins.remove(&plugin);
                             }
-                            let _ = self.plugins.disable_generation(&plugin, load);
+                            let _ = self.extension.disable_generation(&plugin, load);
                             self.remove_plugin_contribution_generation(&plugin, load);
                         }
                         self.notices.record(

@@ -88,9 +88,8 @@ impl InteractiveApplication {
         &mut self,
         reply: crate::extensions::PluginExecutionReply,
     ) {
-        let source = match self.plugin_edits.receive(
+        let source = match self.extension.receive(
             reply,
-            &self.plugins,
             &self.workspace.version(),
             self.configuration.binding_revision(),
         ) {
@@ -104,34 +103,21 @@ impl InteractiveApplication {
         let load = source.load;
         let plugin = execution.plugin.clone();
         let mut provider_continuations = Vec::new();
-        if self.plugins.is_active_generation(&plugin, load) {
-            self.plugin_host_events.acknowledge(
-                &plugin,
-                load,
-                &execution.host_event_acknowledgements,
-            );
+        if self.extension.is_active_generation(&plugin, load) {
+            self.extension
+                .acknowledge(&plugin, load, &execution.host_event_acknowledgements);
             if let Some(policy) = self
                 .plugin_contributions
                 .get(&plugin)
                 .filter(|index| index.generation == load.0)
                 .and_then(|index| index.storage.clone())
             {
-                for request in std::mem::take(&mut execution.storage_requests) {
-                    let token = request.token;
-                    if let Err(error) =
-                        self.plugin_storage
-                            .request(plugin.clone(), load, policy.clone(), request)
-                    {
-                        self.queue_plugin_storage_result(
-                            crate::extensions::PluginStorageResult::rejected(
-                                plugin.clone(),
-                                load,
-                                token,
-                                error,
-                            ),
-                        );
-                    }
-                }
+                self.extension.request_storage(
+                    &plugin,
+                    load,
+                    &policy,
+                    std::mem::take(&mut execution.storage_requests),
+                );
             }
             let workspace_revision = Some(self.workspace.root_revision());
             let buffer_revision = self
@@ -220,7 +206,7 @@ impl InteractiveApplication {
             });
         }
         if !execution.ui_requests.is_empty()
-            && self.plugins.is_active_generation(&plugin, load)
+            && self.extension.is_active_generation(&plugin, load)
             && let Some(index) = self
                 .plugin_contributions
                 .get(&plugin)
@@ -232,14 +218,7 @@ impl InteractiveApplication {
                 .into_iter()
                 .map(|request| self.apply_plugin_ui_request(&index, request))
                 .collect::<Vec<_>>();
-            let pending = self
-                .pending_plugin_ui_events
-                .entry((plugin.clone(), load))
-                .or_default();
-            pending.extend(events);
-            if pending.len() > 64 {
-                pending.drain(..pending.len().saturating_sub(64));
-            }
+            self.extension.queue_ui(plugin.clone(), load, events);
             self.ui.plugin_surfaces = self.plugin_windows.snapshots();
             self.window_session.invalidate_native();
             self.reconcile_editor_windows();
@@ -267,8 +246,7 @@ impl InteractiveApplication {
         );
     }
     pub(in crate::editor::session) fn retire_plugin_edit_sources(&mut self) {
-        let (retired, key) = self.plugin_edits.retire(
-            &self.plugins,
+        let (retired, key) = self.extension.retire_edits(
             &self.state,
             &self.workspace.version(),
             self.configuration.binding_revision(),
@@ -286,7 +264,7 @@ impl InteractiveApplication {
             {
                 self.abort_workspace_edit("plugin proposal source retired".into());
             } else {
-                let _ = self.plugin_edits.finish(&key);
+                let _ = self.extension.finish_edit(&key);
             }
         }
     }
@@ -297,9 +275,8 @@ impl InteractiveApplication {
     ) {
         let result = (|| {
             self.workspace_edits.check_begin()?;
-            let prepared = self.plugin_edits.prepare_preview(
+            let prepared = self.extension.prepare_edit(
                 &key,
-                &self.plugins,
                 &self.state,
                 &self.workspace.version(),
                 self.configuration.binding_revision(),
@@ -363,7 +340,7 @@ impl InteractiveApplication {
                 {
                     self.abort_workspace_edit(error);
                 } else {
-                    let _ = self.plugin_edits.finish(&key);
+                    let _ = self.extension.finish_edit(&key);
                     self.show_error(error);
                 }
             }

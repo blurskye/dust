@@ -69,7 +69,7 @@ impl InteractiveApplication {
         if let Some(id) = retired_preview {
             self.retire_workspace_picker(id);
         }
-        self.lsp_edit_sources
+        self.language
             .retain_actions(payloads.iter().filter_map(|(_, payload)| match payload {
                 PickerPayload::CodeAction(key) => Some(key),
                 _ => None,
@@ -168,10 +168,9 @@ impl InteractiveApplication {
         actions: Vec<crate::language::lsp::LspCodeAction>,
         context: Option<crate::language::lsp::EditContext>,
     ) {
-        let choices = match self.lsp_edit_sources.install_actions(
+        let choices = match self.language.install_actions(
             actions,
             context,
-            &self.lsp,
             self.configuration.settings().workspace.maximum_picker_items,
         ) {
             Ok(choices) => choices,
@@ -604,11 +603,11 @@ impl InteractiveApplication {
             self.show_error("plugin provider ID is malformed");
             return;
         };
-        let Some(load) = self.plugins.load_id(&plugin) else {
+        let Some(load) = self.extension.load_id(&plugin) else {
             self.show_error(crate::extensions::PluginError::NotActive);
             return;
         };
-        if !self.plugins.is_active_generation(&plugin, load) {
+        if !self.extension.is_active_generation(&plugin, load) {
             self.show_error(crate::extensions::PluginError::NotActive);
             return;
         }
@@ -678,7 +677,7 @@ impl InteractiveApplication {
         if let Some(id) = self.search.workspace_picker() {
             self.retire_workspace_picker(id);
         }
-        self.lsp_edit_sources.clear_actions();
+        self.language.clear_actions();
         if let Some(id) = self.search.close_picker() {
             self.documents.cancel_request(id);
         }
@@ -720,9 +719,7 @@ impl InteractiveApplication {
             _ => None,
         };
         let code_action = match &payload {
-            Some(PickerPayload::CodeAction(key)) => {
-                Some(self.lsp_edit_sources.take_action(key, &self.lsp))
-            }
+            Some(PickerPayload::CodeAction(key)) => Some(self.language.take_action(key)),
             _ => None,
         };
         let debug_selection = match &payload {
@@ -861,8 +858,8 @@ impl InteractiveApplication {
                 item,
                 action_command,
             }) => {
-                let valid = self.plugins.load_id(&plugin) == Some(load)
-                    && self.plugins.is_active_generation(&plugin, load)
+                let valid = self.extension.load_id(&plugin) == Some(load)
+                    && self.extension.is_active_generation(&plugin, load)
                     && self
                         .plugin_providers
                         .projection(request)

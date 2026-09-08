@@ -32,9 +32,10 @@ impl InteractiveApplication {
             return Some(self.message("workspace_root_dirty_blocker", &[]));
         }
         let busy = self.workspace.root_operation_pending()
-            || self.active_lsp_server.is_some()
+            || self.language.active().is_some()
             || self
-                .lsp_sessions
+                .language
+                .sessions()
                 .values()
                 .any(|state| state.restart_due.is_some())
             || self.debugger_session.is_running()
@@ -69,22 +70,21 @@ impl InteractiveApplication {
             .map(|root| root.id)
             .collect::<HashSet<_>>();
         let stale = self
-            .lsp_sessions
+            .language
+            .sessions()
             .iter()
             .filter_map(|(key, state)| (!roots.contains(&state.root)).then_some(key.clone()))
             .collect::<Vec<_>>();
         let removed_lsp = !stale.is_empty();
         for key in stale {
-            let _ = self.lsp.stop(&key);
+            let _ = self.language.stop(&key);
             self.clear_lsp_progress(&key);
             self.clear_lsp_server_ownership(&key);
-            self.lsp_sessions.remove(&key);
-            self.lsp_session_synced
-                .retain(|(server, _), _| server != &key);
-            self.lsp_synced_revisions.clear();
-            if self.active_lsp_server.as_deref() == Some(&key) {
-                self.active_lsp_server = None;
-                self.lsp_capabilities = None;
+            self.language.remove(&key);
+            self.language.forget_synced(&key);
+            if self.language.active().map(String::as_str) == Some(&key) {
+                self.language.clear_active();
+
                 self.clear_lsp_ui_projection();
             }
         }
@@ -95,12 +95,12 @@ impl InteractiveApplication {
         self.registry_intents.clear();
         self.pending_registry_artifact = None;
         for (plugin, (load, token)) in self.package_prepared.drain().collect::<Vec<_>>() {
-            let _ = self.plugins.unload_generation(&plugin, load);
+            let _ = self.extension.unload_generation(&plugin, load);
             self.remove_plugin_contribution_generation(&plugin, load);
             let _ = self.packages.request(PackageOperation::Abort { token });
         }
         for (plugin, load) in self.package_commits.values().cloned().collect::<Vec<_>>() {
-            let _ = self.plugins.unload_generation(&plugin, load);
+            let _ = self.extension.unload_generation(&plugin, load);
             self.remove_plugin_contribution_generation(&plugin, load);
         }
         self.debugger_session.reset();

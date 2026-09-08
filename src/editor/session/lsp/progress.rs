@@ -2,7 +2,7 @@ use super::*;
 
 impl InteractiveApplication {
     fn reprobe_failed_path_runtime(&mut self, server: &str) {
-        let Some(definition) = self.lsp_sessions.get(server).and_then(|state| {
+        let Some(definition) = self.language.sessions().get(server).and_then(|state| {
             matches!(&state.launch, LspLaunch::Direct { managed: false, .. })
                 .then(|| state.definition.clone())
         }) else {
@@ -28,7 +28,8 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn lsp_server_label(&self, server_key: &str) -> String {
-        self.lsp_sessions
+        self.language
+            .sessions()
             .get(server_key)
             .map(|session| session.server_id.clone())
             .or_else(|| {
@@ -203,17 +204,17 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn process_lsp_events(&mut self) {
-        for error in self.lsp_edit_sources.flush() {
+        for error in self.language.flush_edit_replies() {
             self.show_error(error);
         }
-        while let Some(owned) = self.lsp_edit_sources.poll_event(&self.lsp) {
+        while let Some(owned) = self.language.poll_event() {
             let crate::language::lsp::OwnedLspEvent {
                 event,
                 context,
                 reply,
             } = owned;
-            if !self.lsp.owns_event_context(&context) {
-                self.lsp_edit_sources
+            if !self.language.owns_event_context(&context) {
+                self.language
                     .reject_reply(reply, "requesting language-server session retired".into());
                 continue;
             }
@@ -223,12 +224,7 @@ impl InteractiveApplication {
                     server,
                     capabilities,
                 } => {
-                    if let Some(session) = self.lsp_sessions.get_mut(&server) {
-                        self.lsp_last_errors.remove(&session.server_id);
-                        session.capabilities = Some(capabilities.clone());
-                    }
-                    if self.active_lsp_server.as_deref() == Some(&server) {
-                        self.lsp_capabilities = Some(capabilities);
+                    if self.language.running(&server, capabilities) {
                         self.schedule_lsp_inlay_startup_refresh();
                     }
                     // Successful lifecycle transitions are reflected by the
@@ -239,16 +235,13 @@ impl InteractiveApplication {
                     server,
                     capabilities,
                 } => {
-                    if let Some(session) = self.lsp_sessions.get_mut(&server) {
-                        session.capabilities = Some(capabilities.clone());
-                    }
-                    if self.active_lsp_server.as_deref() == Some(&server) {
-                        self.lsp_capabilities = Some(capabilities);
+                    if self.language.running(&server, capabilities) {
                         self.schedule_lsp_inlay_refresh(true);
                     }
                 }
+
                 LspEvent::InlayHintsRefresh { server } => {
-                    if self.active_lsp_server.as_deref() == Some(&server) {
+                    if self.language.active().map(String::as_str) == Some(&server) {
                         self.schedule_lsp_inlay_refresh(true);
                     }
                 }
@@ -258,18 +251,20 @@ impl InteractiveApplication {
                     version,
                     diagnostics,
                 } => {
-                    let result =
-                        crate::editor::session::lsp_edits::LspEditSources::diagnostic_batch(
+                    let result = self
+                        .language
+                        .diagnostic_batch(
                             &context,
-                            &self.lsp,
                             &self.state,
                             (&uri, version, diagnostics),
-                            false,
-                            self.configuration
-                                .settings()
-                                .workspace
-                                .maximum_diagnostics_per_owner_uri,
-                            &self.lsp_server_label(&server),
+                            (
+                                false,
+                                self.configuration
+                                    .settings()
+                                    .workspace
+                                    .maximum_diagnostics_per_owner_uri,
+                                &self.lsp_server_label(&server),
+                            ),
                         )
                         .and_then(|batch| self.diagnostics.publish(batch, &self.state));
                     match result {
@@ -398,25 +393,22 @@ impl InteractiveApplication {
                     if !success {
                         self.reprobe_failed_path_runtime(&server);
                     }
-                    let desired = self.lsp_sessions.get_mut(&server).is_some_and(|state| {
-                        state.capabilities = None;
-                        state.desired_running
-                    });
+                    let desired = self.language.stopped(&server);
                     for prefix in ["lsp.", "lsp-pull:"] {
                         if let Ok(producer) = context.diagnostic_producer(prefix) {
                             self.diagnostics.clear_source(&producer);
                         }
                     }
                     self.sync_ui_diagnostics();
-                    let _ = self.lsp.stop(&server);
-                    self.lsp_session_synced.retain(|(key, _), _| key != &server);
+                    let _ = self.language.stop(&server);
+                    self.language.forget_synced(&server);
                     self.clear_lsp_progress(&server);
                     let server_label = self.lsp_server_label(&server);
                     self.notify_message(
                         self.message("lsp_stopped", &[("server", server_label)]),
                         false,
                     );
-                    if self.active_lsp_server.as_deref() == Some(&server) {
+                    if self.language.active().map(String::as_str) == Some(&server) {
                         self.clear_lsp_session_state();
                     }
                     if desired {
@@ -425,27 +417,23 @@ impl InteractiveApplication {
                 }
                 LspEvent::Failed { server, message } => {
                     self.reprobe_failed_path_runtime(&server);
-                    let desired = self.lsp_sessions.get_mut(&server).is_some_and(|state| {
-                        state.capabilities = None;
-                        state.desired_running
-                    });
+                    let desired = self.language.stopped(&server);
                     for prefix in ["lsp.", "lsp-pull:"] {
                         if let Ok(producer) = context.diagnostic_producer(prefix) {
                             self.diagnostics.clear_source(&producer);
                         }
                     }
                     self.sync_ui_diagnostics();
-                    let _ = self.lsp.stop(&server);
-                    self.lsp_session_synced.retain(|(key, _), _| key != &server);
+                    let _ = self.language.stop(&server);
+                    self.language.forget_synced(&server);
                     self.clear_lsp_progress(&server);
                     let server_label = self.lsp_server_label(&server);
-                    self.lsp_last_errors
-                        .insert(server_label.clone(), message.clone());
+                    self.language.failed(server_label.clone(), message.clone());
                     self.show_error(self.message(
                         "lsp_failed",
                         &[("server", server_label), ("diagnostic", message)],
                     ));
-                    if self.active_lsp_server.as_deref() == Some(&server) {
+                    if self.language.active().map(String::as_str) == Some(&server) {
                         self.clear_lsp_session_state();
                     }
                     if desired {
@@ -457,48 +445,20 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn schedule_lsp_restart(&mut self, key: String) {
-        let limit = self.configuration.settings().lsp.restart_limit;
-        let Some(state) = self.lsp_sessions.get_mut(&key) else {
-            return;
-        };
-        if !state.desired_running || state.restart_due.is_some() {
-            return;
-        }
-        if state.restart_count >= limit {
-            state.restart_due = None;
-            state.circuit_open = true;
-            let server = state.server_id.clone();
-            let _ = state;
+        if let Some(server) =
+            self.language
+                .schedule_restart(&key, &self.configuration.settings().lsp, Instant::now())
+        {
             self.show_error(self.message("lsp_restart_disabled", &[("server", server)]));
-            return;
         }
-        state.restart_count = state.restart_count.saturating_add(1);
-        let exponent = u32::from(state.restart_count.saturating_sub(1)).min(8);
-        let delay = self
-            .configuration
-            .settings()
-            .lsp
-            .restart_backoff_ms
-            .saturating_mul(2_u64.saturating_pow(exponent))
-            .min(60_000);
-        state.restart_due = Some(Instant::now() + Duration::from_millis(delay));
     }
 
     pub(in crate::editor::session) fn restart_lsp_if_due(&mut self) {
         if self.execution_validation.is_some() {
             return;
         }
-        let now = Instant::now();
-        let key = self.lsp_sessions.iter().find_map(|(key, state)| {
-            (state.desired_running
-                && !state.circuit_open
-                && state.restart_due.is_some_and(|due| due <= now))
-            .then(|| key.clone())
-        });
-        let Some(key) = key else { return };
-        if let Some(state) = self.lsp_sessions.get_mut(&key) {
-            state.restart_due = None;
+        if let Some(key) = self.language.restart_due(Instant::now()) {
+            self.restart_lsp_session(key);
         }
-        self.restart_lsp_session(key);
     }
 }

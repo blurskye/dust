@@ -2,6 +2,9 @@ use super::configuration::{self, ConfigurationSession};
 use super::documents::{DocumentEvent, DocumentSession, LargeFileOverride, mode_name_large};
 use super::explorer::explorer_watch_policy;
 use super::input::InputSession;
+#[cfg(test)]
+use super::lsp::LspRuntimeState;
+use super::lsp::{LspAutostartObservation, LspLaunch, LspProjectionOwner};
 use super::search::{PickerContent, PickerEpoch, PickerOrigin};
 use super::terminal::{TerminalInput, TerminalUpdate};
 use super::tooling::{
@@ -91,10 +94,8 @@ use crate::editor::{
     RegisterValue, TransactionId, UndoPolicy, ViewId, register_builtin_commands,
 };
 use crate::extensions::{
-    PluginContributionCatalog, PluginEvent, PluginHostEventQueue, PluginLimits, PluginLoadId,
-    PluginManager, PluginProviderBroker, PluginProviderSessionStatus, PluginStatus,
-    PluginStorageResult, PluginStorageService, PluginSubscriptionKind, PluginUiEvent,
-    PluginVirtualDocumentBroker,
+    PluginContributionCatalog, PluginEvent, PluginLimits, PluginLoadId, PluginProviderBroker,
+    PluginProviderSessionStatus, PluginStatus, PluginVirtualDocumentBroker,
 };
 use crate::files::{
     ExplorerMutation, ExplorerWatchService, ProjectRootResolution, RequestId, ResourceIntentKind,
@@ -102,9 +103,9 @@ use crate::files::{
     WorkspaceSearchPolicy,
 };
 use crate::language::lsp::{
-    LspCapabilities, LspCompletionItem, LspDocument, LspEvent, LspFeature, LspFeatureResult,
-    LspMarkupContent, LspMarkupKind, LspProgressKind, LspService, LspWorkspaceEdit, file_uri,
-    language_id_for_path, path_from_file_uri,
+    LspCompletionItem, LspDocument, LspEvent, LspFeature, LspFeatureResult, LspMarkupContent,
+    LspMarkupKind, LspProgressKind, LspWorkspaceEdit, file_uri, language_id_for_path,
+    path_from_file_uri,
 };
 use crate::language::syntax::{
     SyntaxLanguage, SyntaxSupport, builtin_languages, language_for_path,
@@ -121,8 +122,7 @@ use crate::tools::{
     PackageServiceEvent, RegistryPackageMetadata, RegistryPackageSummary, RegistryRequest,
     RegistryResult, RegistryService, ToolDefinition, ToolKind, ToolOperation, ToolStatus,
     discover_executable, is_nixos_host, managed_tool_executable, managed_tool_installed_version,
-    nix_lsp_launch_environment, nix_lsp_launch_environment_for_workspace_at,
-    nix_lsp_profile_installed, nix_lsp_workspace_root, tool_launch_environment,
+    nix_lsp_launch_environment, nix_lsp_profile_installed, nix_lsp_workspace_root,
 };
 use crate::ui::{
     CompletionItem, DocumentationMarkupKind, DocumentationPopupKind,
@@ -158,19 +158,13 @@ const LSP_INLAY_HINT_DEBOUNCE: Duration = Duration::from_millis(120);
 const LSP_INLAY_HINT_EMPTY_RETRY_BASE: Duration = Duration::from_millis(500);
 const LSP_INLAY_HINT_WARMUP_RETRY_LIMIT: u8 = 5;
 const LSP_INLAY_HINT_MAX_STARTUP_DELAY: Duration = Duration::from_secs(8);
-type ActiveBufferObservation = (u64, u64, usize, usize, usize, u8);
-type PluginHostObservation = (u64, String, Option<ActiveBufferObservation>, u64);
 
 struct InteractiveApplication {
     notices: super::notifications::NoticeSession,
     clock: std::sync::Arc<dyn crate::clock::Clock>,
     state: EditorState,
     plugin_windows: PluginWindowHost,
-    pending_plugin_ui_events: BTreeMap<(String, PluginLoadId), Vec<PluginUiEvent>>,
-    plugin_host_events: PluginHostEventQueue,
-    plugin_host_event_observation: Option<PluginHostObservation>,
-    plugin_storage: PluginStorageService,
-    pending_plugin_storage_results: BTreeMap<(String, PluginLoadId), Vec<PluginStorageResult>>,
+    extension: super::extensions::ExtensionSession,
     plugin_providers: PluginProviderBroker,
     plugin_virtual_documents: PluginVirtualDocumentBroker,
     plugin_virtual_editor: VirtualDocumentEditorBridge,
@@ -178,7 +172,6 @@ struct InteractiveApplication {
     workspace: super::workspace::WorkspaceSession,
     diagnostics: super::diagnostics::DiagnosticSession,
     picker_payloads: HashMap<PickerItemId, (PickerEpoch, PickerPayload)>,
-    lsp_edit_sources: super::lsp_edits::LspEditSources,
     workspace_edits: super::workspace_edits::WorkspaceEditSession,
     commands: CommandRegistry<AppEffect>,
     input: InputSession,
@@ -192,18 +185,10 @@ struct InteractiveApplication {
     terminal_width: u16,
     terminal_height: u16,
     tooling: super::tooling::ToolingSession,
-    lsp_last_errors: BTreeMap<String, String>,
-    lsp: LspService,
-    active_lsp_server: Option<String>,
+    language: super::lsp::LspSession,
     pending_lsp_project_root: Option<(u64, PendingLspProjectRoot)>,
     nix_lsp_workspace: NixWorkspaceService,
     pending_nix_lsp_workspace: Option<(u64, PendingNixLspWorkspace)>,
-    lsp_autostart_observation: Option<LspAutostartObservation>,
-    lsp_sessions: HashMap<String, LspRuntimeState>,
-    lsp_session_synced:
-        HashMap<(String, crate::editor::BufferId), crate::editor::text::TextVersion>,
-    lsp_synced_revisions: HashMap<crate::editor::BufferId, BufferRevision>,
-    lsp_capabilities: Option<LspCapabilities>,
     lsp_request_generation: u64,
     lsp_inlay_request_generation: u64,
     lsp_inlay_request_owner: Option<(u64, LspProjectionOwner)>,
@@ -233,8 +218,6 @@ struct InteractiveApplication {
     jump_list: Vec<PersistedLocation>,
     change_list: Vec<PersistedLocation>,
     tasks: crate::editor::session::tasks::TaskSession,
-    plugins: PluginManager,
-    plugin_edits: super::plugin_edits::PluginEditSources,
     plugin_contributions: PluginContributionCatalog,
     pending_index_activation: BTreeMap<String, (PluginLoadId, String)>,
     rejected_plugin_loads: BTreeSet<(String, PluginLoadId)>,
@@ -560,11 +543,10 @@ impl InteractiveApplication {
         let mut application = InteractiveApplication {
             state,
             plugin_windows: PluginWindowHost::default(),
-            pending_plugin_ui_events: BTreeMap::new(),
-            plugin_host_events: PluginHostEventQueue::default(),
-            plugin_host_event_observation: None,
-            plugin_storage: PluginStorageService::start(plugin_storage_root, plugin_queue_capacity),
-            pending_plugin_storage_results: BTreeMap::new(),
+            extension: super::extensions::ExtensionSession::new(
+                plugin_storage_root,
+                plugin_queue_capacity,
+            ),
             plugin_providers: PluginProviderBroker::default(),
             plugin_virtual_documents: PluginVirtualDocumentBroker::default(),
             plugin_virtual_editor: VirtualDocumentEditorBridge::default(),
@@ -572,7 +554,6 @@ impl InteractiveApplication {
             workspace,
             diagnostics,
             picker_payloads: HashMap::new(),
-            lsp_edit_sources: super::lsp_edits::LspEditSources::default(),
             workspace_edits: super::workspace_edits::WorkspaceEditSession::default(),
             commands,
             input: InputSession::new(configuration.settings.input.count_limit),
@@ -589,17 +570,10 @@ impl InteractiveApplication {
             terminal_width: 0,
             terminal_height: 0,
             tooling,
-            lsp_last_errors: BTreeMap::new(),
-            lsp: LspService::new(),
-            active_lsp_server: None,
+            language: super::lsp::LspSession::default(),
             pending_lsp_project_root: None,
             nix_lsp_workspace: NixWorkspaceService::default(),
             pending_nix_lsp_workspace: None,
-            lsp_autostart_observation: None,
-            lsp_sessions: HashMap::new(),
-            lsp_session_synced: HashMap::new(),
-            lsp_synced_revisions: HashMap::new(),
-            lsp_capabilities: None,
             lsp_request_generation: 0,
             lsp_inlay_request_generation: 0,
             lsp_inlay_request_owner: None,
@@ -633,8 +607,6 @@ impl InteractiveApplication {
             tasks,
             notices,
             clock,
-            plugins: PluginManager::start(plugin_queue_capacity),
-            plugin_edits: super::plugin_edits::PluginEditSources::default(),
             plugin_contributions: PluginContributionCatalog::default(),
             pending_index_activation: BTreeMap::new(),
             rejected_plugin_loads: BTreeSet::new(),

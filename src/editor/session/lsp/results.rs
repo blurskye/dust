@@ -1,4 +1,5 @@
 use super::*;
+use crate::editor::session::lsp::LspRuntimeState;
 
 impl InteractiveApplication {
     pub(in crate::editor::session) fn request_lsp_inlay_hints(&mut self) {
@@ -12,7 +13,8 @@ impl InteractiveApplication {
             return;
         }
         let Some(capabilities) = self
-            .lsp_sessions
+            .language
+            .sessions()
             .get(&owner.server)
             .and_then(|session| session.capabilities.as_ref())
             .filter(|capabilities| capabilities.inlay_hints)
@@ -47,7 +49,7 @@ impl InteractiveApplication {
             .saturating_sub(self.lsp_inlay_request_generation)
             .max(u64::MAX / 2);
         if self
-            .lsp
+            .language
             .request(&owner.server, feature, document, ByteOffset(0), generation)
             .is_ok()
         {
@@ -77,13 +79,14 @@ impl InteractiveApplication {
                 && document.path.starts_with(&state.root_path)
         };
         let server = self
-            .active_lsp_server
-            .as_ref()
-            .filter(|key| self.lsp_sessions.get(*key).is_some_and(&supports))
+            .language
+            .active()
+            .filter(|key| self.language.sessions().get(*key).is_some_and(&supports))
             .cloned()
             .or_else(|| {
                 let mut matches = self
-                    .lsp_sessions
+                    .language
+                    .sessions()
                     .iter()
                     .filter_map(|(key, state)| supports(state).then_some(key.clone()))
                     .collect::<Vec<_>>();
@@ -94,7 +97,7 @@ impl InteractiveApplication {
             self.start_lsp(None);
             return;
         };
-        if self.active_lsp_server.as_ref() != Some(&server) {
+        if self.language.active() != Some(&server) {
             self.select_lsp_session(&server);
         }
         // The application owns a session record while its process is still
@@ -102,7 +105,8 @@ impl InteractiveApplication {
         // send a request that can race the worker's startup/disconnect path.
         // `Running` publishes capabilities before this becomes requestable.
         if self
-            .lsp_sessions
+            .language
+            .sessions()
             .get(&server)
             .is_none_or(|session| session.capabilities.is_none())
         {
@@ -110,8 +114,8 @@ impl InteractiveApplication {
         }
         if matches!(feature, LspFeature::CodeAction { .. }) {
             let encoding = self
-                .lsp_capabilities
-                .as_ref()
+                .language
+                .capabilities()
                 .map_or(PositionEncoding::Utf16, |capabilities| {
                     capabilities.position_encoding
                 });
@@ -165,7 +169,7 @@ impl InteractiveApplication {
         self.lsp_request_generation = self.lsp_request_generation.saturating_add(1);
         let generation = self.lsp_request_generation;
         match self
-            .lsp
+            .language
             .request(&server, feature, document, offset, generation)
         {
             Ok(()) => self.lsp_request_owner = Some((generation, owner)),
@@ -173,9 +177,7 @@ impl InteractiveApplication {
             // real startup/exit failure. Avoid replacing that diagnostic with
             // a misleading raw transport-key "not running" error.
             Err(crate::language::lsp::LspError::NotRunning(_)) => {
-                if let Some(session) = self.lsp_sessions.get_mut(&server) {
-                    session.capabilities = None;
-                }
+                self.language.stopped(&server);
             }
             Err(error) => self.show_error(error),
         }
@@ -398,17 +400,18 @@ impl InteractiveApplication {
                     .as_ref()
                     .ok_or_else(|| "pull diagnostics lack a requesting context".to_string())
                     .and_then(|context| {
-                        crate::editor::session::lsp_edits::LspEditSources::diagnostic_batch(
+                        self.language.diagnostic_batch(
                             context,
-                            &self.lsp,
                             &self.state,
                             (uri, None, result.items),
-                            true,
-                            self.configuration
-                                .settings()
-                                .workspace
-                                .maximum_diagnostics_per_owner_uri,
-                            &server_label,
+                            (
+                                true,
+                                self.configuration
+                                    .settings()
+                                    .workspace
+                                    .maximum_diagnostics_per_owner_uri,
+                                &server_label,
+                            ),
                         )
                     });
                 match normalized.and_then(|batch| self.diagnostics.publish(batch, &self.state)) {
@@ -431,8 +434,8 @@ impl InteractiveApplication {
                     let encoding = self.lsp_position_encoding();
                     let codec = PositionCodec::new(&buffer.text);
                     let legend = self
-                        .lsp_capabilities
-                        .as_ref()
+                        .language
+                        .capabilities()
                         .map(|value| value.semantic_token_types.as_slice())
                         .unwrap_or(&[]);
                     let mut line = 0usize;
@@ -658,7 +661,7 @@ impl InteractiveApplication {
                 .map(|_| ())
                 .ok_or_else(|| "editor source revision is exhausted".into())
         }) {
-            self.lsp_edit_sources.reject_reply(response, error.clone());
+            self.language.reject_reply(response, error.clone());
             self.show_error(error);
             return;
         }
@@ -675,8 +678,8 @@ impl InteractiveApplication {
             })
             .collect::<Vec<_>>();
         let plan = match self
-            .lsp_edit_sources
-            .start(edit, encoding, context, response, &documents, &self.lsp)
+            .language
+            .start_edit(edit, encoding, context, response, &documents)
         {
             Ok(plan) => plan,
             Err(error) => {
@@ -694,8 +697,8 @@ impl InteractiveApplication {
             Ok(ticket) => ticket,
             Err(error) => {
                 let _ = self
-                    .lsp_edit_sources
-                    .finish(&plan.key, false, Some(error.clone()));
+                    .language
+                    .finish_edit(&plan.key, false, Some(error.clone()));
                 self.show_error(error);
                 return;
             }
@@ -780,10 +783,9 @@ impl InteractiveApplication {
         let Some(key) = self.workspace_edits.origin() else {
             return Ok(());
         };
-        if self.plugin_edits.owns(key) {
-            return self.plugin_edits.check(
+        if self.extension.owns_edit(key) {
+            return self.extension.check_edit(
                 key,
-                &self.plugins,
                 &self.state,
                 &self.workspace.version(),
                 self.configuration.binding_revision(),
@@ -801,7 +803,7 @@ impl InteractiveApplication {
                 })
             })
             .collect::<Vec<_>>();
-        self.lsp_edit_sources.check(key, &documents, &self.lsp)
+        self.language.check_edit(key, &documents)
     }
     pub(in crate::editor::session) fn finish_workspace_proposal(&mut self) {
         let result = (|| {
@@ -821,7 +823,7 @@ impl InteractiveApplication {
                 .workspace_edits
                 .preparing_origin()
                 .ok_or("workspace source origin missing")?;
-            let drafts = self.lsp_edit_sources.decode(key, files)?;
+            let drafts = self.language.decode_edit(key, files)?;
             self.workspace_edits.finish_preparation(
                 drafts,
                 self.workspace.edit_scope(),
@@ -859,10 +861,10 @@ impl InteractiveApplication {
         applied: bool,
         reason: Option<String>,
     ) -> Result<(), String> {
-        if self.plugin_edits.owns(key) {
-            self.plugin_edits.finish(key)
+        if self.extension.owns_edit(key) {
+            self.extension.finish_edit(key)
         } else {
-            self.lsp_edit_sources.finish(key, applied, reason)
+            self.language.finish_edit(key, applied, reason)
         }
     }
     pub(in crate::editor::session) fn abort_workspace_edit(&mut self, reason: String) {

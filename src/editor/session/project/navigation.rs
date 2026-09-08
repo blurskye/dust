@@ -75,8 +75,8 @@ impl InteractiveApplication {
             return;
         }
         let encoding = self
-            .lsp_capabilities
-            .as_ref()
+            .language
+            .capabilities()
             .map_or(PositionEncoding::Utf16, |capabilities| {
                 capabilities.position_encoding
             });

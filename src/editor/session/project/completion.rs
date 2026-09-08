@@ -112,8 +112,8 @@ impl InteractiveApplication {
         };
         if !item.resolved
             && self
-                .lsp_capabilities
-                .as_ref()
+                .language
+                .capabilities()
                 .is_some_and(|capabilities| capabilities.completion_resolve)
             && let Some(resolve_item) = item.resolve_item.clone()
         {
@@ -122,10 +122,10 @@ impl InteractiveApplication {
                 .state
                 .active_view
                 .map_or(ByteOffset(0), |view| self.state.views[view].cursor);
-            let Some(server) = self.active_lsp_server.clone() else {
+            let Some(server) = self.language.active().cloned() else {
                 return;
             };
-            if let Err(error) = self.lsp.request(
+            if let Err(error) = self.language.request(
                 &server,
                 LspFeature::CompletionResolve { item: resolve_item },
                 document,
@@ -137,8 +137,8 @@ impl InteractiveApplication {
             return;
         }
         let encoding = self
-            .lsp_capabilities
-            .as_ref()
+            .language
+            .capabilities()
             .map_or(PositionEncoding::Utf16, |capabilities| {
                 capabilities.position_encoding
             });

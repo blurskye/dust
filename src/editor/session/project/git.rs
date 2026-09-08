@@ -2,8 +2,8 @@ use super::*;
 
 impl InteractiveApplication {
     pub(in crate::editor::session) fn lsp_position_encoding(&self) -> PositionEncoding {
-        self.lsp_capabilities
-            .as_ref()
+        self.language
+            .capabilities()
             .map_or(PositionEncoding::Utf16, |c| c.position_encoding)
     }
 

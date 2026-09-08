@@ -149,7 +149,8 @@ impl InteractiveApplication {
         let maximum_inlays = self.configuration.settings().lsp.inlay_hint_level
             == crate::config::InlayHintLevel::Max;
         let sessions = self
-            .lsp_sessions
+            .language
+            .sessions()
             .iter()
             .map(|(key, state)| (key.clone(), state.server_id.clone()))
             .collect::<Vec<_>>();
@@ -159,7 +160,7 @@ impl InteractiveApplication {
             } else {
                 crate::language::lsp::LspServerConfiguration::standard()
             };
-            let _ = self.lsp.configure(&key, configuration);
+            let _ = self.language.configure(&key, configuration);
         }
         self.schedule_lsp_inlay_refresh(true);
         self.explorer.reconfigure_watch(replacement_explorer_watch);

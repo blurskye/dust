@@ -17,6 +17,7 @@ pub use storage::{
     STORAGE_LIST_BYTE_CEILING, STORAGE_LIST_ENTRY_CEILING, STORAGE_REQUEST_CEILING,
     STORAGE_RESULT_QUEUE_BYTE_CEILING, STORAGE_VALUE_BYTE_CEILING,
 };
+pub(crate) use virtual_documents::PluginVirtualRequestLane;
 pub use virtual_documents::{
     PluginVirtualDocumentBroker, PluginVirtualDocumentError, PluginVirtualDocumentErrorCode,
     PluginVirtualDocumentFull, PluginVirtualDocumentPatch, PluginVirtualDocumentPatchSet,
