@@ -9,17 +9,17 @@ impl InteractiveApplication {
             AppEffect::TerminalOpen(profile) => {
                 let profile = profile.unwrap_or_else(|| {
                     self.configuration
-                        .settings
+                        .settings()
                         .terminals
                         .default_profile
                         .clone()
                 });
-                self.defer_trusted_execution(DeferredExecution::OpenTerminal(profile));
+                self.request_terminal_open(&profile, None);
             }
             AppEffect::TerminalToggle => {
-                if self.terminal_focused {
+                if self.window_session.terminal_focused() {
                     self.place_active_terminal(WindowPlacement::Hidden);
-                } else if let Some(id) = self.active_terminal {
+                } else if let Some(id) = self.terminal_session.selected() {
                     if self.terminal_window_rect().is_none()
                         && let Err(error) =
                             self.show_native_window(NativeSurfaceTarget::Terminal(id.0))
@@ -27,45 +27,35 @@ impl InteractiveApplication {
                         self.show_error(error);
                         return Ok(());
                     }
-                    self.terminal_focused = true;
+                    self.set_terminal_focus(true);
                     self.resize_active_terminal_to_panel();
                     self.sync_terminal_panel();
                 } else {
                     let profile = self
                         .configuration
-                        .settings
+                        .settings()
                         .terminals
                         .default_profile
                         .clone();
-                    self.defer_trusted_execution(DeferredExecution::OpenTerminal(profile));
+                    self.request_terminal_open(&profile, None);
                 }
             }
             AppEffect::TerminalList => {
                 let items = self
-                    .terminals
-                    .iter()
-                    .map(|(id, terminal)| {
+                    .terminal_session
+                    .choices()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (key, label, detail))| {
                         (
                             PickerItem {
-                                id: PickerItemId(format!("terminal:{}", id.0)),
-                                label: format!("#{} {}", id.0, terminal.profile),
-                                detail: format!(
-                                    "{}{}",
-                                    if terminal.running {
-                                        "running"
-                                    } else {
-                                        "exited"
-                                    },
-                                    if Some(*id) == self.active_terminal {
-                                        " · active"
-                                    } else {
-                                        ""
-                                    }
-                                ),
+                                id: PickerItemId(format!("terminal:{index}")),
+                                label,
+                                detail,
                                 source: "terminal".into(),
                                 action: PickerAction::None,
                             },
-                            PickerPayload::Terminal(*id),
+                            PickerPayload::Terminal(key),
                         )
                     })
                     .collect();
@@ -73,9 +63,9 @@ impl InteractiveApplication {
             }
             AppEffect::TerminalFocus(id) => {
                 let id = PtyId(id);
-                if self.terminals.contains_key(&id) {
-                    self.active_terminal = Some(id);
-                    self.terminal_focused = true;
+                if self.terminal_session.contains(id) {
+                    self.terminal_session.select(id);
+                    self.set_terminal_focus(true);
                     self.resize_active_terminal_to_panel();
                     self.sync_terminal_panel();
                 } else {
@@ -83,8 +73,8 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::TerminalFocusActive => {
-                if self.active_terminal.is_some() {
-                    self.terminal_focused = true;
+                if self.terminal_session.selected().is_some() {
+                    self.set_terminal_focus(true);
                     self.resize_active_terminal_to_panel();
                     self.sync_terminal_panel();
                 } else {
@@ -92,64 +82,32 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::TerminalCycle(direction) => {
-                let mut ids = self.terminals.keys().copied().collect::<Vec<_>>();
-                ids.sort_unstable_by_key(|id| id.0);
-                if ids.is_empty() {
+                let focused = self.window_session.terminal_focused();
+                if !self.terminal_session.cycle(i64::from(direction)) {
                     self.show_error(self.message("terminal_missing", &[]));
                 } else {
-                    let current = self
-                        .active_terminal
-                        .and_then(|active| ids.iter().position(|id| *id == active))
-                        .unwrap_or(0);
-                    let next = if direction < 0 {
-                        current.checked_sub(1).unwrap_or(ids.len() - 1)
-                    } else {
-                        (current + 1) % ids.len()
-                    };
-                    self.active_terminal = Some(ids[next]);
+                    if focused {
+                        self.set_terminal_focus(true);
+                    }
                     self.resize_active_terminal_to_panel();
                     self.sync_terminal_panel();
                 }
             }
             AppEffect::TerminalResize(rows) => {
-                if self.active_terminal.is_none() {
+                if self.terminal_session.selected().is_none() {
                     self.show_error(self.message("terminal_missing", &[]));
                 } else {
-                    let step = i32::from(rows).saturating_mul(i32::from(
-                        self.configuration.settings.ui.terminal_panel.resize_step,
-                    ));
-                    let policy = &self.configuration.settings.ui.terminal_panel;
-                    self.terminal_panel_height = u16::try_from(
-                        i32::from(self.terminal_panel_height)
-                            .saturating_add(step)
-                            .clamp(
-                                i32::from(policy.minimum_height),
-                                i32::from(policy.maximum_height),
-                            ),
-                    )
-                    .unwrap_or(policy.height);
-                    if let Some(id) = self.active_terminal {
-                        let target = NativeSurfaceTarget::Terminal(id.0);
-                        let placement = self.current_native_placement(target).ok();
-                        let updated = match placement {
-                            Some(WindowPlacement::Docked { edge, .. }) => {
-                                Some(WindowPlacement::Docked {
-                                    edge,
-                                    size: self.terminal_panel_height,
-                                })
-                            }
-                            Some(WindowPlacement::Floating(mut rect)) => {
-                                rect.height = self.terminal_panel_height;
-                                Some(WindowPlacement::Floating(rect))
-                            }
-                            _ => None,
-                        };
-                        if let Some(placement) = updated
-                            && let Err(error) =
-                                self.apply_native_window_placement(target, placement)
-                        {
-                            self.show_error(error);
-                        }
+                    let result = if self.compositor_projection().is_none() {
+                        Err("universal compositor projection is missing or stale".into())
+                    } else {
+                        self.window_session.resize_terminal(
+                            self.terminal_session.selected().unwrap().0,
+                            rows,
+                            &self.configuration.settings().ui.terminal_panel,
+                        )
+                    };
+                    if let Err(error) = result {
+                        self.show_error(error);
                     }
                     self.resize_active_terminal_to_panel();
                     self.sync_terminal_panel();
@@ -186,18 +144,17 @@ impl InteractiveApplication {
             }
             AppEffect::TerminalHide => self.place_active_terminal(WindowPlacement::Hidden),
             AppEffect::TerminalUnfocus => {
-                self.terminal_focused = false;
+                self.set_terminal_focus(false);
                 self.sync_terminal_panel();
                 self.ensure_cursor_visible();
             }
             AppEffect::TerminalSend(text) => {
-                if let Some(id) = self.active_terminal {
-                    if let Err(error) = self.ptys.input(
-                        id,
-                        text.into_bytes(),
-                        self.configuration.settings.terminals.maximum_input_bytes,
-                    ) {
-                        self.show_error(error)
+                if let Some(id) = self.terminal_session.selected() {
+                    if let Err(error) =
+                        self.terminal_session
+                            .send(id, TerminalInput::Text(&text), &self.workspace)
+                    {
+                        self.show_error(error);
                     }
                 }
             }
@@ -211,7 +168,8 @@ impl InteractiveApplication {
             }
             AppEffect::TerminalYank { line } => self.yank_terminal_text(line),
             AppEffect::TerminalClose => {
-                if let Some(id) = self.active_terminal {
+                self.terminal_session.cancel_open();
+                if let Some(id) = self.terminal_session.selected() {
                     self.retire_terminal(id, true);
                 }
             }

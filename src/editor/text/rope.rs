@@ -10,13 +10,65 @@ use crate::editor::text::{
 /// Rope-backed normalized UTF-8 text and its file-format metadata.
 #[derive(Clone, Debug)]
 pub struct TextBuffer {
-    pub(crate) rope: Rope,
+    pub(in crate::editor::text) rope: Rope,
     revision: BufferRevision,
     format: FileFormat,
+    source: TextVersion,
 }
 
+/// Exact immutable text snapshot identity, including reloads at equal revisions.
+#[derive(Clone, Debug)]
+pub(crate) struct TextVersion {
+    origin: std::sync::Arc<()>,
+    snapshot: std::sync::Arc<()>,
+}
+impl TextVersion {
+    fn new() -> Self {
+        Self {
+            origin: std::sync::Arc::new(()),
+            snapshot: std::sync::Arc::new(()),
+        }
+    }
+    pub(crate) fn same_incarnation(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.origin, &other.origin)
+    }
+}
+impl PartialEq for TextVersion {
+    fn eq(&self, other: &Self) -> bool {
+        self.same_incarnation(other) && std::sync::Arc::ptr_eq(&self.snapshot, &other.snapshot)
+    }
+}
+impl Eq for TextVersion {}
+
+#[cfg(test)]
+thread_local! { static TEXT_MATERIALIZATIONS: std::cell::Cell<(usize,usize)> = const { std::cell::Cell::new((0,0)) }; }
 impl TextBuffer {
+    #[cfg(test)]
+    pub(crate) fn test_materializations() -> (usize, usize) {
+        TEXT_MATERIALIZATIONS.with(std::cell::Cell::get)
+    }
+
     #[must_use]
+    pub(crate) fn matches_encoded_text(&self, bytes: &[u8]) -> bool {
+        let mut bytes = bytes
+            .strip_prefix(&[0xef, 0xbb, 0xbf])
+            .unwrap_or(bytes)
+            .iter()
+            .copied()
+            .peekable();
+        let normalized = std::iter::from_fn(|| {
+            Some(match bytes.next()? {
+                b'\r' => {
+                    if bytes.peek() == Some(&b'\n') {
+                        bytes.next();
+                    }
+                    b'\n'
+                }
+                byte => byte,
+            })
+        });
+        self.rope.chunks().flat_map(str::bytes).eq(normalized)
+    }
     pub fn from_text(text: &str) -> Self {
         let normalized = normalize_newlines(text);
         let newline_count = normalized.bytes().filter(|byte| *byte == b'\n').count();
@@ -29,16 +81,27 @@ impl TextBuffer {
             rope: Rope::from_str(&normalized),
             revision: BufferRevision::initial(),
             format,
+            source: TextVersion::new(),
         }
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, EncodingError> {
+        #[cfg(test)]
+        TEXT_MATERIALIZATIONS.with(|n| {
+            let (decode, display) = n.get();
+            n.set((decode + 1, display));
+        });
         let DecodedText { text, format } = decode_utf8(bytes)?;
         Ok(Self {
             rope: Rope::from_str(&text),
             revision: BufferRevision::initial(),
             format,
+            source: TextVersion::new(),
         })
+    }
+
+    pub(crate) fn source_version(&self) -> TextVersion {
+        self.source.clone()
     }
 
     #[must_use]
@@ -156,18 +219,25 @@ impl TextBuffer {
 
     pub(crate) fn bump_revision(&mut self) -> Result<(), PositionError> {
         self.revision = self.revision.next()?;
+        self.source.snapshot = std::sync::Arc::new(());
         Ok(())
     }
 
     /// Restore a historical snapshot while preserving monotonic revisions.
     pub fn restore_text(&mut self, text: &str) -> Result<(), PositionError> {
+        self.bump_revision()?;
         self.rope = Rope::from_str(text);
-        self.bump_revision()
+        Ok(())
     }
 }
 
 impl fmt::Display for TextBuffer {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        #[cfg(test)]
+        TEXT_MATERIALIZATIONS.with(|n| {
+            let (decode, display) = n.get();
+            n.set((decode, display + 1));
+        });
         for chunk in self.rope.chunks() {
             formatter.write_str(chunk)?;
         }
@@ -197,4 +267,30 @@ fn normalize_newlines(text: &str) -> String {
         }
     }
     normalized
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::*;
+    #[test]
+    fn exact_snapshots_distinguish_branches_and_reload_but_keep_edit_incarnation() {
+        let original = TextBuffer::from_text("before");
+        let mut a = original.clone();
+        let mut b = original.clone();
+        a.restore_text("branch a").unwrap();
+        b.restore_text("branch b").unwrap();
+        assert_eq!(a.revision(), b.revision());
+        assert_ne!(a.source_version(), b.source_version());
+        assert!(a.source_version().same_incarnation(&b.source_version()));
+        assert!(
+            !a.source_version()
+                .same_incarnation(&TextBuffer::from_text("branch a").source_version())
+        );
+        a.revision = BufferRevision(u64::MAX);
+        let source = a.source_version();
+        let bytes = a.to_string();
+        assert!(a.restore_text("must not publish").is_err());
+        assert_eq!(a.to_string(), bytes);
+        assert_eq!(a.source_version(), source);
+    }
 }

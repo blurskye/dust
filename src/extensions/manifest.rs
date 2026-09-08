@@ -288,12 +288,26 @@ pub struct PluginContributionIndex {
     pub storage: Option<PluginStorageContribution>,
 }
 
+/// Identity of one accepted catalogue revision; cloning a snapshot preserves it.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct PluginCatalogVersion(std::sync::Arc<()>);
+impl PartialEq for PluginCatalogVersion {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+impl Eq for PluginCatalogVersion {}
+
 #[derive(Clone, Debug, Default)]
 pub struct PluginContributionCatalog {
     indexes: BTreeMap<String, PluginContributionIndex>,
+    version: PluginCatalogVersion,
 }
 
 impl PluginContributionCatalog {
+    pub(crate) fn version(&self) -> PluginCatalogVersion {
+        self.version.clone()
+    }
     pub fn install(&mut self, index: PluginContributionIndex) -> Result<(), PluginError> {
         if self.indexes.contains_key(&index.owner) {
             return Err(PluginError::AlreadyActive);
@@ -322,6 +336,7 @@ impl PluginContributionCatalog {
             }
         }
         self.indexes.insert(index.owner.clone(), index);
+        self.version = PluginCatalogVersion::default();
         Ok(())
     }
 
@@ -332,6 +347,7 @@ impl PluginContributionCatalog {
             .is_some_and(|index| index.generation == generation)
         {
             self.indexes.remove(owner);
+            self.version = PluginCatalogVersion::default();
             true
         } else {
             false

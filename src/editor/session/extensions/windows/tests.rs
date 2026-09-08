@@ -231,7 +231,8 @@ fn private_cells_are_local_revisioned_atomic_and_generation_owned() {
     let index = private_index("demo", 9);
     let mut host = PluginWindowHost::default();
     let revision = graph.revision().expect("revision");
-    let opened = host.process(
+    let opened = process_fixture(
+        &mut host,
         &mut graph,
         &index,
         PluginUiRequest {
@@ -313,7 +314,8 @@ fn private_cells_are_local_revisioned_atomic_and_generation_owned() {
             action: "plugin.demo.open".into(),
         }],
     };
-    let replaced = host.process(
+    let replaced = process_fixture(
+        &mut host,
         &mut graph,
         &index,
         PluginUiRequest {
@@ -336,7 +338,8 @@ fn private_cells_are_local_revisioned_atomic_and_generation_owned() {
     let mut outside = snapshot.clone();
     outside.revision = 2;
     outside.cells[0].x = dimensions.width;
-    let rejected = host.process(
+    let rejected = process_fixture(
+        &mut host,
         &mut graph,
         &index,
         PluginUiRequest {
@@ -353,7 +356,8 @@ fn private_cells_are_local_revisioned_atomic_and_generation_owned() {
     );
     assert_eq!(host, before);
 
-    let stale = host.process(
+    let stale = process_fixture(
+        &mut host,
         &mut graph,
         &index,
         PluginUiRequest {
@@ -386,7 +390,8 @@ fn private_cells_are_local_revisioned_atomic_and_generation_owned() {
     );
     assert_eq!(host, before);
 
-    let split_wide = host.process(
+    let split_wide = process_fixture(
+        &mut host,
         &mut graph,
         &index,
         PluginUiRequest {
@@ -438,7 +443,8 @@ fn private_cells_are_local_revisioned_atomic_and_generation_owned() {
     }
     assert_eq!(host, stable);
     let revision = graph.revision().expect("revision");
-    let moved = host.process(
+    let moved = process_fixture(
+        &mut host,
         &mut graph,
         &index,
         PluginUiRequest {
@@ -478,10 +484,7 @@ fn private_cells_are_local_revisioned_atomic_and_generation_owned() {
         host.private_snapshots(&graph).is_empty(),
         "resizing invalidates stale private cells"
     );
-    assert!(
-        host.remove_generation(&mut graph, "demo", 9)
-            .expect("cleanup")
-    );
+    assert!(remove_fixture(&mut host, &mut graph, "demo", 9).expect("cleanup"));
     assert!(host.private_snapshots(&graph).is_empty());
 }
 
@@ -883,7 +886,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         )
         .expect("guest execution");
         assert_eq!(execution.ui_requests.len(), 1);
-        let event = host.process(
+        let event = process_fixture(
+            &mut host,
             &mut graph,
             &static_index,
             execution.ui_requests.into_iter().next().expect("request"),
@@ -920,7 +924,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         &mut outcome.runtime,
     )
     .expect("private open execution");
-    let open_event = host.process(
+    let open_event = process_fixture(
+        &mut host,
         &mut graph,
         &static_index,
         private_open
@@ -967,7 +972,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         &mut outcome.runtime,
     )
     .expect("private replace execution");
-    let replace_event = host.process(
+    let replace_event = process_fixture(
+        &mut host,
         &mut graph,
         &static_index,
         private_replace
@@ -996,7 +1002,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         &mut outcome.runtime,
     )
     .expect("private patch execution");
-    let patch_event = host.process(
+    let patch_event = process_fixture(
+        &mut host,
         &mut graph,
         &static_index,
         private_patch
@@ -1033,7 +1040,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     )
     .expect("private close execution");
     assert!(private_close.result.contains("action=true"));
-    let close_event = host.process(
+    let close_event = process_fixture(
+        &mut host,
         &mut graph,
         &static_index,
         private_close
@@ -1065,12 +1073,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     .expect("bounded queue execution");
     assert_eq!(flood.ui_requests.len(), 64);
     assert!(flood.result.contains("QueueFull"));
-    assert!(
-        !host
-            .remove_generation(&mut graph, "demo", 43)
-            .expect("stale cleanup")
-    );
-    assert!(host.remove_generation(&mut graph, "demo", 44).is_ok());
+    assert!(!remove_fixture(&mut host, &mut graph, "demo", 43).expect("stale cleanup"));
+    assert!(remove_fixture(&mut host, &mut graph, "demo", 44).is_ok());
     assert_eq!(opaque_handle, Some(1));
 }
 
@@ -1081,7 +1085,8 @@ fn generation_owned_retained_window_lifecycle_is_revision_checked() {
     let mut host = PluginWindowHost::default();
     let demo_index = index("demo", 7);
     let open_revision = graph.revision().expect("revision");
-    let event = host.process(
+    let event = process_fixture(
+        &mut host,
         &mut graph,
         &demo_index,
         open_request(open_revision, tree(1, "Hello")),
@@ -1110,7 +1115,8 @@ fn generation_owned_retained_window_lifecycle_is_revision_checked() {
     assert_eq!(projection.hit_test(6, 4), None);
 
     let duplicate_revision = graph.revision().expect("revision");
-    let duplicate = host.process(
+    let duplicate = process_fixture(
+        &mut host,
         &mut graph,
         &demo_index,
         open_request(duplicate_revision, tree(1, "Duplicate")),
@@ -1121,7 +1127,8 @@ fn generation_owned_retained_window_lifecycle_is_revision_checked() {
     );
     assert_eq!(graph, graph_after_open);
 
-    let stale = host.process(
+    let stale = process_fixture(
+        &mut host,
         &mut graph,
         &demo_index,
         PluginUiRequest {
@@ -1139,7 +1146,8 @@ fn generation_owned_retained_window_lifecycle_is_revision_checked() {
     );
     assert_eq!(graph, graph_after_open);
 
-    let replaced = host.process(
+    let replaced = process_fixture(
+        &mut host,
         &mut graph,
         &demo_index,
         PluginUiRequest {
@@ -1172,7 +1180,8 @@ fn generation_owned_retained_window_lifecycle_is_revision_checked() {
     assert_eq!(host.snapshots()[0].scroll, 1);
     host.focus_node_at_row(host.snapshots()[0].window, 0)
         .expect("mouse focus");
-    let repaired = host.process(
+    let repaired = process_fixture(
+        &mut host,
         &mut graph,
         &demo_index,
         PluginUiRequest {
@@ -1201,7 +1210,8 @@ fn generation_owned_retained_window_lifecycle_is_revision_checked() {
 
     let revision = graph.revision().expect("revision");
     assert!(
-        host.process(
+        process_fixture(
+            &mut host,
             &mut graph,
             &demo_index,
             PluginUiRequest {
@@ -1217,7 +1227,8 @@ fn generation_owned_retained_window_lifecycle_is_revision_checked() {
         .is_none()
     );
     let hidden_revision = graph.revision().expect("hidden revision");
-    let focus_hidden = host.process(
+    let focus_hidden = process_fixture(
+        &mut host,
         &mut graph,
         &demo_index,
         PluginUiRequest {
@@ -1234,7 +1245,8 @@ fn generation_owned_retained_window_lifecycle_is_revision_checked() {
     );
 
     let foreign = index("other", 8);
-    let foreign_event = host.process(
+    let foreign_event = process_fixture(
+        &mut host,
         &mut graph,
         &foreign,
         PluginUiRequest {
@@ -1262,16 +1274,14 @@ fn generation_owned_retained_window_lifecycle_is_revision_checked() {
         Some(PluginUiErrorCode::ForeignGeneration)
     );
 
-    assert!(
-        host.remove_generation(&mut graph, "demo", 7)
-            .expect("cleanup")
-    );
+    assert!(remove_fixture(&mut host, &mut graph, "demo", 7).expect("cleanup"));
     assert!(host.snapshots().is_empty());
     assert_eq!(graph.counts(), (0, 0, 0, 1));
 
     let replacement = index("demo", 8);
     let replacement_revision = graph.revision().expect("replacement revision");
-    let replacement_event = host.process(
+    let replacement_event = process_fixture(
+        &mut host,
         &mut graph,
         &replacement,
         open_request(replacement_revision, tree(1, "Replacement")),
@@ -1281,11 +1291,7 @@ fn generation_owned_retained_window_lifecycle_is_revision_checked() {
         "{:?}",
         replacement_event.error
     );
-    assert!(
-        !host
-            .remove_generation(&mut graph, "demo", 7)
-            .expect("stale cleanup")
-    );
+    assert!(!remove_fixture(&mut host, &mut graph, "demo", 7).expect("stale cleanup"));
     assert_eq!(host.snapshots()[0].rows[0].text, "Replacement");
 }
 
@@ -1296,14 +1302,20 @@ fn plugin_window_operations_reject_cross_tab_scope_without_mutation() {
     let mut host = PluginWindowHost::default();
     let demo = index("demo", 3);
     let revision = graph.revision().expect("revision");
-    let opened = host.process(&mut graph, &demo, open_request(revision, tree(1, "one")));
+    let opened = process_fixture(
+        &mut host,
+        &mut graph,
+        &demo,
+        open_request(revision, tree(1, "one")),
+    );
     let handle = opened.handle.expect("handle");
     let second = graph
         .create_workspace_tab("builtin.test", 1)
         .expect("second tab");
     graph.set_active_tab(second).expect("activate second");
     let before = graph.clone();
-    let event = host.process(
+    let event = process_fixture(
+        &mut host,
         &mut graph,
         &demo,
         PluginUiRequest {
@@ -1329,7 +1341,8 @@ fn retained_ui_errors_are_stable_typed_results() {
     graph.create_workspace_tab("builtin.test", 1).expect("tab");
     let mut host = PluginWindowHost::default();
     let revision = graph.revision().expect("revision");
-    let undeclared = host.process(
+    let undeclared = process_fixture(
+        &mut host,
         &mut graph,
         &demo,
         PluginUiRequest {
@@ -1353,7 +1366,8 @@ fn retained_ui_errors_are_stable_typed_results() {
         Some(PluginUiErrorCode::UndeclaredContent)
     );
     let revision = graph.revision().expect("revision");
-    let invalid = host.process(
+    let invalid = process_fixture(
+        &mut host,
         &mut graph,
         &demo,
         PluginUiRequest {
@@ -1377,7 +1391,8 @@ fn retained_ui_errors_are_stable_typed_results() {
         Some(PluginUiErrorCode::InvalidPlacement)
     );
     let revision = graph.revision().expect("revision");
-    let stale = host.process(
+    let stale = process_fixture(
+        &mut host,
         &mut graph,
         &demo,
         PluginUiRequest {
@@ -1438,4 +1453,38 @@ fn retained_tree_rejects_cycles_unreachable_nodes_and_undeclared_actions() {
     let mut undeclared = tree(1, "action");
     undeclared.nodes[2].action = Some("plugin.demo.missing".into());
     assert!(validate_tree(&index, &undeclared, None).is_err());
+}
+
+// Owned initial graph fixtures exercise the same scoped proposal/commit boundary.
+fn process_fixture(
+    host: &mut PluginWindowHost,
+    graph: &mut WindowGraph,
+    index: &PluginContributionIndex,
+    request: PluginUiRequest,
+) -> PluginUiEvent {
+    let mut windows =
+        crate::editor::session::windows::WindowSession::from_test_graph(graph.clone());
+    let mut draft = windows.begin_plugin_fixture(&index.owner, index.generation);
+    let mut candidate = host.clone();
+    let event = candidate.process(&mut draft, index, request);
+    if event.error.is_none() {
+        windows
+            .commit_plugin_fixture(draft)
+            .expect("checked plugin commit");
+        *host = candidate;
+        *graph = windows.graph().clone();
+    }
+    event
+}
+fn remove_fixture(
+    host: &mut PluginWindowHost,
+    graph: &mut WindowGraph,
+    plugin: &str,
+    load: u64,
+) -> Result<bool, String> {
+    let mut windows =
+        crate::editor::session::windows::WindowSession::from_test_graph(graph.clone());
+    windows.remove_plugin_generation(plugin, load)?;
+    *graph = windows.graph().clone();
+    Ok(host.remove_generation(plugin, load))
 }

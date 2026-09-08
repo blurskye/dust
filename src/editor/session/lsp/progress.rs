@@ -18,12 +18,12 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn append_lsp_log(&mut self, line: String) {
-        let maximum = self.configuration.settings.lsp.maximum_log_lines.max(1);
+        let maximum = self.configuration.settings().lsp.maximum_log_lines.max(1);
         while self.lsp_logs.len() >= maximum {
             self.lsp_logs.pop_front();
         }
         self.lsp_logs.push_back(line);
-        if self.picker_surface == PickerSurfaceKind::Logs && self.ui.picker.is_some() {
+        if self.search.picker_surface() == PickerSurfaceKind::Logs && self.ui.picker.is_some() {
             self.show_lsp_logs();
         }
     }
@@ -50,7 +50,7 @@ impl InteractiveApplication {
         message: String,
         percentage: Option<u8>,
     ) {
-        if !self.configuration.settings.ui.lsp_progress.enabled {
+        if !self.configuration.settings().ui.lsp_progress.enabled {
             self.ui.lsp_progress.clear();
             self.ui.lsp_progress_frame = 0;
             return;
@@ -103,7 +103,7 @@ impl InteractiveApplication {
         }
 
         let was_empty = self.ui.lsp_progress.is_empty();
-        let maximum = usize::from(self.configuration.settings.ui.lsp_progress.max_rows);
+        let maximum = usize::from(self.configuration.settings().ui.lsp_progress.max_rows);
         if self.ui.lsp_progress.len() == maximum {
             self.ui.lsp_progress.remove(0);
         }
@@ -136,13 +136,13 @@ impl InteractiveApplication {
         if self.ui.lsp_progress.is_empty() {
             return;
         }
-        if !self.configuration.settings.ui.lsp_progress.enabled {
+        if !self.configuration.settings().ui.lsp_progress.enabled {
             self.ui.lsp_progress.clear();
             self.ui.lsp_progress_frame = 0;
             return;
         }
         let now = Instant::now();
-        let policy = &self.configuration.settings.ui.lsp_progress;
+        let policy = &self.configuration.settings().ui.lsp_progress;
         let maximum = usize::from(policy.max_rows);
         if self.ui.lsp_progress.len() > maximum {
             let excess = self.ui.lsp_progress.len().saturating_sub(maximum);
@@ -204,7 +204,20 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn process_lsp_events(&mut self) {
-        while let Some(event) = self.lsp.try_event() {
+        for error in self.lsp_edit_sources.flush() {
+            self.show_error(error);
+        }
+        while let Some(owned) = self.lsp_edit_sources.poll_event(&self.lsp) {
+            let crate::language::lsp::OwnedLspEvent {
+                event,
+                context,
+                reply,
+            } = owned;
+            if !self.lsp.owns_event_context(&context) {
+                self.lsp_edit_sources
+                    .reject_reply(reply, "requesting language-server session retired".into());
+                continue;
+            }
             match event {
                 LspEvent::Starting { .. } => {}
                 LspEvent::Running {
@@ -246,87 +259,26 @@ impl InteractiveApplication {
                     version,
                     diagnostics,
                 } => {
-                    let server_label = self.lsp_server_label(&server);
-                    let current = self.state.buffers.iter().find_map(|(_, buffer)| {
-                        buffer.path.as_ref().and_then(|path| {
-                            (crate::language::lsp::file_uri(path) == uri)
-                                .then_some(buffer.text.revision())
-                        })
-                    });
-                    let normalized_version = version.map(BufferRevision);
-                    let encoding = self
-                        .lsp_capabilities
-                        .as_ref()
-                        .map_or(PositionEncoding::Utf16, |capabilities| {
-                            capabilities.position_encoding
-                        });
-                    let normalized = self
-                        .state
-                        .buffers
-                        .iter()
-                        .find_map(|(_, buffer)| {
-                            let path = buffer.path.as_ref()?;
-                            (crate::language::lsp::file_uri(path) == uri).then(|| {
-                                let codec = PositionCodec::new(&buffer.text);
-                                diagnostics
-                                    .iter()
-                                    .filter_map(|diagnostic| {
-                                        let start = codec
-                                            .lsp_to_byte(
-                                                diagnostic.range.start.line,
-                                                diagnostic.range.start.character,
-                                                encoding,
-                                            )
-                                            .ok()?;
-                                        let end = codec
-                                            .lsp_to_byte(
-                                                diagnostic.range.end.line,
-                                                diagnostic.range.end.character,
-                                                encoding,
-                                            )
-                                            .ok()?;
-                                        Some(Diagnostic {
-                                            uri: uri.clone(),
-                                            version: normalized_version,
-                                            range: ByteRange::new(start, end).ok()?,
-                                            severity: match diagnostic.severity {
-                                                Some(1) => DiagnosticSeverity::Error,
-                                                Some(2) => DiagnosticSeverity::Warning,
-                                                Some(3) => DiagnosticSeverity::Information,
-                                                _ => DiagnosticSeverity::Hint,
-                                            },
-                                            source: diagnostic
-                                                .source
-                                                .clone()
-                                                .unwrap_or_else(|| server_label.clone()),
-                                            code: diagnostic.code.clone(),
-                                            message: diagnostic.message.clone(),
-                                            related: Vec::new(),
-                                            tags: Vec::new(),
-                                            fixes: Vec::new(),
-                                            timestamp: crate::clock::system_time(),
-                                        })
-                                    })
-                                    .collect::<Vec<_>>()
-                            })
-                        })
-                        .unwrap_or_default();
-                    let owner = DiagnosticOwner::new(format!("lsp.{server}"));
-                    match owner.and_then(|owner| {
-                        self.diagnostics.replace(
-                            owner,
-                            uri,
-                            normalized_version,
-                            current,
-                            normalized,
+                    let result =
+                        crate::editor::session::lsp_edits::LspEditSources::diagnostic_batch(
+                            &context,
+                            &self.lsp,
+                            &self.state,
+                            (&uri, version, diagnostics),
+                            false,
+                            self.configuration
+                                .settings()
+                                .workspace
+                                .maximum_diagnostics_per_owner_uri,
+                            &self.lsp_server_label(&server),
                         )
-                    }) {
-                        Ok(()) => {
-                            self.sync_ui_diagnostics();
-                        }
-                        Err(error) => self.append_lsp_log(error.to_string()),
+                        .and_then(|batch| self.diagnostics.publish(batch, &self.state));
+                    match result {
+                        Ok(()) => self.sync_ui_diagnostics(),
+                        Err(error) => self.append_lsp_log(error),
                     }
                 }
+
                 LspEvent::Result {
                     server,
                     generation,
@@ -355,7 +307,14 @@ impl InteractiveApplication {
                             continue;
                         }
                         self.lsp_inlay_request_owner = None;
-                        self.present_lsp_result(&server, generation, &method, &uri, result);
+                        self.present_lsp_result_owned(
+                            &server,
+                            generation,
+                            &method,
+                            &uri,
+                            result,
+                            Some(context),
+                        );
                         continue;
                     }
                     if generation != self.lsp_request_generation
@@ -372,19 +331,26 @@ impl InteractiveApplication {
                         continue;
                     }
                     self.lsp_request_owner = None;
-                    self.present_lsp_result(&server, generation, &method, &uri, result);
+                    self.present_lsp_result_owned(
+                        &server,
+                        generation,
+                        &method,
+                        &uri,
+                        result,
+                        Some(context),
+                    );
                 }
                 LspEvent::ApplyEditRequest {
-                    server,
-                    request_id,
+                    server: _,
+                    request_id: _,
                     label,
                     edit,
                 } => {
                     self.begin_workspace_proposal(
                         label.unwrap_or_else(|| self.message("workspace_edit_server_label", &[])),
                         edit,
-                        Some((server, request_id)),
-                        self.lsp_position_encoding(),
+                        reply,
+                        context.encoding(),
                     );
                 }
                 LspEvent::Progress {
@@ -401,19 +367,21 @@ impl InteractiveApplication {
                 }
                 LspEvent::Health { server, health } => {
                     let server = self.lsp_server_label(&server);
-                    self.ui.notification = Some(self.message(
-                        "lsp_health",
-                        &[
-                            ("server", server),
-                            ("documents", health.attached_documents.to_string()),
-                            ("pending", health.pending_requests.to_string()),
-                            (
-                                "encoding",
-                                health.capabilities.position_encoding.lsp_name().into(),
-                            ),
-                        ],
-                    ));
-                    self.ui.notification_error = false;
+                    self.notify_message(
+                        self.message(
+                            "lsp_health",
+                            &[
+                                ("server", server),
+                                ("documents", health.attached_documents.to_string()),
+                                ("pending", health.pending_requests.to_string()),
+                                (
+                                    "encoding",
+                                    health.capabilities.position_encoding.lsp_name().into(),
+                                ),
+                            ],
+                        ),
+                        false,
+                    );
                 }
                 LspEvent::Unsupported { server, method } => {
                     let server = self.lsp_server_label(&server);
@@ -435,13 +403,20 @@ impl InteractiveApplication {
                         state.capabilities = None;
                         state.desired_running
                     });
+                    for prefix in ["lsp.", "lsp-pull:"] {
+                        if let Ok(producer) = context.diagnostic_producer(prefix) {
+                            self.diagnostics.clear_source(&producer);
+                        }
+                    }
+                    self.sync_ui_diagnostics();
                     let _ = self.lsp.stop(&server);
                     self.lsp_session_synced.retain(|(key, _), _| key != &server);
                     self.clear_lsp_progress(&server);
                     let server_label = self.lsp_server_label(&server);
-                    self.ui.notification =
-                        Some(self.message("lsp_stopped", &[("server", server_label)]));
-                    self.ui.notification_error = false;
+                    self.notify_message(
+                        self.message("lsp_stopped", &[("server", server_label)]),
+                        false,
+                    );
                     if self.active_lsp_server.as_deref() == Some(&server) {
                         self.clear_lsp_session_state();
                     }
@@ -455,6 +430,12 @@ impl InteractiveApplication {
                         state.capabilities = None;
                         state.desired_running
                     });
+                    for prefix in ["lsp.", "lsp-pull:"] {
+                        if let Ok(producer) = context.diagnostic_producer(prefix) {
+                            self.diagnostics.clear_source(&producer);
+                        }
+                    }
+                    self.sync_ui_diagnostics();
                     let _ = self.lsp.stop(&server);
                     self.lsp_session_synced.retain(|(key, _), _| key != &server);
                     self.clear_lsp_progress(&server);
@@ -477,7 +458,7 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn schedule_lsp_restart(&mut self, key: String) {
-        let limit = self.configuration.settings.lsp.restart_limit;
+        let limit = self.configuration.settings().lsp.restart_limit;
         let Some(state) = self.lsp_sessions.get_mut(&key) else {
             return;
         };
@@ -496,7 +477,7 @@ impl InteractiveApplication {
         let exponent = u32::from(state.restart_count.saturating_sub(1)).min(8);
         let delay = self
             .configuration
-            .settings
+            .settings()
             .lsp
             .restart_backoff_ms
             .saturating_mul(2_u64.saturating_pow(exponent))

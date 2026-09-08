@@ -50,11 +50,32 @@ struct PluginWindowInstance {
     scroll: usize,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(not(test), derive(Clone))]
+#[derive(Debug, Default, Eq, PartialEq)]
 pub(in crate::editor::session) struct PluginWindowHost {
     next_handle: u64,
     instances: BTreeMap<u64, PluginWindowInstance>,
     configured_placements: BTreeMap<String, PluginRequestedPlacement>,
+}
+
+#[cfg(test)]
+thread_local! { static HOST_CLONES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+#[cfg(test)]
+impl Clone for PluginWindowHost {
+    fn clone(&self) -> Self {
+        HOST_CLONES.with(|count| count.set(count.get() + 1));
+        Self {
+            next_handle: self.next_handle,
+            instances: self.instances.clone(),
+            configured_placements: self.configured_placements.clone(),
+        }
+    }
+}
+#[cfg(test)]
+impl PluginWindowHost {
+    pub(in crate::editor::session) fn test_clone_count() -> usize {
+        HOST_CLONES.with(std::cell::Cell::get)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -1,15 +1,110 @@
 use super::*;
 
 impl InteractiveApplication {
+    pub(in crate::editor::session) fn apply_plugin_ui_request(
+        &mut self,
+        index: &crate::extensions::PluginContributionIndex,
+        request: crate::extensions::PluginUiRequest,
+    ) -> crate::extensions::PluginUiEvent {
+        let Some(index) = self
+            .plugin_contributions
+            .get(&index.owner)
+            .filter(|current| {
+                current.generation == index.generation && current.checksum == index.checksum
+            })
+        else {
+            return PluginWindowHost::rejected(
+                request.token,
+                self.window_session.graph().revision(),
+                crate::extensions::PluginUiErrorCode::GenerationLost,
+                "plugin UI request belongs to a retired catalog load".into(),
+            );
+        };
+        if let Err(detail) = self
+            .window_session
+            .require_editor_source(&self.state.window_version())
+        {
+            return PluginWindowHost::rejected(
+                request.token,
+                self.window_session.graph().revision(),
+                crate::extensions::PluginUiErrorCode::StaleGraph,
+                detail,
+            );
+        }
+        if PluginWindowHost::is_retained_update(&request.kind) {
+            return self.plugin_windows.process_retained(
+                self.window_session.graph(),
+                index,
+                request,
+            );
+        }
+        if let Some(event) =
+            self.plugin_windows
+                .admit_window_request(self.window_session.graph(), index, &request)
+        {
+            return event;
+        }
+        let catalog = self.plugin_contributions.version();
+        let mut draft = match self.window_session.begin_plugin(
+            &index.owner,
+            index.generation,
+            (&self.state.window_version(), &catalog),
+        ) {
+            Ok(draft) => draft,
+            Err(detail) => {
+                return PluginWindowHost::rejected(
+                    request.token,
+                    self.window_session.graph().revision(),
+                    crate::extensions::PluginUiErrorCode::StaleGraph,
+                    detail,
+                );
+            }
+        };
+        let mut host = self.plugin_windows.clone();
+        let mut event = host.process(&mut draft, index, request);
+        if event.error.is_none() {
+            match self.window_session.commit_plugin(
+                draft,
+                &self.state.window_version(),
+                &self.plugin_contributions.version(),
+            ) {
+                Ok(()) => self.plugin_windows = host,
+                Err(error) => {
+                    event.handle = None;
+                    event.tree_revision = None;
+                    event.surface_revision = None;
+                    event.error = Some(crate::extensions::PluginUiError {
+                        code: crate::extensions::PluginUiErrorCode::StaleGraph,
+                        detail: error,
+                    });
+                }
+            }
+        }
+        event.graph_revision = self.window_session.graph().revision();
+        event
+    }
+
     pub(in crate::editor::session) fn apply_plugin_execution(
         &mut self,
-        mut execution: PluginExecution,
+        reply: crate::extensions::PluginExecutionReply,
     ) {
+        let source = match self.plugin_edits.receive(
+            reply,
+            &self.plugins,
+            &self.workspace.version(),
+            self.configuration.binding_revision(),
+        ) {
+            Ok(source) => source,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        let mut execution = source.execution;
+        let load = source.load;
         let plugin = execution.plugin.clone();
         let mut provider_continuations = Vec::new();
-        if let Some(load) = self.plugins.load_id(&plugin)
-            && self.plugins.is_active_generation(&plugin, load)
-        {
+        if self.plugins.is_active_generation(&plugin, load) {
             self.plugin_host_events.acknowledge(
                 &plugin,
                 load,
@@ -48,28 +143,40 @@ impl InteractiveApplication {
                 let mut broker = self.plugin_virtual_documents.clone();
                 match broker.apply(&plugin, load, proposal) {
                     Ok(snapshot) => {
-                        let mut state = self.state.clone();
+                        let current = self.state.version();
+                        let mut state = self.state.draft();
                         let mut bridge = self.plugin_virtual_editor.clone();
                         match bridge.publish(&mut state, &snapshot) {
                             Ok(_) => {
-                                let mut graph = self.windows.clone();
-                                let mut editor = self.editor_windows.clone();
-                                if let Err(error) = editor.reconcile(
-                                    &state,
-                                    &mut graph,
-                                    &self.configuration.settings.ui.buffer_line.scratch_label,
-                                ) {
-                                    self.show_error(format!(
-                                        "virtual document graph publication rejected: {error}"
-                                    ));
-                                    continue;
-                                }
+                                let accepted = self
+                                    .window_session
+                                    .prepare_editor_transition(
+                                        state,
+                                        &current,
+                                        self.plugin_contributions.version(),
+                                        &self.configuration.settings().ui.buffer_line.scratch_label,
+                                        None,
+                                    )
+                                    .and_then(|transition| {
+                                        self.window_session.accept_editor_transition(
+                                            transition,
+                                            &current,
+                                            &self.plugin_contributions.version(),
+                                        )
+                                    });
+                                let state = match accepted {
+                                    Ok(state) => state,
+                                    Err(error) => {
+                                        self.show_error(format!(
+                                            "virtual document graph publication rejected: {error}"
+                                        ));
+                                        continue;
+                                    }
+                                };
                                 self.plugin_virtual_documents = broker;
                                 self.state = state;
                                 self.plugin_virtual_editor = bridge;
-                                self.windows = graph;
-                                self.editor_windows = editor;
-                                self.ui.dashboard = false;
+                                self.set_dashboard_visibility(false);
                                 self.reconcile_editor_windows();
                             }
                             Err(error) => self.show_error(format!(
@@ -113,7 +220,6 @@ impl InteractiveApplication {
             });
         }
         if !execution.ui_requests.is_empty()
-            && let Some(load) = self.plugins.load_id(&plugin)
             && self.plugins.is_active_generation(&plugin, load)
             && let Some(index) = self
                 .plugin_contributions
@@ -124,10 +230,7 @@ impl InteractiveApplication {
             let requests = std::mem::take(&mut execution.ui_requests);
             let events = requests
                 .into_iter()
-                .map(|request| {
-                    self.plugin_windows
-                        .process(&mut self.windows, &index, request)
-                })
+                .map(|request| self.apply_plugin_ui_request(&index, request))
                 .collect::<Vec<_>>();
             let pending = self
                 .pending_plugin_ui_events
@@ -138,78 +241,21 @@ impl InteractiveApplication {
                 pending.drain(..pending.len().saturating_sub(64));
             }
             self.ui.plugin_surfaces = self.plugin_windows.snapshots();
-            self.surface_windows.invalidate();
+            self.window_session.invalidate_native();
             self.reconcile_editor_windows();
         }
         for message in execution.messages {
-            self.ui.notification = Some(message);
-            self.ui.notification_error = false;
+            self.notify_message(message, false);
         }
-        let mut documents = Vec::new();
-        for proposal in execution.proposals {
-            let Some((buffer, state)) = self
-                .state
-                .buffers
-                .iter()
-                .find(|(id, _)| id.data().as_ffi() == proposal.buffer)
-            else {
-                continue;
-            };
-            let revision = BufferRevision(proposal.revision);
-            if state.text.revision() != revision {
-                continue;
-            }
-            let Some(path) = state.path.as_ref() else {
-                continue;
-            };
-            let codec = PositionCodec::new(&state.text);
-            let mut edits = Vec::new();
-            for edit in proposal.edits {
-                let (Ok(start), Ok(end)) = (usize::try_from(edit.start), usize::try_from(edit.end))
-                else {
-                    continue;
-                };
-                let (Ok((start_line, start_character)), Ok((end_line, end_character))) = (
-                    codec.byte_to_lsp(ByteOffset(start), PositionEncoding::Utf8),
-                    codec.byte_to_lsp(ByteOffset(end), PositionEncoding::Utf8),
-                ) else {
-                    continue;
-                };
-                edits.push(LspTextEdit {
-                    range: LspRange {
-                        start: LspPosition {
-                            line: start_line,
-                            character: start_character,
-                        },
-                        end: LspPosition {
-                            line: end_line,
-                            character: end_character,
-                        },
-                    },
-                    new_text: edit.replacement,
-                });
-            }
-            if !edits.is_empty() {
-                documents.push(LspDocumentEdit {
-                    uri: file_uri(path),
-                    version: Some(revision.0),
-                    edits,
-                });
-            }
-            let _ = buffer;
-        }
-        if !documents.is_empty() {
-            self.begin_workspace_proposal(
+        match source.preview {
+            Ok(Some(key)) => self.begin_plugin_workspace_proposal(
+                key,
                 format!("plugin {}: {}", execution.plugin, execution.command),
-                LspWorkspaceEdit {
-                    resources: Vec::new(),
-                    documents,
-                },
-                None,
-                PositionEncoding::Utf8,
-            );
+            ),
+            Ok(None) => {}
+            Err(error) => self.show_error(error),
         }
-        self.logs.record(
+        self.notices.record(
             LogLevel::Info,
             "plugins",
             "executed",
@@ -219,5 +265,108 @@ impl InteractiveApplication {
                 ("generation".into(), execution.generation.to_string()),
             ]),
         );
+    }
+    pub(in crate::editor::session) fn retire_plugin_edit_sources(&mut self) {
+        let (retired, key) = self.plugin_edits.retire(
+            &self.plugins,
+            &self.state,
+            &self.workspace.version(),
+            self.configuration.binding_revision(),
+        );
+        if retired != 0 {
+            self.show_error(format!(
+                "{retired} plugin invocations retired before their results were accepted"
+            ));
+        }
+        if let Some(key) = key {
+            if self
+                .workspace_edits
+                .origin()
+                .is_some_and(|origin| origin.same(&key))
+            {
+                self.abort_workspace_edit("plugin proposal source retired".into());
+            } else {
+                let _ = self.plugin_edits.finish(&key);
+            }
+        }
+    }
+    fn begin_plugin_workspace_proposal(
+        &mut self,
+        key: crate::editor::session::workspace_edits::OriginKey,
+        label: String,
+    ) {
+        let result = (|| {
+            self.workspace_edits.check_begin()?;
+            let prepared = self.plugin_edits.prepare_preview(
+                &key,
+                &self.plugins,
+                &self.state,
+                &self.workspace.version(),
+                self.configuration.binding_revision(),
+            )?;
+            let path = prepared.draft.canonical_path.clone();
+            let ticket = self.workspace_edits.begin(
+                self.workspace.version(),
+                self.configuration.binding_revision(),
+                prepared.sources,
+            )?;
+            let maximum = usize::try_from(
+                self.configuration
+                    .settings()
+                    .workspace
+                    .search
+                    .maximum_file_bytes,
+            )
+            .unwrap_or(usize::MAX);
+            let roots = self
+                .workspace
+                .roots()
+                .iter()
+                .map(|r| r.identity.canonical_path.clone())
+                .collect();
+            self.workspace_edits.start_files(
+                ticket,
+                label,
+                Some(key.clone()),
+                false,
+                vec![crate::editor::session::workspace_edits::InputFile::Read(
+                    path.clone(),
+                )],
+                roots,
+                maximum,
+            )?;
+            let snapshot = self
+                .state
+                .workspace_snapshot(
+                    self.workspace_edits
+                        .preparing_sources()
+                        .ok_or("plugin workspace preparation missing")?,
+                    &path,
+                    maximum,
+                )?
+                .ok_or("plugin snapshot document closed")?;
+            self.workspace_edits.open_snapshot(0, snapshot)?;
+            self.workspace_edits.finish_preparation(
+                vec![prepared.draft],
+                self.workspace.edit_scope(),
+                &self.workspace.version(),
+                self.configuration.binding_revision(),
+            )
+        })();
+        match result {
+            Ok(()) => self.show_workspace_proposal(),
+            Err(error) => {
+                if self
+                    .workspace_edits
+                    .origin()
+                    .is_some_and(|origin| origin.same(&key))
+                {
+                    self.abort_workspace_edit(error);
+                } else {
+                    let _ = self.plugin_edits.finish(&key);
+                    self.show_error(error);
+                }
+            }
+        }
     }
 }

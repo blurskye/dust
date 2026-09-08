@@ -1,7 +1,88 @@
 use super::*;
 
+/// Opaque identity/revision of editor-owned window topology. Transaction clones
+/// preserve identity; independently constructed editor states do not.
 #[derive(Clone, Debug)]
+pub(crate) struct EditorWindowVersion {
+    identity: std::sync::Arc<()>,
+    snapshot: std::sync::Arc<()>,
+    revision: Option<u64>,
+}
+impl PartialEq for EditorWindowVersion {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.identity, &other.identity)
+            && std::sync::Arc::ptr_eq(&self.snapshot, &other.snapshot)
+            && self.revision == other.revision
+    }
+}
+impl Eq for EditorWindowVersion {}
+impl EditorWindowVersion {
+    pub(crate) fn same_editor(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.identity, &other.identity)
+    }
+    #[must_use]
+    pub const fn revision(&self) -> Option<u64> {
+        self.revision
+    }
+}
+
+/// An editor-created immutable source view. Callers cannot pair one editor's
+/// revision ticket with another editor's stores, or supply mutable authority.
+pub(crate) struct EditorTopology<'a> {
+    workspace_root: &'a std::path::Path,
+    buffers: &'a SlotMap<BufferId, Buffer>,
+    views: &'a SlotMap<ViewId, View>,
+    panes: &'a SlotMap<PaneId, Pane>,
+    tabs: &'a SlotMap<TabId, Tab>,
+    active_tab: Option<TabId>,
+    version: EditorWindowVersion,
+}
+impl<'a> From<&'a EditorState> for EditorTopology<'a> {
+    fn from(state: &'a EditorState) -> Self {
+        Self {
+            workspace_root: &state.workspace_root,
+            buffers: &state.buffers,
+            views: &state.views,
+            panes: &state.panes,
+            tabs: &state.tabs,
+            active_tab: state.active_tab,
+            version: state.window_version(),
+        }
+    }
+}
+impl<'a> EditorTopology<'a> {
+    pub(crate) fn workspace_root(&self) -> &'a std::path::Path {
+        self.workspace_root
+    }
+    pub(crate) fn buffers(&self) -> &'a SlotMap<BufferId, Buffer> {
+        self.buffers
+    }
+    pub(crate) fn views(&self) -> &'a SlotMap<ViewId, View> {
+        self.views
+    }
+    pub(crate) fn panes(&self) -> &'a SlotMap<PaneId, Pane> {
+        self.panes
+    }
+    pub(crate) fn tabs(&self) -> &'a SlotMap<TabId, Tab> {
+        self.tabs
+    }
+    pub(crate) fn active_tab(&self) -> Option<TabId> {
+        self.active_tab
+    }
+    pub(crate) fn version(&self) -> &EditorWindowVersion {
+        &self.version
+    }
+    pub(crate) fn window_revision(&self) -> Option<u64> {
+        self.version.revision()
+    }
+}
+
+#[cfg_attr(not(test), derive(Clone))]
+#[derive(Debug)]
 pub struct EditorState {
+    window_identity: std::sync::Arc<()>,
+    window_snapshot: std::sync::Arc<()>,
+    editor_snapshot: std::sync::Arc<()>,
     pub workspace_root: PathBuf,
     pub buffers: SlotMap<BufferId, Buffer>,
     pub views: SlotMap<ViewId, View>,
@@ -15,10 +96,38 @@ pub struct EditorState {
     window_revision_exhausted: bool,
 }
 
+#[cfg(test)]
+thread_local! { static EDITOR_CLONES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+#[cfg(test)]
+impl Clone for EditorState {
+    fn clone(&self) -> Self {
+        EDITOR_CLONES.with(|n| n.set(n.get() + 1));
+        Self {
+            window_identity: self.window_identity.clone(),
+            window_snapshot: self.window_snapshot.clone(),
+            editor_snapshot: self.editor_snapshot.clone(),
+            workspace_root: self.workspace_root.clone(),
+            buffers: self.buffers.clone(),
+            views: self.views.clone(),
+            panes: self.panes.clone(),
+            tabs: self.tabs.clone(),
+            active_tab: self.active_tab,
+            active_view: self.active_view,
+            registers: self.registers.clone(),
+            policy: self.policy,
+            window_revision: self.window_revision,
+            window_revision_exhausted: self.window_revision_exhausted,
+        }
+    }
+}
+
 impl EditorState {
     #[must_use]
     pub fn new(workspace_root: PathBuf) -> Self {
         Self {
+            window_identity: std::sync::Arc::new(()),
+            window_snapshot: std::sync::Arc::new(()),
+            editor_snapshot: std::sync::Arc::new(()),
             workspace_root,
             buffers: SlotMap::with_key(),
             views: SlotMap::with_key(),
@@ -33,10 +142,19 @@ impl EditorState {
         }
     }
 
+    /// Capture the source identity and current topology revision without copying stores.
+    #[must_use]
+    pub(crate) fn window_version(&self) -> EditorWindowVersion {
+        EditorWindowVersion {
+            identity: self.window_identity.clone(),
+            snapshot: self.window_snapshot.clone(),
+            revision: self.window_revision(),
+        }
+    }
+
     /// Exact source-owned gate for universal-window reconciliation.
     ///
-    /// Exhaustion fails open: callers receive `None` and must reconcile rather
-    /// than risk treating changed editor presentation as current.
+    /// Exhaustion returns `None`; window admission and projections fail closed.
     #[must_use]
     pub const fn window_revision(&self) -> Option<u64> {
         if self.window_revision_exhausted {
@@ -46,7 +164,24 @@ impl EditorState {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn test_clone_count() -> usize {
+        EDITOR_CLONES.with(std::cell::Cell::get)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn exhaust_window_source_for_test(&mut self) {
+        self.window_revision = u64::MAX;
+        self.mark_window_changed();
+    }
+
+    pub(crate) fn mark_editor_changed(&mut self) {
+        self.editor_snapshot = std::sync::Arc::new(());
+    }
+
     pub(crate) fn mark_window_changed(&mut self) {
+        self.window_snapshot = std::sync::Arc::new(());
+        self.mark_editor_changed();
         match self.window_revision.checked_add(1) {
             Some(revision) => self.window_revision = revision,
             None => self.window_revision_exhausted = true,
@@ -105,6 +240,8 @@ impl EditorState {
         target.mark_saved_as(revision, bytes, path);
         if target.path != before_path || target.dirty != before_dirty {
             self.mark_window_changed();
+        } else {
+            self.mark_editor_changed();
         }
         true
     }
@@ -173,6 +310,7 @@ impl EditorState {
             revision,
         };
         *target = replacement;
+        self.mark_editor_changed();
         true
     }
 
@@ -641,5 +779,32 @@ impl EditorState {
         self.active_view
             .and_then(|view| self.views.get(view))
             .map(|view| view.buffer)
+    }
+}
+
+/// Exact editor publication source, separate from presentation-only revisions.
+#[derive(Clone, Debug)]
+pub(crate) struct EditorVersion {
+    window: EditorWindowVersion,
+    snapshot: std::sync::Arc<()>,
+}
+impl PartialEq for EditorVersion {
+    fn eq(&self, other: &Self) -> bool {
+        self.window == other.window && std::sync::Arc::ptr_eq(&self.snapshot, &other.snapshot)
+    }
+}
+impl Eq for EditorVersion {}
+
+impl EditorState {
+    pub(crate) fn version(&self) -> EditorVersion {
+        EditorVersion {
+            window: self.window_version(),
+            snapshot: self.editor_snapshot.clone(),
+        }
+    }
+}
+impl EditorVersion {
+    pub(crate) fn window(&self) -> &EditorWindowVersion {
+        &self.window
     }
 }

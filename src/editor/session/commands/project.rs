@@ -53,6 +53,11 @@ pub(super) fn register_commands(
             AppEffect::ExplorerClose,
         ),
         (
+            "explorer.panel.toggle",
+            "Toggle file explorer",
+            AppEffect::ExplorerPanelToggle,
+        ),
+        (
             "explorer.next",
             "Select next explorer row",
             AppEffect::ExplorerMove(1),

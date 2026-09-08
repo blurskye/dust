@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn lsp_documentation_popup_preserves_multiline_kind_and_cancels_without_notification() {
     let mut app = app();
-    app.ui.notification = Some("keep unrelated notification".into());
+    app.notify_message("keep unrelated notification".into(), false);
     app.present_lsp_result(
         "rust-analyzer",
         1,
@@ -46,21 +46,13 @@ fn lsp_documentation_popup_preserves_multiline_kind_and_cancels_without_notifica
     assert_eq!(popup.kind, DocumentationPopupKind::Signature);
     assert_eq!(popup.line_count(), 3);
 
-    app.configuration
-        .settings
-        .ui
-        .documentation_popup
-        .maximum_sections = 1;
-    app.configuration
-        .settings
-        .ui
-        .documentation_popup
-        .maximum_lines = 1;
-    app.configuration
-        .settings
-        .ui
-        .documentation_popup
-        .maximum_bytes = 256;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.ui.documentation_popup.maximum_sections = 1;
+        fixture.settings.ui.documentation_popup.maximum_lines = 1;
+        fixture.settings.ui.documentation_popup.maximum_bytes = 256;
+        app.configuration.install_fixture(fixture);
+    }
     app.present_documentation_popup(
         DocumentationPopupKind::Hover,
         "bounded".into(),
@@ -93,7 +85,11 @@ fn inlay_hint_results_are_revision_owned_and_projected_at_exact_unicode_offsets(
         crate::editor::text::TextBuffer::from_text("let 界 = build();"),
         Some(path.clone()),
     );
-    app.configuration.settings.lsp.inlay_hint_level = crate::config::InlayHintLevel::Max;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.lsp.inlay_hint_level = crate::config::InlayHintLevel::Max;
+        app.configuration.install_fixture(fixture);
+    }
     app.present_lsp_result(
         "rust-analyzer",
         6,
@@ -145,9 +141,17 @@ fn inlay_hint_results_are_revision_owned_and_projected_at_exact_unicode_offsets(
     assert_eq!(app.lsp_inlay_empty_retries, 0);
     assert!(app.lsp_inlay_refresh_due.is_none());
 
-    app.configuration.settings.lsp.inlay_hint_level = crate::config::InlayHintLevel::Standard;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.lsp.inlay_hint_level = crate::config::InlayHintLevel::Standard;
+        app.configuration.install_fixture(fixture);
+    }
     assert!(!app.schedule_lsp_inlay_warmup_retry());
-    app.configuration.settings.lsp.inlay_hint_level = crate::config::InlayHintLevel::Max;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.lsp.inlay_hint_level = crate::config::InlayHintLevel::Max;
+        app.configuration.install_fixture(fixture);
+    }
     for retry in 1..=super::LSP_INLAY_HINT_WARMUP_RETRY_LIMIT {
         assert!(app.schedule_lsp_inlay_warmup_retry());
         assert_eq!(app.lsp_inlay_empty_retries, retry);
@@ -170,9 +174,12 @@ fn background_inlay_failures_never_replace_the_user_notification() {
         uri: "file:///inlay-failure.rs".into(),
         language: "rust".into(),
     };
-    app.configuration.settings.lsp.inlay_hint_level = crate::config::InlayHintLevel::Max;
-    app.ui.notification = Some("stable notification".into());
-    app.ui.notification_error = false;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.lsp.inlay_hint_level = crate::config::InlayHintLevel::Max;
+        app.configuration.install_fixture(fixture);
+    }
+    app.notify_message("stable notification".into(), false);
     app.lsp_inlay_request_owner = Some((42, owner.clone()));
 
     app.handle_lsp_request_failure(
@@ -209,7 +216,7 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
     let (buffer, view) = app
         .state
         .open_text(TextBuffer::from_text("let value = 1;"), Some(path));
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
     let owner = super::LspProjectionOwner {
         server: "fake-server".into(),
         buffer,
@@ -253,12 +260,14 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
     assert_eq!(popup.kind, DocumentationPopupKind::Completion);
     assert_eq!(popup.provider, "fake-server");
     assert_eq!(popup.sections[0].markup, DocumentationMarkupKind::Markdown);
-    app.ui
-        .documentation_popup
-        .as_mut()
-        .expect("completion documentation")
-        .sections[0]
-        .lines = (0..40).map(|line| format!("line {line}")).collect();
+    app.lsp_completion_items[0].documentation = Some(crate::language::lsp::LspMarkupContent {
+        kind: crate::language::lsp::LspMarkupKind::Markdown,
+        value: (0..40)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    });
+    app.refresh_lsp_completion_documentation();
     assert_eq!(app.active_input_context(), "completion");
     app.handle_configured_key("ctrl-d".parse::<KeyEvent>().expect("Ctrl-d"));
     assert_eq!(

@@ -5,15 +5,18 @@ use std::{
     io::BufReader,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::mpsc::{self, Receiver, Sender},
-    thread::{self, JoinHandle},
+    sync::{
+        atomic::Ordering,
+        mpsc::{self, Receiver},
+    },
+    thread,
     time::Duration,
 };
 
 use serde_json::{Value, json};
 use thiserror::Error;
 
-use crate::process::{read_content_length_message, write_content_length_message};
+use crate::process::read_content_length_message;
 
 #[derive(Clone, Debug)]
 pub enum DapEvent {
@@ -40,9 +43,17 @@ pub enum DapEvent {
         stop_generation: u64,
         response: DapResponse,
     },
+    RequestFailed {
+        adapter: String,
+        stop_generation: u64,
+        request_seq: i64,
+        command: String,
+        message: String,
+    },
     RunInTerminal {
         adapter: String,
         request_seq: i64,
+        reply: DapTerminalReply,
         cwd: PathBuf,
         arguments: Vec<String>,
         environment: HashMap<String, String>,
@@ -146,10 +157,14 @@ pub enum DapControl {
     Stop,
 }
 
-struct DapSession {
-    sender: Sender<DapControl>,
-    thread: Option<JoinHandle<()>>,
-}
+mod reverse;
+pub(crate) use reverse::DapReplyReceipt;
+pub use reverse::{DapReplyOutcome, DapTerminalReply};
+
+mod session;
+pub use session::DapService;
+pub(crate) use session::{DapContext, ExecutionScope};
+use session::{Events, Writer};
 
 pub struct DapLaunch {
     pub adapter: String,
@@ -162,104 +177,20 @@ pub struct DapLaunch {
     pub request_arguments: Value,
 }
 
-pub struct DapService {
-    events: Sender<DapEvent>,
-    receiver: Receiver<DapEvent>,
-    session: Option<(String, DapSession)>,
-}
-
-impl DapService {
-    #[must_use]
-    pub fn new() -> Self {
-        let (events, receiver) = mpsc::channel();
-        Self {
-            events,
-            receiver,
-            session: None,
+fn run_adapter(
+    launch: DapLaunch,
+    controls: Receiver<session::Control>,
+    events: Events,
+    scope: Option<ExecutionScope>,
+) {
+    let live = events.actor.live.clone();
+    struct Live(std::sync::Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for Live {
+        fn drop(&mut self) {
+            self.0.store(false, std::sync::atomic::Ordering::Release);
         }
     }
-
-    #[must_use]
-    pub fn is_running(&self) -> bool {
-        self.session.is_some()
-    }
-
-    pub fn start_absolute(&mut self, launch: DapLaunch) -> Result<(), DapError> {
-        if self.session.is_some() {
-            return Err(DapError::AlreadyRunning);
-        }
-        if !launch.executable.is_absolute()
-            || !launch.root.is_absolute()
-            || !matches!(launch.request.as_str(), "launch" | "attach")
-        {
-            return Err(DapError::InvalidConfiguration);
-        }
-        let (sender, commands) = mpsc::channel();
-        let events = self.events.clone();
-        events
-            .send(DapEvent::Starting {
-                adapter: launch.adapter.clone(),
-            })
-            .ok();
-        let session_id = launch.adapter.clone();
-        let thread = thread::Builder::new()
-            .name(format!("dust-dap-{}", launch.adapter))
-            .spawn(move || run_adapter(launch, commands, events))
-            .map_err(DapError::Thread)?;
-        self.session = Some((
-            session_id,
-            DapSession {
-                sender,
-                thread: Some(thread),
-            },
-        ));
-        Ok(())
-    }
-
-    pub fn control(&self, control: DapControl) -> Result<(), DapError> {
-        self.session
-            .as_ref()
-            .ok_or(DapError::NotRunning)?
-            .1
-            .sender
-            .send(control)
-            .map_err(|_| DapError::NotRunning)
-    }
-
-    pub fn stop(&mut self) -> Result<(), DapError> {
-        let Some((_, mut session)) = self.session.take() else {
-            return Err(DapError::NotRunning);
-        };
-        session.sender.send(DapControl::Stop).ok();
-        if let Some(thread) = session.thread.take() {
-            let _ = thread.join();
-        }
-        Ok(())
-    }
-
-    #[must_use]
-    pub fn active_adapter(&self) -> Option<&str> {
-        self.session.as_ref().map(|(adapter, _)| adapter.as_str())
-    }
-
-    pub fn try_event(&self) -> Option<DapEvent> {
-        self.receiver.try_recv().ok()
-    }
-}
-
-impl Default for DapService {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Drop for DapService {
-    fn drop(&mut self) {
-        let _ = self.stop();
-    }
-}
-
-fn run_adapter(launch: DapLaunch, controls: Receiver<DapControl>, events: Sender<DapEvent>) {
+    let _live = Live(live.clone());
     let DapLaunch {
         adapter,
         executable,
@@ -270,6 +201,12 @@ fn run_adapter(launch: DapLaunch, controls: Receiver<DapControl>, events: Sender
         request,
         request_arguments,
     } = launch;
+    if let Some(scope) = &scope {
+        if let Err(message) = scope.check() {
+            events.send(DapEvent::Failed { adapter, message }).ok();
+            return;
+        }
+    }
     let mut command = Command::new(executable);
     command
         .args(arguments)
@@ -284,7 +221,10 @@ fn run_adapter(launch: DapLaunch, controls: Receiver<DapControl>, events: Sender
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
-    let mut child = match command.spawn() {
+    if events.actor.cancel.load(Ordering::Acquire) {
+        return;
+    }
+    let child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
             events
@@ -296,34 +236,68 @@ fn run_adapter(launch: DapLaunch, controls: Receiver<DapControl>, events: Sender
             return;
         }
     };
-    let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+    struct Child(std::process::Child);
+    impl Drop for Child {
+        fn drop(&mut self) {
+            terminate_adapter(&mut self.0);
+        }
+    }
+    let mut child = Child(child);
+    // Retire reply/source authority before potentially blocking child cleanup,
+    // including unwind; rebinding transfers this guard's drop order.
+    let _live = _live;
+    let child = &mut child.0;
+    let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
         events
             .send(DapEvent::Failed {
                 adapter,
                 message: "adapter pipes unavailable".into(),
             })
             .ok();
-        terminate_adapter(&mut child);
         return;
     };
-    let (messages, receiver) = mpsc::channel();
-    let reader = thread::spawn(move || {
-        let mut reader = BufReader::new(stdout);
-        loop {
-            match read_content_length_message(&mut reader) {
-                Ok(Some(value)) => {
-                    if messages.send(Ok(value)).is_err() {
-                        break;
-                    }
-                }
-                Ok(None) => break,
-                Err(error) => {
-                    messages.send(Err(error.to_string())).ok();
+    let (messages, receiver) = mpsc::sync_channel(32);
+    let reader_events = events.clone();
+    let reader = thread::Builder::new()
+        .name("dust-dap-reader".into())
+        .spawn(move || {
+            let _resident = reader_events.clone();
+            let mut reader = BufReader::new(stdout);
+            loop {
+                // Framing already enforces a bounded header and 16MiB message limit.
+                let value = match read_content_length_message(&mut reader) {
+                    Ok(Some(value)) => Ok(value),
+                    Ok(None) => break,
+                    Err(error) => Err(error.to_string()),
+                };
+                if !session::deliver(&messages, value, &reader_events.actor.cancel) {
                     break;
                 }
             }
+        });
+    if let Err(error) = reader {
+        events
+            .send(DapEvent::Failed {
+                adapter,
+                message: error.to_string(),
+            })
+            .ok();
+        return;
+    }
+    // A pipe write cannot hold the controller hostage. Both I/O threads retain
+    // resident leases, including while an inherited descriptor is stuck.
+    let (mut stdin, writer) = match Writer::start(stdin, events.clone()) {
+        Ok(writer) => writer,
+        Err(error) => {
+            events
+                .send(DapEvent::Failed {
+                    adapter,
+                    message: error.to_string(),
+                })
+                .ok();
+            return;
         }
-    });
+    };
     let mut sequence = 1_i64;
     send_request(
         &mut stdin,
@@ -343,8 +317,49 @@ fn run_adapter(launch: DapLaunch, controls: Receiver<DapControl>, events: Sender
     let mut stopping = false;
     let mut stop_generation = 0_u64;
     let mut pending: HashMap<i64, (String, u64)> = HashMap::new();
-    while !stopping {
-        while let Ok(control) = controls.try_recv() {
+    let mut reverse = Vec::<reverse::ReverseRequest>::new();
+    let mut last_reverse_sequence = 0;
+    while !stopping && !events.actor.cancel.load(Ordering::Acquire) {
+        if sequence > i64::MAX - 128 {
+            break;
+        }
+        reverse.retain_mut(|request| !request.flush(&mut stdin, &mut sequence));
+        for _ in 0..32 {
+            let Ok(control) = controls.try_recv() else {
+                break;
+            };
+            if control.generation != events.actor.generation.load(Ordering::Acquire) {
+                continue;
+            }
+            let control = control.value;
+            if let DapControl::ReverseResponse { request_seq, .. } = &control {
+                if let Some(request) = reverse.iter_mut().find(|r| r.sequence == *request_seq) {
+                    request.raw(control);
+                }
+                continue;
+            }
+            if pending.len() >= 128 || sequence > i64::MAX - 8 {
+                events
+                    .send(DapEvent::Failed {
+                        adapter: adapter.clone(),
+                        message: "DAP request capacity or sequence exhausted".into(),
+                    })
+                    .ok();
+                stopping = true;
+                break;
+            }
+            if matches!(
+                control,
+                DapControl::Continue | DapControl::Next | DapControl::StepIn | DapControl::StepOut
+            ) {
+                let Some(next) = stop_generation.checked_add(1) else {
+                    stopping = true;
+                    break;
+                };
+                stop_generation = next;
+                events.actor.generation.store(next, Ordering::Release);
+                pending.clear();
+            }
             let (command, arguments) = match control {
                 DapControl::Continue => (
                     Some("continue"),
@@ -395,17 +410,7 @@ fn run_adapter(launch: DapLaunch, controls: Receiver<DapControl>, events: Sender
                 DapControl::Source { reference } => {
                     (Some("source"), json!({"sourceReference":reference}))
                 }
-                DapControl::ReverseResponse {
-                    request_seq,
-                    success,
-                    message,
-                    process_id,
-                } => {
-                    let response = json!({"seq":sequence,"type":"response","request_seq":request_seq,"success":success,"command":"runInTerminal","message":message,"body":{"processId":process_id}});
-                    let _ = write_content_length_message(&mut stdin, &response);
-                    sequence += 1;
-                    (None, json!({}))
-                }
+                DapControl::ReverseResponse { .. } => unreachable!("reverse control routed above"),
                 DapControl::SetBreakpoints { path, breakpoints } => {
                     let path = map_path(&path, &path_maps, false);
                     (
@@ -431,24 +436,72 @@ fn run_adapter(launch: DapLaunch, controls: Receiver<DapControl>, events: Sender
                         == Some(initialize_sequence)
                         && !launched =>
                 {
+                    if message.get("success").and_then(Value::as_bool) != Some(true) {
+                        events
+                            .send(DapEvent::Failed {
+                                adapter: adapter.clone(),
+                                message: "DAP initialize rejected".into(),
+                            })
+                            .ok();
+                        break;
+                    }
                     supports_configuration_done = message
                         .pointer("/body/supportsConfigurationDoneRequest")
                         .and_then(Value::as_bool)
                         .unwrap_or(false);
+                    if let Some(scope) = &scope {
+                        if let Err(message) = scope.check() {
+                            events
+                                .send(DapEvent::Failed {
+                                    adapter: adapter.clone(),
+                                    message,
+                                })
+                                .ok();
+                            break;
+                        }
+                    }
                     send_request(&mut stdin, sequence, &request, request_arguments.clone());
+                    pending.insert(sequence, (request.clone(), stop_generation));
                     sequence += 1;
                     launched = true;
-                    events
-                        .send(DapEvent::Running {
-                            adapter: adapter.clone(),
-                        })
-                        .ok();
                 }
                 Some("response") => {
                     if let Some(request_seq) = message.get("request_seq").and_then(Value::as_i64)
                         && let Some((command, generation)) = pending.remove(&request_seq)
                         && generation == stop_generation
                     {
+                        if message.get("success").and_then(Value::as_bool) != Some(true) {
+                            let message = format!(
+                                "DAP {command} request rejected: {}",
+                                bounded(message.get("message"))
+                            );
+                            if command == "launch" || command == "attach" {
+                                events
+                                    .send(DapEvent::Failed {
+                                        adapter: adapter.clone(),
+                                        message,
+                                    })
+                                    .ok();
+                                break;
+                            }
+                            events
+                                .send(DapEvent::RequestFailed {
+                                    adapter: adapter.clone(),
+                                    stop_generation: generation,
+                                    request_seq,
+                                    command,
+                                    message,
+                                })
+                                .ok();
+                            continue;
+                        }
+                        if command == "launch" || command == "attach" {
+                            events
+                                .send(DapEvent::Running {
+                                    adapter: adapter.clone(),
+                                })
+                                .ok();
+                        }
                         if let Some(response) = normalize_response(
                             &command,
                             message.get("body").unwrap_or(&Value::Null),
@@ -459,6 +512,25 @@ fn run_adapter(launch: DapLaunch, controls: Receiver<DapControl>, events: Sender
                                     adapter: adapter.clone(),
                                     stop_generation: generation,
                                     response,
+                                })
+                                .ok();
+                        } else if matches!(
+                            command.as_str(),
+                            "threads"
+                                | "stackTrace"
+                                | "scopes"
+                                | "variables"
+                                | "evaluate"
+                                | "source"
+                                | "setBreakpoints"
+                        ) {
+                            events
+                                .send(DapEvent::RequestFailed {
+                                    adapter: adapter.clone(),
+                                    stop_generation: generation,
+                                    request_seq,
+                                    command,
+                                    message: "DAP response body is missing or malformed".into(),
                                 })
                                 .ok();
                         }
@@ -476,7 +548,11 @@ fn run_adapter(launch: DapLaunch, controls: Receiver<DapControl>, events: Sender
                         }
                         "initialized" => {}
                         "stopped" => {
-                            stop_generation = stop_generation.saturating_add(1);
+                            let Some(next) = stop_generation.checked_add(1) else {
+                                break;
+                            };
+                            stop_generation = next;
+                            events.actor.generation.store(next, Ordering::Release);
                             pending.retain(|_, (_, generation)| *generation == stop_generation);
                             thread_id = message.pointer("/body/threadId").and_then(Value::as_i64);
                             let reason = message
@@ -496,6 +572,12 @@ fn run_adapter(launch: DapLaunch, controls: Receiver<DapControl>, events: Sender
                                 .ok();
                         }
                         "continued" => {
+                            let Some(next) = stop_generation.checked_add(1) else {
+                                break;
+                            };
+                            stop_generation = next;
+                            events.actor.generation.store(next, Ordering::Release);
+                            pending.clear();
                             events
                                 .send(DapEvent::Running {
                                     adapter: adapter.clone(),
@@ -531,59 +613,44 @@ fn run_adapter(launch: DapLaunch, controls: Receiver<DapControl>, events: Sender
                         .get("command")
                         .and_then(Value::as_str)
                         .unwrap_or_default();
+                    if request_seq <= last_reverse_sequence || reverse.len() >= 32 {
+                        events
+                            .send(DapEvent::Failed {
+                                adapter: adapter.clone(),
+                                message: "DAP reverse request identity reused or admission full"
+                                    .into(),
+                            })
+                            .ok();
+                        break;
+                    }
+                    last_reverse_sequence = request_seq;
                     if command == "runInTerminal" {
-                        let cwd = message
-                            .pointer("/arguments/cwd")
-                            .and_then(Value::as_str)
-                            .map(PathBuf::from);
-                        let arguments = message
-                            .pointer("/arguments/args")
-                            .and_then(Value::as_array)
-                            .map(|values| {
-                                values
-                                    .iter()
-                                    .take(4096)
-                                    .filter_map(Value::as_str)
-                                    .map(|value| value.chars().take(64 * 1024).collect())
-                                    .collect::<Vec<_>>()
-                            });
-                        let environment = message
-                            .pointer("/arguments/env")
-                            .and_then(Value::as_object)
-                            .map(|values| {
-                                values
-                                    .iter()
-                                    .take(4096)
-                                    .filter_map(|(key, value)| {
-                                        value.as_str().map(|value| {
-                                            (
-                                                key.chars().take(1024).collect(),
-                                                value.chars().take(64 * 1024).collect(),
-                                            )
-                                        })
-                                    })
-                                    .collect::<HashMap<_, _>>()
-                            });
-                        if let (Some(cwd), Some(arguments), Some(environment)) =
-                            (cwd, arguments, environment)
+                        // Reserve the original obligation BEFORE argv/environment projection.
+                        let (request, reply) =
+                            reverse::ReverseRequest::reserve(request_seq, live.clone());
+                        reverse.push(request);
+                        if let Some((cwd, arguments, environment)) =
+                            reverse::terminal_arguments(&message)
                         {
                             events
                                 .send(DapEvent::RunInTerminal {
                                     adapter: adapter.clone(),
                                     request_seq,
+                                    reply,
                                     cwd,
                                     arguments,
                                     environment,
                                 })
                                 .ok();
                         } else {
-                            let response = json!({"seq":sequence,"type":"response","request_seq":request_seq,"success":false,"command":command,"message":"invalid bounded runInTerminal arguments"});
-                            let _ = write_content_length_message(&mut stdin, &response);
-                            sequence += 1;
+                            let _ = reply.respond(
+                                false,
+                                Some("invalid bounded runInTerminal arguments".into()),
+                            );
                         }
                     } else {
                         let response = json!({"seq":sequence,"type":"response","request_seq":request_seq,"success":false,"command":command,"message":"unsupported reverse request"});
-                        let _ = write_content_length_message(&mut stdin, &response);
+                        let _ = stdin.submit(response);
                         sequence += 1;
                     }
                 }
@@ -604,15 +671,24 @@ fn run_adapter(launch: DapLaunch, controls: Receiver<DapControl>, events: Sender
         if child.try_wait().ok().flatten().is_some() {
             stopping = true;
         }
+        if writer.is_finished() && !events.actor.cancel.load(Ordering::Acquire) {
+            live.store(false, Ordering::Release);
+            events
+                .send(DapEvent::Failed {
+                    adapter: adapter.clone(),
+                    message: "DAP writer stopped; pending write outcomes unknown".into(),
+                })
+                .ok();
+            stopping = true;
+        }
     }
-    send_request(
-        &mut stdin,
-        sequence,
-        "disconnect",
-        json!({"terminateDebuggee":true}),
-    );
-    terminate_adapter(&mut child);
-    let _ = reader.join();
+    // Out-of-band cancellation is not a successful protocol disconnect.
+    // Controller owns kill/wait; no foreground thread waits for this cleanup.
+    live.store(false, Ordering::Release);
+    events.actor.cancel.store(true, Ordering::Release);
+    drop(stdin);
+    drop(reader);
+    drop(writer);
 }
 
 fn bounded(value: Option<&Value>) -> String {
@@ -763,6 +839,10 @@ fn normalize_response(
     }
 }
 fn terminate_adapter(child: &mut std::process::Child) {
+    // Do not signal a numeric process group after the direct child was reaped.
+    if matches!(child.try_wait(), Ok(Some(_))) {
+        return;
+    }
     #[cfg(unix)]
     {
         let _ = nix::sys::signal::killpg(
@@ -774,13 +854,10 @@ fn terminate_adapter(child: &mut std::process::Child) {
     let _ = child.wait();
 }
 
-fn send_request(writer: &mut impl std::io::Write, seq: i64, command: &str, arguments: Value) {
-    let _ = write_content_length_message(
-        writer,
-        &json!({
-            "seq":seq, "type":"request", "command":command, "arguments":arguments
-        }),
-    );
+fn send_request(writer: &mut Writer, seq: i64, command: &str, arguments: Value) {
+    let _ = writer.submit(json!({
+        "seq":seq, "type":"request", "command":command, "arguments":arguments
+    }));
 }
 
 fn sanitize_output(output: &str) -> String {
@@ -803,6 +880,10 @@ pub enum DapError {
     ExecutableMissing(String),
     #[error("invalid debug adapter configuration")]
     InvalidConfiguration,
+    #[error("debug adapter admission is full")]
+    Full,
+    #[error("debug adapter source or stopped context retired")]
+    Retired,
     #[error("failed to create debug-adapter thread: {0}")]
     Thread(#[source] std::io::Error),
 }
@@ -817,3 +898,15 @@ mod tests {
         assert_eq!(sanitize_output(&"x".repeat(5000)).len(), 4096);
     }
 }
+
+#[cfg(test)]
+pub(crate) fn terminal_reply_source_fixture() {
+    reverse::fixture();
+}
+
+#[cfg(test)]
+pub(crate) use session::fixture as test_session;
+#[cfg(test)]
+mod transport_tests;
+#[cfg(test)]
+pub(crate) use transport_tests::{ADAPTER as TEST_ADAPTER, python as test_python};

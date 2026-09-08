@@ -1,0 +1,476 @@
+//! Private explorer I/O protocol. Public VfsRequest/VfsResult remain unchanged.
+use super::vfs::roots_current;
+use super::{ExplorerMutation, RequestId, VfsError};
+use crate::workspace::RootIdentity;
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
+
+#[derive(Debug)]
+pub(crate) struct PreparedExplorerMutation {
+    operation: ExplorerMutation,
+    roots: Vec<RootIdentity>,
+    identities: Vec<(PathBuf, fs::File)>,
+    maximum: u64,
+}
+impl PreparedExplorerMutation {
+    pub(crate) fn operation(&self) -> &ExplorerMutation {
+        &self.operation
+    }
+}
+pub(crate) enum ExplorerIo {
+    Open {
+        path: PathBuf,
+        roots: Vec<RootIdentity>,
+    },
+    Prepare {
+        operation: ExplorerMutation,
+        roots: Vec<RootIdentity>,
+        maximum: u64,
+    },
+    Apply(PreparedExplorerMutation),
+}
+#[derive(Debug)]
+pub(crate) enum ExplorerIoReply {
+    Opened {
+        id: RequestId,
+        path: PathBuf,
+        result: Result<Vec<u8>, VfsError>,
+    },
+    Prepared {
+        id: RequestId,
+        result: Result<PreparedExplorerMutation, VfsError>,
+    },
+    Applied {
+        id: RequestId,
+        result: Result<(), VfsError>,
+    },
+}
+impl ExplorerIoReply {
+    pub(crate) fn id(&self) -> RequestId {
+        match self {
+            Self::Prepared { id, .. } | Self::Applied { id, .. } | Self::Opened { id, .. } => *id,
+        }
+    }
+}
+fn error(path: &Path, message: impl Into<String>) -> VfsError {
+    VfsError::Io {
+        operation: "check explorer identity",
+        path: path.into(),
+        source: io::Error::other(message.into()),
+    }
+}
+fn identity(metadata: &fs::Metadata) -> (u64, u64) {
+    use std::os::unix::fs::MetadataExt;
+    (metadata.dev(), metadata.ino())
+}
+
+fn prepare(
+    operation: ExplorerMutation,
+    roots: Vec<RootIdentity>,
+    maximum: u64,
+) -> Result<PreparedExplorerMutation, VfsError> {
+    let requested = operation
+        .source()
+        .into_iter()
+        .chain(operation.target())
+        .map(Path::to_path_buf)
+        .collect::<Vec<_>>();
+    let paths: Vec<_> = roots.iter().map(|r| r.canonical_path.clone()).collect();
+    let operation = match operation {
+        ExplorerMutation::Create { path, directory } => ExplorerMutation::Create {
+            path: super::vfs::scoped_missing_target(&path, &paths)?,
+            directory,
+        },
+        ExplorerMutation::Rename { source, target } => ExplorerMutation::Rename {
+            source: super::vfs::scoped_existing_path(&source, &paths)?,
+            target: super::vfs::scoped_missing_target(&target, &paths)?,
+        },
+        ExplorerMutation::Copy { source, target } => ExplorerMutation::Copy {
+            source: super::vfs::scoped_existing_path(&source, &paths)?,
+            target: super::vfs::scoped_missing_target(&target, &paths)?,
+        },
+        ExplorerMutation::Delete { path } => ExplorerMutation::Delete {
+            path: super::vfs::scoped_existing_path(&path, &paths)?,
+        },
+    };
+    let roots = super::vfs::participating_roots(
+        &requested.iter().map(PathBuf::as_path).collect::<Vec<_>>(),
+        &operation
+            .source()
+            .into_iter()
+            .chain(operation.target())
+            .collect::<Vec<_>>(),
+        &roots,
+    )?;
+    // Creating a new name may precede the first listing. Observe an unknown
+    // root on this worker; this is filesystem scoping, never execution trust.
+    let roots = roots
+        .into_iter()
+        .map(|root| {
+            if root.filesystem_identity.is_none()
+                && matches!(operation, ExplorerMutation::Create { .. })
+            {
+                let observed = RootIdentity::capture(&root.canonical_path)
+                    .map_err(|e| error(&root.canonical_path, e.to_string()))?;
+                if observed.canonical_path != root.canonical_path {
+                    return Err(error(&root.canonical_path, "workspace path changed"));
+                }
+                Ok(observed)
+            } else {
+                Ok(root)
+            }
+        })
+        .collect::<Result<Vec<_>, VfsError>>()?;
+    roots_current(&roots)?;
+    let mut watched = roots
+        .iter()
+        .map(|r| r.canonical_path.clone())
+        .collect::<Vec<_>>();
+    if let Some(source) = operation.source() {
+        watched.push(source.into());
+    }
+    if let Some(parent) = operation.target().and_then(Path::parent) {
+        watched.push(parent.into());
+    }
+    watched.sort();
+    watched.dedup();
+    let identities = watched
+        .into_iter()
+        .map(|path| {
+            // Holding the original inode also prevents immediate unlink/recreate inode reuse.
+            use std::os::unix::fs::OpenOptionsExt;
+            let file = fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
+                .open(&path)
+                .map_err(|e| error(&path, e.to_string()))?;
+            let metadata = file.metadata().map_err(|e| error(&path, e.to_string()))?;
+            if !metadata.is_file() && !metadata.is_dir() {
+                return Err(VfsError::NotRegularFile(path));
+            }
+            Ok((path, file))
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(PreparedExplorerMutation {
+        operation,
+        roots,
+        identities,
+        maximum,
+    })
+}
+fn apply(intent: PreparedExplorerMutation) -> Result<(), VfsError> {
+    roots_current(&intent.roots)?;
+    for (path, original) in &intent.identities {
+        let current = fs::symlink_metadata(path).map_err(|e| error(path, e.to_string()))?;
+        let original = original
+            .metadata()
+            .map_err(|e| error(path, e.to_string()))?;
+        if current.file_type().is_symlink() || identity(&current) != identity(&original) {
+            return Err(error(path, "explorer target filesystem identity changed"));
+        }
+    }
+    let roots = intent
+        .roots
+        .iter()
+        .map(|r| r.canonical_path.clone())
+        .collect::<Vec<_>>();
+    // Rechecks are not a filesystem lock: concurrent changes after validation remain possible.
+    super::vfs::apply_explorer_mutation(&intent.operation, &roots, intent.maximum)
+}
+impl ExplorerIo {
+    pub(super) fn run(self, id: RequestId, cancelled: bool) -> ExplorerIoReply {
+        let cancellation = || VfsError::Io {
+            operation: "cancel explorer request",
+            path: PathBuf::new(),
+            source: io::Error::new(
+                io::ErrorKind::Interrupted,
+                "request cancelled before execution",
+            ),
+        };
+        match self {
+            Self::Open { path, roots } => {
+                if cancelled {
+                    return ExplorerIoReply::Opened {
+                        id,
+                        path,
+                        result: Err(cancellation()),
+                    };
+                }
+                match super::canonical_path(&path).and_then(|canonical| {
+                    let roots = super::vfs::participating_roots(&[&path], &[&canonical], &roots)?;
+                    roots_current(&roots)?;
+                    Ok((canonical, roots))
+                }) {
+                    Ok((path, roots)) => {
+                        let result = super::read_file(&path)
+                            .and_then(|bytes| roots_current(&roots).map(|()| bytes));
+                        ExplorerIoReply::Opened { id, path, result }
+                    }
+                    Err(error) => ExplorerIoReply::Opened {
+                        id,
+                        path,
+                        result: Err(error),
+                    },
+                }
+            }
+            Self::Prepare {
+                operation,
+                roots,
+                maximum,
+            } => ExplorerIoReply::Prepared {
+                id,
+                result: if cancelled {
+                    Err(cancellation())
+                } else {
+                    prepare(operation, roots, maximum)
+                },
+            },
+            Self::Apply(intent) => ExplorerIoReply::Applied {
+                id,
+                result: if cancelled {
+                    Err(cancellation())
+                } else {
+                    apply(intent)
+                },
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::files::{VfsReply, VfsWorker};
+    use std::time::{Duration, Instant};
+    fn reply(worker: &VfsWorker) -> ExplorerIoReply {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(VfsReply::Explorer(reply)) = worker.try_reply().unwrap() {
+                return reply;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "explorer worker did not retire its request"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    #[test]
+    fn participating_roots_isolate_missing_roots_and_refuse_replaced_nested_or_cross_root_targets()
+    {
+        let temp = tempfile::tempdir().unwrap();
+        let a = temp.path().join("a");
+        let b = temp.path().join("b");
+        fs::create_dir(&a).unwrap();
+        fs::create_dir(&b).unwrap();
+        let source = a.join("source");
+        fs::write(&source, "source").unwrap();
+        let mut roots = vec![
+            RootIdentity::capture(&a).unwrap(),
+            RootIdentity::capture(&b).unwrap(),
+            RootIdentity {
+                canonical_path: temp.path().join("missing"),
+                filesystem_identity: None,
+            },
+        ];
+        let mut directory = crate::files::DirectoryService::default();
+        directory
+            .list(
+                a.clone(),
+                roots.iter().map(|r| r.canonical_path.clone()).collect(),
+                1,
+                true,
+                true,
+                64,
+            )
+            .unwrap();
+        let until = std::time::Instant::now() + Duration::from_secs(2);
+        let observed = loop {
+            if let Some(result) = directory.poll_result() {
+                break result.unwrap().1;
+            }
+            assert!(std::time::Instant::now() < until);
+            std::thread::sleep(Duration::from_millis(1));
+        };
+        assert_eq!(observed, [roots[0].clone()]);
+        let mut worker = VfsWorker::start(2);
+        worker.open_explorer(source.clone(), roots.clone()).unwrap();
+        assert!(
+            matches!(reply(&worker), ExplorerIoReply::Opened { result: Ok(bytes), .. } if bytes == b"source")
+        );
+        let target = b.join("copy");
+        worker
+            .prepare_explorer(
+                ExplorerMutation::Copy {
+                    source: source.clone(),
+                    target: target.clone(),
+                },
+                roots.clone(),
+                1024,
+            )
+            .unwrap();
+        let ExplorerIoReply::Prepared {
+            result: Ok(intent), ..
+        } = reply(&worker)
+        else {
+            panic!("cross-root preparation");
+        };
+        assert_eq!(intent.roots.len(), 2);
+        let parked = temp.path().join("parked-b");
+        fs::rename(&b, &parked).unwrap();
+        fs::create_dir(&b).unwrap();
+        worker.apply_explorer(intent).unwrap();
+        assert!(matches!(
+            reply(&worker),
+            ExplorerIoReply::Applied { result: Err(_), .. }
+        ));
+        assert!(!target.exists());
+        assert!(source.exists());
+        fs::remove_dir(&b).unwrap();
+        fs::rename(&parked, &b).unwrap();
+        worker
+            .prepare_explorer(
+                ExplorerMutation::Copy {
+                    source: source.clone(),
+                    target: target.clone(),
+                },
+                roots.clone(),
+                1024,
+            )
+            .unwrap();
+        let ExplorerIoReply::Prepared {
+            result: Ok(intent), ..
+        } = reply(&worker)
+        else {
+            panic!("fresh copy preparation");
+        };
+        worker.apply_explorer(intent).unwrap();
+        assert!(matches!(
+            reply(&worker),
+            ExplorerIoReply::Applied { result: Ok(()), .. }
+        ));
+        assert_eq!(fs::read(&target).unwrap(), b"source");
+        let nested = a.join("nested");
+        fs::create_dir(&nested).unwrap();
+        roots.push(RootIdentity::capture(&nested).unwrap());
+        fs::rename(&nested, a.join("old-nested")).unwrap();
+        std::os::unix::fs::symlink(&b, &nested).unwrap();
+        // Canonicalization points at a valid other root. The invalid lexical
+        // participating root must still reject, not fall back to b or ancestor a.
+        worker
+            .open_explorer(nested.join("copy"), roots.clone())
+            .unwrap();
+        assert!(matches!(
+            reply(&worker),
+            ExplorerIoReply::Opened { result: Err(_), .. }
+        ));
+        worker
+            .prepare_explorer(
+                ExplorerMutation::Delete {
+                    path: nested.join("copy"),
+                },
+                roots.clone(),
+                1024,
+            )
+            .unwrap();
+        assert!(matches!(
+            reply(&worker),
+            ExplorerIoReply::Prepared { result: Err(_), .. }
+        ));
+        assert_eq!(fs::read(&target).unwrap(), b"source");
+        worker.open_explorer(source, roots).unwrap();
+        assert!(matches!(
+            reply(&worker),
+            ExplorerIoReply::Opened { result: Ok(_), .. }
+        ));
+        worker.begin_shutdown();
+    }
+    #[test]
+    fn explorer_worker_preserves_replaced_targets_and_cancels_queued_work_exactly() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let parked = root.path().join("original");
+        fs::write(&source, "original").unwrap();
+        let roots = vec![RootIdentity::capture(root.path()).unwrap()];
+        let mut worker = VfsWorker::start(2);
+        let id = worker
+            .prepare_explorer(
+                ExplorerMutation::Delete {
+                    path: source.clone(),
+                },
+                roots.clone(),
+                1024,
+            )
+            .unwrap();
+        let ExplorerIoReply::Prepared {
+            id: got,
+            result: Ok(intent),
+        } = reply(&worker)
+        else {
+            panic!("preflight failed");
+        };
+        assert_eq!(id, got);
+        fs::rename(&source, &parked).unwrap();
+        fs::write(&source, "replacement").unwrap();
+        worker.apply_explorer(intent).unwrap();
+        assert!(matches!(
+            reply(&worker),
+            ExplorerIoReply::Applied { result: Err(_), .. }
+        ));
+        assert_eq!(fs::read_to_string(&source).unwrap(), "replacement");
+        assert_eq!(fs::read_to_string(&parked).unwrap(), "original");
+        worker
+            .prepare_explorer(
+                ExplorerMutation::Delete {
+                    path: source.clone(),
+                },
+                roots.clone(),
+                1024,
+            )
+            .unwrap();
+        let ExplorerIoReply::Prepared {
+            result: Ok(intent), ..
+        } = reply(&worker)
+        else {
+            panic!("fresh preflight failed");
+        };
+        worker.apply_explorer(intent).unwrap();
+        assert!(matches!(
+            reply(&worker),
+            ExplorerIoReply::Applied { result: Ok(()), .. }
+        ));
+        assert!(!source.exists());
+        let (mut gated, release) = VfsWorker::start_gated_for_test(1);
+        let id = gated
+            .prepare_explorer(
+                ExplorerMutation::Delete {
+                    path: parked.clone(),
+                },
+                roots.clone(),
+                1024,
+            )
+            .unwrap();
+        assert!(matches!(
+            gated.open_explorer(parked.clone(), roots.clone()),
+            Err(VfsError::QueueFull)
+        ));
+        assert!(gated.cancel(id));
+        release.send(()).unwrap();
+        assert!(
+            matches!(reply(&gated), ExplorerIoReply::Prepared { id: got, result: Err(_) } if got == id)
+        );
+        assert!(parked.exists());
+        let open = gated.open_explorer(parked.clone(), roots).unwrap();
+        assert!(
+            matches!(reply(&gated), ExplorerIoReply::Opened { id, result: Ok(bytes), .. } if id == open && bytes == b"original")
+        );
+        assert!(gated.try_reply().unwrap().is_none());
+        gated.begin_shutdown();
+        assert!(matches!(
+            gated.open_explorer(parked, Vec::new()),
+            Err(VfsError::WorkerStopped)
+        ));
+    }
+}

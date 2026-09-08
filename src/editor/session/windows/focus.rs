@@ -1,0 +1,165 @@
+use super::{NativeSurfaceTarget, WindowSession};
+use crate::ui::window::{SpatialDirection, WindowId};
+
+/// The underlying keyboard target. Picker/prompt/documentation capture does not
+/// erase this target; its identity is revalidated when the graph is reconciled.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(in crate::editor::session) enum FocusTarget {
+    #[default]
+    Editor,
+    Explorer,
+    Terminal(u64),
+    Plugin(WindowId),
+}
+
+impl WindowSession {
+    pub(in crate::editor::session) fn new(dashboard: bool, terminal_height: u16) -> Self {
+        Self {
+            dashboard,
+            terminal_height,
+            ..Self::default()
+        }
+    }
+    pub(in crate::editor::session) fn focus(&self) -> FocusTarget {
+        self.focus
+    }
+    pub(in crate::editor::session) fn explorer_focused(&self) -> bool {
+        self.focus() == FocusTarget::Explorer
+    }
+    pub(in crate::editor::session) fn focused_terminal(&self) -> Option<u64> {
+        if let FocusTarget::Terminal(id) = self.focus {
+            Some(id)
+        } else {
+            None
+        }
+    }
+    pub(in crate::editor::session) fn terminal_focused(&self) -> bool {
+        self.focused_terminal().is_some()
+    }
+
+    pub(in crate::editor::session) fn dashboard_visible(&self) -> bool {
+        self.dashboard
+    }
+    pub(in crate::editor::session) fn open_dashboard(&mut self) {
+        self.dashboard = true;
+        self.invalidate_native();
+    }
+    pub(in crate::editor::session) fn close_dashboard(&mut self) {
+        self.dashboard = false;
+        self.invalidate_native();
+    }
+    pub(in crate::editor::session) fn focus_explorer(&mut self) {
+        self.request_focus(FocusTarget::Explorer);
+    }
+    pub(in crate::editor::session) fn leave_explorer(&mut self) {
+        if self.explorer_focused() {
+            self.request_focus(FocusTarget::Editor);
+        }
+    }
+    pub(in crate::editor::session) fn focus_terminal(&mut self, id: u64) {
+        self.request_focus(FocusTarget::Terminal(id));
+    }
+    pub(in crate::editor::session) fn leave_terminal(&mut self) {
+        if self.terminal_focused() {
+            self.request_focus(FocusTarget::Editor);
+        }
+    }
+    fn request_focus(&mut self, focus: FocusTarget) {
+        if self.focus != focus {
+            self.focus_stamp = std::sync::Arc::new(());
+            self.focus = focus;
+            self.invalidate_native();
+        }
+    }
+    pub(super) fn accept_graph_focus(&mut self) {
+        let Some(window) = self.core.graph.focused() else {
+            self.focus = FocusTarget::Editor;
+            return;
+        };
+        match self.core.native.target_for_window(window) {
+            Some(NativeSurfaceTarget::Picker(_)) => {} // temporary capture, not terminal selection
+            Some(NativeSurfaceTarget::Explorer) => self.focus = FocusTarget::Explorer,
+            Some(NativeSurfaceTarget::Terminal(id)) => self.focus = FocusTarget::Terminal(id),
+            Some(NativeSurfaceTarget::Dashboard) => self.focus = FocusTarget::Editor,
+            None => {
+                self.focus = if self
+                    .core
+                    .graph
+                    .window(window)
+                    .is_some_and(|w| w.owner.starts_with("plugin."))
+                {
+                    FocusTarget::Plugin(window)
+                } else {
+                    FocusTarget::Editor
+                }
+            }
+        }
+    }
+    pub(in crate::editor::session) fn spatial_target(
+        &self,
+        direction: SpatialDirection,
+    ) -> Option<WindowId> {
+        let layout = self.layout.as_ref()?;
+        let current = match self.focus {
+            FocusTarget::Explorer => layout.surfaces.explorer,
+            FocusTarget::Terminal(id) => self.core.native.terminal(id).map(|ids| ids.window),
+            FocusTarget::Plugin(window) => Some(window),
+            FocusTarget::Editor => self.core.graph.focused(),
+        }?;
+        layout.projection.spatial_neighbor(current, direction)
+    }
+    pub(in crate::editor::session) fn terminal_height(&self) -> u16 {
+        self.terminal_height
+    }
+    pub(in crate::editor::session) fn resize_terminal(
+        &mut self,
+        id: u64,
+        rows: i16,
+        policy: &crate::config::TerminalPanelConfig,
+    ) -> Result<(), String> {
+        self.require_projected_graph()?;
+        let height = self.resized_terminal_height(
+            rows,
+            policy.resize_step,
+            policy.minimum_height,
+            policy.maximum_height,
+        );
+        let target = NativeSurfaceTarget::Terminal(id);
+        let placement = match self.native_placement(target)? {
+            crate::ui::window::WindowPlacement::Docked { edge, .. } => {
+                Some(crate::ui::window::WindowPlacement::Docked { edge, size: height })
+            }
+            crate::ui::window::WindowPlacement::Floating(mut rect) => {
+                rect.height = height;
+                Some(crate::ui::window::WindowPlacement::Floating(rect))
+            }
+            _ => None,
+        };
+        if let Some(placement) = placement {
+            self.place_native(target, placement)?;
+        }
+        self.terminal_height = height;
+        Ok(())
+    }
+    pub(in crate::editor::session) fn constrain_terminal_height(
+        &mut self,
+        minimum: u16,
+        maximum: u16,
+    ) {
+        self.terminal_height = self.terminal_height.clamp(minimum, maximum);
+    }
+    pub(in crate::editor::session) fn resized_terminal_height(
+        &self,
+        rows: i16,
+        step: u16,
+        minimum: u16,
+        maximum: u16,
+    ) -> u16 {
+        u16::try_from(
+            i32::from(self.terminal_height)
+                .saturating_add(i32::from(rows).saturating_mul(i32::from(step)))
+                .clamp(i32::from(minimum), i32::from(maximum)),
+        )
+        .expect("u16-clamped height")
+    }
+}

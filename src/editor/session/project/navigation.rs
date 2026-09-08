@@ -24,7 +24,7 @@ impl InteractiveApplication {
             .iter()
             .map(|root| root.identity.canonical_path.clone())
             .collect();
-        match self.vfs.read_scoped(found.canonical_path, roots) {
+        match self.documents.read_scoped(found.canonical_path, roots) {
             Ok(id) => {
                 self.pending_vfs.insert(
                     id,
@@ -51,19 +51,14 @@ impl InteractiveApplication {
         else {
             return;
         };
-        if let Ok(view) = self.state.show_buffer(buffer) {
-            let transaction = EditorTransaction::new(self.transaction_id())
-                .with_precondition(Precondition::ViewDisplays { view, buffer })
-                .with_operation(EditorOperation::SetCursor {
-                    view,
-                    position: range.start,
-                })
-                .with_undo_policy(UndoPolicy::Ignore);
-            if let Err(error) = self.state.apply_transaction(&transaction) {
-                self.show_error(error);
-            } else {
-                self.ensure_cursor_visible();
-            }
+        let transaction = self.transaction_id();
+        match self
+            .state
+            .prepare_document_location(buffer, range.start, transaction)
+            .and_then(|draft| self.commit_editor_draft(draft, None, false))
+        {
+            Ok(()) => self.ensure_cursor_visible(),
+            Err(error) => self.show_error(error),
         }
     }
 
@@ -97,7 +92,7 @@ impl InteractiveApplication {
                 .iter()
                 .map(|root| root.identity.canonical_path.clone())
                 .collect();
-            match self.vfs.read_scoped(path, roots) {
+            match self.documents.read_scoped(path, roots) {
                 Ok(id) => {
                     self.pending_vfs.insert(
                         id,
@@ -106,8 +101,7 @@ impl InteractiveApplication {
                             encoding,
                         },
                     );
-                    self.ui.notification = Some(self.message("opening_file", &[]));
-                    self.ui.notification_error = false;
+                    self.notify_message(self.message("opening_file", &[]), false);
                 }
                 Err(error) => self.show_error(error),
             }
@@ -159,7 +153,7 @@ impl InteractiveApplication {
                 previous.path != location.path || previous.byte != location.byte
             }) {
                 self.change_list.push(location);
-                let maximum = self.configuration.settings.persistence.changes;
+                let maximum = self.configuration.settings().persistence.changes;
                 if self.change_list.len() > maximum {
                     self.change_list.drain(..self.change_list.len() - maximum);
                 }
@@ -184,7 +178,7 @@ impl InteractiveApplication {
             .iter()
             .map(|root| root.identity.canonical_path.clone())
             .collect();
-        match self.vfs.read_scoped(source.path.clone(), roots) {
+        match self.documents.read_scoped(source.path.clone(), roots) {
             Ok(id) => {
                 self.pending_vfs
                     .insert(id, PendingVfs::MatcherNavigation { source });
@@ -209,7 +203,7 @@ impl InteractiveApplication {
         }
         if let Some(current) = self.current_persisted_location() {
             self.jump_list.push(current);
-            let maximum = self.configuration.settings.persistence.jumps;
+            let maximum = self.configuration.settings().persistence.jumps;
             if self.jump_list.len() > maximum {
                 self.jump_list.drain(..self.jump_list.len() - maximum);
             }
@@ -220,7 +214,7 @@ impl InteractiveApplication {
             .iter()
             .map(|root| root.identity.canonical_path.clone())
             .collect();
-        match self.vfs.read_scoped(location.path.clone(), roots) {
+        match self.documents.read_scoped(location.path.clone(), roots) {
             Ok(id) => {
                 self.pending_vfs
                     .insert(id, PendingVfs::PersistedNavigation { location });
@@ -244,13 +238,19 @@ impl InteractiveApplication {
             return;
         };
         let uri = crate::language::lsp::file_uri(&path);
-        let target = self
+        self.diagnostics.retire_documents(&self.state);
+        let Some(key) = self
             .diagnostics
-            .adjacent(&uri, cursor, direction, filter.severities());
-        let Some(target) = target else {
+            .adjacent(&uri, cursor, direction, filter.severities())
+        else {
             self.show_error(self.message("diagnostic_none", &[]));
             return;
         };
+        let Some(target) = self.diagnostics.resolve(&key, &self.state) else {
+            self.sync_ui_diagnostics();
+            return;
+        };
+        let position = target.range.start;
         let transaction = EditorTransaction::new(self.transaction_id())
             .with_precondition(Precondition::ViewDisplays {
                 view: view_id,
@@ -258,23 +258,21 @@ impl InteractiveApplication {
             })
             .with_operation(EditorOperation::SetCursor {
                 view: view_id,
-                position: target.range.start,
+                position,
             })
             .with_undo_policy(UndoPolicy::Ignore);
-        if let Err(error) = self.state.apply_transaction(&transaction) {
+        let result = self
+            .state
+            .prepare_transaction(&transaction)
+            .map_err(|e| e.to_string())
+            .and_then(|draft| self.commit_editor_draft(draft, None, false));
+        if let Err(error) = result {
             self.show_error(error);
         } else {
-            let line = self.state.buffers[buffer_id]
-                .text
-                .byte_to_line(target.range.start)
-                .unwrap_or(0);
-            self.ui.expanded_diagnostic = Some(crate::ui::ExpandedDiagnosticState {
-                path: path.clone(),
-                line,
-                severities: filter.severities().to_vec(),
-            });
-            self.ui.notification = None;
-            self.ui.notification_error = false;
+            self.diagnostics
+                .expand(key, filter.severities(), &self.state);
+            self.sync_ui_diagnostics();
+            self.clear_notice();
             self.ensure_cursor_visible();
         }
     }

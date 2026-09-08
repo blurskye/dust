@@ -81,11 +81,13 @@ impl InteractiveApplication {
                 if let Some((_, document)) = self.active_lsp_document()
                     && !definition.supports_language(&document.language_id)
                 {
-                    self.ui.notification = Some(format!(
-                        "{} is installed. Open a supported file to start it.",
-                        definition.name
-                    ));
-                    self.ui.notification_error = false;
+                    self.notify_message(
+                        format!(
+                            "{} is installed. Open a supported file to start it.",
+                            definition.name
+                        ),
+                        false,
+                    );
                 } else {
                     self.start_lsp(Some(id.into()));
                 }
@@ -116,11 +118,13 @@ impl InteractiveApplication {
                 ToolKind::Lsp => unreachable!("handled before installed-tool dispatch"),
                 ToolKind::Dap => self.start_dap(Some(id.into()), None),
                 ToolKind::Formatter | ToolKind::Linter => {
-                    self.ui.notification = Some(self.message(
-                        "tool_install_succeeded",
-                        &[("tool", definition.name.clone())],
-                    ));
-                    self.ui.notification_error = false;
+                    self.notify_message(
+                        self.message(
+                            "tool_install_succeeded",
+                            &[("tool", definition.name.clone())],
+                        ),
+                        false,
+                    );
                 }
             }
             return;
@@ -129,44 +133,7 @@ impl InteractiveApplication {
             self.show_error(diagnostic.clone());
             return;
         }
-        if !self.execution_revalidated {
-            self.defer_trusted_execution(DeferredExecution::InstallTool {
-                id: id.into(),
-                source: None,
-            });
-            return;
-        }
-        if definition.install.is_none() {
-            self.show_error(self.message("tool_no_installer", &[("tool", definition.name)]));
-            return;
-        }
-        if let Err(error) = self
-            .workspace
-            .authorize_execution(ExecutionSource::ProjectLocal)
-        {
-            self.show_error(error);
-            return;
-        }
-        match self.tool_installer.install(definition.clone()) {
-            Ok(()) => {
-                self.tools[index].status = ToolStatus::Installing {
-                    phase: "preparing".into(),
-                    completed: 0,
-                    total: None,
-                };
-                self.ui.notification =
-                    Some(self.message("tool_install_started", &[("tool", definition.name)]));
-                self.ui.notification_error = false;
-                let category = self
-                    .ui
-                    .tool_menu
-                    .as_ref()
-                    .map_or("all", |menu| &menu.category)
-                    .to_owned();
-                self.rebuild_tool_menu(&category, Some(id));
-            }
-            Err(error) => self.show_error(error),
-        }
+        self.install_tool_by_id(id, None);
     }
 
     pub(in crate::editor::session) fn install_selected_tool(&mut self) {
@@ -197,6 +164,14 @@ impl InteractiveApplication {
         &mut self,
         id: &str,
         source: Option<LspRuntimeSource>,
+    ) {
+        self.install_tool_authorized(id, source, None);
+    }
+    pub(in crate::editor::session) fn install_tool_authorized(
+        &mut self,
+        id: &str,
+        source: Option<LspRuntimeSource>,
+        authorization: Option<ExecutionAuthorization>,
     ) {
         let Some(index) = self
             .tools
@@ -242,11 +217,10 @@ impl InteractiveApplication {
             match source {
                 LspRuntimeSource::Path if rustup_install.is_none() => {
                     if discover_executable(&definition.executable).is_some() {
-                        self.ui.notification = Some(format!(
+                        self.notify_message(format!(
                             "{} is already installed on PATH; Dust leaves external software unchanged",
                             definition.name
-                        ));
-                        self.ui.notification_error = false;
+                        ), false);
                     } else {
                         self.show_error(format!(
                             "{} is not installed and has no Dust-managed build",
@@ -260,12 +234,14 @@ impl InteractiveApplication {
                     if self
                         .managed_variant_installed(&self.tools[index].definition, &definition) =>
                 {
-                    self.ui.notification = Some(format!(
-                        "{} {} is already installed",
-                        definition.name,
-                        definition.version.as_deref().unwrap_or("unknown")
-                    ));
-                    self.ui.notification_error = false;
+                    self.notify_message(
+                        format!(
+                            "{} {} is already installed",
+                            definition.name,
+                            definition.version.as_deref().unwrap_or("unknown")
+                        ),
+                        false,
+                    );
                     return;
                 }
                 LspRuntimeSource::Nix
@@ -275,18 +251,25 @@ impl InteractiveApplication {
                             &definition,
                         ) =>
                 {
-                    self.ui.notification = Some(format!(
+                    self.notify_message(format!(
                         "{} {} is already installed through Dust's Nix compatibility environment",
                         definition.name,
                         definition.version.as_deref().unwrap_or("unknown")
-                    ));
-                    self.ui.notification_error = false;
+                    ), false);
                     return;
                 }
                 LspRuntimeSource::Managed | LspRuntimeSource::Nix => {}
             }
         }
-        if !self.execution_revalidated {
+        if !authorization.is_some_and(|permit| {
+            permit.consume(
+                &self.workspace,
+                ExecutionAdmission::Tool(
+                    id.into(),
+                    (definition.kind == ToolKind::Lsp).then_some(source),
+                ),
+            )
+        }) {
             self.defer_trusted_execution(DeferredExecution::InstallTool {
                 id: id.into(),
                 source: (definition.kind == ToolKind::Lsp).then_some(source),
@@ -346,19 +329,24 @@ impl InteractiveApplication {
                     completed: 0,
                     total: None,
                 };
-                self.ui.notification = Some(format!(
-                    "installing {} {} {}…",
-                    definition.name,
-                    source.label(),
-                    if source == LspRuntimeSource::Path {
-                        "component"
-                    } else if matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix) {
-                        definition.version.as_deref().unwrap_or("unknown")
-                    } else {
-                        "runtime"
-                    }
-                ));
-                self.ui.notification_error = false;
+                self.notify_message(
+                    format!(
+                        "installing {} {} {}…",
+                        definition.name,
+                        source.label(),
+                        if source == LspRuntimeSource::Path {
+                            "component"
+                        } else if matches!(
+                            source,
+                            LspRuntimeSource::Managed | LspRuntimeSource::Nix
+                        ) {
+                            definition.version.as_deref().unwrap_or("unknown")
+                        } else {
+                            "runtime"
+                        }
+                    ),
+                    false,
+                );
                 let category = self
                     .ui
                     .tool_menu
@@ -404,40 +392,39 @@ impl InteractiveApplication {
         } else {
             base_definition.clone()
         };
-        let operation = match source {
-            LspRuntimeSource::Path => {
-                self.ui.notification = Some(
+        let operation =
+            match source {
+                LspRuntimeSource::Path => {
+                    self.notify_message(
                     "This server is owned by PATH, not Dust; remove it with its package manager"
-                        .into(),
-                );
-                self.ui.notification_error = false;
-                return;
-            }
-            LspRuntimeSource::Managed => {
-                if !self.managed_variant_installed(&base_definition, &definition) {
-                    self.show_error(format!(
-                        "Dust-download version {} is not installed",
-                        definition.version.as_deref().unwrap_or("unknown")
-                    ));
+                        .into(), false);
                     return;
                 }
-                self.stop_lsp_sessions_for_server(&id);
-                self.tool_installer.uninstall(definition.clone())
-            }
-            LspRuntimeSource::Nix => {
-                if !nix_lsp_profile_installed(&definition)
-                    || !self.managed_variant_installed(&base_definition, &definition)
-                {
-                    self.show_error(format!(
-                        "Dust via Nix version {} is not installed",
-                        definition.version.as_deref().unwrap_or("unknown")
-                    ));
-                    return;
+                LspRuntimeSource::Managed => {
+                    if !self.managed_variant_installed(&base_definition, &definition) {
+                        self.show_error(format!(
+                            "Dust-download version {} is not installed",
+                            definition.version.as_deref().unwrap_or("unknown")
+                        ));
+                        return;
+                    }
+                    self.stop_lsp_sessions_for_server(&id);
+                    self.tool_installer.uninstall(definition.clone())
                 }
-                self.stop_lsp_sessions_for_server(&id);
-                self.tool_installer.uninstall_nix(definition.clone())
-            }
-        };
+                LspRuntimeSource::Nix => {
+                    if !nix_lsp_profile_installed(&definition)
+                        || !self.managed_variant_installed(&base_definition, &definition)
+                    {
+                        self.show_error(format!(
+                            "Dust via Nix version {} is not installed",
+                            definition.version.as_deref().unwrap_or("unknown")
+                        ));
+                        return;
+                    }
+                    self.stop_lsp_sessions_for_server(&id);
+                    self.tool_installer.uninstall_nix(definition.clone())
+                }
+            };
         match operation {
             Ok(()) => {
                 self.tools[index].status = ToolStatus::Installing {
@@ -445,12 +432,14 @@ impl InteractiveApplication {
                     completed: 0,
                     total: None,
                 };
-                self.ui.notification = Some(format!(
-                    "uninstalling {} {} runtime…",
-                    definition.name,
-                    source.label()
-                ));
-                self.ui.notification_error = false;
+                self.notify_message(
+                    format!(
+                        "uninstalling {} {} runtime…",
+                        definition.name,
+                        source.label()
+                    ),
+                    false,
+                );
                 let category = self
                     .ui
                     .tool_menu
@@ -542,24 +531,26 @@ impl InteractiveApplication {
                     name
                 ));
             } else {
-                self.ui.notification = Some(match result.operation {
-                    ToolOperation::InstallRustup => {
-                        format!("installed {name} in the active rustup toolchain")
-                    }
-                    ToolOperation::InstallManaged => {
-                        format!("installed {name} Dust download runtime")
-                    }
-                    ToolOperation::InstallNix => {
-                        format!("installed {name} Dust via Nix runtime")
-                    }
-                    ToolOperation::UninstallManaged => {
-                        format!("uninstalled {name} Dust download runtime")
-                    }
-                    ToolOperation::UninstallNix => {
-                        format!("uninstalled {name} Dust via Nix runtime")
-                    }
-                });
-                self.ui.notification_error = false;
+                self.notify_message(
+                    match result.operation {
+                        ToolOperation::InstallRustup => {
+                            format!("installed {name} in the active rustup toolchain")
+                        }
+                        ToolOperation::InstallManaged => {
+                            format!("installed {name} Dust download runtime")
+                        }
+                        ToolOperation::InstallNix => {
+                            format!("installed {name} Dust via Nix runtime")
+                        }
+                        ToolOperation::UninstallManaged => {
+                            format!("uninstalled {name} Dust download runtime")
+                        }
+                        ToolOperation::UninstallNix => {
+                            format!("uninstalled {name} Dust via Nix runtime")
+                        }
+                    },
+                    false,
+                );
                 self.lsp_last_errors.remove(&result.id);
             }
             self.lsp_autostart_observation = None;

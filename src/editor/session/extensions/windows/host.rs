@@ -50,41 +50,216 @@ impl PluginWindowHost {
         Ok(())
     }
 
+    pub(in crate::editor::session) fn rejected(
+        token: u64,
+        graph_revision: Option<u64>,
+        code: PluginUiErrorCode,
+        detail: String,
+    ) -> PluginUiEvent {
+        mutation_event(token, graph_revision, Err(ui_error(code, detail)))
+    }
+    /// Admission runs against immutable live state, before graph/host staging.
+    /// Structural graph validation still runs on the accepted mutation candidate.
+    pub(in crate::editor::session) fn admit_window_request(
+        &self,
+        graph: &WindowGraph,
+        index: &PluginContributionIndex,
+        request: &PluginUiRequest,
+    ) -> Option<PluginUiEvent> {
+        match self.check_window_request(graph, index, &request.kind) {
+            Err(error) => Some(mutation_event(request.token, graph.revision(), Err(error))),
+            Ok(false) => {
+                let handle = match &request.kind {
+                    PluginUiRequestKind::PlaceWindow { handle, .. }
+                    | PluginUiRequestKind::FocusWindow { handle, .. } => *handle,
+                    _ => unreachable!("only placement/focus can be unchanged"),
+                };
+                Some(mutation_event(
+                    request.token,
+                    graph.revision(),
+                    self.owned_instance(index, handle)
+                        .map(|instance| instance_revisions(handle, instance)),
+                ))
+            }
+            Ok(true) => None,
+        }
+    }
+    fn check_window_request(
+        &self,
+        graph: &WindowGraph,
+        index: &PluginContributionIndex,
+        request: &PluginUiRequestKind,
+    ) -> Result<bool, PluginUiError> {
+        match request {
+            PluginUiRequestKind::OpenWindow {
+                expected_graph_revision,
+                content_type,
+                title,
+                placement,
+                tree,
+            } => {
+                require_graph_revision(graph, *expected_graph_revision)?;
+                let declaration = index
+                    .content_types
+                    .iter()
+                    .find(|d| &d.id == content_type)
+                    .ok_or_else(|| {
+                        ui_error(
+                            PluginUiErrorCode::UndeclaredContent,
+                            "content type is not owned by this plugin generation",
+                        )
+                    })?;
+                let placement = self
+                    .configured_placements
+                    .get(content_type)
+                    .copied()
+                    .unwrap_or(*placement);
+                if !declaration
+                    .allowed_placements
+                    .contains(&placement_kind(placement))
+                {
+                    return Err(ui_error(
+                        PluginUiErrorCode::DisallowedPlacement,
+                        "window placement is not allowed by the static declaration",
+                    ));
+                }
+                if self
+                    .instances
+                    .values()
+                    .filter(|i| {
+                        i.plugin == index.owner
+                            && i.load == index.generation
+                            && i.content_type == *content_type
+                    })
+                    .count()
+                    >= usize::from(declaration.maximum_instances)
+                {
+                    return Err(ui_error(
+                        PluginUiErrorCode::InstanceCeiling,
+                        "plugin content instance ceiling reached",
+                    ));
+                }
+                match declaration.presenter {
+                    PluginPresenterKind::RetainedDeclarative => validate_tree(
+                        index,
+                        tree.as_ref().ok_or_else(|| {
+                            ui_error(
+                                PluginUiErrorCode::InvalidTree,
+                                "retained presenter requires an initial tree",
+                            )
+                        })?,
+                        None,
+                    )?,
+                    PluginPresenterKind::PrivateCells => {
+                        if tree.is_some() || declaration.private_cells.is_none() {
+                            return Err(ui_error(
+                                PluginUiErrorCode::WrongPresenter,
+                                "private presenter does not accept a retained tree",
+                            ));
+                        }
+                    }
+                }
+                crate::ui::window::validate_title(if title.is_empty() {
+                    &declaration.title
+                } else {
+                    title
+                })
+                .map_err(map_graph_error)?;
+                graph_placement(placement)?;
+                if graph.active_tab().is_none() {
+                    return Err(ui_error(
+                        PluginUiErrorCode::CrossTab,
+                        "no active workspace tab",
+                    ));
+                }
+                self.next_handle.max(1).checked_add(1).ok_or_else(|| {
+                    ui_error(
+                        PluginUiErrorCode::InternalRejected,
+                        "plugin window handle space exhausted",
+                    )
+                })?;
+                Ok(true)
+            }
+            PluginUiRequestKind::PlaceWindow {
+                handle,
+                expected_graph_revision,
+                placement,
+            } => {
+                require_graph_revision(graph, *expected_graph_revision)?;
+                let instance = self.owned_instance(index, *handle)?;
+                require_active_window(graph, instance.window)?;
+                let declaration = index
+                    .content_types
+                    .iter()
+                    .find(|d| d.id == instance.content_type)
+                    .ok_or_else(|| {
+                        ui_error(
+                            PluginUiErrorCode::GenerationLost,
+                            "content declaration is stale",
+                        )
+                    })?;
+                if !declaration
+                    .allowed_placements
+                    .contains(&placement_kind(*placement))
+                {
+                    return Err(ui_error(
+                        PluginUiErrorCode::DisallowedPlacement,
+                        "window placement is not allowed by the static declaration",
+                    ));
+                }
+                let placement = graph_placement(*placement)?;
+                Ok(graph
+                    .window(instance.window)
+                    .is_none_or(|window| window.placement != placement))
+            }
+            PluginUiRequestKind::FocusWindow {
+                handle,
+                expected_graph_revision,
+            } => {
+                require_graph_revision(graph, *expected_graph_revision)?;
+                let instance = self.owned_instance(index, *handle)?;
+                require_active_window(graph, instance.window)?;
+                if graph
+                    .window(instance.window)
+                    .is_some_and(|window| window.placement == WindowPlacement::Hidden)
+                {
+                    return Err(ui_error(
+                        PluginUiErrorCode::HiddenFocus,
+                        "hidden plugin window cannot receive focus",
+                    ));
+                }
+                Ok(graph.focused() != Some(instance.window))
+            }
+            PluginUiRequestKind::CloseWindow {
+                handle,
+                expected_graph_revision,
+            } => {
+                require_graph_revision(graph, *expected_graph_revision)?;
+                let instance = self.owned_instance(index, *handle)?;
+                require_active_window(graph, instance.window)?;
+                Ok(true)
+            }
+            _ => Err(ui_error(
+                PluginUiErrorCode::InternalRejected,
+                "retained update used window admission",
+            )),
+        }
+    }
+
     pub(in crate::editor::session) fn process(
         &mut self,
-        graph: &mut WindowGraph,
+        graph: &mut crate::editor::session::windows::PluginWindowDraft,
         index: &PluginContributionIndex,
         request: PluginUiRequest,
     ) -> PluginUiEvent {
         let token = request.token;
         let result = self.process_checked(graph, index, request.kind);
-        match result {
-            Ok((handle, tree_revision, surface_revision)) => PluginUiEvent {
-                token,
-                handle,
-                graph_revision: graph.revision(),
-                tree_revision,
-                surface_revision,
-                geometry: None,
-                action: None,
-                error: None,
-            },
-            Err(error) => PluginUiEvent {
-                token,
-                handle: None,
-                graph_revision: graph.revision(),
-                tree_revision: None,
-                surface_revision: None,
-                geometry: None,
-                action: None,
-                error: Some(error),
-            },
-        }
+        mutation_event(token, graph.revision(), result)
     }
 
     fn process_checked(
         &mut self,
-        graph: &mut WindowGraph,
+        graph: &mut crate::editor::session::windows::PluginWindowDraft,
         index: &PluginContributionIndex,
         request: PluginUiRequestKind,
     ) -> Result<WindowMutationRevisions, PluginUiError> {
@@ -96,7 +271,7 @@ impl PluginWindowHost {
                 placement,
                 tree,
             } => {
-                require_graph_revision(graph, expected_graph_revision)?;
+                require_graph_revision(graph.read(), expected_graph_revision)?;
                 let declaration = index
                     .content_types
                     .iter()
@@ -167,7 +342,7 @@ impl PluginWindowHost {
                     ui_error(PluginUiErrorCode::CrossTab, "no active workspace tab")
                 })?;
                 let placement = graph_placement(placement)?;
-                let mut candidate = graph.clone();
+                let candidate = &mut *graph;
                 let owner = format!("plugin.{}", index.owner);
                 let content = candidate
                     .create_content(
@@ -198,6 +373,7 @@ impl PluginWindowHost {
                     .map_err(map_graph_error)?;
                 candidate.validate().map_err(map_graph_error)?;
                 let handle = self.allocate_handle()?;
+                let tree_revision = tree.as_ref().map(|tree| tree.revision);
                 self.instances.insert(
                     handle,
                     PluginWindowInstance {
@@ -210,14 +386,115 @@ impl PluginWindowHost {
                         window,
                         presenter: declaration.presenter,
                         focused_node,
-                        tree: tree.clone(),
+                        tree,
                         private,
                         scroll: 0,
                     },
                 );
-                *graph = candidate;
-                Ok((Some(handle), tree.as_ref().map(|tree| tree.revision), None))
+                Ok((Some(handle), tree_revision, None))
             }
+            PluginUiRequestKind::PlaceWindow {
+                handle,
+                expected_graph_revision,
+                placement,
+            } => {
+                require_graph_revision(graph.read(), expected_graph_revision)?;
+                let instance = self.owned_instance(index, handle)?;
+                require_active_window(graph.read(), instance.window)?;
+                let declaration = index
+                    .content_types
+                    .iter()
+                    .find(|declaration| declaration.id == instance.content_type)
+                    .ok_or_else(|| {
+                        ui_error(
+                            PluginUiErrorCode::GenerationLost,
+                            "content declaration is stale",
+                        )
+                    })?;
+                if !declaration
+                    .allowed_placements
+                    .contains(&placement_kind(placement))
+                {
+                    return Err(ui_error(
+                        PluginUiErrorCode::DisallowedPlacement,
+                        "window placement is not allowed by the static declaration",
+                    ));
+                }
+                let candidate = &mut *graph;
+                candidate
+                    .place(instance.window, graph_placement(placement)?)
+                    .map_err(map_graph_error)?;
+                candidate.validate().map_err(map_graph_error)?;
+                Ok(instance_revisions(handle, instance))
+            }
+            PluginUiRequestKind::FocusWindow {
+                handle,
+                expected_graph_revision,
+            } => {
+                require_graph_revision(graph.read(), expected_graph_revision)?;
+                let instance = self.owned_instance(index, handle)?;
+                require_active_window(graph.read(), instance.window)?;
+                if graph
+                    .window(instance.window)
+                    .is_some_and(|window| matches!(window.placement, WindowPlacement::Hidden))
+                {
+                    return Err(ui_error(
+                        PluginUiErrorCode::HiddenFocus,
+                        "hidden plugin window cannot receive focus",
+                    ));
+                }
+                let candidate = &mut *graph;
+                candidate.focus(instance.window).map_err(map_graph_error)?;
+                candidate.validate().map_err(map_graph_error)?;
+                Ok(instance_revisions(handle, instance))
+            }
+            PluginUiRequestKind::CloseWindow {
+                handle,
+                expected_graph_revision,
+            } => {
+                require_graph_revision(graph.read(), expected_graph_revision)?;
+                let instance = self.owned_instance(index, handle)?;
+                require_active_window(graph.read(), instance.window)?;
+                let revisions = instance_revisions(handle, instance);
+                let candidate = &mut *graph;
+                candidate
+                    .close_window(instance.window)
+                    .and_then(|_| candidate.remove_view(instance.view))
+                    .and_then(|_| candidate.remove_content(instance.content))
+                    .map_err(map_graph_error)?;
+                candidate.validate().map_err(map_graph_error)?;
+                self.instances.remove(&handle);
+                Ok(revisions)
+            }
+            request => self.process_retained_checked(graph.read(), index, request),
+        }
+    }
+
+    pub(in crate::editor::session) fn is_retained_update(request: &PluginUiRequestKind) -> bool {
+        matches!(
+            request,
+            PluginUiRequestKind::ReplaceUi { .. }
+                | PluginUiRequestKind::ReplacePrivate { .. }
+                | PluginUiRequestKind::PatchPrivate { .. }
+        )
+    }
+    pub(in crate::editor::session) fn process_retained(
+        &mut self,
+        graph: &WindowGraph,
+        index: &PluginContributionIndex,
+        request: PluginUiRequest,
+    ) -> PluginUiEvent {
+        let token = request.token;
+        let result = self.process_retained_checked(graph, index, request.kind);
+        mutation_event(token, graph.revision(), result)
+    }
+    fn process_retained_checked(
+        &mut self,
+        graph: &WindowGraph,
+        index: &PluginContributionIndex,
+        request: PluginUiRequestKind,
+    ) -> Result<WindowMutationRevisions, PluginUiError> {
+        match request {
             PluginUiRequestKind::ReplaceUi {
                 handle,
                 expected_tree_revision,
@@ -246,83 +523,9 @@ impl PluginWindowHost {
                 instance.scroll = instance
                     .scroll
                     .min(tree_rows(&tree, None).len().saturating_sub(1));
-                instance.tree = Some(tree.clone());
-                Ok((Some(handle), Some(tree.revision), None))
-            }
-            PluginUiRequestKind::PlaceWindow {
-                handle,
-                expected_graph_revision,
-                placement,
-            } => {
-                require_graph_revision(graph, expected_graph_revision)?;
-                let instance = self.owned_instance(index, handle)?;
-                require_active_window(graph, instance.window)?;
-                let declaration = index
-                    .content_types
-                    .iter()
-                    .find(|declaration| declaration.id == instance.content_type)
-                    .ok_or_else(|| {
-                        ui_error(
-                            PluginUiErrorCode::GenerationLost,
-                            "content declaration is stale",
-                        )
-                    })?;
-                if !declaration
-                    .allowed_placements
-                    .contains(&placement_kind(placement))
-                {
-                    return Err(ui_error(
-                        PluginUiErrorCode::DisallowedPlacement,
-                        "window placement is not allowed by the static declaration",
-                    ));
-                }
-                let mut candidate = graph.clone();
-                candidate
-                    .place(instance.window, graph_placement(placement)?)
-                    .map_err(map_graph_error)?;
-                candidate.validate().map_err(map_graph_error)?;
-                *graph = candidate;
-                Ok(instance_revisions(handle, instance))
-            }
-            PluginUiRequestKind::FocusWindow {
-                handle,
-                expected_graph_revision,
-            } => {
-                require_graph_revision(graph, expected_graph_revision)?;
-                let instance = self.owned_instance(index, handle)?;
-                require_active_window(graph, instance.window)?;
-                if graph
-                    .window(instance.window)
-                    .is_some_and(|window| matches!(window.placement, WindowPlacement::Hidden))
-                {
-                    return Err(ui_error(
-                        PluginUiErrorCode::HiddenFocus,
-                        "hidden plugin window cannot receive focus",
-                    ));
-                }
-                let mut candidate = graph.clone();
-                candidate.focus(instance.window).map_err(map_graph_error)?;
-                candidate.validate().map_err(map_graph_error)?;
-                *graph = candidate;
-                Ok(instance_revisions(handle, instance))
-            }
-            PluginUiRequestKind::CloseWindow {
-                handle,
-                expected_graph_revision,
-            } => {
-                require_graph_revision(graph, expected_graph_revision)?;
-                let instance = self.owned_instance(index, handle)?.clone();
-                require_active_window(graph, instance.window)?;
-                let mut candidate = graph.clone();
-                candidate
-                    .close_window(instance.window)
-                    .and_then(|_| candidate.remove_view(instance.view))
-                    .and_then(|_| candidate.remove_content(instance.content))
-                    .map_err(map_graph_error)?;
-                candidate.validate().map_err(map_graph_error)?;
-                self.instances.remove(&handle);
-                *graph = candidate;
-                Ok(instance_revisions(handle, &instance))
+                let revision = tree.revision;
+                instance.tree = Some(tree);
+                Ok((Some(handle), Some(revision), None))
             }
             PluginUiRequestKind::ReplacePrivate { handle, snapshot } => {
                 let instance = self.owned_instance(index, handle)?;
@@ -340,14 +543,15 @@ impl PluginWindowHost {
                     &snapshot,
                     private.snapshot.as_ref().map(|snapshot| snapshot.revision),
                 )?;
+                let revision = snapshot.revision;
                 self.instances
                     .get_mut(&handle)
                     .expect("validated private handle")
                     .private
                     .as_mut()
                     .expect("private presenter")
-                    .snapshot = Some(snapshot.clone());
-                Ok((Some(handle), None, Some(snapshot.revision)))
+                    .snapshot = Some(snapshot);
+                Ok((Some(handle), None, Some(revision)))
             }
             PluginUiRequestKind::PatchPrivate { handle, patch } => {
                 let instance = self.owned_instance(index, handle)?;
@@ -360,18 +564,22 @@ impl PluginWindowHost {
                     )
                 })?;
                 let candidate = apply_private_patch(declaration, private, &patch)?;
+                let revision = candidate.revision;
                 self.instances
                     .get_mut(&handle)
                     .expect("validated private handle")
                     .private
                     .as_mut()
                     .expect("private presenter")
-                    .snapshot = Some(candidate.clone());
-                Ok((Some(handle), None, Some(candidate.revision)))
+                    .snapshot = Some(candidate);
+                Ok((Some(handle), None, Some(revision)))
             }
+            _ => Err(ui_error(
+                PluginUiErrorCode::InternalRejected,
+                "not a retained UI update",
+            )),
         }
     }
-
     fn allocate_handle(&mut self) -> Result<u64, PluginUiError> {
         let handle = self.next_handle.max(1);
         self.next_handle = handle.checked_add(1).ok_or_else(|| {
@@ -406,37 +614,26 @@ impl PluginWindowHost {
         Ok(instance)
     }
 
-    pub(in crate::editor::session) fn reset_runtime(
-        &mut self,
-        graph: &mut WindowGraph,
-    ) -> Result<(), WindowError> {
-        let owners = self
-            .instances
+    pub(in crate::editor::session) fn generations(&self) -> Vec<(String, u64)> {
+        self.instances
             .values()
             .map(|instance| (instance.plugin.clone(), instance.load))
-            .collect::<BTreeSet<_>>();
-        for (plugin, load) in owners {
-            graph.remove_owner_generation(&format!("plugin.{plugin}"), load)?;
-        }
-        self.instances.clear();
-        Ok(())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
     }
-
+    pub(in crate::editor::session) fn clear_runtime(&mut self) {
+        self.instances.clear();
+    }
     pub(in crate::editor::session) fn remove_generation(
         &mut self,
-        graph: &mut WindowGraph,
         plugin: &str,
         load: u64,
-    ) -> Result<bool, WindowError> {
-        let owner = format!("plugin.{plugin}");
-        let removed = self
-            .instances
-            .values()
-            .any(|instance| instance.plugin == plugin && instance.load == load);
-        graph.remove_owner_generation(&owner, load)?;
+    ) -> bool {
+        let before = self.instances.len();
         self.instances
             .retain(|_, instance| !(instance.plugin == plugin && instance.load == load));
-        Ok(removed)
+        self.instances.len() != before
     }
 
     pub(in crate::editor::session) fn input_context(
@@ -756,5 +953,34 @@ impl PluginWindowHost {
                 error: None,
             },
         ))
+    }
+}
+
+fn mutation_event(
+    token: u64,
+    graph_revision: Option<u64>,
+    result: Result<WindowMutationRevisions, PluginUiError>,
+) -> PluginUiEvent {
+    match result {
+        Ok((handle, tree_revision, surface_revision)) => PluginUiEvent {
+            token,
+            handle,
+            graph_revision,
+            tree_revision,
+            surface_revision,
+            geometry: None,
+            action: None,
+            error: None,
+        },
+        Err(error) => PluginUiEvent {
+            token,
+            handle: None,
+            graph_revision,
+            tree_revision: None,
+            surface_revision: None,
+            geometry: None,
+            action: None,
+            error: Some(error),
+        },
     }
 }

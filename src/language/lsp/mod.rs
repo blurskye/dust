@@ -27,6 +27,9 @@ const MAX_PENDING_REQUESTS: usize = 128;
 const MAX_LOG_LINES: usize = 200;
 const MAX_LOG_LINE_BYTES: usize = 4096;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+mod origins;
+use origins::EventSender;
+pub(crate) use origins::{ApplyEditReply, EditContext, OwnedLspEvent, PendingEditReply};
 mod model;
 pub use model::*;
 mod session;
@@ -46,3 +49,6 @@ pub use markdown::*;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(crate) use origins::DiagnosticLineage;

@@ -32,7 +32,7 @@ impl InteractiveApplication {
         let Some(viewport) = active_pane_viewport(
             &self.state,
             &self.ui,
-            &self.configuration.settings,
+            self.configuration.settings(),
             content_width,
             self.workspace_render_height(),
         ) else {
@@ -45,29 +45,34 @@ impl InteractiveApplication {
             viewport
                 .height
                 .saturating_sub(u16::from(
-                    self.configuration.settings.ui.status_line.enabled,
+                    self.configuration.settings().ui.status_line.enabled,
                 ))
                 .max(1),
         );
-        let vertical_margin =
-            usize::from(self.configuration.settings.editor.viewport.vertical_margin)
-                .min(body_height.saturating_sub(1) / 2);
+        let vertical_margin = usize::from(
+            self.configuration
+                .settings()
+                .editor
+                .viewport
+                .vertical_margin,
+        )
+        .min(body_height.saturating_sub(1) / 2);
         let available = editor_state_content_width(
             &self.state,
             &buffer.text,
-            &self.configuration.settings.editor,
+            &self.configuration.settings().editor,
             viewport.width,
         );
         let wrap_enabled = available > 0
-            && self.configuration.settings.editor.wrap
+            && self.configuration.settings().editor.wrap
             && !(self.ui.large_file_buffers.contains(&view.buffer)
-                && self.configuration.settings.editor.large_file.disable_wrap);
+                && self.configuration.settings().editor.large_file.disable_wrap);
         let visual_rows = VisualRowModel::new_for_state(
             &self.state,
             &buffer.text,
             view_id,
             &self.ui,
-            &self.configuration.settings,
+            self.configuration.settings(),
             viewport.width,
             wrap_enabled,
         );
@@ -114,12 +119,12 @@ impl InteractiveApplication {
                 .unwrap_or_default();
             let cursor_column = configured_text_width(
                 &prefix,
-                self.configuration.settings.editor.tab_width,
-                self.configuration.settings.editor.ambiguous_width,
+                self.configuration.settings().editor.tab_width,
+                self.configuration.settings().editor.ambiguous_width,
             );
             let margin = usize::from(
                 self.configuration
-                    .settings
+                    .settings()
                     .editor
                     .viewport
                     .horizontal_margin,
@@ -141,8 +146,8 @@ impl InteractiveApplication {
             let snapped = snap_display_column(
                 line_text,
                 target,
-                self.configuration.settings.editor.tab_width,
-                self.configuration.settings.editor.ambiguous_width,
+                self.configuration.settings().editor.tab_width,
+                self.configuration.settings().editor.ambiguous_width,
             );
             if cursor_column.saturating_sub(snapped) < available {
                 snapped
@@ -150,8 +155,8 @@ impl InteractiveApplication {
                 snap_display_column_forward(
                     line_text,
                     cursor_column.saturating_add(1).saturating_sub(available),
-                    self.configuration.settings.editor.tab_width,
-                    self.configuration.settings.editor.ambiguous_width,
+                    self.configuration.settings().editor.tab_width,
+                    self.configuration.settings().editor.ambiguous_width,
                 )
             }
         };
@@ -189,7 +194,7 @@ impl InteractiveApplication {
     pub(super) fn message(&self, key: &str, replacements: &[(&str, String)]) -> String {
         let mut message = self
             .configuration
-            .settings
+            .settings()
             .messages
             .get(key)
             .expect("resolved configuration validates required messages")
@@ -201,7 +206,6 @@ impl InteractiveApplication {
     }
 
     pub(super) fn show_error(&mut self, error: impl std::fmt::Display) {
-        self.ui.notification = Some(error.to_string());
-        self.ui.notification_error = true;
+        self.notify_message(error.to_string(), true);
     }
 }

@@ -184,241 +184,494 @@ pub enum VfsResult {
     },
 }
 
+impl VfsResult {
+    pub(crate) fn request_id(&self) -> RequestId {
+        match self {
+            Self::ResourceResolved { id, .. }
+            | Self::ResourceApplied { id, .. }
+            | Self::ExplorerMutated { id, .. }
+            | Self::CreateTarget { id, .. }
+            | Self::Read { id, .. }
+            | Self::Write { id, .. }
+            | Self::Directory { id, .. }
+            | Self::RecoveryDiscovered { id, .. }
+            | Self::RecoveryWritten { id, .. }
+            | Self::RecoveryCleaned { id, .. }
+            | Self::Deleted { id, .. } => *id,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum VfsReply {
+    Public(VfsResult),
+    Explorer(ExplorerIoReply),
+}
+struct QueuedRequest {
+    read_roots: Option<Vec<crate::workspace::RootIdentity>>,
+    explorer: Option<ExplorerIo>,
+    document_paths: Option<Vec<PathBuf>>,
+    request: VfsRequest,
+    state: Arc<std::sync::atomic::AtomicU8>,
+}
+struct WorkerFinished(Arc<AtomicBool>);
+impl Drop for WorkerFinished {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+impl VfsRequest {
+    fn id(&self) -> Option<RequestId> {
+        match self {
+            Self::Read { id, .. }
+            | Self::ReadScoped { id, .. }
+            | Self::ReadScopedBounded { id, .. }
+            | Self::ResolveCreate { id, .. }
+            | Self::ResolveResource { id, .. }
+            | Self::ApplyResource { id, .. }
+            | Self::ExplorerMutation { id, .. }
+            | Self::Write { id, .. }
+            | Self::ListDirectory { id, .. }
+            | Self::DiscoverRecovery { id, .. }
+            | Self::WriteRecovery { id, .. }
+            | Self::CleanupRecovery { id, .. }
+            | Self::Delete { id, .. } => Some(*id),
+            Self::Shutdown => None,
+        }
+    }
+}
+#[cfg(test)]
+thread_local! { static START_GATE: std::cell::RefCell<Option<Receiver<()>>> = const { std::cell::RefCell::new(None) }; }
 pub struct VfsWorker {
-    sender: SyncSender<VfsRequest>,
-    receiver: Receiver<VfsResult>,
+    queue_capacity: usize,
+    sender: SyncSender<QueuedRequest>,
+    stopping: Arc<AtomicBool>,
+    finished: Arc<AtomicBool>,
+    requests: std::collections::HashMap<RequestId, (Arc<std::sync::atomic::AtomicU8>, bool)>,
+    last_id: Option<u64>,
+    receiver: Receiver<VfsReply>,
     thread: Option<JoinHandle<()>>,
     ids: Arc<dyn crate::clock::IdSource>,
 }
 
+pub(crate) struct VfsReadAdmission<'a> {
+    worker: &'a mut VfsWorker,
+    id: RequestId,
+}
+impl VfsReadAdmission<'_> {
+    pub(crate) fn submit(
+        self,
+        path: PathBuf,
+        roots: Vec<crate::workspace::RootIdentity>,
+        maximum_bytes: u64,
+    ) -> Result<RequestId, VfsError> {
+        self.worker
+            .submit_scoped_read(self.id, path, roots, maximum_bytes)?;
+        Ok(self.id)
+    }
+}
 impl VfsWorker {
+    pub(crate) fn reserve_read(&mut self) -> Result<VfsReadAdmission<'_>, VfsError> {
+        if self.stopping.load(Ordering::Acquire) || self.finished.load(Ordering::Acquire) {
+            return Err(VfsError::WorkerStopped);
+        }
+        // Queued/cancelled-but-not-dequeued requests conservatively occupy slots.
+        // Holding &mut self excludes every other producer; only the worker can free space.
+        if self
+            .requests
+            .values()
+            .filter(|(state, _)| state.load(Ordering::Acquire) < 2)
+            .count()
+            >= self.queue_capacity
+        {
+            return Err(VfsError::QueueFull);
+        }
+        let id = self.next_request_id()?;
+        Ok(VfsReadAdmission { worker: self, id })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn start_gated_for_test(capacity: usize) -> (Self, mpsc::Sender<()>) {
+        let (send, receive) = mpsc::channel();
+        START_GATE.with(|gate| *gate.borrow_mut() = Some(receive));
+        (Self::start(capacity), send)
+    }
     #[must_use]
     pub fn start(queue_capacity: usize) -> Self {
         Self::start_with_ids(queue_capacity, Arc::new(crate::clock::AtomicIds::new(1)))
     }
     pub fn start_with_ids(queue_capacity: usize, ids: Arc<dyn crate::clock::IdSource>) -> Self {
-        let (request_sender, request_receiver) = mpsc::sync_channel(queue_capacity.max(1));
-        let (result_sender, result_receiver) = mpsc::channel();
+        let (request_sender, request_receiver) =
+            mpsc::sync_channel::<QueuedRequest>(queue_capacity.max(1));
+        let (result_sender, result_receiver) = mpsc::sync_channel(queue_capacity.max(1));
+        let stopping = Arc::new(AtomicBool::new(false));
+        let finished = Arc::new(AtomicBool::new(false));
+        let worker_stop = stopping.clone();
+        let worker_finished = finished.clone();
+        #[cfg(test)]
+        let gate = START_GATE.with(|gate| gate.borrow_mut().take());
         let thread = thread::Builder::new()
             .name("dust-vfs".into())
             .spawn(move || {
-                while let Ok(request) = request_receiver.recv() {
-                    let result = match request {
-                        VfsRequest::Read { id, path } => match canonical_path(&path) {
-                            Ok(path) => VfsResult::Read {
-                                id,
-                                result: read_file(&path),
-                                path,
-                            },
-                            Err(error) => VfsResult::Read {
-                                id,
-                                path,
-                                result: Err(error),
-                            },
-                        },
-                        VfsRequest::ReadScoped {
-                            id,
-                            path,
-                            canonical_roots,
-                        } => match canonical_path(&path) {
-                            Ok(path)
-                                if canonical_roots.iter().any(|root| path.starts_with(root)) =>
-                            {
-                                VfsResult::Read {
-                                    id,
-                                    result: read_file(&path),
-                                    path,
-                                }
-                            }
-                            Ok(path) => VfsResult::Read {
-                                id,
-                                result: Err(VfsError::OutsideScope(path.clone())),
-                                path,
-                            },
-                            Err(error) => VfsResult::Read {
-                                id,
-                                path,
-                                result: Err(error),
-                            },
-                        },
-                        VfsRequest::ReadScopedBounded {
-                            id,
-                            path,
-                            canonical_roots,
-                            maximum_bytes,
-                        } => match canonical_path(&path) {
-                            Ok(path)
-                                if canonical_roots.iter().any(|root| path.starts_with(root)) =>
-                            {
-                                VfsResult::Read {
-                                    id,
-                                    result: read_file_with_ceiling(&path, maximum_bytes),
-                                    path,
-                                }
-                            }
-                            Ok(path) => VfsResult::Read {
-                                id,
-                                result: Err(VfsError::OutsideScope(path.clone())),
-                                path,
-                            },
-                            Err(error) => VfsResult::Read {
-                                id,
-                                path,
-                                result: Err(error),
-                            },
-                        },
-                        VfsRequest::ResolveResource {
-                            id,
-                            source,
-                            target,
-                            canonical_roots,
-                            maximum_bytes,
-                        } => VfsResult::ResourceResolved {
-                            id,
-                            result: resolve_resource_intent(
-                                &source,
-                                target.as_deref(),
-                                &canonical_roots,
-                                maximum_bytes,
-                            ),
-                        },
-                        VfsRequest::ApplyResource { id, intent } => {
-                            let result = apply_resource_intent(&intent);
-                            VfsResult::ResourceApplied { id, intent, result }
-                        }
-                        VfsRequest::ExplorerMutation {
-                            id,
-                            operation,
-                            canonical_roots,
-                            maximum_bytes,
-                        } => {
-                            let result = apply_explorer_mutation(
-                                &operation,
-                                &canonical_roots,
-                                maximum_bytes,
-                            );
-                            VfsResult::ExplorerMutated {
-                                id,
-                                operation,
-                                result,
-                            }
-                        }
-                        VfsRequest::ResolveCreate {
-                            id,
-                            path,
-                            canonical_roots,
-                        } => {
-                            let result = (|| {
-                                let name = path
-                                    .file_name()
-                                    .ok_or_else(|| VfsError::OutsideScope(path.clone()))?;
-                                let parent = canonical_path(
-                                    path.parent()
-                                        .ok_or_else(|| VfsError::OutsideScope(path.clone()))?,
-                                )?;
-                                if !canonical_roots.iter().any(|root| parent.starts_with(root)) {
-                                    return Err(VfsError::OutsideScope(parent));
-                                }
-                                let target = parent.join(name);
-                                match fs::symlink_metadata(&target) {
-                                    Ok(_) => Err(VfsError::Io {
-                                        operation: "create target already exists",
-                                        path: target,
-                                        source: io::Error::new(
-                                            io::ErrorKind::AlreadyExists,
-                                            "target exists",
-                                        ),
-                                    }),
-                                    Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                                        Ok(target)
-                                    }
-                                    Err(source) => Err(VfsError::Io {
-                                        operation: "inspect create target",
-                                        path: target,
-                                        source,
-                                    }),
-                                }
-                            })();
-                            VfsResult::CreateTarget { id, result }
-                        }
-                        VfsRequest::Write {
-                            id,
-                            path,
-                            bytes,
-                            expectation,
-                        } => VfsResult::Write {
-                            id,
-                            result: checked_atomic_write(&path, &bytes, &expectation),
-                            path,
-                        },
-                        VfsRequest::ListDirectory {
-                            id,
-                            path,
-                            maximum_entries,
-                        } => VfsResult::Directory {
-                            id,
-                            result: list_directory(&path, maximum_entries),
-                            path,
-                        },
-                        VfsRequest::DiscoverRecovery {
-                            id,
-                            directory,
-                            maximum_records,
-                        } => {
-                            let mut discovery = discover_recovery(&directory);
-                            discovery.records.truncate(maximum_records);
-                            VfsResult::RecoveryDiscovered { id, discovery }
-                        }
-                        VfsRequest::WriteRecovery { id, path, record } => {
-                            let result = path
-                                .parent()
-                                .map_or(Ok(()), fs::create_dir_all)
-                                .map_err(|source| VfsError::Io {
-                                    operation: "create recovery directory",
-                                    path: path.clone(),
-                                    source,
-                                })
-                                .and_then(|()| write_recovery(&path, &record));
-                            VfsResult::RecoveryWritten { id, path, result }
-                        }
-                        VfsRequest::CleanupRecovery {
-                            id,
-                            directory,
-                            maximum_records,
-                            maximum_age_days,
-                        } => VfsResult::RecoveryCleaned {
-                            id,
-                            cleanup: cleanup_recovery(
-                                &directory,
-                                maximum_records,
-                                maximum_age_days,
-                                crate::clock::system_time(),
-                            ),
-                        },
-                        VfsRequest::Delete { id, path } => {
-                            let result = fs::remove_file(&path)
-                                .or_else(|error| {
-                                    (error.kind() == io::ErrorKind::NotFound)
-                                        .then_some(())
-                                        .ok_or(error)
-                                })
-                                .map_err(|source| VfsError::Io {
-                                    operation: "delete",
-                                    path: path.clone(),
-                                    source,
-                                });
-                            VfsResult::Deleted { id, path, result }
-                        }
-                        VfsRequest::Shutdown => break,
-                    };
-                    if result_sender.send(result).is_err() {
+                let _finished = WorkerFinished(worker_finished);
+                #[cfg(test)]
+                if let Some(gate) = gate {
+                    let _ = gate.recv();
+                }
+                while let Ok(queued) = request_receiver.recv() {
+                    if worker_stop.load(Ordering::Acquire) {
                         break;
+                    }
+                    let request = queued.request;
+                    let cancelled = queued
+                        .state
+                        .compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire)
+                        .is_err();
+                    let mut result = if let Some(explorer) = queued.explorer {
+                        VfsReply::Explorer(
+                            explorer.run(request.id().expect("explorer request ID"), cancelled),
+                        )
+                    } else if !cancelled && queued.read_roots.is_some() {
+                        let roots = queued.read_roots.as_deref().expect("checked scoped read");
+                        let VfsRequest::ReadScopedBounded {
+                            id,
+                            path,
+                            maximum_bytes,
+                            ..
+                        } = request
+                        else {
+                            unreachable!("private scoped read packet")
+                        };
+                        let inspected = (|| {
+                            let canonical = canonical_path(&path)?;
+                            let participating =
+                                participating_roots(&[&path], &[&canonical], roots)?;
+                            roots_current(&participating)?;
+                            let bytes = read_file_with_ceiling(&canonical, maximum_bytes)?;
+                            roots_current(&participating)?;
+                            Ok((canonical, bytes))
+                        })();
+                        VfsReply::Public(match inspected {
+                            Ok((path, bytes)) => VfsResult::Read {
+                                id,
+                                path,
+                                result: Ok(bytes),
+                            },
+                            Err(error) => VfsResult::Read {
+                                id,
+                                path,
+                                result: Err(error),
+                            },
+                        })
+                    } else {
+                        VfsReply::Public(if cancelled {
+                            let error = VfsError::Io {
+                                operation: "cancel request",
+                                path: PathBuf::new(),
+                                source: io::Error::new(
+                                    io::ErrorKind::Interrupted,
+                                    "request cancelled before execution",
+                                ),
+                            };
+                            match request {
+                                VfsRequest::Read { id, path }
+                                | VfsRequest::ReadScoped { id, path, .. }
+                                | VfsRequest::ReadScopedBounded { id, path, .. } => {
+                                    VfsResult::Read {
+                                        id,
+                                        path,
+                                        result: Err(error),
+                                    }
+                                }
+                                VfsRequest::Write { id, path, .. } => VfsResult::Write {
+                                    id,
+                                    path,
+                                    result: Err(error),
+                                },
+                                VfsRequest::ResolveCreate { id, .. } => VfsResult::CreateTarget {
+                                    id,
+                                    result: Err(error),
+                                },
+                                VfsRequest::ResolveResource { id, .. } => {
+                                    VfsResult::ResourceResolved {
+                                        id,
+                                        result: Err(error),
+                                    }
+                                }
+                                VfsRequest::ApplyResource { id, intent } => {
+                                    VfsResult::ResourceApplied {
+                                        id,
+                                        intent,
+                                        result: Err(error),
+                                    }
+                                }
+                                _ => unreachable!("request kind does not admit cancellation"),
+                            }
+                        } else {
+                            match request {
+                                VfsRequest::Read { id, path } => match canonical_path(&path) {
+                                    Ok(path) => VfsResult::Read {
+                                        id,
+                                        result: read_file(&path),
+                                        path,
+                                    },
+                                    Err(error) => VfsResult::Read {
+                                        id,
+                                        path,
+                                        result: Err(error),
+                                    },
+                                },
+                                VfsRequest::ReadScoped {
+                                    id,
+                                    path,
+                                    canonical_roots,
+                                } => match canonical_path(&path) {
+                                    Ok(path)
+                                        if canonical_roots
+                                            .iter()
+                                            .any(|root| path.starts_with(root)) =>
+                                    {
+                                        VfsResult::Read {
+                                            id,
+                                            result: read_file(&path),
+                                            path,
+                                        }
+                                    }
+                                    Ok(path) => VfsResult::Read {
+                                        id,
+                                        result: Err(VfsError::OutsideScope(path.clone())),
+                                        path,
+                                    },
+                                    Err(error) => VfsResult::Read {
+                                        id,
+                                        path,
+                                        result: Err(error),
+                                    },
+                                },
+                                VfsRequest::ReadScopedBounded {
+                                    id,
+                                    path,
+                                    canonical_roots,
+                                    maximum_bytes,
+                                } => match canonical_path(&path) {
+                                    Ok(path)
+                                        if canonical_roots
+                                            .iter()
+                                            .any(|root| path.starts_with(root)) =>
+                                    {
+                                        VfsResult::Read {
+                                            id,
+                                            result: read_file_with_ceiling(&path, maximum_bytes),
+                                            path,
+                                        }
+                                    }
+                                    Ok(path) => VfsResult::Read {
+                                        id,
+                                        result: Err(VfsError::OutsideScope(path.clone())),
+                                        path,
+                                    },
+                                    Err(error) => VfsResult::Read {
+                                        id,
+                                        path,
+                                        result: Err(error),
+                                    },
+                                },
+                                VfsRequest::ResolveResource {
+                                    id,
+                                    source,
+                                    target,
+                                    canonical_roots,
+                                    maximum_bytes,
+                                } => VfsResult::ResourceResolved {
+                                    id,
+                                    result: resolve_resource_intent(
+                                        &source,
+                                        target.as_deref(),
+                                        &canonical_roots,
+                                        maximum_bytes,
+                                    ),
+                                },
+                                VfsRequest::ApplyResource { id, intent } => {
+                                    let result = apply_resource_intent(&intent);
+                                    VfsResult::ResourceApplied { id, intent, result }
+                                }
+                                VfsRequest::ExplorerMutation {
+                                    id,
+                                    operation,
+                                    canonical_roots,
+                                    maximum_bytes,
+                                } => {
+                                    let result = apply_explorer_mutation(
+                                        &operation,
+                                        &canonical_roots,
+                                        maximum_bytes,
+                                    );
+                                    VfsResult::ExplorerMutated {
+                                        id,
+                                        operation,
+                                        result,
+                                    }
+                                }
+                                VfsRequest::ResolveCreate {
+                                    id,
+                                    path,
+                                    canonical_roots,
+                                } => {
+                                    let result = (|| {
+                                        let name = path
+                                            .file_name()
+                                            .ok_or_else(|| VfsError::OutsideScope(path.clone()))?;
+                                        let parent =
+                                            canonical_path(path.parent().ok_or_else(|| {
+                                                VfsError::OutsideScope(path.clone())
+                                            })?)?;
+                                        if !canonical_roots
+                                            .iter()
+                                            .any(|root| parent.starts_with(root))
+                                        {
+                                            return Err(VfsError::OutsideScope(parent));
+                                        }
+                                        let target = parent.join(name);
+                                        match fs::symlink_metadata(&target) {
+                                            Ok(_) => Err(VfsError::Io {
+                                                operation: "create target already exists",
+                                                path: target,
+                                                source: io::Error::new(
+                                                    io::ErrorKind::AlreadyExists,
+                                                    "target exists",
+                                                ),
+                                            }),
+                                            Err(error)
+                                                if error.kind() == io::ErrorKind::NotFound =>
+                                            {
+                                                Ok(target)
+                                            }
+                                            Err(source) => Err(VfsError::Io {
+                                                operation: "inspect create target",
+                                                path: target,
+                                                source,
+                                            }),
+                                        }
+                                    })();
+                                    VfsResult::CreateTarget { id, result }
+                                }
+                                VfsRequest::Write {
+                                    id,
+                                    path,
+                                    bytes,
+                                    expectation,
+                                } => {
+                                    let document = queued.document_paths.is_some();
+                                    let result = (|| {
+                                        if let Some(paths) = queued.document_paths {
+                                            let canonical = fs::canonicalize(&path).ok();
+                                            if paths.iter().any(|other| {
+                                                other == &path
+                                                    || canonical.as_ref().is_some_and(|target| {
+                                                        fs::canonicalize(other).ok().as_ref()
+                                                            == Some(target)
+                                                    })
+                                            }) {
+                                                return Err(VfsError::DestinationExists(
+                                                    path.clone(),
+                                                ));
+                                            }
+                                        }
+                                        checked_atomic_write(&path, &bytes, &expectation)
+                                    })();
+                                    let path = if document && result.is_ok() {
+                                        fs::canonicalize(&path).unwrap_or(path)
+                                    } else {
+                                        path
+                                    };
+                                    VfsResult::Write { id, path, result }
+                                }
+                                VfsRequest::ListDirectory {
+                                    id,
+                                    path,
+                                    maximum_entries,
+                                } => VfsResult::Directory {
+                                    id,
+                                    result: list_directory(&path, maximum_entries),
+                                    path,
+                                },
+                                VfsRequest::DiscoverRecovery {
+                                    id,
+                                    directory,
+                                    maximum_records,
+                                } => {
+                                    let mut discovery = discover_recovery(&directory);
+                                    discovery.records.truncate(maximum_records);
+                                    VfsResult::RecoveryDiscovered { id, discovery }
+                                }
+                                VfsRequest::WriteRecovery { id, path, record } => {
+                                    let result = path
+                                        .parent()
+                                        .map_or(Ok(()), fs::create_dir_all)
+                                        .map_err(|source| VfsError::Io {
+                                            operation: "create recovery directory",
+                                            path: path.clone(),
+                                            source,
+                                        })
+                                        .and_then(|()| write_recovery(&path, &record));
+                                    VfsResult::RecoveryWritten { id, path, result }
+                                }
+                                VfsRequest::CleanupRecovery {
+                                    id,
+                                    directory,
+                                    maximum_records,
+                                    maximum_age_days,
+                                } => VfsResult::RecoveryCleaned {
+                                    id,
+                                    cleanup: cleanup_recovery(
+                                        &directory,
+                                        maximum_records,
+                                        maximum_age_days,
+                                        crate::clock::system_time(),
+                                    ),
+                                },
+                                VfsRequest::Delete { id, path } => {
+                                    let result = fs::remove_file(&path)
+                                        .or_else(|error| {
+                                            (error.kind() == io::ErrorKind::NotFound)
+                                                .then_some(())
+                                                .ok_or(error)
+                                        })
+                                        .map_err(|source| VfsError::Io {
+                                            operation: "delete",
+                                            path: path.clone(),
+                                            source,
+                                        });
+                                    VfsResult::Deleted { id, path, result }
+                                }
+                                VfsRequest::Shutdown => break,
+                            }
+                        })
+                    };
+                    queued.state.store(3, Ordering::Release);
+                    loop {
+                        if worker_stop.load(Ordering::Acquire) {
+                            return;
+                        }
+                        match result_sender.try_send(result) {
+                            Ok(()) => break,
+                            Err(TrySendError::Disconnected(_)) => return,
+                            Err(TrySendError::Full(pending)) => {
+                                result = pending;
+                                thread::park_timeout(Duration::from_millis(1));
+                            }
+                        }
                     }
                 }
             })
             .expect("VFS worker thread creation must succeed");
         Self {
+            queue_capacity: queue_capacity.max(1),
             sender: request_sender,
+            stopping,
+            finished,
+            requests: std::collections::HashMap::new(),
+            last_id: None,
             receiver: result_receiver,
             thread: Some(thread),
             ids,
@@ -426,10 +679,8 @@ impl VfsWorker {
     }
 
     pub fn read(&mut self, path: PathBuf) -> Result<RequestId, VfsError> {
-        let id = self.next_request_id();
-        self.sender
-            .try_send(VfsRequest::Read { id, path })
-            .map_err(map_send_error)?;
+        let id = self.next_request_id()?;
+        self.submit(VfsRequest::Read { id, path })?;
         Ok(id)
     }
 
@@ -438,14 +689,12 @@ impl VfsWorker {
         path: PathBuf,
         canonical_roots: Vec<PathBuf>,
     ) -> Result<RequestId, VfsError> {
-        let id = self.next_request_id();
-        self.sender
-            .try_send(VfsRequest::ReadScoped {
-                id,
-                path,
-                canonical_roots,
-            })
-            .map_err(map_send_error)?;
+        let id = self.next_request_id()?;
+        self.submit(VfsRequest::ReadScoped {
+            id,
+            path,
+            canonical_roots,
+        })?;
         Ok(id)
     }
 
@@ -455,15 +704,13 @@ impl VfsWorker {
         canonical_roots: Vec<PathBuf>,
         maximum_bytes: u64,
     ) -> Result<RequestId, VfsError> {
-        let id = self.next_request_id();
-        self.sender
-            .try_send(VfsRequest::ReadScopedBounded {
-                id,
-                path,
-                canonical_roots,
-                maximum_bytes,
-            })
-            .map_err(map_send_error)?;
+        let id = self.next_request_id()?;
+        self.submit(VfsRequest::ReadScopedBounded {
+            id,
+            path,
+            canonical_roots,
+            maximum_bytes,
+        })?;
         Ok(id)
     }
 
@@ -474,23 +721,74 @@ impl VfsWorker {
         canonical_roots: Vec<PathBuf>,
         maximum_bytes: usize,
     ) -> Result<RequestId, VfsError> {
-        let id = self.next_request_id();
-        self.sender
-            .try_send(VfsRequest::ResolveResource {
-                id,
-                source,
-                target,
-                canonical_roots,
-                maximum_bytes,
-            })
-            .map_err(map_send_error)?;
+        let id = self.next_request_id()?;
+        self.submit(VfsRequest::ResolveResource {
+            id,
+            source,
+            target,
+            canonical_roots,
+            maximum_bytes,
+        })?;
         Ok(id)
     }
     pub fn apply_resource(&mut self, intent: CheckedResourceIntent) -> Result<RequestId, VfsError> {
-        let id = self.next_request_id();
-        self.sender
-            .try_send(VfsRequest::ApplyResource { id, intent })
-            .map_err(map_send_error)?;
+        let id = self.next_request_id()?;
+        self.submit(VfsRequest::ApplyResource { id, intent })?;
+        Ok(id)
+    }
+
+    pub(crate) fn open_explorer(
+        &mut self,
+        path: PathBuf,
+        roots: Vec<crate::workspace::RootIdentity>,
+    ) -> Result<RequestId, VfsError> {
+        let id = self.next_request_id()?;
+        self.submit_io(
+            VfsRequest::Read {
+                id,
+                path: path.clone(),
+            },
+            None,
+            Some(ExplorerIo::Open { path, roots }),
+        )?;
+        Ok(id)
+    }
+    pub(crate) fn prepare_explorer(
+        &mut self,
+        operation: ExplorerMutation,
+        roots: Vec<crate::workspace::RootIdentity>,
+        maximum: u64,
+    ) -> Result<RequestId, VfsError> {
+        let id = self.next_request_id()?;
+        let request = VfsRequest::ExplorerMutation {
+            id,
+            operation: operation.clone(),
+            canonical_roots: Vec::new(),
+            maximum_bytes: maximum,
+        };
+        self.submit_io(
+            request,
+            None,
+            Some(ExplorerIo::Prepare {
+                operation,
+                roots,
+                maximum,
+            }),
+        )?;
+        Ok(id)
+    }
+    pub(crate) fn apply_explorer(
+        &mut self,
+        intent: PreparedExplorerMutation,
+    ) -> Result<RequestId, VfsError> {
+        let id = self.next_request_id()?;
+        let request = VfsRequest::ExplorerMutation {
+            id,
+            operation: intent.operation().clone(),
+            canonical_roots: Vec::new(),
+            maximum_bytes: 0,
+        };
+        self.submit_io(request, None, Some(ExplorerIo::Apply(intent)))?;
         Ok(id)
     }
 
@@ -500,15 +798,13 @@ impl VfsWorker {
         canonical_roots: Vec<PathBuf>,
         maximum_bytes: u64,
     ) -> Result<RequestId, VfsError> {
-        let id = self.next_request_id();
-        self.sender
-            .try_send(VfsRequest::ExplorerMutation {
-                id,
-                operation,
-                canonical_roots,
-                maximum_bytes,
-            })
-            .map_err(map_send_error)?;
+        let id = self.next_request_id()?;
+        self.submit(VfsRequest::ExplorerMutation {
+            id,
+            operation,
+            canonical_roots,
+            maximum_bytes,
+        })?;
         Ok(id)
     }
 
@@ -517,14 +813,12 @@ impl VfsWorker {
         path: PathBuf,
         canonical_roots: Vec<PathBuf>,
     ) -> Result<RequestId, VfsError> {
-        let id = self.next_request_id();
-        self.sender
-            .try_send(VfsRequest::ResolveCreate {
-                id,
-                path,
-                canonical_roots,
-            })
-            .map_err(map_send_error)?;
+        let id = self.next_request_id()?;
+        self.submit(VfsRequest::ResolveCreate {
+            id,
+            path,
+            canonical_roots,
+        })?;
         Ok(id)
     }
 
@@ -538,31 +832,46 @@ impl VfsWorker {
         bytes: Vec<u8>,
         expectation: WriteExpectation,
     ) -> Result<RequestId, VfsError> {
-        let id = self.next_request_id();
-        self.sender
-            .try_send(VfsRequest::Write {
+        let id = self.next_request_id()?;
+        self.submit(VfsRequest::Write {
+            id,
+            path,
+            bytes,
+            expectation,
+        })?;
+        Ok(id)
+    }
+
+    pub(crate) fn write_document(
+        &mut self,
+        path: PathBuf,
+        bytes: Vec<u8>,
+        expectation: WriteExpectation,
+        other_paths: Vec<PathBuf>,
+    ) -> Result<RequestId, VfsError> {
+        let id = self.next_request_id()?;
+        self.submit_document(
+            VfsRequest::Write {
                 id,
                 path,
                 bytes,
                 expectation,
-            })
-            .map_err(map_send_error)?;
+            },
+            Some(other_paths),
+        )?;
         Ok(id)
     }
-
     pub fn list_directory(
         &mut self,
         path: PathBuf,
         maximum_entries: usize,
     ) -> Result<RequestId, VfsError> {
-        let id = self.next_request_id();
-        self.sender
-            .try_send(VfsRequest::ListDirectory {
-                id,
-                path,
-                maximum_entries,
-            })
-            .map_err(map_send_error)?;
+        let id = self.next_request_id()?;
+        self.submit(VfsRequest::ListDirectory {
+            id,
+            path,
+            maximum_entries,
+        })?;
         Ok(id)
     }
 
@@ -571,14 +880,12 @@ impl VfsWorker {
         directory: PathBuf,
         maximum_records: usize,
     ) -> Result<RequestId, VfsError> {
-        let id = self.next_request_id();
-        self.sender
-            .try_send(VfsRequest::DiscoverRecovery {
-                id,
-                directory,
-                maximum_records,
-            })
-            .map_err(map_send_error)?;
+        let id = self.next_request_id()?;
+        self.submit(VfsRequest::DiscoverRecovery {
+            id,
+            directory,
+            maximum_records,
+        })?;
         Ok(id)
     }
 
@@ -587,10 +894,8 @@ impl VfsWorker {
         path: PathBuf,
         record: RecoveryRecord,
     ) -> Result<RequestId, VfsError> {
-        let id = self.next_request_id();
-        self.sender
-            .try_send(VfsRequest::WriteRecovery { id, path, record })
-            .map_err(map_send_error)?;
+        let id = self.next_request_id()?;
+        self.submit(VfsRequest::WriteRecovery { id, path, record })?;
         Ok(id)
     }
 
@@ -600,27 +905,34 @@ impl VfsWorker {
         maximum_records: usize,
         maximum_age_days: u64,
     ) -> Result<RequestId, VfsError> {
-        let id = self.next_request_id();
-        self.sender
-            .try_send(VfsRequest::CleanupRecovery {
-                id,
-                directory,
-                maximum_records,
-                maximum_age_days,
-            })
-            .map_err(map_send_error)?;
+        let id = self.next_request_id()?;
+        self.submit(VfsRequest::CleanupRecovery {
+            id,
+            directory,
+            maximum_records,
+            maximum_age_days,
+        })?;
         Ok(id)
     }
 
     pub fn delete(&mut self, path: PathBuf) -> Result<RequestId, VfsError> {
-        let id = self.next_request_id();
-        self.sender
-            .try_send(VfsRequest::Delete { id, path })
-            .map_err(map_send_error)?;
+        let id = self.next_request_id()?;
+        self.submit(VfsRequest::Delete { id, path })?;
         Ok(id)
     }
 
     pub fn try_result(&self) -> Result<Option<VfsResult>, VfsError> {
+        match self.try_reply()? {
+            Some(VfsReply::Public(result)) => Ok(Some(result)),
+            None => Ok(None),
+            Some(VfsReply::Explorer(_)) => Err(VfsError::Io {
+                operation: "route VFS result",
+                path: PathBuf::new(),
+                source: io::Error::other("internal explorer result requires its owner route"),
+            }),
+        }
+    }
+    pub(crate) fn try_reply(&self) -> Result<Option<VfsReply>, VfsError> {
         match self.receiver.try_recv() {
             Ok(result) => Ok(Some(result)),
             Err(TryRecvError::Empty) => Ok(None),
@@ -628,28 +940,193 @@ impl VfsWorker {
         }
     }
 
-    fn next_request_id(&self) -> RequestId {
-        RequestId(self.ids.next())
+    fn next_request_id(&mut self) -> Result<RequestId, VfsError> {
+        if self.stopping.load(Ordering::Acquire) {
+            return Err(VfsError::WorkerStopped);
+        }
+        let id = self.ids.next();
+        if self.last_id.is_some_and(|last| id <= last) {
+            return Err(VfsError::Io {
+                operation: "allocate request identity",
+                path: PathBuf::new(),
+                source: io::Error::other("VFS request identity exhausted or not monotonic"),
+            });
+        }
+        self.last_id = Some(id);
+        Ok(RequestId(id))
     }
-}
-
-pub(super) fn map_send_error(error: TrySendError<VfsRequest>) -> VfsError {
-    match error {
-        TrySendError::Full(_) => VfsError::QueueFull,
-        TrySendError::Disconnected(_) => VfsError::WorkerStopped,
+    fn submit(&mut self, request: VfsRequest) -> Result<(), VfsError> {
+        self.submit_document(request, None)
     }
-}
-
-impl Drop for VfsWorker {
-    fn drop(&mut self) {
-        let _ = self.sender.send(VfsRequest::Shutdown);
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+    fn submit_document(
+        &mut self,
+        request: VfsRequest,
+        document_paths: Option<Vec<PathBuf>>,
+    ) -> Result<(), VfsError> {
+        self.submit_io(request, document_paths, None)
+    }
+    fn submit_io(
+        &mut self,
+        request: VfsRequest,
+        document_paths: Option<Vec<PathBuf>>,
+        explorer: Option<ExplorerIo>,
+    ) -> Result<(), VfsError> {
+        self.submit_packet(request, document_paths, explorer, None)
+    }
+    fn submit_scoped_read(
+        &mut self,
+        id: RequestId,
+        path: PathBuf,
+        roots: Vec<crate::workspace::RootIdentity>,
+        maximum_bytes: u64,
+    ) -> Result<(), VfsError> {
+        self.submit_packet(
+            VfsRequest::ReadScopedBounded {
+                id,
+                path,
+                canonical_roots: Vec::new(),
+                maximum_bytes,
+            },
+            None,
+            None,
+            Some(roots),
+        )
+    }
+    fn submit_packet(
+        &mut self,
+        request: VfsRequest,
+        document_paths: Option<Vec<PathBuf>>,
+        explorer: Option<ExplorerIo>,
+        read_roots: Option<Vec<crate::workspace::RootIdentity>>,
+    ) -> Result<(), VfsError> {
+        if self.stopping.load(Ordering::Acquire) {
+            return Err(VfsError::WorkerStopped);
+        }
+        self.requests
+            .retain(|_, (state, _)| state.load(Ordering::Acquire) != 3);
+        let id = request
+            .id()
+            .expect("ordinary admission has request identity");
+        let state = Arc::new(std::sync::atomic::AtomicU8::new(0));
+        let cancellable = explorer.is_some()
+            || matches!(
+                &request,
+                VfsRequest::Read { .. }
+                    | VfsRequest::ReadScoped { .. }
+                    | VfsRequest::ReadScopedBounded { .. }
+                    | VfsRequest::Write { .. }
+                    | VfsRequest::ResolveCreate { .. }
+                    | VfsRequest::ResolveResource { .. }
+                    | VfsRequest::ApplyResource { .. }
+            );
+        match self.sender.try_send(QueuedRequest {
+            read_roots,
+            explorer,
+            document_paths,
+            request,
+            state: state.clone(),
+        }) {
+            Ok(()) => {
+                self.requests.insert(id, (state, cancellable));
+                Ok(())
+            }
+            Err(TrySendError::Full(_)) => Err(VfsError::QueueFull),
+            Err(TrySendError::Disconnected(_)) => Err(VfsError::WorkerStopped),
         }
     }
+    /// Cancel a queued read/write or workspace resource request; true only before execution starts.
+    /// Other request kinds currently return false.
+    /// A running filesystem operation may still finish; its owner must retire
+    /// publication independently. Cancellation never rolls back a disk write.
+    pub fn cancel(&mut self, id: RequestId) -> bool {
+        self.requests.get(&id).is_some_and(|(state, allowed)| {
+            *allowed
+                && state
+                    .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+        })
+    }
+    pub fn begin_shutdown(&mut self) {
+        self.stopping.store(true, Ordering::Release);
+        let _ = self.sender.try_send(QueuedRequest {
+            read_roots: None,
+            explorer: None,
+            document_paths: None,
+            request: VfsRequest::Shutdown,
+            state: Arc::new(std::sync::atomic::AtomicU8::new(0)),
+        });
+    }
+    pub fn has_outstanding(&self) -> bool {
+        !self.shutdown_finished()
+            && self
+                .requests
+                .values()
+                .any(|(state, _)| state.load(Ordering::Acquire) != 3)
+    }
+    pub fn shutdown_finished(&self) -> bool {
+        self.finished.load(Ordering::Acquire)
+    }
+}
+impl Drop for VfsWorker {
+    fn drop(&mut self) {
+        self.begin_shutdown();
+        self.thread.take();
+    }
 }
 
-fn scoped_existing_path(path: &Path, roots: &[PathBuf]) -> Result<PathBuf, VfsError> {
+pub(crate) fn roots_current(roots: &[crate::workspace::RootIdentity]) -> Result<(), VfsError> {
+    let error = |path: &Path, message: String| VfsError::Io {
+        operation: "check root identity",
+        path: path.into(),
+        source: io::Error::other(message),
+    };
+    if roots.is_empty() {
+        return Err(error(
+            Path::new(""),
+            "read or mutation has no filesystem scope".into(),
+        ));
+    }
+    for root in roots {
+        let current = crate::workspace::RootIdentity::capture(&root.canonical_path)
+            .map_err(|e| error(&root.canonical_path, e.to_string()))?;
+        if root.filesystem_identity.is_none() || &current != root {
+            return Err(error(
+                &root.canonical_path,
+                "workspace filesystem identity changed".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+/// Select the most specific applicable root for both lexical and canonical paths.
+/// Retaining the lexical root prevents a replaced root symlink bypassing its identity check.
+pub(crate) fn participating_roots(
+    requested: &[&Path],
+    canonical: &[&Path],
+    roots: &[crate::workspace::RootIdentity],
+) -> Result<Vec<crate::workspace::RootIdentity>, VfsError> {
+    let mut selected = Vec::new();
+    for (paths, required) in [(requested, false), (canonical, true)] {
+        for path in paths {
+            let root = roots
+                .iter()
+                .filter(|root| path.starts_with(&root.canonical_path))
+                .max_by_key(|root| root.canonical_path.components().count());
+            match root {
+                Some(root) => {
+                    if !selected.contains(root) {
+                        selected.push(root.clone());
+                    }
+                }
+                None if required => return Err(VfsError::OutsideScope((*path).into())),
+                None => {}
+            }
+        }
+    }
+    Ok(selected)
+}
+
+pub(super) fn scoped_existing_path(path: &Path, roots: &[PathBuf]) -> Result<PathBuf, VfsError> {
     let lexical = fs::symlink_metadata(path).map_err(|source| VfsError::Io {
         operation: "inspect explorer path",
         path: path.to_path_buf(),
@@ -674,7 +1151,7 @@ fn scoped_existing_path(path: &Path, roots: &[PathBuf]) -> Result<PathBuf, VfsEr
     Ok(canonical)
 }
 
-fn scoped_missing_target(path: &Path, roots: &[PathBuf]) -> Result<PathBuf, VfsError> {
+pub(super) fn scoped_missing_target(path: &Path, roots: &[PathBuf]) -> Result<PathBuf, VfsError> {
     let name = path
         .file_name()
         .filter(|name| !name.is_empty())
@@ -1018,6 +1495,21 @@ pub(super) fn read_file_with_ceiling(path: &Path, maximum_bytes: u64) -> Result<
 }
 
 pub fn read_file(path: &Path) -> Result<Vec<u8>, VfsError> {
+    let metadata = fs::metadata(path).map_err(|source| VfsError::Io {
+        operation: "inspect read target",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if !metadata.is_file() {
+        return Err(VfsError::Io {
+            operation: "read non-regular file",
+            path: path.to_path_buf(),
+            source: io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "document target is not a regular file",
+            ),
+        });
+    }
     let file = fs::File::open(path).map_err(|source| VfsError::Io {
         operation: "open for reading",
         path: path.to_path_buf(),
@@ -1126,4 +1618,100 @@ pub(super) fn sync_parent(parent: &Path) -> Result<(), VfsError> {
 #[cfg(not(unix))]
 pub(super) fn sync_parent(_parent: &Path) -> Result<(), VfsError> {
     Ok(())
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    fn result(worker: &VfsWorker) -> VfsResult {
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(result) = worker.try_result().unwrap() {
+                return result;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+    #[test]
+    fn queued_write_cancellation_is_exact_and_full_admission_never_writes() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("file");
+        let (mut worker, gate) = VfsWorker::start_gated_for_test(1);
+        let id = worker.write(path.clone(), b"cancelled".to_vec()).unwrap();
+        assert!(matches!(
+            worker.write(path.clone(), b"full".to_vec()),
+            Err(VfsError::QueueFull)
+        ));
+        assert!(worker.cancel(id));
+        assert!(!worker.cancel(id));
+        gate.send(()).unwrap();
+        assert!(
+            matches!(result(&worker),VfsResult::Write {id:actual,result:Err(VfsError::Io {source,..}),..} if actual==id && source.kind()==io::ErrorKind::Interrupted)
+        );
+        assert!(!path.exists());
+        let accepted = worker.write(path.clone(), b"saved".to_vec()).unwrap();
+        assert!(matches!(result(&worker),VfsResult::Write{id,result:Ok(()),..} if id==accepted));
+        assert_eq!(fs::read(path).unwrap(), b"saved");
+    }
+    #[test]
+    fn non_reader_and_full_queue_shutdown_do_not_join_or_block_drop() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("file");
+        fs::write(&path, b"text").unwrap();
+        let mut worker = VfsWorker::start(1);
+        let admission_deadline = std::time::Instant::now() + Duration::from_secs(2);
+        for _ in 0..3 {
+            loop {
+                assert!(std::time::Instant::now() < admission_deadline);
+                match worker.read(path.clone()) {
+                    Ok(_) => break,
+                    Err(VfsError::QueueFull) => thread::sleep(Duration::from_millis(1)),
+                    Err(e) => panic!("{e}"),
+                }
+            }
+        }
+        let start = std::time::Instant::now();
+        worker.begin_shutdown();
+        assert!(start.elapsed() < Duration::from_millis(50));
+        let deadline = start + Duration::from_secs(2);
+        while !worker.shutdown_finished() {
+            assert!(std::time::Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(matches!(worker.read(path), Err(VfsError::WorkerStopped)));
+        let (worker, gate) = VfsWorker::start_gated_for_test(1);
+        let finished = worker.finished.clone();
+        let start = std::time::Instant::now();
+        drop(worker);
+        assert!(start.elapsed() < Duration::from_millis(50));
+        gate.send(()).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while !finished.load(Ordering::Acquire) {
+            assert!(std::time::Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+    #[test]
+    fn reused_or_exhausted_request_identity_rejects_before_queue_admission() {
+        struct Repeated;
+        impl crate::clock::IdSource for Repeated {
+            fn next(&self) -> u64 {
+                u64::MAX
+            }
+        }
+        let (gate, receive) = mpsc::channel();
+        START_GATE.with(|g| *g.borrow_mut() = Some(receive));
+        let mut worker = VfsWorker::start_with_ids(2, Arc::new(Repeated));
+        worker.read("unused".into()).unwrap();
+        assert!(matches!(
+            worker.read("unused".into()),
+            Err(VfsError::Io {
+                operation: "allocate request identity",
+                ..
+            })
+        ));
+        worker.begin_shutdown();
+        gate.send(()).unwrap();
+    }
 }

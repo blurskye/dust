@@ -1,0 +1,538 @@
+//! Bounded PTY admission. All filesystem/PTY/process I/O runs on owned workers.
+use super::{PtyError, PtyEvent, PtyId, PtyRequest};
+use std::{
+    collections::HashMap,
+    io::{Read, Write},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc::{self, Receiver, SyncSender},
+    },
+    thread,
+    time::Duration,
+};
+
+struct Slot(Arc<AtomicUsize>);
+impl Slot {
+    fn reserve(count: &Arc<AtomicUsize>, maximum: usize) -> Result<Self, PtyError> {
+        count
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                if n < maximum { n.checked_add(1) } else { None }
+            })
+            .map_err(|_| PtyError::QueueFull)?;
+        Ok(Self(count.clone()))
+    }
+}
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+struct Input {
+    bytes: Vec<u8>,
+    _slot: Slot,
+}
+struct Handle {
+    input: SyncSender<Input>,
+    resize: SyncSender<(u16, u16)>,
+    cancel: Arc<AtomicBool>,
+    queued: Arc<AtomicUsize>,
+    maximum: usize,
+    capacity: usize,
+    finished: Arc<AtomicBool>,
+}
+pub struct PtyService {
+    next: Option<u64>,
+    capacity: usize,
+    residents: Arc<AtomicUsize>,
+    sessions: HashMap<PtyId, Handle>,
+    sender: SyncSender<PtyEvent>,
+    receiver: Receiver<PtyEvent>,
+    closed: bool,
+}
+pub(crate) struct PtyAdmission<'a> {
+    service: &'a mut PtyService,
+    slot: Slot,
+}
+pub(crate) struct PtyInputAdmission<'a> {
+    handle: &'a Handle,
+    slot: Slot,
+}
+impl PtyInputAdmission<'_> {
+    pub(crate) fn submit(self, bytes: Vec<u8>) -> Result<(), PtyError> {
+        if self.handle.cancel.load(Ordering::Acquire)
+            || self.handle.finished.load(Ordering::Acquire)
+        {
+            return Err(PtyError::Stopped);
+        }
+        if bytes.len() > self.handle.maximum {
+            return Err(PtyError::InvalidPolicy);
+        }
+        self.handle
+            .input
+            .try_send(Input {
+                bytes,
+                _slot: self.slot,
+            })
+            .map_err(queue)
+    }
+}
+impl PtyAdmission<'_> {
+    pub(crate) fn submit(
+        self,
+        request: PtyRequest,
+        root: Option<crate::workspace::RootIdentity>,
+    ) -> Result<PtyId, PtyError> {
+        validate(&request)?;
+        let id = PtyId(self.service.next.ok_or(PtyError::Exhausted)?);
+        self.service.next = id.0.checked_add(1);
+        let capacity = request.policy.event_capacity.clamp(1, 256);
+        let (input, input_rx) = mpsc::sync_channel(capacity);
+        let (resize, resize_rx) = mpsc::sync_channel(capacity);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let finished = Arc::new(AtomicBool::new(false));
+        let handle = Handle {
+            input,
+            resize,
+            cancel: cancel.clone(),
+            queued: Arc::new(AtomicUsize::new(0)),
+            maximum: request.policy.maximum_input_bytes,
+            capacity,
+            finished: finished.clone(),
+        };
+        let events = self.service.sender.clone();
+        // The lease lives until controller, reader AND writer have released it.
+        let resident = Arc::new(self.slot);
+        thread::Builder::new()
+            .name(format!("dust-pty-{}", id.0))
+            .spawn(move || {
+                struct Finished(Arc<AtomicBool>);
+                impl Drop for Finished {
+                    fn drop(&mut self) {
+                        self.0.store(true, Ordering::Release);
+                    }
+                }
+                let _finished = Finished(finished);
+                if let Err(error) = run(
+                    id, request, root, &events, cancel, input_rx, resize_rx, resident,
+                ) {
+                    let _ = events.send(PtyEvent::Failed {
+                        id,
+                        message: error.to_string(),
+                    });
+                }
+            })
+            .map_err(|error| PtyError::Spawn(error.to_string()))?;
+        self.service.sessions.insert(id, handle);
+        Ok(id)
+    }
+}
+impl PtyService {
+    pub fn start(capacity: usize) -> Self {
+        let capacity = capacity.clamp(1, 256);
+        let (sender, receiver) = mpsc::sync_channel(capacity);
+        Self {
+            next: Some(1),
+            capacity,
+            residents: Arc::new(AtomicUsize::new(0)),
+            sessions: HashMap::new(),
+            sender,
+            receiver,
+            closed: false,
+        }
+    }
+    pub(crate) fn check_open(&self) -> Result<(), PtyError> {
+        if self.closed {
+            return Err(PtyError::Stopped);
+        }
+        if self.next.is_none() {
+            return Err(PtyError::Exhausted);
+        }
+        if self.sessions.len() >= self.capacity
+            || self.residents.load(Ordering::Acquire) >= self.capacity
+        {
+            return Err(PtyError::QueueFull);
+        }
+        Ok(())
+    }
+    pub(crate) fn reserve(&mut self) -> Result<PtyAdmission<'_>, PtyError> {
+        self.check_open()?;
+        let slot = Slot::reserve(&self.residents, self.capacity)?;
+        Ok(PtyAdmission {
+            service: self,
+            slot,
+        })
+    }
+    /// Asynchronous admission, not a successful spawn or directory observation.
+    pub fn open(&mut self, request: PtyRequest) -> Result<PtyId, PtyError> {
+        self.reserve()?.submit(request, None)
+    }
+    pub(crate) fn reserve_input(&self, id: PtyId) -> Result<PtyInputAdmission<'_>, PtyError> {
+        if self.closed {
+            return Err(PtyError::Stopped);
+        }
+        let handle = self.sessions.get(&id).ok_or(PtyError::Stopped)?;
+        if handle.cancel.load(Ordering::Acquire) || handle.finished.load(Ordering::Acquire) {
+            return Err(PtyError::Stopped);
+        }
+        let slot = Slot::reserve(&handle.queued, handle.capacity)?;
+        Ok(PtyInputAdmission { handle, slot })
+    }
+    pub fn input(&self, id: PtyId, bytes: Vec<u8>, ceiling: usize) -> Result<(), PtyError> {
+        let admission = self.reserve_input(id)?;
+        if bytes.len() > ceiling {
+            return Err(PtyError::InvalidPolicy);
+        }
+        admission.submit(bytes)
+    }
+    pub fn resize(&self, id: PtyId, columns: u16, rows: u16) -> Result<(), PtyError> {
+        if self.closed || columns == 0 || rows == 0 {
+            return Err(PtyError::InvalidPolicy);
+        }
+        let handle = self.sessions.get(&id).ok_or(PtyError::Stopped)?;
+        if handle.cancel.load(Ordering::Acquire) || handle.finished.load(Ordering::Acquire) {
+            return Err(PtyError::Stopped);
+        }
+        handle.resize.try_send((columns, rows)).map_err(queue)
+    }
+    /// Out-of-band cancellation cannot be lost behind a full command queue.
+    pub fn close(&self, id: PtyId) -> Result<(), PtyError> {
+        self.sessions
+            .get(&id)
+            .ok_or(PtyError::Stopped)?
+            .cancel
+            .store(true, Ordering::Release);
+        Ok(())
+    }
+    pub fn begin_shutdown(&mut self) {
+        self.closed = true;
+        for handle in self.sessions.values() {
+            handle.cancel.store(true, Ordering::Release);
+        }
+    }
+    pub fn pending(&self) -> usize {
+        self.sessions.len()
+    }
+    pub fn poll(&mut self) -> Result<Vec<PtyEvent>, PtyError> {
+        Ok(self.drain_events())
+    }
+    pub(crate) fn drain_events(&mut self) -> Vec<PtyEvent> {
+        let mut events = Vec::new();
+        for _ in 0..256 {
+            let Ok(event) = self.receiver.try_recv() else {
+                break;
+            };
+            if let PtyEvent::Exited { id, .. } | PtyEvent::Failed { id, .. } = &event {
+                self.sessions.remove(id);
+            }
+            events.push(event);
+        }
+        // A panic/startup failure must not leave an immortal logical session.
+        // Finished is published after all controller sends; queued terminals win.
+        if events.is_empty() {
+            let ended = self
+                .sessions
+                .iter()
+                .filter_map(|(id, h)| h.finished.load(Ordering::Acquire).then_some(*id))
+                .collect::<Vec<_>>();
+            // Acquire the finished flags BEFORE the second drain. A terminal
+            // may have arrived between the first empty receive and that load.
+            for _ in 0..256 {
+                let Ok(event) = self.receiver.try_recv() else {
+                    break;
+                };
+                if let PtyEvent::Exited { id, .. } | PtyEvent::Failed { id, .. } = &event {
+                    self.sessions.remove(id);
+                }
+                events.push(event);
+            }
+            if !events.is_empty() {
+                return events;
+            }
+            for id in ended {
+                self.sessions.remove(&id);
+                events.push(PtyEvent::Failed {
+                    id,
+                    message: "PTY worker stopped without a terminal result".into(),
+                });
+            }
+        }
+        events
+    }
+}
+impl Drop for PtyService {
+    fn drop(&mut self) {
+        self.begin_shutdown();
+    }
+}
+fn queue<T>(error: mpsc::TrySendError<T>) -> PtyError {
+    match error {
+        mpsc::TrySendError::Full(_) => PtyError::QueueFull,
+        mpsc::TrySendError::Disconnected(_) => PtyError::Stopped,
+    }
+}
+fn validate(request: &PtyRequest) -> Result<(), PtyError> {
+    let argv = request
+        .arguments
+        .iter()
+        .fold(0usize, |n, s| n.saturating_add(s.len()));
+    let env = request.environment.iter().fold(0usize, |n, (k, v)| {
+        n.saturating_add(k.len()).saturating_add(v.len())
+    });
+    if !request.program.is_absolute()
+        || !request.cwd.is_absolute()
+        || request.columns == 0
+        || request.rows == 0
+        || request.arguments.len() > 4096
+        || argv > 1024 * 1024
+        || env > 1024 * 1024
+        || request.policy.maximum_output_bytes == 0
+        || request.policy.maximum_output_bytes > 256 * 1024 * 1024
+        || request.policy.maximum_input_bytes == 0
+        || request.policy.maximum_input_bytes > 16 * 1024 * 1024
+        || request.policy.event_capacity == 0
+    {
+        return Err(PtyError::InvalidPolicy);
+    }
+    Ok(())
+}
+struct Child(Box<dyn portable_pty::Child + Send + Sync>);
+impl Drop for Child {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+fn deliver(
+    mut event: PtyEvent,
+    events: &SyncSender<PtyEvent>,
+    cancel: &AtomicBool,
+    child: &mut Child,
+) -> bool {
+    loop {
+        match events.try_send(event) {
+            Ok(()) => return true,
+            Err(mpsc::TrySendError::Disconnected(_)) => return false,
+            Err(mpsc::TrySendError::Full(returned)) => event = returned,
+        }
+        if cancel.load(Ordering::Acquire) {
+            let _ = child.0.kill();
+        }
+        thread::sleep(Duration::from_millis(2));
+    }
+}
+fn run(
+    id: PtyId,
+    request: PtyRequest,
+    root: Option<crate::workspace::RootIdentity>,
+    events: &SyncSender<PtyEvent>,
+    cancel: Arc<AtomicBool>,
+    input: Receiver<Input>,
+    resize: Receiver<(u16, u16)>,
+    resident: Arc<Slot>,
+) -> Result<(), PtyError> {
+    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+    let fail = |error: String| PtyError::Spawn(error);
+    if cancel.load(Ordering::Acquire) {
+        return Err(fail("PTY cancelled before spawn".into()));
+    }
+    if !request.cwd.is_dir() {
+        return Err(fail("PTY working directory is unavailable".into()));
+    }
+    if let Some(root) = root {
+        let current = crate::workspace::RootIdentity::capture(&root.canonical_path)
+            .map_err(|e| fail(e.to_string()))?;
+        let cwd = request
+            .cwd
+            .canonicalize()
+            .map_err(|e| fail(e.to_string()))?;
+        if root != current
+            || !request.cwd.starts_with(&root.canonical_path)
+            || !cwd.starts_with(&root.canonical_path)
+        {
+            return Err(fail(
+                "PTY execution root filesystem identity changed".into(),
+            ));
+        }
+    }
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: request.rows,
+            cols: request.columns,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| fail(e.to_string()))?;
+    let mut command = CommandBuilder::new(&request.program);
+    command.args(&request.arguments);
+    command.cwd(&request.cwd);
+    for (key, value) in &request.environment {
+        command.env(key, value);
+    }
+    if cancel.load(Ordering::Acquire) {
+        return Err(fail("PTY cancelled before spawn".into()));
+    }
+    let mut child = Child(
+        pair.slave
+            .spawn_command(command)
+            .map_err(|e| fail(e.to_string()))?,
+    );
+    drop(pair.slave);
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| fail(e.to_string()))?;
+    let mut writer = pair.master.take_writer().map_err(|e| fail(e.to_string()))?;
+    if !deliver(
+        PtyEvent::Started {
+            id,
+            root_revision: request.root_revision,
+        },
+        events,
+        &cancel,
+        &mut child,
+    ) {
+        return Ok(());
+    }
+    let (read_tx, read_rx) = mpsc::sync_channel(1);
+    let output = events.clone();
+    let read_resident = resident.clone();
+    let maximum = request.policy.maximum_output_bytes;
+    thread::Builder::new()
+        .name(format!("dust-pty-read-{}", id.0))
+        .spawn(move || {
+            let _resident = read_resident;
+            let result = (|| -> Result<(), String> {
+                let mut total = 0usize;
+                let mut bytes = [0u8; 8192];
+                loop {
+                    let read = match reader.read(&mut bytes) {
+                        Ok(0) => return Ok(()),
+                        Ok(n) => n,
+                        // Linux PTY masters report EIO when the last slave closes.
+                        #[cfg(target_os = "linux")]
+                        Err(e) if e.raw_os_error() == Some(5) => return Ok(()),
+                        Err(e) => return Err(e.to_string()),
+                    };
+                    if read > maximum.saturating_sub(total) {
+                        return Err("PTY output limit exceeded; stream is incomplete".into());
+                    }
+                    total += read;
+                    output
+                        .send(PtyEvent::Output {
+                            id,
+                            bytes: bytes[..read].to_vec(),
+                            truncated: false,
+                        })
+                        .map_err(|_| "PTY output receiver stopped".to_owned())?;
+                }
+            })();
+            let _ = read_tx.send(result);
+        })
+        .map_err(|e| fail(e.to_string()))?;
+    let (write_tx, write_rx) = mpsc::sync_channel(1);
+    let write_cancel = cancel.clone();
+    let write_resident = resident.clone();
+    let writer_stop = Arc::new(AtomicBool::new(false));
+    let stop_writer = writer_stop.clone();
+    thread::Builder::new()
+        .name(format!("dust-pty-write-{}", id.0))
+        .spawn(move || {
+            let _resident = write_resident;
+            let result = (|| -> Result<(), String> {
+                while !write_cancel.load(Ordering::Acquire) && !stop_writer.load(Ordering::Acquire)
+                {
+                    match input.recv_timeout(Duration::from_millis(10)) {
+                        Ok(packet) => {
+                            let Input { bytes, _slot } = packet;
+                            drop(_slot);
+                            writer
+                                .write_all(&bytes)
+                                .and_then(|_| writer.flush())
+                                .map_err(|e| e.to_string())?;
+                        }
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(_) => break,
+                    }
+                }
+                if input.try_recv().is_ok() {
+                    return Err("PTY stopped with undelivered admitted input".into());
+                }
+                Ok(())
+            })();
+            let _ = write_tx.send(result);
+        })
+        .map_err(|e| fail(e.to_string()))?;
+    let mut exit = None;
+    let mut read_done = false;
+    let mut write_done = false;
+    let mut failure = None;
+    loop {
+        if cancel.load(Ordering::Acquire) || failure.is_some() {
+            let _ = child.0.kill();
+            writer_stop.store(true, Ordering::Release);
+        }
+        for _ in 0..256 {
+            let Ok((columns, rows)) = resize.try_recv() else {
+                break;
+            };
+            pair.master
+                .resize(PtySize {
+                    rows,
+                    cols: columns,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+                .map_err(|e| fail(e.to_string()))?;
+            if !deliver(
+                PtyEvent::Resized { id, columns, rows },
+                events,
+                &cancel,
+                &mut child,
+            ) {
+                return Ok(());
+            }
+        }
+        if exit.is_none() {
+            if let Some(status) = child.0.try_wait().map_err(|e| fail(e.to_string()))? {
+                exit = Some(status.exit_code());
+                writer_stop.store(true, Ordering::Release);
+            }
+        }
+        for (rx, done) in [(&read_rx, &mut read_done), (&write_rx, &mut write_done)] {
+            if !*done {
+                match rx.try_recv() {
+                    Ok(result) => {
+                        *done = true;
+                        if let Err(e) = result {
+                            failure.get_or_insert(e);
+                        }
+                    }
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        *done = true;
+                        failure.get_or_insert("PTY I/O worker stopped without completion".into());
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {}
+                }
+            }
+        }
+        if let Some(code) = exit {
+            if read_done && write_done {
+                let event = if let Some(message) = failure {
+                    PtyEvent::Failed { id, message }
+                } else {
+                    PtyEvent::Exited {
+                        id,
+                        code: Some(code),
+                    }
+                };
+                deliver(event, events, &cancel, &mut child);
+                return Ok(());
+            }
+        }
+        thread::sleep(Duration::from_millis(2));
+    }
+}
+
+#[cfg(test)]
+mod tests;

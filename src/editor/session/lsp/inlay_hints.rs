@@ -2,33 +2,17 @@ use super::*;
 
 impl InteractiveApplication {
     pub(in crate::editor::session) fn sync_ui_diagnostics(&mut self) {
-        let candidate = self
-            .diagnostics
-            .problems(None, None)
-            .into_iter()
-            .filter_map(|problem| {
-                Some(UiDiagnostic {
-                    path: path_from_file_uri(&problem.uri)?,
-                    range: problem.range,
-                    severity: problem.severity,
-                    source: problem.source,
-                    code: problem.code,
-                    message: problem.message,
-                })
-            })
-            .collect::<Vec<_>>();
-        if candidate != self.ui.diagnostics {
+        if let Some(candidate) = self.diagnostics.projection(&self.state) {
             self.ui.diagnostics = candidate;
-            self.content_line_diagnostic_revision =
-                self.content_line_diagnostic_revision.saturating_add(1);
-            self.content_line_projection_signature = None;
+            self.window_session.diagnostics_changed();
         }
+        self.ui.expanded_diagnostic = self.diagnostics.expanded(&self.state);
     }
 
     pub(in crate::editor::session) fn clear_lsp_ui_projection(&mut self) {
         self.lsp_completion_items.clear();
         self.ui.language_completion = None;
-        self.ui.documentation_popup = None;
+        self.close_documentation();
         self.ui.lsp_semantic_spans.clear();
         self.ui.lsp_highlight_spans.clear();
         self.ui.lsp_inlay_hints.clear();
@@ -90,7 +74,7 @@ impl InteractiveApplication {
         self.lsp_inlay_empty_retries = 0;
         self.lsp_inlay_refresh_due = Some(
             Instant::now()
-                + if self.configuration.settings.lsp.inlay_hint_level
+                + if self.configuration.settings().lsp.inlay_hint_level
                     == crate::config::InlayHintLevel::Max
                 {
                     LSP_INLAY_HINT_MAX_STARTUP_DELAY
@@ -101,8 +85,8 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn schedule_lsp_inlay_warmup_retry(&mut self) -> bool {
-        if !self.configuration.settings.lsp.inlay_hints
-            || self.configuration.settings.lsp.inlay_hint_level
+        if !self.configuration.settings().lsp.inlay_hints
+            || self.configuration.settings().lsp.inlay_hint_level
                 != crate::config::InlayHintLevel::Max
             || self.lsp_inlay_empty_retries >= LSP_INLAY_HINT_WARMUP_RETRY_LIMIT
         {
@@ -116,7 +100,7 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn schedule_lsp_inlay_refresh(&mut self, immediate: bool) {
-        if !self.configuration.settings.lsp.inlay_hints {
+        if !self.configuration.settings().lsp.inlay_hints {
             self.lsp_inlay_refresh_due = None;
             self.lsp_inlay_request_owner = None;
             self.lsp_inlay_empty_retries = 0;
@@ -132,7 +116,7 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn process_lsp_inlay_refresh(&mut self) {
-        if !self.configuration.settings.lsp.inlay_hints {
+        if !self.configuration.settings().lsp.inlay_hints {
             self.lsp_inlay_refresh_due = None;
             self.lsp_inlay_request_owner = None;
             self.lsp_inlay_empty_retries = 0;

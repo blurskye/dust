@@ -255,6 +255,7 @@ fn workspace_frame_respects_nonzero_compositor_origin_for_side_and_top_docks() {
         id: 1,
         profile: "side".into(),
         tabs: vec![super::TerminalTabState {
+            phase: super::TerminalPhase::Running,
             id: 1,
             profile: "side".into(),
             running: true,
@@ -2425,12 +2426,14 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
         profile: "shell".into(),
         tabs: vec![
             super::TerminalTabState {
+                phase: super::TerminalPhase::Running,
                 id: 7,
                 profile: "shell".into(),
                 running: true,
                 exit_code: None,
             },
             super::TerminalTabState {
+                phase: super::TerminalPhase::Exited,
                 id: 8,
                 profile: "logs".into(),
                 running: false,

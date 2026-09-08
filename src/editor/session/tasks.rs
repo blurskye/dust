@@ -1,512 +1,718 @@
-use super::*;
+//! Task planning, admitted run ownership, bounded output and source projections.
+use super::workspace::{WorkspaceSession, WorkspaceVersion};
+mod linter;
+mod sources;
+use crate::{
+    config::{Config, ProcessConfig, TaskConfig},
+    editor::{
+        EditorState, TransactionId,
+        text::{ByteOffset, ByteRange, TextEdit, TextEditSet},
+        transaction::{EditorOperation, EditorTransaction, Precondition},
+    },
+    process::{
+        ExecutionPreflightRequest, ExecutionPreflightResult, JobEvent, JobId, JobPolicy,
+        JobRequest, JobStream, JobSupervisor,
+    },
+    workspace::{DiagnosticProducer, PickerAction, PickerItem, PickerItemId},
+};
+pub(super) use linter::{LinterReadLoan, LinterUpdate};
+pub(super) use sources::{FormatterSource, TaskDiagnosticRun};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
+#[derive(Clone, Debug)]
+pub(in crate::editor::session) enum AdapterContext {
+    Plain,
+    Formatter {
+        source: FormatterSource,
+    },
+    Linter {
+        matcher: crate::config::ProblemMatcherConfig,
+    },
+    Test {
+        matcher: crate::config::ProblemMatcherConfig,
+    },
+}
+#[derive(Clone, Debug)]
+pub(in crate::editor::session) struct TaskOutputRecord {
+    pub(in crate::editor::session) stream: JobStream,
+    pub(in crate::editor::session) text: String,
+    pub(in crate::editor::session) truncated: bool,
+}
+pub(in crate::editor::session) struct RunningTask {
+    output: Vec<u8>,
+    key: RunKey,
+    diagnostic_source: Option<TaskDiagnosticRun>,
+    requested: String,
+    name: String,
+    adapter: AdapterContext,
+    root: PathBuf,
+}
 
-impl InteractiveApplication {
-    pub(super) fn start_task_after_validation(&mut self, name: &str) {
-        self.start_task_plan(name, AdapterContext::Plain);
+impl RunningTask {
+    pub(super) fn requested(&self) -> &String {
+        &self.requested
     }
-
-    pub(super) fn start_task_plan(&mut self, name: &str, adapter: AdapterContext) {
-        if self.job_tasks.values().any(|task| task.requested == name) {
-            self.show_error(self.message("task_already_running", &[("name", name.into())]));
-            return;
-        }
-        let Some(mut plan) = task_plan(name, &self.configuration.settings.tasks) else {
-            self.show_error(self.message("task_unknown", &[("name", name.into())]));
-            return;
-        };
-        self.task_output.insert(name.to_owned(), Vec::new());
-        self.task_output_rows.insert(name.to_owned(), Vec::new());
-        self.task_status.insert(name.to_owned(), "queued".into());
-        self.start_task_step(name.to_owned(), &mut plan, adapter);
+    pub(super) fn name(&self) -> &String {
+        &self.name
     }
+    pub(super) fn adapter(&self) -> &AdapterContext {
+        &self.adapter
+    }
+}
+#[derive(Clone, Debug)]
+pub(in crate::editor::session) struct TestCaseResult {
+    pub(in crate::editor::session) name: String,
+    pub(in crate::editor::session) status: String,
+    pub(in crate::editor::session) duration: String,
+    pub(in crate::editor::session) message: String,
+    pub(in crate::editor::session) source: Option<(PathBuf, usize, usize)>,
+}
 
-    pub(super) fn start_task_step(
-        &mut self,
-        requested: String,
+pub(in crate::editor::session) fn task_plan(
+    name: &str,
+    tasks: &BTreeMap<String, crate::config::TaskConfig>,
+) -> Option<Vec<String>> {
+    fn visit(
+        name: &str,
+        tasks: &BTreeMap<String, crate::config::TaskConfig>,
+        seen: &mut BTreeSet<String>,
+        active: &mut BTreeSet<String>,
         plan: &mut Vec<String>,
-        adapter: AdapterContext,
-    ) {
-        if self.job_tasks.len() >= self.configuration.settings.processes.maximum_running
-            || plan.is_empty()
-        {
-            return;
+    ) -> Option<()> {
+        if seen.contains(name) {
+            return Some(());
         }
-        let name = plan.remove(0);
-        let Some(task) = self.configuration.settings.tasks.get(&name).cloned() else {
-            return;
+        if active.len() >= 256 || !active.insert(name.into()) {
+            return None;
+        }
+        let task = tasks.get(name)?;
+        for dependency in &task.dependencies {
+            visit(dependency, tasks, seen, active, plan)?;
+        }
+        active.remove(name);
+        seen.insert(name.into());
+        plan.push(name.into());
+        Some(())
+    }
+    let mut seen = BTreeSet::new();
+    let mut plan = Vec::new();
+    visit(name, tasks, &mut seen, &mut BTreeSet::new(), &mut plan)?;
+    Some(plan)
+}
+
+#[derive(Clone, Debug)]
+struct RunKey {
+    epoch: Arc<()>,
+    workspace: WorkspaceVersion,
+    configuration: u64,
+}
+#[derive(Clone, Debug)]
+pub(super) struct TestKey {
+    name: String,
+    run: Arc<()>,
+    index: usize,
+}
+struct Plan {
+    remaining: VecDeque<(String, TaskConfig)>,
+    adapter: AdapterContext,
+    awaiting: bool,
+}
+pub(super) struct TaskStep {
+    request: ExecutionPreflightRequest,
+    requested: String,
+    name: String,
+    task: TaskConfig,
+    adapter: AdapterContext,
+    key: RunKey,
+}
+pub(super) enum TaskUpdate {
+    Output,
+    Finished {
+        task: RunningTask,
+        code: Option<i32>,
+        truncated: bool,
+        next: bool,
+    },
+    Failed {
+        source: Option<DiagnosticProducer>,
+        message: String,
+    },
+}
+pub(super) struct TaskSession {
+    linters: linter::Linters,
+    jobs: JobSupervisor,
+    running: HashMap<JobId, RunningTask>,
+    keys: HashMap<String, RunKey>,
+    plans: HashMap<String, Plan>,
+    rows: HashMap<String, Vec<TaskOutputRecord>>,
+    active_output: Option<String>,
+    truncated: HashSet<JobId>,
+    statuses: HashMap<String, String>,
+    tests: HashMap<String, Vec<TestCaseResult>>,
+    matchers: HashMap<String, regex::Regex>,
+    events: VecDeque<JobEvent>,
+    maximum_output: usize,
+    closed: bool,
+}
+impl TaskSession {
+    pub(super) fn new(config: &Config) -> Self {
+        let mut owner = Self {
+            linters: linter::Linters::default(),
+            jobs: JobSupervisor::new(config.processes.event_capacity),
+            running: HashMap::new(),
+            keys: HashMap::new(),
+            plans: HashMap::new(),
+            rows: HashMap::new(),
+            active_output: None,
+            truncated: HashSet::new(),
+            statuses: HashMap::new(),
+            tests: HashMap::new(),
+            matchers: HashMap::new(),
+            events: VecDeque::new(),
+            maximum_output: 0,
+            closed: false,
         };
-        let Some(root_id) = self.workspace.active_root() else {
-            self.show_error(self.message("task_no_root", &[]));
-            return;
+        owner.configure(config);
+        owner
+    }
+    pub(super) fn configure(&mut self, config: &Config) {
+        self.maximum_output = config.processes.maximum_output_bytes;
+        self.matchers = config
+            .tasks
+            .iter()
+            .filter_map(|(name, task)| {
+                Some((
+                    name.clone(),
+                    regex::Regex::new(&task.matcher.as_ref()?.pattern).ok()?,
+                ))
+            })
+            .collect();
+        self.linters
+            .retire("task source configuration/workspace retired");
+        self.keys.clear();
+        self.plans.clear();
+        for id in self.running.keys() {
+            let _ = self.jobs.cancel(*id);
+        }
+    }
+    pub(super) fn plan(
+        &mut self,
+        name: &str,
+        adapter: &AdapterContext,
+        config: &Config,
+        workspace: &WorkspaceSession,
+        configuration: u64,
+        permit: super::workspace::TaskPermit,
+    ) -> Result<(), String> {
+        let kind = match adapter {
+            AdapterContext::Plain => crate::config::TaskKind::Task,
+            AdapterContext::Formatter { .. } => crate::config::TaskKind::Formatter,
+            AdapterContext::Linter { .. } => crate::config::TaskKind::Linter,
+            AdapterContext::Test { .. } => crate::config::TaskKind::Test,
         };
-        let Some(root_path) = self
-            .workspace
+        if !workspace.consume_task_permit(permit, name, kind) {
+            return Err("task execution permit is stale or foreign".into());
+        }
+        self.plan_checked(name, adapter, config, workspace, configuration)
+    }
+    fn plan_checked(
+        &mut self,
+        name: &str,
+        adapter: &AdapterContext,
+        config: &Config,
+        workspace: &WorkspaceSession,
+        configuration: u64,
+    ) -> Result<(), String> {
+        if self.closed
+            || configuration == u64::MAX
+            || self.running.len() >= config.processes.maximum_running
+            || self.keys.contains_key(name)
+                && self.statuses.get(name).is_some_and(|status| {
+                    status == "queued"
+                        || status.starts_with("running:")
+                        || status.starts_with("starting:")
+                })
+        {
+            return Err("task admission is closed, full or already pending".into());
+        }
+        let plan = task_plan(name, &config.tasks).ok_or("unknown task or dependency")?;
+        self.keys.insert(
+            name.into(),
+            RunKey {
+                epoch: Arc::new(()),
+                workspace: workspace.version(),
+                configuration,
+            },
+        );
+        self.plans.insert(
+            name.into(),
+            Plan {
+                remaining: plan
+                    .into_iter()
+                    .map(|name| {
+                        let task = config.tasks[&name].clone();
+                        (name, task)
+                    })
+                    .collect(),
+                adapter: adapter.clone(),
+                awaiting: false,
+            },
+        );
+        self.rows.insert(name.into(), Vec::new());
+        self.tests.remove(name);
+        self.statuses.insert(name.into(), "queued".into());
+        Ok(())
+    }
+    pub(super) fn step(
+        &mut self,
+        requested: &str,
+        workspace: &WorkspaceSession,
+        configuration: u64,
+    ) -> Result<(TaskStep, ExecutionPreflightRequest), String> {
+        let key = self
+            .keys
+            .get(requested)
+            .filter(|key| {
+                key.workspace == workspace.version() && key.configuration == configuration
+            })
+            .ok_or("task plan retired")?;
+        let plan = self.plans.get_mut(requested).ok_or("task plan closed")?;
+        if self.closed || plan.awaiting {
+            return Err("task plan is closed or already awaiting a step".into());
+        }
+        let (name, task) = plan.remaining.pop_front().ok_or("task plan exhausted")?;
+        plan.awaiting = true;
+        let adapter = plan.adapter.clone();
+        let root = workspace
             .roots()
             .iter()
-            .find(|root| root.id == root_id)
-            .map(|root| root.identity.canonical_path.clone())
-        else {
-            return;
-        };
+            .find(|root| Some(root.id) == workspace.active_root())
+            .ok_or("task has no active root")?;
         let cwd = task.cwd.clone().map_or_else(
-            || root_path.clone(),
-            |path| {
-                if path.is_absolute() {
-                    path
+            || root.identity.canonical_path.clone(),
+            |p| {
+                if p.is_absolute() {
+                    p
                 } else {
-                    root_path.join(path)
+                    root.identity.canonical_path.join(p)
                 }
             },
         );
-        let roots = self
-            .workspace
-            .roots()
-            .iter()
-            .map(|root| root.identity.canonical_path.clone())
-            .collect();
         let request = ExecutionPreflightRequest {
             executable: task.executable.clone(),
             cwd,
-            roots,
-            root_revision: self.workspace.root_revision(),
-        };
-        match self.execution_preflight.request(request) {
-            Ok(id) => {
-                self.pending_execution_preflight.insert(
-                    id,
-                    PendingExecutionPreflight::Task {
-                        requested,
-                        name,
-                        remaining: plan.clone(),
-                        task,
-                        adapter,
-                    },
-                );
-            }
-            Err(error) => self.show_error(error),
-        }
-    }
-
-    pub(super) fn apply_formatter_result(&mut self, task: &RunningTask) {
-        let AdapterContext::Formatter {
-            buffer, revision, ..
-        } = task.adapter
-        else {
-            return;
-        };
-        let Some(bytes) = self.task_output.get(&task.requested) else {
-            return;
-        };
-        let Ok(replacement) = String::from_utf8(bytes.clone()) else {
-            self.show_error(self.message("formatter_invalid_utf8", &[]));
-            return;
-        };
-        let Some(state) = self.state.buffers.get(buffer) else {
-            return;
-        };
-        if state.text.revision() != revision {
-            self.show_error(self.message("formatter_stale", &[]));
-            return;
-        }
-        let end = ByteOffset(state.text.len_bytes());
-        let transaction = EditorTransaction::new(self.transaction_id())
-            .with_precondition(Precondition::BufferRevision { buffer, revision })
-            .with_precondition(Precondition::BufferWritable(buffer))
-            .with_operation(EditorOperation::ApplyEdits {
-                buffer,
-                edits: TextEditSet::new(
-                    revision,
-                    vec![TextEdit::new(
-                        ByteRange::new(ByteOffset(0), end).expect("ordered"),
-                        replacement,
-                    )],
-                ),
-            });
-        if let Err(error) = self.state.apply_transaction(&transaction) {
-            self.show_error(error)
-        } else {
-            self.ui.notification = Some(self.message("formatter_applied", &[]));
-            self.ui.notification_error = false;
-        }
-    }
-
-    pub(super) fn apply_linter_result(&mut self, task: &RunningTask) {
-        let AdapterContext::Linter { matcher } = &task.adapter else {
-            return;
-        };
-        let Some(bytes) = self.task_output.get(&task.requested) else {
-            return;
-        };
-        let Ok(text) = std::str::from_utf8(bytes) else {
-            return;
-        };
-        let Some(regex) = self.matcher_cache.get(&task.requested) else {
-            return;
-        };
-        let Ok(owner) = DiagnosticOwner::new(format!("task:{}", task.requested)) else {
-            return;
-        };
-        let mut grouped: BTreeMap<String, Vec<Diagnostic>> = BTreeMap::new();
-        for captures in regex
-            .captures_iter(text)
-            .take(self.configuration.settings.workspace.maximum_diagnostics)
-        {
-            let Some(path) = captures
-                .name(&matcher.path_group)
-                .map(|value| PathBuf::from(value.as_str()))
-            else {
-                continue;
-            };
-            let path = if path.is_absolute() {
-                path
-            } else {
-                task.root.join(path)
-            };
-            if !path.starts_with(&task.root) {
-                continue;
-            }
-            let Some((_, buffer)) = self
-                .state
-                .buffers
-                .iter()
-                .find(|(_, buffer)| buffer.path.as_ref() == Some(&path))
-            else {
-                continue;
-            };
-            let line = captures
-                .name(&matcher.line_group)
-                .and_then(|value| value.as_str().parse::<usize>().ok())
-                .unwrap_or(1)
-                .saturating_sub(1);
-            let column = matcher
-                .column_group
-                .as_ref()
-                .and_then(|name| captures.name(name))
-                .and_then(|value| value.as_str().parse::<usize>().ok())
-                .unwrap_or(1)
-                .saturating_sub(1);
-            let Some(start) = buffer
-                .text
-                .line_to_byte(line)
-                .ok()
-                .map(|offset| ByteOffset((offset.get() + column).min(buffer.text.len_bytes())))
-            else {
-                continue;
-            };
-            if buffer.text.validate_offset(start).is_err() {
-                continue;
-            }
-            let severity = matcher
-                .severity_group
-                .as_ref()
-                .and_then(|name| captures.name(name))
-                .map(|value| value.as_str())
-                .map_or(DiagnosticSeverity::Error, |value| {
-                    match value.to_ascii_lowercase().as_str() {
-                        "warning" | "warn" => DiagnosticSeverity::Warning,
-                        "info" | "information" => DiagnosticSeverity::Information,
-                        "hint" => DiagnosticSeverity::Hint,
-                        _ => DiagnosticSeverity::Error,
-                    }
-                });
-            let message = captures
-                .name(&matcher.message_group)
-                .map(|value| value.as_str().chars().take(4096).collect())
-                .unwrap_or_default();
-            let uri = crate::language::lsp::file_uri(&path);
-            grouped.entry(uri.clone()).or_default().push(Diagnostic {
-                uri,
-                version: Some(buffer.text.revision()),
-                range: ByteRange::new(start, start).expect("empty range"),
-                severity,
-                source: task.requested.clone(),
-                code: None,
-                message,
-                related: Vec::new(),
-                tags: Vec::new(),
-                fixes: Vec::new(),
-                timestamp: crate::clock::system_time(),
-            });
-        }
-        let mut unopened = BTreeMap::<PathBuf, Vec<RawLinterDiagnostic>>::new();
-        for captures in regex
-            .captures_iter(text)
-            .take(self.configuration.settings.workspace.maximum_diagnostics)
-        {
-            let Some(raw_path) = captures
-                .name(&matcher.path_group)
-                .map(|value| PathBuf::from(value.as_str()))
-            else {
-                continue;
-            };
-            let path = if raw_path.is_absolute() {
-                raw_path
-            } else {
-                task.root.join(raw_path)
-            };
-            if !path.starts_with(&task.root)
-                || self
-                    .state
-                    .buffers
-                    .iter()
-                    .any(|(_, buffer)| buffer.path.as_ref() == Some(&path))
-            {
-                continue;
-            }
-            let line = captures
-                .name(&matcher.line_group)
-                .and_then(|value| value.as_str().parse::<usize>().ok())
-                .unwrap_or(1)
-                .saturating_sub(1);
-            let column = matcher
-                .column_group
-                .as_ref()
-                .and_then(|name| captures.name(name))
-                .and_then(|value| value.as_str().parse::<usize>().ok())
-                .unwrap_or(1)
-                .saturating_sub(1);
-            let severity = matcher
-                .severity_group
-                .as_ref()
-                .and_then(|name| captures.name(name))
-                .map(|value| value.as_str().to_ascii_lowercase())
-                .map_or(DiagnosticSeverity::Error, |value| match value.as_str() {
-                    "warning" | "warn" => DiagnosticSeverity::Warning,
-                    "info" | "information" => DiagnosticSeverity::Information,
-                    "hint" => DiagnosticSeverity::Hint,
-                    _ => DiagnosticSeverity::Error,
-                });
-            let message = captures
-                .name(&matcher.message_group)
-                .map(|value| value.as_str().chars().take(4096).collect())
-                .unwrap_or_default();
-            unopened.entry(path).or_default().push(RawLinterDiagnostic {
-                line,
-                column,
-                severity,
-                message,
-            });
-        }
-        if !unopened.is_empty() {
-            let generation = self.next_linter_generation;
-            self.next_linter_generation = self.next_linter_generation.saturating_add(1);
-            let roots = self
-                .workspace
+            roots: workspace
                 .roots()
                 .iter()
                 .map(|root| root.identity.canonical_path.clone())
-                .collect::<Vec<_>>();
-            let mut waiting = 0;
-            for (path, raw) in unopened {
-                match self.vfs.read_scoped(path, roots.clone()) {
-                    Ok(id) => {
-                        self.pending_vfs
-                            .insert(id, PendingVfs::LinterRead { generation, raw });
-                        waiting += 1
-                    }
-                    Err(error) => {
-                        self.logs.record(
-                            LogLevel::Error,
-                            "linter",
-                            "source-read-queue-failed",
-                            BTreeMap::from([("error".into(), error.to_string())]),
-                        );
-                        return;
-                    }
-                }
-            }
-            self.pending_linter_builds.insert(
-                generation,
-                PendingLinterBuild {
-                    owner,
-                    root_revision: self.workspace.root_revision(),
-                    waiting,
-                    failed: false,
-                    grouped,
-                },
-            );
-            return;
-        }
-        self.diagnostics.clear_owner(&owner);
-        for (uri, items) in grouped {
-            let current = items.first().and_then(|item| item.version);
-            let _ = self
-                .diagnostics
-                .replace(owner.clone(), uri, current, current, items);
-        }
-        self.sync_ui_diagnostics();
+                .collect(),
+            root_revision: workspace.root_revision(),
+        };
+        Ok((
+            TaskStep {
+                requested: requested.into(),
+                name,
+                request: request.clone(),
+                task,
+                adapter,
+                key: key.clone(),
+            },
+            request,
+        ))
     }
-
-    pub(super) fn finish_linter_build(&mut self, generation: u64) {
-        let Some(build) = self.pending_linter_builds.remove(&generation) else {
-            return;
-        };
-        if build.failed || build.root_revision != self.workspace.root_revision() {
-            return;
+    pub(super) fn reject_step(&mut self, step: &TaskStep) {
+        if self
+            .keys
+            .get(&step.requested)
+            .is_some_and(|key| Arc::ptr_eq(&key.epoch, &step.key.epoch))
+        {
+            self.keys.remove(&step.requested);
+            self.plans.remove(&step.requested);
+            self.statuses
+                .insert(step.requested.clone(), "failed".into());
         }
-        self.diagnostics.clear_owner(&build.owner);
-        for (uri, items) in build.grouped {
-            let current = items.first().and_then(|item| item.version);
-            let _ = self
-                .diagnostics
-                .replace(build.owner.clone(), uri, current, current, items);
+    }
+    pub(super) fn launch(
+        &mut self,
+        step: TaskStep,
+        ready: super::workspace::ExecutionReady,
+        policy: &ProcessConfig,
+        editor: &EditorState,
+        workspace: &WorkspaceSession,
+        configuration: u64,
+    ) -> Result<Option<DiagnosticProducer>, String> {
+        if !self.key_current(&step.requested, &step.key, workspace, configuration) {
+            return Err("task launch retired".into());
         }
-        self.sync_ui_diagnostics();
+        let name = step.requested.clone();
+        let result = ready
+            .into_execution_result(&step.request, workspace)
+            .and_then(|result| {
+                self.launch_inner(step, result, policy, editor, workspace, configuration)
+            });
+        if result.is_err() {
+            self.keys.remove(&name);
+            self.plans.remove(&name);
+            self.statuses.insert(name, "failed".into());
+        }
+        result
     }
-
-    pub(super) fn apply_test_result(&mut self, task: &RunningTask) {
-        let AdapterContext::Test { matcher } = &task.adapter else {
-            return;
-        };
-        let Some(bytes) = self.task_output.get(&task.requested) else {
-            return;
-        };
-        let Ok(text) = std::str::from_utf8(bytes) else {
-            return;
-        };
-        let Some(regex) = self.matcher_cache.get(&task.requested) else {
-            return;
-        };
-        let cases = regex
-            .captures_iter(text)
-            .take(10_000)
-            .map(|captures| TestCaseResult {
-                name: matcher
-                    .name_group
-                    .as_ref()
-                    .and_then(|name| captures.name(name))
-                    .map(|value| value.as_str().chars().take(512).collect())
-                    .unwrap_or_else(|| "test".into()),
-                status: matcher
-                    .status_group
-                    .as_ref()
-                    .and_then(|name| captures.name(name))
-                    .map(|value| value.as_str().chars().take(32).collect())
-                    .unwrap_or_else(|| "unknown".into()),
-                duration: matcher
-                    .duration_group
-                    .as_ref()
-                    .and_then(|name| captures.name(name))
-                    .map(|value| value.as_str().chars().take(64).collect())
-                    .unwrap_or_default(),
-                message: captures
-                    .name(&matcher.message_group)
-                    .map(|value| value.as_str().chars().take(2048).collect())
-                    .unwrap_or_default(),
-                source: captures
-                    .name(&matcher.path_group)
-                    .map(|value| PathBuf::from(value.as_str()))
-                    .map(|path| MatcherSource {
-                        path: if path.is_absolute() {
-                            path
-                        } else {
-                            task.root.join(path)
-                        },
-                        line: captures
-                            .name(&matcher.line_group)
-                            .and_then(|value| value.as_str().parse::<usize>().ok())
-                            .unwrap_or(1)
-                            .saturating_sub(1),
-                        column: matcher
-                            .column_group
-                            .as_ref()
-                            .and_then(|name| captures.name(name))
-                            .and_then(|value| value.as_str().parse::<usize>().ok())
-                            .unwrap_or(1)
-                            .saturating_sub(1),
-                    })
-                    .filter(|source| source.path.starts_with(&task.root)),
-            })
-            .collect();
-        self.test_results.insert(task.requested.clone(), cases);
-    }
-
-    pub(super) fn show_task_picker(&mut self) {
-        let items = self
-            .task_status
+    fn launch_inner(
+        &mut self,
+        step: TaskStep,
+        result: ExecutionPreflightResult,
+        policy: &ProcessConfig,
+        editor: &EditorState,
+        workspace: &WorkspaceSession,
+        configuration: u64,
+    ) -> Result<Option<DiagnosticProducer>, String> {
+        if !self.key_current(&step.requested, &step.key, workspace, configuration)
+            || result.root_revision != workspace.root_revision()
+            || self.running.len() >= policy.maximum_running
+        {
+            return Err("task launch source retired or full".into());
+        }
+        let root = workspace
+            .roots()
             .iter()
-            .map(|(name, status)| {
-                (
-                    PickerItem {
-                        id: PickerItemId(format!("task:{name}")),
-                        label: name.clone(),
-                        detail: status.clone(),
-                        source: String::new(),
-                        action: PickerAction::None,
-                    },
-                    PickerPayload::Command(String::new()),
-                )
-            })
-            .collect();
-        self.install_picker(self.message("picker_tasks_title", &[]), items);
-    }
-
-    pub(super) fn show_output_picker(&mut self, name: &str) {
-        let previous = if self.active_output_task.as_deref() == Some(name) {
-            self.picker.as_ref().map(|picker| {
-                (
-                    picker.presentation().query,
-                    picker.selected_item().map(|item| item.id.clone()),
-                )
-            })
+            .find(|root| root.identity.canonical_path == result.root)
+            .ok_or("task preflight root retired")?;
+        // Reservation lends the actual supervisor before snapshots or request serialization.
+        let admission = self.jobs.reserve().map_err(|e| e.to_string())?;
+        let stdin = match &step.adapter {
+            AdapterContext::Formatter { source } if step.name == step.requested => {
+                Some(source.stdin(editor, policy.maximum_stdin_bytes)?)
+            }
+            _ => None,
+        };
+        let diagnostic_source = if step.name == step.requested
+            && matches!(step.adapter, AdapterContext::Linter { .. })
+        {
+            Some(TaskDiagnosticRun::capture(
+                &step.requested,
+                editor,
+                workspace,
+                configuration,
+            )?)
         } else {
             None
         };
-        let follow_tail = previous.is_none()
-            || self
-                .ui
-                .picker
-                .as_ref()
-                .is_some_and(|picker| picker.selected == picker.rows.len().checked_sub(1));
-        self.active_output_task = Some(name.to_owned());
-        let items = self
-            .task_output_rows
+        let producer = diagnostic_source
+            .as_ref()
+            .map(|source| source.producer().clone());
+        let request = JobRequest {
+            program: result.executable,
+            arguments: step.task.arguments,
+            cwd: result.cwd,
+            environment: step.task.environment,
+            root_revision: result.root_revision,
+            stdin,
+            policy: JobPolicy {
+                maximum_output_bytes: policy.maximum_output_bytes,
+                maximum_line_bytes: policy.maximum_line_bytes,
+                maximum_stdin_bytes: policy.maximum_stdin_bytes,
+                timeout: Duration::from_millis(
+                    step.task.timeout_ms.unwrap_or(policy.maximum_timeout_ms),
+                ),
+            },
+        };
+        let id = admission
+            .submit_scoped(request, root.identity.clone())
+            .map_err(|e| e.to_string())?;
+        self.statuses
+            .insert(step.requested.clone(), format!("starting:{}", step.name));
+        self.running.insert(
+            id,
+            RunningTask {
+                output: Vec::new(),
+                key: step.key,
+                requested: step.requested,
+                name: step.name,
+                adapter: step.adapter,
+                root: result.root,
+                diagnostic_source,
+            },
+        );
+        Ok(producer)
+    }
+    fn key_current(
+        &self,
+        name: &str,
+        key: &RunKey,
+        workspace: &WorkspaceSession,
+        configuration: u64,
+    ) -> bool {
+        !self.closed
+            && key.workspace == workspace.version()
+            && key.configuration == configuration
+            && self
+                .keys
+                .get(name)
+                .is_some_and(|current| Arc::ptr_eq(&key.epoch, &current.epoch))
+    }
+    pub(super) fn current(
+        &self,
+        task: &RunningTask,
+        workspace: &WorkspaceSession,
+        configuration: u64,
+    ) -> bool {
+        self.key_current(&task.requested, &task.key, workspace, configuration)
+    }
+    pub(super) fn running_count(&self) -> usize {
+        self.running.len()
+    }
+    pub(super) fn status_count(&self) -> usize {
+        self.statuses.len()
+    }
+    pub(super) fn names(&self) -> impl Iterator<Item = &String> {
+        self.statuses.keys()
+    }
+    pub(super) fn active_output(&self) -> Option<&str> {
+        self.active_output.as_deref()
+    }
+    pub(super) fn select_output(&mut self, name: Option<&str>) {
+        self.active_output = name.map(str::to_owned);
+    }
+    pub(super) fn stop(&mut self, name: &str) -> Result<Option<DiagnosticProducer>, String> {
+        let current = self.keys.remove(name);
+        let mut producer = current.as_ref().and_then(|key| self.linters.stop_run(key));
+        self.plans.remove(name);
+        self.statuses.insert(name.into(), "cancelled".into());
+        let mut found = producer.is_some();
+        for (id, task) in &self.running {
+            if task.requested == name {
+                self.jobs.cancel(*id).map_err(|e| e.to_string())?;
+                found = true;
+                if current
+                    .as_ref()
+                    .is_some_and(|key| Arc::ptr_eq(&key.epoch, &task.key.epoch))
+                {
+                    producer = task
+                        .diagnostic_source
+                        .as_ref()
+                        .map(|source| source.producer().clone());
+                }
+            }
+        }
+        if found {
+            Ok(producer)
+        } else {
+            Err("task is not running; pending launch retired".into())
+        }
+    }
+    pub(super) fn retire_workspace(&mut self) {
+        self.linters
+            .retire("task source configuration/workspace retired");
+        self.keys.clear();
+        self.plans.clear();
+        for id in self.running.keys() {
+            let _ = self.jobs.cancel(*id);
+        }
+        self.rows.clear();
+        self.tests.clear();
+        self.statuses.clear();
+        self.active_output = None;
+    }
+    pub(super) fn begin_shutdown(&mut self) {
+        self.closed = true;
+        self.linters
+            .retire("task source configuration/workspace retired");
+        self.keys.clear();
+        self.plans.clear();
+        self.jobs.begin_shutdown();
+    }
+    pub(super) fn abandon(&mut self) -> usize {
+        let count = self.running.len();
+        self.jobs.abandon();
+        self.running.clear();
+        count
+    }
+    pub(super) fn next_update(
+        &mut self,
+        workspace: &WorkspaceSession,
+        configuration: u64,
+    ) -> Option<TaskUpdate> {
+        if self.events.is_empty() {
+            self.events.extend(self.jobs.poll());
+        }
+        while let Some(event) = self.events.pop_front() {
+            match event {
+                JobEvent::Started { job, root_revision } => {
+                    if let Some(task) = self.running.get(&job).filter(|task| {
+                        self.current(task, workspace, configuration)
+                            && root_revision == workspace.root_revision()
+                    }) {
+                        self.statuses
+                            .insert(task.requested.clone(), format!("running:{}", task.name));
+                    }
+                }
+                JobEvent::Output {
+                    job,
+                    stream,
+                    bytes,
+                    truncated,
+                } => {
+                    if !self
+                        .running
+                        .get(&job)
+                        .is_some_and(|task| self.current(task, workspace, configuration))
+                    {
+                        continue;
+                    }
+                    let Some(task) = self.running.get_mut(&job) else {
+                        continue;
+                    };
+                    if truncated {
+                        self.truncated.insert(job);
+                    }
+                    if task.name == task.requested
+                        && matches!(task.adapter, AdapterContext::Formatter { .. })
+                        && stream == JobStream::Stderr
+                    {
+                        continue;
+                    }
+                    let output = &mut task.output;
+                    let accepted = &bytes[..bytes
+                        .len()
+                        .min(self.maximum_output.saturating_sub(output.len()))];
+                    if accepted.len() != bytes.len() {
+                        self.truncated.insert(job);
+                    }
+                    output.extend_from_slice(accepted);
+                    let rows = self.rows.entry(task.requested.clone()).or_default();
+                    for line in String::from_utf8_lossy(accepted).lines().take(1024) {
+                        rows.push(TaskOutputRecord {
+                            stream,
+                            text: line
+                                .chars()
+                                .filter(|c| !c.is_control())
+                                .take(4096)
+                                .collect(),
+                            truncated,
+                        });
+                    }
+                    if rows.len() > 10_000 {
+                        rows.drain(..rows.len() - 10_000);
+                    }
+                    return Some(TaskUpdate::Output);
+                }
+                JobEvent::Exited {
+                    job,
+                    code,
+                    timed_out,
+                } => {
+                    let Some(task) = self.running.remove(&job) else {
+                        continue;
+                    };
+                    let truncated = self.truncated.remove(&job) || timed_out;
+                    if !self.current(&task, workspace, configuration) {
+                        continue;
+                    }
+                    if code == Some(0) && !truncated {
+                        self.apply_test_result(&task);
+                    }
+                    let next = if code == Some(0) && !truncated {
+                        self.plans.get_mut(&task.requested).is_some_and(|plan| {
+                            plan.awaiting = false;
+                            !plan.remaining.is_empty()
+                        })
+                    } else {
+                        false
+                    };
+                    if !next {
+                        self.plans.remove(&task.requested);
+                    }
+                    self.statuses.insert(
+                        task.requested.clone(),
+                        if next {
+                            "queued"
+                        } else if code == Some(0)
+                            && !truncated
+                            && matches!(
+                                task.adapter,
+                                AdapterContext::Formatter { .. } | AdapterContext::Linter { .. }
+                            )
+                        {
+                            "process exited"
+                        } else if code == Some(0) && !truncated {
+                            "succeeded"
+                        } else {
+                            "failed"
+                        }
+                        .into(),
+                    );
+                    return Some(TaskUpdate::Finished {
+                        task,
+                        code,
+                        truncated,
+                        next,
+                    });
+                }
+                JobEvent::Failed { job, message } => {
+                    let Some(task) = self.running.remove(&job) else {
+                        continue;
+                    };
+                    self.truncated.remove(&job);
+                    if !self.current(&task, workspace, configuration) {
+                        return Some(TaskUpdate::Failed {
+                            source: None,
+                            message: format!("retired task {}: {message}", task.requested),
+                        });
+                    }
+                    self.plans.remove(&task.requested);
+                    self.statuses
+                        .insert(task.requested.clone(), "failed".into());
+                    return Some(TaskUpdate::Failed {
+                        source: task
+                            .diagnostic_source
+                            .map(|source| source.producer().clone()),
+                        message,
+                    });
+                }
+            }
+        }
+        None
+    }
+    pub(super) fn task_items(&self) -> Vec<PickerItem> {
+        self.statuses
+            .iter()
+            .map(|(name, status)| PickerItem {
+                id: PickerItemId(format!("task:{name}")),
+                label: name.clone(),
+                detail: status.clone(),
+                source: String::new(),
+                action: PickerAction::None,
+            })
+            .collect()
+    }
+    pub(super) fn output_items(&self, name: &str) -> Vec<PickerItem> {
+        self.rows
             .get(name)
             .into_iter()
             .flatten()
             .enumerate()
-            .map(|(index, row)| {
-                (
-                    PickerItem {
-                        id: PickerItemId(format!("output:{name}:{index}")),
-                        label: row.text.clone(),
-                        detail: format!(
-                            "{:?}{}",
-                            row.stream,
-                            if row.truncated { " · truncated" } else { "" }
-                        ),
-                        source: String::new(),
-                        action: PickerAction::None,
-                    },
-                    PickerPayload::Command(String::new()),
-                )
+            .map(|(index, row)| PickerItem {
+                id: PickerItemId(format!("output:{name}:{index}")),
+                label: row.text.clone(),
+                detail: format!(
+                    "{:?}{}",
+                    row.stream,
+                    if row.truncated { " · truncated" } else { "" }
+                ),
+                source: String::new(),
+                action: PickerAction::None,
             })
-            .collect();
-        self.install_surface_picker(
-            PickerSurfaceKind::Output,
-            self.message("picker_output_title", &[("name", name.into())]),
-            items,
-        );
-        if let Some(picker) = &mut self.picker {
-            if let Some((query, selected)) = previous {
-                picker.set_query(query);
-                if let Some(selected) = selected {
-                    picker.select_id(&selected);
-                }
-            }
-            if follow_tail {
-                picker.select_last();
-            }
-            picker.ensure_selected_visible(
-                usize::from(self.configuration.settings.ui.picker.height_percent).max(1),
-            );
-        }
-        self.sync_picker_ui();
+            .collect()
     }
-
-    pub(super) fn show_test_picker(&mut self, name: &str) {
-        let items = self
-            .test_results
+    pub(super) fn test_items(&self, name: &str) -> Vec<(PickerItem, TestKey)> {
+        let Some(key) = self.keys.get(name) else {
+            return Vec::new();
+        };
+        self.tests
             .get(name)
             .into_iter()
             .flatten()
@@ -520,157 +726,160 @@ impl InteractiveApplication {
                         source: case.message.clone(),
                         action: PickerAction::None,
                     },
-                    case.source.clone().map_or(
-                        PickerPayload::Command(String::new()),
-                        PickerPayload::MatcherSource,
-                    ),
+                    TestKey {
+                        name: name.into(),
+                        run: key.epoch.clone(),
+                        index,
+                    },
                 )
             })
-            .collect();
-        self.install_picker(
-            self.message("picker_tests_title", &[("name", name.into())]),
-            items,
-        );
+            .collect()
     }
-
-    pub(super) fn process_job_events(&mut self) {
-        let revision = self.workspace.root_revision();
-        for event in self.jobs.poll() {
-            match event {
-                JobEvent::Output {
-                    job,
-                    stream,
-                    bytes,
-                    truncated,
-                } => {
-                    if truncated {
-                        self.task_truncated.insert(job);
-                    }
-                    if let Some(task) = self
-                        .job_tasks
-                        .get(&job)
-                        .filter(|task| task.root_revision == revision)
-                    {
-                        if task.name == task.requested
-                            && matches!(task.adapter, AdapterContext::Formatter { .. })
-                            && stream == JobStream::Stderr
-                        {
-                            continue;
-                        }
-                        let output = self.task_output.entry(task.requested.clone()).or_default();
-                        let remaining = self
-                            .configuration
-                            .settings
-                            .processes
-                            .maximum_output_bytes
-                            .saturating_sub(output.len());
-                        let accepted = &bytes[..bytes.len().min(remaining)];
-                        output.extend_from_slice(accepted);
-                        let rows = self
-                            .task_output_rows
-                            .entry(task.requested.clone())
-                            .or_default();
-                        for line in String::from_utf8_lossy(accepted).lines().take(1024) {
-                            rows.push(TaskOutputRecord {
-                                stream,
-                                text: line
-                                    .chars()
-                                    .filter(|character| !character.is_control())
-                                    .take(4096)
-                                    .collect(),
-                                truncated,
-                            });
-                        }
-                        if rows.len() > 10_000 {
-                            rows.drain(..rows.len() - 10_000);
-                        }
-                    }
-                    if let Some(name) = self.active_output_task.clone()
-                        && self.picker_surface == PickerSurfaceKind::Output
-                    {
-                        self.show_output_picker(&name);
-                    }
-                }
-                JobEvent::Exited { job, code, .. } => {
-                    if let Some(task) = self.job_tasks.remove(&job) {
-                        let truncated = self.task_truncated.remove(&job);
-                        if task.root_revision != revision {
-                            continue;
-                        }
-                        if code == Some(0) && !task.remaining.is_empty() {
-                            let mut remaining = task.remaining;
-                            self.start_task_step(task.requested, &mut remaining, task.adapter);
-                        } else {
-                            if code == Some(0) && !truncated {
-                                self.apply_formatter_result(&task);
-                                self.apply_linter_result(&task);
-                                self.apply_test_result(&task);
-                            } else if matches!(task.adapter, AdapterContext::Formatter { .. })
-                                && truncated
-                            {
-                                self.show_error(self.message("formatter_truncated", &[]));
-                            }
-                            self.task_status.insert(
-                                task.requested.clone(),
-                                if code == Some(0) {
-                                    "succeeded".into()
-                                } else {
-                                    "failed".into()
-                                },
-                            );
-                            self.ui.notification = Some(self.message(
-                                "task_exited",
-                                &[
-                                    ("name", task.name),
-                                    (
-                                        "code",
-                                        code.map_or_else(
-                                            || "signal".into(),
-                                            |value| value.to_string(),
-                                        ),
-                                    ),
-                                ],
-                            ));
-                            self.ui.notification_error = code != Some(0);
-                        }
-                    }
-                }
-                JobEvent::Started { job, root_revision } => {
-                    if root_revision != revision {
-                        let _ = self.jobs.cancel(job);
-                    }
-                }
-                JobEvent::Failed { job, message } => {
-                    self.job_tasks.remove(&job);
-                    self.show_error(self.message("task_failed", &[("diagnostic", message)]));
-                }
-            }
+    pub(super) fn resolve_test(&self, key: &TestKey) -> Option<(PathBuf, usize, usize)> {
+        let current = self.keys.get(&key.name)?;
+        if !Arc::ptr_eq(&current.epoch, &key.run) {
+            return None;
         }
+        self.tests.get(&key.name)?.get(key.index)?.source.clone()
+    }
+    pub(super) fn formatter_transaction(
+        &self,
+        task: &RunningTask,
+        editor: &EditorState,
+        workspace: &WorkspaceSession,
+        configuration: u64,
+        id: TransactionId,
+    ) -> Result<Option<EditorTransaction>, String> {
+        let AdapterContext::Formatter { source } = &task.adapter else {
+            return Ok(None);
+        };
+        if !self.current(task, workspace, configuration) {
+            return Err("formatter run retired".into());
+        }
+        source.check(editor)?;
+        let bytes = &task.output;
+        let replacement = std::str::from_utf8(bytes)
+            .map_err(|_| "formatter output is not UTF-8")?
+            .to_owned();
+        let text = &editor.buffers[source.buffer()].text;
+        Ok(Some(
+            EditorTransaction::new(id)
+                .with_precondition(Precondition::BufferRevision {
+                    buffer: source.buffer(),
+                    revision: text.revision(),
+                })
+                .with_precondition(Precondition::BufferWritable(source.buffer()))
+                .with_operation(EditorOperation::ApplyEdits {
+                    buffer: source.buffer(),
+                    edits: TextEditSet::new(
+                        text.revision(),
+                        vec![TextEdit::new(
+                            ByteRange::new(ByteOffset(0), ByteOffset(text.len_bytes()))
+                                .map_err(|e| e.to_string())?,
+                            replacement,
+                        )],
+                    ),
+                }),
+        ))
     }
 }
-
-pub(in crate::editor::session) fn task_plan(
-    name: &str,
-    tasks: &BTreeMap<String, crate::config::TaskConfig>,
-) -> Option<Vec<String>> {
-    fn visit(
-        name: &str,
-        tasks: &BTreeMap<String, crate::config::TaskConfig>,
-        seen: &mut BTreeSet<String>,
-        plan: &mut Vec<String>,
-    ) -> Option<()> {
-        if !seen.insert(name.into()) {
-            return Some(());
-        }
-        let task = tasks.get(name)?;
-        for dependency in &task.dependencies {
-            visit(dependency, tasks, seen, plan)?;
-        }
-        plan.push(name.into());
-        Some(())
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        editor::text::TextBuffer,
+        workspace::{RootIdentity, WorkspaceId, WorkspaceState},
+    };
+    #[test]
+    fn task_owner_rejects_retired_plans_and_formatter_incarnations_before_materialization() {
+        let root = tempfile::tempdir().unwrap();
+        let scope = WorkspaceState::new(
+            WorkspaceId(1),
+            [("root".into(), RootIdentity::capture(root.path()).unwrap())],
+        )
+        .unwrap();
+        let workspace = WorkspaceSession::new(scope, root.path().join("trust"), 1, false, false, 1);
+        let mut editor = EditorState::new(root.path().into());
+        let (buffer, _) = editor.open_text(
+            TextBuffer::from_text("abc"),
+            Some(root.path().join("source")),
+        );
+        let mut config = Config::default();
+        config.tasks.insert(
+            "task".into(),
+            TaskConfig {
+                kind: crate::config::TaskKind::Task,
+                executable: PathBuf::from("/bin/sh"),
+                arguments: vec![],
+                cwd: None,
+                environment: BTreeMap::new(),
+                dependencies: vec![],
+                timeout_ms: None,
+                stdin: false,
+                matcher: None,
+            },
+        );
+        let mut owner = TaskSession::new(&config);
+        owner.configure(&config);
+        owner
+            .plan_checked("task", &AdapterContext::Plain, &config, &workspace, 1)
+            .unwrap();
+        assert!(
+            owner
+                .plan_checked("task", &AdapterContext::Plain, &config, &workspace, 1)
+                .is_err()
+        );
+        let (step, _) = owner.step("task", &workspace, 1).unwrap();
+        assert!(owner.step("task", &workspace, 1).is_err());
+        owner.retire_workspace();
+        let before = TextBuffer::test_materializations();
+        assert!(
+            owner
+                .launch(
+                    step,
+                    super::super::workspace::ExecutionReady::fixture(
+                        &workspace,
+                        ExecutionPreflightResult {
+                            id: crate::process::PreflightId(1),
+                            executable: PathBuf::from("/bin/sh"),
+                            cwd: root.path().into(),
+                            root: root.path().into(),
+                            root_revision: workspace.root_revision()
+                        }
+                    ),
+                    &config.processes,
+                    &editor,
+                    &workspace,
+                    1
+                )
+                .is_err()
+        );
+        assert_eq!(TextBuffer::test_materializations(), before);
+        let source = FormatterSource::capture(&editor, buffer).unwrap();
+        editor.buffers[buffer].text = TextBuffer::from_text("abc");
+        assert!(source.stdin(&editor, 1024).is_err());
+        assert_eq!(TextBuffer::test_materializations(), before);
+        owner
+            .plan_checked("task", &AdapterContext::Plain, &config, &workspace, 1)
+            .unwrap();
+        let (step, _) = owner.step("task", &workspace, 1).unwrap();
+        let key = TestKey {
+            name: "task".into(),
+            run: step.key.epoch.clone(),
+            index: 0,
+        };
+        owner.tests.insert(
+            "task".into(),
+            vec![TestCaseResult {
+                name: "one".into(),
+                status: "ok".into(),
+                duration: String::new(),
+                message: String::new(),
+                source: Some((root.path().join("source"), 0, 0)),
+            }],
+        );
+        assert!(owner.resolve_test(&key).is_some());
+        owner.retire_workspace();
+        assert!(owner.resolve_test(&key).is_none());
     }
-    let mut seen = BTreeSet::new();
-    let mut plan = Vec::new();
-    visit(name, tasks, &mut seen, &mut plan)?;
-    Some(plan)
 }

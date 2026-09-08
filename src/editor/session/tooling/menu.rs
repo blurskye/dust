@@ -2,7 +2,7 @@ use super::*;
 
 impl InteractiveApplication {
     fn tool_menu_height(&self) -> u16 {
-        let configured = &self.configuration.settings.ui.tool_manager;
+        let configured = &self.configuration.settings().ui.tool_manager;
         let height = (u32::from(self.terminal_height) * u32::from(configured.height_percent) / 100)
             .try_into()
             .unwrap_or(self.terminal_height);
@@ -29,7 +29,7 @@ impl InteractiveApplication {
             .unwrap_or(u16::MAX)
             .saturating_mul(2)
             .saturating_add(11)
-            .max(self.configuration.settings.ui.tool_manager.minimum_height);
+            .max(self.configuration.settings().ui.tool_manager.minimum_height);
         usize::from(
             self.tool_menu_height()
                 .min(compact_height)
@@ -42,7 +42,7 @@ impl InteractiveApplication {
     pub(in crate::editor::session) fn open_tool_menu(&mut self, category: String) {
         self.cancel_pending_mapping();
         self.input.cancel_pending();
-        self.ui.prompt = None;
+        self.close_prompt();
         // `:lsp` is normally opened from a source buffer. Put the matching
         // server under the cursor so Enter and runtime selection act on the
         // server the user is actually editing, not an alphabetically earlier
@@ -421,7 +421,7 @@ impl InteractiveApplication {
         selected_id: Option<&str>,
     ) {
         let nixos_host = is_nixos_host();
-        let configured = self.configuration.settings.ui.tool_manager.clone();
+        let configured = self.configuration.settings().ui.tool_manager.clone();
         let previous_picker = self.ui.tool_menu.as_ref().and_then(|menu| {
             menu.runtime_picker.as_ref().map(|picker| {
                 (
@@ -860,7 +860,7 @@ impl InteractiveApplication {
         if menu.runtime_picker.is_some() {
             return;
         }
-        let order = &self.configuration.settings.ui.tool_manager.category_order;
+        let order = &self.configuration.settings().ui.tool_manager.category_order;
         let current = order
             .iter()
             .position(|category| category == &menu.category)
@@ -1019,17 +1019,19 @@ impl InteractiveApplication {
             self.install_tool_by_id(&id, Some(source));
             return;
         }
-        self.ui.notification = Some(match source {
-            LspRuntimeSource::Managed => format!(
-                "{id} ACTIVE build: Dust download {}",
-                self.lsp_managed_versions
-                    .get(&id)
-                    .map(String::as_str)
-                    .unwrap_or("unknown")
-            ),
-            _ => format!("{id} ACTIVE installation: {}", source.label()),
-        });
-        self.ui.notification_error = false;
+        self.notify_message(
+            match source {
+                LspRuntimeSource::Managed => format!(
+                    "{id} ACTIVE build: Dust download {}",
+                    self.lsp_managed_versions
+                        .get(&id)
+                        .map(String::as_str)
+                        .unwrap_or("unknown")
+                ),
+                _ => format!("{id} ACTIVE installation: {}", source.label()),
+            },
+            false,
+        );
         self.rebuild_tool_menu(&category, Some(&id));
     }
 

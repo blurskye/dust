@@ -1,10 +1,282 @@
-use super::*;
+use crate::config::{
+    ConfigurationWorker, ConfigurationWorkerError, ConfigurationWorkerResult, LoadedConfig,
+};
+use crate::editor::input::{
+    InputContextLayer, InputContextRegistry, KeyEvent, KeymapBindings, KeymapLayer, KeymapSequence,
+    MappingResolution,
+};
+use crate::editor::{
+    AppEffect, CommandError, CommandInvocation, CommandRegistry, CommandValue, InvocationSource,
+    register_app_commands, register_builtin_commands,
+};
+use crate::extensions::PluginContributionCatalog;
+use crate::ui::DashboardAction;
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    path::PathBuf,
+    str::FromStr,
+    sync::Arc,
+};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 mod model;
-pub use model::*;
+pub(in crate::editor::session) use model::ReverseBinding;
+pub use model::{
+    ConfigurationSources, KeymapInspection, KeymapOperation, ResolvedConfiguration,
+    ResolvedKeyGroup, ResolvedKeymaps,
+};
 mod resolve;
-pub use resolve::*;
+pub use resolve::validate_loaded_configuration;
+pub(in crate::editor::session) use resolve::{
+    configuration_generation_is_newer, configured_byte_offset_at_display_column,
+    configured_grapheme_width, configured_text_width, dashboard_actions, resolve_configuration,
+};
 mod validation;
-pub(in crate::editor::session) use validation::*;
+pub(in crate::editor::session) use validation::{
+    configuration_value, invocation_fingerprint, keymap_entries_for_policy,
+    validate_configured_commands,
+};
 mod compile;
-pub use compile::*;
+pub(in crate::editor::session) use compile::{
+    KeymapCompilation, compile_keymap_entries, display_key_sequence,
+};
+pub use compile::{
+    compile_keymaps, compile_keymaps_with_plugin_catalog, compile_keymaps_with_plugin_index,
+    reload_keymaps,
+};
+mod contributions;
+
+fn configured_context(
+    contexts: &InputContextRegistry,
+    context: &str,
+    mode: &str,
+) -> Result<String, String> {
+    contexts
+        .resolve(context, mode)
+        .map_err(|error| error.to_string())
+}
+
+/// Accepted policy and reload admission. No caller receives a mutable policy view.
+pub(super) struct ConfigurationSession {
+    accepted: ResolvedConfiguration,
+    stamp: Arc<()>,
+    worker: ConfigurationWorker,
+    generation: u64,
+    binding_revision: u64,
+}
+
+/// A fully resolved candidate; only this module can construct or modify it.
+pub(in crate::editor::session) struct ConfigurationCandidate {
+    resolved: ResolvedConfiguration,
+    stamp: Arc<()>,
+    catalog: crate::extensions::PluginCatalogVersion,
+}
+
+pub(in crate::editor::session) struct ContributionCandidate {
+    stamp: Arc<()>,
+    catalog: crate::extensions::PluginCatalogVersion,
+    keymaps: Option<ResolvedKeymaps>,
+    windows: crate::config::WindowsConfig,
+    deferred: bool,
+}
+impl ContributionCandidate {
+    pub(in crate::editor::session) fn windows(&self) -> &crate::config::WindowsConfig {
+        &self.windows
+    }
+}
+impl ConfigurationCandidate {
+    pub(in crate::editor::session) fn view(&self) -> &ResolvedConfiguration {
+        &self.resolved
+    }
+}
+
+impl ConfigurationSession {
+    pub(super) fn new(accepted: ResolvedConfiguration, user_configuration: bool) -> Self {
+        let worker = ConfigurationWorker::start(
+            user_configuration,
+            accepted.settings.config_watch.clone(),
+            accepted.settings.ui.theme.clone(),
+        );
+        Self {
+            accepted,
+            stamp: Arc::new(()),
+            worker,
+            generation: 0,
+            binding_revision: 0,
+        }
+    }
+    pub(super) fn settings(&self) -> &crate::config::Config {
+        &self.accepted.settings
+    }
+    pub(super) fn dashboard(&self) -> &crate::config::DashboardConfig {
+        &self.accepted.dashboard
+    }
+    pub(super) fn theme(&self) -> &crate::config::ThemeConfig {
+        &self.accepted.theme
+    }
+    pub(super) fn keymaps(&self) -> &ResolvedKeymaps {
+        &self.accepted.keymaps
+    }
+    pub(super) fn raw_keymaps(&self) -> &crate::config::LoadedKeymaps {
+        &self.accepted.raw_keymaps
+    }
+    pub(super) fn base_keymaps(&self) -> &crate::config::LoadedKeymaps {
+        &self.accepted.base_keymaps
+    }
+    pub(super) fn raw_windows(&self) -> &crate::config::WindowsConfig {
+        &self.accepted.raw_windows
+    }
+    pub(super) fn expected_plugin_indexes(&self) -> &BTreeSet<String> {
+        &self.accepted.expected_plugin_indexes
+    }
+    pub(super) fn deferred_plugin_keymaps(&self) -> bool {
+        self.accepted.deferred_plugin_keymaps
+    }
+    pub(super) fn generation(&self) -> u64 {
+        self.generation
+    }
+    pub(super) fn binding_revision_ref(&self) -> &u64 {
+        &self.binding_revision
+    }
+    pub(super) fn binding_revision(&self) -> u64 {
+        self.binding_revision
+    }
+    pub(super) fn explain(&self, key: &str) -> Option<crate::config::ConfigExplanation> {
+        self.accepted.explain(key)
+    }
+    pub(super) fn dashboard_actions(&self) -> Vec<DashboardAction> {
+        dashboard_actions(&self.accepted)
+    }
+    pub(super) fn request_reload(&self) -> Result<(), ConfigurationWorkerError> {
+        self.worker.request_reload()
+    }
+    pub(super) fn next_result(
+        &mut self,
+    ) -> Result<Option<ConfigurationWorkerResult>, ConfigurationWorkerError> {
+        let Some(result) = self.worker.try_result()? else {
+            return Ok(None);
+        };
+        if !configuration_generation_is_newer(self.generation, result.generation) {
+            return Ok(None);
+        }
+        self.generation = result.generation;
+        // Preserve cancellation on observed reload generations, including rejected reloads.
+        self.binding_revision = self.binding_revision.saturating_add(1);
+        Ok(Some(result))
+    }
+    pub(super) fn retain_watch(&self) {
+        let _ = self.worker.configure_watch(
+            self.accepted.settings.config_watch.clone(),
+            self.accepted.settings.ui.theme.clone(),
+        );
+    }
+    pub(super) fn prepare(
+        &self,
+        loaded: LoadedConfig,
+        commands: &CommandRegistry<AppEffect>,
+        catalog: &PluginContributionCatalog,
+    ) -> Result<ConfigurationCandidate, String> {
+        loaded.config.validate().map_err(str::to_owned)?;
+        let mut resolved = match resolve_configuration(commands, loaded, true)? {
+            (resolved, None) => resolved,
+            (_, Some(error)) => return Err(error),
+        };
+        if resolved.settings.plugins != self.accepted.settings.plugins {
+            return Err(
+                "live plugin topology reload is not yet staged; previous configuration retained"
+                    .into(),
+            );
+        }
+        resolved.keymaps = compile_keymaps_with_plugin_catalog(
+            commands,
+            &resolved.raw_keymaps,
+            catalog,
+            &resolved.settings.input.keymaps,
+        )
+        .map_err(|errors| errors.join("; "))?;
+        Ok(ConfigurationCandidate {
+            resolved,
+            catalog: catalog.version(),
+            stamp: self.stamp.clone(),
+        })
+    }
+    pub(super) fn stage_watch(
+        &self,
+        candidate: &ConfigurationCandidate,
+        catalog: &PluginContributionCatalog,
+    ) -> Result<(), String> {
+        self.check_stamp(&candidate.stamp)?;
+        Self::check_catalog(&candidate.catalog, catalog)?;
+        self.worker
+            .configure_watch(
+                candidate.resolved.settings.config_watch.clone(),
+                candidate.resolved.settings.ui.theme.clone(),
+            )
+            .map_err(|error| error.to_string())
+    }
+    fn check_catalog(
+        expected: &crate::extensions::PluginCatalogVersion,
+        current: &PluginContributionCatalog,
+    ) -> Result<(), String> {
+        if *expected == current.version() {
+            Ok(())
+        } else {
+            Err("configuration candidate catalogue revision is stale".into())
+        }
+    }
+    fn check_stamp(&self, stamp: &Arc<()>) -> Result<(), String> {
+        if Arc::ptr_eq(&self.stamp, stamp) {
+            Ok(())
+        } else {
+            Err("configuration candidate is stale or belongs to another session".into())
+        }
+    }
+    pub(super) fn commit(
+        &mut self,
+        candidate: ConfigurationCandidate,
+        catalog: &PluginContributionCatalog,
+    ) -> Result<(), String> {
+        self.check_stamp(&candidate.stamp)?;
+        Self::check_catalog(&candidate.catalog, catalog)?;
+        self.accepted = candidate.resolved;
+        self.stamp = Arc::new(());
+        self.binding_revision = self.binding_revision.saturating_add(1);
+        Ok(())
+    }
+    #[cfg(test)]
+    pub(super) fn install_bindings(&mut self, keymaps: ResolvedKeymaps, deferred: bool) {
+        self.accepted.keymaps = keymaps;
+        self.accepted.deferred_plugin_keymaps = deferred;
+        self.stamp = Arc::new(());
+        self.binding_revision = self.binding_revision.saturating_add(1);
+    }
+    pub(super) fn toggle_inlay_hints(&mut self) -> bool {
+        self.stamp = Arc::new(());
+        self.accepted.settings.lsp.inlay_hints = !self.accepted.settings.lsp.inlay_hints;
+        self.accepted.settings.lsp.inlay_hints
+    }
+
+    #[cfg(test)]
+    pub(in crate::editor::session) fn fixture_snapshot(&self) -> ResolvedConfiguration {
+        self.accepted.clone()
+    }
+    #[cfg(test)]
+    pub(in crate::editor::session) fn install_fixture(&mut self, candidate: ResolvedConfiguration) {
+        candidate
+            .settings
+            .validate()
+            .expect("valid owned fixture policy");
+        self.accepted = candidate;
+        self.stamp = Arc::new(());
+        self.binding_revision = self.binding_revision.saturating_add(1);
+    }
+}
+
+pub(in crate::editor::session) fn plugin_owner_from_id(id: &str) -> Option<&str> {
+    let mut segments = id.split('.');
+    (segments.next()? == "plugin")
+        .then(|| segments.next())
+        .flatten()
+        .filter(|owner| !owner.is_empty())
+}

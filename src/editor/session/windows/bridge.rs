@@ -1,10 +1,11 @@
+use super::EditorTopology;
 use std::{
     collections::{BTreeMap, HashMap},
     path::Path,
 };
 
 use crate::{
-    editor::{BufferId, EditorState, LayoutNode, PaneId, TabId, ViewId as EditorViewId},
+    editor::{BufferId, LayoutNode, PaneId, TabId, ViewId as EditorViewId},
     ui::PickerSurfaceKind,
     ui::window::{
         ContentAdapterKind, ContentId, ContentTypeId, TileAxis, TiledLayoutNode,
@@ -18,14 +19,14 @@ const EDITOR_GENERATION: u64 = 1;
 const MAXIMUM_BRIDGE_TITLE_BYTES: usize = 4 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct EditorWindowBinding {
+pub(in crate::editor::session) struct EditorWindowBinding {
     pub window: WindowId,
     pub pane: PaneId,
     pub view: EditorViewId,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct ActiveEditorWindowLayout {
+pub(in crate::editor::session) struct ActiveEditorWindowLayout {
     pub layout: TiledLayoutSnapshot,
     pub bindings: Vec<EditorWindowBinding>,
 }
@@ -34,39 +35,45 @@ pub(super) struct ActiveEditorWindowLayout {
 /// mutation model is migrated into the universal graph. The graph owns layout
 /// validation/projection; the maps adapt existing editor identifiers.
 #[derive(Clone, Debug, Default)]
-pub(super) struct EditorWindowBridge {
+pub(in crate::editor::session) struct EditorWindowBridge {
     buffers: HashMap<BufferId, ContentId>,
     views: HashMap<EditorViewId, ViewId>,
     panes: HashMap<PaneId, WindowId>,
     tabs: HashMap<TabId, WorkspaceTabId>,
-    source_revision: Option<u64>,
+    source: Option<crate::editor::EditorWindowVersion>,
     scratch_label: Option<String>,
     #[cfg(test)]
     reconciliation_count: u64,
 }
 
 impl EditorWindowBridge {
-    pub(super) fn is_current(&self, state: &EditorState, scratch_label: &str) -> bool {
-        state.window_revision().is_some_and(|revision| {
-            self.source_revision == Some(revision)
-                && self.scratch_label.as_deref() == Some(scratch_label)
-        })
+    pub(super) fn source(&self) -> Option<&crate::editor::EditorWindowVersion> {
+        self.source.as_ref()
+    }
+    pub(in crate::editor::session) fn is_current(
+        &self,
+        state: &EditorTopology<'_>,
+        scratch_label: &str,
+    ) -> bool {
+        state.window_revision().is_some()
+            && self.source.as_ref() == Some(state.version())
+            && self.scratch_label.as_deref() == Some(scratch_label)
     }
 
     pub(super) fn reconcile(
         &mut self,
-        state: &EditorState,
+        state: &EditorTopology<'_>,
         graph: &mut WindowGraph,
         scratch_label: &str,
     ) -> Result<(), WindowError> {
-        let source_revision = state.window_revision();
+        let source = state.version().clone();
         // Retire absent hosts first so a still-live view may be rehosted by a
         // replacement pane without ever owning two windows.
         let stale_panes = self
             .panes
             .iter()
             .filter_map(|(pane, window)| {
-                (!state.panes.contains_key(*pane)).then_some((*pane, *window))
+                (!state.panes().contains_key(*pane)).then_some((*pane, *window))
             })
             .collect::<Vec<_>>();
         for (pane, window) in stale_panes {
@@ -76,7 +83,7 @@ impl EditorWindowBridge {
 
         let titles = editor_buffer_titles(state, scratch_label);
         let text_type = ContentTypeId::new("builtin.text-buffer")?;
-        for (buffer_id, buffer) in &state.buffers {
+        for (buffer_id, buffer) in state.buffers() {
             let title = titles
                 .get(&buffer_id)
                 .cloned()
@@ -96,14 +103,14 @@ impl EditorWindowBridge {
             }
         }
 
-        for (tab_id, _) in &state.tabs {
+        for (tab_id, _) in state.tabs() {
             if let std::collections::hash_map::Entry::Vacant(e) = self.tabs.entry(tab_id) {
                 let tab = graph.create_workspace_tab(EDITOR_OWNER, EDITOR_GENERATION)?;
                 e.insert(tab);
             }
         }
 
-        for (editor_view, view) in &state.views {
+        for (editor_view, view) in state.views() {
             if !self.views.contains_key(&editor_view) {
                 let content = self
                     .buffers
@@ -115,11 +122,14 @@ impl EditorWindowBridge {
             }
         }
 
-        for (tab_id, tab) in &state.tabs {
+        for (tab_id, tab) in state.tabs() {
             let universal_tab = self.tabs[&tab_id];
             for pane_id in editor_panes(&tab.root) {
                 let placement = WindowPlacement::Tiled;
-                let pane = state.panes.get(pane_id).ok_or(WindowError::UnknownWindow)?;
+                let pane = state
+                    .panes()
+                    .get(pane_id)
+                    .ok_or(WindowError::UnknownWindow)?;
                 let universal_view = self
                     .views
                     .get(&pane.view)
@@ -141,7 +151,7 @@ impl EditorWindowBridge {
             }
         }
 
-        for (tab_id, tab) in &state.tabs {
+        for (tab_id, tab) in state.tabs() {
             let universal_tab = self.tabs[&tab_id];
             let root = editor_tiled_layout(&tab.root, &self.panes)?;
             graph.set_tiled_layout(universal_tab, Some(root))?;
@@ -151,7 +161,7 @@ impl EditorWindowBridge {
             .views
             .iter()
             .filter_map(|(view, universal)| {
-                (!state.views.contains_key(*view)).then_some((*view, *universal))
+                (!state.views().contains_key(*view)).then_some((*view, *universal))
             })
             .collect::<Vec<_>>();
         for (view, universal) in stale_views {
@@ -163,7 +173,7 @@ impl EditorWindowBridge {
             .tabs
             .iter()
             .filter_map(|(tab, universal)| {
-                (!state.tabs.contains_key(*tab)).then_some((*tab, *universal))
+                (!state.tabs().contains_key(*tab)).then_some((*tab, *universal))
             })
             .collect::<Vec<_>>();
         for (tab, universal) in stale_tabs {
@@ -175,7 +185,7 @@ impl EditorWindowBridge {
             .buffers
             .iter()
             .filter_map(|(buffer, content)| {
-                (!state.buffers.contains_key(*buffer)).then_some((*buffer, *content))
+                (!state.buffers().contains_key(*buffer)).then_some((*buffer, *content))
             })
             .collect::<Vec<_>>();
         for (buffer, content) in stale_buffers {
@@ -183,7 +193,7 @@ impl EditorWindowBridge {
             self.buffers.remove(&buffer);
         }
 
-        if let Some(active_tab) = state.active_tab {
+        if let Some(active_tab) = state.active_tab() {
             graph.set_active_tab(
                 self.tabs
                     .get(&active_tab)
@@ -191,14 +201,14 @@ impl EditorWindowBridge {
                     .ok_or(WindowError::UnknownWorkspaceTab)?,
             )?;
         }
-        if let Some(active_tab) = state.active_tab
-            && let Some(tab) = state.tabs.get(active_tab)
+        if let Some(active_tab) = state.active_tab()
+            && let Some(tab) = state.tabs().get(active_tab)
             && let Some(window) = self.panes.get(&tab.focused).copied()
         {
             graph.focus(window)?;
         }
         graph.validate()?;
-        self.source_revision = source_revision;
+        self.source = Some(source);
         self.scratch_label = Some(scratch_label.to_owned());
         #[cfg(test)]
         {
@@ -207,22 +217,22 @@ impl EditorWindowBridge {
         Ok(())
     }
 
-    pub(super) fn active_layout(
+    pub(in crate::editor::session) fn active_layout(
         &self,
-        state: &EditorState,
+        state: &EditorTopology<'_>,
         graph: &WindowGraph,
     ) -> Option<ActiveEditorWindowLayout> {
-        let editor_tab = state.active_tab?;
+        let editor_tab = state.active_tab()?;
         let tab = self.tabs.get(&editor_tab).copied()?;
         let layout = graph.tiled_layout_snapshot(tab)?;
-        let editor = state.tabs.get(editor_tab)?;
+        let editor = state.tabs().get(editor_tab)?;
         let bindings = editor_panes(&editor.root)
             .into_iter()
             .filter_map(|pane| {
                 Some(EditorWindowBinding {
                     window: *self.panes.get(&pane)?,
                     pane,
-                    view: state.panes.get(pane)?.view,
+                    view: state.panes().get(pane)?.view,
                 })
             })
             .collect();
@@ -236,54 +246,62 @@ impl EditorWindowBridge {
     }
 
     #[cfg(test)]
-    pub(super) const fn reconciliation_count(&self) -> u64 {
+    pub(in crate::editor::session) const fn reconciliation_count(&self) -> u64 {
         self.reconciliation_count
     }
 
-    pub(super) fn active_tab(&self, state: &EditorState) -> Option<WorkspaceTabId> {
-        self.tabs.get(&state.active_tab?).copied()
+    pub(in crate::editor::session) fn active_tab(
+        &self,
+        state: &EditorTopology,
+    ) -> Option<WorkspaceTabId> {
+        self.tabs.get(&state.active_tab()?).copied()
     }
 
-    pub(super) fn focused_window(&self, state: &EditorState) -> Option<WindowId> {
-        let tab = state.tabs.get(state.active_tab?)?;
+    pub(in crate::editor::session) fn focused_window(
+        &self,
+        state: &EditorTopology,
+    ) -> Option<WindowId> {
+        let tab = state.tabs().get(state.active_tab()?)?;
         self.panes.get(&tab.focused).copied()
     }
 
-    pub(super) fn buffer_for_content(&self, content: ContentId) -> Option<BufferId> {
+    pub(in crate::editor::session) fn buffer_for_content(
+        &self,
+        content: ContentId,
+    ) -> Option<BufferId> {
         self.buffers
             .iter()
             .find_map(|(buffer, candidate)| (*candidate == content).then_some(*buffer))
     }
 
-    #[cfg(test)]
-    pub(super) fn content_for(&self, buffer: BufferId) -> Option<ContentId> {
+    pub(in crate::editor::session) fn content_for(&self, buffer: BufferId) -> Option<ContentId> {
         self.buffers.get(&buffer).copied()
     }
 
     #[cfg(test)]
-    pub(super) fn view_for(&self, view: EditorViewId) -> Option<ViewId> {
+    pub(in crate::editor::session) fn view_for(&self, view: EditorViewId) -> Option<ViewId> {
         self.views.get(&view).copied()
     }
 
     #[cfg(test)]
-    pub(super) fn window_for(&self, pane: PaneId) -> Option<WindowId> {
+    pub(in crate::editor::session) fn window_for(&self, pane: PaneId) -> Option<WindowId> {
         self.panes.get(&pane).copied()
     }
 
-    pub(super) fn pane_for_window(&self, window: WindowId) -> Option<PaneId> {
+    pub(in crate::editor::session) fn pane_for_window(&self, window: WindowId) -> Option<PaneId> {
         self.panes
             .iter()
             .find_map(|(pane, candidate)| (*candidate == window).then_some(*pane))
     }
 
     #[cfg(test)]
-    pub(super) fn tab_for(&self, tab: TabId) -> Option<WorkspaceTabId> {
+    pub(in crate::editor::session) fn tab_for(&self, tab: TabId) -> Option<WorkspaceTabId> {
         self.tabs.get(&tab).copied()
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct NativeSurfaceSignature {
+pub(in crate::editor::session) struct NativeSurfaceSignature {
     pub editor_tab: Option<WorkspaceTabId>,
     pub editor_window: Option<WindowId>,
     pub explorer_visible: bool,
@@ -292,7 +310,7 @@ pub(super) struct NativeSurfaceSignature {
     pub active_terminal: Option<u64>,
     pub terminal_focused: bool,
     pub terminal_size: u16,
-    pub terminal_set_revision: u64,
+    pub terminal_set_revision: Option<u64>,
     pub terminal_width: u16,
     pub terminal_height: u16,
     pub dashboard_visible: bool,
@@ -303,14 +321,14 @@ pub(super) struct NativeSurfaceSignature {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct NativeSurfaceIds {
+pub(in crate::editor::session) struct NativeSurfaceIds {
     pub content: ContentId,
     pub view: ViewId,
     pub window: WindowId,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum NativeSurfaceTarget {
+pub(in crate::editor::session) enum NativeSurfaceTarget {
     Explorer,
     Terminal(u64),
     Dashboard,
@@ -318,7 +336,7 @@ pub(super) enum NativeSurfaceTarget {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub(super) struct NativeSurfaceBridge {
+pub(in crate::editor::session) struct NativeSurfaceBridge {
     explorer: Option<NativeSurfaceIds>,
     dashboard: Option<NativeSurfaceIds>,
     pickers: BTreeMap<PickerSurfaceKind, NativeSurfaceIds>,
@@ -339,8 +357,8 @@ pub(super) struct NativeSurfaceBridge {
 }
 
 impl NativeSurfaceBridge {
-    pub(super) fn is_current(&self, signature: NativeSurfaceSignature) -> bool {
-        self.signature == Some(signature)
+    pub(in crate::editor::session) fn is_current(&self, signature: NativeSurfaceSignature) -> bool {
+        signature.terminal_set_revision.is_some() && self.signature == Some(signature)
     }
 
     pub(super) fn invalidate(&mut self) {
@@ -358,7 +376,10 @@ impl NativeSurfaceBridge {
     ) -> Result<(), WindowError> {
         let owner = "builtin.surfaces";
         let generation = 1;
-        if signature.editor_tab.is_none()
+        // Hidden retained native windows still need a host while editor tabs
+        // are replaced; skipping them leaves stale tabs non-empty.
+        if self.workspace_tab.is_none()
+            && signature.editor_tab.is_none()
             && !signature.explorer_visible
             && !signature.dashboard_visible
             && signature.picker_rect.is_none()
@@ -610,41 +631,50 @@ impl NativeSurfaceBridge {
         Ok(())
     }
 
-    pub(super) fn workspace_tab(&self) -> Option<WorkspaceTabId> {
+    pub(in crate::editor::session) fn workspace_tab(&self) -> Option<WorkspaceTabId> {
         self.workspace_tab
     }
 
-    pub(super) fn explorer(&self) -> Option<NativeSurfaceIds> {
+    pub(in crate::editor::session) fn explorer(&self) -> Option<NativeSurfaceIds> {
         self.explorer
     }
 
-    pub(super) fn dashboard(&self) -> Option<NativeSurfaceIds> {
+    pub(in crate::editor::session) fn dashboard(&self) -> Option<NativeSurfaceIds> {
         self.dashboard
     }
 
-    pub(super) fn picker(&self) -> Option<NativeSurfaceIds> {
+    pub(in crate::editor::session) fn picker(&self) -> Option<NativeSurfaceIds> {
         self.signature
             .and_then(|signature| signature.picker_surface)
             .and_then(|kind| self.pickers.get(&kind).copied())
     }
 
     #[cfg(test)]
-    pub(super) fn picker_for(&self, kind: PickerSurfaceKind) -> Option<NativeSurfaceIds> {
+    pub(in crate::editor::session) fn picker_for(
+        &self,
+        kind: PickerSurfaceKind,
+    ) -> Option<NativeSurfaceIds> {
         self.pickers.get(&kind).copied()
     }
 
-    pub(super) fn terminal(&self, id: u64) -> Option<NativeSurfaceIds> {
+    pub(in crate::editor::session) fn terminal(&self, id: u64) -> Option<NativeSurfaceIds> {
         self.terminals.get(&id).copied()
     }
 
-    pub(super) fn terminal_placement(&self, id: u64) -> Option<WindowPlacement> {
+    pub(in crate::editor::session) fn terminal_placement(
+        &self,
+        id: u64,
+    ) -> Option<WindowPlacement> {
         self.terminal_placements
             .get(&id)
             .copied()
             .or(self.terminal_default_placement)
     }
 
-    pub(super) fn target_for_window(&self, window: WindowId) -> Option<NativeSurfaceTarget> {
+    pub(in crate::editor::session) fn target_for_window(
+        &self,
+        window: WindowId,
+    ) -> Option<NativeSurfaceTarget> {
         if self.explorer.is_some_and(|ids| ids.window == window) {
             return Some(NativeSurfaceTarget::Explorer);
         }
@@ -661,7 +691,10 @@ impl NativeSurfaceBridge {
         })
     }
 
-    pub(super) fn ids_for_target(&self, target: NativeSurfaceTarget) -> Option<NativeSurfaceIds> {
+    pub(in crate::editor::session) fn ids_for_target(
+        &self,
+        target: NativeSurfaceTarget,
+    ) -> Option<NativeSurfaceIds> {
         match target {
             NativeSurfaceTarget::Explorer => self.explorer,
             NativeSurfaceTarget::Terminal(id) => self.terminals.get(&id).copied(),
@@ -670,7 +703,7 @@ impl NativeSurfaceBridge {
         }
     }
 
-    pub(super) fn placement_for_target(
+    pub(in crate::editor::session) fn placement_for_target(
         &self,
         target: NativeSurfaceTarget,
     ) -> Option<WindowPlacement> {
@@ -906,7 +939,7 @@ impl NativeSurfaceBridge {
         Ok(())
     }
 
-    pub(super) fn semantic_defaults(
+    pub(in crate::editor::session) fn semantic_defaults(
         &self,
         selected_terminal: Option<u64>,
     ) -> Vec<(&'static str, WindowPlacement)> {
@@ -1004,15 +1037,18 @@ fn editor_panes(node: &LayoutNode) -> Vec<PaneId> {
     }
 }
 
-fn editor_buffer_titles(state: &EditorState, scratch_label: &str) -> HashMap<BufferId, String> {
+fn editor_buffer_titles(
+    state: &EditorTopology<'_>,
+    scratch_label: &str,
+) -> HashMap<BufferId, String> {
     let mut bases = HashMap::<String, usize>::new();
-    for (_, buffer) in &state.buffers {
+    for (_, buffer) in state.buffers() {
         let base = editor_buffer_base(buffer.path.as_deref(), scratch_label);
         *bases.entry(base).or_default() += 1;
     }
     let mut occurrences = HashMap::<String, usize>::new();
     state
-        .buffers
+        .buffers()
         .iter()
         .map(|(id, buffer)| {
             let base = editor_buffer_base(buffer.path.as_deref(), scratch_label);
@@ -1023,7 +1059,7 @@ fn editor_buffer_titles(state: &EditorState, scratch_label: &str) -> HashMap<Buf
                 let context = buffer.path.as_deref().map_or_else(
                     || base.clone(),
                     |path| {
-                        path.strip_prefix(&state.workspace_root)
+                        path.strip_prefix(state.workspace_root())
                             .unwrap_or(path)
                             .to_string_lossy()
                             .into_owned()

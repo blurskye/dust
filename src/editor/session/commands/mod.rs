@@ -237,6 +237,7 @@ pub enum AppEffect {
     WorkspaceRootStatus,
     ExplorerOpen,
     ExplorerClose,
+    ExplorerPanelToggle,
     ExplorerMove(i8),
     ExplorerPage(isize),
     ExplorerParent,
@@ -370,16 +371,7 @@ pub enum PickerKind {
     Changes,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum LayoutAction {
-    Split(crate::editor::Axis),
-    ClosePane,
-    ResizePane(i8),
-    FocusPane(isize),
-    NewTab,
-    CloseTab,
-    FocusTab(isize),
-}
+pub use crate::editor::session::windows::LayoutAction;
 
 #[derive(Clone, Copy, Debug)]
 pub enum PromptMove {

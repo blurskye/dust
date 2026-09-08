@@ -81,7 +81,25 @@ pub(super) fn render_explorer_window(
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
     let panel_width = rect.width.saturating_sub(1);
-    render_explorer_dock(&mut local, explorer, ui, config, panel_width, rect.height);
+    let body = ui
+        .surface_content
+        .explorer
+        .unwrap_or_else(|| crate::ui::geometry::explorer_body_geometry(rect, config));
+    let local_body = WindowRect {
+        x: 0,
+        y: body.y.saturating_sub(rect.y),
+        width: body.width,
+        height: body.height,
+    };
+    render_explorer_dock(
+        &mut local,
+        explorer,
+        ui,
+        config,
+        panel_width,
+        rect.height,
+        local_body,
+    );
     for y in 0..rect.height {
         for x in 0..rect.width {
             if let Some(cell) = local.get(x, y)
@@ -105,11 +123,11 @@ pub(super) fn render_explorer_window(
             .map(|row| {
                 (
                     rect.x.saturating_add(1.min(panel_width.saturating_sub(1))),
-                    rect.y.saturating_add(3).saturating_add(row),
+                    body.y.saturating_add(row),
                     cursor_style(config.ui.cursor.normal),
                 )
             })
-            .filter(|(_, y, _)| *y < rect.y.saturating_add(rect.height));
+            .filter(|(_, y, _)| *y < body.y.saturating_add(body.height));
     }
 }
 
@@ -120,6 +138,7 @@ pub(super) fn render_explorer_dock(
     config: &Config,
     panel_width: u16,
     height: u16,
+    body: WindowRect,
 ) {
     if panel_width == 0 || height == 0 {
         return;
@@ -190,8 +209,8 @@ pub(super) fn render_explorer_dock(
         }
     }
 
-    let body_top = 3;
-    let available_rows = usize::from(panel_height.saturating_sub(body_top));
+    let body_top = body.y;
+    let available_rows = usize::from(body.height);
     let mut rendered_rows = 0usize;
     for (screen_row, row) in explorer.rows.iter().take(available_rows).enumerate() {
         rendered_rows = rendered_rows.saturating_add(1);

@@ -25,7 +25,7 @@ impl InteractiveApplication {
                 let context = self.active_input_context();
                 if let Some(command_id) = self
                     .configuration
-                    .settings
+                    .settings()
                     .input
                     .text_commands
                     .get(&context)
@@ -43,181 +43,62 @@ impl InteractiveApplication {
         &self,
         invocation: &CommandInvocation,
     ) -> Option<CommandInvocation> {
-        let view_id = invocation.target.view.or(self.state.active_view)?;
-        let view = self.state.views.get(view_id)?;
-        let buffer = self.state.buffers.get(view.buffer)?;
-        let selection = view.selection?;
-        let (shape, width, height) = match selection.kind {
-            crate::editor::SelectionKind::Character => {
-                let low = selection.anchor.min(selection.head);
-                let high = selection.anchor.max(selection.head);
-                let end = next_grapheme_boundary(&buffer.text, high);
-                let selected = buffer.text.slice(ByteRange::new(low, end).ok()?).ok()?;
-                ("character", selected.graphemes(true).count(), 1_usize)
-            }
-            crate::editor::SelectionKind::Line => {
-                let anchor = buffer.text.byte_to_line(selection.anchor).ok()?;
-                let head = buffer.text.byte_to_line(selection.head).ok()?;
-                ("line", 1, anchor.abs_diff(head).saturating_add(1))
-            }
-            crate::editor::SelectionKind::Block => {
-                let anchor_line = buffer.text.byte_to_line(selection.anchor).ok()?;
-                let head_line = buffer.text.byte_to_line(selection.head).ok()?;
-                let anchor_start = buffer.text.line_to_byte(anchor_line).ok()?;
-                let head_start = buffer.text.line_to_byte(head_line).ok()?;
-                let anchor_text = buffer.text.line(anchor_line).ok()?;
-                let head_text = buffer.text.line(head_line).ok()?;
-                let width_policy = DisplayWidthPolicy {
-                    tab_width: self.state.policy.tab_width,
-                    ambiguous_wide: self.state.policy.ambiguous_width_wide,
-                };
-                let anchor_column = display_column_at(
-                    anchor_text.strip_suffix('\n').unwrap_or(&anchor_text),
-                    selection.anchor.get().saturating_sub(anchor_start.get()),
-                    width_policy,
-                );
-                let head_column = display_column_at(
-                    head_text.strip_suffix('\n').unwrap_or(&head_text),
-                    selection.head.get().saturating_sub(head_start.get()),
-                    width_policy,
-                );
-                (
-                    "block",
-                    anchor_column.abs_diff(head_column).saturating_add(1),
-                    anchor_line.abs_diff(head_line).saturating_add(1),
-                )
-            }
-        };
-        let operator = invocation.arguments.get("operator")?.clone();
-        let mut repeat = CommandInvocation::new("edit.repeat_visual", invocation.source).ok()?;
-        repeat.arguments.insert("operator".into(), operator);
-        repeat
-            .arguments
-            .insert("shape".into(), CommandValue::String(shape.into()));
-        repeat.arguments.insert(
-            "width".into(),
-            CommandValue::Integer(i64::try_from(width).ok()?),
-        );
-        repeat.arguments.insert(
-            "height".into(),
-            CommandValue::Integer(i64::try_from(height).ok()?),
-        );
-        repeat.register = invocation.register;
-        repeat.count = invocation.count;
-        Some(repeat)
-    }
-
-    pub(super) fn record_successful_invocation(
-        &mut self,
-        invocation: &CommandInvocation,
-        repeat_override: Option<&CommandInvocation>,
-        suppress_repeat: bool,
-    ) {
-        if !invocation.id.as_str().starts_with("macro.")
-            && !invocation.id.as_str().starts_with("input.")
-        {
-            if let Some((_, recorded)) = &mut self.recording_macro {
-                let mut invocation = invocation.clone();
-                invocation.target = Default::default();
-                recorded.push(invocation);
-            }
-        }
-        if invocation.source == InvocationSource::Macro {
-            return;
-        }
-        if suppress_repeat {
-            return;
-        }
-        let mut semantic = repeat_override.unwrap_or(invocation).clone();
-        semantic.target = Default::default();
-        match invocation.id.as_str() {
-            "mode.insert" | "mode.replace" | "edit.substitute" => {
-                self.pending_change = Some(vec![semantic]);
-            }
-            "edit.operator" | "edit.repeat_visual"
-                if semantic
-                    .arguments
-                    .get("operator")
-                    .is_some_and(|value| value == &CommandValue::String("change".into())) =>
-            {
-                self.pending_change = Some(vec![semantic]);
-            }
-            "edit.insert_text"
-            | "edit.backspace"
-            | "edit.replace_text"
-            | "edit.replace_backspace" => {
-                if let Some(pending) = &mut self.pending_change {
-                    pending.push(semantic);
-                }
-            }
-            "mode.normal" => {
-                if let Some(mut pending) = self.pending_change.take() {
-                    pending.push(semantic);
-                    self.last_change = pending;
-                }
-            }
-            "edit.delete_char"
-            | "edit.delete_backward"
-            | "edit.replace"
-            | "edit.join_lines"
-            | "edit.toggle_case"
-            | "edit.put" => self.last_change = vec![semantic],
-            "edit.operator" | "edit.repeat_visual" => self.last_change = vec![semantic],
-            _ => {}
-        }
+        let view = self
+            .state
+            .views
+            .get(invocation.target.view.or(self.state.active_view)?)?;
+        self.input.normalized_visual_repeat(
+            invocation,
+            &self.state.buffers.get(view.buffer)?.text,
+            view.selection?,
+            DisplayWidthPolicy {
+                tab_width: self.state.policy.tab_width,
+                ambiguous_wide: self.state.policy.ambiguous_width_wide,
+            },
+        )
     }
 
     pub(super) fn repeat_last_change(&mut self) {
-        if self.last_change.is_empty() {
-            self.show_error(self.message("no_previous_change", &[]));
-            return;
-        }
-        if self.last_change.len() > self.configuration.settings.runtime.repeat_step_limit {
-            self.show_error(
-                self.message(
-                    "repeat_step_limit",
-                    &[(
-                        "limit",
-                        self.configuration
-                            .settings
-                            .runtime
-                            .repeat_step_limit
-                            .to_string(),
-                    )],
-                ),
-            );
-            return;
-        }
-        let invocations = self.last_change.clone();
-        for mut invocation in invocations {
-            invocation.source = InvocationSource::Macro;
-            invocation.target = Default::default();
-            self.invoke(invocation);
+        let limit = self.configuration.settings().runtime.repeat_step_limit;
+        match self.input.repeat_plan(limit) {
+            Ok(invocations) => {
+                for invocation in invocations {
+                    self.invoke(invocation);
+                }
+            }
+            Err(super::super::input::ReplayError::NoChange) => {
+                self.show_error(self.message("no_previous_change", &[]));
+            }
+            Err(_) => {
+                self.show_error(self.message("repeat_step_limit", &[("limit", limit.to_string())]))
+            }
         }
     }
 
     pub(super) fn replay_macro(&mut self, requested: char) {
-        let register = if requested == '@' {
-            let Some(register) = self.last_macro else {
-                self.show_error(self.message("no_previous_macro", &[]));
-                return;
-            };
-            register
-        } else {
-            requested
+        let Ok(register) = self.input.macro_register(requested) else {
+            self.show_error(self.message("no_previous_macro", &[]));
+            return;
         };
         let Some(invocations) = self.state.registers.get_macro(register).map(<[_]>::to_vec) else {
             self.show_error(self.message("empty_macro", &[("register", register.to_string())]));
             return;
         };
-        if self.replay_depth >= self.configuration.settings.runtime.macro_recursion_limit {
+        if self
+            .input
+            .begin_macro_replay(
+                register,
+                self.configuration.settings().runtime.macro_recursion_limit,
+            )
+            .is_err()
+        {
             self.show_error(
                 self.message(
                     "macro_recursion_limit",
                     &[(
                         "limit",
                         self.configuration
-                            .settings
+                            .settings()
                             .runtime
                             .macro_recursion_limit
                             .to_string(),
@@ -226,17 +107,18 @@ impl InteractiveApplication {
             );
             return;
         }
-        self.last_macro = Some(register);
-        self.replay_depth += 1;
-        for mut invocation in invocations {
-            if self.replay_steps >= self.configuration.settings.runtime.macro_step_limit {
+        for invocation in invocations {
+            let Ok(invocation) = self.input.macro_step(
+                invocation,
+                self.configuration.settings().runtime.macro_step_limit,
+            ) else {
                 self.show_error(
                     self.message(
                         "macro_step_limit",
                         &[(
                             "limit",
                             self.configuration
-                                .settings
+                                .settings()
                                 .runtime
                                 .macro_step_limit
                                 .to_string(),
@@ -244,13 +126,10 @@ impl InteractiveApplication {
                     ),
                 );
                 break;
-            }
-            self.replay_steps += 1;
-            invocation.source = InvocationSource::Macro;
-            invocation.target = Default::default();
+            };
             self.invoke(invocation);
         }
-        self.replay_depth -= 1;
+        self.input.finish_macro_replay();
     }
 
     pub(super) fn search_word_under_cursor(&mut self, forward: bool) {
@@ -279,7 +158,7 @@ impl InteractiveApplication {
             .find(|(_, character)| !(character.is_alphanumeric() || *character == '_'))
             .map_or(source.len(), |(relative, _)| cursor + relative);
         self.ui.search_query = Some(source[start..end].to_owned());
-        self.last_search_forward = forward;
+        self.input.remember_search(forward);
         self.perform_search(forward);
     }
 
@@ -287,95 +166,155 @@ impl InteractiveApplication {
         &mut self,
         transaction: &EditorTransaction,
     ) -> Result<(), String> {
-        let mut candidate = self.state.clone();
-        candidate
-            .apply_transaction(transaction)
+        self.commit_editor_transaction(transaction, None)
+    }
+    pub(super) fn apply_window_plan(
+        &mut self,
+        plan: super::super::windows::WindowPlan,
+    ) -> Result<(), String> {
+        self.window_session.check_plan(
+            &plan,
+            &self.state.window_version(),
+            &self.plugin_contributions.version(),
+        )?;
+        if plan.operations().is_empty() {
+            self.window_session.accept_native_plan(
+                plan,
+                &self.state.window_version(),
+                &self.plugin_contributions.version(),
+            )?;
+            if let Some(id) = self
+                .window_session
+                .focused_terminal()
+                .map(PtyId)
+                .filter(|id| self.terminal_session.contains(*id))
+            {
+                self.terminal_session.select(id);
+            }
+            self.project_window_activation();
+            self.reconcile_editor_windows();
+            return Ok(());
+        }
+        let transaction = plan
+            .operations()
+            .iter()
+            .cloned()
+            .fold(
+                EditorTransaction::new(self.transaction_id()),
+                |transaction, operation| transaction.with_operation(operation),
+            )
+            .with_undo_policy(UndoPolicy::Ignore);
+        self.commit_editor_transaction(&transaction, Some(plan))
+    }
+    fn commit_editor_transaction(
+        &mut self,
+        transaction: &EditorTransaction,
+        plan: Option<super::super::windows::WindowPlan>,
+    ) -> Result<(), String> {
+        if let Some(plan) = &plan {
+            self.window_session.check_plan(
+                plan,
+                &self.state.window_version(),
+                &self.plugin_contributions.version(),
+            )?;
+        }
+        self.window_session
+            .check_editor_admission(&(&self.state).into())?;
+        let candidate = self
+            .state
+            .prepare_transaction(transaction)
             .map_err(|error| error.to_string())?;
-        if candidate.window_revision() == self.state.window_revision() {
-            self.state = candidate;
+        self.commit_editor_draft(candidate, plan, false)
+    }
+    pub(super) fn commit_editor_draft(
+        &mut self,
+        candidate: crate::editor::EditorDraft,
+        plan: Option<super::super::windows::WindowPlan>,
+        activate_document: bool,
+    ) -> Result<(), String> {
+        self.window_session
+            .check_editor_admission(&(&self.state).into())?;
+        let current = self.state.version();
+        candidate.check_current(&current)?;
+        if !activate_document
+            && plan.is_none()
+            && candidate.window_version() == self.state.window_version()
+        {
+            self.state = candidate.accept(&current)?;
             return Ok(());
         }
 
-        let previous_state = std::mem::replace(&mut self.state, candidate);
-        let previous_graph = self.windows.clone();
-        let previous_editor = self.editor_windows.clone();
-        let previous_surfaces = self.surface_windows.clone();
-        let previous_ui = self.ui.clone();
-        self.reconcile_editor_windows();
-        let accepted = self.editor_windows.is_current(
-            &self.state,
-            &self.configuration.settings.ui.buffer_line.scratch_label,
-        ) && self.windows.validate().is_ok()
-            && self.windows.revision().is_some()
-            && self.compositor_projection().is_some();
-        if accepted {
-            Ok(())
+        let terminals = self.terminal_session.descriptions();
+        let mut signature = self.native_surface_signature(self.window_session.editor_ids());
+        signature.dashboard_visible =
+            self.window_session.dashboard_visible() || candidate.topology().active_tab().is_none();
+        let title = self.message("explorer_title", &[]);
+        let descriptions = NativeDescriptions {
+            signature,
+            explorer_title: &title,
+            dashboard_title: &self.configuration.dashboard().identity,
+            picker_title: self
+                .ui
+                .picker
+                .as_ref()
+                .map_or("Picker", |picker| &picker.title),
+            terminals: &terminals,
+        };
+        let catalog = self.plugin_contributions.version();
+        let transition = if let Some(plan) = plan {
+            self.window_session.prepare_editor_plan(
+                plan,
+                (&current, &catalog),
+                candidate,
+                &self.configuration.settings().ui.buffer_line.scratch_label,
+                descriptions,
+            )?
+        } else if activate_document {
+            self.window_session.prepare_document_transition(
+                candidate,
+                &current,
+                catalog.clone(),
+                &self.configuration.settings().ui.buffer_line.scratch_label,
+                descriptions,
+            )?
         } else {
-            self.state = previous_state;
-            self.windows = previous_graph;
-            self.editor_windows = previous_editor;
-            self.surface_windows = previous_surfaces;
-            self.ui = previous_ui;
-            Err("authoritative editor/window transaction was rejected".into())
-        }
+            self.window_session.prepare_editor_transition(
+                candidate,
+                &current,
+                catalog.clone(),
+                &self.configuration.settings().ui.buffer_line.scratch_label,
+                Some(descriptions),
+            )?
+        };
+        self.state = self
+            .window_session
+            .accept_editor_transition(transition, &current, &catalog)?;
+        self.reconcile_editor_windows();
+        Ok(())
     }
 
     pub(super) fn focus_surface(&mut self, direction: FocusDirection) {
         self.reconcile_editor_windows();
-        let Some(layout) = self.ui.compositor_layout.as_ref() else {
-            return;
-        };
-        // Dock focus is host-owned and intentionally distinct from the graph's
-        // tiled-editor focus. Spatial movement must therefore start from the
-        // visibly focused dock, not from the last editor window.
-        let current = if self.terminal_focused {
-            layout.surfaces.terminal.map(|(_, window)| window)
-        } else if self.ui.explorer_focused {
-            layout.surfaces.explorer
-        } else {
-            self.windows.focused()
-        };
-        let Some(current) = current else {
-            return;
-        };
         let direction = match direction {
             FocusDirection::Left => SpatialDirection::Left,
             FocusDirection::Down => SpatialDirection::Down,
             FocusDirection::Up => SpatialDirection::Up,
             FocusDirection::Right => SpatialDirection::Right,
         };
-        let Some(target) = layout.projection.spatial_neighbor(current, direction) else {
+        let Some(target) = self.window_session.spatial_target(direction) else {
             return;
         };
-        if layout.surfaces.explorer == Some(target) {
-            self.ui.explorer_focused = true;
-            self.terminal_focused = false;
-        } else if layout
-            .surfaces
-            .terminal
-            .is_some_and(|(_, window)| window == target)
-        {
-            self.ui.explorer_focused = false;
-            self.terminal_focused = true;
-        } else {
-            let Some(pane) = self.ui.editor_window_layout.as_ref().and_then(|editor| {
-                editor
-                    .bindings
-                    .iter()
-                    .find(|binding| binding.window == target)
-                    .map(|binding| binding.pane)
-            }) else {
-                return;
-            };
-            let transaction = EditorTransaction::new(self.transaction_id())
-                .with_operation(EditorOperation::FocusPaneId { pane })
-                .with_undo_policy(UndoPolicy::Ignore);
-            if let Err(error) = self.apply_authoritative_editor_transaction(&transaction) {
-                self.show_error(error);
-                return;
-            }
-            self.ui.explorer_focused = false;
-            self.terminal_focused = false;
+        let result = self
+            .window_session
+            .plan_focus(
+                target,
+                &self.state.window_version(),
+                self.plugin_contributions.version(),
+            )
+            .and_then(|plan| self.apply_window_plan(plan));
+        if let Err(error) = result {
+            self.show_error(error);
+            return;
         }
         self.cancel_pending_mapping();
         self.input.cancel_pending();
@@ -384,54 +323,26 @@ impl InteractiveApplication {
     }
 
     pub(super) fn apply_layout_action(&mut self, action: LayoutAction) {
-        let closes_dirty = match action {
-            LayoutAction::ClosePane => self
-                .state
-                .active_buffer_id()
-                .and_then(|buffer| self.state.buffers.get(buffer))
-                .is_some_and(|buffer| buffer.dirty),
-            LayoutAction::CloseTab => self.state.active_tab_views().into_iter().any(|view| {
-                self.state
-                    .views
-                    .get(view)
-                    .and_then(|view| self.state.buffers.get(view.buffer))
-                    .is_some_and(|buffer| buffer.dirty)
-            }),
-            _ => false,
+        self.reconcile_editor_windows();
+        let plan = match self.window_session.plan_layout(
+            action,
+            &(&self.state).into(),
+            self.configuration.settings(),
+            self.plugin_contributions.version(),
+        ) {
+            Ok(plan) => plan,
+            Err(super::super::windows::LayoutPlanError::Dirty) => {
+                self.show_error(self.message("dirty_close", &[]));
+                return;
+            }
+            Err(super::super::windows::LayoutPlanError::Rejected(error)) => {
+                self.show_error(error);
+                return;
+            }
         };
-        if closes_dirty {
-            self.show_error(self.message("dirty_close", &[]));
-            return;
-        }
-        let operation = match action {
-            LayoutAction::Split(axis) => EditorOperation::SplitPane {
-                axis,
-                ratio: self.configuration.settings.ui.panes.default_ratio,
-            },
-            LayoutAction::ClosePane => EditorOperation::ClosePane,
-            LayoutAction::ResizePane(direction) => EditorOperation::ResizePane {
-                delta: i16::from(direction)
-                    * i16::try_from(self.configuration.settings.ui.panes.resize_step)
-                        .unwrap_or(i16::MAX),
-            },
-            LayoutAction::FocusPane(offset) => EditorOperation::FocusPane {
-                offset,
-                wrap: self.configuration.settings.ui.panes.focus_wrap,
-            },
-            LayoutAction::NewTab => EditorOperation::NewTab,
-            LayoutAction::CloseTab => EditorOperation::CloseTab,
-            LayoutAction::FocusTab(offset) => EditorOperation::FocusTab {
-                offset,
-                wrap: self.configuration.settings.ui.tab_line.focus_wrap,
-            },
-        };
-        let transaction = EditorTransaction::new(self.transaction_id())
-            .with_operation(operation)
-            .with_undo_policy(UndoPolicy::Ignore);
-        if let Err(error) = self.apply_authoritative_editor_transaction(&transaction) {
+        if let Err(error) = self.apply_window_plan(plan) {
             self.show_error(error);
         } else {
-            self.ui.dashboard = false;
             self.cancel_pending_mapping();
             self.input.cancel_pending();
             self.ensure_cursor_visible();
@@ -440,7 +351,7 @@ impl InteractiveApplication {
 
     pub(super) fn apply_retained_ui_interaction(&mut self, interaction: PluginUiInteraction) {
         match self.plugin_windows.interact_focused(
-            &self.windows,
+            self.window_session.graph(),
             &self.plugin_contributions,
             interaction,
         ) {
@@ -455,7 +366,7 @@ impl InteractiveApplication {
     }
 
     pub(super) fn select_retained_ui_at_mouse(&mut self) {
-        let Some((column, row)) = self.mouse_position else {
+        let Some((column, row)) = self.input.mouse_position() else {
             return;
         };
         let Some(projection) = self.compositor_projection() else {
@@ -482,7 +393,7 @@ impl InteractiveApplication {
             return;
         };
         let target = if at_mouse {
-            self.mouse_position.and_then(|(x, y)| {
+            self.input.mouse_position().and_then(|(x, y)| {
                 projection.hit_test(x, y).and_then(|window| {
                     projection.window(window).map(|projected| {
                         (
@@ -494,7 +405,7 @@ impl InteractiveApplication {
                 })
             })
         } else {
-            self.windows.focused().and_then(|window| {
+            self.window_session.graph().focused().and_then(|window| {
                 self.ui
                     .private_surfaces
                     .iter()
@@ -529,7 +440,7 @@ impl InteractiveApplication {
     pub(super) fn mouse_pane_geometry(
         &self,
     ) -> Option<(crate::editor::PaneId, u16, u16, u16, u16)> {
-        let (global_column, global_row) = self.mouse_position?;
+        let (global_column, global_row) = self.input.mouse_position()?;
         let workspace = self.workspace_bounds()?;
         if !rect_contains_point(workspace, global_column, global_row) {
             return None;
@@ -540,7 +451,7 @@ impl InteractiveApplication {
         pane_viewports(
             &self.state,
             &self.ui,
-            &self.configuration.settings,
+            self.configuration.settings(),
             content_width,
             self.workspace_render_height(),
         )
@@ -587,12 +498,10 @@ impl InteractiveApplication {
             return;
         };
         let view = &self.state.views[view_id];
-        let original_cursor = view.cursor;
         let buffer_id = view.buffer;
         let buffer = &self.state.buffers[buffer_id];
-        let revision = buffer.text.revision();
         let body_height = pane_height.saturating_sub(u16::from(
-            self.configuration.settings.ui.status_line.enabled,
+            self.configuration.settings().ui.status_line.enabled,
         ));
         if row >= body_height {
             return;
@@ -600,162 +509,77 @@ impl InteractiveApplication {
         let gutter = editor_state_gutter_width(
             &self.state,
             &buffer.text,
-            &self.configuration.settings.editor,
+            &self.configuration.settings().editor,
             pane_width,
         );
         let available = editor_state_content_width(
             &self.state,
             &buffer.text,
-            &self.configuration.settings.editor,
+            &self.configuration.settings().editor,
             pane_width,
         );
         if available == 0 {
             return;
         }
-        let wrap_enabled = self.configuration.settings.editor.wrap
+        let wrap_enabled = self.configuration.settings().editor.wrap
             && !(self.ui.large_file_buffers.contains(&buffer_id)
-                && self.configuration.settings.editor.large_file.disable_wrap);
+                && self.configuration.settings().editor.large_file.disable_wrap);
         let visual_rows = VisualRowModel::new_for_state(
             &self.state,
             &buffer.text,
             view_id,
             &self.ui,
-            &self.configuration.settings,
+            self.configuration.settings(),
             pane_width,
             wrap_enabled,
         );
-        let start_anchor = visual_rows.normalize(VisualRowAnchor {
-            line: view.scroll_line,
-            wrap_row: view.scroll_wrap_row,
-        });
-        let target_anchor = visual_rows.forward(start_anchor, usize::from(row));
-        if visual_rows.screen_row(start_anchor, target_anchor, usize::from(body_height))
-            != Some(usize::from(row))
-        {
+        let source = self.state.version();
+        let transaction_id = TransactionId(self.next_transaction);
+        let plan = self.input.mouse_plan(
+            crate::editor::session::input::MouseDocument {
+                editor: &source,
+                view_id,
+                pane_id,
+                view,
+                text: &buffer.text,
+            },
+            crate::editor::session::input::MouseGeometry {
+                column,
+                row,
+                body_height,
+                gutter,
+                wrap: wrap_enabled,
+                rows: &visual_rows,
+                inlays: &self.ui.lsp_inlay_hints,
+            },
+            &self.configuration.settings().editor,
+            transaction_id,
+            extend_selection,
+        );
+        let Some(plan) = plan else {
             return;
-        }
-        let line_index = target_anchor.line;
-        let line_start = buffer
-            .text
-            .line_to_byte(line_index)
-            .unwrap_or(ByteOffset(0));
-        let byte = if wrap_enabled {
-            visual_rows.byte_at_cell(target_anchor, usize::from(column.saturating_sub(gutter)))
-        } else {
-            let line = buffer.text.line(line_index).unwrap_or_default();
-            let content = line.strip_suffix('\n').unwrap_or(&line);
-            let snapped_scroll = snap_display_column(
-                content,
-                view.scroll_column,
-                self.configuration.settings.editor.tab_width,
-                self.configuration.settings.editor.ambiguous_width,
-            );
-            let target_column =
-                usize::from(column.saturating_sub(gutter)).saturating_add(snapped_scroll);
-            let skipped_bytes = configured_byte_offset_at_display_column(
-                content,
-                view.scroll_column,
-                self.configuration.settings.editor.tab_width,
-                self.configuration.settings.editor.ambiguous_width,
-            );
-            let visible_start = ByteOffset(line_start.get().saturating_add(skipped_bytes));
-            let line_end = ByteOffset(line_start.get().saturating_add(content.len()));
-            let mut hints = self
-                .ui
-                .lsp_inlay_hints
-                .iter()
-                .filter(|hint| {
-                    hint.buffer == buffer_id
-                        && hint.revision == revision
-                        && hint.position >= visible_start
-                        && hint.position <= line_end
-                })
-                .collect::<Vec<_>>();
-            hints.sort_unstable_by_key(|hint| hint.position);
-            hints.truncate(32);
-            let mut hint_cursor = 0usize;
-            let mut display_column = 0_usize;
-            let mut virtual_cells = 0usize;
-            'target: {
-                for (relative, grapheme) in content.grapheme_indices(true) {
-                    let global = ByteOffset(line_start.get().saturating_add(relative));
-                    while let Some(hint) = hints
-                        .get(hint_cursor)
-                        .filter(|hint| hint.position == global)
-                    {
-                        let width = configured_text_width(
-                            &hint.label,
-                            self.configuration.settings.editor.tab_width,
-                            self.configuration.settings.editor.ambiguous_width,
-                        );
-                        let start = display_column.saturating_add(virtual_cells);
-                        if start.saturating_add(width) > target_column {
-                            break 'target relative;
-                        }
-                        virtual_cells = virtual_cells.saturating_add(width);
-                        hint_cursor = hint_cursor.saturating_add(1);
-                    }
-                    let width = if grapheme == "\t" {
-                        self.configuration.settings.editor.tab_width
-                            - (display_column % self.configuration.settings.editor.tab_width)
-                    } else {
-                        configured_grapheme_width(
-                            grapheme,
-                            self.configuration.settings.editor.ambiguous_width,
-                        )
-                    };
-                    if display_column
-                        .saturating_add(virtual_cells)
-                        .saturating_add(width)
-                        > target_column
-                    {
-                        break 'target relative;
-                    }
-                    display_column = display_column.saturating_add(width);
-                }
-                content.len()
+        };
+        self.transaction_id();
+        let transaction = match self.input.mouse_transaction(&plan, &self.state.version()) {
+            Ok(transaction) => transaction,
+            Err(error) => {
+                self.show_error(error);
+                return;
             }
         };
-        let position = ByteOffset(line_start.get().saturating_add(byte));
-        let mut transaction = EditorTransaction::new(self.transaction_id())
-            .with_precondition(Precondition::BufferRevision {
-                buffer: buffer_id,
-                revision,
-            })
-            .with_operation(EditorOperation::FocusPaneId { pane: pane_id })
-            .with_operation(EditorOperation::SetCursor {
-                view: view_id,
-                position,
-            })
-            .with_undo_policy(UndoPolicy::Ignore);
-        if extend_selection {
-            transaction.operations.push(EditorOperation::SetSelection {
-                view: view_id,
-                selection: Some(crate::editor::Selection {
-                    anchor: self
-                        .mouse_selection_anchor
-                        .filter(|(anchor_view, _)| *anchor_view == view_id)
-                        .map_or(original_cursor, |(_, anchor)| anchor),
-                    head: position,
-                    kind: crate::editor::SelectionKind::Character,
-                }),
-            });
-            transaction.operations.push(EditorOperation::SetMode {
-                view: view_id,
-                mode: EditorMode::VisualChar,
-            });
-        } else {
-            transaction.operations.push(EditorOperation::SetSelection {
-                view: view_id,
-                selection: None,
-            });
-        }
-        if let Err(error) = self.apply_authoritative_editor_transaction(&transaction) {
+        if let Err(error) = self.apply_authoritative_editor_transaction(transaction) {
             self.show_error(error);
         } else {
-            if !extend_selection {
-                self.mouse_selection_anchor = Some((view_id, position));
-            }
+            let source = self.state.window_version();
+            let current = self.state.active_view.and_then(|id| {
+                self.state.views.get(id).and_then(|view| {
+                    self.state
+                        .buffers
+                        .get(view.buffer)
+                        .map(|buffer| (id, view.buffer, buffer.text.revision()))
+                })
+            });
+            self.input.accept_mouse_plan(plan, &source, current);
             self.ensure_cursor_visible();
         }
     }
@@ -774,7 +598,7 @@ impl InteractiveApplication {
         let Some(viewport) = active_pane_viewport(
             &self.state,
             &self.ui,
-            &self.configuration.settings,
+            self.configuration.settings(),
             content_width,
             self.workspace_render_height(),
         )
@@ -785,14 +609,14 @@ impl InteractiveApplication {
             viewport
                 .height
                 .saturating_sub(u16::from(
-                    self.configuration.settings.ui.status_line.enabled,
+                    self.configuration.settings().ui.status_line.enabled,
                 ))
                 .max(1),
         );
         let percent = if kind.starts_with("half_") {
-            self.configuration.settings.editor.half_page_percent
+            self.configuration.settings().editor.half_page_percent
         } else {
-            self.configuration.settings.editor.full_page_percent
+            self.configuration.settings().editor.full_page_percent
         };
         let amount = body.saturating_mul(usize::from(percent)) / 100;
         let amount = amount
@@ -801,19 +625,19 @@ impl InteractiveApplication {
         let available = editor_state_content_width(
             &self.state,
             &buffer.text,
-            &self.configuration.settings.editor,
+            &self.configuration.settings().editor,
             viewport.width,
         );
         let wrap_enabled = available > 0
-            && self.configuration.settings.editor.wrap
+            && self.configuration.settings().editor.wrap
             && !(self.ui.large_file_buffers.contains(&view.buffer)
-                && self.configuration.settings.editor.large_file.disable_wrap);
+                && self.configuration.settings().editor.large_file.disable_wrap);
         let visual_rows = VisualRowModel::new_for_state(
             &self.state,
             &buffer.text,
             view_id,
             &self.ui,
-            &self.configuration.settings,
+            self.configuration.settings(),
             viewport.width,
             wrap_enabled,
         );
@@ -840,8 +664,8 @@ impl InteractiveApplication {
             .unwrap_or_default();
         let current_column = configured_text_width(
             &old_prefix,
-            self.configuration.settings.editor.tab_width,
-            self.configuration.settings.editor.ambiguous_width,
+            self.configuration.settings().editor.tab_width,
+            self.configuration.settings().editor.ambiguous_width,
         );
         let target_line = target_anchor.line;
         let target_start = buffer
@@ -858,12 +682,12 @@ impl InteractiveApplication {
             let mut target_byte = 0_usize;
             for (relative, grapheme) in target_content.grapheme_indices(true) {
                 let width = if grapheme == "\t" {
-                    self.configuration.settings.editor.tab_width
-                        - (display_column % self.configuration.settings.editor.tab_width)
+                    self.configuration.settings().editor.tab_width
+                        - (display_column % self.configuration.settings().editor.tab_width)
                 } else {
                     configured_grapheme_width(
                         grapheme,
-                        self.configuration.settings.editor.ambiguous_width,
+                        self.configuration.settings().editor.ambiguous_width,
                     )
                 };
                 if display_column.saturating_add(width) > current_column {

@@ -17,14 +17,14 @@ impl InteractiveApplication {
     }
 
     pub(super) fn schedule_recovery_work(&mut self) {
-        if !self.configuration.settings.recovery.enabled {
+        if !self.configuration.settings().recovery.enabled {
             return;
         }
         if !self.recovery_discovery_queued
-            && let Ok(id) = self.vfs.discover_recovery(
+            && let Ok(id) = self.documents.discover_recovery(
                 self.recovery_directory.clone(),
                 self.configuration
-                    .settings
+                    .settings()
                     .recovery
                     .maximum_discovered_records,
             )
@@ -32,15 +32,15 @@ impl InteractiveApplication {
             self.recovery_discovery_queued = true;
             self.pending_vfs.insert(id, PendingVfs::RecoveryDiscovery);
         }
-        if self.configuration.settings.recovery.cleanup_enabled
+        if self.configuration.settings().recovery.cleanup_enabled
             && !self.recovery_cleanup_queued
-            && let Ok(id) = self.vfs.cleanup_recovery(
+            && let Ok(id) = self.documents.cleanup_recovery(
                 self.recovery_directory.clone(),
                 self.configuration
-                    .settings
+                    .settings()
                     .recovery
                     .maximum_retained_records,
-                self.configuration.settings.recovery.maximum_age_days,
+                self.configuration.settings().recovery.maximum_age_days,
             )
         {
             self.recovery_cleanup_queued = true;
@@ -48,7 +48,7 @@ impl InteractiveApplication {
         }
         let now = Instant::now();
         let debounce =
-            Duration::from_millis(self.configuration.settings.recovery.write_debounce_ms);
+            Duration::from_millis(self.configuration.settings().recovery.write_debounce_ms);
         let buffers = self
             .state
             .buffers
@@ -71,14 +71,14 @@ impl InteractiveApplication {
             } else {
                 self.recovery_scheduled.remove(&buffer);
                 self.recovery_pruned_revisions.remove(&buffer);
-                if self.configuration.settings.recovery.delete_clean_journals
+                if self.configuration.settings().recovery.delete_clean_journals
                     && self.recovery_revisions.contains_key(&buffer)
                 {
                     let journal = self.recovery_path(buffer);
                     let delete_queued = self.pending_vfs.values().any(|pending| {
                         matches!(pending, PendingVfs::RecoveryDelete { path, .. } if path == &journal)
                     });
-                    if !delete_queued && let Ok(id) = self.vfs.delete(journal.clone()) {
+                    if !delete_queued && let Ok(id) = self.documents.delete(journal.clone()) {
                         self.pending_vfs.insert(
                             id,
                             PendingVfs::RecoveryDelete {
@@ -111,7 +111,7 @@ impl InteractiveApplication {
                 buffer_state.text.to_string(),
             );
             let journal = self.recovery_path(buffer);
-            if let Ok(id) = self.vfs.write_recovery(journal, record) {
+            if let Ok(id) = self.documents.write_recovery(journal, record) {
                 self.recovery_scheduled.remove(&buffer);
                 self.recovery_pruned_revisions.remove(&buffer);
                 self.recovery_revisions.insert(buffer, revision);
@@ -122,7 +122,7 @@ impl InteractiveApplication {
     }
 
     pub(super) fn queue_dirty_recovery_before_exit(&mut self) {
-        if !self.configuration.settings.recovery.enabled {
+        if !self.configuration.settings().recovery.enabled {
             return;
         }
         let now = Instant::now();

@@ -2,13 +2,29 @@ use super::*;
 
 #[test]
 fn diagnostic_navigation_filters_severity_wraps_and_expands_the_landed_line() {
-    let mut app = app();
+    let root = tempfile::tempdir().unwrap();
+    let state_dir = tempfile::tempdir().unwrap();
+    let mut app = InteractiveApplication::new(
+        StartupTarget::Dashboard {
+            root: root.path().into(),
+        },
+        crate::config::load_bundled_config(),
+        false,
+        state_dir.path().into(),
+        false,
+        false,
+        std::sync::Arc::new(crate::clock::SystemClock),
+    )
+    .unwrap();
+    app.terminal_width = 80;
+    app.terminal_height = 24;
     let path = app.state.workspace_root.join("diagnostic.rs");
     let (buffer, view) = app.state.open_text(
         TextBuffer::from_text("ok\nerror\nwarning\n"),
         Some(path.clone()),
     );
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
     let uri = crate::language::lsp::file_uri(&path);
     let diagnostic = |range, severity, message: &str| crate::workspace::Diagnostic {
         uri: uri.clone(),
@@ -23,24 +39,34 @@ fn diagnostic_navigation_filters_severity_wraps_and_expands_the_landed_line() {
         fixes: Vec::new(),
         timestamp: std::time::SystemTime::UNIX_EPOCH,
     };
+    let producer = crate::workspace::DiagnosticProducer::new(
+        crate::workspace::DiagnosticOwner::new("lsp.fake").unwrap(),
+    );
+    app.diagnostics.activate(producer.clone());
     app.diagnostics
-        .replace(
-            crate::workspace::DiagnosticOwner::new("lsp.fake").unwrap(),
-            uri.clone(),
-            None,
-            None,
-            vec![
-                diagnostic(
-                    ByteRange::new(ByteOffset(3), ByteOffset(8)).unwrap(),
-                    DiagnosticSeverity::Error,
-                    "error",
+        .publish(
+            crate::editor::session::diagnostics::DiagnosticBatch {
+                producer,
+                uri: uri.clone(),
+                document: crate::editor::session::diagnostics::DiagnosticDocument::capture(
+                    &app.state, buffer,
                 ),
-                diagnostic(
-                    ByteRange::new(ByteOffset(9), ByteOffset(16)).unwrap(),
-                    DiagnosticSeverity::Warning,
-                    "warning",
-                ),
-            ],
+                validity:
+                    crate::editor::session::diagnostics::DiagnosticValidity::UnversionedReport,
+                items: vec![
+                    diagnostic(
+                        ByteRange::new(ByteOffset(3), ByteOffset(8)).unwrap(),
+                        DiagnosticSeverity::Error,
+                        "error",
+                    ),
+                    diagnostic(
+                        ByteRange::new(ByteOffset(9), ByteOffset(16)).unwrap(),
+                        DiagnosticSeverity::Warning,
+                        "warning",
+                    ),
+                ],
+            },
+            &app.state,
         )
         .unwrap();
     app.sync_ui_diagnostics();
@@ -57,6 +83,50 @@ fn diagnostic_navigation_filters_severity_wraps_and_expands_the_landed_line() {
     app.invoke_mapped_command("diagnostic.next");
     assert_eq!(app.state.views[view].cursor, ByteOffset(9));
     assert_eq!(app.state.views[view].buffer, buffer);
+    app.open_builtin_picker(PickerKind::Diagnostics);
+    let before = app.state.views[view].cursor;
+    let replacement = crate::workspace::DiagnosticProducer::new(
+        crate::workspace::DiagnosticOwner::new("lsp.fake").unwrap(),
+    );
+    app.diagnostics.activate(replacement);
+    app.accept_picker();
+    assert_eq!(
+        app.state.views[view].cursor, before,
+        "old picker key cannot navigate replacement diagnostics"
+    );
+    assert!(app.ui.expanded_diagnostic.is_none());
+
+    // A simulated task source uses the production pre-run capture, not a late name lookup.
+    let configuration = app.configuration.binding_revision();
+    let run = crate::editor::session::tasks::TaskDiagnosticRun::capture(
+        "lint",
+        &app.state,
+        &app.workspace,
+        configuration,
+    )
+    .unwrap();
+    app.diagnostics.activate(run.producer().clone());
+    assert!(run.current(&app.diagnostics, &app.workspace, configuration));
+    assert!(run.document(&path, &app.state).unwrap().is_some());
+    app.state.open_text(
+        TextBuffer::from_text("unrelated"),
+        Some(root.path().join("other")),
+    );
+    assert!(run.document(&path, &app.state).unwrap().is_some());
+    assert!(!run.current(&app.diagnostics, &app.workspace, configuration + 1));
+    let next = crate::editor::session::tasks::TaskDiagnosticRun::capture(
+        "lint",
+        &app.state,
+        &app.workspace,
+        configuration,
+    )
+    .unwrap();
+    app.diagnostics.activate(next.producer().clone());
+    app.diagnostics.clear_source(run.producer());
+    assert!(next.current(&app.diagnostics, &app.workspace, configuration));
+    assert!(!run.current(&app.diagnostics, &app.workspace, configuration));
+    app.state.buffers[buffer].text = TextBuffer::from_text("ok\nerror\nwarning\n");
+    assert!(next.document(&path, &app.state).is_err());
 }
 
 #[test]
@@ -67,11 +137,7 @@ fn explorer_command_prompt_creates_a_file_from_the_selected_directory() {
     app.prompt_insert("new.txt");
     app.submit_prompt();
     assert!(app.ui.prompt.is_none(), "{:?}", app.ui.prompt);
-    assert!(
-        app.pending_vfs
-            .values()
-            .any(|pending| matches!(pending, PendingVfs::ExplorerMutation))
-    );
+    assert!(app.explorer.mutation_pending());
     let deadline = Instant::now() + Duration::from_secs(2);
     while Instant::now() < deadline && !app.state.workspace_root.join("new.txt").exists() {
         app.process_vfs_results();
@@ -92,12 +158,16 @@ fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
     app.state.set_buffer_dirty(buffer, true);
     app.open_explorer();
     let deadline = Instant::now() + Duration::from_secs(2);
-    while Instant::now() < deadline && app.explorer.id_for_path(&source).is_none() {
+    while Instant::now() < deadline && app.explorer.tree().id_for_path(&source).is_none() {
         app.process_explorer_result();
         std::thread::sleep(Duration::from_millis(2));
     }
-    app.explorer
-        .select(app.explorer.id_for_path(&source).expect("source node"));
+    app.explorer.select(
+        app.explorer
+            .tree()
+            .id_for_path(&source)
+            .expect("source node"),
+    );
     app.rename_explorer_path("renamed.txt".into());
     let target = app.state.workspace_root.join("renamed.txt");
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -105,15 +175,69 @@ fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
         app.process_vfs_results();
         std::thread::sleep(Duration::from_millis(2));
     }
-    assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&target));
+    assert_eq!(
+        app.state.buffers[buffer].path.as_ref(),
+        Some(&target),
+        "notice={:?}; roots={:?}; pending={}; disk target={}",
+        app.notices.current(),
+        app.workspace.roots(),
+        app.explorer.mutation_pending(),
+        target.exists()
+    );
     assert!(app.state.buffers[buffer].dirty);
     assert_eq!(
         app.state.buffers[buffer].text.to_string(),
         "kept plus unsaved"
     );
 
-    app.explorer_delete_target = Some(target.clone());
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while app.explorer.tree().id_for_path(&target).is_none() {
+        app.process_explorer_result();
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    app.explorer
+        .select(app.explorer.tree().id_for_path(&target).unwrap());
+    let ready_delete = |app: &mut InteractiveApplication| {
+        app.request_explorer_delete();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while app
+            .input
+            .prompt()
+            .is_none_or(|p| p.kind != crate::ui::PromptKind::ExplorerDelete)
+        {
+            app.process_vfs_results();
+            assert!(Instant::now() < deadline, "delete preflight timed out");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    };
+    ready_delete(&mut app);
+    app.close_prompt();
+    assert!(!app.explorer.mutation_pending());
     app.confirm_explorer_delete("delete".into());
+    assert!(target.exists());
+    ready_delete(&mut app);
+    let original = target.with_extension("original");
+    fs::rename(&target, &original).unwrap();
+    fs::write(&target, "replacement must survive").unwrap();
+    app.prompt_insert("delete");
+    app.submit_prompt();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while app.explorer.mutation_pending() {
+        app.process_vfs_results();
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(
+        fs::read_to_string(&target).unwrap(),
+        "replacement must survive"
+    );
+    assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&target));
+    fs::remove_file(&target).unwrap();
+    fs::rename(&original, &target).unwrap();
+    ready_delete(&mut app);
+    app.prompt_insert("delete");
+    app.submit_prompt();
     let deadline = Instant::now() + Duration::from_secs(2);
     while Instant::now() < deadline && app.state.buffers[buffer].path.is_some() {
         app.process_vfs_results();
@@ -126,14 +250,52 @@ fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
         app.state.buffers[buffer].text.to_string(),
         "kept plus unsaved"
     );
+    let opened = app.state.workspace_root.join("opened.txt");
+    fs::write(&opened, "open through owner").unwrap();
+    app.refresh_explorer();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while app.explorer.tree().id_for_path(&opened).is_none() {
+        app.process_explorer_result();
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    app.explorer
+        .select(app.explorer.tree().id_for_path(&opened).unwrap());
+    app.explorer_open_file(false);
+    app.ui.explorer = None;
+    app.reconcile_explorer_watch();
+    wait_vfs(&mut app);
+    assert!(
+        !app.state
+            .buffers
+            .values()
+            .any(|buffer| buffer.path.as_ref() == Some(&opened)),
+        "closed explorer read resurrected a document"
+    );
+    app.open_explorer();
+    app.explorer
+        .select(app.explorer.tree().id_for_path(&opened).unwrap());
+    let panes = app.state.panes.len();
+    app.explorer_open_file(true);
+    wait_vfs(&mut app);
+    assert_eq!(app.state.panes.len(), panes + 1);
+    let active = app.state.active_buffer_id().unwrap();
+    assert_eq!(app.state.buffers[active].path.as_ref(), Some(&opened));
+    assert_eq!(
+        app.state.buffers[active].text.to_string(),
+        "open through owner"
+    );
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "kept plus unsaved"
+    );
 }
 
 #[test]
 fn workspace_trust_requires_exact_confirmation_cancels_on_focus_loss_and_persists() {
     let mut app = app();
     prepare_trust_identity(&mut app);
-    app.ui.notification = Some("stale notification".into());
-    app.ui.notification_error = true;
+    app.notify_message("stale notification".into(), true);
     app.request_workspace_trust();
     assert!(app.ui.notification.is_none());
     assert!(!app.ui.notification_error);
@@ -149,13 +311,13 @@ fn workspace_trust_requires_exact_confirmation_cancels_on_focus_loss_and_persist
             .as_deref()
             .is_some_and(|help| help.contains("Allows project commands"))
     );
-    app.ui.prompt.as_mut().expect("prompt").input = "wrong".into();
+    app.prompt_insert("wrong");
     app.submit_prompt();
     assert_eq!(
         app.workspace.trust(),
         crate::workspace::WorkspaceTrust::Untrusted
     );
-    assert!(app.search_history.is_empty() && app.command_history.is_empty());
+    assert!(app.input.search_history().is_empty() && app.input.command_history().is_empty());
 
     app.request_workspace_trust();
     app.handle_event(crate::ui::UiEvent::FocusLost);
@@ -166,12 +328,13 @@ fn workspace_trust_requires_exact_confirmation_cancels_on_focus_loss_and_persist
     );
 
     app.request_workspace_trust();
-    app.ui.prompt.as_mut().expect("prompt").input = app
+    let phrase = app
         .configuration
-        .settings
+        .settings()
         .workspace
         .trust_confirmation_phrase
         .clone();
+    app.prompt_insert(&phrase);
     app.submit_prompt();
     assert_eq!(
         app.workspace.trust(),
@@ -182,7 +345,7 @@ fn workspace_trust_requires_exact_confirmation_cancels_on_focus_loss_and_persist
         app.workspace.trust(),
         crate::workspace::WorkspaceTrust::Trusted
     );
-    let source = fs::read_to_string(&app.trust_state_path).expect("persisted trust");
+    let source = fs::read_to_string(app.workspace.state_path()).expect("persisted trust");
     assert!(source.contains("filesystem_identity"));
 
     app.revoke_workspace_trust();
@@ -191,7 +354,7 @@ fn workspace_trust_requires_exact_confirmation_cancels_on_focus_loss_and_persist
         crate::workspace::WorkspaceTrust::Untrusted
     );
     wait_trust(&mut app);
-    let source = fs::read_to_string(&app.trust_state_path).expect("persisted revocation");
+    let source = fs::read_to_string(app.workspace.state_path()).expect("persisted revocation");
     assert!(source.contains("identities = []"));
     assert!(source.contains("[[seen]]"));
 }
@@ -201,18 +364,18 @@ fn unseen_workspace_prompts_once_after_identity_and_database_are_ready() {
     let mut app = app();
     prepare_trust_identity(&mut app);
     let identity = app.workspace.roots()[0].identity.clone();
-    assert!(!app.trust_store.is_seen(&identity));
+    assert!(!app.workspace.seen(&identity));
 
     app.maybe_prompt_for_unseen_workspace();
     assert_eq!(
         app.ui.prompt.as_ref().map(|prompt| prompt.kind),
         Some(crate::ui::PromptKind::WorkspaceTrust)
     );
-    assert!(app.trust_store.is_seen(&identity));
+    assert!(app.workspace.seen(&identity));
     app.close_prompt();
     wait_trust(&mut app);
     assert!(
-        fs::read_to_string(&app.trust_state_path)
+        fs::read_to_string(app.workspace.state_path())
             .expect("seen workspace state")
             .contains("[[seen]]")
     );
@@ -232,7 +395,7 @@ fn automatic_workspace_trust_prompt_never_steals_an_active_prompt_or_safe_mode()
         Some(crate::ui::PromptKind::Command)
     );
     app.close_prompt();
-    app.safe_mode = true;
+    app.workspace.fixture_safe_mode(true);
     app.maybe_prompt_for_unseen_workspace();
     assert!(app.ui.prompt.is_none());
 }
@@ -242,7 +405,7 @@ fn workspace_trust_never_activates_before_identity_and_database_are_ready() {
     let mut app = app();
     app.confirm_workspace_trust(
         app.configuration
-            .settings
+            .settings()
             .workspace
             .trust_confirmation_phrase
             .clone(),
@@ -256,7 +419,7 @@ fn workspace_trust_never_activates_before_identity_and_database_are_ready() {
 
 fn wait_explorer(app: &mut InteractiveApplication) {
     let deadline = Instant::now() + Duration::from_secs(2);
-    while app.explorer_pending.is_some() {
+    while app.explorer.pending() {
         app.process_explorer_result();
         assert!(Instant::now() < deadline, "explorer timed out");
         thread::yield_now();
@@ -271,7 +434,7 @@ fn explorer_lazily_loads_and_opens_scoped_file() {
     app.open_explorer();
     app.explorer_toggle();
     wait_explorer(&mut app);
-    assert_eq!(app.explorer.visible().len(), 2);
+    assert_eq!(app.explorer.tree().visible().len(), 2);
     let explorer_ui = app.ui.explorer.as_ref().expect("dedicated explorer ui");
     assert_eq!(explorer_ui.rows.len(), 1, "single root remains hidden");
     assert!(explorer_ui.rows[0].node_id > 0);
@@ -282,31 +445,79 @@ fn explorer_lazily_loads_and_opens_scoped_file() {
             .iter()
             .any(|segment| segment.role == crate::ui::ExplorerSegmentRole::File)
     );
-    app.configuration.settings.ui.explorer.icon_mode = crate::config::ExplorerIconMode::Ascii;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.ui.explorer.icon_mode = crate::config::ExplorerIconMode::Ascii;
+        app.configuration.install_fixture(fixture);
+    }
     app.sync_explorer_ui();
     assert!(app.ui.explorer.as_ref().is_some_and(|ui| {
         ui.rows[0].segments.iter().any(|segment| {
             segment.role == crate::ui::ExplorerSegmentRole::Icon && segment.text == "."
         })
     }));
-    app.configuration.settings.ui.explorer.icon_mode = crate::config::ExplorerIconMode::Unicode;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.ui.explorer.icon_mode = crate::config::ExplorerIconMode::Unicode;
+        app.configuration.install_fixture(fixture);
+    }
     app.sync_explorer_ui();
     assert!(app.ui.explorer.as_ref().is_some_and(|ui| {
         ui.rows[0].segments.iter().any(|segment| {
             segment.role == crate::ui::ExplorerSegmentRole::Icon && segment.text == "·"
         })
     }));
-    app.explorer.move_selection(1);
+    app.explorer.navigate(1);
+    app.reconcile_editor_windows();
     app.explorer_open_file(false);
     assert!(app.ui.explorer.is_some());
     assert!(!app.ui.explorer_focused);
+    // A normal redraw can reconcile the graph before asynchronous I/O finishes.
+    app.reconcile_editor_windows();
     wait_vfs(&mut app);
     let buffer = app.state.active_buffer_id().expect("opened");
     assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
+    assert_eq!(app.active_input_context(), "editor.normal");
+    let tab = app.state.active_tab;
+    let view = app.state.active_view;
+
+    // Reopening an existing file switches back to its tab/view, without
+    // duplicating the buffer or replacing its in-memory contents from disk.
+    app.state.new_tab().unwrap();
+    app.process_effect(AppEffect::NewBuffer);
+    fs::write(&path, "different disk contents").unwrap();
+    let buffers = app.state.buffers.len();
+    app.open_explorer();
+    app.explorer
+        .select(app.explorer.tree().id_for_path(&path).unwrap());
+    app.reconcile_editor_windows();
+    app.explorer_open_file(false);
+    app.reconcile_editor_windows();
+    wait_vfs(&mut app);
+    assert_eq!(app.state.active_buffer_id(), Some(buffer));
+    assert_eq!(app.state.active_tab, tab);
+    assert_eq!(app.state.active_view, view);
+    assert_eq!(app.state.buffers.len(), buffers);
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "explorer content\n"
+    );
+    assert_eq!(app.active_input_context(), "editor.normal");
+
     app.open_explorer();
     app.explorer_open_file(true);
+    app.reconcile_editor_windows();
     wait_vfs(&mut app);
     assert_eq!(app.state.active_tab_views().len(), 2);
+
+    // Genuine navigation while the read is outstanding still wins.
+    app.open_explorer();
+    app.explorer_open_file(false);
+    app.process_effect(AppEffect::NewBuffer);
+    let newer = app.state.active_buffer_id();
+    app.reconcile_editor_windows();
+    wait_vfs(&mut app);
+    assert_eq!(app.state.active_buffer_id(), newer);
 }
 
 #[test]
@@ -349,14 +560,14 @@ fn explorer_follow_lazily_expands_to_active_file() {
     fs::write(&path, "follow").unwrap();
     app.state
         .open_text(TextBuffer::from_text("follow"), Some(path.clone()));
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
     app.follow_active_file_in_explorer();
     wait_explorer(&mut app);
     assert_eq!(
-        app.explorer.selected_node().map(|node| &node.path),
+        app.explorer.tree().selected_node().map(|node| &node.path),
         Some(&path)
     );
-    assert!(app.explorer_follow_path.is_none());
+    assert!(!app.explorer.following());
     assert!(
         app.ui
             .explorer
@@ -375,14 +586,14 @@ fn explorer_watch_batches_reload_through_directory_service_and_preserve_identity
     fs::write(app.state.workspace_root.join("root.txt"), "x").unwrap();
     app.open_explorer();
     wait_explorer(&mut app);
-    let directory_id = app.explorer.id_for_path(&directory).unwrap();
+    let directory_id = app.explorer.tree().id_for_path(&directory).unwrap();
     app.explorer.select(directory_id);
     app.explorer_toggle();
     wait_explorer(&mut app);
-    let kept_id = app.explorer.id_for_path(&kept).unwrap();
+    let kept_id = app.explorer.tree().id_for_path(&kept).unwrap();
     app.explorer.select(kept_id);
     app.sync_explorer_ui();
-    let generation = app.explorer_watch_generation.unwrap();
+    let generation = app.explorer.watch_generation().unwrap();
     let root = app.state.workspace_root.clone();
     let stale = ExplorerWatchBatch {
         generation: ExplorerWatchGeneration(generation.0.saturating_sub(1)),
@@ -390,7 +601,7 @@ fn explorer_watch_batches_reload_through_directory_service_and_preserve_identity
         directories: vec![root.clone()],
     };
     app.accept_explorer_watch_batch(stale);
-    assert!(app.explorer_watch_reload_queue.is_empty());
+    assert!(app.explorer.watch_queue_empty());
     let added = root.join("added.txt");
     fs::write(&added, "x").unwrap();
     let hidden = root.join(".hidden");
@@ -405,18 +616,22 @@ fn explorer_watch_batches_reload_through_directory_service_and_preserve_identity
     });
     app.start_next_explorer_watch_reload();
     wait_explorer(&mut app);
-    assert!(app.explorer.id_for_path(&added).is_some());
-    assert!(app.explorer.id_for_path(&hidden).is_none());
-    assert!(app.explorer.id_for_path(&ignored).is_none());
-    assert_eq!(app.explorer.id_for_path(&directory), Some(directory_id));
+    assert!(app.explorer.tree().id_for_path(&added).is_some());
+    assert!(app.explorer.tree().id_for_path(&hidden).is_none());
+    assert!(app.explorer.tree().id_for_path(&ignored).is_none());
+    assert_eq!(
+        app.explorer.tree().id_for_path(&directory),
+        Some(directory_id)
+    );
     assert!(
         app.explorer
+            .tree()
             .node(directory_id)
             .is_some_and(|node| node.expanded)
     );
-    assert_eq!(app.explorer.id_for_path(&kept), Some(kept_id));
+    assert_eq!(app.explorer.tree().id_for_path(&kept), Some(kept_id));
     fs::remove_file(&kept).unwrap();
-    let generation = app.explorer_watch_generation.unwrap();
+    let generation = app.explorer.watch_generation().unwrap();
     app.accept_explorer_watch_batch(ExplorerWatchBatch {
         generation,
         root_revision: app.workspace.root_revision(),
@@ -424,29 +639,34 @@ fn explorer_watch_batches_reload_through_directory_service_and_preserve_identity
     });
     app.start_next_explorer_watch_reload();
     wait_explorer(&mut app);
-    assert!(app.explorer.id_for_path(&kept).is_none());
-    assert_eq!(app.explorer.selected_id(), Some(directory_id));
-    let reconciles = app.explorer_watch.reconcile_count();
+    assert!(app.explorer.tree().id_for_path(&kept).is_none());
+    assert_eq!(app.explorer.tree().selected_id(), Some(directory_id));
+    let reconciles = app.explorer.watch_reconciles();
     let pending = app.pending_vfs.len();
     for _ in 0..256 {
         app.reconcile_editor_windows();
         let _ = render(
             &app.state,
             &app.ui,
-            &app.configuration.settings,
-            &app.configuration.dashboard,
+            app.configuration.settings(),
+            app.configuration.dashboard(),
             app.terminal_width,
             app.terminal_height,
         );
     }
-    assert_eq!(app.explorer_watch.reconcile_count(), reconciles);
+    assert_eq!(app.explorer.watch_reconciles(), reconciles);
     assert_eq!(app.pending_vfs.len(), pending);
     app.explorer.select(directory_id);
     app.explorer.toggle_loaded(directory_id);
     app.sync_explorer_ui();
-    assert!(!app.explorer.watched_directories().contains(&directory));
+    assert!(
+        !app.explorer
+            .tree()
+            .watched_directories()
+            .contains(&directory)
+    );
     app.process_effect(AppEffect::ExplorerClose);
-    assert!(app.explorer_watch_generation.is_none());
+    assert!(app.explorer.watch_generation().is_none());
 }
 
 #[test]
@@ -467,25 +687,34 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
     assert_eq!(explorer.rows.len(), 6);
     assert!(explorer.rows.len() < explorer.total);
     assert_eq!(explorer.rows.iter().filter(|row| row.selected).count(), 1);
-    let first_child = app.explorer.selected_id().expect("first child");
-    let projection_generation = app.explorer.projection_generation();
+    let first_child = app.explorer.tree().selected_id().expect("first child");
+    let projection_generation = app.explorer.tree().projection_generation();
 
     app.move_explorer_selection(-1);
-    assert_eq!(app.explorer.selected_id(), Some(first_child));
+    assert_eq!(app.explorer.tree().selected_id(), Some(first_child));
     app.explorer_collapse_or_parent();
-    assert_eq!(app.explorer.selected_id(), Some(first_child));
-    assert_eq!(app.explorer.projection_generation(), projection_generation);
+    assert_eq!(app.explorer.tree().selected_id(), Some(first_child));
+    assert_eq!(
+        app.explorer.tree().projection_generation(),
+        projection_generation
+    );
 
     app.handle_event(crate::ui::UiEvent::Resize(80, 20));
     let explorer = app.ui.explorer.as_ref().expect("grown projection");
     assert_eq!(explorer.rows.len(), 16);
     assert_eq!(explorer.rows.iter().filter(|row| row.selected).count(), 1);
-    assert_eq!(app.explorer.projection_generation(), projection_generation);
+    assert_eq!(
+        app.explorer.tree().projection_generation(),
+        projection_generation
+    );
     app.handle_event(crate::ui::UiEvent::Resize(80, 8));
     let explorer = app.ui.explorer.as_ref().expect("shrunk projection");
     assert_eq!(explorer.rows.len(), 4);
     assert_eq!(explorer.rows.iter().filter(|row| row.selected).count(), 1);
-    assert_eq!(app.explorer.projection_generation(), projection_generation);
+    assert_eq!(
+        app.explorer.tree().projection_generation(),
+        projection_generation
+    );
 
     app.move_explorer_selection(30);
     let explorer = app.ui.explorer.as_ref().expect("scrolled projection");
@@ -494,18 +723,21 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
     assert!(explorer.rows.iter().any(|row| row.selected));
     let before_page = app
         .explorer
-        .visible_index(app.explorer.selected_id().unwrap())
+        .tree()
+        .visible_index(app.explorer.tree().selected_id().unwrap())
         .unwrap();
     app.page_explorer_selection(-1);
     let after_page = app
         .explorer
-        .visible_index(app.explorer.selected_id().unwrap())
+        .tree()
+        .visible_index(app.explorer.tree().selected_id().unwrap())
         .unwrap();
     assert!(after_page < before_page);
     app.page_explorer_selection(1);
     assert!(
         app.explorer
-            .visible_index(app.explorer.selected_id().unwrap())
+            .tree()
+            .visible_index(app.explorer.tree().selected_id().unwrap())
             .unwrap()
             > after_page
     );
@@ -516,7 +748,8 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
     );
     let before_wheel = app
         .explorer
-        .visible_index(app.explorer.selected_id().unwrap())
+        .tree()
+        .visible_index(app.explorer.tree().selected_id().unwrap())
         .unwrap();
     app.handle_event(UiEvent::Mouse {
         key: wheel,
@@ -525,26 +758,30 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
     });
     assert!(
         app.explorer
-            .visible_index(app.explorer.selected_id().unwrap())
+            .tree()
+            .visible_index(app.explorer.tree().selected_id().unwrap())
             .unwrap()
             < before_wheel
     );
     app.move_explorer_selection(isize::MIN);
-    let top = app.explorer.selected_id();
+    let top = app.explorer.tree().selected_id();
     app.page_explorer_selection(-1);
-    assert_eq!(app.explorer.selected_id(), top);
+    assert_eq!(app.explorer.tree().selected_id(), top);
     app.move_explorer_selection(isize::MAX);
-    let bottom = app.explorer.selected_id();
+    let bottom = app.explorer.tree().selected_id();
     app.page_explorer_selection(1);
-    assert_eq!(app.explorer.selected_id(), bottom);
+    assert_eq!(app.explorer.tree().selected_id(), bottom);
     let first_viewport_node = app.ui.explorer.as_ref().unwrap().rows[0].node_id;
-    app.mouse_position = Some((1, 3));
+    app.input.observe_mouse(1, 3);
     app.explorer_mouse_select();
     assert_eq!(
-        app.explorer.selected_id(),
+        app.explorer.tree().selected_id(),
         Some(crate::workspace::ExplorerNodeId(first_viewport_node))
     );
-    assert_eq!(app.explorer.projection_generation(), projection_generation);
+    assert_eq!(
+        app.explorer.tree().projection_generation(),
+        projection_generation
+    );
 
     let projected_before_rejection = app.ui.explorer.clone();
     let mut invalid = crate::config::load_bundled_config();
@@ -558,7 +795,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
     assert!(app.apply_configuration_candidate(invalid, false).is_err());
     assert_eq!(app.ui.explorer, projected_before_rejection);
     assert_eq!(
-        app.configuration.settings.ui.explorer.icon_mode,
+        app.configuration.settings().ui.explorer.icon_mode,
         crate::config::ExplorerIconMode::NerdFont
     );
 
@@ -575,7 +812,10 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
             segment.role == crate::ui::ExplorerSegmentRole::Icon && segment.text == "."
         })
     }));
-    assert_eq!(app.explorer.projection_generation(), projection_generation);
+    assert_eq!(
+        app.explorer.tree().projection_generation(),
+        projection_generation
+    );
 }
 
 #[test]
@@ -583,7 +823,7 @@ fn directional_focus_moves_spatially_then_crosses_the_explorer_boundary() {
     let mut app = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("focus"), None);
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
     app.apply_layout_action(crate::editor::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
     ));
@@ -616,7 +856,7 @@ fn directional_focus_moves_spatially_then_crosses_the_explorer_boundary() {
 
 fn wait_root_operation(app: &mut InteractiveApplication) {
     let deadline = Instant::now() + Duration::from_secs(2);
-    while app.pending_root_operation.is_some() {
+    while app.workspace.root_operation_pending() {
         app.process_trust_events();
         assert!(Instant::now() < deadline, "root operation timed out");
         thread::yield_now();
@@ -664,7 +904,7 @@ fn stale_async_root_add_and_pending_service_removal_are_rejected() {
     let third = tempdir().expect("third");
     app.add_workspace_root(second.path().to_path_buf());
     app.workspace
-        .add_root(
+        .fixture_add_root(
             "third".into(),
             crate::workspace::RootIdentity::capture(third.path()).expect("identity"),
         )
@@ -676,7 +916,7 @@ fn stale_async_root_add_and_pending_service_removal_are_rejected() {
         "stale async add did not commit"
     );
     let third_id = app.workspace.active_root().expect("third active");
-    app.workspace_search_generation = Some(99);
+    app.start_workspace_search("needle".into(), None);
     app.remove_workspace_root(third_id);
     assert_eq!(app.workspace.roots().len(), 2);
     assert!(app.ui.notification_error);
@@ -694,22 +934,56 @@ pub(super) fn wait_execution_validation(app: &mut InteractiveApplication) {
 #[cfg(unix)]
 #[test]
 fn same_session_root_replacement_cancels_all_protected_action_kinds() {
-    let actions = [
-        super::DeferredExecution::InstallTool {
-            id: "missing".into(),
-            source: None,
-        },
-        super::DeferredExecution::StartLsp(Some("missing".into())),
-        super::DeferredExecution::StartDap {
-            requested: Some("missing".into()),
-            program: None,
-        },
-    ];
-    for action in actions {
+    for kind in 0..3 {
         let mut app = app();
+        let action = match kind {
+            0 => super::DeferredExecution::InstallTool {
+                id: "missing".into(),
+                source: None,
+            },
+            1 => super::DeferredExecution::StartLsp(Some("missing".into())),
+            _ => {
+                let mut policy = crate::config::DebugConfig::default();
+                policy.adapters.insert(
+                    "owned".into(),
+                    crate::config::DebugAdapterConfig {
+                        program: "/bin/sh".into(),
+                        arguments: vec![],
+                        environment: Default::default(),
+                    },
+                );
+                policy.sessions.insert(
+                    "owned".into(),
+                    crate::config::DebugSessionConfig {
+                        adapter: "owned".into(),
+                        request: crate::config::DebugRequestKind::Attach,
+                        cwd: None,
+                        program: None,
+                        run_in_terminal_profile: None,
+                        arguments: Default::default(),
+                        path_maps: Default::default(),
+                    },
+                );
+                let intent = app
+                    .debugger_session
+                    .request_debug(
+                        Some("owned"),
+                        None,
+                        None,
+                        None,
+                        &policy,
+                        &app.configuration.settings().terminals,
+                        app.configuration.binding_revision(),
+                        &app.workspace,
+                        &app.tools,
+                    )
+                    .unwrap();
+                super::DeferredExecution::StartDebug(intent)
+            }
+        };
         prepare_trust_identity(&mut app);
-        for root in app.workspace.roots() {
-            app.trust_store.trust(root.identity.clone());
+        for root in app.workspace.roots().to_vec() {
+            app.workspace.fixture_trust_identity(root.identity.clone());
         }
         app.reconcile_workspace_trust();
         assert_eq!(
@@ -735,8 +1009,8 @@ fn same_session_root_replacement_cancels_all_protected_action_kinds() {
 fn protected_action_resumes_once_after_successful_identity_revalidation() {
     let mut app = app();
     prepare_trust_identity(&mut app);
-    for root in app.workspace.roots() {
-        app.trust_store.trust(root.identity.clone());
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone());
     }
     app.reconcile_workspace_trust();
     app.defer_trusted_execution(super::DeferredExecution::InstallTool {
@@ -753,13 +1027,13 @@ fn protected_action_resumes_once_after_successful_identity_revalidation() {
         app.workspace.trust(),
         crate::workspace::WorkspaceTrust::Trusted
     );
-    assert!(app.execution_validation_generations.is_empty());
+    assert!(!app.workspace.validation_pending());
     assert!(app.execution_validation.is_none());
 }
 
 fn wait_workspace_search(app: &mut InteractiveApplication) {
     let deadline = Instant::now() + Duration::from_secs(5);
-    while app.workspace_search_generation.is_some() || app.pending_workspace_proposal.is_some() {
+    while app.search.pending() || app.workspace_edits.preparing() {
         app.process_workspace_search_events();
         app.process_vfs_results();
         assert!(Instant::now() < deadline, "workspace search timed out");
@@ -776,7 +1050,7 @@ fn explorer_auto_git_status_is_silent_outside_a_repository() {
         crate::editor::text::TextBuffer::from_text("plain\n"),
         Some(path),
     );
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
     app.open_explorer();
     let deadline = Instant::now() + Duration::from_secs(3);
     while app.git_status_generation.is_some() {
@@ -812,7 +1086,7 @@ fn active_tracked_buffer_starts_git_status_and_updates_unsaved_signs_without_exp
         crate::editor::text::TextBuffer::from_text("one\ntwo\nthree\n"),
         Some(path),
     );
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
 
     app.reconcile_git_signs();
     assert!(app.git_status_generation.is_some());
@@ -935,8 +1209,8 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
     let frame = crate::ui::render(
         &app.state,
         &app.ui,
-        &app.configuration.settings,
-        &app.configuration.dashboard,
+        app.configuration.settings(),
+        app.configuration.dashboard(),
         100,
         30,
     );
@@ -964,8 +1238,8 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
         let _ = crate::ui::render(
             &app.state,
             &app.ui,
-            &app.configuration.settings,
-            &app.configuration.dashboard,
+            app.configuration.settings(),
+            app.configuration.dashboard(),
             100,
             30,
         );
@@ -997,7 +1271,7 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
     assert!(app.git_mutation_generation.is_none());
     assert!(app.ui.notification_error);
 
-    app.ui.explorer_focused = false;
+    app.set_explorer_focus(false);
     app.handle_configured_key(KeyEvent::character('d'));
     app.handle_configured_key(KeyEvent::character('d'));
     let active = app.state.active_buffer_id().unwrap();
@@ -1021,8 +1295,8 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
     let dirty_frame = crate::ui::render(
         &app.state,
         &app.ui,
-        &app.configuration.settings,
-        &app.configuration.dashboard,
+        app.configuration.settings(),
+        app.configuration.dashboard(),
         100,
         30,
     );
@@ -1062,8 +1336,8 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
         .replace("line 18\n", "changed 18\n");
     fs::write(&path, &changed).unwrap();
     prepare_trust_identity(&mut app);
-    for root in app.workspace.roots() {
-        app.trust_store.trust(root.identity.clone())
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone())
     }
     app.reconcile_workspace_trust();
     assert_eq!(
@@ -1194,7 +1468,7 @@ fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
     assert!(fs::metadata(&path).unwrap().len() > 120 * 1024);
     app.start_workspace_file_picker();
     let deadline = Instant::now() + Duration::from_secs(3);
-    while app.workspace_file_generation.is_some() {
+    while app.search.files_pending() {
         app.process_workspace_file_events();
         assert!(Instant::now() < deadline);
         thread::yield_now();
@@ -1210,7 +1484,7 @@ fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
     app.picker_insert("find-me");
     for _ in 0..256 {
         app.sync_picker_ui();
-        assert_eq!(app.workspace_files.generation(), 1)
+        assert_eq!(app.search.file_requests(), 1)
     }
     app.accept_picker();
     wait_vfs(&mut app);
@@ -1247,7 +1521,7 @@ fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
     );
     app.picker_insert("needle");
     wait_workspace_search(&mut app);
-    assert_eq!(app.workspace_search_matches.len(), 1);
+    assert_eq!(app.search.matches().len(), 1);
     assert_eq!(
         app.ui.picker.as_ref().map(|picker| picker.title.as_str()),
         Some("Grep")
@@ -1272,13 +1546,17 @@ fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
 #[test]
 fn workspace_search_streams_exact_batches_and_root_changes_cancel() {
     let mut app = app();
-    app.configuration.settings.workspace.search.batch_size = 1;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.workspace.search.batch_size = 1;
+        app.configuration.install_fixture(fixture);
+    }
     fs::write(app.state.workspace_root.join("one.txt"), "needle\n").unwrap();
     fs::write(app.state.workspace_root.join("two.txt"), "needle\n").unwrap();
     app.start_workspace_search("needle".into(), None);
     wait_workspace_search(&mut app);
-    assert_eq!(app.workspace_search_sequence, 2);
-    let broker = app.workspace_search_workflow.as_ref().unwrap();
+    assert_eq!(app.search.sequence(), 2);
+    let broker = app.search.workflow().unwrap();
     let snapshot = broker.snapshot_if_changed(0).unwrap();
     assert!(snapshot.complete);
     assert_eq!(snapshot.items.len(), 2);
@@ -1289,15 +1567,15 @@ fn workspace_search_streams_exact_batches_and_root_changes_cancel() {
     app.start_workspace_search("needle".into(), None);
     let extra = tempdir().unwrap();
     app.workspace
-        .add_root(
+        .fixture_add_root(
             "extra".into(),
             crate::workspace::RootIdentity::capture(extra.path()).unwrap(),
         )
         .unwrap();
     app.process_workspace_search_events();
-    assert!(app.workspace_search_generation.is_none());
-    assert!(app.workspace_search_workflow.is_none());
-    assert!(app.workspace_search_matches.is_empty());
+    assert!(!app.search.pending());
+    assert!(app.search.workflow().is_none());
+    assert!(app.search.matches().is_empty());
 }
 
 #[test]
@@ -1309,7 +1587,7 @@ fn workspace_replacement_previews_without_disk_mutation_and_checked_save_rejects
     fs::write(&second, "two needle\n").expect("second");
     app.start_workspace_search("needle".into(), Some("changed".into()));
     wait_workspace_search(&mut app);
-    let proposal = app.workspace_proposal.as_ref().expect("preview");
+    let proposal = app.workspace_edits.proposal().expect("preview");
     assert_eq!(proposal.files.len(), 2);
     assert_eq!(
         fs::read_to_string(&first).expect("unchanged"),
@@ -1364,7 +1642,7 @@ fn workspace_replacement_rejects_open_buffer_that_differs_from_search_snapshot()
     app.state.buffers[buffer].dirty = true;
     app.start_workspace_search("needle".into(), Some("changed".into()));
     wait_workspace_search(&mut app);
-    assert!(app.workspace_proposal.is_none());
+    assert!(app.workspace_edits.proposal().is_none());
     assert_eq!(
         app.state.buffers[buffer].text.to_string(),
         "prefix needle\n"
@@ -1378,7 +1656,7 @@ fn save_as_reload_close_and_external_change_protection_work() {
     let root = app.state.workspace_root.clone();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abc"), None);
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
     app.start_save(false, Some(PathBuf::from("new.txt")), false);
     wait_vfs(&mut app);
     let path = root.join("new.txt");
@@ -1435,8 +1713,12 @@ fn invalid_configured_regex_keeps_search_prompt_input() {
     let mut app = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abc"), None);
-    app.ui.dashboard = false;
-    app.configuration.settings.search.regex = true;
+    app.set_dashboard_visibility(false);
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.search.regex = true;
+        app.configuration.install_fixture(fixture);
+    }
     app.open_prompt(crate::ui::PromptKind::SearchForward, "[".into());
     app.submit_prompt();
     let prompt = app.ui.prompt.expect("invalid regex prompt remains open");
@@ -1451,7 +1733,7 @@ fn search_moves_forward_wraps_and_repeats() {
         crate::editor::text::TextBuffer::from_text("one two one"),
         None,
     );
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
     app.ui.search_query = Some("one".into());
     app.perform_search(true);
     assert_eq!(
@@ -1467,5 +1749,229 @@ fn search_moves_forward_wraps_and_repeats() {
     assert_eq!(
         app.state.views[view].cursor,
         crate::editor::text::ByteOffset(8)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn task_formatter_uses_authorized_worker_and_refuses_reloaded_snapshot() {
+    let root = tempdir().unwrap();
+    let state_dir = tempdir().unwrap();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.tasks.insert(
+        "owned-dependency".into(),
+        crate::config::TaskConfig {
+            kind: crate::config::TaskKind::Task,
+            executable: PathBuf::from("/bin/sh"),
+            arguments: vec![
+                "-c".into(),
+                "printf dependency-output; printf ok >> dependency-runs".into(),
+            ],
+            cwd: None,
+            environment: BTreeMap::new(),
+            dependencies: vec![],
+            timeout_ms: Some(2000),
+            stdin: false,
+            matcher: None,
+        },
+    );
+    loaded.config.tasks.insert(
+        "owned-format".into(),
+        crate::config::TaskConfig {
+            kind: crate::config::TaskKind::Formatter,
+            executable: PathBuf::from("/bin/sh"),
+            arguments: vec![
+                "-c".into(),
+                "IFS= read -r input || :; printf ready > ready; while [ ! -f go ]; do :; done; if [ -f invalid ]; then printf '\\377'; else printf XYZ; fi".into(),
+            ],
+            cwd: None,
+            environment: BTreeMap::new(),
+            dependencies: vec!["owned-dependency".into()],
+            timeout_ms: Some(2000),
+            stdin: true,
+            matcher: None,
+        },
+    );
+    let mut app = InteractiveApplication::new(
+        StartupTarget::Dashboard {
+            root: root.path().into(),
+        },
+        loaded,
+        false,
+        state_dir.path().into(),
+        false,
+        false,
+        std::sync::Arc::new(crate::clock::SystemClock),
+    )
+    .unwrap();
+    app.terminal_width = 80;
+    app.terminal_height = 24;
+    let path = root.path().join("source.txt");
+    fs::write(&path, "abc").unwrap();
+    let (buffer, _) = app
+        .state
+        .open_text(TextBuffer::from_text("abc"), Some(path.clone()));
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone());
+    }
+    app.reconcile_workspace_trust();
+    for stale in [true, false] {
+        if stale {
+            fs::write(root.path().join("invalid"), "").unwrap();
+        }
+        app.process_effect(AppEffect::FormatRun("owned-format".into()));
+        wait_execution_validation(&mut app);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !root.path().join("ready").exists() && Instant::now() < deadline {
+            app.process_execution_preflight();
+            app.process_job_events();
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(
+            root.path().join("ready").exists(),
+            "{:?}",
+            app.ui.notification
+        );
+        if stale {
+            app.state.buffers[buffer].text = TextBuffer::from_text("abc");
+        }
+        fs::write(root.path().join("go"), "").unwrap();
+        while app.tasks.running_count() != 0 && Instant::now() < deadline {
+            app.process_job_events();
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(app.tasks.running_count(), 0);
+        assert_eq!(
+            app.state.buffers[buffer].text.to_string(),
+            if stale { "abc" } else { "XYZ" },
+            "notification: {:?}; history: {:?}",
+            app.ui.notification,
+            app.notices.history().collect::<Vec<_>>()
+        );
+        if stale {
+            assert!(
+                app.ui
+                    .notification
+                    .as_ref()
+                    .is_some_and(|message| message.contains("formatter document incarnation")),
+                "{:?}",
+                app.ui.notification
+            );
+            fs::remove_file(root.path().join("invalid")).unwrap();
+        }
+        fs::remove_file(root.path().join("ready")).unwrap();
+        fs::remove_file(root.path().join("go")).unwrap();
+    }
+    assert_eq!(fs::read_to_string(path).unwrap(), "abc");
+    assert_eq!(
+        fs::read_to_string(root.path().join("dependency-runs")).unwrap(),
+        "okok"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn linter_job_and_vfs_publish_only_original_source_then_recover() {
+    let root = tempdir().unwrap();
+    let state_dir = tempdir().unwrap();
+    fs::write(root.path().join("open.txt"), "abc\n").unwrap();
+    fs::write(root.path().join("disk.txt"), "abc\n").unwrap();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.tasks.insert(
+        "owned-lint".into(),
+        crate::config::TaskConfig {
+            kind: crate::config::TaskKind::Linter,
+            executable: "/bin/sh".into(),
+            arguments: vec![
+                "-c".into(),
+                "printf 'open.txt:1:1:open message\ndisk.txt:1:1:disk message\n'".into(),
+            ],
+            cwd: None,
+            environment: BTreeMap::new(),
+            dependencies: vec![],
+            timeout_ms: Some(2000),
+            stdin: false,
+            matcher: Some(crate::config::ProblemMatcherConfig {
+                pattern: r"(?m)^(?P<path>[^:]+):(?P<line>\d+):(?P<column>\d+):(?P<message>[^\n]+)$"
+                    .into(),
+                path_group: "path".into(),
+                line_group: "line".into(),
+                column_group: Some("column".into()),
+                severity_group: None,
+                message_group: "message".into(),
+                name_group: None,
+                status_group: None,
+                duration_group: None,
+            }),
+        },
+    );
+    let mut app = InteractiveApplication::new(
+        StartupTarget::Dashboard {
+            root: root.path().into(),
+        },
+        loaded,
+        false,
+        state_dir.path().into(),
+        false,
+        false,
+        std::sync::Arc::new(crate::clock::SystemClock),
+    )
+    .unwrap();
+    app.terminal_width = 80;
+    app.terminal_height = 24;
+    let (buffer, _) = app.state.open_text(
+        TextBuffer::from_text("abc\n"),
+        Some(root.path().join("open.txt")),
+    );
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone());
+    }
+    app.reconcile_workspace_trust();
+    for stale in [true, false] {
+        app.process_effect(AppEffect::LintRun("owned-lint".into()));
+        wait_execution_validation(&mut app);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while app.tasks.linter_count() == 0 && Instant::now() < deadline {
+            app.process_execution_preflight();
+            app.process_job_events();
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(
+            app.tasks.linter_count(),
+            1,
+            "{:?}",
+            app.notices.history().collect::<Vec<_>>()
+        );
+        if stale {
+            app.state.buffers[buffer].text = TextBuffer::from_text("abc\n");
+        }
+        let before = TextBuffer::test_materializations();
+        while app.tasks.linter_count() != 0 && Instant::now() < deadline {
+            app.process_vfs_results();
+            app.process_job_events();
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(app.tasks.linter_count(), 0);
+        assert_eq!(
+            app.diagnostics.choices().count(),
+            if stale { 0 } else { 2 },
+            "{:?}",
+            app.notices.history().collect::<Vec<_>>()
+        );
+        if stale {
+            assert_eq!(TextBuffer::test_materializations(), before);
+        }
+    }
+    assert!(app.diagnostics.choices().all(|(_, _, validity)| validity
+        == crate::editor::session::diagnostics::DiagnosticValidity::DiskReport));
+    assert_eq!(
+        fs::read_to_string(root.path().join("open.txt")).unwrap(),
+        "abc\n"
     );
 }

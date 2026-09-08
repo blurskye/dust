@@ -2,22 +2,11 @@ use super::*;
 
 impl InteractiveApplication {
     pub(in crate::editor::session) fn rebuild_matcher_cache(&mut self) {
-        self.matcher_cache = self
-            .configuration
-            .settings
-            .tasks
-            .iter()
-            .filter_map(|(name, task)| {
-                task.matcher
-                    .as_ref()
-                    .and_then(|matcher| regex::Regex::new(&matcher.pattern).ok())
-                    .map(|regex| (name.clone(), regex))
-            })
-            .collect();
+        self.tasks.configure(self.configuration.settings());
     }
 
     pub(in crate::editor::session) fn plugin_limits(&self) -> PluginLimits {
-        let policy = &self.configuration.settings.plugins;
+        let policy = &self.configuration.settings().plugins;
         PluginLimits {
             maximum_component_bytes: policy.maximum_component_bytes,
             maximum_commands: policy.maximum_commands,
@@ -30,11 +19,11 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn load_configured_plugins(&mut self) {
-        if self.safe_mode {
+        if self.workspace.safe_mode() {
             self.show_error(self.message("safe_mode_blocked", &[]));
             return;
         }
-        let policy = self.configuration.settings.plugins.clone();
+        let policy = self.configuration.settings().plugins.clone();
         let store = if policy.store.is_absolute() {
             policy.store
         } else {
@@ -110,15 +99,13 @@ impl InteractiveApplication {
         self.plugin_contributions = PluginContributionCatalog::default();
         self.plugin_host_events = PluginHostEventQueue::default();
         self.plugin_host_event_observation = None;
-        if let Ok(compiled) = compile_keymaps_with_plugin_catalog(
+        if let Ok(candidate) = self.configuration.prepare_base_bindings(
             &self.commands,
-            &self.configuration.base_keymaps,
             &self.plugin_contributions,
-            &self.configuration.settings.input.keymaps,
-        ) {
-            self.cancel_pending_mapping();
-            self.configuration.keymaps = compiled;
-            self.configuration.deferred_plugin_keymaps = true;
+            true,
+        ) && let Err(error) = self.commit_contribution_candidate(candidate)
+        {
+            self.show_error(error);
         }
         for (plugin, (_, token)) in self.package_prepared.drain() {
             self.commands.unregister_plugin(&plugin);
@@ -138,7 +125,7 @@ impl InteractiveApplication {
         for (plugin, _) in self.package_commits.values() {
             self.commands.unregister_plugin(plugin);
         }
-        self.logs.record(
+        self.notices.record(
             LogLevel::Error,
             "plugins",
             "worker-stopped",
@@ -217,91 +204,41 @@ impl InteractiveApplication {
         Ok(())
     }
 
-    pub(in crate::editor::session) fn resolve_plugin_window_rules(
-        &self,
-    ) -> Result<crate::config::WindowsConfig, String> {
-        for rule in &self.configuration.raw_windows.rules {
-            let Some(owner) = plugin_owner_from_id(&rule.content_type) else {
-                continue;
-            };
-            if !self.configuration.expected_plugin_indexes.contains(owner) {
-                return Err(format!(
-                    "plugin window selector `{}` does not name an enabled plugin",
-                    rule.content_type
-                ));
-            }
-            let index = self.plugin_contributions.get(owner).ok_or_else(|| {
-                format!(
-                    "plugin window selector `{}` is not indexed",
-                    rule.content_type
-                )
-            })?;
-            let declaration = index
-                .content_types
-                .iter()
-                .find(|content| content.id == rule.content_type)
-                .ok_or_else(|| {
-                    format!(
-                        "plugin window selector `{}` was not statically declared",
-                        rule.content_type
-                    )
-                })?;
-            let requested = match &rule.placement {
-                crate::config::WindowPlacementConfig::Automatic => None,
-                crate::config::WindowPlacementConfig::Docked { .. } => {
-                    Some(crate::extensions::PluginWindowPlacementKind::Docked)
-                }
-                crate::config::WindowPlacementConfig::Floating { .. } => {
-                    Some(crate::extensions::PluginWindowPlacementKind::Floating)
-                }
-                crate::config::WindowPlacementConfig::Fullscreen => {
-                    Some(crate::extensions::PluginWindowPlacementKind::Fullscreen)
-                }
-                crate::config::WindowPlacementConfig::Hidden => {
-                    Some(crate::extensions::PluginWindowPlacementKind::Hidden)
-                }
-            };
-            if requested
-                .is_some_and(|placement| !declaration.allowed_placements.contains(&placement))
-            {
-                return Err(format!(
-                    "plugin window selector `{}` requests a disallowed placement",
-                    rule.content_type
-                ));
-            }
-        }
-        Ok(self.configuration.raw_windows.clone())
-    }
-
     pub(in crate::editor::session) fn recompile_plugin_contributions(
         &mut self,
     ) -> Result<(), String> {
-        let compiled = compile_keymaps_with_plugin_catalog(
-            &self.commands,
-            &self.configuration.raw_keymaps,
-            &self.plugin_contributions,
-            &self.configuration.settings.input.keymaps,
-        )
-        .map_err(|errors| errors.join("; "))?;
-        let windows = self.resolve_plugin_window_rules()?;
+        let candidate = self
+            .configuration
+            .prepare_plugin_contributions(&self.commands, &self.plugin_contributions)?;
+        self.commit_contribution_candidate(candidate)
+    }
+
+    pub(in crate::editor::session) fn commit_contribution_candidate(
+        &mut self,
+        candidate: crate::editor::session::configuration::ContributionCandidate,
+    ) -> Result<(), String> {
+        // Both owners are checked before publication. There is no callback, wait,
+        // or configuration mutation between this check and the two accepts.
+        self.configuration
+            .check_contributions(&candidate, &self.plugin_contributions)?;
         let mut plugin_windows = self.plugin_windows.clone();
-        plugin_windows.set_configured_rules(&windows)?;
+        plugin_windows.set_configured_rules(candidate.windows())?;
         let native_windows = crate::config::WindowsConfig {
-            rules: windows
+            rules: candidate
+                .windows()
                 .rules
                 .iter()
                 .filter(|rule| !rule.content_type.starts_with("plugin."))
                 .cloned()
                 .collect(),
         };
-        let (graph, mut surfaces) = self.prepare_configured_window_rules(&native_windows)?;
-        surfaces.invalidate();
-        self.cancel_pending_mapping();
-        self.configuration.keymaps = compiled;
-        self.configuration.settings.windows = windows;
+        let windows = self.prepare_configured_window_rules(&native_windows)?;
+        self.window_session
+            .accept_current(windows, &self.state.window_version())?;
+        self.configuration
+            .commit_contributions(candidate, &self.plugin_contributions)?;
         self.plugin_windows = plugin_windows;
-        self.windows = graph;
-        self.surface_windows = surfaces;
+        self.cancel_pending_mapping();
         self.reconcile_editor_windows();
         Ok(())
     }
@@ -311,17 +248,17 @@ impl InteractiveApplication {
         plugin: &str,
         load: PluginLoadId,
     ) {
-        let mut graph = self.windows.clone();
-        let mut windows = self.plugin_windows.clone();
-        match windows.remove_generation(&mut graph, plugin, load.0) {
+        match self
+            .window_session
+            .remove_plugin_generation(plugin, load.0)
+            .map(|()| self.plugin_windows.remove_generation(plugin, load.0))
+        {
             Ok(removed) => {
                 self.pending_plugin_ui_events
                     .remove(&(plugin.to_owned(), load));
                 if removed {
-                    self.windows = graph;
-                    self.plugin_windows = windows;
                     self.ui.plugin_surfaces = self.plugin_windows.snapshots();
-                    self.surface_windows.invalidate();
+                    self.window_session.invalidate_native();
                     self.reconcile_editor_windows();
                 }
             }
@@ -355,31 +292,13 @@ impl InteractiveApplication {
         if self.plugin_contributions.remove_generation(plugin, load.0) {
             self.commands.unregister_plugin(plugin);
             if let Err(error) = self.recompile_plugin_contributions() {
-                match compile_keymaps_with_plugin_catalog(
-                    &self.commands,
-                    &self.configuration.base_keymaps,
-                    &self.plugin_contributions,
-                    &self.configuration.settings.input.keymaps,
-                ) {
-                    Ok(compiled) => {
-                        self.cancel_pending_mapping();
-                        self.configuration.keymaps = compiled;
-                        self.configuration.deferred_plugin_keymaps = true;
-                        let fallback_windows = crate::config::WindowsConfig {
-                            rules: self
-                                .configuration
-                                .raw_windows
-                                .rules
-                                .iter()
-                                .filter(|rule| !rule.content_type.starts_with("plugin."))
-                                .cloned()
-                                .collect(),
-                        };
-                        let _ = self.plugin_windows.set_configured_rules(&fallback_windows);
-                        self.configuration.settings.windows = fallback_windows;
-                        self.show_error(error);
-                    }
-                    Err(fallback) => self.show_error(fallback.join("; ")),
+                match self
+                    .configuration
+                    .prepare_builtin_contributions(&self.commands, &self.plugin_contributions, true)
+                    .and_then(|candidate| self.commit_contribution_candidate(candidate))
+                {
+                    Ok(()) => self.show_error(error),
+                    Err(fallback) => self.show_error(fallback),
                 }
             }
         }
@@ -403,27 +322,20 @@ impl InteractiveApplication {
                 let _ = self.packages.request(PackageOperation::Abort { token });
             }
         }
-        if let Ok(compiled) = compile_keymaps_with_plugin_catalog(
-            &self.commands,
-            &self.configuration.base_keymaps,
-            &self.plugin_contributions,
-            &self.configuration.settings.input.keymaps,
-        ) {
-            self.cancel_pending_mapping();
-            self.configuration.keymaps = compiled;
+        let candidate = self
+            .configuration
+            .prepare_builtin_contributions(
+                &self.commands,
+                &self.plugin_contributions,
+                self.configuration.deferred_plugin_keymaps(),
+            )
+            .unwrap_or_else(|_| {
+                self.configuration
+                    .prepare_builtin_rules(&self.plugin_contributions)
+            });
+        if let Err(error) = self.commit_contribution_candidate(candidate) {
+            self.show_error(error);
         }
-        let fallback_windows = crate::config::WindowsConfig {
-            rules: self
-                .configuration
-                .raw_windows
-                .rules
-                .iter()
-                .filter(|rule| !rule.content_type.starts_with("plugin."))
-                .cloned()
-                .collect(),
-        };
-        let _ = self.plugin_windows.set_configured_rules(&fallback_windows);
-        self.configuration.settings.windows = fallback_windows;
         self.show_error(diagnostic);
     }
 
@@ -435,7 +347,7 @@ impl InteractiveApplication {
     ) {
         let expected = self
             .configuration
-            .expected_plugin_indexes
+            .expected_plugin_indexes()
             .iter()
             .cloned()
             .collect::<Vec<_>>();

@@ -1,4 +1,8 @@
-use super::*;
+use super::{
+    BTreeMap, BTreeSet, CommandInvocation, CommandValue, FromStr, HashMap, InputContextLayer,
+    InvocationSource, KeyEvent, KeymapBindings, KeymapSequence, MappingResolution, PathBuf,
+    configuration_value, display_key_sequence, invocation_fingerprint,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum KeymapOperation {
@@ -84,7 +88,7 @@ pub struct KeyHintProjection {
 
 #[derive(Clone, Default)]
 pub struct ResolvedKeymaps {
-    pub(in crate::editor::session) resolvers: HashMap<String, KeymapResolver>,
+    pub(super) bindings: HashMap<String, KeymapBindings>,
     pub(in crate::editor::session) reverse: HashMap<(String, String), ReverseBinding>,
     pub(in crate::editor::session) inspections: Vec<KeymapInspection>,
     pub(in crate::editor::session) groups: Vec<ResolvedKeyGroup>,
@@ -198,16 +202,22 @@ impl ResolvedConfiguration {
 }
 
 impl ResolvedKeymaps {
-    pub(crate) fn resolve(&mut self, context: &str, key: KeyEvent) -> MappingResolution {
-        self.resolvers
-            .get_mut(context)
-            .map_or(MappingResolution::Missing, |resolver| resolver.feed(key))
+    pub(crate) fn resolve(
+        &self,
+        sequence: &mut KeymapSequence,
+        context: &str,
+        key: KeyEvent,
+    ) -> MappingResolution {
+        self.bindings
+            .get(context)
+            .map_or(MappingResolution::Missing, |bindings| {
+                sequence.feed(bindings, key)
+            })
     }
 
-    #[must_use]
-    pub(in crate::editor::session) fn pending_prefix(&self, context: &str) -> Option<String> {
-        let sequence = self.resolvers.get(context)?.pending_sequence();
-        (!sequence.is_empty()).then(|| display_key_sequence(sequence))
+    #[cfg(test)]
+    pub(in crate::editor::session) fn has_bindings(&self) -> bool {
+        !self.bindings.is_empty()
     }
 
     #[must_use]

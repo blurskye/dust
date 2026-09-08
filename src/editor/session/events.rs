@@ -6,49 +6,14 @@ impl InteractiveApplication {
             .git_status_snapshot
             .as_ref()
             .map_or(0, |snapshot| snapshot.entries.len());
-        self.ui.running_tasks = self.job_tasks.len();
-    }
-
-    pub(super) fn update_notification_timer(&mut self) {
-        if self.ui.notification != self.observed_notification {
-            if let Some(message) = self.ui.notification.as_ref()
-                && self
-                    .notification_history
-                    .back()
-                    .is_none_or(|(_, previous)| previous != message)
-            {
-                self.notification_history
-                    .push_back((self.ui.notification_error, message.clone()));
-                if self.notification_history.len() > 200 {
-                    self.notification_history.pop_front();
-                }
-            }
-            self.observed_notification = self.ui.notification.clone();
-            self.notification_deadline = self.ui.notification.as_ref().and_then(|_| {
-                let timeout = self.configuration.settings.ui.notifications.timeout_ms;
-                (timeout > 0).then(|| Instant::now() + Duration::from_millis(timeout))
-            });
-        }
-        if self
-            .notification_deadline
-            .is_some_and(|deadline| Instant::now() >= deadline)
-        {
-            self.ui.notification = None;
-            self.ui.notification_error = false;
-            self.observed_notification = None;
-            self.notification_deadline = None;
-        }
+        self.ui.running_tasks = self.tasks.running_count();
     }
 
     pub(super) fn toggle_buffer_pin(&mut self, buffer: crate::editor::BufferId) {
         if !self.state.buffers.contains_key(buffer) {
             return;
         }
-        if !self.content_line_pins.remove(&buffer) {
-            self.content_line_pins.insert(buffer);
-        }
-        self.content_line_order_revision = self.content_line_order_revision.saturating_add(1);
-        self.content_line_projection_signature = None;
+        self.window_session.toggle_pin(buffer);
         self.reconcile_editor_windows();
     }
 
@@ -62,32 +27,10 @@ impl InteractiveApplication {
         let Some(buffer) = self.state.active_buffer_id() else {
             return;
         };
-        let pinned = self.content_line_pins.contains(&buffer);
-        let Some(index) = self
-            .content_line_order
-            .iter()
-            .position(|candidate| *candidate == buffer)
-        else {
-            self.show_error("active buffer has no content-line entry");
+        if let Err(error) = self.window_session.move_content(buffer, direction) {
+            self.show_error(error);
             return;
-        };
-        let target = if direction < 0 {
-            self.content_line_order[..index]
-                .iter()
-                .rposition(|candidate| self.content_line_pins.contains(candidate) == pinned)
-        } else {
-            self.content_line_order[index.saturating_add(1)..]
-                .iter()
-                .position(|candidate| self.content_line_pins.contains(candidate) == pinned)
-                .map(|offset| index + 1 + offset)
-        };
-        let Some(target) = target else {
-            self.show_error("buffer is already at the content-line boundary");
-            return;
-        };
-        self.content_line_order.swap(index, target);
-        self.content_line_order_revision = self.content_line_order_revision.saturating_add(1);
-        self.content_line_projection_signature = None;
+        }
         self.reconcile_editor_windows();
     }
 
@@ -97,7 +40,8 @@ impl InteractiveApplication {
         column: u16,
         row: u16,
     ) -> bool {
-        if self.ui.prompt.is_some() || self.ui.picker.is_some() || self.ui.tool_menu.is_some() {
+        if self.input.prompt().is_some() || self.ui.picker.is_some() || self.ui.tool_menu.is_some()
+        {
             return false;
         }
         let Some(kind) = key.terminal_mouse() else {
@@ -114,11 +58,16 @@ impl InteractiveApplication {
         let Some(bounds) = self.workspace_bounds() else {
             return false;
         };
-        let tab_line = self.configuration.settings.ui.tab_line.enabled
-            && (!self.configuration.settings.ui.tab_line.hide_when_single
+        let tab_line = self.configuration.settings().ui.tab_line.enabled
+            && (!self.configuration.settings().ui.tab_line.hide_when_single
                 || self.state.tabs.len() > 1);
-        let buffer_line = self.configuration.settings.ui.buffer_line.enabled
-            && (!self.configuration.settings.ui.buffer_line.hide_when_single
+        let buffer_line = self.configuration.settings().ui.buffer_line.enabled
+            && (!self
+                .configuration
+                .settings()
+                .ui
+                .buffer_line
+                .hide_when_single
                 || self.ui.content_tabs.len() > 1);
         if !buffer_line
             || row != bounds.y.saturating_add(u16::from(tab_line))
@@ -129,7 +78,7 @@ impl InteractiveApplication {
         }
         let Some(identity) = crate::ui::content_tab_at_column(
             &self.ui.content_tabs,
-            &self.configuration.settings,
+            self.configuration.settings(),
             bounds.width,
             column - bounds.x,
         ) else {
@@ -141,7 +90,11 @@ impl InteractiveApplication {
             .iter()
             .find(|entry| entry.identity == identity)
             .cloned();
-        let Some(buffer) = self.editor_windows.buffer_for_content(identity.0) else {
+        let Some(buffer) = self
+            .window_session
+            .editor_ids()
+            .buffer_for_content(identity.0)
+        else {
             if kind == crate::editor::input::TerminalMouseInput::RightDown
                 && entry.is_some_and(|entry| !entry.closeable)
             {
@@ -173,11 +126,18 @@ impl InteractiveApplication {
             UiEvent::Resize(width, height) => {
                 self.terminal_width = width;
                 self.terminal_height = height;
-                self.surface_windows.invalidate();
+                self.window_session.invalidate();
+                self.project_window_geometry();
+                self.window_session.invalidate_native();
                 self.resize_active_terminal_to_panel();
                 self.sync_terminal_panel();
                 self.sync_explorer_ui();
-                if self.configuration.settings.ui.keep_cursor_visible_on_resize {
+                if self
+                    .configuration
+                    .settings()
+                    .ui
+                    .keep_cursor_visible_on_resize
+                {
                     self.ensure_cursor_visible();
                 }
             }
@@ -192,7 +152,7 @@ impl InteractiveApplication {
             }
             UiEvent::FocusLost => {
                 self.send_terminal_focus_report(false);
-                if self.ui.prompt.as_ref().is_some_and(|prompt| {
+                if self.input.prompt().is_some_and(|prompt| {
                     matches!(
                         prompt.kind,
                         PromptKind::WorkspaceTrust
@@ -205,8 +165,8 @@ impl InteractiveApplication {
                 self.handle_key_in_context("focus", KeyEvent::focus_lost());
             }
             UiEvent::Mouse { key, column, row } => {
-                self.mouse_position = Some((column, row));
-                if self.ui.documentation_popup.is_some() {
+                self.input.observe_mouse(column, row);
+                if self.input.documentation().is_some() {
                     match key.terminal_mouse() {
                         Some(crate::editor::input::TerminalMouseInput::ScrollUp) => {
                             self.process_effect(AppEffect::LspDocumentationScroll(-1));
@@ -237,7 +197,7 @@ impl InteractiveApplication {
                     && let Some(id) = self.ui.terminal_panel.as_ref().and_then(|terminal| {
                         terminal_tab_at_column(
                             terminal,
-                            &self.configuration.settings,
+                            self.configuration.settings(),
                             rect.width,
                             column.saturating_sub(rect.x),
                         )
@@ -267,7 +227,7 @@ impl InteractiveApplication {
                             .input_context(window, &self.plugin_contributions)
                     });
                 if self.ui.picker.is_none()
-                    && self.ui.prompt.is_none()
+                    && self.input.prompt().is_none()
                     && self.ui.tool_menu.is_none()
                     && let Some(context) = plugin_context
                 {
@@ -275,10 +235,16 @@ impl InteractiveApplication {
                         .compositor_projection()
                         .and_then(|projection| projection.hit_test(column, row))
                     {
-                        let mut graph = self.windows.clone();
-                        if graph.focus(window).and_then(|_| graph.validate()).is_ok() {
-                            self.windows = graph;
-                            self.surface_windows.invalidate();
+                        if self
+                            .window_session
+                            .plan_focus(
+                                window,
+                                &self.state.window_version(),
+                                self.plugin_contributions.version(),
+                            )
+                            .and_then(|plan| self.apply_window_plan(plan))
+                            .is_ok()
+                        {
                             self.reconcile_editor_windows();
                         }
                     }
@@ -287,49 +253,56 @@ impl InteractiveApplication {
                 }
                 let context = if self.ui.picker.is_some() {
                     "picker_mouse"
-                } else if self.ui.prompt.is_some() {
+                } else if self.input.prompt().is_some() {
                     "prompt_mouse"
                 } else if self.ui.tool_menu.is_some() {
                     "tool_manager_mouse"
                 } else if over_terminal {
                     "terminal_mouse"
                 } else if over_explorer {
-                    self.ui.explorer_focused = true;
+                    self.set_explorer_focus(true);
                     "explorer_mouse"
-                } else if self.ui.dashboard || self.state.active_view.is_none() {
+                } else if self.window_session.dashboard_visible()
+                    || self.state.active_view.is_none()
+                {
                     "dashboard_mouse"
                 } else {
-                    self.ui.explorer_focused = false;
+                    self.set_explorer_focus(false);
                     "editor_mouse"
                 };
                 if context == "terminal_mouse"
-                    && self.terminal_focused
-                    && let Some(id) = self.active_terminal
-                    && let Some(terminal) = self.terminals.get(&id)
-                    && terminal.mode == TerminalPanelMode::Input
-                    && let Some(rect) = self.terminal_window_rect()
+                    && self.window_session.terminal_focused()
+                    && let Some(id) = self.keyboard_terminal()
+                    && self.terminal_session.mode(id) == Some(TerminalPanelMode::Input)
+                    && let Some(rect) =
+                        self.window_session
+                            .native_ids()
+                            .terminal(id.0)
+                            .and_then(|ids| {
+                                self.compositor_projection()?
+                                    .window(ids.window)
+                                    .map(|w| w.rect)
+                            })
+                    && let Some(geometry) = crate::ui::terminal_geometry_from_rect(rect)
                     && let Some(event) = key.terminal_mouse()
                 {
-                    if let Some(bytes) =
-                        crate::ui::encode_terminal_mouse_event(crate::ui::TerminalMouseEncoding {
-                            event,
-                            column,
-                            row,
-                            left: rect.x,
-                            top: rect.y.saturating_add(1),
-                            width: rect.width,
-                            height: rect.height.saturating_sub(2),
-                            mode: terminal.screen.mouse_mode(),
-                            sgr: terminal.screen.sgr_mouse(),
-                            ceiling: self.configuration.settings.terminals.maximum_input_bytes,
-                        })
-                    {
-                        let _ = self.ptys.input(
-                            id,
-                            bytes,
-                            self.configuration.settings.terminals.maximum_input_bytes,
-                        );
-                        return;
+                    let rect = WindowRect {
+                        x: geometry.x,
+                        y: geometry.body_top,
+                        width: geometry.width,
+                        height: geometry.body_height,
+                    };
+                    match self.terminal_session.send(
+                        id,
+                        TerminalInput::Mouse(event, column, row, rect),
+                        &self.workspace,
+                    ) {
+                        Ok(true) => return,
+                        Ok(false) => {}
+                        Err(error) => {
+                            self.show_error(error);
+                            return;
+                        }
                     }
                 }
                 self.handle_key_in_context(context, key);
@@ -337,7 +310,23 @@ impl InteractiveApplication {
         }
     }
 
+    pub(super) fn keyboard_terminal(&self) -> Option<PtyId> {
+        if self.input.capture_context().is_some()
+            || self.workspace_edits.proposal().is_some()
+            || self.ui.picker.is_some()
+            || self.ui.tool_menu.is_some()
+        {
+            return None;
+        }
+        self.window_session
+            .focused_terminal()
+            .map(PtyId)
+            .filter(|id| self.terminal_session.contains(*id))
+    }
     pub(super) fn active_input_context(&self) -> String {
+        if let Some(context) = self.input.capture_context() {
+            return context.into();
+        }
         if let Some(pending) = self.input.pending_context() {
             return match pending {
                 crate::editor::input::PendingInputContext::Register => "register",
@@ -348,60 +337,39 @@ impl InteractiveApplication {
             }
             .into();
         }
-        if self
-            .ui
-            .documentation_popup
-            .as_ref()
-            .is_some_and(|popup| popup.kind != DocumentationPopupKind::Completion)
-        {
-            return "documentation".into();
+        if self.workspace_edits.proposal().is_some() {
+            return "workspace_edit".into();
         }
-        if self.terminal_focused
-            && self.active_terminal.is_some()
-            && self.terminal_window_rect().is_some()
-        {
+        if self.ui.picker.is_some() {
+            return "picker".into();
+        }
+        if self.ui.tool_menu.is_some() {
+            return "tool_manager".into();
+        }
+        if self.keyboard_terminal().is_some() && self.terminal_window_rect().is_some() {
             return self
-                .active_terminal
-                .and_then(|id| self.terminals.get(&id))
-                .map_or("terminal", |terminal| match terminal.mode {
+                .keyboard_terminal()
+                .and_then(|id| self.terminal_session.mode(id))
+                .map_or("terminal", |mode| match mode {
                     TerminalPanelMode::Input => "terminal",
                     TerminalPanelMode::Normal => "terminal_normal",
                     TerminalPanelMode::Visual => "terminal_visual",
                 })
                 .into();
         }
-        if self.workspace_proposal.is_some() {
-            return "workspace_edit".into();
-        }
-        if self.ui.picker.is_some() {
-            return "picker".into();
-        }
         if self.ui.language_completion.is_some() {
             return "completion".into();
         }
-        if let Some(prompt) = &self.ui.prompt {
-            return match prompt.kind {
-                PromptKind::Command => "command_prompt",
-                PromptKind::SearchForward | PromptKind::SearchBackward => "search_prompt",
-                PromptKind::WorkspaceTrust | PromptKind::GitReset | PromptKind::ExplorerDelete => {
-                    "workspace_trust_prompt"
-                }
-            }
-            .into();
-        }
-        if self.ui.tool_menu.is_some() {
-            return "tool_manager".into();
-        }
-        if self.ui.explorer.is_some() && self.ui.explorer_focused {
+        if self.ui.explorer.is_some() && self.window_session.explorer_focused() {
             return "explorer".into();
         }
-        if let Some(context) = self.windows.focused().and_then(|window| {
+        if let Some(context) = self.window_session.graph().focused().and_then(|window| {
             self.plugin_windows
                 .input_context(window, &self.plugin_contributions)
         }) {
             return context;
         }
-        if self.ui.dashboard || self.state.active_view.is_none() {
+        if self.window_session.dashboard_visible() || self.state.active_view.is_none() {
             return "dashboard".into();
         }
         let mode = self
@@ -413,25 +381,22 @@ impl InteractiveApplication {
     }
 
     pub(super) fn send_terminal_focus_report(&mut self, focused: bool) {
-        if self.terminal_focused
-            && let Some(id) = self.active_terminal
-            && let Some(terminal) = self.terminals.get(&id)
-            && let Some(bytes) = crate::ui::encode_focus(focused, terminal.screen.focus_reporting())
-        {
-            let _ = self.ptys.input(
-                id,
-                bytes.to_vec(),
-                self.configuration.settings.terminals.maximum_input_bytes,
-            );
+        if let Some(id) = self.keyboard_terminal() {
+            if let Err(error) =
+                self.terminal_session
+                    .send(id, TerminalInput::Focus(focused), &self.workspace)
+            {
+                self.show_error(error);
+            }
         }
     }
 
     pub(super) fn handle_configured_key(&mut self, key: KeyEvent) {
-        if self.terminal_focused
+        if self.window_session.terminal_focused()
             && self
-                .active_terminal
-                .and_then(|id| self.terminals.get(&id))
-                .is_some_and(|terminal| terminal.mode == TerminalPanelMode::Input)
+                .keyboard_terminal()
+                .and_then(|id| self.terminal_session.mode(id))
+                == Some(TerminalPanelMode::Input)
         {
             let encoded = key.terminal_navigation().map(|key| match key {
                 crate::editor::input::TerminalNavigationKey::Up => crate::ui::PtyInputKey::Up,
@@ -442,17 +407,13 @@ impl InteractiveApplication {
                 crate::editor::input::TerminalNavigationKey::End => crate::ui::PtyInputKey::End,
             });
             if let Some(encoded) = encoded
-                && let Some(id) = self.active_terminal
-                && let Some(terminal) = self.terminals.get(&id)
+                && let Some(id) = self.keyboard_terminal()
             {
-                let bytes =
-                    crate::ui::encode_key(encoded, terminal.screen.application_cursor()).to_vec();
-                if bytes.len() <= self.configuration.settings.terminals.maximum_input_bytes {
-                    let _ = self.ptys.input(
-                        id,
-                        bytes,
-                        self.configuration.settings.terminals.maximum_input_bytes,
-                    );
+                if let Err(error) =
+                    self.terminal_session
+                        .send(id, TerminalInput::Key(encoded), &self.workspace)
+                {
+                    self.show_error(error);
                 }
                 return;
             }
@@ -466,88 +427,50 @@ impl InteractiveApplication {
             && key.modifiers.control
             && matches!(key.code, crate::editor::input::KeyCode::Char('d' | 'u'));
         if context != "documentation" && !scrolls_completion_documentation {
-            self.ui.documentation_popup = None;
+            self.close_documentation();
         }
+        self.diagnostics.dismiss_expansion();
         self.ui.expanded_diagnostic = None;
         let context = context.to_owned();
-        if self
-            .pending_keymap
-            .as_ref()
-            .is_some_and(|pending| pending.context != context)
-        {
-            self.cancel_pending_mapping();
-        }
-        let resolution = self
-            .configuration
-            .keymaps
-            .resolvers
-            .get_mut(&context)
-            .map_or(MappingResolution::Missing, |resolver| {
-                resolver.feed(key.clone())
-            });
+        let resolution = self.input.resolve(
+            &context,
+            key.clone(),
+            self.configuration.keymaps(),
+            self.configuration.binding_revision(),
+            self.clock.monotonic(),
+            Duration::from_millis(self.configuration.settings().input.mapping_timeout_ms),
+        );
+        self.project_input_hints();
         match resolution {
             MappingResolution::Ready(invocation) => {
-                self.pending_keymap = None;
                 self.invoke_mapped(invocation);
             }
             MappingResolution::ReadyAndReplay(invocation, replay) => {
-                self.pending_keymap = None;
                 self.invoke_mapped(invocation);
                 for key in replay {
                     self.handle_configured_key(key);
                 }
             }
             MappingResolution::Replay(replay) => {
-                self.pending_keymap = None;
                 for key in replay {
                     self.handle_configured_key(key);
                 }
             }
-            MappingResolution::Disabled => self.pending_keymap = None,
-            resolution @ (MappingResolution::Pending | MappingResolution::Ambiguous) => {
-                let now = Instant::now();
-                let prefix = self
-                    .configuration
-                    .keymaps
-                    .pending_prefix(&context)
-                    .expect("pending resolution owns a non-empty resolver sequence");
-                let started_at = self.pending_keymap.as_ref().map_or(now, |pending| {
-                    if pending.context == context
-                        && pending.configuration_generation == self.configuration_generation
-                    {
-                        pending.started_at
-                    } else {
-                        now
-                    }
-                });
-                self.pending_keymap = Some(PendingKeymap {
-                    context,
-                    prefix,
-                    started_at,
-                    deadline: matches!(resolution, MappingResolution::Ambiguous).then(|| {
-                        now + Duration::from_millis(
-                            self.configuration.settings.input.mapping_timeout_ms,
-                        )
-                    }),
-                    configuration_generation: self.configuration_generation,
-                });
-                self.ui.key_hints = None;
-                return;
-            }
+            MappingResolution::Disabled => {}
+            MappingResolution::Pending | MappingResolution::Ambiguous => return,
             MappingResolution::Missing => {
-                self.pending_keymap = None;
                 let mut handled = false;
                 if let Some(character) = key.text_character()
                     && let Some(command_id) = self
                         .configuration
-                        .settings
+                        .settings()
                         .input
                         .character_fallback_commands
                         .get(&context)
                         .cloned()
                         .or_else(|| {
                             self.configuration
-                                .settings
+                                .settings()
                                 .input
                                 .text_commands
                                 .get(&context)
@@ -560,7 +483,7 @@ impl InteractiveApplication {
                 if !handled
                     && let Some(command_id) = self
                         .configuration
-                        .settings
+                        .settings()
                         .input
                         .unmatched_commands
                         .get(&context)
@@ -577,22 +500,16 @@ impl InteractiveApplication {
     }
 
     pub(super) fn handle_configured_paste(&mut self, text: String) {
-        self.ui.documentation_popup = None;
-        if self.terminal_focused
-            && let Some(id) = self.active_terminal
-            && let Some(terminal) = self.terminals.get(&id)
-            && terminal.mode == TerminalPanelMode::Input
+        self.close_documentation();
+        if self.window_session.terminal_focused()
+            && let Some(id) = self.keyboard_terminal()
+            && self.terminal_session.mode(id) == Some(TerminalPanelMode::Input)
         {
-            if let Some(bytes) = crate::ui::encode_paste(
-                &text,
-                terminal.screen.bracketed_paste(),
-                self.configuration.settings.terminals.maximum_input_bytes,
-            ) {
-                let _ = self.ptys.input(
-                    id,
-                    bytes,
-                    self.configuration.settings.terminals.maximum_input_bytes,
-                );
+            if let Err(error) =
+                self.terminal_session
+                    .send(id, TerminalInput::Paste(&text), &self.workspace)
+            {
+                self.show_error(error);
             }
             return;
         }
@@ -600,7 +517,7 @@ impl InteractiveApplication {
         let context = self.active_input_context();
         if let Some(command_id) = self
             .configuration
-            .settings
+            .settings()
             .input
             .paste_commands
             .get(&context)
@@ -640,121 +557,44 @@ impl InteractiveApplication {
     }
 
     pub(super) fn cancel_pending_mapping(&mut self) {
-        self.ui.key_hints = None;
-        if let Some(pending) = self.pending_keymap.take()
-            && let Some(resolver) = self
-                .configuration
-                .keymaps
-                .resolvers
-                .get_mut(&pending.context)
-        {
-            resolver.cancel();
-        }
+        self.input.cancel_mapping();
+        self.project_input_hints();
     }
-
     pub(super) fn flush_keymap_timeout(&mut self) {
-        let Some(pending) = self.pending_keymap.clone() else {
-            self.ui.key_hints = None;
-            return;
-        };
-        let Some(deadline) = pending.deadline else {
-            return;
-        };
-        if Instant::now() < deadline {
-            return;
-        }
-        self.pending_keymap = None;
-        self.ui.key_hints = None;
-        if pending.context != self.active_input_context()
-            || pending.configuration_generation != self.configuration_generation
-        {
-            if let Some(resolver) = self
-                .configuration
-                .keymaps
-                .resolvers
-                .get_mut(&pending.context)
-            {
-                resolver.cancel();
-            }
-            return;
-        }
-        if let Some(resolver) = self
-            .configuration
-            .keymaps
-            .resolvers
-            .get_mut(&pending.context)
-        {
-            if let MappingResolution::Ready(invocation) = resolver.flush_timeout() {
-                self.invoke_mapped(invocation);
-                self.ensure_cursor_visible();
-            }
+        let context = self.active_input_context();
+        let invocation = self.input.flush_timeout(
+            &context,
+            self.configuration.binding_revision(),
+            self.clock.monotonic(),
+        );
+        self.project_input_hints();
+        if let Some(invocation) = invocation {
+            self.invoke_mapped(invocation);
+            self.ensure_cursor_visible();
         }
     }
-
     pub(super) fn update_key_hint_ui(&mut self) {
-        self.ui.key_hints = None;
-        let Some(pending) = self.pending_keymap.clone() else {
-            return;
-        };
-        if pending.configuration_generation != self.configuration_generation
-            || pending.context != self.active_input_context()
-        {
-            self.cancel_pending_mapping();
-            return;
+        let context = self.active_input_context();
+        if self.input.prompt().is_some() || self.workspace_edits.proposal().is_some() {
+            self.input.hide_hints();
+        } else {
+            self.input.update_hints(
+                &context,
+                (
+                    self.configuration.keymaps(),
+                    self.configuration.binding_revision(),
+                ),
+                &self.configuration.settings().ui.key_hints,
+                &self.configuration.settings().command_labels,
+                self.clock.monotonic(),
+            );
         }
-        let policy = &self.configuration.settings.ui.key_hints;
-        let now = Instant::now();
-        if !policy.enabled
-            || self.ui.prompt.is_some()
-            || self.workspace_proposal.is_some()
-            || pending.deadline.is_some_and(|deadline| now >= deadline)
-            || now.duration_since(pending.started_at) < Duration::from_millis(policy.delay_ms)
-        {
-            return;
-        }
-        let Some(projection) = self.configuration.keymaps.hints_for_prefix(
-            &pending.context,
-            &pending.prefix,
-            &self.configuration.settings.command_labels,
-        ) else {
-            return;
-        };
-        let rows = projection
-            .rows
-            .into_iter()
-            .filter(|row| {
-                row.mappings
-                    .iter()
-                    .any(|mapping| mapping.operation == KeymapOperation::Command)
-            })
-            .map(|row| {
-                let group = row.group_id.is_some();
-                KeyHintUiRow {
-                    next_key: row.next_key,
-                    label: if group || (row.direct && policy.show_command_titles) {
-                        row.label
-                    } else {
-                        policy.fallback_label.clone()
-                    },
-                    icon: (group && policy.show_group_icons)
-                        .then_some(row.icon)
-                        .flatten(),
-                    group,
-                }
-            })
-            .take(usize::from(policy.max_rows) * usize::from(policy.max_columns))
-            .collect::<Vec<_>>();
-        if !rows.is_empty() {
-            self.ui.key_hints = Some(KeyHintUiState {
-                prefix: projection.prefix,
-                rows,
-            });
-        }
+        self.project_input_hints();
     }
 
     pub(super) fn invoke(&mut self, mut invocation: CommandInvocation) {
         if !invocation.id.as_str().starts_with("lsp.documentation.") {
-            self.ui.documentation_popup = None;
+            self.close_documentation();
         }
         if invocation.target.view.is_none() {
             invocation.target.view = self.state.active_view;
@@ -779,23 +619,44 @@ impl InteractiveApplication {
             Ok(outcome) => {
                 let changed = outcome.transaction.is_some();
                 if let Some(mut transaction) = outcome.transaction {
-                    let snippet_groups = self.prepare_snippet_mirror_transaction(&mut transaction);
+                    let source = self.state.window_version();
+                    let snippet_document = self.input.snippet_buffer().and_then(|id| {
+                        self.state.buffers.get(id).map(|buffer| {
+                            crate::editor::session::input::SnippetDocument {
+                                editor: &source,
+                                buffer: id,
+                                text: &buffer.text,
+                                view: None,
+                            }
+                        })
+                    });
+                    let update = self
+                        .input
+                        .prepare_snippet_mirror(snippet_document, &mut transaction);
                     if let Err(error) = self.state.apply_transaction(&transaction) {
                         self.show_error(error);
                         return;
                     }
-                    if let Some(groups) = snippet_groups
-                        && let Some(session) = self.snippet_session.as_mut()
-                    {
-                        session.groups = groups;
-                        session.revision = self.state.buffers[session.buffer].text.revision();
+                    if let Some(update) = update {
+                        let source = self.state.window_version();
+                        let document = self.input.snippet_buffer().and_then(|id| {
+                            self.state.buffers.get(id).map(|buffer| {
+                                crate::editor::session::input::SnippetDocument {
+                                    editor: &source,
+                                    buffer: id,
+                                    text: &buffer.text,
+                                    view: None,
+                                }
+                            })
+                        });
+                        self.input.accept_snippet_edit(update, document);
                     }
                 }
 
                 if changed {
                     self.push_change_location();
                 }
-                self.record_successful_invocation(
+                self.input.record_successful_invocation(
                     &invocation,
                     repeat_override.as_ref(),
                     suppress_repeat,

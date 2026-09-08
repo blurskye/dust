@@ -302,3 +302,78 @@ fn save_completion_for_old_revision_does_not_clear_newer_dirty_edit() {
     assert!(buffer.dirty);
     assert_eq!(buffer.text.to_string(), "abc");
 }
+
+#[test]
+fn independently_changed_branches_have_distinct_window_sources() {
+    let mut state = EditorState::new("/workspace".into());
+    let (buffer, _) = state.open_text(TextBuffer::from_text("same"), None);
+    let mut left = state.clone();
+    let mut right = state.clone();
+    left.set_buffer_path_and_dirty(buffer, Some("left.rs".into()), false);
+    right.set_buffer_path_and_dirty(buffer, Some("right.rs".into()), false);
+    assert_eq!(left.window_revision(), right.window_revision());
+    assert!(left.window_version().same_editor(&right.window_version()));
+    assert_ne!(left.window_version(), right.window_version());
+}
+
+#[test]
+fn presentation_mutators_mint_sources_and_rejected_preconditions_do_not_clone() {
+    fn changed(state: &mut EditorState, mutate: impl FnOnce(&mut EditorState)) {
+        let before = state.window_version();
+        mutate(state);
+        assert_ne!(state.window_version(), before);
+        assert!(state.window_version().same_editor(&before));
+    }
+    let mut state = EditorState::new("/workspace".into());
+    changed(&mut state, |s| {
+        s.open_text(TextBuffer::from_text("text"), Some("/one".into()));
+    });
+    let buffer = state.active_buffer_id().unwrap();
+    changed(&mut state, |s| {
+        s.set_buffer_dirty(buffer, true);
+    });
+    changed(&mut state, |s| {
+        s.set_buffer_path_and_dirty(buffer, Some("/two".into()), false);
+    });
+    changed(&mut state, |s| {
+        s.replace_buffer_from_disk(buffer, TextBuffer::from_text("new"), "/two".into());
+    });
+    changed(&mut state, |s| {
+        s.load_hidden_text(TextBuffer::from_text("hidden"), "/hidden".into());
+    });
+    changed(&mut state, |s| {
+        s.split_active(crate::editor::Axis::Vertical, 500).unwrap();
+    });
+    changed(&mut state, |s| {
+        s.focus_pane(-1, true).unwrap();
+    });
+    changed(&mut state, |s| {
+        s.resize_active_pane(20).unwrap();
+    });
+    let panes = state.panes.keys().collect::<Vec<_>>();
+    changed(&mut state, |s| {
+        s.swap_panes(panes[0], panes[1]).unwrap();
+    });
+    changed(&mut state, |s| {
+        s.close_active_pane().unwrap();
+    });
+    changed(&mut state, |s| {
+        s.new_tab().unwrap();
+    });
+    changed(&mut state, |s| {
+        s.focus_tab(-1, true).unwrap();
+    });
+    changed(&mut state, |s| {
+        s.close_active_tab().unwrap();
+    });
+    let before = state.version();
+    let copies = EditorState::test_clone_count();
+    let invalid = crate::editor::EditorTransaction::new(crate::editor::TransactionId(1))
+        .with_precondition(crate::editor::Precondition::BufferRevision {
+            buffer,
+            revision: crate::editor::text::BufferRevision(u64::MAX),
+        });
+    assert!(state.prepare_transaction(&invalid).is_err());
+    assert_eq!(state.version(), before);
+    assert_eq!(EditorState::test_clone_count(), copies);
+}

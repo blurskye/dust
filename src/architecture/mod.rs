@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use thiserror::Error;
+mod dependencies;
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct ArchitectureAudit {
     pub files: usize,
@@ -51,6 +52,8 @@ pub fn audit_source(root: &Path) -> Result<ArchitectureAudit, ArchitectureError>
             }
         }
     }
+
+    dependencies::audit(root, &paths)?;
 
     for removed in [
         "application",
@@ -105,7 +108,7 @@ pub fn audit_source(root: &Path) -> Result<ArchitectureAudit, ArchitectureError>
 
     if !session.contains("tool_installer.install")
         || !session.contains("PendingExecutionPreflight::Lsp")
-        || !session.contains("PendingExecutionPreflight::DapToolAdapter")
+        || !session.contains("advance_debug")
         || !language.contains("start_session_absolute_with_policy")
         || !language.contains("PreflightRequired")
         || debugger.contains("discover_executable")
@@ -144,7 +147,7 @@ pub fn audit_source(root: &Path) -> Result<ArchitectureAudit, ArchitectureError>
         || !ui.contains("pub struct VisualRowSlice")
         || !ui.contains("cursor_projection")
         || !ui.contains("byte_at_cell")
-        || !session.contains("content_line_projection_signature")
+        || !session.contains("content_current")
         || !session.contains("apply_authoritative_editor_transaction")
         || !session.contains("SetScrollWrapRow")
         || !language.contains("LspMarkupKind")
@@ -312,6 +315,8 @@ fn collect(directory: &Path, out: &mut Vec<PathBuf>) -> Result<(), ArchitectureE
 pub enum ArchitectureError {
     #[error("architecture audit I/O failed: {0}")]
     Io(#[source] std::io::Error),
+    #[error("architecture dependency violation in {path}: {detail}")]
+    Dependency { path: PathBuf, detail: String },
     #[error("invalid architecture source path {0}")]
     Invalid(PathBuf),
     #[error("architecture audit ceiling exceeded")]

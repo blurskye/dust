@@ -1,0 +1,664 @@
+use super::EditorTopology;
+use super::bridge::{EditorWindowBridge, NativeSurfaceBridge};
+use super::{
+    EditorWindowCandidate, NativeSurfaceSignature, NativeSurfaceTarget, WindowCandidate,
+    WindowSession,
+};
+use crate::ui::window::{WindowGraph, WindowId, WindowPlacement};
+use crate::{
+    editor::FocusDirection,
+    ui::window::{DockEdge, WindowRect},
+};
+use std::{collections::BTreeMap, sync::Arc};
+
+pub(in crate::editor::session) struct NativeDescriptions<'a> {
+    pub signature: NativeSurfaceSignature,
+    pub explorer_title: &'a str,
+    pub dashboard_title: &'a str,
+    pub picker_title: &'a str,
+    pub terminals: &'a [(u64, String)],
+}
+
+impl WindowCandidate {
+    pub(in crate::editor::session) fn graph(&self) -> &WindowGraph {
+        &self.core.graph
+    }
+}
+
+impl WindowSession {
+    pub(in crate::editor::session) fn require_editor_source(
+        &self,
+        current: &crate::editor::EditorWindowVersion,
+    ) -> Result<(), String> {
+        if current.revision().is_none() || self.core.editor.source() != Some(current) {
+            return Err("window editor source is stale".into());
+        }
+        Ok(())
+    }
+    pub(in crate::editor::session) fn graph(&self) -> &WindowGraph {
+        &self.core.graph
+    }
+    pub(in crate::editor::session) fn editor_ids(&self) -> &EditorWindowBridge {
+        &self.core.editor
+    }
+    pub(in crate::editor::session) fn native_ids(&self) -> &NativeSurfaceBridge {
+        &self.core.native
+    }
+
+    pub(in crate::editor::session) fn configure_initial(
+        &mut self,
+        windows: &crate::config::WindowsConfig,
+    ) -> Result<(), String> {
+        let placements = configured_window_placements(windows)?;
+        if self.core.graph.active_tab().is_some() {
+            return Err("initial window policy requires an empty session".into());
+        }
+        let mut candidate = self.candidate()?;
+        candidate
+            .core
+            .native
+            .set_configured_placements(placements)
+            .map_err(|e| e.to_string())?;
+        self.commit(candidate)
+    }
+    pub(in crate::editor::session) fn check_transition_capacity(&self) -> Result<(), String> {
+        self.epoch
+            .checked_add(1)
+            .ok_or("window owner revision is exhausted")?;
+        self.core
+            .graph
+            .revision()
+            .ok_or("window graph revision is exhausted")?;
+        Ok(())
+    }
+    pub(super) fn candidate(&self) -> Result<WindowCandidate, String> {
+        self.check_transition_capacity()?;
+        Ok(WindowCandidate {
+            origin: self.origin.clone(),
+            epoch: self.epoch,
+            core: self.core.clone(),
+            dashboard: None,
+        })
+    }
+    pub(super) fn commit(&mut self, candidate: WindowCandidate) -> Result<(), String> {
+        if !Arc::ptr_eq(&self.origin, &candidate.origin) || self.epoch != candidate.epoch {
+            return Err("window candidate is stale or belongs to another session".into());
+        }
+        candidate
+            .graph()
+            .validate()
+            .map_err(|error| error.to_string())?;
+        candidate
+            .graph()
+            .revision()
+            .ok_or("window graph revision is exhausted")?;
+        let epoch = self
+            .epoch
+            .checked_add(1)
+            .ok_or("window owner revision is exhausted")?;
+        if let Some(dashboard) = candidate.dashboard {
+            self.dashboard = dashboard;
+        }
+        let focus_content = |graph: &crate::ui::window::WindowGraph| {
+            graph
+                .focused()
+                .and_then(|w| graph.window(w))
+                .and_then(|w| graph.view(w.view))
+                .map(|v| v.content)
+        };
+        if self.core.graph.focused() != candidate.core.graph.focused()
+            || focus_content(&self.core.graph) != focus_content(&candidate.core.graph)
+        {
+            self.focus_stamp = Arc::new(());
+        }
+        self.core = candidate.core;
+        self.accept_graph_focus();
+        self.epoch = epoch;
+        self.invalidate();
+        Ok(())
+    }
+    pub(in crate::editor::session) fn accept_current(
+        &mut self,
+        candidate: WindowCandidate,
+        current: &crate::editor::EditorWindowVersion,
+    ) -> Result<(), String> {
+        if candidate
+            .core
+            .editor
+            .source()
+            .map_or(current.revision() == Some(0), |source| {
+                source == current && current.revision().is_some()
+            })
+        {
+            self.commit(candidate)
+        } else {
+            Err("window candidate editor source is stale".into())
+        }
+    }
+    pub(in crate::editor::session) fn prepare_editor_transition(
+        &self,
+        proposal: crate::editor::EditorDraft,
+        current: &crate::editor::EditorVersion,
+        catalog: crate::extensions::PluginCatalogVersion,
+        scratch: &str,
+        descriptions: Option<NativeDescriptions<'_>>,
+    ) -> Result<EditorWindowCandidate, String> {
+        proposal.check_current(current)?;
+        let candidate = match descriptions {
+            Some(descriptions) => {
+                self.prepare_reconcile(&proposal.topology(), scratch, descriptions)?
+            }
+            None => self.prepare_editor(&proposal.topology(), scratch)?,
+        };
+        self.stage_editor_transition(proposal, candidate, catalog)
+    }
+    pub(in crate::editor::session) fn prepare_document_transition(
+        &self,
+        proposal: crate::editor::EditorDraft,
+        current: &crate::editor::EditorVersion,
+        catalog: crate::extensions::PluginCatalogVersion,
+        scratch: &str,
+        mut descriptions: NativeDescriptions<'_>,
+    ) -> Result<EditorWindowCandidate, String> {
+        descriptions.signature.dashboard_visible = false;
+        let mut transition = self.prepare_editor_transition(
+            proposal,
+            current,
+            catalog,
+            scratch,
+            Some(descriptions),
+        )?;
+        transition.candidate.dashboard = Some(false);
+        Ok(transition)
+    }
+    pub(super) fn stage_editor_transition(
+        &self,
+        proposal: crate::editor::EditorDraft,
+        candidate: WindowCandidate,
+        catalog: crate::extensions::PluginCatalogVersion,
+    ) -> Result<EditorWindowCandidate, String> {
+        if !Arc::ptr_eq(&self.origin, &candidate.origin) || self.epoch != candidate.epoch {
+            return Err("window candidate is stale or belongs to another session".into());
+        }
+        self.epoch
+            .checked_add(1)
+            .ok_or("window owner revision is exhausted")?;
+        let after = candidate
+            .core
+            .editor
+            .source()
+            .ok_or("missing proposed editor source")?;
+        let before = proposal.before_window();
+        if before.revision().is_none()
+            || after.revision().is_none()
+            || !before.same_editor(after)
+            || after != &proposal.window_version()
+        {
+            return Err("invalid editor transition source".into());
+        }
+        if candidate
+            .core
+            .graph
+            .active_tab()
+            .and_then(|tab| candidate.core.graph.workspace_tab(tab))
+            .is_none()
+        {
+            return Err("editor transition has no projectable workspace".into());
+        }
+        Ok(EditorWindowCandidate {
+            proposal,
+            catalog,
+            candidate,
+        })
+    }
+    pub(in crate::editor::session) fn accept_editor_transition(
+        &mut self,
+        transition: EditorWindowCandidate,
+        current: &crate::editor::EditorVersion,
+        catalog: &crate::extensions::PluginCatalogVersion,
+    ) -> Result<crate::editor::EditorState, String> {
+        if &transition.catalog != catalog {
+            return Err("editor transition source changed before acceptance".into());
+        }
+        let state = transition.proposal.accept(current)?;
+        self.commit(transition.candidate)?;
+        Ok(state)
+    }
+    pub(in crate::editor::session) fn invalidate_native(&mut self) {
+        self.core.native.invalidate();
+        self.invalidate();
+        self.epoch = self.epoch.saturating_add(1);
+    }
+    pub(in crate::editor::session) fn allow_explorer(&mut self) {
+        self.core.native.allow_explorer();
+        self.invalidate_native();
+    }
+    pub(in crate::editor::session) fn prepare_reconcile(
+        &self,
+        state: &EditorTopology<'_>,
+        scratch: &str,
+        descriptions: NativeDescriptions<'_>,
+    ) -> Result<WindowCandidate, String> {
+        self.check_editor_admission(state)?;
+        let mut candidate = self.candidate()?;
+        let core = &mut candidate.core;
+        let current = core.editor.is_current(state, scratch);
+        let bind = |editor: &EditorWindowBridge| {
+            let mut signature = descriptions.signature;
+            signature.editor_tab = editor.active_tab(state);
+            signature.editor_window = editor.focused_window(state);
+            signature
+        };
+        if !current {
+            let signature = bind(&core.editor);
+            if !core.native.is_current(signature) {
+                core.native
+                    .reconcile(
+                        &mut core.graph,
+                        signature,
+                        descriptions.explorer_title,
+                        descriptions.dashboard_title,
+                        descriptions.picker_title,
+                        descriptions.terminals,
+                    )
+                    .map_err(|e| e.to_string())?;
+            }
+            core.editor
+                .reconcile(state, &mut core.graph, scratch)
+                .map_err(|e| e.to_string())?;
+        }
+        let signature = bind(&core.editor);
+        if !current || !core.native.is_current(signature) {
+            core.native
+                .reconcile(
+                    &mut core.graph,
+                    signature,
+                    descriptions.explorer_title,
+                    descriptions.dashboard_title,
+                    descriptions.picker_title,
+                    descriptions.terminals,
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        core.graph.validate().map_err(|e| e.to_string())?;
+        Ok(candidate)
+    }
+    pub(in crate::editor::session) fn check_editor_admission(
+        &self,
+        state: &EditorTopology<'_>,
+    ) -> Result<(), String> {
+        self.check_transition_capacity()?;
+        if state.window_revision().is_none() {
+            return Err("editor source revision is exhausted".into());
+        }
+        if self
+            .core
+            .editor
+            .source()
+            .is_some_and(|source| !source.same_editor(state.version()))
+        {
+            return Err("editor source belongs to another editor".into());
+        }
+        Ok(())
+    }
+    pub(super) fn prepare_editor(
+        &self,
+        state: &EditorTopology<'_>,
+        scratch: &str,
+    ) -> Result<WindowCandidate, String> {
+        self.check_editor_admission(state)?;
+        let mut candidate = self.candidate()?;
+        candidate
+            .core
+            .editor
+            .reconcile(state, &mut candidate.core.graph, scratch)
+            .map_err(|e| e.to_string())?;
+        Ok(candidate)
+    }
+    pub(super) fn focus_window(&mut self, window: WindowId) -> Result<(), String> {
+        let mut candidate = self.candidate()?;
+        candidate
+            .core
+            .graph
+            .focus(window)
+            .map_err(|e| e.to_string())?;
+        candidate.core.native.invalidate();
+        self.commit(candidate)
+    }
+    pub(super) fn require_projected_graph(&self) -> Result<(), String> {
+        if self
+            .layout
+            .as_ref()
+            .is_some_and(|layout| Some(layout.graph_revision) == self.core.graph.revision())
+        {
+            Ok(())
+        } else {
+            Err("universal compositor projection is missing or stale".into())
+        }
+    }
+    pub(in crate::editor::session) fn place_native(
+        &mut self,
+        target: NativeSurfaceTarget,
+        placement: WindowPlacement,
+    ) -> Result<(), String> {
+        self.require_projected_graph()?;
+        let mut candidate = self.candidate()?;
+        let core = &mut candidate.core;
+        if placement == WindowPlacement::Hidden
+            && let Some(current) = core
+                .native
+                .ids_for_target(target)
+                .and_then(|ids| core.graph.window(ids.window))
+                .map(|w| w.placement)
+                .filter(|p| *p != WindowPlacement::Hidden)
+        {
+            core.native
+                .place_target(target, current)
+                .map_err(|e| e.to_string())?;
+        }
+        let ids = core
+            .native
+            .place_target(target, placement)
+            .map_err(|e| e.to_string())?;
+        core.graph
+            .place(ids.window, placement)
+            .map_err(|e| e.to_string())?;
+        self.commit(candidate)?;
+        if matches!(target, NativeSurfaceTarget::Terminal(_)) {
+            match placement {
+                WindowPlacement::Docked { size, .. } => self.terminal_height = size,
+                WindowPlacement::Floating(rect) => self.terminal_height = rect.height,
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+    pub(in crate::editor::session) fn show_native(
+        &mut self,
+        target: NativeSurfaceTarget,
+        explorer: WindowPlacement,
+        terminal: WindowPlacement,
+    ) -> Result<(), String> {
+        self.require_projected_graph()?;
+        let mut candidate = self.candidate()?;
+        let core = &mut candidate.core;
+        let ids = core
+            .native
+            .show_target(target, explorer, terminal)
+            .map_err(|e| e.to_string())?;
+        let placement = core
+            .native
+            .placement_for_target(target)
+            .ok_or("native window has no restorable placement")?;
+        core.graph
+            .place(ids.window, placement)
+            .map_err(|e| e.to_string())?;
+        self.commit(candidate)
+    }
+
+    pub(in crate::editor::session) fn swap_native(
+        &mut self,
+        first: NativeSurfaceTarget,
+        second: NativeSurfaceTarget,
+    ) -> Result<(), String> {
+        self.require_projected_graph()?;
+        let mut candidate = self.candidate()?;
+        let core = &mut candidate.core;
+        let a = core
+            .native
+            .ids_for_target(first)
+            .ok_or("first native window is unavailable")?;
+        let b = core
+            .native
+            .ids_for_target(second)
+            .ok_or("second native window is unavailable")?;
+        let ap = core
+            .graph
+            .window(a.window)
+            .ok_or("first native window identity is stale")?
+            .placement;
+        let bp = core
+            .graph
+            .window(b.window)
+            .ok_or("second native window identity is stale")?
+            .placement;
+        core.graph
+            .swap_non_tiled_placements(a.window, b.window)
+            .map_err(|e| e.to_string())?;
+        core.native
+            .place_target(first, bp)
+            .map_err(|e| e.to_string())?;
+        core.native
+            .place_target(second, ap)
+            .map_err(|e| e.to_string())?;
+        self.commit(candidate)
+    }
+    pub(in crate::editor::session) fn prepare_rules(
+        &self,
+        windows: &crate::config::WindowsConfig,
+        descriptions: NativeDescriptions<'_>,
+    ) -> Result<WindowCandidate, String> {
+        let mut candidate = self.candidate()?;
+        candidate
+            .core
+            .native
+            .set_configured_placements(configured_window_placements(windows)?)
+            .map_err(|e| e.to_string())?;
+        Self::reconcile_rules(&mut candidate, descriptions)?;
+        Ok(candidate)
+    }
+    pub(in crate::editor::session) fn prepare_semantic_defaults(
+        &self,
+        rules: &[(&str, WindowPlacement)],
+        descriptions: NativeDescriptions<'_>,
+    ) -> Result<WindowCandidate, String> {
+        let mut candidate = self.candidate()?;
+        for (kind, placement) in rules {
+            candidate
+                .core
+                .native
+                .set_semantic_default(kind, *placement)
+                .map_err(|e| e.to_string())?;
+        }
+        Self::reconcile_rules(&mut candidate, descriptions)?;
+        Ok(candidate)
+    }
+    fn reconcile_rules(
+        candidate: &mut WindowCandidate,
+        descriptions: NativeDescriptions<'_>,
+    ) -> Result<(), String> {
+        let core = &mut candidate.core;
+        core.native
+            .reconcile(
+                &mut core.graph,
+                descriptions.signature,
+                descriptions.explorer_title,
+                descriptions.dashboard_title,
+                descriptions.picker_title,
+                descriptions.terminals,
+            )
+            .map_err(|e| e.to_string())?;
+        core.graph.validate().map_err(|e| e.to_string())?;
+        core.native.invalidate();
+        Ok(())
+    }
+    pub(in crate::editor::session) fn reset_runtime(
+        &mut self,
+        plugin_generations: &[(String, u64)],
+    ) -> Result<(), String> {
+        let mut candidate = self.candidate()?;
+        let core = &mut candidate.core;
+        for (plugin, load) in plugin_generations {
+            core.graph
+                .remove_owner_generation(&format!("plugin.{plugin}"), *load)
+                .map_err(|e| e.to_string())?;
+        }
+        core.native
+            .reset(&mut core.graph)
+            .map_err(|e| e.to_string())?;
+        core.editor
+            .reset(&mut core.graph)
+            .map_err(|e| e.to_string())?;
+        self.commit(candidate)?;
+        self.origin = Arc::new(());
+        Ok(())
+    }
+    pub(in crate::editor::session) fn remove_plugin_generation(
+        &mut self,
+        plugin: &str,
+        load: u64,
+    ) -> Result<(), String> {
+        let mut candidate = self.candidate()?;
+        candidate
+            .core
+            .graph
+            .remove_owner_generation(&format!("plugin.{plugin}"), load)
+            .map_err(|e| e.to_string())?;
+        candidate.core.native.invalidate();
+        self.commit(candidate)
+    }
+}
+
+impl WindowSession {
+    pub(in crate::editor::session) fn native_placement(
+        &self,
+        target: NativeSurfaceTarget,
+    ) -> Result<WindowPlacement, String> {
+        let ids = self
+            .native_ids()
+            .ids_for_target(target)
+            .ok_or_else(|| "native window target is not currently instantiated".to_owned())?;
+        self.graph()
+            .window(ids.window)
+            .map(|window| window.placement)
+            .ok_or_else(|| "native window graph identity is stale".to_owned())
+    }
+
+    pub(in crate::editor::session) fn resized_native_placement(
+        &self,
+        target: NativeSurfaceTarget,
+        amount: i16,
+    ) -> Result<WindowPlacement, String> {
+        let placement = match self.native_placement(target)? {
+            WindowPlacement::Docked { edge, size } => WindowPlacement::Docked {
+                edge,
+                size: size.saturating_add_signed(amount).max(1),
+            },
+            WindowPlacement::Floating(mut rect) => {
+                rect.width = rect.width.saturating_add_signed(amount).max(1);
+                rect.height = rect.height.saturating_add_signed(amount).max(1);
+                WindowPlacement::Floating(rect)
+            }
+            WindowPlacement::Tiled => {
+                return Err("editor tiled mutation is not yet graph-authoritative".into());
+            }
+            WindowPlacement::Fullscreen | WindowPlacement::Hidden | WindowPlacement::Overlay(_) => {
+                return Err("only docked or floating ordinary windows can be resized".into());
+            }
+        };
+        Ok(placement)
+    }
+    pub(in crate::editor::session) fn directional_native_placement(
+        &self,
+        target: NativeSurfaceTarget,
+        direction: crate::editor::FocusDirection,
+        step: i16,
+    ) -> Result<Option<WindowPlacement>, String> {
+        let placement = self.native_placement(target)?;
+        let placement = match placement {
+            WindowPlacement::Docked { edge, size } => {
+                let grow = match (edge, direction) {
+                    (DockEdge::Bottom, FocusDirection::Up)
+                    | (DockEdge::Top, FocusDirection::Down)
+                    | (DockEdge::Left, FocusDirection::Right)
+                    | (DockEdge::Right, FocusDirection::Left) => true,
+                    (DockEdge::Bottom, FocusDirection::Down)
+                    | (DockEdge::Top, FocusDirection::Up)
+                    | (DockEdge::Left, FocusDirection::Left)
+                    | (DockEdge::Right, FocusDirection::Right) => false,
+                    _ => return Ok(None),
+                };
+                WindowPlacement::Docked {
+                    edge,
+                    size: size
+                        .saturating_add_signed(if grow { step } else { -step })
+                        .max(1),
+                }
+            }
+            WindowPlacement::Floating(mut rect) => {
+                match direction {
+                    FocusDirection::Left => {
+                        rect.width = rect.width.saturating_add_signed(-step).max(1)
+                    }
+                    FocusDirection::Right => {
+                        rect.width = rect.width.saturating_add_signed(step).max(1)
+                    }
+                    FocusDirection::Up => {
+                        rect.height = rect.height.saturating_add_signed(step).max(1)
+                    }
+                    FocusDirection::Down => {
+                        rect.height = rect.height.saturating_add_signed(-step).max(1)
+                    }
+                }
+                WindowPlacement::Floating(rect)
+            }
+            WindowPlacement::Tiled => {
+                return Err("native tiled window resizing is unsupported".into());
+            }
+            WindowPlacement::Fullscreen | WindowPlacement::Hidden | WindowPlacement::Overlay(_) => {
+                return Err("focused window cannot be directionally resized".into());
+            }
+        };
+        Ok(Some(placement))
+    }
+}
+
+fn configured_window_placements(
+    windows: &crate::config::WindowsConfig,
+) -> Result<BTreeMap<String, WindowPlacement>, String> {
+    let mut placements = BTreeMap::new();
+    for rule in &windows.rules {
+        if rule.content_type.starts_with("plugin.") {
+            continue;
+        }
+        let placement = match &rule.placement {
+            crate::config::WindowPlacementConfig::Automatic => continue,
+            crate::config::WindowPlacementConfig::Docked { edge, size } => {
+                WindowPlacement::Docked {
+                    edge: match edge.as_str() {
+                        "left" => DockEdge::Left,
+                        "right" => DockEdge::Right,
+                        "top" => DockEdge::Top,
+                        "bottom" => DockEdge::Bottom,
+                        _ => return Err(format!("unknown configured dock edge `{edge}`")),
+                    },
+                    size: *size,
+                }
+            }
+            crate::config::WindowPlacementConfig::Floating {
+                x,
+                y,
+                width,
+                height,
+            } => WindowPlacement::Floating(WindowRect {
+                x: *x,
+                y: *y,
+                width: *width,
+                height: *height,
+            }),
+            crate::config::WindowPlacementConfig::Fullscreen => WindowPlacement::Fullscreen,
+            crate::config::WindowPlacementConfig::Hidden => WindowPlacement::Hidden,
+        };
+        placement.validate().map_err(|error| error.to_string())?;
+        if placements
+            .insert(rule.content_type.clone(), placement)
+            .is_some()
+        {
+            return Err(format!(
+                "duplicate configured window target `{}`",
+                rule.content_type
+            ));
+        }
+    }
+    Ok(placements)
+}

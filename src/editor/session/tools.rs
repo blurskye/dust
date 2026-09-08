@@ -149,11 +149,13 @@ impl InteractiveApplication {
                             ) {
                                 Ok(load) => {
                                     self.package_prepared.insert(id.clone(), (load, token));
-                                    self.ui.notification = Some(self.message(
-                                        "package_prepared",
-                                        &[("package", prepared.manifest.name)],
-                                    ));
-                                    self.ui.notification_error = false;
+                                    self.notify_message(
+                                        self.message(
+                                            "package_prepared",
+                                            &[("package", prepared.manifest.name)],
+                                        ),
+                                        false,
+                                    );
                                 }
                                 Err(error) => {
                                     let _ =
@@ -252,17 +254,23 @@ impl InteractiveApplication {
                                 .collect();
                             self.install_picker(self.message("package_picker_title", &[]), items);
                         } else if !prepared_operation && !activation_operation {
-                            self.ui.notification = Some(self.message(
-                                "package_operation_complete",
-                                &[
-                                    ("operation", result.operation),
-                                    (
-                                        "count",
-                                        result.verified.or(result.removed).unwrap_or(0).to_string(),
-                                    ),
-                                ],
-                            ));
-                            self.ui.notification_error = false;
+                            self.notify_message(
+                                self.message(
+                                    "package_operation_complete",
+                                    &[
+                                        ("operation", result.operation),
+                                        (
+                                            "count",
+                                            result
+                                                .verified
+                                                .or(result.removed)
+                                                .unwrap_or(0)
+                                                .to_string(),
+                                        ),
+                                    ],
+                                ),
+                                false,
+                            );
                         }
                     }
                     PackageServiceEvent::Failed {
@@ -281,7 +289,7 @@ impl InteractiveApplication {
                             let _ = self.plugins.disable_generation(&plugin, load);
                             self.remove_plugin_contribution_generation(&plugin, load);
                         }
-                        self.logs.record(
+                        self.notices.record(
                             LogLevel::Error,
                             "packages",
                             "operation-failed",

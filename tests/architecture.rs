@@ -173,7 +173,10 @@ fn editor_geometry_is_projected_from_the_universal_window_snapshot() {
     assert!(render.contains("compositor.projection.window("));
     assert!(render.contains("Some(compositor.graph_revision) == ui.window_graph_revision"));
     assert!(render.contains("place_workspace_frame("));
-    assert!(render.contains("render_picker(&mut frame, picker, config, rect)"));
+    assert!(
+        render
+            .contains("render_picker(&mut frame, picker, config, rect, ui.surface_content.picker)")
+    );
     assert!(render.contains("let layout = ui.editor_window_layout.as_ref()?;"));
     assert!(render.contains("layout.source_revision != source_revision"));
     assert!(!render.contains("crate::editor::LayoutNode"));
@@ -181,7 +184,7 @@ fn editor_geometry_is_projected_from_the_universal_window_snapshot() {
     assert!(!render.contains("WindowId(u64::MAX)"));
     assert!(!render.contains("unwrap_or(&fallback)"));
 
-    let bridge = module_source("src/editor/session/window_bridge.rs");
+    let bridge = module_source("src/editor/session/windows/bridge.rs");
     assert!(bridge.contains("state.window_revision()"));
     assert!(!bridge.contains("EditorWindowSignature"));
     assert!(!bridge.contains("editor_window_signature"));
@@ -190,9 +193,22 @@ fn editor_geometry_is_projected_from_the_universal_window_snapshot() {
     assert!(session.contains("pane_viewports("));
     assert!(session.contains("active_pane_viewport("));
     assert!(session.contains("self.terminal_window_rect()"));
-    assert!(session.contains("self.explorer_window_rect()"));
+    assert!(session.contains("self.window_session.content().explorer"));
     assert!(session.contains("apply_authoritative_editor_transaction"));
-    assert!(session.contains("Some(layout.graph_revision) == self.windows.revision()"));
+    let windows = module_source("src/editor/session/windows.rs");
+    assert!(windows.contains("source == Some(layout.source_revision)"));
+    assert!(windows.contains("self.core.graph.revision() == Some(layout.graph_revision)"));
+    assert!(windows.contains("project_with_tiled_insets("));
+    assert!(windows.contains("picker_content_geometry(picker, config, rect)"));
+    assert!(!windows.contains("use super::*"));
+    for forbidden in ["EditorState", "UiState", "InteractiveApplication"] {
+        assert!(
+            !windows
+                .split(|c: char| !c.is_alphanumeric() && c != '_')
+                .any(|token| token == forbidden),
+            "window projection owner imports {forbidden}"
+        );
+    }
 }
 
 #[test]
@@ -342,6 +358,8 @@ fn obsolete_and_ambiguous_source_owners_do_not_return() {
         "debugging",
         "observability",
         "test_support",
+        "editor/session/window_bridge.rs",
+        "editor/session/window_bridge",
     ] {
         assert!(
             !manifest.join("src").join(removed).exists(),

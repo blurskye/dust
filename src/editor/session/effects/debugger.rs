@@ -5,24 +5,21 @@ impl InteractiveApplication {
         &mut self,
         effect: AppEffect,
     ) -> Result<(), AppEffect> {
+        self.debugger_session.refresh(
+            &self.configuration.settings().debug,
+            self.workspace.version(),
+        );
         match effect {
             AppEffect::DapStart(program) => self.start_dap(None, program),
             AppEffect::DapConfigurationStart(name) => self.start_dap_configuration(&name),
-            AppEffect::DapWatchAdd(expression) => {
-                if !expression.is_empty()
-                    && expression.len() <= 64 * 1024
-                    && self.dap_watches.len() < self.configuration.settings.debug.maximum_watches
-                    && !self.dap_watches.contains(&expression)
-                {
-                    self.dap_watches.push(expression);
-                }
-            }
+            AppEffect::DapWatchAdd(expression) => self.debugger_session.add_watch(expression),
             AppEffect::DapWatchRemove(expression) => {
-                self.dap_watches.retain(|watch| watch != &expression)
+                self.debugger_session.remove_watch(&expression)
             }
             AppEffect::DapWatchList => self.open_dap_picker(
                 "watches",
-                self.dap_watches
+                self.debugger_session
+                    .watches()
                     .iter()
                     .cloned()
                     .map(|expression| {
@@ -39,39 +36,39 @@ impl InteractiveApplication {
                     .collect(),
             ),
             AppEffect::DapStop => {
-                if let Err(error) = self.dap.stop() {
+                if let Err(error) = self.debugger_session.stop() {
                     self.show_error(error);
                 }
             }
             AppEffect::DapContinue => {
-                if let Err(error) = self.dap.control(DapControl::Continue) {
+                if let Err(error) = self.debugger_session.control(DapControl::Continue) {
                     self.show_error(error);
                 }
             }
             AppEffect::DapPause => {
-                if let Err(error) = self.dap.control(DapControl::Pause) {
+                if let Err(error) = self.debugger_session.control(DapControl::Pause) {
                     self.show_error(error);
                 }
             }
             AppEffect::DapNext => {
-                if let Err(error) = self.dap.control(DapControl::Next) {
+                if let Err(error) = self.debugger_session.control(DapControl::Next) {
                     self.show_error(error);
                 }
             }
             AppEffect::DapStepIn => {
-                if let Err(error) = self.dap.control(DapControl::StepIn) {
+                if let Err(error) = self.debugger_session.control(DapControl::StepIn) {
                     self.show_error(error);
                 }
             }
             AppEffect::DapStepOut => {
-                if let Err(error) = self.dap.control(DapControl::StepOut) {
+                if let Err(error) = self.debugger_session.control(DapControl::StepOut) {
                     self.show_error(error);
                 }
             }
             AppEffect::DapConsole => {
                 let items = self
-                    .dap_console
-                    .iter()
+                    .debugger_session
+                    .console()
                     .enumerate()
                     .map(|(index, (adapter, line))| {
                         (
@@ -89,14 +86,22 @@ impl InteractiveApplication {
                 self.install_picker(self.message("dap_console_title", &[]), items);
             }
             AppEffect::DapSessions => {
-                let adapter = self.dap.active_adapter().unwrap_or("none").to_owned();
-                let configuration = self.active_debug_configuration.clone().unwrap_or_default();
+                let adapter = self
+                    .debugger_session
+                    .active_adapter()
+                    .unwrap_or("none")
+                    .to_owned();
+                let configuration = self
+                    .debugger_session
+                    .configuration()
+                    .map(str::to_owned)
+                    .unwrap_or_default();
                 let items = vec![(
                     PickerItem {
                         id: PickerItemId("dap-session:active".into()),
                         label: adapter,
                         detail: configuration,
-                        source: if self.dap.is_running() {
+                        source: if self.debugger_session.is_running() {
                             self.message("dap_session_running", &[])
                         } else {
                             self.message("dap_session_stopped", &[])
@@ -108,12 +113,12 @@ impl InteractiveApplication {
                 self.install_picker(self.message("dap_sessions_title", &[]), items);
             }
             AppEffect::DapThreads => {
-                if let Err(error) = self.dap.control(DapControl::Threads) {
+                if let Err(error) = self.debugger_session.control(DapControl::Threads) {
                     self.show_error(error)
                 }
             }
             AppEffect::DapStack(thread) => {
-                if let Err(error) = self.dap.control(DapControl::StackTrace {
+                if let Err(error) = self.debugger_session.control(DapControl::StackTrace {
                     thread_id: thread,
                     start: 0,
                     levels: 256,
@@ -122,12 +127,15 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::DapScopes(frame) => {
-                if let Err(error) = self.dap.control(DapControl::Scopes { frame_id: frame }) {
+                if let Err(error) = self
+                    .debugger_session
+                    .control(DapControl::Scopes { frame_id: frame })
+                {
                     self.show_error(error)
                 }
             }
             AppEffect::DapVariables(reference) => {
-                if let Err(error) = self.dap.control(DapControl::Variables {
+                if let Err(error) = self.debugger_session.control(DapControl::Variables {
                     reference,
                     start: 0,
                     count: 1000,
@@ -136,7 +144,7 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::DapEvaluate(expression) => {
-                if let Err(error) = self.dap.control(DapControl::Evaluate {
+                if let Err(error) = self.debugger_session.control(DapControl::Evaluate {
                     expression,
                     frame_id: None,
                     context: "repl".into(),
@@ -145,8 +153,8 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::DapRestart => {
-                if let Some(name) = self.active_debug_configuration.clone() {
-                    let _ = self.dap.stop();
+                if let Some(name) = self.debugger_session.configuration().map(str::to_owned) {
+                    let _ = self.debugger_session.stop();
                     self.start_dap_configuration(&name)
                 } else {
                     self.show_error(self.message("dap_no_configuration", &[]));
@@ -171,39 +179,18 @@ impl InteractiveApplication {
                 else {
                     return Ok(());
                 };
-                for value in [
-                    condition.as_ref(),
-                    hit_condition.as_ref(),
-                    log_message.as_ref(),
-                ]
-                .into_iter()
-                .flatten()
-                {
-                    if value.len() > 64 * 1024 || value.chars().any(|character| character == '\0') {
-                        self.show_error(self.message("dap_breakpoint_invalid", &[]));
-                        return Ok(());
-                    }
-                }
-                let rows = self.dap_breakpoints.entry(path.clone()).or_default();
-                if let Some(row) = rows.iter_mut().find(|row| row.line == line) {
-                    row.condition = condition;
-                    row.hit_condition = hit_condition;
-                    row.log_message = log_message;
-                } else if rows.len() < self.configuration.settings.debug.maximum_breakpoints {
-                    rows.push(DapSourceBreakpoint {
-                        path: path.clone(),
+                if let Err(error) = self.debugger_session.breakpoint(
+                    DapSourceBreakpoint {
+                        path,
                         line,
                         column: None,
                         condition,
                         hit_condition,
                         log_message,
-                    });
-                }
-                if self.dap.is_running() {
-                    let _ = self.dap.control(DapControl::SetBreakpoints {
-                        path,
-                        breakpoints: rows.clone(),
-                    });
+                    },
+                    false,
+                ) {
+                    self.show_error(error);
                 }
             }
             AppEffect::DapBreakpointToggle => {
@@ -221,53 +208,53 @@ impl InteractiveApplication {
                 else {
                     return Ok(());
                 };
-                let rows = self.dap_breakpoints.entry(path.clone()).or_default();
-                let removed = rows.iter().any(|row| row.line == line);
-                if removed {
-                    rows.retain(|row| row.line != line)
-                } else {
-                    rows.push(DapSourceBreakpoint {
+                match self.debugger_session.breakpoint(
+                    DapSourceBreakpoint {
                         path: path.clone(),
                         line,
                         column: None,
                         condition: None,
                         hit_condition: None,
                         log_message: None,
-                    })
-                }
-                let breakpoints = rows.clone();
-                if self.dap.is_running() {
-                    let _ = self.dap.control(DapControl::SetBreakpoints {
-                        path: path.clone(),
-                        breakpoints,
-                    });
-                }
-                self.ui.notification = Some(self.message(
-                    "dap_breakpoint_status",
-                    &[
-                        (
-                            "state",
-                            if removed {
-                                "removed".into()
-                            } else {
-                                "added".into()
-                            },
+                    },
+                    true,
+                ) {
+                    Ok(removed) => self.notify_message(
+                        self.message(
+                            "dap_breakpoint_status",
+                            &[
+                                (
+                                    "state",
+                                    if removed {
+                                        "removed".into()
+                                    } else {
+                                        "added".into()
+                                    },
+                                ),
+                                ("path", path.display().to_string()),
+                                ("line", line.to_string()),
+                            ],
                         ),
-                        ("path", path.display().to_string()),
-                        ("line", line.to_string()),
-                    ],
-                ));
-                self.ui.notification_error = false;
+                        false,
+                    ),
+                    Err(error) => self.show_error(error),
+                }
             }
+
             AppEffect::DapStatus => {
-                self.ui.notification = Some(self.message(
-                    "dap_status",
-                    &[(
-                        "adapter",
-                        self.dap.active_adapter().unwrap_or("none").to_owned(),
-                    )],
-                ));
-                self.ui.notification_error = false;
+                self.notify_message(
+                    self.message(
+                        "dap_status",
+                        &[(
+                            "adapter",
+                            self.debugger_session
+                                .active_adapter()
+                                .unwrap_or("none")
+                                .to_owned(),
+                        )],
+                    ),
+                    false,
+                );
             }
             effect => return Err(effect),
         }

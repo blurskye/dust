@@ -1,0 +1,626 @@
+use super::*;
+use crate::{
+    config::{Config, ProblemMatcherConfig, TaskConfig, TaskKind},
+    editor::StartupTarget,
+    editor::session::documents::{DocumentEvent, DocumentSession},
+    files::VfsWorker,
+    workspace::{RootIdentity, WorkspaceId, WorkspaceState},
+};
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
+fn fixture() -> (
+    tempfile::TempDir,
+    EditorState,
+    WorkspaceSession,
+    Config,
+    TaskSession,
+    DiagnosticSession,
+) {
+    let root = tempfile::tempdir().unwrap();
+    let scope = WorkspaceState::new(
+        WorkspaceId(1),
+        [("root".into(), RootIdentity::capture(root.path()).unwrap())],
+    )
+    .unwrap();
+    let workspace = WorkspaceSession::new(scope, root.path().join("trust"), 1, false, false, 1);
+    let editor = EditorState::new(root.path().into());
+    let matcher = ProblemMatcherConfig {
+        pattern: r"(?m)^(?P<path>[^:]+):(?P<line>\d+):(?P<column>\d+):(?P<message>[^\n]+)$".into(),
+        path_group: "path".into(),
+        line_group: "line".into(),
+        column_group: Some("column".into()),
+        severity_group: None,
+        message_group: "message".into(),
+        name_group: None,
+        status_group: None,
+        duration_group: None,
+    };
+    let mut config = Config::default();
+    for name in ["first", "second"] {
+        config.tasks.insert(
+            name.into(),
+            TaskConfig {
+                kind: TaskKind::Linter,
+                executable: "/bin/sh".into(),
+                arguments: vec![],
+                cwd: None,
+                environment: BTreeMap::new(),
+                dependencies: vec![],
+                timeout_ms: None,
+                stdin: false,
+                matcher: Some(matcher.clone()),
+            },
+        );
+    }
+    let tasks = TaskSession::new(&config);
+    (
+        root,
+        editor,
+        workspace,
+        config,
+        tasks,
+        DiagnosticSession::new(100, 100),
+    )
+}
+// Simulated completion metadata inside the private owner; the connected dispatch test
+// separately exercises actual authorization, process output and worker submission.
+fn completed(
+    tasks: &mut TaskSession,
+    config: &Config,
+    workspace: &WorkspaceSession,
+    editor: &EditorState,
+    diagnostics: &mut DiagnosticSession,
+    name: &str,
+    bytes: &[u8],
+) -> RunningTask {
+    let adapter = AdapterContext::Linter {
+        matcher: config.tasks[name].matcher.clone().unwrap(),
+    };
+    tasks
+        .plan_checked(name, &adapter, config, workspace, 1)
+        .unwrap();
+    let (step, _) = tasks.step(name, workspace, 1).unwrap();
+    tasks.statuses.insert(name.into(), "process exited".into());
+    let source = TaskDiagnosticRun::capture(name, editor, workspace, 1).unwrap();
+    diagnostics.activate(source.producer().clone());
+    RunningTask {
+        output: bytes.to_vec(),
+        key: step.key,
+        requested: name.into(),
+        name: name.into(),
+        adapter,
+        root: editor.workspace_root.clone(),
+        diagnostic_source: Some(source),
+    }
+}
+fn documents(
+    vfs: VfsWorker,
+    editor: &EditorState,
+    workspace: &WorkspaceSession,
+) -> DocumentSession {
+    DocumentSession::new(
+        vfs,
+        &StartupTarget::Dashboard {
+            root: editor.workspace_root.clone(),
+        },
+        editor.window_version(),
+        workspace.root_revision(),
+        16,
+    )
+}
+fn reply(
+    documents: &mut DocumentSession,
+    editor: &EditorState,
+    workspace: &WorkspaceSession,
+) -> TaskReadReply {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if let Some(DocumentEvent::TaskRead(reply)) = documents
+            .poll(&editor.window_version(), workspace.root_revision())
+            .unwrap()
+        {
+            return reply;
+        }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+}
+#[test]
+fn linter_owner_validates_whole_sources_and_retires_original_publications() {
+    let (root, mut editor, workspace, config, mut tasks, mut diagnostics) = fixture();
+    let (id, _) = editor.open_text(
+        TextBuffer::from_text("abc\n"),
+        Some(root.path().join("open")),
+    );
+    for name in ["first", "second"] {
+        let task = completed(
+            &mut tasks,
+            &config,
+            &workspace,
+            &editor,
+            &mut diagnostics,
+            name,
+            b"open:1:1:ok\n",
+        );
+        tasks
+            .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+            .unwrap();
+        let Some(LinterUpdate::Publish { producer, batches }) =
+            tasks.next_linter_update(&editor, &workspace, 1, &diagnostics)
+        else {
+            panic!("missing publication")
+        };
+        diagnostics
+            .replace_source(&producer, batches, &editor)
+            .unwrap();
+        assert!(
+            tasks
+                .next_linter_update(&editor, &workspace, 1, &diagnostics)
+                .is_none()
+        );
+    }
+    assert_eq!(diagnostics.choices().count(), 2);
+    let task = completed(
+        &mut tasks,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "first",
+        b"open:1:1:good\nopen:0:1:bad\n",
+    );
+    assert!(
+        tasks
+            .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+            .is_err()
+    );
+    assert_eq!(diagnostics.choices().count(), 1); // independent second producer survives
+    let task = completed(
+        &mut tasks,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "first",
+        b"open:1:1:old\n",
+    );
+    tasks
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+        .unwrap();
+    editor.open_text(
+        TextBuffer::from_text("unrelated"),
+        Some(root.path().join("other")),
+    );
+    editor.buffers[id].text = TextBuffer::from_text("abc\n");
+    assert!(matches!(
+        tasks.next_linter_update(&editor, &workspace, 1, &diagnostics),
+        Some(LinterUpdate::Failed(_))
+    ));
+    assert!(
+        tasks
+            .next_linter_update(&editor, &workspace, 1, &diagnostics)
+            .is_none()
+    );
+    let task = completed(
+        &mut tasks,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "first",
+        b"\xff",
+    );
+    let foreign = EditorState::new(root.path().into());
+    assert!(
+        tasks
+            .begin_linter(task, &foreign, &workspace, 1, &diagnostics, 100, 1024)
+            .unwrap_err()
+            .contains("source retired")
+    );
+    // Supersession discards the old build, never the new producer's set.
+    let task = completed(
+        &mut tasks,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "first",
+        b"unopened:1:1:old",
+    );
+    tasks
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+        .unwrap();
+    let task = completed(
+        &mut tasks,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "first",
+        b"open:1:1:new",
+    );
+    tasks
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+        .unwrap();
+    assert!(matches!(
+        tasks.next_linter_update(&editor, &workspace, 1, &diagnostics),
+        Some(LinterUpdate::Failed(_))
+    ));
+    let Some(LinterUpdate::Publish { producer, batches }) =
+        tasks.next_linter_update(&editor, &workspace, 1, &diagnostics)
+    else {
+        panic!("replacement missing")
+    };
+    diagnostics
+        .replace_source(&producer, batches, &editor)
+        .unwrap();
+    assert_eq!(diagnostics.choices().count(), 2);
+    let task = completed(
+        &mut tasks,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "first",
+        b"unopened:1:1:stopped",
+    );
+    tasks
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+        .unwrap();
+    let stopped = tasks.stop("first").unwrap().unwrap();
+    diagnostics.clear_source(&stopped);
+    assert!(matches!(
+        tasks.next_linter_update(&editor, &workspace, 1, &diagnostics),
+        Some(LinterUpdate::Failed(_))
+    ));
+    assert_eq!(diagnostics.choices().count(), 1);
+    tasks.linters.next = u64::MAX;
+    let task = completed(
+        &mut tasks,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "first",
+        b"open:1:1:x",
+    );
+    assert!(
+        tasks
+            .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+            .unwrap_err()
+            .contains("identity exhausted")
+    );
+}
+#[test]
+fn linter_reads_reserve_real_capacity_keep_worker_identity_and_refuse_stale_decode() {
+    let (root, mut editor, workspace, config, mut tasks, mut diagnostics) = fixture();
+    for path in ["a", "b"] {
+        std::fs::write(root.path().join(path), b"abc\n").unwrap();
+    }
+    let (vfs, release) = VfsWorker::start_gated_for_test(1);
+    let mut docs = documents(vfs, &editor, &workspace);
+    let task = completed(
+        &mut tasks,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "first",
+        b"a:1:1:a\nb:1:1:b\n",
+    );
+    tasks
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+        .unwrap();
+    drop(
+        tasks
+            .linter_read(&editor, &workspace, &1, &diagnostics)
+            .unwrap(),
+    );
+    assert_eq!(
+        tasks.linters.builds.values().next().unwrap().unread.len(),
+        2
+    );
+    docs.submit_linter_read(
+        tasks
+            .linter_read(&editor, &workspace, &1, &diagnostics)
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        !docs
+            .submit_linter_read(
+                tasks
+                    .linter_read(&editor, &workspace, &1, &diagnostics)
+                    .unwrap()
+            )
+            .unwrap()
+    );
+    assert_eq!(
+        tasks.linters.builds.values().next().unwrap().unread.len(),
+        1
+    );
+    tasks.retire_workspace();
+    assert_eq!(
+        tasks.linters.builds.values().next().unwrap().pending.len(),
+        1
+    );
+    let key = tasks.linter_cancellations().pop().unwrap();
+    tasks.linter_cancelled(docs.cancel_linter_read(&key).unwrap());
+    assert!(docs.cancel_linter_read(&key).is_none());
+    assert!(matches!(
+        tasks.next_linter_update(&editor, &workspace, 1, &diagnostics),
+        Some(LinterUpdate::Failed(_))
+    ));
+    release.send(()).unwrap();
+    // Full capacity is backpressure, not a failed build: release and resume the exact unread path.
+    let (vfs, release) = VfsWorker::start_gated_for_test(1);
+    let mut resumed = documents(vfs, &editor, &workspace);
+    let task = completed(
+        &mut tasks,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "first",
+        b"a:1:1:a\nb:1:1:b\n",
+    );
+    tasks
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+        .unwrap();
+    assert!(
+        resumed
+            .submit_linter_read(
+                tasks
+                    .linter_read(&editor, &workspace, &1, &diagnostics)
+                    .unwrap()
+            )
+            .unwrap()
+    );
+    assert!(
+        !resumed
+            .submit_linter_read(
+                tasks
+                    .linter_read(&editor, &workspace, &1, &diagnostics)
+                    .unwrap()
+            )
+            .unwrap()
+    );
+    release.send(()).unwrap();
+    tasks
+        .accept_linter_read(
+            reply(&mut resumed, &editor, &workspace),
+            &editor,
+            &workspace,
+            1,
+            &diagnostics,
+        )
+        .unwrap();
+    assert!(
+        resumed
+            .submit_linter_read(
+                tasks
+                    .linter_read(&editor, &workspace, &1, &diagnostics)
+                    .unwrap()
+            )
+            .unwrap()
+    );
+    tasks
+        .accept_linter_read(
+            reply(&mut resumed, &editor, &workspace),
+            &editor,
+            &workspace,
+            1,
+            &diagnostics,
+        )
+        .unwrap();
+    assert!(
+        matches!(tasks.next_linter_update(&editor,&workspace,1,&diagnostics),Some(LinterUpdate::Publish{batches,..}) if batches.len()==2)
+    );
+    // Two real worker namespaces may allocate the same numeric ID, never the same key.
+    let (vfs, release) = VfsWorker::start_gated_for_test(1);
+    let mut first = documents(vfs, &editor, &workspace);
+    let task = completed(
+        &mut tasks,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "first",
+        b"a:1:1:a\n",
+    );
+    tasks
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+        .unwrap();
+    first
+        .submit_linter_read(
+            tasks
+                .linter_read(&editor, &workspace, &1, &diagnostics)
+                .unwrap(),
+        )
+        .unwrap();
+    let mut other = TaskSession::new(&config);
+    let mut second = documents(VfsWorker::start(1), &editor, &workspace);
+    let task = completed(
+        &mut other,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "second",
+        b"a:1:1:b\n",
+    );
+    other
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+        .unwrap();
+    second
+        .submit_linter_read(
+            other
+                .linter_read(&editor, &workspace, &1, &diagnostics)
+                .unwrap(),
+        )
+        .unwrap();
+    let foreign = reply(&mut second, &editor, &workspace);
+    assert_eq!(
+        foreign.id(),
+        tasks
+            .linters
+            .builds
+            .values()
+            .next()
+            .unwrap()
+            .pending
+            .keys()
+            .copied()
+            .next()
+            .unwrap()
+    );
+    let before = TextBuffer::test_materializations();
+    assert!(
+        tasks
+            .accept_linter_read(foreign, &editor, &workspace, 1, &diagnostics)
+            .unwrap_err()
+            .contains("unowned")
+    );
+    assert_eq!(TextBuffer::test_materializations(), before);
+    editor.open_text(TextBuffer::from_text("new"), Some(root.path().join("a")));
+    let after_open = TextBuffer::test_materializations();
+    release.send(()).unwrap();
+    tasks
+        .accept_linter_read(
+            reply(&mut first, &editor, &workspace),
+            &editor,
+            &workspace,
+            1,
+            &diagnostics,
+        )
+        .unwrap();
+    assert_eq!(TextBuffer::test_materializations(), after_open);
+    assert!(matches!(
+        tasks.next_linter_update(&editor, &workspace, 1, &diagnostics),
+        Some(LinterUpdate::Failed(_))
+    ));
+    other.finish_linter_obligations("fixture consumed foreign reply");
+    // Actual stopped worker produces one sealed terminal and no resurrected source.
+    let task = completed(
+        &mut tasks,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "first",
+        b"b:1:1:b\n",
+    );
+    tasks
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+        .unwrap();
+    let (vfs, release) = VfsWorker::start_gated_for_test(1);
+    let mut stopped = documents(vfs, &editor, &workspace);
+    stopped
+        .submit_linter_read(
+            tasks
+                .linter_read(&editor, &workspace, &1, &diagnostics)
+                .unwrap(),
+        )
+        .unwrap();
+    stopped.stop_worker();
+    release.send(()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if let Some(DocumentEvent::Stopped { task_reads, .. }) = stopped
+            .poll(&editor.window_version(), workspace.root_revision())
+            .unwrap()
+        {
+            tasks.linter_worker_stopped(task_reads);
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    assert!(matches!(
+        tasks.next_linter_update(&editor, &workspace, 1, &diagnostics),
+        Some(LinterUpdate::Failed(_))
+    ));
+    assert!(
+        tasks
+            .next_linter_update(&editor, &workspace, 1, &diagnostics)
+            .is_none()
+    );
+    let task = completed(
+        &mut tasks,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "first",
+        b"b:1:1:b",
+    );
+    tasks
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 2)
+        .unwrap();
+    let mut bounded = documents(VfsWorker::start(1), &editor, &workspace);
+    bounded
+        .submit_linter_read(
+            tasks
+                .linter_read(&editor, &workspace, &1, &diagnostics)
+                .unwrap(),
+        )
+        .unwrap();
+    let before = TextBuffer::test_materializations();
+    tasks
+        .accept_linter_read(
+            reply(&mut bounded, &editor, &workspace),
+            &editor,
+            &workspace,
+            1,
+            &diagnostics,
+        )
+        .unwrap();
+    assert_eq!(TextBuffer::test_materializations(), before);
+    assert!(matches!(
+        tasks.next_linter_update(&editor, &workspace, 1, &diagnostics),
+        Some(LinterUpdate::Failed(_))
+    ));
+    // Keep the old root in an owned temp directory, preventing inode reuse.
+    let task = completed(
+        &mut tasks,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "first",
+        b"b:1:1:b",
+    );
+    tasks
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+        .unwrap();
+    let (vfs, release) = VfsWorker::start_gated_for_test(1);
+    let mut replaced = documents(vfs, &editor, &workspace);
+    replaced
+        .submit_linter_read(
+            tasks
+                .linter_read(&editor, &workspace, &1, &diagnostics)
+                .unwrap(),
+        )
+        .unwrap();
+    let retained = tempfile::tempdir().unwrap();
+    std::fs::rename(root.path(), retained.path().join("old-root")).unwrap();
+    std::fs::create_dir(root.path()).unwrap();
+    std::fs::write(root.path().join("b"), b"abc\n").unwrap();
+    release.send(()).unwrap();
+    let before = TextBuffer::test_materializations();
+    tasks
+        .accept_linter_read(
+            reply(&mut replaced, &editor, &workspace),
+            &editor,
+            &workspace,
+            1,
+            &diagnostics,
+        )
+        .unwrap();
+    assert_eq!(TextBuffer::test_materializations(), before);
+    assert!(
+        matches!(tasks.next_linter_update(&editor,&workspace,1,&diagnostics),Some(LinterUpdate::Failed(error)) if error.contains("filesystem identity changed"))
+    );
+}

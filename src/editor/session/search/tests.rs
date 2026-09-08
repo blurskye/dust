@@ -1,0 +1,351 @@
+use super::*;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
+fn scope(root: &std::path::Path) -> WorkspaceVersion {
+    let identity = crate::workspace::RootIdentity::capture(root).unwrap();
+    let state = crate::workspace::WorkspaceState::new(
+        crate::workspace::WorkspaceId(1),
+        [("root".into(), identity)],
+    )
+    .unwrap();
+    crate::editor::session::workspace::WorkspaceSession::new(
+        state,
+        root.join("trust.json"),
+        1,
+        false,
+        false,
+        1,
+    )
+    .version()
+}
+fn found() -> WorkspaceSearchMatch {
+    WorkspaceSearchMatch {
+        id: "one".into(),
+        root: "/fixture".into(),
+        canonical_path: "/fixture/file".into(),
+        relative_path: "file".into(),
+        line: 0,
+        column: 0,
+        end_line: 0,
+        end_column: 6,
+        range: 0..6,
+        line_text: "needle".into(),
+        snapshot: Arc::from(&b"needle\n"[..]),
+    }
+}
+#[test]
+fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = scope(directory.path());
+    let mut owner = SearchSession::default();
+    let ticket = owner
+        .prepare_preview(
+            "file".into(),
+            "title".into(),
+            "loading".into(),
+            source.clone(),
+            1,
+        )
+        .1
+        .unwrap();
+    let mut other = SearchSession::default();
+    assert!(!other.admit_preview(ticket, crate::files::RequestId(1), 8));
+    let ticket = owner
+        .prepare_preview(
+            "second".into(),
+            "second".into(),
+            "loading".into(),
+            source.clone(),
+            1,
+        )
+        .1
+        .unwrap();
+    assert!(owner.admit_preview(ticket, crate::files::RequestId(2), 8));
+    assert_eq!(owner.clear_preview(), Some(crate::files::RequestId(2)));
+    assert!(!owner.accept_preview(
+        crate::files::RequestId(2),
+        &Ok(vec![255; 64]),
+        source.clone(),
+        1
+    ));
+    assert!(owner.preview().is_none());
+    let ticket = owner
+        .prepare_preview(
+            "third".into(),
+            "third".into(),
+            "loading".into(),
+            source.clone(),
+            1,
+        )
+        .1
+        .unwrap();
+    assert!(owner.admit_preview(ticket, crate::files::RequestId(3), 8));
+    assert!(owner.accept_preview(
+        crate::files::RequestId(3),
+        &Ok(vec![255; 9]),
+        source.clone(),
+        1
+    ));
+    assert_eq!(
+        owner.preview().as_ref().unwrap().lines,
+        ["preview exceeds admitted byte limit"]
+    );
+    assert!(!owner.accept_preview(
+        crate::files::RequestId(3),
+        &Ok(b"late".to_vec()),
+        source.clone(),
+        1
+    ));
+    let ticket = owner
+        .prepare_preview(
+            "fourth".into(),
+            "fourth".into(),
+            "loading".into(),
+            source.clone(),
+            1,
+        )
+        .1
+        .unwrap();
+    assert!(owner.admit_preview(ticket, crate::files::RequestId(4), 8));
+    assert!(owner.accept_preview(
+        crate::files::RequestId(4),
+        &Ok(b"valid".to_vec()),
+        source.clone(),
+        1
+    ));
+    assert_eq!(owner.preview().as_ref().unwrap().lines, ["valid"]);
+    let ticket = owner
+        .prepare_preview(
+            "fifth".into(),
+            "fifth".into(),
+            "loading".into(),
+            source.clone(),
+            1,
+        )
+        .1
+        .unwrap();
+    assert!(owner.admit_preview(ticket, crate::files::RequestId(5), 8));
+    assert!(owner.accept_preview(crate::files::RequestId(5), &Ok(vec![255; 8]), source, 2));
+    assert!(owner.preview().is_none());
+}
+#[test]
+fn completed_stream_and_idle_snapshot_have_one_accepted_lifetime() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = scope(directory.path());
+    let mut owner = SearchSession {
+        generation: Some(1),
+        scope: Some((source.clone(), 1)),
+        intent: Some(Intent::Find),
+        ..SearchSession::default()
+    };
+    let mut broker = SearchWorkflowBroker::try_new(SearchWorkflowSpec {
+        id: SearchWorkflowId(1),
+        source: SearchSourceKind::Grep,
+        matcher: SearchMatcherKind::Literal,
+        presenter: SearchPresenterKind::Picker,
+        maximum_items: 2,
+        maximum_bytes: 4096,
+    })
+    .unwrap();
+    broker
+        .begin(SearchRequestId(1), SearchStreamGeneration(1), "")
+        .unwrap();
+    owner.workflow = Some(broker);
+    assert!(
+        owner
+            .accept(WorkspaceSearchEvent::Batch {
+                generation: 2,
+                matches: vec![found()]
+            })
+            .is_none()
+    );
+    assert!(owner.matches().is_empty());
+    assert!(matches!(
+        owner.accept(WorkspaceSearchEvent::Batch {
+            generation: 1,
+            matches: vec![found()]
+        }),
+        Some(SearchUpdate::Batch)
+    ));
+    let item = found();
+    owner.preview_snapshot(&item, 64);
+    let epoch = owner.preview_epoch.clone();
+    let lines = owner.preview().as_ref().unwrap().lines.as_ptr();
+    for _ in 0..256 {
+        owner.preview_snapshot(&item, 64);
+        assert!(Arc::ptr_eq(&epoch, &owner.preview_epoch));
+        assert_eq!(lines, owner.preview().as_ref().unwrap().lines.as_ptr());
+    }
+    owner.poll(scope(directory.path()), 1);
+    assert!(owner.matches().is_empty());
+    assert!(!owner.pending());
+    assert!(owner.workflow().is_none());
+}
+#[test]
+#[ignore = "explicit search/preview ownership cost probe"]
+fn search_owner_cost_probe() {
+    let count = std::env::var("DUST_COST_ITERATIONS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(1000)
+        .clamp(1, 10000);
+    let mut item = found();
+    item.snapshot = Arc::from("0123456789abcdef\n".repeat(8000).into_bytes());
+    item.line = 4096;
+    item.range = 69632..69638;
+    let mode = std::env::var("DUST_COST_CASE").unwrap_or("unchanged_snapshot".into());
+    let max = 65536;
+    let mut owner = SearchSession::default();
+    owner.preview_snapshot(&item, max);
+    let before = (
+        crate::ui::window::WindowGraph::test_clone_count(),
+        crate::editor::EditorState::test_clone_count(),
+        crate::editor::text::TextBuffer::test_materializations(),
+    );
+    eprintln!("DUST_ALLOC_START");
+    let start = Instant::now();
+    for n in 0..count {
+        if mode == "changed_snapshot" {
+            item.range = 69632 + (n % 2)..69638 + (n % 2);
+        }
+        std::hint::black_box(owner.preview_snapshot(&item, max));
+    }
+    let elapsed = start.elapsed();
+    eprintln!("DUST_ALLOC_END");
+    let after = crate::editor::text::TextBuffer::test_materializations();
+    println!(
+        "case={mode} iterations={count} elapsed_ns={} graph_copies={} editor_copies={} text_decodes={} text_displays={}",
+        elapsed.as_nanos(),
+        crate::ui::window::WindowGraph::test_clone_count() - before.0,
+        crate::editor::EditorState::test_clone_count() - before.1,
+        after.0 - before.2.0,
+        after.1 - before.2.1
+    );
+    assert!(elapsed < Duration::from_secs(2));
+}
+
+#[test]
+fn bounded_drain_publishes_only_the_final_accepted_store_disposition() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = scope(directory.path());
+    for failed in [false, true] {
+        let mut workflow = SearchWorkflowBroker::try_new(SearchWorkflowSpec {
+            id: SearchWorkflowId(1),
+            source: SearchSourceKind::Grep,
+            matcher: SearchMatcherKind::Literal,
+            presenter: SearchPresenterKind::Picker,
+            maximum_items: 2,
+            maximum_bytes: 4096,
+        })
+        .unwrap();
+        workflow
+            .begin(SearchRequestId(1), SearchStreamGeneration(1), "")
+            .unwrap();
+        let mut events = vec![WorkspaceSearchEvent::Batch {
+            generation: 1,
+            matches: vec![found()],
+        }];
+        events.push(if failed {
+            WorkspaceSearchEvent::Failed {
+                generation: 1,
+                error: "fixture failure".into(),
+            }
+        } else {
+            WorkspaceSearchEvent::Complete {
+                generation: 1,
+                summary: crate::files::WorkspaceSearchSummary::default(),
+            }
+        });
+        let mut owner = SearchSession {
+            grep: WorkspaceSearchService::events_for_test(events),
+            generation: Some(1),
+            scope: Some((source.clone(), 1)),
+            workflow: Some(workflow),
+            intent: Some(Intent::Find),
+            ..SearchSession::default()
+        };
+        let updates = owner.poll(source.clone(), 1);
+        assert_eq!(updates.len(), 1);
+        assert!(!owner.pending());
+        if failed {
+            assert!(matches!(&updates[0], SearchUpdate::Failed(_)));
+            assert!(owner.matches().is_empty());
+        } else {
+            assert!(matches!(&updates[0], SearchUpdate::Complete { .. }));
+            assert_eq!(owner.matches().len(), 1);
+        }
+        assert!(owner.poll(source.clone(), 1).is_empty());
+    }
+}
+
+#[test]
+fn picker_epochs_scope_and_close_preserve_only_current_interaction() {
+    use crate::{
+        ui::PickerSurfaceKind,
+        workspace::{PickerAction, PickerItem, PickerItemId},
+    };
+    let root = tempfile::tempdir().unwrap();
+    let source = scope(root.path());
+    let mut owner = SearchSession::default();
+    let content = || PickerContent {
+        surface: PickerSurfaceKind::Generic,
+        origin: PickerOrigin::General,
+        title: "Picker".into(),
+        items: (0..45)
+            .map(|n| PickerItem {
+                id: PickerItemId(format!("row-{n:02}")),
+                label: format!("jk {n:02}"),
+                detail: String::new(),
+                source: String::new(),
+                action: PickerAction::None,
+            })
+            .collect(),
+        query: String::new(),
+        complete: true,
+    };
+    let epoch = owner
+        .install_picker(content(), 100, source.clone(), 1)
+        .unwrap();
+    assert!(owner.owns_picker_epoch(&epoch));
+    assert!(!SearchSession::default().owns_picker_epoch(&epoch));
+    assert_eq!(owner.picker_insert("jk"), Some("jk".into()));
+    for _ in 0..17 {
+        owner.picker_move(1, false);
+    }
+    assert_eq!(owner.picker_scroll(5), Some(13));
+    assert_eq!(owner.picker_scroll(40), Some(13));
+    assert_eq!(
+        owner.picker().unwrap().selected_item().unwrap().id.0,
+        "row-17"
+    );
+    assert!(!owner.picker_is_stale(source.clone(), 1));
+    assert!(owner.picker_is_stale(source.clone(), 2));
+    assert!(owner.picker_is_stale(scope(root.path()), 1));
+    let next = owner
+        .install_picker(content(), 100, source.clone(), 1)
+        .unwrap();
+    assert!(!owner.owns_picker_epoch(&epoch));
+    let (_, ticket) =
+        owner.prepare_preview("file".into(), "File".into(), "Loading".into(), source, 1);
+    assert!(owner.admit_preview(ticket.unwrap(), crate::files::RequestId(9), 64));
+    assert_eq!(owner.close_picker(), Some(crate::files::RequestId(9)));
+    assert!(!owner.owns_picker_epoch(&next));
+    assert!(owner.picker_projection().is_none());
+    assert!(owner.preview().is_none());
+    assert_eq!(owner.close_picker(), None);
+    owner.open_live();
+    owner.generation = Some(9);
+    owner.grep = WorkspaceSearchService::events_for_test(vec![WorkspaceSearchEvent::Batch {
+        generation: 9,
+        matches: vec![found()],
+    }]);
+    owner
+        .install_picker(content(), 100, scope(root.path()), 1)
+        .unwrap();
+    assert!(!owner.live());
+    assert!(!owner.pending());
+    assert!(owner.poll(scope(root.path()), 1).is_empty());
+    assert!(owner.matches().is_empty());
+}

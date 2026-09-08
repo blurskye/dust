@@ -1,4 +1,9 @@
-use super::*;
+use super::{
+    AppEffect, BTreeMap, CommandInvocation, CommandRegistry, CommandValue, FromStr, HashMap,
+    InputContextLayer, InputContextRegistry, InvocationSource, KeyEvent, KeymapInspection,
+    KeymapLayer, KeymapOperation, ResolvedKeyGroup, ResolvedKeymaps, ReverseBinding,
+    configured_context, invocation_fingerprint, keymap_entries_for_policy,
+};
 
 pub fn reload_keymaps(
     commands: &CommandRegistry<AppEffect>,
@@ -958,7 +963,7 @@ pub(in crate::editor::session) fn compile_typed_keymap_entries(
             InputContextLayer::User => KeymapLayer::Mode,
         };
         let keymap = result
-            .resolvers
+            .bindings
             .entry(context.clone())
             .or_default()
             .layer_mut(layer);

@@ -1,4 +1,5 @@
 use super::*;
+use crate::editor::text::PositionEncoding;
 
 #[test]
 fn installed_language_server_autostarts_after_workspace_trust_is_exact() {
@@ -8,7 +9,7 @@ fn installed_language_server_autostarts_after_workspace_trust_is_exact() {
         crate::editor::text::TextBuffer::from_text("fn main() {}"),
         Some(path),
     );
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
     app.tools
         .retain(|entry| entry.definition.kind != crate::tools::ToolKind::Lsp);
     let false_executable = crate::tools::discover_executable("false").expect("false executable");
@@ -37,8 +38,8 @@ fn installed_language_server_autostarts_after_workspace_trust_is_exact() {
     assert!(!app.ui.notification_error);
 
     prepare_trust_identity(&mut app);
-    for root in app.workspace.roots() {
-        app.trust_store.trust(root.identity.clone());
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone());
     }
     app.reconcile_workspace_trust();
     app.sync_lsp_document();
@@ -94,12 +95,12 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
         status: ToolStatus::Installed(false_executable),
     });
     prepare_trust_identity(&mut app);
-    for root in app.workspace.roots() {
-        app.trust_store.trust(root.identity.clone());
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone());
     }
     app.reconcile_workspace_trust();
-    app.execution_revalidated = true;
     app.start_lsp(Some("nested-rust".into()));
+    wait_execution_validation(&mut app);
     let deadline = Instant::now() + Duration::from_secs(2);
     while app.pending_lsp_project_root.is_some() {
         app.process_lsp_project_root();
@@ -175,14 +176,14 @@ fn nested_marker_backed_project_gets_its_own_dap_preflight_root() {
         status: ToolStatus::Installed(false_executable),
     });
     prepare_trust_identity(&mut app);
-    for root in app.workspace.roots() {
-        app.trust_store.trust(root.identity.clone());
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone());
     }
     app.reconcile_workspace_trust();
-    app.execution_revalidated = true;
     app.start_dap(Some("nested-rust-dap".into()), Some(source.clone()));
+    wait_execution_validation(&mut app);
     let deadline = Instant::now() + Duration::from_secs(2);
-    while app.pending_dap_project_root.is_some() {
+    while app.debugger_session.debug_discovering() {
         app.process_dap_project_root();
         assert!(
             Instant::now() < deadline,
@@ -191,16 +192,8 @@ fn nested_marker_backed_project_gets_its_own_dap_preflight_root() {
         thread::yield_now();
     }
     let action = app
-        .pending_execution_preflight
-        .values()
-        .find_map(|action| match action {
-            super::PendingExecutionPreflight::DapToolAdapter {
-                project_root,
-                program,
-                ..
-            } => Some((project_root, program)),
-            _ => None,
-        })
+        .debugger_session
+        .debug_preflight_paths()
         .expect("nested project must queue a DAP preflight");
     assert_eq!(action.0, &nested);
     assert_eq!(action.1, &source);
@@ -254,8 +247,8 @@ fn untrusted_workspace_blocks_project_local_language_server_launch() {
             .is_some_and(|message| message.contains("trust"))
     );
     prepare_trust_identity(&mut app);
-    for root in app.workspace.roots() {
-        app.trust_store.trust(root.identity.clone());
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone());
     }
     app.reconcile_workspace_trust();
     fs::write(
@@ -363,11 +356,11 @@ fn unopened_multifile_workspace_edit_previews_then_applies_only_to_editor_buffer
         crate::editor::text::PositionEncoding::Utf16,
     );
     let deadline = Instant::now() + Duration::from_secs(2);
-    while app.workspace_proposal.is_none() && Instant::now() < deadline {
+    while app.workspace_edits.proposal().is_none() && Instant::now() < deadline {
         app.process_vfs_results();
         thread::sleep(Duration::from_millis(5));
     }
-    assert!(app.workspace_proposal.is_some());
+    assert!(app.workspace_edits.proposal().is_some());
     assert_eq!(app.state.buffers[first_buffer].text.to_string(), "abc");
     assert_eq!(fs::read_to_string(&second).expect("disk"), "xyz");
     app.accept_workspace_proposal();
@@ -382,6 +375,70 @@ fn unopened_multifile_workspace_edit_previews_then_applies_only_to_editor_buffer
     assert_eq!(app.state.buffers[second_buffer].text.to_string(), "xYz");
     assert!(app.state.buffers[first_buffer].dirty && app.state.buffers[second_buffer].dirty);
     assert_eq!(fs::read_to_string(&second).expect("disk remains"), "xyz");
+
+    let target = first.with_file_name("renamed.rs");
+    let rename = || crate::language::lsp::LspWorkspaceEdit {
+        documents: Vec::new(),
+        resources: vec![crate::language::lsp::LspResourceOperation::Rename {
+            old_uri: crate::language::lsp::file_uri(&first),
+            new_uri: crate::language::lsp::file_uri(&target),
+            overwrite: false,
+            ignore_if_exists: false,
+        }],
+    };
+    app.begin_workspace_proposal(
+        "cancelled resource".into(),
+        rename(),
+        None,
+        PositionEncoding::Utf16,
+    );
+    app.reject_workspace_proposal();
+    app.begin_workspace_proposal("resource".into(), rename(), None, PositionEncoding::Utf16);
+    wait_vfs(&mut app);
+    assert!(app.workspace_edits.proposal().is_some());
+    app.accept_workspace_proposal();
+    app.process_effect(AppEffect::WorkspaceResourceApply);
+    wait_vfs(&mut app);
+    assert!(
+        first.exists() && !target.exists(),
+        "dirty resource source must not reach disk apply"
+    );
+    assert_eq!(app.state.buffers[first_buffer].path.as_ref(), Some(&first));
+    app.start_save(false, None, false);
+    wait_vfs(&mut app);
+    assert!(!app.state.buffers[first_buffer].dirty);
+    assert_eq!(fs::read_to_string(&first).unwrap(), "aBc");
+    app.begin_workspace_proposal(
+        "fresh resource".into(),
+        rename(),
+        None,
+        PositionEncoding::Utf16,
+    );
+    wait_vfs(&mut app);
+    assert!(app.workspace_edits.proposal().is_some());
+    app.accept_workspace_proposal();
+    app.apply_configuration_candidate(crate::config::load_bundled_config(), false)
+        .unwrap();
+    app.process_effect(AppEffect::WorkspaceResourceApply);
+    wait_vfs(&mut app);
+    assert!(
+        first.exists() && !target.exists(),
+        "configuration retirement must discard unsubmitted resources"
+    );
+    app.begin_workspace_proposal(
+        "after configuration".into(),
+        rename(),
+        None,
+        PositionEncoding::Utf16,
+    );
+    wait_vfs(&mut app);
+    app.accept_workspace_proposal();
+    app.process_effect(AppEffect::WorkspaceResourceApply);
+    wait_vfs(&mut app);
+    assert!(!first.exists());
+    assert_eq!(fs::read_to_string(&target).unwrap(), "aBc");
+    assert_eq!(app.state.buffers[first_buffer].path.as_ref(), Some(&target));
+    assert!(!app.state.buffers[first_buffer].dirty);
 }
 
 #[test]
@@ -413,18 +470,18 @@ fn lsp_progress_hides_transport_keys_preserves_begin_titles_and_animates() {
     assert!(!progress.server.contains("root:1"));
     assert!(
         app.configuration
-            .settings
+            .settings()
             .ui
             .lsp_progress
             .spinner_frames
             .iter()
             .any(|frame| frame == "⠇")
     );
-    app.configuration
-        .settings
-        .ui
-        .lsp_progress
-        .spinner_interval_ms = 1_000;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.ui.lsp_progress.spinner_interval_ms = 1_000;
+        app.configuration.install_fixture(fixture);
+    }
     app.lsp_progress_epoch = Instant::now() - Duration::from_millis(1_500);
     app.update_lsp_progress_animation();
     assert_eq!(app.ui.lsp_progress_frame, 1);
@@ -439,12 +496,16 @@ fn lsp_progress_hides_transport_keys_preserves_begin_titles_and_animates() {
     );
     let timeout = app
         .configuration
-        .settings
+        .settings()
         .ui
         .lsp_progress
         .completed_timeout_ms;
     assert_eq!(
-        app.configuration.settings.ui.lsp_progress.completed_symbol,
+        app.configuration
+            .settings()
+            .ui
+            .lsp_progress
+            .completed_symbol,
         "✓"
     );
     let completed = app.ui.lsp_progress.first_mut().expect("completed progress");
@@ -466,7 +527,7 @@ fn lsp_completion_applies_through_one_validated_transaction() {
         Some(path),
     );
     app.state.views[view].cursor = ByteOffset(5);
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
     app.lsp_capabilities = Some(crate::language::lsp::LspCapabilities {
         position_encoding: crate::editor::text::PositionEncoding::Utf16,
         ..Default::default()
@@ -501,11 +562,11 @@ fn lsp_completion_applies_through_one_validated_transaction() {
 #[test]
 fn lsp_completion_selection_scrolls_and_wraps_inside_the_visible_window() {
     let mut app = app();
-    app.configuration
-        .settings
-        .ui
-        .command_line
-        .completion_max_rows = 3;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.ui.command_line.completion_max_rows = 3;
+        app.configuration.install_fixture(fixture);
+    }
     app.ui.language_completion = Some(crate::ui::LanguageCompletionState {
         items: (0..5)
             .map(|index| crate::ui::CompletionItem {
@@ -643,12 +704,12 @@ fn lsp_status_never_labels_failed_or_backing_off_sessions_as_starting() {
     let key = "failed-rust-analyzer".to_owned();
     app.lsp_sessions.insert(
         key.clone(),
-        crate::editor::session::LspRuntimeState {
+        crate::editor::session::dispatch::LspRuntimeState {
             root,
             root_path: app.state.workspace_root.clone(),
             server_id: definition.id.clone(),
             definition,
-            launch: crate::editor::session::LspLaunch::Direct {
+            launch: crate::editor::session::dispatch::LspLaunch::Direct {
                 executable,
                 managed: false,
             },
@@ -705,7 +766,7 @@ fn lsp_tool_menu_reports_real_path_version_executable_and_lifecycle() {
     let source = app.state.workspace_root.join("main.rs");
     app.state
         .open_text(TextBuffer::from_text("fn main() {}"), Some(source));
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
     app.tools
         .retain(|entry| entry.definition.kind != ToolKind::Lsp);
     let echo = crate::tools::discover_executable("echo").expect("echo executable");
@@ -841,8 +902,8 @@ fn enter_installs_a_missing_managed_lsp_instead_of_trying_to_start_it() {
     assert_eq!(row.lifecycle, "not installed");
     assert!(row.can_install);
     prepare_trust_identity(&mut app);
-    for root in app.workspace.roots() {
-        app.trust_store.trust(root.identity.clone());
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone());
     }
     app.reconcile_workspace_trust();
     app.activate_selected_tool();
@@ -863,7 +924,7 @@ fn tool_menu_navigation_keeps_the_selected_server_inside_the_rendered_list() {
     for _ in 0..row_count {
         app.move_tool_menu(1);
         let menu = app.ui.tool_menu.as_ref().expect("menu");
-        let configured = &app.configuration.settings.ui.tool_manager;
+        let configured = &app.configuration.settings().ui.tool_manager;
         let modal_height =
             (u32::from(app.terminal_height) * u32::from(configured.height_percent) / 100) as u16;
         let modal_height = modal_height
@@ -1009,4 +1070,110 @@ fn lsp_tool_menu_is_registry_driven_filterable_and_configurable() {
     assert_eq!(app.ui.tool_menu.as_ref().expect("menu").category, "dap");
     app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Escape));
     assert!(app.ui.tool_menu.is_none());
+}
+
+#[test]
+fn plugin_workspace_preview_uses_invocation_source_and_retires_on_dismissal() {
+    use crate::extensions::{ExecutionFixture, PluginEdit, PluginEditProposal};
+    use slotmap::Key;
+    let root = tempfile::tempdir().unwrap();
+    let saved = tempfile::tempdir().unwrap();
+    let mut app = InteractiveApplication::new(
+        StartupTarget::Dashboard {
+            root: root.path().into(),
+        },
+        crate::config::load_bundled_config(),
+        false,
+        saved.path().into(),
+        false,
+        false,
+        std::sync::Arc::new(crate::clock::SystemClock),
+    )
+    .unwrap();
+    app.terminal_width = 80;
+    app.terminal_height = 24;
+    let path = root.path().join("source.txt");
+    fs::write(&path, "éab").unwrap();
+    let (buffer, _) = app.state.open_text(
+        crate::editor::text::TextBuffer::from_text("éab"),
+        Some(path.clone()),
+    );
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let (manager, endpoint) = ExecutionFixture::new(2);
+    app.plugins = manager;
+    let execute = AppEffect::PluginExecute {
+        plugin: "demo".into(),
+        command: "run".into(),
+    };
+    let proposed = |revision| {
+        vec![PluginEditProposal {
+            buffer: buffer.data().as_ffi(),
+            revision,
+            edits: vec![PluginEdit {
+                start: 2,
+                end: 3,
+                replacement: "X".into(),
+            }],
+        }]
+    };
+    app.process_effect(execute.clone());
+    let captured = endpoint.take();
+    endpoint.reply(&captured, proposed(0));
+    app.process_plugin_events();
+    assert!(app.workspace_edits.proposal().is_some());
+    // Enter toggles without dismissing the source-bound preview.
+    app.accept_picker();
+    assert!(!app.workspace_edits.proposal().unwrap().files[0].selected);
+    app.accept_picker();
+    assert!(app.workspace_edits.proposal().unwrap().files[0].selected);
+    app.process_effect(AppEffect::PickerCancel);
+    assert!(app.workspace_edits.proposal().is_none());
+    app.accept_workspace_proposal();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "éab");
+    endpoint.reply(&captured, proposed(0));
+    app.process_plugin_events();
+    assert!(
+        app.workspace_edits.proposal().is_none(),
+        "duplicate cannot resurrect closed preview"
+    );
+    app.process_effect(execute.clone());
+    let configured = endpoint.take();
+    endpoint.reply(&configured, proposed(0));
+    app.process_plugin_events();
+    app.apply_configuration_candidate(crate::config::load_bundled_config(), false)
+        .unwrap();
+    app.accept_workspace_proposal();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "éab");
+    app.process_effect(execute.clone());
+    let fresh = endpoint.take();
+    endpoint.reply(&fresh, proposed(0));
+    app.process_plugin_events();
+    app.accept_workspace_proposal();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "éXb");
+    assert!(app.state.buffers[buffer].dirty);
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "éab",
+        "approval edits buffers, not disk"
+    );
+    app.process_effect(execute.clone());
+    let replaced = endpoint.take();
+    endpoint.reply(
+        &replaced,
+        proposed(app.state.buffers[buffer].text.revision().0),
+    );
+    app.process_plugin_events();
+    app.install_picker("other".into(), Vec::new());
+    assert!(
+        app.workspace_edits.proposal().is_none(),
+        "another picker retires the old preview source"
+    );
+    app.process_effect(execute);
+    let late = endpoint.take();
+    app.plugins.disable("demo").unwrap();
+    endpoint.reply(&late, proposed(app.state.buffers[buffer].text.revision().0));
+    app.process_plugin_events();
+    assert!(app.workspace_edits.proposal().is_none());
+    app.plugin_edits.close();
 }

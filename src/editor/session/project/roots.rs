@@ -2,26 +2,14 @@ use super::*;
 
 impl InteractiveApplication {
     pub(in crate::editor::session) fn add_workspace_root(&mut self, path: PathBuf) {
-        if self.pending_root_operation.is_some() {
-            self.show_error(self.message("workspace_root_operation_busy", &[]));
-            return;
-        }
         let requested_path = if path.is_absolute() {
             path
         } else {
             self.state.workspace_root.join(path)
         };
-        match self.trust_service.inspect_root(requested_path.clone()) {
-            Ok(generation) => {
-                self.pending_root_operation = Some(PendingRootOperation {
-                    generation,
-                    root_revision: self.workspace.root_revision(),
-                    requested_path,
-                });
-                self.ui.notification = Some(self.message("workspace_root_loading", &[]));
-                self.ui.notification_error = false;
-            }
-            Err(error) => self.show_error(error),
+        match self.workspace.add_root_request(requested_path) {
+            Ok(()) => self.notify_message(self.message("workspace_root_loading", &[]), false),
+            Err(e) => self.show_workspace_failure(e),
         }
     }
 
@@ -43,39 +31,35 @@ impl InteractiveApplication {
         }) {
             return Some(self.message("workspace_root_dirty_blocker", &[]));
         }
-        let busy = self.pending_root_operation.is_some()
+        let busy = self.workspace.root_operation_pending()
             || self.active_lsp_server.is_some()
             || self
                 .lsp_sessions
                 .values()
                 .any(|state| state.restart_due.is_some())
-            || self.dap.is_running()
+            || self.debugger_session.is_running()
             || self
                 .tools
                 .iter()
                 .any(|tool| matches!(tool.status, ToolStatus::Installing { .. }))
-            || self.workspace_search_generation.is_some()
-            || self.pending_workspace_proposal.is_some()
-            || self.workspace_proposal.is_some()
+            || self.search.pending()
+            || self.workspace_edits.preparing()
+            || self.workspace_edits.proposal().is_some()
             || !self.pending_vfs.is_empty()
-            || self.trust_persist_generation.is_some()
+            || self.workspace.persist_pending()
             || self.execution_validation.is_some()
-            || !self.startup_reads.is_empty()
-            || self.startup_reads_pending > 0;
+            || self.documents.has_startup_work()
+            || self.documents.file_work_pending();
         busy.then(|| self.message("workspace_root_service_blocker", &[]))
     }
 
     pub(in crate::editor::session) fn invalidate_root_scoped_operations(&mut self) {
+        self.documents.retire_startup();
+        self.documents.retire_workspace(&self.workspace.version());
         self.clear_git_status();
-        for terminal in self.terminals.keys().copied().collect::<Vec<_>>() {
-            let _ = self.ptys.close(terminal);
-        }
-        self.active_terminal = None;
-        self.terminal_focused = false;
-        if !self.terminals.is_empty() {
-            self.terminals.clear();
-            self.terminal_set_revision = self.terminal_set_revision.saturating_add(1);
-        }
+        self.terminal_session.reset();
+        self.reject_terminal_responses("workspace changed");
+        self.set_terminal_focus(false);
         self.ui.terminal_panel = None;
         let roots = self
             .workspace
@@ -118,56 +102,27 @@ impl InteractiveApplication {
             let _ = self.plugins.unload_generation(&plugin, load);
             self.remove_plugin_contribution_generation(&plugin, load);
         }
-        let _ = self.dap.stop();
-        self.dap_responses.clear();
-        self.dap_console.clear();
-        self.dap_terminal_responses.clear();
-        self.active_debug_terminal_profile = None;
-        self.active_debug_configuration = None;
-        self.dap_breakpoints.clear();
-        self.dap_watches.clear();
-        self.snippet_session = None;
-        for name in self.task_status.keys() {
+        self.debugger_session.reset();
+        self.input.clear_snippet();
+        for name in self.tasks.names() {
             if let Ok(owner) = DiagnosticOwner::new(format!("task:{name}")) {
                 self.diagnostics.clear_owner(&owner);
             }
         }
-        self.task_status.clear();
-        self.pending_linter_builds.clear();
-        self.task_output.clear();
-        self.task_output_rows.clear();
-        self.test_results.clear();
-        self.task_truncated.clear();
-        for job in self.job_tasks.keys().copied().collect::<Vec<_>>() {
-            let _ = self.jobs.cancel(job);
-        }
+        self.tasks.retire_workspace();
         self.clear_git_status();
-        self.workspace_files.cancel();
-        self.workspace_file_generation = None;
-        self.workspace_file_root_revision = None;
-        self.workspace_file_entries.clear();
-        self.workspace_search.cancel();
-        self.workspace_search_workflow = None;
-        self.workspace_search_sequence = 0;
-        self.workspace_search_generation = None;
-        self.workspace_search_intent = None;
-        self.workspace_search_matches.clear();
-        self.workspace_search_root_revision = None;
-        if self.pending_workspace_proposal.is_some() || self.workspace_proposal.is_some() {
+        self.search.cancel();
+        if self.workspace_edits.preparing() || self.workspace_edits.proposal().is_some() {
             self.reject_workspace_proposal();
         }
-        self.workspace_proposal_root_revision = None;
-        self.workspace_resource_intents.clear();
-        self.accepted_resource_intents.clear();
-        self.resource_apply_pending.clear();
-        self.explorer_pending = None;
-        self.explorer_preview_path = None;
-        self.explorer_preview_lines.clear();
-        self.explorer_preview_generation = self.explorer_preview_generation.saturating_add(1);
+        self.retire_workspace_resources("workspace changed");
+        self.retire_plugin_edit_sources();
+        self.retire_explorer_intents();
+        self.clear_explorer_preview();
         self.explorer
             .reset_roots(self.workspace.roots(), self.workspace.root_revision());
         self.ui.explorer = None;
-        self.ui.explorer_focused = false;
+        self.set_explorer_focus(false);
         self.reconcile_explorer_watch();
         self.close_picker();
         self.ensure_cursor_visible();
@@ -184,11 +139,13 @@ impl InteractiveApplication {
         match self.workspace.remove_root(id) {
             Ok(root) => {
                 self.invalidate_root_scoped_operations();
-                self.ui.notification = Some(self.message(
-                    "workspace_root_removed",
-                    &[("path", root.identity.canonical_path.display().to_string())],
-                ));
-                self.ui.notification_error = false;
+                self.notify_message(
+                    self.message(
+                        "workspace_root_removed",
+                        &[("path", root.identity.canonical_path.display().to_string())],
+                    ),
+                    false,
+                );
             }
             Err(error) => self.show_error(error),
         }
@@ -198,8 +155,13 @@ impl InteractiveApplication {
         &mut self,
         id: crate::workspace::RootId,
     ) {
+        let before = self.workspace.version();
         match self.workspace.set_active_root(id) {
             Ok(()) => {
+                if before != self.workspace.version() {
+                    self.documents.retire_startup();
+                }
+                self.documents.retire_workspace(&self.workspace.version());
                 self.clear_git_status();
                 let path = self
                     .workspace
@@ -208,9 +170,10 @@ impl InteractiveApplication {
                     .find(|root| root.id == id)
                     .map(|root| root.identity.canonical_path.display().to_string())
                     .unwrap_or_default();
-                self.ui.notification =
-                    Some(self.message("workspace_root_activated", &[("path", path)]));
-                self.ui.notification_error = false;
+                self.notify_message(
+                    self.message("workspace_root_activated", &[("path", path)]),
+                    false,
+                );
             }
             Err(error) => self.show_error(error),
         }

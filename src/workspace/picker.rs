@@ -136,6 +136,11 @@ impl PickerState {
         });
     }
 
+    #[must_use]
+    pub fn selected_is_last(&self) -> bool {
+        self.selected == self.visible.len().checked_sub(1)
+    }
+
     pub fn select_last(&mut self) {
         self.selected = self.visible.len().checked_sub(1);
     }
@@ -165,6 +170,11 @@ impl PickerState {
         self.selected
             .and_then(|selected| self.visible.get(selected))
             .and_then(|index| self.items.get(*index))
+    }
+
+    #[must_use]
+    pub fn scroll(&self) -> usize {
+        self.scroll
     }
 
     #[must_use]

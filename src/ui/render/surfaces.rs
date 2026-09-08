@@ -125,6 +125,7 @@ pub(super) fn render_picker(
     picker: &PickerUiState,
     config: &Config,
     rect: WindowRect,
+    geometry: Option<crate::ui::geometry::PickerContentGeometry>,
 ) {
     let configured = &config.ui.picker;
     let WindowRect {
@@ -185,49 +186,15 @@ pub(super) fn render_picker(
             .to_string()
             .len()
     });
-    let list_natural_width = picker
-        .rows
-        .iter()
-        .take(64)
-        .map(|row| {
-            text_width(&row.label, config.editor.ambiguous_width)
-                .saturating_add(text_width(&row.detail, config.editor.ambiguous_width))
-                .saturating_add(text_width(&row.source, config.editor.ambiguous_width))
-                .saturating_add(8)
-        })
-        .max()
-        .unwrap_or(28)
-        .clamp(28, 72);
-    let preview_natural_width = preview.map_or(0, |preview| {
-        preview
-            .lines
-            .iter()
-            .take(64)
-            .map(|line| text_width(line, config.editor.ambiguous_width))
-            .max()
-            .unwrap_or(28)
-            .saturating_add(preview_number_width)
-            .saturating_add(4)
-            .clamp(32, 88)
-    });
-    let side_by_side = preview.is_some()
-        && usize::from(width)
-            >= list_natural_width
-                .saturating_add(preview_natural_width)
-                .saturating_add(3);
-    let divider = side_by_side.then(|| {
-        left.saturating_add(u16::try_from(list_natural_width).unwrap_or(width - 1))
-            .saturating_add(1)
-            .min(left + width - 2)
-    });
-    let stacked_divider = (preview.is_some() && !side_by_side).then(|| {
-        let minimum = top.saturating_add(6);
-        let maximum = top.saturating_add(height.saturating_sub(4));
-        top.saturating_add(height.saturating_mul(2) / 3)
-            .clamp(minimum, maximum)
-    });
-    let list_right = divider.unwrap_or(left + width - 1);
-    let list_bottom = stacked_divider.unwrap_or(top + height - 1);
+    let Some(geometry) = geometry
+        .filter(|geometry| geometry.outer == rect)
+        .or_else(|| crate::ui::geometry::picker_content_geometry(picker, config, rect))
+    else {
+        return;
+    };
+    let divider = geometry.divider;
+    let stacked_divider = geometry.stacked_divider;
+    let list_right = geometry.list.x.saturating_add(geometry.list.width);
     if let Some(divider) = divider {
         for y in top + 1..top + height - 1 {
             frame
@@ -289,8 +256,8 @@ pub(super) fn render_picker(
             .grid
             .set_cell(x, top + 2, &horizontal.to_string(), Style::Border);
     }
-    let first_row = top + 3;
-    let visible_rows = usize::from(list_bottom.saturating_sub(first_row));
+    let first_row = geometry.list.y;
+    let visible_rows = usize::from(geometry.list.height);
     for (display_row, (index, row)) in picker
         .rows
         .iter()

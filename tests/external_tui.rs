@@ -12,12 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-struct PtyCloseGuard<'a>(&'a PtyService, dust::process::PtyId);
-impl Drop for PtyCloseGuard<'_> {
-    fn drop(&mut self) {
-        let _ = self.0.close(self.1);
-    }
-}
+// PtyService owns nonblocking cancellation on drop, including assertion unwinds.
 
 fn wait_for_preflight(
     preflight: &ExecutionPreflightService,
@@ -141,7 +136,6 @@ fn lazygit_launch_resize_and_quit_uses_preflight_pty() {
             policy: PtyPolicy::default(),
         })
         .unwrap();
-    let _guard = PtyCloseGuard(&ptys, id);
     let mut screen = PtyScreen::new(100, 30, 4096);
     let mut saw_alternate = false;
     let mut sent_quit = false;
@@ -223,7 +217,6 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
             policy: PtyPolicy::default(),
         })
         .unwrap();
-    let _close_guard = PtyCloseGuard(&ptys, id);
     let mut screen = PtyScreen::new(40, 8, 1024);
     let mut raw = Vec::new();
     let mut sent = false;

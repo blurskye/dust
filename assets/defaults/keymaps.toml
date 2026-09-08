@@ -911,7 +911,7 @@ command = "workspace.file.find"
 id = "builtin.dashboard.surface.explorer-open.leader-f-e"
 context = "dashboard"
 keys = "<leader> f e"
-command = "explorer.open"
+command = "explorer.panel.toggle"
 [[keymap]]
 id = "builtin.dashboard.surface.explorer-open.shortcut-f"
 context = "dashboard"
@@ -1022,6 +1022,11 @@ keys = "down"
 command = "command_line.history.next"
 
 # Explorer controls.
+[[keymap]]
+id = "builtin.explorer.surface.explorer-panel-toggle.leader-f-e"
+context = "explorer"
+keys = "<leader> f e"
+command = "explorer.panel.toggle"
 [[keymap]]
 id = "builtin.explorer.surface.explorer-close.escape"
 context = "explorer"
@@ -2975,7 +2980,7 @@ id = "builtin.editor.normal.explorer-open.leader-f-e"
 context = "editor"
 mode = "normal"
 keys = "<leader> f e"
-command = "explorer.open"
+command = "explorer.panel.toggle"
 
 [[keymap]]
 id = "builtin.editor.normal.diagnostic-open.leader-x-x"

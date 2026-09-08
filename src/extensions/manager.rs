@@ -1,5 +1,28 @@
 use super::*;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 
+#[derive(Debug)]
+struct QueueSlot(Arc<AtomicUsize>);
+impl Drop for QueueSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+#[derive(Debug)]
+pub(super) struct QueuedRequest {
+    request: Request,
+    slot: QueueSlot,
+}
+impl QueuedRequest {
+    pub(super) fn into_request(self) -> Request {
+        let Self { request, slot } = self;
+        drop(slot);
+        request
+    }
+}
 #[derive(Debug)]
 pub(super) enum Request {
     IndexFromStore {
@@ -32,6 +55,7 @@ pub(super) enum Request {
     },
     Execute {
         load: PluginLoadId,
+        origin: Option<PluginInvocationOrigin>,
         invocation: PluginExecutionRequest,
     },
     Disable {
@@ -52,6 +76,7 @@ pub(super) enum WorkerEvent {
     },
     Executed {
         load: PluginLoadId,
+        origin: Option<PluginInvocationOrigin>,
         execution: PluginExecution,
     },
     Failed {
@@ -78,6 +103,67 @@ pub enum PluginEvent {
         error: PluginError,
     },
 }
+// Private editor collaboration. Public events intentionally remain compatible.
+#[derive(Clone, Debug)]
+pub(crate) struct PluginInvocationOrigin {
+    manager: std::sync::Arc<()>,
+    invocation: std::sync::Arc<()>,
+    plugin: String,
+    command: String,
+    load: PluginLoadId,
+}
+impl PluginInvocationOrigin {
+    pub(crate) fn same(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.invocation, &other.invocation)
+    }
+    pub(crate) fn current(&self, manager: &PluginManager) -> bool {
+        std::sync::Arc::ptr_eq(&self.manager, &manager.owner)
+            && manager.is_active_generation(&self.plugin, self.load)
+    }
+    pub(crate) fn load(&self) -> PluginLoadId {
+        self.load
+    }
+}
+pub(crate) struct PluginExecutionReply {
+    execution: PluginExecution,
+    origin: Option<PluginInvocationOrigin>,
+}
+impl PluginExecutionReply {
+    pub(crate) fn into_parts(self) -> (PluginExecution, Option<PluginInvocationOrigin>) {
+        (self.execution, self.origin)
+    }
+}
+pub(crate) enum OwnedPluginEvent {
+    Other(PluginEvent),
+    Executed(PluginExecutionReply),
+}
+pub(crate) struct PluginInvocation<'a> {
+    manager: &'a mut PluginManager,
+    origin: PluginInvocationOrigin,
+    slot: QueueSlot,
+}
+impl PluginInvocation<'_> {
+    pub(crate) fn origin(&self) -> &PluginInvocationOrigin {
+        &self.origin
+    }
+    pub(crate) fn check(&self, invocation: &PluginExecutionRequest) -> Result<(), PluginError> {
+        if invocation.plugin != self.origin.plugin || invocation.command != self.origin.command {
+            return Err(PluginError::InvalidInvocation);
+        }
+        PluginManager::validate_invocation(invocation)
+    }
+    pub(crate) fn submit(self, invocation: PluginExecutionRequest) -> Result<(), PluginError> {
+        self.check(&invocation)?;
+        self.manager.send_reserved(QueuedRequest {
+            request: Request::Execute {
+                load: self.origin.load,
+                origin: Some(self.origin),
+                invocation,
+            },
+            slot: self.slot,
+        })
+    }
+}
 pub(super) struct RuntimeSlot {
     load: PluginLoadId,
     runtime: ActiveRuntime,
@@ -89,7 +175,9 @@ pub(super) struct IndexedCandidate {
     limits: PluginLimits,
 }
 pub struct PluginManager {
-    pub(super) sender: SyncSender<Request>,
+    pub(super) owner: std::sync::Arc<()>,
+    pub(super) queued: Arc<AtomicUsize>,
+    pub(super) sender: SyncSender<QueuedRequest>,
     pub(super) receiver: Receiver<WorkerEvent>,
     pub statuses: BTreeMap<String, PluginStatus>,
     pub(super) loads: BTreeMap<String, PluginLoadId>,
@@ -101,7 +189,7 @@ pub struct PluginManager {
 impl PluginManager {
     pub fn start(capacity: usize) -> Self {
         let capacity = capacity.clamp(1, 64);
-        let (tx, rx) = mpsc::sync_channel::<Request>(capacity);
+        let (tx, rx) = mpsc::sync_channel::<QueuedRequest>(capacity);
         let (etx, erx) = mpsc::sync_channel(capacity);
         thread::Builder::new()
             .name("dust-components".into())
@@ -110,7 +198,7 @@ impl PluginManager {
                 let mut indexed: BTreeMap<(String, PluginLoadId), IndexedCandidate> =
                     BTreeMap::new();
                 while let Ok(request) = rx.recv() {
-                    let event = match request {
+                    let event = match request.into_request() {
                         Request::IndexFromStore {
                             load,
                             expected_plugin,
@@ -283,7 +371,11 @@ impl PluginManager {
                                 error,
                             },
                         },
-                        Request::Execute { load, invocation } => {
+                        Request::Execute {
+                            load,
+                            origin,
+                            invocation,
+                        } => {
                             let plugin = invocation.plugin.clone();
                             match runtimes.get_mut(&plugin).filter(|slot| slot.load == load) {
                                 Some(slot) => execute_component(invocation, &mut slot.runtime)
@@ -296,7 +388,11 @@ impl PluginManager {
                                                 error,
                                             }
                                         },
-                                        |execution| WorkerEvent::Executed { load, execution },
+                                        |execution| WorkerEvent::Executed {
+                                            load,
+                                            origin,
+                                            execution,
+                                        },
                                     ),
                                 None => WorkerEvent::Failed {
                                     load,
@@ -321,6 +417,8 @@ impl PluginManager {
             })
             .expect("plugin loader");
         Self {
+            owner: std::sync::Arc::new(()),
+            queued: Arc::new(AtomicUsize::new(0)),
             sender: tx,
             receiver: erx,
             statuses: BTreeMap::new(),
@@ -342,9 +440,22 @@ impl PluginManager {
     }
     fn flush_pending_disables(&mut self) -> bool {
         while let Some((plugin, load)) = self.pending_disables.pop_front() {
-            match self.sender.try_send(Request::Disable { load, plugin }) {
+            let slot = match self.reserve_queue() {
+                Ok(slot) => slot,
+                Err(_) => {
+                    self.pending_disables.push_front((plugin, load));
+                    return false;
+                }
+            };
+            match self.sender.try_send(QueuedRequest {
+                request: Request::Disable { load, plugin },
+                slot,
+            }) {
                 Ok(()) => {}
-                Err(TrySendError::Full(Request::Disable { load, plugin })) => {
+                Err(TrySendError::Full(QueuedRequest {
+                    request: Request::Disable { load, plugin },
+                    ..
+                })) => {
                     self.pending_disables.push_front((plugin, load));
                     return false;
                 }
@@ -374,7 +485,21 @@ impl PluginManager {
             Err(PluginError::QueueFull)
         }
     }
+    fn reserve_queue(&self) -> Result<QueueSlot, PluginError> {
+        self.queued
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                count
+                    .checked_add(1)
+                    .filter(|count| *count <= self.maximum_loads)
+            })
+            .map_err(|_| PluginError::QueueFull)?;
+        Ok(QueueSlot(self.queued.clone()))
+    }
     fn send_request(&mut self, request: Request) -> Result<(), PluginError> {
+        let slot = self.reserve_queue()?;
+        self.send_reserved(QueuedRequest { request, slot })
+    }
+    fn send_reserved(&mut self, request: QueuedRequest) -> Result<(), PluginError> {
         match self.sender.try_send(request) {
             Ok(()) => Ok(()),
             Err(TrySendError::Full(_)) => Err(PluginError::QueueFull),
@@ -498,7 +623,7 @@ impl PluginManager {
         self.statuses.insert(plugin, PluginStatus::Loading);
         Ok(load)
     }
-    pub fn execute(&mut self, invocation: PluginExecutionRequest) -> Result<(), PluginError> {
+    fn validate_invocation(invocation: &PluginExecutionRequest) -> Result<(), PluginError> {
         if invocation.arguments.len() > 256
             || invocation
                 .arguments
@@ -508,13 +633,49 @@ impl PluginManager {
         {
             return Err(PluginError::InvalidInvocation);
         }
+        Ok(())
+    }
+    pub(crate) fn prepare_execution(
+        &mut self,
+        plugin: &str,
+        command: &str,
+    ) -> Result<PluginInvocation<'_>, PluginError> {
+        self.require_disable_order()?;
+        let load = self.load_id(plugin).ok_or(PluginError::NotActive)?;
+        if !self.is_active_generation(plugin, load) {
+            return Err(PluginError::NotActive);
+        }
+        if !matches!(self.statuses.get(plugin), Some(PluginStatus::Active(commands)) if commands.iter().any(|c| c == command))
+        {
+            return Err(PluginError::UndeclaredCommand);
+        }
+        let slot = self.reserve_queue()?;
+        let origin = PluginInvocationOrigin {
+            manager: self.owner.clone(),
+            invocation: std::sync::Arc::new(()),
+            plugin: plugin.into(),
+            command: command.into(),
+            load,
+        };
+        Ok(PluginInvocation {
+            manager: self,
+            origin,
+            slot,
+        })
+    }
+    pub fn execute(&mut self, invocation: PluginExecutionRequest) -> Result<(), PluginError> {
+        Self::validate_invocation(&invocation)?;
         self.require_disable_order()?;
         let load = self
             .loads
             .get(&invocation.plugin)
             .copied()
             .ok_or(PluginError::NotActive)?;
-        self.send_request(Request::Execute { load, invocation })
+        self.send_request(Request::Execute {
+            load,
+            origin: None,
+            invocation,
+        })
     }
     fn fail_stopped_loads(&mut self) {
         let ids = self.loads.keys().cloned().collect::<Vec<_>>();
@@ -526,6 +687,17 @@ impl PluginManager {
         }
     }
     pub fn poll(&mut self) -> Result<Vec<PluginEvent>, PluginError> {
+        self.poll_owned().map(|events| {
+            events
+                .into_iter()
+                .map(|event| match event {
+                    OwnedPluginEvent::Other(event) => event,
+                    OwnedPluginEvent::Executed(reply) => PluginEvent::Executed(reply.execution),
+                })
+                .collect()
+        })
+    }
+    pub(crate) fn poll_owned(&mut self) -> Result<Vec<OwnedPluginEvent>, PluginError> {
         if self.stopped {
             self.fail_stopped_loads();
             return Err(PluginError::Stopped);
@@ -551,11 +723,11 @@ impl PluginManager {
                                 continue;
                             }
                             self.statuses.insert(plugin.clone(), PluginStatus::Indexed);
-                            events.push(PluginEvent::Indexed {
+                            events.push(OwnedPluginEvent::Other(PluginEvent::Indexed {
                                 load,
                                 plugin,
                                 index,
-                            });
+                            }));
                         }
                         WorkerEvent::Loaded { load, component } => {
                             let plugin = component.manifest.id.clone();
@@ -565,11 +737,21 @@ impl PluginManager {
                                 continue;
                             }
                             self.statuses.insert(plugin,if !component.activated_commands.is_empty(){PluginStatus::Active(component.activated_commands.clone())}else if component.instantiated{PluginStatus::Instantiated}else{PluginStatus::ValidatedUntilHost(component.unavailable_host.clone().unwrap_or_else(||"component imports require unavailable host bindings".into()))});
-                            events.push(PluginEvent::Loaded { load, component })
+                            events.push(OwnedPluginEvent::Other(PluginEvent::Loaded {
+                                load,
+                                component,
+                            }))
                         }
-                        WorkerEvent::Executed { load, execution } => {
+                        WorkerEvent::Executed {
+                            load,
+                            origin,
+                            execution,
+                        } => {
                             if self.loads.get(&execution.plugin) == Some(&load) {
-                                events.push(PluginEvent::Executed(execution));
+                                events.push(OwnedPluginEvent::Executed(PluginExecutionReply {
+                                    origin,
+                                    execution,
+                                }));
                             }
                         }
                         WorkerEvent::Failed {
@@ -583,11 +765,11 @@ impl PluginManager {
                             self.loads.remove(&plugin);
                             self.statuses
                                 .insert(plugin.clone(), PluginStatus::Failed(error.to_string()));
-                            events.push(PluginEvent::Failed {
+                            events.push(OwnedPluginEvent::Other(PluginEvent::Failed {
                                 load,
                                 plugin,
                                 error,
-                            });
+                            }));
                         }
                     }
                 }

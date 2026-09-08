@@ -13,48 +13,43 @@ impl InteractiveApplication {
                 if let Some(location) = self.current_persisted_location() {
                     self.marks.retain(|mark| mark.name != name);
                     self.marks.push(PersistedMark { name, location });
-                    let maximum = self.configuration.settings.persistence.marks;
+                    let maximum = self.configuration.settings().persistence.marks;
                     if self.marks.len() > maximum {
                         self.marks.drain(..self.marks.len() - maximum);
                     }
                 }
             }
             AppEffect::SafeModeStatus => {
-                self.ui.notification = Some(self.message(
-                    "safe_mode_status",
-                    &[(
-                        "state",
-                        if self.safe_mode {
-                            "active".into()
-                        } else {
-                            "inactive".into()
-                        },
-                    )],
-                ));
-                self.ui.notification_error = false;
+                self.notify_message(
+                    self.message(
+                        "safe_mode_status",
+                        &[(
+                            "state",
+                            if self.workspace.safe_mode() {
+                                "active".into()
+                            } else {
+                                "inactive".into()
+                            },
+                        )],
+                    ),
+                    false,
+                );
             }
             AppEffect::ShowHealth => {
-                self.ui.notification = Some(
+                self.notify_message(
                     self.message(
                         "healthy",
                         &[
                             ("buffers", self.state.buffers.len().to_string()),
                             ("workspace", self.state.workspace_root.display().to_string()),
-                            ("terminal", self.terminal_capabilities.clone()),
-                            ("jobs", self.job_tasks.len().to_string()),
-                            (
-                                "ptys",
-                                self.terminals
-                                    .values()
-                                    .filter(|terminal| terminal.running)
-                                    .count()
-                                    .to_string(),
-                            ),
+                            ("terminal", self.notices.terminal_capabilities().to_owned()),
+                            ("jobs", self.tasks.running_count().to_string()),
+                            ("ptys", self.terminal_session.running_count().to_string()),
                             (
                                 "preflights",
                                 self.pending_execution_preflight.len().to_string(),
                             ),
-                            ("tasks", self.task_status.len().to_string()),
+                            ("tasks", self.tasks.status_count().to_string()),
                             ("plugins", self.plugins.statuses.len().to_string()),
                             (
                                 "plugin_failures",
@@ -69,16 +64,13 @@ impl InteractiveApplication {
                             ),
                             ("packages", self.packages.pending_count().to_string()),
                             ("lsp", self.lsp_sessions.len().to_string()),
-                            (
-                                "persistence",
-                                self.persistence_pending.is_some().to_string(),
-                            ),
-                            ("safe", self.safe_mode.to_string()),
-                            ("dap", self.dap.is_running().to_string()),
+                            ("persistence", self.persistence.pending().to_string()),
+                            ("safe", self.workspace.safe_mode().to_string()),
+                            ("dap", self.debugger_session.is_running().to_string()),
                         ],
                     ),
+                    false,
                 );
-                self.ui.notification_error = false;
             }
             effect => return Err(effect),
         }

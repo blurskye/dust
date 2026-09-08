@@ -10,7 +10,7 @@ use super::{EditorWindowBridge, NativeSurfaceBridge};
 
 fn reconcile(bridge: &mut EditorWindowBridge, graph: &mut WindowGraph, state: &EditorState) {
     bridge
-        .reconcile(state, graph, "[scratch]")
+        .reconcile(&state.into(), graph, "[scratch]")
         .expect("reconcile graph");
 }
 
@@ -27,7 +27,7 @@ fn same_content_has_independent_views_and_windows_with_stable_focus_identity() {
     let mut bridge = EditorWindowBridge::default();
     let mut graph = WindowGraph::default();
     reconcile(&mut bridge, &mut graph, &state);
-    assert!(bridge.is_current(&state, "[scratch]"));
+    assert!(bridge.is_current(&(&state).into(), "[scratch]"));
 
     let content = bridge.content_for(buffer).expect("content");
     let first = bridge.view_for(first_view).expect("first view");
@@ -57,7 +57,7 @@ fn same_content_has_independent_views_and_windows_with_stable_focus_identity() {
         1,
     );
     state.resize_active_pane(100).expect("resize");
-    assert!(!bridge.is_current(&state, "[scratch]"));
+    assert!(!bridge.is_current(&(&state).into(), "[scratch]"));
     reconcile(&mut bridge, &mut graph, &state);
     let after = graph.tiled_layout_snapshot(tab).expect("layout").project(
         crate::ui::window::WindowRect {
@@ -72,7 +72,7 @@ fn same_content_has_independent_views_and_windows_with_stable_focus_identity() {
     assert_eq!(bridge.window_for(first_pane), Some(first_window));
     assert_eq!(bridge.window_for(second_pane), Some(second_window));
     assert!(after.windows[0].rect.width > before.windows[0].rect.width);
-    assert!(bridge.is_current(&state, "[scratch]"));
+    assert!(bridge.is_current(&(&state).into(), "[scratch]"));
 }
 
 #[test]

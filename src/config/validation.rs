@@ -32,7 +32,7 @@ fn task_graph_has_cycle(tasks: &BTreeMap<String, TaskConfig>) -> bool {
 }
 
 impl Config {
-    pub(super) fn validate(&self) -> Result<(), &'static str> {
+    pub(crate) fn validate(&self) -> Result<(), &'static str> {
         const SUPPORTED_WINDOW_CONTENT: &[&str] = &[
             "builtin.explorer",
             "builtin.terminal",

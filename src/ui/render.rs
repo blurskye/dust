@@ -3,6 +3,7 @@ use terminal::*;
 mod explorer;
 use explorer::*;
 mod overlays;
+use super::geometry::text_width;
 use overlays::*;
 mod workspace;
 use workspace::*;
@@ -17,6 +18,7 @@ pub use editor::{snap_display_column, snap_display_column_forward};
 pub use explorer::explorer_panel_width;
 pub use overlays::content_tab_at_column;
 pub use surfaces::picker_geometry;
+pub(crate) use terminal::terminal_geometry_from_rect;
 pub use terminal::terminal_tab_at_column;
 pub use visual_rows::{
     VisualRowAnchor, VisualRowModel, editor_content_width, editor_gutter_width,
@@ -415,8 +417,18 @@ pub enum TerminalPanelMode {
     Visual,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalPhase {
+    Preflight,
+    Starting,
+    Running,
+    Exited,
+    Failed,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TerminalTabState {
+    pub phase: TerminalPhase,
     pub id: u64,
     pub profile: String,
     pub running: bool,
@@ -584,6 +596,7 @@ pub struct UiLspProgress {
 
 #[derive(Clone, Debug, Default)]
 pub struct UiState {
+    pub surface_content: crate::ui::geometry::SurfaceContentGeometry,
     pub dashboard: bool,
     pub prompt: Option<PromptState>,
     pub notification: Option<String>,
@@ -858,7 +871,7 @@ pub fn render(
                 .map(|window| window.rect)
         })
     {
-        render_picker(&mut frame, picker, config, rect);
+        render_picker(&mut frame, picker, config, rect, ui.surface_content.picker);
     }
     if let Some(completion) = &ui.language_completion
         && let Some(bounds) = content_bounds
@@ -928,19 +941,16 @@ pub fn render(
                 .as_ref()
                 .map(|message| (message, Style::Error))
         });
-    if let Some((message, style)) = message {
-        let y = workspace_height.saturating_sub(config.ui.notifications.rows_from_bottom);
-        let available = usize::from(
-            config
-                .ui
-                .notifications
-                .max_width
-                .min(width.saturating_sub(config.ui.notifications.left)),
+    if let Some((message, style)) = message
+        && let Some(rect) = super::geometry::notification_geometry(config, width, workspace_height)
+    {
+        frame.grid.put_text_clipped(
+            rect.x,
+            rect.y,
+            message,
+            style,
+            rect.x.saturating_add(rect.width),
         );
-        let message = message.chars().take(available).collect::<String>();
-        frame
-            .grid
-            .put_text(config.ui.notifications.left, y, &message, style);
     }
     if let Some(prompt) = &ui.prompt {
         render_prompt(&mut frame, prompt, config, width, workspace_height);

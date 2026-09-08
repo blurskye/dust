@@ -5,20 +5,24 @@ fn adversarial_grapheme_rows_make_render_mouse_and_reversed_pages_agree() {
     let mut app = app();
     app.terminal_width = 3;
     app.terminal_height = 7;
-    app.configuration.settings.editor.wrap = true;
-    app.configuration.settings.editor.line_numbers = crate::config::LineNumbers::Off;
-    app.configuration.settings.editor.viewport.vertical_margin = 0;
-    app.configuration.settings.ui.status_line.enabled = false;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.wrap = true;
+        fixture.settings.editor.line_numbers = crate::config::LineNumbers::Off;
+        fixture.settings.editor.viewport.vertical_margin = 0;
+        fixture.settings.ui.status_line.enabled = false;
+        app.configuration.install_fixture(fixture);
+    }
     let (buffer, view) = app.state.open_text(
         TextBuffer::from_text("aa界界\naa\t\t\ne\u{301}界x\ntail"),
         None,
     );
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let viewport = active_pane_viewport(
         &app.state,
         &app.ui,
-        &app.configuration.settings,
+        app.configuration.settings(),
         app.workspace_bounds().unwrap().width,
         app.workspace_render_height(),
     )
@@ -34,16 +38,16 @@ fn adversarial_grapheme_rows_make_render_mouse_and_reversed_pages_agree() {
                     &app.state.buffers[buffer].text,
                     view,
                     &app.ui,
-                    &app.configuration.settings,
+                    app.configuration.settings(),
                     viewport.width,
                     true,
                 );
                 model.byte_at_cell(VisualRowAnchor { line: 0, wrap_row }, cell)
             };
-            app.mouse_position = Some((
+            app.input.observe_mouse(
                 viewport.x.saturating_add(u16::try_from(cell).unwrap()),
                 viewport.y.saturating_add(u16::try_from(wrap_row).unwrap()),
-            ));
+            );
             app.apply_mouse_cursor(false);
             assert_eq!(
                 app.state.views[view].cursor,
@@ -58,14 +62,14 @@ fn adversarial_grapheme_rows_make_render_mouse_and_reversed_pages_agree() {
     app.state.views[view].scroll_wrap_row = 0;
     let body = usize::from(viewport.height.max(1));
     let amount = body.saturating_mul(usize::from(
-        app.configuration.settings.editor.full_page_percent,
+        app.configuration.settings().editor.full_page_percent,
     )) / 100;
     let expected_down = {
         let model = VisualRowModel::new(
             &app.state.buffers[buffer].text,
             view,
             &app.ui,
-            &app.configuration.settings,
+            app.configuration.settings(),
             viewport.width,
             true,
         );
@@ -89,22 +93,26 @@ fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently()
     let mut app = app();
     app.terminal_width = 12;
     app.terminal_height = 8;
-    app.configuration.settings.editor.wrap = true;
-    app.configuration.settings.editor.line_numbers = crate::config::LineNumbers::Off;
-    app.configuration.settings.ui.status_line.enabled = false;
-    app.configuration.settings.editor.viewport.vertical_margin = 2;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.wrap = true;
+        fixture.settings.editor.line_numbers = crate::config::LineNumbers::Off;
+        fixture.settings.ui.status_line.enabled = false;
+        fixture.settings.editor.viewport.vertical_margin = 2;
+        app.configuration.install_fixture(fixture);
+    }
     let text = format!(
         "{}\nfold\nhidden 界\nhidden e\u{301}\ntail",
         "x".repeat(150)
     );
     let (_, view) = app.state.open_text(TextBuffer::from_text(&text), None);
     let buffer = app.state.views[view].buffer;
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let viewport = active_pane_viewport(
         &app.state,
         &app.ui,
-        &app.configuration.settings,
+        app.configuration.settings(),
         app.workspace_bounds().unwrap().width,
         app.workspace_render_height(),
     )
@@ -116,7 +124,7 @@ fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently()
         &app.state.buffers[buffer].text,
         view,
         &app.ui,
-        &app.configuration.settings,
+        app.configuration.settings(),
         viewport.width,
         true,
     );
@@ -130,13 +138,17 @@ fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently()
         .unwrap();
     assert!(row >= 2 && row < usize::from(viewport.height).saturating_sub(2));
 
-    app.configuration.settings.editor.viewport.vertical_margin = 100;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.viewport.vertical_margin = 100;
+        app.configuration.install_fixture(fixture);
+    }
     app.terminal_height = 4;
     app.ensure_cursor_visible();
     let tiny_viewport = active_pane_viewport(
         &app.state,
         &app.ui,
-        &app.configuration.settings,
+        app.configuration.settings(),
         app.workspace_bounds().unwrap().width,
         app.workspace_render_height(),
     )
@@ -145,7 +157,7 @@ fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently()
         &app.state.buffers[buffer].text,
         view,
         &app.ui,
-        &app.configuration.settings,
+        app.configuration.settings(),
         tiny_viewport.width,
         true,
     );
@@ -163,7 +175,11 @@ fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently()
     );
 
     app.terminal_height = 8;
-    app.configuration.settings.editor.viewport.vertical_margin = 0;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.viewport.vertical_margin = 0;
+        app.configuration.install_fixture(fixture);
+    }
     app.state.views[view].cursor = ByteOffset(0);
     app.state.views[view].scroll_line = 0;
     app.state.views[view].scroll_wrap_row = 0;
@@ -186,7 +202,7 @@ fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently()
         &app.state.buffers[buffer].text,
         view,
         &app.ui,
-        &app.configuration.settings,
+        app.configuration.settings(),
         viewport.width,
         true,
     );
@@ -202,16 +218,16 @@ fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently()
     app.state.views[view].scroll_line = 0;
     app.state.views[view].scroll_wrap_row = 0;
     let workspace = app.workspace_bounds().unwrap();
-    app.mouse_position = Some((
+    app.input.observe_mouse(
         workspace.x.saturating_add(viewport.x).saturating_add(1),
         workspace.y.saturating_add(viewport.y).saturating_add(2),
-    ));
+    );
     app.apply_mouse_cursor(false);
     let mouse_model = VisualRowModel::new(
         &app.state.buffers[buffer].text,
         view,
         &app.ui,
-        &app.configuration.settings,
+        app.configuration.settings(),
         viewport.width,
         true,
     );
@@ -232,13 +248,13 @@ fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently()
     let split_viewport = active_pane_viewport(
         &app.state,
         &app.ui,
-        &app.configuration.settings,
+        app.configuration.settings(),
         app.workspace_bounds().unwrap().width,
         app.workspace_render_height(),
     )
     .unwrap();
     assert!(split_viewport.width > 0 && split_viewport.height > 0);
-    let reconciliation_count = app.editor_windows.reconciliation_count();
+    let reconciliation_count = app.window_session.editor_ids().reconciliation_count();
     let window_revision = app.state.window_revision();
     let transaction = app.next_transaction;
     let accepted_scroll = (
@@ -251,14 +267,14 @@ fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently()
         let _ = render(
             &app.state,
             &app.ui,
-            &app.configuration.settings,
-            &app.configuration.dashboard,
+            app.configuration.settings(),
+            app.configuration.dashboard(),
             app.terminal_width,
             app.terminal_height,
         );
     }
     assert_eq!(
-        app.editor_windows.reconciliation_count(),
+        app.window_session.editor_ids().reconciliation_count(),
         reconciliation_count
     );
     assert_eq!(app.state.window_revision(), window_revision);
@@ -277,10 +293,14 @@ fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently()
 fn vertical_margin_keeps_cursor_context_above_and_below() {
     let mut app = app();
     app.terminal_height = 10;
-    app.configuration.settings.editor.viewport.vertical_margin = 2;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.viewport.vertical_margin = 2;
+        app.configuration.install_fixture(fixture);
+    }
     let text = (0..30).map(|n| format!("line {n}\n")).collect::<String>();
     let (_, view) = app.state.open_text(TextBuffer::from_text(&text), None);
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
     app.state.views[view].cursor = app.state.buffers[app.state.views[view].buffer]
         .text
         .line_to_byte(15)
@@ -291,7 +311,7 @@ fn vertical_margin_keeps_cursor_context_above_and_below() {
     let viewport = active_pane_viewport(
         &app.state,
         &app.ui,
-        &app.configuration.settings,
+        app.configuration.settings(),
         app.terminal_width,
         app.workspace_render_height(),
     )
@@ -310,10 +330,14 @@ fn exact_pane_horizontal_follow_is_display_safe_and_view_owned() {
     let mut app = app();
     app.terminal_width = 18;
     app.terminal_height = 8;
-    app.configuration.settings.editor.wrap = false;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.wrap = false;
+        app.configuration.install_fixture(fixture);
+    }
     let text = "a\t界e\u{301}bcdefghijklmnopqrstuvwxyz";
     let (_, view) = app.state.open_text(TextBuffer::from_text(text), None);
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
     app.state.views[view].cursor = ByteOffset(text.len());
     app.ensure_cursor_visible();
     let shifted = app.state.views[view].scroll_column;
@@ -323,8 +347,8 @@ fn exact_pane_horizontal_follow_is_display_safe_and_view_owned() {
         snap_display_column(
             text,
             shifted,
-            app.configuration.settings.editor.tab_width,
-            app.configuration.settings.editor.ambiguous_width,
+            app.configuration.settings().editor.tab_width,
+            app.configuration.settings().editor.ambiguous_width,
         )
     );
     let sibling = app
@@ -346,7 +370,11 @@ fn exact_pane_horizontal_follow_is_display_safe_and_view_owned() {
     assert_eq!(app.state.views[view].scroll_column, 0);
     assert_eq!(app.state.views[sibling].scroll_column, shifted);
     app.state.views[view].scroll_column = 8;
-    app.configuration.settings.editor.wrap = true;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.wrap = true;
+        app.configuration.install_fixture(fixture);
+    }
     app.ensure_cursor_visible();
     assert_eq!(app.state.views[view].scroll_column, 0);
 }
@@ -355,11 +383,15 @@ fn exact_pane_horizontal_follow_is_display_safe_and_view_owned() {
 fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
     let mut app = app();
     let (_, view) = app.state.open_text(TextBuffer::from_text("a\tX"), None);
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
     app.state.views[view].cursor = ByteOffset("a\t".len());
-    app.configuration.settings.editor.wrap = false;
-    app.configuration.settings.editor.line_numbers = crate::config::LineNumbers::Off;
-    app.configuration.settings.editor.viewport.horizontal_margin = 0;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.wrap = false;
+        fixture.settings.editor.line_numbers = crate::config::LineNumbers::Off;
+        fixture.settings.editor.viewport.horizontal_margin = 0;
+        app.configuration.install_fixture(fixture);
+    }
     app.terminal_width = 2;
     app.terminal_height = 6;
     app.ensure_cursor_visible();
@@ -367,19 +399,23 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
     let frame = render(
         &app.state,
         &app.ui,
-        &app.configuration.settings,
-        &app.configuration.dashboard,
+        app.configuration.settings(),
+        app.configuration.dashboard(),
         app.terminal_width,
         app.terminal_height,
     );
     assert!(frame.cursor.is_some_and(|(x, y, _)| x == 0 && y == 0));
-    app.mouse_position = Some((1, 0));
+    app.input.observe_mouse(1, 0);
     app.apply_mouse_cursor(false);
     assert_eq!(app.state.views[view].cursor, ByteOffset("a\tX".len()));
 
-    app.configuration.settings.editor.line_numbers = crate::config::LineNumbers::Absolute;
-    app.configuration.settings.editor.line_number_separator = "1234567890123456".into();
-    app.configuration.settings.editor.gutter_padding = 20;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.line_numbers = crate::config::LineNumbers::Absolute;
+        fixture.settings.editor.line_number_separator = "1234567890123456".into();
+        fixture.settings.editor.gutter_padding = 20;
+        app.configuration.install_fixture(fixture);
+    }
     app.state.views[view].cursor = ByteOffset("a\t".len());
     app.state.views[view].scroll_column = 0;
     app.terminal_width = 1;
@@ -388,8 +424,8 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
     let one_cell = render(
         &app.state,
         &app.ui,
-        &app.configuration.settings,
-        &app.configuration.dashboard,
+        app.configuration.settings(),
+        app.configuration.dashboard(),
         app.terminal_width,
         app.terminal_height,
     );
@@ -400,13 +436,13 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
     let two_cell = render(
         &app.state,
         &app.ui,
-        &app.configuration.settings,
-        &app.configuration.dashboard,
+        app.configuration.settings(),
+        app.configuration.dashboard(),
         app.terminal_width,
         app.terminal_height,
     );
     assert!(two_cell.cursor.is_some_and(|(x, _, _)| x == 1));
-    app.mouse_position = Some((1, 0));
+    app.input.observe_mouse(1, 0);
     app.apply_mouse_cursor(false);
     assert_eq!(app.state.views[view].cursor, ByteOffset("a\t".len()));
 
@@ -415,8 +451,8 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
     let widened = render(
         &app.state,
         &app.ui,
-        &app.configuration.settings,
-        &app.configuration.dashboard,
+        app.configuration.settings(),
+        app.configuration.dashboard(),
         app.terminal_width,
         app.terminal_height,
     );
@@ -428,7 +464,11 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
 
     let buffer = app.state.views[view].buffer;
     app.terminal_width = 2;
-    app.configuration.settings.editor.wrap = true;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.wrap = true;
+        app.configuration.install_fixture(fixture);
+    }
     app.ui.large_file_buffers.push(buffer);
     app.state.views[view].scroll_column = 0;
     app.ensure_cursor_visible();
@@ -439,8 +479,12 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
     app.ensure_cursor_visible();
     assert_eq!(app.state.views[view].scroll_column, 0);
 
-    app.configuration.settings.editor.wrap = false;
-    app.configuration.settings.editor.line_numbers = crate::config::LineNumbers::Off;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.wrap = false;
+        fixture.settings.editor.line_numbers = crate::config::LineNumbers::Off;
+        app.configuration.install_fixture(fixture);
+    }
     app.terminal_width = 2;
     app.state.buffers[buffer].text = TextBuffer::from_text("ab界X");
     app.state.views[view].cursor = ByteOffset("ab界".len());
@@ -450,14 +494,18 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
     let wide = render(
         &app.state,
         &app.ui,
-        &app.configuration.settings,
-        &app.configuration.dashboard,
+        app.configuration.settings(),
+        app.configuration.dashboard(),
         app.terminal_width,
         app.terminal_height,
     );
     assert!(wide.cursor.is_some_and(|(x, _, _)| x == 0));
 
-    app.configuration.settings.ui.panes.minimum_width = 3;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.ui.panes.minimum_width = 3;
+        app.configuration.install_fixture(fixture);
+    }
     app.terminal_width = 6;
     app.state
         .split_active(crate::editor::Axis::Horizontal, 100)
@@ -469,7 +517,7 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
     let zero_viewport = active_pane_viewport(
         &app.state,
         &app.ui,
-        &app.configuration.settings,
+        app.configuration.settings(),
         app.terminal_width,
         app.terminal_height,
     )
@@ -510,9 +558,13 @@ fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
     let mut app = app();
     let text = format!("{}\nx", "0123456789".repeat(8));
     let (_, view) = app.state.open_text(TextBuffer::from_text(&text), None);
-    app.ui.dashboard = false;
-    app.configuration.settings.editor.wrap = false;
-    app.configuration.settings.editor.line_numbers = crate::config::LineNumbers::Off;
+    app.set_dashboard_visibility(false);
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.wrap = false;
+        fixture.settings.editor.line_numbers = crate::config::LineNumbers::Off;
+        app.configuration.install_fixture(fixture);
+    }
     app.terminal_width = 90;
     app.terminal_height = 18;
     app.state.views[view].cursor = ByteOffset(80);
@@ -530,13 +582,13 @@ fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
     app.ensure_cursor_visible();
     let docked = app.state.views[view].scroll_column;
     assert!(docked > 0);
-    let panel = explorer_panel_width(&app.configuration.settings, app.terminal_width)
+    let panel = explorer_panel_width(app.configuration.settings(), app.terminal_width)
         .expect("explorer panel");
     let frame = render(
         &app.state,
         &app.ui,
-        &app.configuration.settings,
-        &app.configuration.dashboard,
+        app.configuration.settings(),
+        app.configuration.dashboard(),
         app.terminal_width,
         app.terminal_height,
     );
@@ -549,7 +601,11 @@ fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
     let narrowed = app.state.views[view].scroll_column;
     assert!(narrowed > docked);
     app.ui.explorer = None;
-    app.configuration.settings.editor.line_numbers = crate::config::LineNumbers::Absolute;
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.line_numbers = crate::config::LineNumbers::Absolute;
+        app.configuration.install_fixture(fixture);
+    }
     app.state.views[view].scroll_column = 0;
     app.ensure_cursor_visible();
     let gutter_shifted = app.state.views[view].scroll_column;
@@ -559,8 +615,8 @@ fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
     let widened = render(
         &app.state,
         &app.ui,
-        &app.configuration.settings,
-        &app.configuration.dashboard,
+        app.configuration.settings(),
+        app.configuration.dashboard(),
         app.terminal_width,
         app.terminal_height,
     );
@@ -591,7 +647,7 @@ fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
     let viewport = active_pane_viewport(
         &app.state,
         &app.ui,
-        &app.configuration.settings,
+        app.configuration.settings(),
         app.terminal_width,
         app.terminal_height,
     )
@@ -600,8 +656,8 @@ fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
     let frame = render(
         &app.state,
         &app.ui,
-        &app.configuration.settings,
-        &app.configuration.dashboard,
+        app.configuration.settings(),
+        app.configuration.dashboard(),
         app.terminal_width,
         app.terminal_height,
     );
@@ -616,24 +672,25 @@ fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
 #[test]
 fn documentation_keys_scroll_clamp_and_close_the_popup_context() {
     let mut app = app();
-    app.configuration.settings.ui.documentation_popup.max_height = 5;
-    app.configuration
-        .settings
-        .ui
-        .documentation_popup
-        .scroll_step = 4;
-    app.ui.documentation_popup = Some(DocumentationPopupState {
-        kind: DocumentationPopupKind::Hover,
-        title: "Hover".into(),
-        provider: "test".into(),
-        source_range: None,
-        sections: vec![DocumentationSection {
-            heading: None,
-            markup: DocumentationMarkupKind::PlainText,
-            lines: (0..10).map(|line| format!("line {line}")).collect(),
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.ui.documentation_popup.max_height = 5;
+        fixture.settings.ui.documentation_popup.scroll_step = 4;
+        app.configuration.install_fixture(fixture);
+    }
+    app.present_documentation_popup(
+        DocumentationPopupKind::Hover,
+        "Hover".into(),
+        "test".into(),
+        None,
+        vec![crate::language::lsp::LspMarkupContent {
+            kind: crate::language::lsp::LspMarkupKind::PlainText,
+            value: (0..10)
+                .map(|line| format!("line {line}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
         }],
-        scroll: 0,
-    });
+    );
     assert_eq!(app.active_input_context(), "documentation");
     app.handle_configured_key(KeyEvent::character('j'));
     assert_eq!(
@@ -673,18 +730,19 @@ fn documentation_keys_scroll_clamp_and_close_the_popup_context() {
     assert!(app.ui.documentation_popup.is_none());
     assert_ne!(app.active_input_context(), "documentation");
 
-    app.ui.documentation_popup = Some(DocumentationPopupState {
-        kind: DocumentationPopupKind::Hover,
-        title: "Hover".into(),
-        provider: "test".into(),
-        source_range: None,
-        sections: vec![DocumentationSection {
-            heading: None,
-            markup: DocumentationMarkupKind::PlainText,
-            lines: (0..10).map(|line| format!("line {line}")).collect(),
+    app.present_documentation_popup(
+        DocumentationPopupKind::Hover,
+        "Hover".into(),
+        "test".into(),
+        None,
+        vec![crate::language::lsp::LspMarkupContent {
+            kind: crate::language::lsp::LspMarkupKind::PlainText,
+            value: (0..10)
+                .map(|line| format!("line {line}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
         }],
-        scroll: 0,
-    });
+    );
     app.handle_event(crate::ui::UiEvent::Mouse {
         key: KeyEvent::mouse(
             crate::editor::input::KeyCode::MouseScrollDown,

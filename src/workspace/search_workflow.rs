@@ -154,7 +154,16 @@ impl SearchWorkflowBroker {
         self.revision = self.revision.saturating_add(1)
     }
     pub fn accept(&mut self, chunk: SearchWorkflowChunk) -> Result<(), SearchWorkflowError> {
-        let mut next = self.active.clone().ok_or(SearchWorkflowError::Stale)?;
+        let next = self.active.as_ref().ok_or(SearchWorkflowError::Stale)?;
+        let mut bytes = next.bytes;
+        let sequence = next
+            .next_sequence
+            .checked_add(1)
+            .ok_or(SearchWorkflowError::Limit)?;
+        let revision = self
+            .revision
+            .checked_add(1)
+            .ok_or(SearchWorkflowError::Limit)?;
         if next.request != chunk.request || next.generation != chunk.generation {
             return Err(SearchWorkflowError::Stale);
         }
@@ -179,8 +188,7 @@ impl SearchWorkflowBroker {
             {
                 return Err(SearchWorkflowError::Duplicate);
             }
-            next.bytes = next
-                .bytes
+            bytes = bytes
                 .checked_add(
                     item.stable_key.len()
                         + item.title.len()
@@ -188,19 +196,20 @@ impl SearchWorkflowBroker {
                         + item.search_text.len(),
                 )
                 .ok_or(SearchWorkflowError::Limit)?;
-            if next.bytes > self.spec.maximum_bytes
+            if bytes > self.spec.maximum_bytes
                 || next.items.len() + keys.len() > self.spec.maximum_items
             {
                 return Err(SearchWorkflowError::Limit);
             }
         }
+        let next = self.active.as_mut().expect("validated active stream");
         for item in chunk.items {
             next.items.insert(item.stable_key.clone(), item);
         }
-        next.next_sequence += 1;
+        next.next_sequence = sequence;
+        next.bytes = bytes;
         next.complete = chunk.complete;
-        self.active = Some(next);
-        self.revision = self.revision.saturating_add(1);
+        self.revision = revision;
         Ok(())
     }
     pub fn request_preview(
@@ -239,6 +248,23 @@ impl SearchWorkflowBroker {
         next.preview_request = None;
         self.revision += 1;
         Ok(())
+    }
+    pub(crate) fn ordered_items(&self) -> Option<Vec<&SearchWorkflowItem>> {
+        let active = self.active.as_ref()?;
+        let q = active.query.to_lowercase();
+        let mut items = active
+            .items
+            .values()
+            .filter(|i| q.is_empty() || i.search_text.to_lowercase().contains(&q))
+            .collect::<Vec<_>>();
+        items.sort_by(|a, b| {
+            let ar = a.search_text.to_lowercase().find(&q).unwrap_or(usize::MAX);
+            let br = b.search_text.to_lowercase().find(&q).unwrap_or(usize::MAX);
+            ar.cmp(&br)
+                .then_with(|| a.title.cmp(&b.title))
+                .then_with(|| a.stable_key.cmp(&b.stable_key))
+        });
+        Some(items)
     }
     pub fn snapshot_if_changed(&self, last: u64) -> Option<SearchWorkflowSnapshot> {
         if last == self.revision {

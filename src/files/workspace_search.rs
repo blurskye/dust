@@ -78,11 +78,27 @@ pub struct WorkspaceSearchService {
 }
 
 impl WorkspaceSearchService {
+    #[cfg(test)]
+    pub(crate) fn events_for_test(events: Vec<WorkspaceSearchEvent>) -> Self {
+        assert!(events.len() <= 256);
+        let (sender, receiver) = mpsc::sync_channel(events.len().max(1));
+        for event in events {
+            sender.send(event).unwrap();
+        }
+        Self {
+            generation: 1,
+            cancellation: None,
+            receiver: Some(receiver),
+        }
+    }
     pub fn start(&mut self, policy: WorkspaceSearchPolicy) -> Result<u64, WorkspaceSearchError> {
         validate_workspace_search_policy(&policy)?;
-        self.cancel();
-        self.generation = self.generation.saturating_add(1);
-        let generation = self.generation;
+        let generation =
+            self.generation
+                .checked_add(1)
+                .ok_or(WorkspaceSearchError::UnsafePolicy(
+                    "request identity exhausted",
+                ))?;
         let cancellation = Arc::new(AtomicBool::new(false));
         let worker_cancellation = Arc::clone(&cancellation);
         let (sender, receiver) = mpsc::sync_channel(policy.event_queue_capacity);
@@ -90,6 +106,8 @@ impl WorkspaceSearchService {
             .name(format!("dust-workspace-search-{generation}"))
             .spawn(move || run_workspace_search(generation, policy, worker_cancellation, sender))
             .map_err(WorkspaceSearchError::Spawn)?;
+        self.cancel();
+        self.generation = generation;
         self.cancellation = Some(cancellation);
         self.receiver = Some(receiver);
         Ok(generation)
@@ -108,6 +126,15 @@ impl WorkspaceSearchService {
             .and_then(|receiver| receiver.try_recv().ok())
     }
 
+    pub(crate) fn poll_event(&self) -> Result<Option<WorkspaceSearchEvent>, &'static str> {
+        match self.receiver.as_ref().map(|receiver| receiver.try_recv()) {
+            Some(Ok(event)) => Ok(Some(event)),
+            Some(Err(mpsc::TryRecvError::Disconnected)) => {
+                Err("workspace search worker stopped before completion")
+            }
+            _ => Ok(None),
+        }
+    }
     #[must_use]
     pub const fn generation(&self) -> u64 {
         self.generation

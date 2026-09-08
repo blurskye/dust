@@ -73,6 +73,10 @@ impl DiagnosticStore {
         }
     }
 
+    pub(crate) fn limits(&self) -> (usize, usize) {
+        (self.maximum_total, self.maximum_per_owner_uri)
+    }
+
     pub fn set_limits(&mut self, maximum_total: usize, maximum_per_owner_uri: usize) {
         self.maximum_total = maximum_total.clamp(1, ABSOLUTE_DIAGNOSTIC_LIMIT);
         self.maximum_per_owner_uri = maximum_per_owner_uri.clamp(1, ABSOLUTE_DIAGNOSTIC_LIMIT);
@@ -96,18 +100,7 @@ impl DiagnosticStore {
         current_revision: Option<BufferRevision>,
         mut diagnostics: Vec<Diagnostic>,
     ) -> Result<(), WorkspaceError> {
-        if version.is_some() && current_revision != version {
-            return Err(WorkspaceError::StaleDiagnostics {
-                expected: current_revision,
-                actual: version,
-            });
-        }
-        if diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.uri != uri || diagnostic.version != version)
-        {
-            return Err(WorkspaceError::MixedDiagnosticSet);
-        }
+        Self::check_set(&uri, version, current_revision, &diagnostics)?;
         diagnostics.truncate(self.maximum_per_owner_uri);
         let key = (owner, uri);
         let previous = self.sets.get(&key).map_or(0, Vec::len);
@@ -121,6 +114,27 @@ impl DiagnosticStore {
             self.sets.insert(key, diagnostics);
         }
         self.total = self.sets.values().map(Vec::len).sum();
+        Ok(())
+    }
+
+    pub(crate) fn check_set(
+        uri: &str,
+        version: Option<BufferRevision>,
+        current_revision: Option<BufferRevision>,
+        diagnostics: &[Diagnostic],
+    ) -> Result<(), WorkspaceError> {
+        if version.is_some() && current_revision != version {
+            return Err(WorkspaceError::StaleDiagnostics {
+                expected: current_revision,
+                actual: version,
+            });
+        }
+        if diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.uri != uri || diagnostic.version != version)
+        {
+            return Err(WorkspaceError::MixedDiagnosticSet);
+        }
         Ok(())
     }
 
@@ -210,5 +224,29 @@ impl DiagnosticStore {
                 .or_else(|| rows.first())
                 .cloned()
         }
+    }
+}
+
+/// Internal producer incarnation, separate from its user-visible owner name.
+#[derive(Clone, Debug)]
+pub(crate) struct DiagnosticProducer {
+    owner: DiagnosticOwner,
+    origin: std::sync::Arc<()>,
+}
+impl DiagnosticProducer {
+    pub(crate) fn new(owner: DiagnosticOwner) -> Self {
+        Self {
+            owner,
+            origin: std::sync::Arc::new(()),
+        }
+    }
+    pub(crate) fn from_runtime(owner: DiagnosticOwner, origin: std::sync::Arc<()>) -> Self {
+        Self { owner, origin }
+    }
+    pub(crate) fn owner(&self) -> &DiagnosticOwner {
+        &self.owner
+    }
+    pub(crate) fn same(&self, other: &Self) -> bool {
+        self.owner == other.owner && std::sync::Arc::ptr_eq(&self.origin, &other.origin)
     }
 }

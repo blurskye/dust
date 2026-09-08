@@ -1,6 +1,7 @@
 use super::*;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(not(test), derive(Clone))]
+#[derive(Debug, Default, Eq, PartialEq)]
 pub struct WindowGraph {
     pub(super) next_content: u64,
     pub(super) next_view: u64,
@@ -15,7 +16,34 @@ pub struct WindowGraph {
     pub(super) revision: u64,
 }
 
+#[cfg(test)]
+thread_local! { static GRAPH_CLONES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+// Test-only accounting mirrors the derived production clone, including the
+// copies made inside checked_mutation; no instrumentation enters production.
+#[cfg(test)]
+impl Clone for WindowGraph {
+    fn clone(&self) -> Self {
+        GRAPH_CLONES.with(|count| count.set(count.get() + 1));
+        Self {
+            next_content: self.next_content,
+            next_view: self.next_view,
+            next_window: self.next_window,
+            next_tab: self.next_tab,
+            contents: self.contents.clone(),
+            views: self.views.clone(),
+            windows: self.windows.clone(),
+            workspace_tabs: self.workspace_tabs.clone(),
+            active_tab: self.active_tab,
+            focused: self.focused,
+            revision: self.revision,
+        }
+    }
+}
 impl WindowGraph {
+    #[cfg(test)]
+    pub(crate) fn test_clone_count() -> usize {
+        GRAPH_CLONES.with(std::cell::Cell::get)
+    }
     /// Monotonic graph/compositor source revision. Exhaustion deliberately
     /// returns `None`, forcing every consumer to fail closed.
     #[must_use]

@@ -59,7 +59,11 @@ impl ProjectRootService {
         {
             return Err(VfsError::ProjectRootMarker);
         }
-        self.generation = self.generation.saturating_add(1);
+        self.generation = self.generation.checked_add(1).ok_or_else(|| VfsError::Io {
+            operation: "allocate project-root generation",
+            path: document.clone(),
+            source: io::Error::other("project-root generation exhausted"),
+        })?;
         let generation = self.generation;
         let (sender, receiver) = mpsc::sync_channel(1);
         let worker_document = document.clone();
@@ -85,6 +89,17 @@ impl ProjectRootService {
         Ok(generation)
     }
 
+    /// Consuming terminal poll; unlike the compatibility query, disconnect is an outcome.
+    pub fn poll_result(&mut self) -> Option<Result<ProjectRootResolution, VfsError>> {
+        let receiver = self.receiver.as_ref()?;
+        let result = match receiver.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return None,
+            Err(TryRecvError::Disconnected) => Err(VfsError::WorkerStopped),
+        };
+        self.receiver = None;
+        Some(result)
+    }
     pub fn try_result(&self) -> Option<Result<ProjectRootResolution, VfsError>> {
         self.receiver
             .as_ref()

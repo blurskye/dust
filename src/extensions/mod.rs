@@ -51,3 +51,6 @@ pub use index::*;
 
 #[cfg(test)]
 mod manager_tests;
+
+#[cfg(test)]
+pub(crate) use manager_tests::{ExecutionFixture, empty_execution_request};

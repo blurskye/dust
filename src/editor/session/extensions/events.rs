@@ -33,9 +33,9 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn refresh_plugin_host_events(&mut self) {
-        let active_surface = if self.terminal_focused {
+        let active_surface = if self.window_session.terminal_focused() {
             "terminal"
-        } else if self.ui.explorer_focused {
+        } else if self.window_session.explorer_focused() {
             "explorer"
         } else if self
             .ui
@@ -73,7 +73,7 @@ impl InteractiveApplication {
                 kind,
             ))
         });
-        let graph_revision = self.windows.revision().unwrap_or(0);
+        let graph_revision = self.window_session.graph().revision().unwrap_or(0);
         let observation = (
             self.workspace.root_revision(),
             active_surface.clone(),
@@ -130,14 +130,23 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn process_plugin_events(&mut self) {
-        let events = match self.plugins.poll() {
+        self.retire_plugin_edit_sources();
+        let events = match self.plugins.poll_owned() {
             Ok(events) => events,
             Err(error) => {
+                self.retire_plugin_edit_sources();
                 self.handle_plugin_worker_stopped(error);
                 return;
             }
         };
         for event in events {
+            let event = match event {
+                crate::extensions::OwnedPluginEvent::Executed(reply) => {
+                    self.apply_plugin_execution(reply);
+                    continue;
+                }
+                crate::extensions::OwnedPluginEvent::Other(event) => event,
+            };
             match event {
                 PluginEvent::Indexed {
                     load,
@@ -175,10 +184,10 @@ impl InteractiveApplication {
                     }
                     self.pending_index_activation
                         .insert(plugin.clone(), (load, checksum.clone()));
-                    let waiting_for_deferred = self.configuration.deferred_plugin_keymaps
+                    let waiting_for_deferred = self.configuration.deferred_plugin_keymaps()
                         && !self
                             .configuration
-                            .expected_plugin_indexes
+                            .expected_plugin_indexes()
                             .iter()
                             .all(|owner| self.plugin_contributions.get(owner).is_some());
                     if accepted.is_ok() && waiting_for_deferred {
@@ -191,7 +200,7 @@ impl InteractiveApplication {
                         self.abort_pending_index_batch(error);
                         continue;
                     }
-                    let activations = if self.configuration.deferred_plugin_keymaps {
+                    let activations = if self.configuration.deferred_plugin_keymaps() {
                         std::mem::take(&mut self.pending_index_activation)
                     } else {
                         BTreeMap::from([(plugin.clone(), (load, checksum))])
@@ -218,7 +227,7 @@ impl InteractiveApplication {
                         self.show_error(error);
                         continue;
                     }
-                    self.logs.record(
+                    self.notices.record(
                         LogLevel::Info,
                         "plugins",
                         "indexed-and-accepted",
@@ -345,7 +354,7 @@ impl InteractiveApplication {
                             }
                         }
                     }
-                    self.logs.record(
+                    self.notices.record(
                         LogLevel::Info,
                         "plugins",
                         "active",
@@ -358,7 +367,7 @@ impl InteractiveApplication {
                         ]),
                     );
                 }
-                PluginEvent::Executed(execution) => self.apply_plugin_execution(execution),
+                PluginEvent::Executed(_) => self.show_error("unowned plugin execution event"),
                 PluginEvent::Failed {
                     load,
                     plugin,
@@ -367,8 +376,11 @@ impl InteractiveApplication {
                     if self.rejected_plugin_loads.remove(&(plugin.clone(), load)) {
                         continue;
                     }
-                    if self.configuration.deferred_plugin_keymaps
-                        && self.configuration.expected_plugin_indexes.contains(&plugin)
+                    if self.configuration.deferred_plugin_keymaps()
+                        && self
+                            .configuration
+                            .expected_plugin_indexes()
+                            .contains(&plugin)
                     {
                         self.abort_expected_index_batch(plugin, load, error);
                         continue;
@@ -392,7 +404,7 @@ impl InteractiveApplication {
                     }
                     self.remove_plugin_contribution_generation(&plugin, load);
                     self.commands.unregister_plugin(&plugin);
-                    self.logs.record(
+                    self.notices.record(
                         LogLevel::Error,
                         "plugins",
                         "failed",
@@ -404,5 +416,6 @@ impl InteractiveApplication {
                 }
             }
         }
+        self.retire_plugin_edit_sources();
     }
 }

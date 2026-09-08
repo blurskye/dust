@@ -1,4 +1,12 @@
+use crate::editor::text::TextBuffer;
+use crate::editor::{EditorTopology, EditorVersion, EditorWindowVersion};
+mod paths;
+mod workspace;
+pub(crate) use workspace::{
+    EditorPublication, WorkspaceCommitCheck, WorkspaceEditSources, WorkspaceSnapshot,
+};
 mod undo;
+pub(crate) use paths::BufferPathChange;
 
 pub use undo::UndoTree;
 
@@ -186,38 +194,20 @@ impl EditorState {
         &mut self,
         transaction: &EditorTransaction,
     ) -> Result<(), TransactionError> {
-        validate_preconditions(self, &transaction.preconditions)?;
-        let mut candidate = self.clone();
-        for operation in &transaction.operations {
-            apply_operation(&mut candidate, operation, transaction.undo_policy)?;
-        }
-        if transaction.undo_policy == UndoPolicy::Boundary {
-            for (_, buffer) in &mut candidate.buffers {
-                buffer.undo.boundary();
-            }
-        }
-        if transaction
-            .operations
-            .iter()
-            .any(|operation| operation.changed_buffer_dirtiness(self, &candidate))
-        {
-            candidate.mark_window_changed();
-        }
-        *self = candidate;
+        let draft = self.prepare_transaction(transaction)?;
+        *self = draft.state;
         Ok(())
     }
 }
 
 impl EditorOperation {
-    fn changed_buffer_dirtiness(&self, before: &EditorState, after: &EditorState) -> bool {
-        let buffer = match self {
+    fn edited_buffer(&self) -> Option<BufferId> {
+        match self {
             Self::ApplyEdits { buffer, .. } | Self::Undo { buffer } | Self::Redo { buffer } => {
-                *buffer
+                Some(*buffer)
             }
-            _ => return false,
-        };
-        before.buffers.get(buffer).map(|buffer| buffer.dirty)
-            != after.buffers.get(buffer).map(|buffer| buffer.dirty)
+            _ => None,
+        }
     }
 }
 
@@ -529,6 +519,208 @@ fn clamp_views(state: &mut EditorState, buffer: BufferId) {
     }
 }
 
+/// Detached editor-owned proposal. Its origin and resulting stores cannot be
+/// replaced or paired independently by the window/extension owner.
+pub(crate) struct EditorDraft {
+    before: EditorVersion,
+    state: EditorState,
+}
+impl EditorState {
+    pub(crate) fn prepare_transaction(
+        &self,
+        transaction: &EditorTransaction,
+    ) -> Result<EditorDraft, TransactionError> {
+        validate_preconditions(self, &transaction.preconditions)?;
+        self.draft().apply_operations(transaction)
+    }
+    pub(crate) fn draft(&self) -> EditorDraft {
+        EditorDraft {
+            before: self.version(),
+            state: self.clone(),
+        }
+    }
+}
+impl EditorDraft {
+    pub(crate) fn before_window(&self) -> &EditorWindowVersion {
+        self.before.window()
+    }
+    pub(crate) fn topology(&self) -> EditorTopology<'_> {
+        (&self.state).into()
+    }
+    pub(crate) fn window_version(&self) -> EditorWindowVersion {
+        self.state.window_version()
+    }
+    fn apply_operations(
+        mut self,
+        transaction: &EditorTransaction,
+    ) -> Result<Self, TransactionError> {
+        let before = self.state.version();
+        // A failed operation consumes this detached draft; partial edits cannot
+        // escape as an acceptable editor proposal, and live state is untouched.
+        let dirty_before = transaction
+            .operations
+            .iter()
+            .filter_map(|operation| operation.edited_buffer())
+            .map(|id| (id, self.state.buffers.get(id).map(|b| b.dirty)))
+            .collect::<Vec<_>>();
+        for operation in &transaction.operations {
+            apply_operation(&mut self.state, operation, transaction.undo_policy)?;
+        }
+        if transaction.undo_policy == UndoPolicy::Boundary {
+            for (_, buffer) in &mut self.state.buffers {
+                buffer.undo.boundary();
+            }
+        }
+        if dirty_before
+            .into_iter()
+            .any(|(id, dirty)| dirty != self.state.buffers.get(id).map(|b| b.dirty))
+        {
+            self.state.mark_window_changed();
+        }
+        if self.state.version() == before {
+            self.state.mark_editor_changed();
+        }
+        Ok(self)
+    }
+    pub(crate) fn check_current(&self, current: &EditorVersion) -> Result<(), String> {
+        if &self.before != current
+            || self.before.window().revision().is_none()
+            || self.state.window_revision().is_none()
+        {
+            return Err("editor proposal source changed before acceptance".into());
+        }
+        Ok(())
+    }
+    pub(crate) fn accept(self, current: &EditorVersion) -> Result<EditorState, String> {
+        self.check_current(current)?;
+        Ok(self.state)
+    }
+    pub(crate) fn open_document(
+        &mut self,
+        text: TextBuffer,
+        path: std::path::PathBuf,
+    ) -> (BufferId, ViewId) {
+        self.state.open_text(text, Some(path))
+    }
+    pub(crate) fn split_document(&mut self, ratio: u16) -> Result<(), &'static str> {
+        self.state
+            .split_active(crate::editor::Axis::Vertical, ratio)
+            .map(|_| ())
+    }
+    pub(crate) fn load_document(&mut self, text: TextBuffer, path: std::path::PathBuf) -> BufferId {
+        self.state.load_hidden_text(text, path)
+    }
+    pub(crate) fn reload_document(
+        &mut self,
+        buffer: BufferId,
+        text: TextBuffer,
+        path: std::path::PathBuf,
+    ) -> bool {
+        self.state.replace_buffer_from_disk(buffer, text, path)
+    }
+    pub(crate) fn save_document(
+        &mut self,
+        buffer: BufferId,
+        expected: &crate::editor::text::TextVersion,
+        revision: BufferRevision,
+        bytes: Vec<u8>,
+        path: std::path::PathBuf,
+    ) -> bool {
+        let changed = self
+            .state
+            .buffers
+            .get(buffer)
+            .is_some_and(|b| &b.text.source_version() != expected);
+        if !self
+            .state
+            .mark_buffer_saved_as(buffer, revision, bytes, Some(path))
+        {
+            return false;
+        }
+        if changed {
+            self.state.set_buffer_dirty(buffer, true);
+        }
+        true
+    }
+    pub(crate) fn close_document(
+        &mut self,
+        view: ViewId,
+        buffer: BufferId,
+    ) -> Result<bool, &'static str> {
+        if self.state.active_view != Some(view)
+            || self
+                .state
+                .views
+                .get(view)
+                .is_none_or(|v| v.buffer != buffer)
+        {
+            return Err("close target changed");
+        }
+        self.state.close_active_view()?;
+        let removed = !self.state.views.values().any(|v| v.buffer == buffer);
+        if removed {
+            self.state.remove_buffer(buffer);
+        }
+        if self.state.active_view.is_none()
+            && let Some(buffer) = self.state.buffers.keys().next()
+        {
+            self.state.show_buffer(buffer)?;
+        }
+        Ok(removed)
+    }
+    pub(crate) fn show_document(&mut self, buffer: BufferId) -> Result<ViewId, &'static str> {
+        self.state.show_buffer(buffer)
+    }
+    pub(crate) fn open_virtual_read_only(
+        &mut self,
+        text: TextBuffer,
+        owner: String,
+        generation: u64,
+        document: u64,
+        revision: u64,
+    ) -> (BufferId, ViewId) {
+        self.state
+            .open_virtual_read_only(text, owner, generation, document, revision)
+    }
+    pub(crate) fn replace_virtual_read_only(
+        &mut self,
+        buffer: BufferId,
+        expected: u64,
+        revision: u64,
+        text: TextBuffer,
+    ) -> bool {
+        // Preserve the same cursor/selection/scroll policy as the virtual bridge,
+        // without lending that bridge mutable editor stores.
+        let views = self
+            .state
+            .views
+            .iter()
+            .filter(|(_, v)| v.buffer == buffer)
+            .map(|(id, v)| (id, v.cursor, v.selection, v.scroll_line, v.scroll_column))
+            .collect::<Vec<_>>();
+        if !self
+            .state
+            .replace_virtual_read_only(buffer, expected, revision, text)
+        {
+            return false;
+        }
+        let text = &self.state.buffers[buffer].text;
+        let len = text.len_bytes();
+        for (id, cursor, selection, line, column) in views {
+            if let Some(view) = self.state.views.get_mut(id) {
+                view.cursor = ByteOffset(cursor.get().min(len));
+                while !text.is_char_boundary(view.cursor) {
+                    view.cursor = ByteOffset(view.cursor.get().saturating_sub(1));
+                }
+                view.selection = selection.filter(|s| s.anchor.get() <= len && s.head.get() <= len);
+                view.scroll_line = line.min(text.len_lines().saturating_sub(1));
+                view.scroll_column = column;
+            }
+        }
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -637,5 +829,34 @@ mod tests {
         );
         assert!(state.apply_transaction(&transaction).is_err());
         assert_eq!(state.buffers[buffer].text.to_string(), "abc");
+    }
+}
+
+impl EditorState {
+    pub(crate) fn prepare_document_location(
+        &self,
+        buffer: BufferId,
+        position: ByteOffset,
+        transaction: TransactionId,
+    ) -> Result<EditorDraft, String> {
+        self.buffers
+            .get(buffer)
+            .ok_or("navigation buffer closed")?
+            .text
+            .validate_offset(position)
+            .map_err(|e| e.to_string())?;
+        if self.window_version().revision().is_none() {
+            return Err("navigation editor exhausted".into());
+        }
+        let mut draft = self.draft();
+        let view = draft.show_document(buffer)?;
+        draft
+            .apply_operations(
+                &EditorTransaction::new(transaction)
+                    .with_precondition(Precondition::ViewDisplays { view, buffer })
+                    .with_operation(EditorOperation::SetCursor { view, position })
+                    .with_undo_policy(UndoPolicy::Ignore),
+            )
+            .map_err(|e| e.to_string())
     }
 }

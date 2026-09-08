@@ -1,0 +1,784 @@
+use super::configuration::{self, ConfigurationSession};
+use super::documents::{DocumentEvent, DocumentSession, LargeFileOverride, mode_name_large};
+use super::explorer::explorer_watch_policy;
+use super::input::InputSession;
+use super::search::{PickerContent, PickerEpoch, PickerOrigin};
+use super::terminal::{TerminalInput, TerminalUpdate};
+use super::windows::{
+    EditorWindowBridge, NativeDescriptions, NativeSurfaceSignature, NativeSurfaceTarget,
+    ProjectionRequest, WindowCandidate, WindowSession,
+};
+use configuration::*;
+#[cfg(test)]
+use configuration::{
+    KeymapOperation, compile_keymaps, compile_keymaps_with_plugin_catalog, reload_keymaps,
+};
+use effects::{ExecutionAdmission, ExecutionAuthorization};
+#[path = "../commands/mod.rs"]
+pub(super) mod commands;
+#[path = "legacy_debugger.rs"]
+mod debugger;
+use crate::editor::session::debugger::DebugSession;
+#[path = "legacy_documents.rs"]
+mod documents;
+#[path = "../editing_input.rs"]
+mod editing_input;
+#[path = "../effects/mod.rs"]
+mod effects;
+#[path = "../events.rs"]
+mod events;
+#[path = "../extensions/mod.rs"]
+mod extensions;
+
+use super::syntax::{IndentError, SyntaxDocument, SyntaxSession, semantic_role};
+use super::windows::rect_contains_point;
+#[cfg(test)]
+use persistence::{build_restored_layout, capture_persisted_layout};
+#[path = "../lsp/mod.rs"]
+mod lsp;
+#[path = "legacy_persistence.rs"]
+mod persistence;
+#[path = "../project/mod.rs"]
+mod project;
+#[path = "../prompts.rs"]
+mod prompts;
+#[path = "../recovery.rs"]
+mod recovery;
+#[path = "../state.rs"]
+mod state;
+use state::*;
+mod legacy_syntax;
+#[path = "legacy_tasks.rs"]
+mod legacy_tasks;
+use crate::editor::session::tasks::{AdapterContext, RunningTask};
+#[path = "legacy_terminal.rs"]
+mod terminal_adapter;
+#[path = "../terminal_service.rs"]
+mod terminal_service;
+#[path = "../tooling/mod.rs"]
+mod tooling;
+#[path = "../tools.rs"]
+mod tools;
+#[path = "../viewport.rs"]
+mod viewport;
+#[path = "../windowing.rs"]
+mod windowing;
+
+pub use commands::{
+    AppEffect, DiagnosticFilter, LayoutAction, PickerKind, PromptMove, register_app_commands,
+};
+
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
+
+use super::workspace::WorkspacePreflightEvent as ExecutionPreflightEvent;
+use crate::config::LoadedConfig;
+use crate::debugger::{DapControl, DapEvent, DapResponse, DapSourceBreakpoint};
+use crate::editor::input::{InputAction, KeyEvent, MappingResolution, parse_ex};
+use crate::editor::text::{
+    BufferRevision, ByteOffset, ByteRange, DisplayWidthPolicy, PositionCodec, PositionEncoding,
+    TextBuffer, TextEdit, TextEditSet,
+};
+use crate::editor::{
+    ArgumentSchema, CommandError, CommandId, CommandInvocation, CommandOutcome, CommandRegistry,
+    CommandSource, CommandSpec, CommandValue, ContextRequirement, EditorMode, EditorOperation,
+    EditorState, EditorTransaction, FocusDirection, InvocationSource, Precondition, RegisterShape,
+    RegisterValue, TransactionId, UndoPolicy, ViewId, register_builtin_commands,
+};
+use crate::extensions::{
+    PluginContributionCatalog, PluginEvent, PluginHostEventQueue, PluginLimits, PluginLoadId,
+    PluginManager, PluginProviderBroker, PluginProviderSessionStatus, PluginStatus,
+    PluginStorageResult, PluginStorageService, PluginSubscriptionKind, PluginUiEvent,
+    PluginVirtualDocumentBroker,
+};
+use crate::files::{
+    ExplorerMutation, ExplorerWatchService, ProjectRootResolution, RecoveryRecord, RequestId,
+    ResourceIntentKind, VfsError, VfsResult, VfsWorker, WorkspaceFilePolicy, WorkspaceSearchMatch,
+    WorkspaceSearchPolicy,
+};
+use crate::language::lsp::{
+    LspCapabilities, LspCompletionItem, LspDocument, LspEvent, LspFeature, LspFeatureResult,
+    LspMarkupContent, LspMarkupKind, LspProgressKind, LspService, LspWorkspaceEdit, file_uri,
+    language_id_for_path, path_from_file_uri,
+};
+use crate::language::syntax::{
+    SyntaxLanguage, SyntaxSupport, builtin_languages, language_for_path,
+};
+use crate::persistence::{
+    PersistedLargeFileOverride, PersistedLayout, PersistedLocation, PersistedMark, PersistedPane,
+    PersistedSession, PersistedState, PersistedTab, PersistedWindowPlacement, PersistedWindowRule,
+    PersistencePolicy, PersistenceService, STATE_VERSION, validate_window_rules,
+};
+use crate::process::{ExecutionPreflightRequest, PreflightId, PtyId};
+use crate::telemetry::{LiveCrashSnapshot, LogLevel};
+use crate::tools::{
+    NIX_LSP_NIXPKGS_REVISION, NixWorkspaceService, PackageOperation, PackageService,
+    PackageServiceEvent, RegistryPackageMetadata, RegistryPackageSummary, RegistryRequest,
+    RegistryResult, RegistryService, ToolDefinition, ToolEntry, ToolInstaller, ToolKind,
+    ToolOperation, ToolStatus, ToolVersionRequest, ToolVersionService, discover_executable,
+    inspect_tools, is_nixos_host, managed_tool_executable, managed_tool_installed_version,
+    nix_lsp_launch_environment, nix_lsp_launch_environment_for_workspace_at,
+    nix_lsp_profile_installed, nix_lsp_shell, nix_lsp_tool_installed, nix_lsp_workspace_root,
+    tool_launch_environment,
+};
+use crate::ui::{
+    CompletionItem, DocumentationMarkupKind, DocumentationPopupKind,
+    EditorWindowBinding as UiEditorWindowBinding, EditorWindowLayoutState, KeyInputKind,
+    LanguageCompletionState, NativeSurfaceWindowBinding, PickerSurfaceKind, PromptKind,
+    TerminalError, TerminalOptions, TerminalPanelMode, TerminalSession, ToolMenuRow, ToolMenuState,
+    ToolRuntimeOption, ToolRuntimePickerState, UiEvent, UiFold, UiInlayHint, UiLspProgress,
+    UiState, UiSyntaxSpan, VisualRowAnchor, VisualRowModel, active_pane_viewport,
+    editor_state_content_width, editor_state_gutter_width, editor_workspace_insets,
+    explorer_panel_width, pane_viewports, picker_geometry, prompt_geometry, render,
+    snap_display_column, snap_display_column_forward, terminal_panel_geometry,
+    terminal_tab_at_column,
+};
+use crate::workspace::{
+    DiagnosticOwner, ExecutionSource, ExplorerKind, FileSnapshot, PickerAction, PickerItem,
+    PickerItemId, PickerState, RootIdentity, WorkspaceEditDraft, WorkspaceId, WorkspaceState,
+    WorkspaceTrust,
+};
+use slotmap::Key;
+use thiserror::Error;
+use unicode_segmentation::UnicodeSegmentation;
+
+use self::{
+    extensions::documents::VirtualDocumentEditorBridge,
+    extensions::windows::{PluginUiInteraction, PluginWindowHost},
+};
+use crate::editor::{ApplicationError, StartupTarget, build_state};
+use crate::ui::window::{
+    CompositorProjection, DockEdge, SpatialDirection, WindowPlacement, WindowRect,
+};
+
+const LSP_INLAY_HINT_DEBOUNCE: Duration = Duration::from_millis(120);
+const LSP_INLAY_HINT_EMPTY_RETRY_BASE: Duration = Duration::from_millis(500);
+const LSP_INLAY_HINT_WARMUP_RETRY_LIMIT: u8 = 5;
+const LSP_INLAY_HINT_MAX_STARTUP_DELAY: Duration = Duration::from_secs(8);
+type ActiveBufferObservation = (u64, u64, usize, usize, usize, u8);
+type PluginHostObservation = (u64, String, Option<ActiveBufferObservation>, u64);
+
+struct InteractiveApplication {
+    notices: super::notifications::NoticeSession,
+    clock: std::sync::Arc<dyn crate::clock::Clock>,
+    state: EditorState,
+    plugin_windows: PluginWindowHost,
+    pending_plugin_ui_events: BTreeMap<(String, PluginLoadId), Vec<PluginUiEvent>>,
+    plugin_host_events: PluginHostEventQueue,
+    plugin_host_event_observation: Option<PluginHostObservation>,
+    plugin_storage: PluginStorageService,
+    pending_plugin_storage_results: BTreeMap<(String, PluginLoadId), Vec<PluginStorageResult>>,
+    plugin_providers: PluginProviderBroker,
+    plugin_virtual_documents: PluginVirtualDocumentBroker,
+    plugin_virtual_editor: VirtualDocumentEditorBridge,
+    active_plugin_picker: Option<u64>,
+    workspace: super::workspace::WorkspaceSession,
+    diagnostics: super::diagnostics::DiagnosticSession,
+    picker_payloads: HashMap<PickerItemId, (PickerEpoch, PickerPayload)>,
+    lsp_edit_sources: super::lsp_edits::LspEditSources,
+    workspace_edits: super::workspace_edits::WorkspaceEditSession,
+    commands: CommandRegistry<AppEffect>,
+    input: InputSession,
+    configuration: ConfigurationSession,
+    ui: UiState,
+    documents: DocumentSession,
+    search: super::search::SearchSession,
+    pending_vfs: HashMap<RequestId, PendingVfs>,
+    should_quit: bool,
+    window_session: WindowSession,
+    terminal_width: u16,
+    terminal_height: u16,
+    tools: Vec<ToolEntry>,
+    /// Catalog LSP IDs explicitly switched from PATH preference to the verified
+    /// upstream artifact processed by Dust's private Nix compatibility runtime.
+    lsp_nix_workspace_preferred: BTreeSet<String>,
+    /// Catalog LSP IDs explicitly switched to Dust's direct managed artifact.
+    lsp_managed_preferred: BTreeSet<String>,
+    /// Exact catalog-managed version selected per LSP ID.
+    lsp_managed_versions: BTreeMap<String, String>,
+    tool_installer: ToolInstaller,
+    tool_version_service: ToolVersionService,
+    tool_version_pending: BTreeSet<String>,
+    tool_versions: BTreeMap<String, Result<String, String>>,
+    lsp_last_errors: BTreeMap<String, String>,
+    lsp: LspService,
+    active_lsp_server: Option<String>,
+    pending_lsp_project_root: Option<(u64, PendingLspProjectRoot)>,
+    nix_lsp_workspace: NixWorkspaceService,
+    pending_nix_lsp_workspace: Option<(u64, PendingNixLspWorkspace)>,
+    lsp_autostart_observation: Option<LspAutostartObservation>,
+    lsp_sessions: HashMap<String, LspRuntimeState>,
+    lsp_session_synced:
+        HashMap<(String, crate::editor::BufferId), crate::editor::text::TextVersion>,
+    lsp_synced_revisions: HashMap<crate::editor::BufferId, BufferRevision>,
+    lsp_capabilities: Option<LspCapabilities>,
+    lsp_request_generation: u64,
+    lsp_inlay_request_generation: u64,
+    lsp_inlay_request_owner: Option<(u64, LspProjectionOwner)>,
+    lsp_inlay_refresh_due: Option<Instant>,
+    lsp_inlay_empty_retries: u8,
+    lsp_logs: VecDeque<String>,
+    lsp_progress_epoch: Instant,
+    lsp_completion_items: Vec<LspCompletionItem>,
+    lsp_selection_ranges: Vec<ByteRange>,
+    lsp_semantic_raw: HashMap<(String, String), (Option<String>, Vec<u32>)>,
+    lsp_pull_ids: HashMap<(String, String), String>,
+    lsp_projection_owner: Option<LspProjectionOwner>,
+    lsp_request_owner: Option<(u64, LspProjectionOwner)>,
+    lsp_completion_owner: Option<(u64, LspProjectionOwner)>,
+
+    debugger_session: DebugSession,
+    recovery_directory: PathBuf,
+    recovery_records: Vec<(PathBuf, RecoveryRecord)>,
+    recovery_revisions: HashMap<crate::editor::BufferId, BufferRevision>,
+    recovery_pruned_revisions: HashMap<crate::editor::BufferId, BufferRevision>,
+    recovery_scheduled: HashMap<crate::editor::BufferId, (BufferRevision, Instant)>,
+    recovery_discovery_queued: bool,
+    recovery_cleanup_queued: bool,
+    next_transaction: u64,
+    git_status: crate::workspace::git::GitStatusService,
+    git_status_generation: Option<crate::workspace::git::GitStatusGeneration>,
+    git_status_root_revision: Option<u64>,
+    git_status_snapshot: Option<crate::workspace::git::GitStatusSnapshot>,
+    git_status_decorations: BTreeMap<PathBuf, crate::workspace::git::GitFileStatus>,
+    git_status_silent: bool,
+    git_status_silent_attempted: Option<(u64, PathBuf)>,
+    git_hunks: crate::workspace::git::GitHunkService,
+    git_hunk_generation: Option<crate::workspace::git::GitHunkGeneration>,
+    git_hunk_expected: Option<(u64, u64, crate::workspace::git::GitRepositoryId, PathBuf)>,
+    git_hunk_action: Option<i8>,
+    git_hunk_snapshot: Option<crate::workspace::git::GitHunkSnapshot>,
+    git_sign_hunks: crate::workspace::git::GitHunkService,
+    git_sign_generation: Option<crate::workspace::git::GitHunkGeneration>,
+    git_sign_owner: Option<(
+        u64,
+        u64,
+        crate::workspace::git::GitRepositoryId,
+        PathBuf,
+        crate::editor::BufferId,
+        u64,
+    )>,
+    selected_git_hunk: Option<(
+        crate::workspace::git::GitHunkSnapshot,
+        crate::workspace::git::GitHunk,
+        PathBuf,
+    )>,
+    git_mutation: crate::workspace::git::GitMutationService,
+    git_mutation_generation: Option<crate::workspace::git::GitMutationGeneration>,
+    execution_validation: Option<PendingExecutionValidation>,
+    explorer: super::explorer::ExplorerSession,
+    syntax: SyntaxSession,
+    persistence: super::persistence::PersistenceSession,
+    session_restore: Option<PendingSessionRestore>,
+    recent_files: Vec<PathBuf>,
+    marks: Vec<PersistedMark>,
+    jump_list: Vec<PersistedLocation>,
+    change_list: Vec<PersistedLocation>,
+    tasks: crate::editor::session::tasks::TaskSession,
+    plugins: PluginManager,
+    plugin_edits: super::plugin_edits::PluginEditSources,
+    plugin_contributions: PluginContributionCatalog,
+    pending_index_activation: BTreeMap<String, (PluginLoadId, String)>,
+    rejected_plugin_loads: BTreeSet<(String, PluginLoadId)>,
+    packages: PackageService,
+    registry: RegistryService,
+    registry_intents: HashMap<u64, bool>,
+    pending_registry_artifact: Option<(RegistryPackageMetadata, Vec<u8>)>,
+    package_prepared: HashMap<String, (PluginLoadId, u64)>,
+    package_commits: HashMap<u64, (String, PluginLoadId)>,
+    package_startup_pending: HashMap<String, PluginLoadId>,
+    package_managed_plugins: HashMap<String, PluginLoadId>,
+    package_startup_request: Option<u64>,
+    package_startup_rollback: Option<u64>,
+    package_startup_rollback_attempted: bool,
+    plugin_worker_reported: bool,
+    terminal_session: super::terminal::TerminalSession,
+    pending_execution_preflight: HashMap<PreflightId, PendingExecutionPreflight>,
+}
+
+pub fn run_interactive(
+    startup: StartupTarget,
+    loaded_config: LoadedConfig,
+    safe_mode: bool,
+) -> Result<(), InteractiveError> {
+    let mut application = InteractiveApplication::new(
+        startup,
+        loaded_config,
+        safe_mode,
+        crate::config::user_state_directory(),
+        true,
+        true,
+        std::sync::Arc::new(crate::clock::SystemClock),
+    )?;
+    application
+        .window_session
+        .configure_initial(&application.configuration.settings().windows)
+        .map_err(|error| InteractiveError::Configuration(error.to_string()))?;
+    let crash_path = crate::config::user_state_directory().join("last-crash.json");
+    if application.workspace.safe_mode() {
+        application.notify_message(
+            application.message("safe_mode_status", &[("state", "active".into())]),
+            true,
+        );
+    } else if crash_path.is_file() {
+        application.notify_message(application.message("previous_crash", &[]), true);
+    }
+    application.rebuild_matcher_cache();
+    if !application.workspace.safe_mode() {
+        application.load_configured_plugins();
+        application.package_startup_request = application
+            .packages
+            .request(PackageOperation::Activations)
+            .ok();
+    }
+    application.notices.record(
+        LogLevel::Info,
+        "application",
+        "startup",
+        BTreeMap::from([
+            (
+                "safe_mode".into(),
+                application.workspace.safe_mode().to_string(),
+            ),
+            (
+                "roots".into(),
+                application.workspace.roots().len().to_string(),
+            ),
+            (
+                "buffers".into(),
+                application.state.buffers.len().to_string(),
+            ),
+        ]),
+    );
+    if !application.workspace.safe_mode() {
+        application.load_persistence();
+    }
+    if application.documents.has_startup_work() {
+        application.notify_message(application.message("opening_file", &[]), false);
+    }
+    let terminal_ui = &application.configuration.settings().ui;
+    let mut terminal = TerminalSession::enter(
+        TerminalOptions {
+            color_mode: terminal_ui.color_mode,
+            alternate_screen: terminal_ui.alternate_screen,
+            bracketed_paste: terminal_ui.bracketed_paste,
+            focus_events: terminal_ui.focus_events,
+            mouse: terminal_ui.mouse,
+        },
+        application.configuration.theme().clone(),
+    )?;
+    application
+        .notices
+        .set_terminal_capabilities(terminal.capability_summary());
+    (application.terminal_width, application.terminal_height) = terminal.size()?;
+
+    while !application.should_quit {
+        application.process_vfs_results();
+        application.process_git_status_events();
+        application.process_git_hunk_events();
+        application.process_git_sign_events();
+        application.process_git_mutation_events();
+        application.process_workspace_file_events();
+        application.process_workspace_search_events();
+        application.process_explorer_watch_events();
+        application.process_explorer_result();
+        application.process_trust_events();
+        application.maybe_prompt_for_unseen_workspace();
+        application.process_configuration_result();
+        application.process_tool_progress();
+        application.process_tool_results();
+        application.process_tool_version_results();
+        application.process_lsp_project_root();
+        application.process_nix_lsp_workspace();
+        application.process_dap_project_root();
+        application.process_lsp_events();
+        application.restart_lsp_if_due();
+        application.process_dap_events();
+        application.process_execution_preflight();
+        application.process_pty_events();
+        application.process_plugin_storage_events();
+        application.process_plugin_events();
+        application.process_registry_events();
+        application.process_package_events();
+        application.process_job_events();
+        application.process_large_file_modes();
+        application.process_syntax();
+        application.process_persistence_events();
+        application.sync_lsp_document();
+        application.process_lsp_inlay_refresh();
+        application.sync_lsp_status_ui();
+        application.sync_status_summary_ui();
+        application.update_lsp_progress_animation();
+        application.flush_keymap_timeout();
+        application.update_key_hint_ui();
+        application.update_notification_timer();
+        application.update_live_crash_snapshot();
+        application.reconcile_editor_windows();
+        application.reconcile_git_signs();
+        application.refresh_plugin_host_events();
+        let frame = render(
+            &application.state,
+            &application.ui,
+            application.configuration.settings(),
+            application.configuration.dashboard(),
+            application.terminal_width,
+            application.terminal_height,
+        );
+        terminal.set_mouse(application.configuration.settings().ui.mouse)?;
+        terminal.set_color_mode(application.configuration.settings().ui.color_mode);
+        terminal.set_theme(application.configuration.theme().clone());
+        application
+            .notices
+            .set_terminal_capabilities(terminal.capability_summary());
+        terminal.draw(&frame)?;
+        application.queue_startup_reads();
+        application.schedule_recovery_work();
+        if let Some(event) = terminal.poll_event(Duration::from_millis(
+            application.configuration.settings().runtime.event_poll_ms,
+        ))? {
+            if matches!(
+                event,
+                UiEvent::Resize(_, _) | UiEvent::FocusGained | UiEvent::FocusLost
+            ) {
+                terminal.invalidate();
+            }
+            application.handle_event(event);
+        }
+    }
+    drop(terminal);
+    application.finish_shutdown()
+}
+
+fn mode_name(mode: EditorMode) -> &'static str {
+    match mode {
+        EditorMode::Normal => "normal",
+        EditorMode::Insert => "insert",
+        EditorMode::Replace => "replace",
+        EditorMode::VisualChar => "visual_char",
+        EditorMode::VisualLine => "visual_line",
+        EditorMode::VisualBlock => "visual_block",
+        EditorMode::OperatorPending => "operator_pending",
+        EditorMode::CommandLine => "command_line",
+        EditorMode::Prompt => "prompt",
+    }
+}
+
+fn command(id: &str) -> Result<CommandInvocation, CommandError> {
+    CommandInvocation::new(id, InvocationSource::Keymap)
+}
+
+#[derive(Debug, Error)]
+pub enum InteractiveError {
+    #[error(transparent)]
+    Application(#[from] ApplicationError),
+    #[error(transparent)]
+    Command(#[from] CommandError),
+    #[error(transparent)]
+    Terminal(#[from] TerminalError),
+    #[error(transparent)]
+    Vfs(#[from] VfsError),
+    #[error("configuration error: {0}")]
+    Configuration(String),
+    #[error(transparent)]
+    Encoding(#[from] crate::editor::text::EncodingError),
+}
+
+#[cfg(test)]
+#[path = "../tests/mod.rs"]
+mod tests;
+
+mod render;
+mod shutdown;
+
+impl InteractiveApplication {
+    fn new(
+        startup: StartupTarget,
+        loaded_config: LoadedConfig,
+        safe_mode: bool,
+        state_directory: PathBuf,
+        initialize_trust: bool,
+        persist_logs: bool,
+        clock: std::sync::Arc<dyn crate::clock::Clock>,
+    ) -> Result<Self, InteractiveError> {
+        let mut state = build_state(&startup);
+        let mut commands = CommandRegistry::default();
+        register_builtin_commands(&mut commands)?;
+        register_app_commands(&mut commands)?;
+        let use_user_configuration = loaded_config.user_configuration;
+        let (configuration, config_diagnostic) =
+            match resolve_configuration(&commands, loaded_config, true) {
+                Ok(resolved) => resolved,
+                Err(diagnostic) => {
+                    let bundled = crate::config::load_bundled_config();
+                    let (resolved, _) = resolve_configuration(&commands, bundled, true)
+                        .map_err(InteractiveError::Configuration)?;
+                    let message = resolved.settings.messages["startup_fallback"]
+                        .replace("{diagnostic}", &diagnostic);
+                    (resolved, Some(message))
+                }
+            };
+        state.policy = crate::editor::EditingPolicy {
+            tab_width: configuration.settings.editor.tab_width,
+            indent_width: configuration.settings.editor.indent_width,
+            expand_tabs: configuration.settings.editor.expand_tabs,
+            undo_break_on_text_commit: configuration.settings.editor.undo_break_on_text_commit,
+            registers_enabled: configuration.settings.editor.registers.storage
+                == crate::config::RegisterStorage::Internal,
+            mirror_named_to_unnamed: configuration
+                .settings
+                .editor
+                .registers
+                .mirror_named_to_unnamed,
+            ambiguous_width_wide: configuration.settings.editor.ambiguous_width
+                == crate::config::AmbiguousWidth::Wide,
+        };
+        let dashboard_visible = matches!(startup, StartupTarget::Dashboard { .. })
+            && configuration.settings.startup.show_dashboard;
+        if matches!(startup, StartupTarget::Dashboard { .. }) && !dashboard_visible {
+            state.open_text(TextBuffer::from_text(""), None);
+        }
+        let workspace = WorkspaceState::new(
+            WorkspaceId(1),
+            [(
+                "workspace".into(),
+                RootIdentity {
+                    canonical_path: state.workspace_root.clone(),
+                    filesystem_identity: None,
+                },
+            )],
+        )
+        .map_err(|error| InteractiveError::Configuration(error.to_string()))?;
+        let diagnostics = super::diagnostics::DiagnosticSession::new(
+            configuration.settings.workspace.maximum_diagnostics,
+            configuration
+                .settings
+                .workspace
+                .maximum_diagnostics_per_owner_uri,
+        );
+        let vfs_queue_capacity = configuration.settings.runtime.vfs_queue_capacity;
+        let syntax_queue_capacity = configuration.settings.syntax.queue_capacity;
+        let persistence_queue_capacity = configuration.settings.persistence.queue_capacity;
+        let process_event_capacity = configuration.settings.processes.event_capacity;
+        let tasks = crate::editor::session::tasks::TaskSession::new(&configuration.settings);
+        let persistence_path = state_directory.join(&configuration.settings.persistence.state_file);
+        let workspace = super::workspace::WorkspaceSession::new(
+            workspace,
+            state_directory.join("trusted-workspaces.toml"),
+            configuration.settings.workspace.trust_state_queue_capacity,
+            initialize_trust,
+            safe_mode,
+            process_event_capacity,
+        );
+        let notices = super::notifications::NoticeSession::new(
+            &configuration.settings,
+            persist_logs,
+            state_directory.join("live-health.json"),
+            clock.monotonic(),
+        );
+        let plugin_queue_capacity = configuration.settings.plugins.queue_capacity;
+        let plugin_storage_root = state_directory.join("plugin-data-v1");
+        let registry = RegistryService::start(
+            configuration.settings.packages.registry.clone(),
+            state_directory.join("packages/registry-cache"),
+        )
+        .map_err(|error| InteractiveError::Configuration(error.to_string()))?;
+        let terminal_session =
+            super::terminal::TerminalSession::new(&configuration.settings.terminals);
+        let terminal_panel_height = configuration.settings.ui.terminal_panel.height;
+        let explorer_watch = ExplorerWatchService::start(explorer_watch_policy(
+            &configuration.settings.ui.explorer.watch,
+        ))
+        .map_err(|error| InteractiveError::Configuration(error.to_string()))?;
+        let documents = DocumentSession::new(
+            VfsWorker::start(vfs_queue_capacity),
+            &startup,
+            state.window_version(),
+            workspace.root_revision(),
+            vfs_queue_capacity,
+        );
+        let debugger_session =
+            DebugSession::new(&configuration.settings.debug, workspace.version());
+        let mut application = InteractiveApplication {
+            state,
+            plugin_windows: PluginWindowHost::default(),
+            pending_plugin_ui_events: BTreeMap::new(),
+            plugin_host_events: PluginHostEventQueue::default(),
+            plugin_host_event_observation: None,
+            plugin_storage: PluginStorageService::start(plugin_storage_root, plugin_queue_capacity),
+            pending_plugin_storage_results: BTreeMap::new(),
+            plugin_providers: PluginProviderBroker::default(),
+            plugin_virtual_documents: PluginVirtualDocumentBroker::default(),
+            plugin_virtual_editor: VirtualDocumentEditorBridge::default(),
+            active_plugin_picker: None,
+            workspace,
+            diagnostics,
+            picker_payloads: HashMap::new(),
+            lsp_edit_sources: super::lsp_edits::LspEditSources::default(),
+            workspace_edits: super::workspace_edits::WorkspaceEditSession::default(),
+            commands,
+            input: InputSession::new(configuration.settings.input.count_limit),
+            configuration: ConfigurationSession::new(configuration, use_user_configuration),
+            ui: UiState {
+                config_diagnostic,
+                ..UiState::default()
+            },
+            documents,
+            search: super::search::SearchSession::default(),
+            pending_vfs: HashMap::new(),
+            should_quit: false,
+            window_session: WindowSession::new(dashboard_visible, terminal_panel_height),
+            terminal_width: 0,
+            terminal_height: 0,
+            tools: inspect_tools(),
+            lsp_nix_workspace_preferred: BTreeSet::new(),
+            lsp_managed_preferred: BTreeSet::new(),
+            lsp_managed_versions: BTreeMap::new(),
+            tool_installer: ToolInstaller::start(),
+            tool_version_service: ToolVersionService::start(),
+            tool_version_pending: BTreeSet::new(),
+            tool_versions: BTreeMap::new(),
+            lsp_last_errors: BTreeMap::new(),
+            lsp: LspService::new(),
+            active_lsp_server: None,
+            pending_lsp_project_root: None,
+            nix_lsp_workspace: NixWorkspaceService::default(),
+            pending_nix_lsp_workspace: None,
+            lsp_autostart_observation: None,
+            lsp_sessions: HashMap::new(),
+            lsp_session_synced: HashMap::new(),
+            lsp_synced_revisions: HashMap::new(),
+            lsp_capabilities: None,
+            lsp_request_generation: 0,
+            lsp_inlay_request_generation: 0,
+            lsp_inlay_request_owner: None,
+            lsp_inlay_refresh_due: None,
+            lsp_inlay_empty_retries: 0,
+            lsp_logs: VecDeque::new(),
+            lsp_progress_epoch: Instant::now(),
+            lsp_completion_items: Vec::new(),
+            lsp_selection_ranges: Vec::new(),
+            lsp_semantic_raw: HashMap::new(),
+            lsp_pull_ids: HashMap::new(),
+            lsp_projection_owner: None,
+            lsp_request_owner: None,
+            lsp_completion_owner: None,
+            debugger_session,
+            recovery_directory: state_directory.join("recovery"),
+            recovery_records: Vec::new(),
+            recovery_revisions: HashMap::new(),
+            recovery_pruned_revisions: HashMap::new(),
+            recovery_scheduled: HashMap::new(),
+            recovery_discovery_queued: false,
+            recovery_cleanup_queued: false,
+            next_transaction: 1_000_000,
+            git_status: crate::workspace::git::GitStatusService::default(),
+            git_status_generation: None,
+            git_status_root_revision: None,
+            git_status_snapshot: None,
+            git_status_decorations: BTreeMap::new(),
+            git_status_silent: false,
+            git_status_silent_attempted: None,
+            git_hunks: crate::workspace::git::GitHunkService::default(),
+            git_hunk_generation: None,
+            git_hunk_expected: None,
+            git_hunk_action: None,
+            git_hunk_snapshot: None,
+            git_sign_hunks: crate::workspace::git::GitHunkService::default(),
+            git_sign_generation: None,
+            git_sign_owner: None,
+            selected_git_hunk: None,
+            git_mutation: crate::workspace::git::GitMutationService::default(),
+            git_mutation_generation: None,
+            execution_validation: None,
+            explorer: super::explorer::ExplorerSession::new(explorer_watch),
+            syntax: SyntaxSession::new(syntax_queue_capacity),
+            persistence: super::persistence::PersistenceSession::new(
+                PersistenceService::start(persistence_queue_capacity),
+                persistence_path,
+            ),
+            session_restore: None,
+            recent_files: Vec::new(),
+            marks: Vec::new(),
+            jump_list: Vec::new(),
+            change_list: Vec::new(),
+            tasks,
+            notices,
+            clock,
+            plugins: PluginManager::start(plugin_queue_capacity),
+            plugin_edits: super::plugin_edits::PluginEditSources::default(),
+            plugin_contributions: PluginContributionCatalog::default(),
+            pending_index_activation: BTreeMap::new(),
+            rejected_plugin_loads: BTreeSet::new(),
+            registry,
+            registry_intents: HashMap::new(),
+            pending_registry_artifact: None,
+            package_prepared: HashMap::new(),
+            package_commits: HashMap::new(),
+            package_startup_pending: HashMap::new(),
+            package_managed_plugins: HashMap::new(),
+            package_startup_request: None,
+            package_startup_rollback: None,
+            package_startup_rollback_attempted: false,
+            plugin_worker_reported: false,
+            packages: PackageService::start(
+                state_directory.join("packages"),
+                8,
+                16 * 1024 * 1024,
+                64 * 1024 * 1024,
+            ),
+            terminal_session,
+            pending_execution_preflight: HashMap::new(),
+        };
+        application.project_configuration();
+        application.project_window_activation();
+        Ok(application)
+    }
+}
+
+impl InteractiveApplication {
+    pub(super) fn queue_startup_reads(&mut self) {
+        for error in self
+            .documents
+            .queue_startup(&self.state.window_version(), self.workspace.root_revision())
+        {
+            self.show_error(error);
+        }
+        self.finish_startup_reads_if_complete();
+    }
+    pub(super) fn open_startup_document(
+        &mut self,
+        text: TextBuffer,
+        path: PathBuf,
+    ) -> Result<crate::editor::BufferId, String> {
+        self.window_session
+            .check_editor_admission(&(&self.state).into())?;
+        let mut candidate = self.state.draft();
+        let (buffer, _) = candidate.open_document(text, path);
+        self.commit_editor_draft(candidate, None, true)?;
+        Ok(buffer)
+    }
+    pub(super) fn finish_startup_reads_if_complete(&mut self) {
+        if let Some(buffer) = self
+            .documents
+            .take_startup_primary(&self.state.window_version(), self.workspace.root_revision())
+            && self.state.buffers.contains_key(buffer)
+        {
+            if let Err(error) = self
+                .window_session
+                .check_editor_admission(&(&self.state).into())
+            {
+                self.show_error(error);
+                return;
+            }
+            let mut candidate = self.state.draft();
+            if candidate.show_document(buffer).is_ok()
+                && let Err(error) = self.commit_editor_draft(candidate, None, true)
+            {
+                self.show_error(error);
+            }
+        }
+    }
+}

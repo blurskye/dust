@@ -3,8 +3,88 @@ use super::*;
 impl InteractiveApplication {
     pub(in crate::editor::session) fn process_vfs_results(&mut self) {
         loop {
-            let result = match self.vfs.try_result() {
-                Ok(Some(result)) => result,
+            let result = match self
+                .documents
+                .poll(&self.state.window_version(), self.workspace.root_revision())
+            {
+                Ok(Some(DocumentEvent::Legacy(result))) => result,
+                Ok(Some(DocumentEvent::TaskRead(reply))) => {
+                    if let Err(error) = self.tasks.accept_linter_read(
+                        reply,
+                        &self.state,
+                        &self.workspace,
+                        self.configuration.binding_revision(),
+                        &self.diagnostics,
+                    ) {
+                        self.show_error(error);
+                    }
+                    self.drain_linter_sources();
+                    continue;
+                }
+                Ok(Some(DocumentEvent::WorkspaceIo(reply))) => {
+                    self.process_workspace_io(reply);
+                    continue;
+                }
+                Ok(Some(DocumentEvent::Explorer(reply))) => {
+                    self.process_explorer_io(reply);
+                    continue;
+                }
+                Ok(Some(DocumentEvent::File(reply))) => {
+                    self.process_file_reply(reply);
+                    continue;
+                }
+                Ok(Some(DocumentEvent::Stopped {
+                    requests,
+                    error,
+                    task_reads,
+                })) => {
+                    for id in requests {
+                        self.pending_vfs.remove(&id);
+                    }
+                    self.search.clear_preview();
+                    self.explorer.clear_preview();
+                    self.explorer.retire_intents();
+                    self.session_restore = None;
+                    if self.workspace_edits.proposal().is_some() || self.workspace_edits.preparing()
+                    {
+                        self.reject_workspace_proposal();
+                    }
+                    self.finish_workspace_resource_obligations("document worker stopped");
+                    self.tasks.linter_worker_stopped(task_reads);
+                    self.drain_linter_sources();
+                    self.show_error(error);
+                    break;
+                }
+                Ok(Some(DocumentEvent::Discarded)) => continue,
+                Ok(Some(DocumentEvent::Startup {
+                    receipt,
+                    path,
+                    text,
+                })) => {
+                    let buffer = match text
+                        .and_then(|text| self.open_startup_document(text, path.clone()))
+                    {
+                        Ok(buffer) => {
+                            self.notify_message(
+                                self.message("opened", &[("path", path.display().to_string())]),
+                                false,
+                            );
+                            Some(buffer)
+                        }
+                        Err(error) => {
+                            self.show_error(error);
+                            None
+                        }
+                    };
+                    self.documents.finish_startup(
+                        receipt,
+                        buffer,
+                        &self.state.window_version(),
+                        self.workspace.root_revision(),
+                    );
+                    self.finish_startup_reads_if_complete();
+                    continue;
+                }
                 Ok(None) => break,
                 Err(error) => {
                     self.show_error(error);
@@ -56,11 +136,13 @@ impl InteractiveApplication {
                         if !cleanup.diagnostics.is_empty() {
                             self.show_error(cleanup.diagnostics.join("; "));
                         } else if !cleanup.deleted.is_empty() {
-                            self.ui.notification = Some(self.message(
-                                "recovery_pruned",
-                                &[("count", cleanup.deleted.len().to_string())],
-                            ));
-                            self.ui.notification_error = false;
+                            self.notify_message(
+                                self.message(
+                                    "recovery_pruned",
+                                    &[("count", cleanup.deleted.len().to_string())],
+                                ),
+                                false,
+                            );
                         }
                     }
                 }
@@ -92,8 +174,7 @@ impl InteractiveApplication {
                     let pending = self.pending_vfs.remove(&id);
                     match (pending, result) {
                         (Some(PendingVfs::CrashDelete), Ok(())) => {
-                            self.ui.notification = Some(self.message("crash_cleared", &[]));
-                            self.ui.notification_error = false;
+                            self.notify_message(self.message("crash_cleared", &[]), false);
                         }
                         (
                             Some(PendingVfs::RecoveryDelete {
@@ -115,362 +196,47 @@ impl InteractiveApplication {
                                     self.recovery_pruned_revisions.remove(&buffer);
                                 }
                             } else {
-                                self.ui.notification =
-                                    Some(self.message("recovery_discarded", &[]));
-                                self.ui.notification_error = false;
+                                self.notify_message(self.message("recovery_discarded", &[]), false);
                             }
                         }
                         (_, Err(error)) => self.show_error(error),
                         _ => self.show_error(self.message("unexpected_completion", &[])),
                     }
                 }
-                VfsResult::ResourceResolved { id, result } => {
-                    let pending = self.pending_vfs.remove(&id);
-                    match (pending, result) {
-                        (Some(PendingVfs::WorkspaceResourceResolve { proposal }), Ok(intent)) => {
-                            let mut finish = false;
-                            if let Some(build) = &mut self.pending_workspace_proposal
-                                && build.id == proposal
-                            {
-                                if let ResourceIntentKind::Rename { target, .. } = &intent.kind
-                                    && self
-                                        .state
-                                        .buffers
-                                        .iter()
-                                        .any(|(_, buffer)| buffer.path.as_ref() == Some(target))
-                                {
-                                    if let Some(build) = self.pending_workspace_proposal.take() {
-                                        self.reject_pending_workspace_proposal(
-                                            build,
-                                            "rename target already has an editor buffer".into(),
-                                        )
-                                    }
-                                    continue;
-                                }
-                                build.resource_intents.push(intent);
-                                build.waiting = build.waiting.saturating_sub(1);
-                                finish = build.waiting == 0;
-                            }
-                            if finish {
-                                self.finish_workspace_proposal();
-                            }
-                        }
-                        (Some(PendingVfs::WorkspaceResourceResolve { .. }), Err(error)) => {
-                            if let Some(build) = self.pending_workspace_proposal.take() {
-                                self.reject_pending_workspace_proposal(build, error.to_string())
-                            }
-                        }
-                        _ => {}
-                    }
+                VfsResult::ExplorerMutated { .. } => {
+                    self.show_error("unowned explorer mutation result")
                 }
-                VfsResult::ResourceApplied { id, intent, result } => {
-                    self.resource_apply_pending.remove(&id);
-                    match result {
-                        Ok(()) => match intent.kind {
-                            ResourceIntentKind::Rename { target, .. } => {
-                                if let Some((buffer, _)) =
-                                    self.state.buffers.iter().find(|(_, buffer)| {
-                                        buffer.path.as_ref() == Some(&intent.source)
-                                    })
-                                {
-                                    let dirty = self.state.buffers[buffer].dirty;
-                                    self.state.set_buffer_path_and_dirty(
-                                        buffer,
-                                        Some(target.clone()),
-                                        dirty,
-                                    );
-                                    self.record_recent_file(target);
-                                }
-                            }
-                            ResourceIntentKind::Delete => {
-                                if let Some((buffer, _)) =
-                                    self.state.buffers.iter().find(|(_, buffer)| {
-                                        buffer.path.as_ref() == Some(&intent.source)
-                                    })
-                                {
-                                    self.state.set_buffer_path_and_dirty(buffer, None, true);
-                                }
-                            }
-                        },
-                        Err(error) => self.show_error(error),
-                    }
-                }
-                VfsResult::ExplorerMutated {
-                    id,
-                    operation,
-                    result,
-                } => {
-                    let pending = self.pending_vfs.remove(&id);
-                    if !matches!(pending, Some(PendingVfs::ExplorerMutation)) {
-                        continue;
-                    }
-                    match result {
-                        Ok(()) => {
-                            match &operation {
-                                ExplorerMutation::Rename { source, target } => {
-                                    let affected = self
-                                        .state
-                                        .buffers
-                                        .iter()
-                                        .filter_map(|(id, buffer)| {
-                                            let path = buffer.path.as_ref()?;
-                                            let suffix = path.strip_prefix(source).ok()?;
-                                            Some((id, target.join(suffix), buffer.dirty))
-                                        })
-                                        .collect::<Vec<_>>();
-                                    for (buffer, path, dirty) in affected {
-                                        self.state.set_buffer_path_and_dirty(
-                                            buffer,
-                                            Some(path.clone()),
-                                            dirty,
-                                        );
-                                        self.record_recent_file(path);
-                                    }
-                                    if self
-                                        .explorer_clipboard
-                                        .as_ref()
-                                        .is_some_and(|(path, cut)| *cut && path == source)
-                                    {
-                                        self.explorer_clipboard = None;
-                                    }
-                                }
-                                ExplorerMutation::Delete { path } => {
-                                    let affected = self
-                                        .state
-                                        .buffers
-                                        .iter()
-                                        .filter_map(|(id, buffer)| {
-                                            buffer
-                                                .path
-                                                .as_ref()
-                                                .is_some_and(|candidate| {
-                                                    candidate.starts_with(path)
-                                                })
-                                                .then_some(id)
-                                        })
-                                        .collect::<Vec<_>>();
-                                    for buffer in affected {
-                                        self.state.set_buffer_path_and_dirty(buffer, None, true);
-                                    }
-                                }
-                                ExplorerMutation::Create { .. } | ExplorerMutation::Copy { .. } => {
-                                }
-                            }
-                            self.ui.notification = Some(format!(
-                                "explorer operation complete: {}",
-                                operation
-                                    .target()
-                                    .or_else(|| operation.source())
-                                    .map_or_else(
-                                        || "path".into(),
-                                        |path| path.display().to_string()
-                                    )
-                            ));
-                            self.ui.notification_error = false;
-                            self.refresh_explorer();
-                            self.start_git_status_refresh_silent();
-                        }
-                        Err(error) => self.show_error(error),
-                    }
-                }
-                VfsResult::CreateTarget { id, result } => {
-                    let pending = self.pending_vfs.remove(&id);
-                    match (pending, result) {
-                        (
-                            Some(PendingVfs::WorkspaceProposalCreate {
-                                proposal,
-                                requested_path,
-                            }),
-                            Ok(path),
-                        ) => {
-                            let mut finish = false;
-                            if let Some(build) = &mut self.pending_workspace_proposal
-                                && build.id == proposal
-                            {
-                                build.resolved_paths.insert(requested_path, path.clone());
-                                build.creates.push(path.clone());
-                                build.snapshots.push(FileSnapshot {
-                                    canonical_path: path,
-                                    revision: None,
-                                    bytes: Vec::new(),
-                                });
-                                build.waiting = build.waiting.saturating_sub(1);
-                                finish = build.waiting == 0;
-                            }
-                            if finish {
-                                self.finish_workspace_proposal();
-                            }
-                        }
-                        (Some(PendingVfs::WorkspaceProposalCreate { .. }), Err(error)) => {
-                            if let Some(build) = self.pending_workspace_proposal.take() {
-                                self.reject_pending_workspace_proposal(build, error.to_string())
-                            }
-                        }
-                        _ => {}
-                    }
-                }
+                VfsResult::ResourceApplied { .. }
+                | VfsResult::ResourceResolved { .. }
+                | VfsResult::CreateTarget { .. } => self.show_error("unowned workspace I/O result"),
                 VfsResult::Read { id, path, result } => {
                     let pending = self.pending_vfs.remove(&id);
-                    let startup_primary = match &pending {
-                        Some(PendingVfs::StartupOpen { primary }) => Some(*primary),
-                        _ => None,
-                    };
-                    if let Some(PendingVfs::PickerPreview {
-                        path: requested,
-                        generation,
-                    }) = &pending
-                    {
-                        if *generation == self.picker_preview_generation
-                            && self.picker_preview_path.as_ref() == Some(requested)
-                        {
-                            let title = self
-                                .picker_preview
-                                .as_ref()
-                                .map_or_else(String::new, |preview| preview.title.clone());
-                            let lines = match result {
-                                Ok(bytes) => match std::str::from_utf8(&bytes) {
-                                    Ok(text) => Self::picker_preview_lines(text, 512),
-                                    Err(_) => vec!["binary preview unavailable".into()],
-                                },
-                                Err(error) => vec![format!("preview unavailable: {error}")],
-                            };
-                            self.picker_preview = Some(PickerPreview {
-                                title,
-                                lines,
-                                first_line: 0,
-                                highlight_line: None,
-                            });
-                            self.sync_picker_ui();
-                        }
+                    if self.search.accept_preview(
+                        id,
+                        &result,
+                        self.workspace.version(),
+                        self.configuration.binding_revision(),
+                    ) {
+                        self.sync_picker_ui();
                         continue;
                     }
-                    if let Some(PendingVfs::ExplorerPreview {
-                        path: requested,
-                        generation,
-                    }) = &pending
-                    {
-                        if *generation == self.explorer_preview_generation
-                            && self.explorer_preview_path.as_ref() == Some(requested)
-                        {
-                            self.explorer_preview_lines = match result {
-                                Ok(bytes) => {
-                                    let maximum = self
-                                        .configuration
-                                        .settings
-                                        .ui
-                                        .explorer
-                                        .maximum_preview_bytes;
-                                    let bytes = &bytes[..bytes.len().min(maximum)];
-                                    match std::str::from_utf8(bytes) {
-                                        Ok(text) => text
-                                            .lines()
-                                            .take(
-                                                self.configuration
-                                                    .settings
-                                                    .ui
-                                                    .explorer
-                                                    .maximum_preview_lines,
-                                            )
-                                            .map(|line| {
-                                                line.chars()
-                                                    .filter(|character| {
-                                                        !character.is_control()
-                                                            || *character == '\t'
-                                                    })
-                                                    .take(4096)
-                                                    .collect()
-                                            })
-                                            .collect(),
-                                        Err(_) => {
-                                            vec![self.message("explorer_preview_binary", &[])]
-                                        }
-                                    }
-                                }
-                                Err(error) => vec![self.message(
-                                    "explorer_preview_failed",
-                                    &[("diagnostic", error.to_string())],
-                                )],
-                            };
-                            self.sync_explorer_ui();
-                        }
+                    if self.explorer.accept_preview(
+                        id,
+                        &result,
+                        self.workspace.version(),
+                        self.configuration.binding_revision(),
+                    ) {
+                        self.sync_explorer_ui();
                         continue;
                     }
                     match result.map_err(InteractiveError::from).and_then(|bytes| {
                         TextBuffer::from_bytes(&bytes).map_err(InteractiveError::from)
                     }) {
                         Ok(text) => match pending {
-                            Some(PendingVfs::WorkspaceProposalRead {
-                                proposal,
-                                requested_path,
-                            }) => {
-                                let mut finish = false;
-                                if let Some(build) = &mut self.pending_workspace_proposal
-                                    && build.id == proposal
-                                {
-                                    build.resolved_paths.insert(requested_path, path.clone());
-                                    build.snapshots.push(FileSnapshot {
-                                        canonical_path: path,
-                                        revision: None,
-                                        bytes: text.to_bytes(),
-                                    });
-                                    build.waiting = build.waiting.saturating_sub(1);
-                                    finish = build.waiting == 0;
-                                }
-                                if finish {
-                                    self.finish_workspace_proposal();
-                                }
-                            }
                             Some(PendingVfs::SessionRestore { requested_path }) => {
                                 self.accept_session_restore_read(requested_path, path, text)
                             }
-                            Some(PendingVfs::Open) => {
-                                self.state.open_text(text, Some(path.clone()));
-                                self.record_recent_file(path.clone());
-                                self.ui.dashboard = false;
-                                self.ui.notification = Some(
-                                    self.message("opened", &[("path", path.display().to_string())]),
-                                );
-                                self.ui.notification_error = false;
-                            }
-                            Some(PendingVfs::LinterRead { generation, raw }) => {
-                                let uri = file_uri(&path);
-                                let mut diagnostics = Vec::new();
-                                for raw in raw {
-                                    let start = text
-                                        .line_to_byte(raw.line)
-                                        .ok()
-                                        .map(|offset| {
-                                            ByteOffset(
-                                                (offset.get() + raw.column).min(text.len_bytes()),
-                                            )
-                                        })
-                                        .filter(|offset| text.validate_offset(*offset).is_ok())
-                                        .unwrap_or(ByteOffset(0));
-                                    diagnostics.push(Diagnostic {
-                                        uri: uri.clone(),
-                                        version: None,
-                                        range: ByteRange::new(start, start).expect("empty"),
-                                        severity: raw.severity,
-                                        source: "linter".into(),
-                                        code: None,
-                                        message: raw.message,
-                                        related: Vec::new(),
-                                        tags: Vec::new(),
-                                        fixes: Vec::new(),
-                                        timestamp: crate::clock::system_time(),
-                                    });
-                                }
-                                let mut finish = false;
-                                if let Some(build) = self.pending_linter_builds.get_mut(&generation)
-                                {
-                                    build.grouped.entry(uri).or_default().extend(diagnostics);
-                                    build.waiting = build.waiting.saturating_sub(1);
-                                    finish = build.waiting == 0;
-                                }
-                                if finish {
-                                    self.finish_linter_build(generation);
-                                }
-                            }
+
                             Some(PendingVfs::MatcherNavigation { source }) => {
                                 let (buffer, view) = self.state.open_text(text, Some(path.clone()));
                                 let start = self.state.buffers[buffer]
@@ -491,8 +257,9 @@ impl InteractiveApplication {
                                     })
                                     .unwrap_or(ByteOffset(0));
                                 self.state.views[view].cursor = start;
+                                self.state.mark_editor_changed();
                                 self.record_recent_file(path);
-                                self.ui.dashboard = false;
+                                self.set_dashboard_visibility(false);
                                 self.ensure_cursor_visible();
                             }
                             Some(PendingVfs::PersistedNavigation { location }) => {
@@ -515,8 +282,9 @@ impl InteractiveApplication {
                                         head: cursor,
                                         kind: crate::editor::SelectionKind::Character,
                                     });
+                                self.state.mark_editor_changed();
                                 self.record_recent_file(path);
-                                self.ui.dashboard = false;
+                                self.set_dashboard_visibility(false);
                                 self.ensure_cursor_visible();
                             }
                             Some(PendingVfs::LspNavigation { range, encoding }) => {
@@ -547,7 +315,7 @@ impl InteractiveApplication {
                                 } else {
                                     self.show_error(self.message("lsp_invalid_position", &[]));
                                 }
-                                self.ui.dashboard = false;
+                                self.set_dashboard_visibility(false);
                                 self.ensure_cursor_visible();
                             }
                             Some(PendingVfs::WorkspaceSearchNavigation { range }) => {
@@ -572,61 +340,12 @@ impl InteractiveApplication {
                                 if let Err(error) = self.state.apply_transaction(&transaction) {
                                     self.show_error(error);
                                 }
-                                self.ui.dashboard = false;
+                                self.set_dashboard_visibility(false);
                                 self.ensure_cursor_visible();
-                            }
-                            Some(PendingVfs::ExplorerOpen { split }) => {
-                                if split {
-                                    self.apply_layout_action(LayoutAction::Split(
-                                        crate::editor::Axis::Vertical,
-                                    ));
-                                }
-                                self.state.open_text(text, Some(path));
-                                self.ui.dashboard = false;
-                            }
-                            Some(PendingVfs::StartupOpen { primary }) => {
-                                let (buffer, _) = self.state.open_text(text, Some(path.clone()));
-                                if primary {
-                                    self.startup_primary_buffer = Some(buffer);
-                                }
-                                self.ui.dashboard = false;
-                                self.ui.notification = Some(
-                                    self.message("opened", &[("path", path.display().to_string())]),
-                                );
-                                self.ui.notification_error = false;
-                            }
-                            Some(PendingVfs::Reload { buffer }) => {
-                                if self
-                                    .state
-                                    .replace_buffer_from_disk(buffer, text, path.clone())
-                                {
-                                    self.ui.notification = Some(self.message(
-                                        "reloaded_file",
-                                        &[("path", path.display().to_string())],
-                                    ));
-                                    self.ui.notification_error = false;
-                                } else {
-                                    self.show_error(self.message("reload_closed", &[]));
-                                }
                             }
                             _ => self.show_error(self.message("unexpected_read", &[])),
                         },
-                        Err(error) => {
-                            if matches!(pending, Some(PendingVfs::WorkspaceProposalRead { .. })) {
-                                if let Some(build) = self.pending_workspace_proposal.take() {
-                                    self.reject_pending_workspace_proposal(
-                                        build,
-                                        error.to_string(),
-                                    );
-                                }
-                            } else {
-                                self.show_error(error);
-                            }
-                        }
-                    }
-                    if startup_primary.is_some() {
-                        self.startup_reads_pending = self.startup_reads_pending.saturating_sub(1);
-                        self.finish_startup_reads_if_complete();
+                        Err(error) => self.show_error(error),
                     }
                 }
                 VfsResult::Directory {
@@ -636,74 +355,16 @@ impl InteractiveApplication {
                 } => {
                     let pending = self.pending_vfs.remove(&id);
                     match (pending, result) {
-                        (
-                            Some(PendingVfs::Completion {
-                                generation,
-                                prompt_input,
-                                fragment,
-                            }),
-                            Ok(paths),
-                        ) if generation == self.completion_generation
-                            && self
-                                .ui
-                                .prompt
-                                .as_ref()
-                                .is_some_and(|prompt| prompt.input == prompt_input) =>
-                        {
-                            let prefix = PathBuf::from(&fragment)
-                                .file_name()
-                                .map_or_else(String::new, |name| {
-                                    name.to_string_lossy().to_lowercase()
-                                });
-                            let limit = self.configuration.settings.runtime.completion_limit;
-                            let detail =
-                                self.configuration.settings.command_labels["file.open"].clone();
-                            let workspace = self.state.workspace_root.clone();
-                            let select_first =
-                                self.configuration.settings.input.completion_select_first;
-                            if let Some(prompt) = &mut self.ui.prompt {
-                                prompt.completions = paths
-                                    .into_iter()
-                                    .filter(|path| {
-                                        path.file_name().is_some_and(|name| {
-                                            name.to_string_lossy()
-                                                .to_lowercase()
-                                                .starts_with(&prefix)
-                                        })
-                                    })
-                                    .take(limit)
-                                    .map(|path| CompletionItem {
-                                        label: path
-                                            .strip_prefix(&workspace)
-                                            .unwrap_or(&path)
-                                            .display()
-                                            .to_string(),
-                                        detail: detail.clone(),
-                                    })
-                                    .collect();
-                                prompt.selected_completion =
-                                    (select_first && !prompt.completions.is_empty()).then_some(0);
-                            }
+                        (Some(PendingVfs::Completion { key }), Ok(paths)) => {
+                            self.input.accept_prompt_paths(
+                                &key,
+                                paths,
+                                &self.state.workspace_root,
+                                self.configuration.settings(),
+                            );
+                            self.project_input_prompt();
                         }
                         (Some(PendingVfs::Completion { .. }), Err(_)) => {}
-                        (Some(PendingVfs::Completion { .. }), Ok(_)) => {}
-                        (Some(PendingVfs::LinterRead { generation, .. }), Err(error)) => {
-                            let mut finish = false;
-                            if let Some(build) = self.pending_linter_builds.get_mut(&generation) {
-                                build.failed = true;
-                                build.waiting = build.waiting.saturating_sub(1);
-                                finish = build.waiting == 0;
-                            }
-                            self.logs.record(
-                                LogLevel::Error,
-                                "linter",
-                                "source-read-failed",
-                                BTreeMap::from([("error".into(), error.to_string())]),
-                            );
-                            if finish {
-                                self.finish_linter_build(generation);
-                            }
-                        }
                         (Some(PendingVfs::SessionRestore { .. }), Err(_)) => {
                             self.fail_session_restore()
                         }
@@ -711,74 +372,234 @@ impl InteractiveApplication {
                         _ => self.show_error(self.message("unexpected_completion", &[])),
                     }
                 }
-                VfsResult::Write { id, path, result } => {
-                    let pending = self.pending_vfs.remove(&id);
-                    match (pending, result) {
-                        (
-                            Some(PendingVfs::Save {
-                                buffer,
-                                revision,
-                                bytes,
-                                target,
-                                quit_after,
-                            }),
-                            Ok(()),
-                        ) => {
-                            if self.state.mark_buffer_saved_as(
-                                buffer,
-                                revision,
-                                bytes,
-                                Some(target),
-                            ) {
-                                let buffer_state = &self.state.buffers[buffer];
-                                let still_dirty = buffer_state.dirty;
-                                let lsp_document = buffer_state.path.clone().and_then(|path| {
-                                    Some(LspDocument {
-                                        language_id: language_id_for_path(&path)?.into(),
-                                        path,
-                                        version: buffer_state.text.revision().0,
-                                        text: buffer_state.text.to_string(),
-                                    })
-                                });
-                                self.ui.notification = Some(if still_dirty {
-                                    self.message(
-                                        "saved_dirty",
-                                        &[
-                                            ("revision", revision.0.to_string()),
-                                            ("path", path.display().to_string()),
-                                        ],
-                                    )
-                                } else {
-                                    self.message("saved", &[("path", path.display().to_string())])
-                                });
-                                self.ui.notification_error = false;
-                                if let Some(server) = self.active_lsp_server.as_deref()
-                                    && let Some(document) = lsp_document
-                                {
-                                    let _ = self.lsp.save(server, document);
-                                }
-                                if self.ui.explorer.is_some() {
-                                    self.start_git_status_refresh_with_feedback(false);
-                                }
-                                if quit_after && !still_dirty {
-                                    if self
-                                        .state
-                                        .buffers
-                                        .iter()
-                                        .any(|(_, candidate)| candidate.dirty)
-                                    {
-                                        self.show_error(self.message("saved_others_dirty", &[]));
-                                    } else {
-                                        self.should_quit = true;
-                                    }
-                                }
-                            }
-                        }
-                        (_, Err(error)) => self.show_error(error),
-                        _ => self.show_error(self.message("unexpected_completion", &[])),
+                VfsResult::Write { result, .. } => {
+                    if let Err(error) = result {
+                        self.show_error(error);
+                    } else {
+                        self.show_error(self.message("unexpected_completion", &[]));
                     }
                 }
             }
+        }
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn process_explorer_io(
+        &mut self,
+        reply: crate::files::ExplorerIoReply,
+    ) {
+        use crate::editor::session::explorer::MutationUpdate;
+        if let crate::files::ExplorerIoReply::Opened { id, path, result } = reply {
+            let Some(reply) = self.explorer.accept_open(
+                id,
+                &path,
+                (
+                    self.workspace.version(),
+                    self.configuration.binding_revision(),
+                ),
+                &self.state.window_version(),
+            ) else {
+                return;
+            };
+            let reply = match reply {
+                Ok(reply) => reply,
+                Err(error) => {
+                    self.show_error(error);
+                    return;
+                }
+            };
+            if let Err(error) = self
+                .window_session
+                .check_editor_admission(&(&self.state).into())
+            {
+                self.show_error(error);
+                return;
+            }
+            let text = match result
+                .map_err(|e| e.to_string())
+                .and_then(|bytes| TextBuffer::from_bytes(&bytes).map_err(|e| e.to_string()))
+            {
+                Ok(text) => text,
+                Err(error) => {
+                    self.show_error(error);
+                    return;
+                }
+            };
+            let activate = self.window_session.navigation_current(
+                &reply.navigation,
+                &self.state.window_version(),
+                self.state.active_view,
+            );
+            let mut draft = self.state.draft();
+            if activate {
+                if reply.split
+                    && self.state.active_view.is_some()
+                    && let Err(error) =
+                        draft.split_document(self.configuration.settings().ui.panes.default_ratio)
+                {
+                    self.show_error(error);
+                    return;
+                }
+                draft.open_document(text, path);
+            } else {
+                draft.load_document(text, path);
+            }
+            if let Err(error) = self.commit_editor_draft(draft, None, activate) {
+                self.show_error(error);
+                return;
+            }
+            if activate {
+                self.set_dashboard_visibility(false);
+                self.ensure_cursor_visible();
+            }
+            return;
+        }
+        let Some(update) = self.explorer.accept_mutation(
+            reply,
+            self.workspace.version(),
+            self.configuration.binding_revision(),
+            &self.state.window_version(),
+        ) else {
+            return;
+        };
+        match update {
+            MutationUpdate::Confirmation(path) => {
+                self.open_prompt(PromptKind::ExplorerDelete, String::new());
+                self.prompt_help(format!(
+                    "Permanently deletes `{}`. Type `delete`.",
+                    path.display()
+                ));
+            }
+            MutationUpdate::Apply(prepared) => self.apply_prepared_explorer(prepared),
+            MutationUpdate::Failed(error) => self.show_error(error),
+            MutationUpdate::Complete { operation, change } => {
+                let reconciliation = (|| -> Result<(), String> {
+                    self.window_session
+                        .check_editor_admission(&(&self.state).into())?;
+                    if let Some(change) = change {
+                        let target = match &operation {
+                            ExplorerMutation::Rename { target, .. } => Some(target.as_path()),
+                            _ => None,
+                        };
+                        let (draft, recent) = self.state.reconcile_paths(change, target)?;
+                        if let Some(draft) = draft {
+                            self.commit_editor_draft(draft, None, false)?;
+                        }
+                        for path in recent {
+                            self.record_recent_file(path);
+                        }
+                    }
+                    Ok(())
+                })();
+                if let Err(error) = reconciliation {
+                    self.show_error(error);
+                } else {
+                    self.notify_message(
+                        format!(
+                            "explorer operation complete: {}",
+                            operation
+                                .target()
+                                .or_else(|| operation.source())
+                                .map_or_else(|| "path".into(), |path| path.display().to_string())
+                        ),
+                        false,
+                    );
+                }
+                self.refresh_explorer();
+                self.start_git_status_refresh_silent();
+            }
+        }
+    }
+}
+
+impl InteractiveApplication {
+    fn process_workspace_io(&mut self, reply: crate::editor::session::documents::WorkspaceIoReply) {
+        if self.workspace_edits.owns_preparation_reply(&reply) {
+            if let VfsResult::ResourceResolved {
+                result: Ok(intent), ..
+            } = reply.result()
+            {
+                let target = match &intent.kind {
+                    ResourceIntentKind::Rename { target, .. } => Some(target.as_path()),
+                    ResourceIntentKind::Delete => None,
+                };
+                if let Err(error) = self.state.check_resource_destination(target) {
+                    self.abort_workspace_edit(error);
+                    return;
+                }
+            }
+            match self.workspace_edits.accept_preparation_reply(
+                reply,
+                &self.workspace.version(),
+                self.configuration.binding_revision(),
+            ) {
+                Ok(()) => {
+                    if self.workspace_edits.files_ready() {
+                        self.finish_workspace_proposal();
+                    }
+                }
+                Err(error) => self.abort_workspace_edit(error),
+            }
+            return;
+        }
+
+        let Some(result) = self.workspace_edits.resource_finished(
+            reply,
+            &self.workspace.version(),
+            self.configuration.binding_revision(),
+        ) else {
+            return;
+        };
+        let request = match result {
+            Ok(request) => request,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        let (change, target) = request.into_change();
+        match self.state.reconcile_paths(change, target.as_deref()) {
+            Ok((draft, recent)) => {
+                if let Some(draft) = draft
+                    && let Err(error) = self.commit_editor_draft(draft, None, false)
+                {
+                    self.show_error(error);
+                    return;
+                }
+                for path in recent {
+                    self.record_recent_file(path);
+                }
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn retire_workspace_resources(&mut self, reason: &str) {
+        let (notices, requests) = self.workspace_edits.retire_resources(reason);
+        for notice in notices {
+            self.show_error(notice);
+        }
+        for id in requests {
+            if let Some(cancelled) = self.documents.cancel_workspace_queued(id) {
+                if let Some(notice) = self.workspace_edits.resource_cancelled(cancelled) {
+                    self.show_error(notice);
+                }
+            } else {
+                self.show_error(
+                    "resource publication retired; its filesystem outcome is still pending",
+                );
+            }
+        }
+    }
+    pub(in crate::editor::session) fn finish_workspace_resource_obligations(
+        &mut self,
+        reason: &str,
+    ) {
+        for notice in self.workspace_edits.finish_resources(reason) {
+            self.show_error(notice);
         }
     }
 }

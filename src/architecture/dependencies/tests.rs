@@ -1,0 +1,120 @@
+use super::*;
+
+fn check(extra: &[(&str, &str)], service: &str) -> Result<(), ArchitectureError> {
+    let fixture = tempfile::tempdir().unwrap();
+    let base = [
+        (
+            "src/lib.rs",
+            "extern crate self as local_crate; pub mod editor; pub mod language; pub mod facade;",
+        ),
+        (
+            "src/editor/mod.rs",
+            "pub mod state { pub struct EditorState { pub workspace_root: String } } pub use state::EditorState; pub mod text { pub struct TextBuffer; }",
+        ),
+        ("src/language/mod.rs", "pub mod lsp;"),
+        (
+            "src/facade.rs",
+            "pub mod nested { pub use crate::editor::EditorState as Actor; } pub use nested::*; pub type Wrapped = Option<Box<Actor>>;",
+        ),
+        ("src/language/lsp.rs", service),
+    ];
+    let mut paths = BTreeSet::new();
+    for (path, source) in base.into_iter().chain(extra.iter().copied()) {
+        let path = fixture.path().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, source).unwrap();
+        paths.insert(path);
+    }
+    audit(fixture.path(), &paths.into_iter().collect::<Vec<_>>())
+}
+
+#[test]
+fn canonical_services_reject_direct_local_alias_reexport_glob_and_macro_authority() {
+    for source in [
+        "pub fn bad(s: &mut crate::editor::EditorState) { s.workspace_root.clear(); }",
+        "use crate::editor::EditorState as Shared; pub fn bad(s: &mut Shared) { s.workspace_root.clear(); }",
+        "pub fn bad() { use crate::editor::EditorState as Shared; let mut s = Shared { workspace_root: String::new() }; s.workspace_root.clear(); }",
+        "use crate::editor as model; pub fn bad(s: &mut model::EditorState) { s.workspace_root.clear(); }",
+        "use crate::facade::nested::{self as model}; pub fn bad(s: &mut model::Actor) { s.workspace_root.clear(); }",
+        "use crate::facade::*; pub fn bad(s: &mut Actor) { s.workspace_root.clear(); }",
+        "pub fn bad(_: crate::facade::Wrapped) {}",
+        "pub fn outer() { mod nested { pub fn bad(s: &mut crate::editor::EditorState) { s.workspace_root.clear(); } } }",
+        "const _: () = { mod nested { pub fn bad(s: &mut crate::editor::EditorState) { s.workspace_root.clear(); } } };",
+        "type Local = crate::facade::nested::Actor; pub fn bad(s: &mut Local) { s.workspace_root.clear(); }",
+        "macro_rules! ty { ($t:ty) => { $t } } pub fn bad(_: ty!(&mut crate::editor::EditorState)) {}",
+        "pub fn bad(s: &mut ::local_crate::editor::EditorState) { s.workspace_root.clear(); }",
+        "pub fn bad() { let mut s = crate::editor::EditorState { workspace_root: String::new() }; s.workspace_root.clear(); }",
+    ] {
+        let error = check(&[], source).expect_err(source);
+        assert!(
+            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("forbidden authority crate::editor")),
+            "{source}: {error}"
+        );
+    }
+}
+
+#[test]
+fn real_module_paths_cannot_launder_service_ownership() {
+    for (declaration, path) in [
+        (
+            "#[path = \"../shared.rs\"] pub mod nested;",
+            "src/shared.rs",
+        ),
+        (
+            "pub mod nested { #[path = \"shared.rs\"] pub mod inner; }",
+            "src/language/lsp/nested/shared.rs",
+        ),
+    ] {
+        let error = check(
+            &[(
+                path,
+                "pub fn bad(s: &mut crate::editor::EditorState) { s.workspace_root.clear(); }",
+            )],
+            declaration,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, ArchitectureError::Dependency { detail, .. } if detail.contains("forbidden authority crate::editor"))
+        );
+    }
+}
+
+#[test]
+fn legitimate_domain_clients_comments_strings_and_test_only_code_are_not_authority_edges() {
+    check(
+        &[],
+        r#"
+        use crate::editor::text::TextBuffer;
+        pub fn process(_: &TextBuffer) { let _ = "crate::editor::EditorState"; }
+        // crate::editor::EditorState is explanatory text, not a dependency.
+        #[cfg(test)] fn fixture(_: &mut crate::editor::EditorState) {}
+        #[cfg(all(unix, test))] mod tests { use crate::editor::EditorState; }
+    "#,
+    )
+    .unwrap();
+    // This is a public editor client, not a service, and remains intentionally legal.
+    check(&[("src/facade.rs", "pub fn public_client(s: &mut crate::editor::EditorState) { s.workspace_root.clear(); }")], "pub fn service() {}").unwrap();
+}
+
+#[test]
+fn migrated_owner_globs_and_unaccounted_module_paths_fail_closed() {
+    let error = check(
+        &[(
+            "src/editor/mod.rs",
+            "pub mod session { pub mod input { use super::*; } }",
+        )],
+        "pub fn service() {}",
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, ArchitectureError::Dependency { detail, .. } if detail.contains("imports and exports explicitly"))
+    );
+    let error = check(
+        &[],
+        "#[cfg_attr(unix, path = \"elsewhere.rs\")] pub mod nested;",
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, ArchitectureError::Dependency { detail, .. } if detail.contains("conditional module attributes"))
+    );
+}

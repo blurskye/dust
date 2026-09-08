@@ -71,9 +71,9 @@ impl InteractiveApplication {
             language: document.language_id.clone(),
             root_revision: self.workspace.root_revision(),
             trust: self.workspace.trust(),
-            enabled: self.configuration.settings.lsp.enabled,
-            auto_start: self.configuration.settings.lsp.auto_start,
-            nix_workspace_fallback: self.configuration.settings.lsp.nix_workspace_fallback,
+            enabled: self.configuration.settings().lsp.enabled,
+            auto_start: self.configuration.settings().lsp.auto_start,
+            nix_workspace_fallback: self.configuration.settings().lsp.nix_workspace_fallback,
             execution_busy: self.execution_validation.is_some(),
             launchable_server,
         };
@@ -86,7 +86,7 @@ impl InteractiveApplication {
             && observation.auto_start
             && !observation.execution_busy
             && observation.trust == WorkspaceTrust::Trusted
-            && !self.safe_mode
+            && !self.workspace.safe_mode()
             && server.is_some();
         self.lsp_autostart_observation = Some(observation);
         if should_start {
@@ -117,7 +117,7 @@ impl InteractiveApplication {
             self.lsp_autostart_observation = None;
             return;
         };
-        let revision = BufferRevision(document.version);
+        let revision = self.state.buffers[buffer].text.source_version();
         let mut sessions = Vec::new();
         let mut detach = Vec::new();
         for (key, state) in &self.lsp_sessions {
@@ -158,17 +158,21 @@ impl InteractiveApplication {
             if self.lsp_session_synced.get(&(server.clone(), buffer)) == Some(&revision) {
                 continue;
             }
-            if self.lsp.change(server, document.clone()).is_ok() {
+            if self
+                .lsp
+                .sync_owned(server, document.clone(), (buffer, revision.clone()))
+                .is_ok()
+            {
                 changed = true;
                 self.lsp_session_synced
-                    .insert((server.clone(), buffer), revision);
+                    .insert((server.clone(), buffer), revision.clone());
                 if let Some(state) = self.lsp_sessions.get_mut(server) {
                     state.documents.insert(buffer, document.clone());
                 }
             }
         }
         if changed
-            && !(self.configuration.settings.lsp.inlay_hint_level
+            && !(self.configuration.settings().lsp.inlay_hint_level
                 == crate::config::InlayHintLevel::Max
                 && self.ui.lsp_inlay_hints.is_empty()
                 && self.lsp_inlay_refresh_due.is_some())

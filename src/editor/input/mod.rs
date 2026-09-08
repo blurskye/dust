@@ -17,4 +17,5 @@ pub use key::{
     KeyCode, KeyEvent, KeyParseError, Modifiers, TerminalMouseInput, TerminalNavigationKey,
 };
 pub use keymap::{Keymap, KeymapLayer, KeymapResolver, MappingResolution};
+pub(crate) use keymap::{KeymapBindings, KeymapSequence};
 pub use search::{SearchPatternError, search_matches};

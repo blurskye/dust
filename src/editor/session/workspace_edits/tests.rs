@@ -1,0 +1,580 @@
+use super::*;
+use crate::editor::{
+    EditorState, TransactionId,
+    text::{ByteOffset, ByteRange, TextBuffer, TextEdit},
+};
+#[test]
+fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_before_clone() {
+    let root = tempfile::tempdir().unwrap();
+    let scope = WorkspaceState::new(
+        crate::workspace::WorkspaceId(1),
+        [(
+            "root".into(),
+            crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+        )],
+    )
+    .unwrap();
+    let workspace = crate::editor::session::workspace::WorkspaceSession::new(
+        scope.clone(),
+        root.path().join("trust.json"),
+        1,
+        false,
+        false,
+        1,
+    );
+    let version = workspace.version();
+    let path = root.path().join("open");
+    let hidden = root.path().join("hidden");
+    let mut editor = EditorState::new(root.path().into());
+    let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(path.clone()));
+    let prepared = |ticket| PreparedEdits {
+        ticket,
+        label: "preview".into(),
+        drafts: vec![
+            WorkspaceEditDraft {
+                canonical_path: hidden.clone(),
+                expected_revision: None,
+                edits: vec![TextEdit::new(
+                    ByteRange::new(ByteOffset(0), ByteOffset(1)).unwrap(),
+                    "H",
+                )],
+            },
+            WorkspaceEditDraft {
+                canonical_path: path.clone(),
+                expected_revision: Some(crate::editor::text::BufferRevision(0)),
+                edits: vec![TextEdit::new(
+                    ByteRange::new(ByteOffset(0), ByteOffset(3)).unwrap(),
+                    "NEW",
+                )],
+            },
+        ],
+        snapshots: vec![
+            FileSnapshot {
+                canonical_path: hidden.clone(),
+                revision: None,
+                bytes: b"h".to_vec(),
+            },
+            FileSnapshot {
+                canonical_path: path.clone(),
+                revision: Some(crate::editor::text::BufferRevision(0)),
+                bytes: b"old".to_vec(),
+            },
+        ],
+        resources: Vec::new(),
+    };
+    let mut owner = WorkspaceEditSession::default();
+    let retired = owner
+        .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
+        .unwrap();
+    owner.reject();
+    let id = owner
+        .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
+        .unwrap();
+    assert!(id.id() > retired.id());
+    let before = TextBuffer::test_materializations();
+    assert!(owner.build(prepared(retired), &scope, &version, 1).is_err());
+    let mut foreign_owner = WorkspaceEditSession::default();
+    let foreign_ticket = foreign_owner
+        .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
+        .unwrap();
+    assert!(
+        owner
+            .build(prepared(foreign_ticket), &scope, &version, 1)
+            .is_err()
+    );
+    assert_eq!(TextBuffer::test_materializations(), before);
+    owner.build(prepared(id), &scope, &version, 1).unwrap();
+    owner.toggle(0).unwrap();
+    assert!(!owner.proposal().unwrap().files[0].selected);
+    owner.toggle(0).unwrap();
+    assert!(owner.toggle(99).is_err());
+    assert!(owner.approval(&version, 2).is_err());
+    editor.buffers[buffer].read_only = true;
+    let (sources, preview) = owner.approval(&version, 1).unwrap();
+    let copies = EditorState::test_clone_count();
+    let materializations = TextBuffer::test_materializations();
+    assert!(
+        editor
+            .prepare_workspace_edit(sources, preview, TransactionId(1))
+            .is_err()
+    );
+    assert_eq!(editor.buffers.len(), 1); // earlier unopened target never leaks into live state
+    assert_eq!(EditorState::test_clone_count(), copies);
+    assert_eq!(TextBuffer::test_materializations(), materializations);
+    editor.buffers[buffer].read_only = false;
+    let change = editor.capture_path_change(&path).unwrap();
+    editor.buffers[buffer].text.restore_text("dirty").unwrap();
+    editor.set_buffer_dirty(buffer, true);
+    assert!(
+        editor
+            .validate_resource_change(&change, b"old", None)
+            .is_err()
+    );
+    assert!(
+        editor
+            .prepare_workspace_edit(sources, preview, TransactionId(2))
+            .is_err()
+    );
+    editor.replace_buffer_from_disk(buffer, TextBuffer::from_text("old"), path.clone());
+    assert!(
+        editor
+            .prepare_workspace_edit(sources, preview, TransactionId(3))
+            .is_err()
+    );
+    assert!(editor.workspace_resource_change(sources, &path).is_err());
+    assert_eq!(EditorState::test_clone_count(), copies);
+    owner.reject();
+    assert!(owner.approval(&version, 1).is_err());
+    let id = owner
+        .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
+        .unwrap();
+    owner.build(prepared(id), &scope, &version, 1).unwrap();
+    let (sources, preview) = owner.approval(&version, 1).unwrap();
+    let foreign = EditorState::new(root.path().into());
+    assert!(
+        foreign
+            .prepare_workspace_edit(sources, preview, TransactionId(4))
+            .is_err()
+    );
+    let draft = editor
+        .prepare_workspace_edit(sources, preview, TransactionId(5))
+        .unwrap();
+    owner.stage_approval(&draft, Vec::new()).unwrap();
+    assert!(owner.accepted(editor.publication()).is_err());
+    editor = draft.accept(&editor.version()).unwrap();
+    owner.accepted(editor.publication()).unwrap();
+    assert!(owner.proposal().is_none());
+    assert_eq!(editor.buffers[buffer].text.to_string(), "NEW");
+    assert!(editor.buffers[buffer].dirty);
+    assert_eq!(editor.buffers.len(), 2);
+    assert!(
+        editor
+            .buffers
+            .iter()
+            .any(|(_, b)| b.path.as_ref() == Some(&hidden) && b.text.to_string() == "H" && b.dirty)
+    );
+    assert!(owner.accepted(editor.publication()).is_err());
+    // A single real bounded document lane proves read/create admission, queue
+    // refusal, cancellation, and a late terminal without reviving old preparation.
+    use crate::editor::StartupTarget;
+    use crate::editor::session::documents::{DocumentEvent, DocumentSession};
+    use crate::files::VfsWorker;
+    let disk = root.path().join("on-disk");
+    std::fs::write(&disk, b"abc").unwrap();
+    let created = root.path().join("new-file");
+    let (vfs, release) = VfsWorker::start_gated_for_test(1);
+    let mut documents = DocumentSession::new(
+        vfs,
+        &StartupTarget::Dashboard {
+            root: root.path().into(),
+        },
+        editor.window_version(),
+        1,
+        1,
+    );
+    let mut io = WorkspaceEditSession::default();
+    let ticket = io
+        .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
+        .unwrap();
+    io.start_files(
+        ticket,
+        "old".into(),
+        None,
+        false,
+        vec![
+            InputFile::Read(disk.clone()),
+            InputFile::Create(created.clone()),
+        ],
+        vec![root.path().into()],
+        1024,
+    )
+    .unwrap();
+    let permit = io.prepare_io(0, &workspace, &1, &editor).unwrap();
+    documents.submit_workspace_io(permit).unwrap();
+    let permit = io.prepare_io(1, &workspace, &1, &editor).unwrap();
+    assert!(documents.submit_workspace_io(permit).is_err());
+    let retired = io.reject();
+    assert_eq!(retired.requests.len(), 1);
+    assert!(documents.cancel_request(retired.requests[0]));
+    let ticket = io
+        .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
+        .unwrap();
+    io.start_files(
+        ticket,
+        "new".into(),
+        None,
+        false,
+        vec![InputFile::Read(disk.clone())],
+        vec![root.path().into()],
+        1024,
+    )
+    .unwrap();
+    release.send(()).unwrap();
+    let wait = |documents: &mut DocumentSession| {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            if let Some(event) = documents.poll(&editor.window_version(), 1).unwrap() {
+                break event;
+            }
+            assert!(std::time::Instant::now() < end);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    };
+    assert!(matches!(wait(&mut documents), DocumentEvent::Discarded));
+    assert!(io.preparing());
+    let permit = io.prepare_io(0, &workspace, &1, &editor).unwrap();
+    documents.submit_workspace_io(permit).unwrap();
+    let mut foreign_documents = DocumentSession::new(
+        VfsWorker::start(2),
+        &StartupTarget::Dashboard {
+            root: root.path().into(),
+        },
+        editor.window_version(),
+        1,
+        2,
+    );
+    foreign_documents.read(disk.clone()).unwrap();
+    assert!(matches!(
+        wait(&mut foreign_documents),
+        DocumentEvent::Legacy(_)
+    ));
+    let mut foreign_io = WorkspaceEditSession::default();
+    let ticket = foreign_io
+        .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
+        .unwrap();
+    foreign_io
+        .start_files(
+            ticket,
+            "foreign worker".into(),
+            None,
+            false,
+            vec![InputFile::Read(disk.clone())],
+            vec![root.path().into()],
+            1024,
+        )
+        .unwrap();
+    let permit = foreign_io.prepare_io(0, &workspace, &1, &editor).unwrap();
+    foreign_documents.submit_workspace_io(permit).unwrap();
+    let DocumentEvent::WorkspaceIo(foreign_reply) = wait(&mut foreign_documents) else {
+        panic!("foreign read");
+    };
+    assert_eq!(foreign_reply.id().0, retired.requests[0].0 + 1);
+    assert!(
+        !io.owns_preparation_reply(&foreign_reply),
+        "equal VFS IDs do not substitute another worker"
+    );
+    let before = TextBuffer::test_materializations();
+    assert!(
+        io.accept_preparation_reply(foreign_reply, &version, 1)
+            .is_err()
+    );
+    assert!(
+        foreign
+            .workspace_snapshot(io.preparing_sources().unwrap(), &path, 1024)
+            .is_err()
+    );
+    assert_eq!(TextBuffer::test_materializations(), before);
+    foreign_io.reject();
+    foreign_documents.stop_worker();
+    let DocumentEvent::WorkspaceIo(reply) = wait(&mut documents) else {
+        panic!("owned read");
+    };
+    assert_eq!(
+        reply.id().0,
+        retired.requests[0].0 + 1,
+        "full admission did not mint another VFS ID"
+    );
+    assert!(io.owns_preparation_reply(&reply));
+    assert!(!owner.owns_preparation_reply(&reply));
+    io.accept_preparation_reply(reply, &version, 1).unwrap();
+    assert!(io.files_ready());
+    assert_eq!(
+        io.prepared_files().unwrap().snapshot(&disk).unwrap().bytes,
+        b"abc"
+    );
+    io.reject();
+    let ticket = io
+        .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
+        .unwrap();
+    io.start_files(
+        ticket,
+        "create".into(),
+        None,
+        false,
+        vec![InputFile::Create(created.clone())],
+        vec![root.path().into()],
+        1024,
+    )
+    .unwrap();
+    let permit = io.prepare_io(0, &workspace, &1, &editor).unwrap();
+    documents.submit_workspace_io(permit).unwrap();
+    let DocumentEvent::WorkspaceIo(reply) = wait(&mut documents) else {
+        panic!("owned create inspection");
+    };
+    io.accept_preparation_reply(reply, &version, 1).unwrap();
+    assert!(io.files_ready());
+    assert!(
+        io.prepared_files()
+            .unwrap()
+            .snapshot(&created)
+            .unwrap()
+            .bytes
+            .is_empty()
+    );
+    assert!(
+        !created.exists(),
+        "create inspection is not a disk mutation"
+    );
+    io.reject();
+    documents.close_admission();
+    let ticket = io
+        .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
+        .unwrap();
+    io.start_files(
+        ticket,
+        "closed".into(),
+        None,
+        false,
+        vec![InputFile::Read(disk)],
+        vec![root.path().into()],
+        1024,
+    )
+    .unwrap();
+    let permit = io.prepare_io(0, &workspace, &1, &editor).unwrap();
+    assert!(documents.submit_workspace_io(permit).is_err());
+    io.reject();
+    documents.stop_worker();
+    let resource = root.path().join("resource");
+    let target = root.path().join("resource-renamed");
+    std::fs::write(&resource, b"resource bytes").unwrap();
+    let mut resources = WorkspaceEditSession::default();
+    let mut inspections = DocumentSession::new(
+        VfsWorker::start(2),
+        &StartupTarget::Dashboard {
+            root: root.path().into(),
+        },
+        editor.window_version(),
+        1,
+        2,
+    );
+    stage_resource(
+        &mut resources,
+        &mut inspections,
+        &editor,
+        &workspace,
+        &scope,
+        &resource,
+        &target,
+    );
+    let permit = resources
+        .prepare_resource(&workspace, &1, &editor)
+        .unwrap()
+        .unwrap();
+    drop(permit); // An unused loan neither consumes the stage nor submits work.
+    let (notices, requests) = resources.retire_resources("configuration changed");
+    assert_eq!(notices.len(), 1);
+    assert!(requests.is_empty());
+    assert!(
+        resources
+            .prepare_resource(&workspace, &1, &editor)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        resources
+            .retire_resources("configuration changed")
+            .0
+            .is_empty()
+    );
+
+    stage_resource(
+        &mut resources,
+        &mut inspections,
+        &editor,
+        &workspace,
+        &scope,
+        &resource,
+        &target,
+    );
+    let (vfs, release) = VfsWorker::start_gated_for_test(2);
+    let mut writes = DocumentSession::new(
+        vfs,
+        &StartupTarget::Dashboard {
+            root: root.path().into(),
+        },
+        editor.window_version(),
+        1,
+        2,
+    );
+    writes
+        .submit_workspace_resource(
+            resources
+                .prepare_resource(&workspace, &1, &editor)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+    let (_, requests) = resources.retire_resources("configuration changed");
+    assert_eq!(requests.len(), 1);
+    let cancelled = writes
+        .cancel_workspace_queued(requests[0])
+        .expect("queued cancellation");
+    assert!(
+        resources
+            .resource_cancelled(cancelled)
+            .unwrap()
+            .contains("before execution")
+    );
+    assert!(writes.cancel_workspace_queued(requests[0]).is_none());
+    release.send(()).unwrap();
+    assert!(matches!(
+        wait_workspace_document(&mut writes, &editor),
+        DocumentEvent::Discarded
+    ));
+    assert!(resource.exists() && !target.exists());
+
+    stage_resource(
+        &mut resources,
+        &mut inspections,
+        &editor,
+        &workspace,
+        &scope,
+        &resource,
+        &target,
+    );
+    inspections
+        .submit_workspace_resource(
+            resources
+                .prepare_resource(&workspace, &1, &editor)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+    let DocumentEvent::WorkspaceIo(reply) = wait_workspace_document(&mut inspections, &editor)
+    else {
+        panic!("disk terminal");
+    };
+    assert!(!resource.exists() && target.exists());
+    let (_, requests) = resources.retire_resources("configuration changed");
+    assert_eq!(requests.len(), 1);
+    assert!(inspections.cancel_workspace_queued(requests[0]).is_none());
+    assert!(
+        resources
+            .resource_finished(reply, &version, 2)
+            .unwrap()
+            .err()
+            .unwrap()
+            .contains("completed on disk")
+    );
+    assert!(resources.finish_resources("duplicate shutdown").is_empty());
+
+    // Stop a gated worker with an admitted resource: report an unknown outcome
+    // exactly once, not a rollback or a falsely acknowledged cancellation.
+    stage_resource(
+        &mut resources,
+        &mut inspections,
+        &editor,
+        &workspace,
+        &scope,
+        &target,
+        &resource,
+    );
+    let (vfs, release) = VfsWorker::start_gated_for_test(2);
+    let mut stopped = DocumentSession::new(
+        vfs,
+        &StartupTarget::Dashboard {
+            root: root.path().into(),
+        },
+        editor.window_version(),
+        1,
+        2,
+    );
+    stopped
+        .submit_workspace_resource(
+            resources
+                .prepare_resource(&workspace, &1, &editor)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+    stopped.stop_worker();
+    release.send(()).unwrap();
+    assert!(matches!(
+        wait_workspace_document(&mut stopped, &editor),
+        DocumentEvent::Stopped { .. }
+    ));
+    let notices = resources.finish_resources("worker stopped");
+    assert_eq!(notices.len(), 1);
+    assert!(notices[0].contains("outcome is unknown"));
+    assert!(resources.finish_resources("deadline").is_empty());
+    assert!(!resource.exists() && target.exists());
+    inspections.stop_worker();
+    writes.stop_worker();
+    owner.next = u64::MAX;
+    assert!(
+        owner
+            .begin(version, 1, editor.workspace_edit_sources().unwrap())
+            .is_err()
+    );
+}
+
+fn wait_workspace_document(
+    documents: &mut crate::editor::session::documents::DocumentSession,
+    editor: &EditorState,
+) -> crate::editor::session::documents::DocumentEvent {
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        if let Some(event) = documents.poll(&editor.window_version(), 1).unwrap() {
+            return event;
+        }
+        assert!(std::time::Instant::now() < end);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+fn stage_resource(
+    owner: &mut WorkspaceEditSession,
+    documents: &mut crate::editor::session::documents::DocumentSession,
+    editor: &EditorState,
+    workspace: &crate::editor::session::workspace::WorkspaceSession,
+    scope: &WorkspaceState,
+    source: &std::path::Path,
+    target: &std::path::Path,
+) {
+    let version = workspace.version();
+    let ticket = owner
+        .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
+        .unwrap();
+    owner
+        .start_files(
+            ticket,
+            "resource lifetime".into(),
+            None,
+            false,
+            vec![InputFile::Resource {
+                source: source.into(),
+                target: Some(target.into()),
+            }],
+            vec![source.parent().unwrap().into()],
+            1024,
+        )
+        .unwrap();
+    let permit = owner.prepare_io(0, workspace, &1, editor).unwrap();
+    documents.submit_workspace_io(permit).unwrap();
+    let crate::editor::session::documents::DocumentEvent::WorkspaceIo(reply) =
+        wait_workspace_document(documents, editor)
+    else {
+        panic!("resource inspection");
+    };
+    owner.accept_preparation_reply(reply, &version, 1).unwrap();
+    owner
+        .finish_preparation(Vec::new(), scope, &version, 1)
+        .unwrap();
+    let (sources, proposal) = owner.approval(&version, 1).unwrap();
+    let change = editor.workspace_resource_change(sources, source).unwrap();
+    let draft = editor
+        .prepare_workspace_edit(sources, proposal, TransactionId(1))
+        .unwrap();
+    owner.stage_approval(&draft, vec![change]).unwrap();
+    let published = draft.accept(&editor.version()).unwrap();
+    owner.accepted(published.publication()).unwrap();
+}

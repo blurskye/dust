@@ -71,7 +71,7 @@ fn indexed_plugin_defaults_install_before_activation_and_roll_back_on_failure() 
     }
     let indexed = app
         .configuration
-        .keymaps
+        .keymaps()
         .inspect_key("dashboard", "x y")
         .expect("indexed binding");
     assert_eq!(indexed.contribution_owner.as_deref(), Some("demo"));
@@ -91,7 +91,7 @@ fn indexed_plugin_defaults_install_before_activation_and_roll_back_on_failure() 
     }
     assert!(
         app.configuration
-            .keymaps
+            .keymaps()
             .inspect_key("dashboard", "x y")
             .is_none()
     );
@@ -219,7 +219,7 @@ fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
         &app.commands,
         &loaded,
         &catalog,
-        &app.configuration.settings.input.keymaps,
+        &app.configuration.settings().input.keymaps,
     )
     .expect("typed contributions");
     assert_eq!(
@@ -255,10 +255,10 @@ fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
 #[test]
 fn resolved_key_hints_follow_leaders_groups_and_configured_command_labels() {
     let app = app();
-    let labels = &app.configuration.settings.command_labels;
+    let labels = &app.configuration.settings().command_labels;
     let hints = app
         .configuration
-        .keymaps
+        .keymaps()
         .hints_for_prefix("editor.normal", "space", labels)
         .expect("leader continuations");
     let files = hints
@@ -289,7 +289,7 @@ fn resolved_key_hints_follow_leaders_groups_and_configured_command_labels() {
     custom_labels.insert("buffer.picker.open".into(), "Choose a buffer".into());
     let file_hints = app
         .configuration
-        .keymaps
+        .keymaps()
         .hints_for_prefix("editor.normal", "space f", &custom_labels)
         .expect("file continuations");
     assert_eq!(
@@ -302,7 +302,7 @@ fn resolved_key_hints_follow_leaders_groups_and_configured_command_labels() {
     );
     let goto_hints = app
         .configuration
-        .keymaps
+        .keymaps()
         .hints_for_prefix("editor.normal", "g", labels)
         .expect("goto continuations");
     for key in ["d", "D", "I", "y", "r", "K", "O"] {
@@ -312,7 +312,7 @@ fn resolved_key_hints_follow_leaders_groups_and_configured_command_labels() {
         );
     }
 
-    let mut policy = app.configuration.settings.input.keymaps.clone();
+    let mut policy = app.configuration.settings().input.keymaps.clone();
     policy.leader = ",".into();
     policy.local_leader = ";".into();
     let mut loaded = crate::config::load_bundled_config().keymaps;
@@ -405,14 +405,14 @@ fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
     let (resolved, diagnostic) = compile_keymaps(
         &app.commands,
         &loaded,
-        &app.configuration.settings.input.keymaps,
+        &app.configuration.settings().input.keymaps,
     );
     assert!(diagnostic.is_none(), "{diagnostic:?}");
     let leader = resolved
         .hints_for_prefix(
             "editor.normal",
             "space",
-            &app.configuration.settings.command_labels,
+            &app.configuration.settings().command_labels,
         )
         .expect("leader hints");
     assert_eq!(
@@ -427,7 +427,7 @@ fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
         .hints_for_prefix(
             "editor.normal",
             "space f",
-            &app.configuration.settings.command_labels,
+            &app.configuration.settings().command_labels,
         )
         .expect("file hints");
     assert!(!files.rows.iter().any(|row| row.next_key == "b"));
@@ -465,7 +465,7 @@ fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
     let (disabled, diagnostic) = compile_keymaps(
         &app.commands,
         &disabled,
-        &app.configuration.settings.input.keymaps,
+        &app.configuration.settings().input.keymaps,
     );
     assert!(diagnostic.is_none(), "{diagnostic:?}");
     assert!(
@@ -478,7 +478,7 @@ fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
         .hints_for_prefix(
             "editor.normal",
             "space f",
-            &app.configuration.settings.command_labels,
+            &app.configuration.settings().command_labels,
         )
         .expect("remaining file hints");
     assert!(!files.rows.iter().any(|row| row.next_key == "b"));
@@ -586,7 +586,7 @@ fn invalid_key_groups_reject_compilation_and_reload_transactionally() {
         let (_, diagnostic) = compile_keymaps(
             &app.commands,
             &loaded,
-            &app.configuration.settings.input.keymaps,
+            &app.configuration.settings().input.keymaps,
         );
         assert!(
             diagnostic
@@ -612,7 +612,7 @@ fn invalid_key_groups_reject_compilation_and_reload_transactionally() {
     let (_, diagnostic) = compile_keymaps(
         &app.commands,
         &duplicate,
-        &app.configuration.settings.input.keymaps,
+        &app.configuration.settings().input.keymaps,
     );
     assert!(
         diagnostic
@@ -653,7 +653,7 @@ fn invalid_key_groups_reject_compilation_and_reload_transactionally() {
         let (_, diagnostic) = compile_keymaps(
             &app.commands,
             &loaded,
-            &app.configuration.settings.input.keymaps,
+            &app.configuration.settings().input.keymaps,
         );
         assert!(
             diagnostic
@@ -677,9 +677,9 @@ fn invalid_key_groups_reject_compilation_and_reload_transactionally() {
     });
     let (retained, diagnostic) = reload_keymaps(
         &app.commands,
-        &app.configuration.keymaps,
+        app.configuration.keymaps(),
         &invalid,
-        &app.configuration.settings.input.keymaps,
+        &app.configuration.settings().input.keymaps,
     );
     assert!(
         diagnostic
@@ -688,7 +688,7 @@ fn invalid_key_groups_reject_compilation_and_reload_transactionally() {
     );
     assert_eq!(
         retained.groups(),
-        app.configuration.keymaps.groups(),
+        app.configuration.keymaps().groups(),
         "rejected candidate must retain groups and maps atomically"
     );
 }
@@ -698,20 +698,20 @@ fn macros_record_replay_last_register_and_stop_at_limits() {
     let mut app = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abc"), None);
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
     for key in ['q', 'a', 'x', 'q', '@', 'a', '@', '@'] {
         app.handle_configured_key(KeyEvent::character(key));
     }
     let buffer = app.state.active_buffer_id().expect("buffer");
     assert_eq!(app.state.buffers[buffer].text.to_string(), "");
-    assert_eq!(app.last_macro, Some('a'));
+    assert_eq!(app.input.last_macro(), Some('a'));
 
     let recursive = crate::editor::CommandInvocation::new("macro.replay", InvocationSource::Macro)
         .expect("macro command")
         .with_argument("register", CommandValue::String("r".into()));
     app.state.registers.set_macro('r', vec![recursive]);
     app.replay_macro('r');
-    assert_eq!(app.replay_depth, 0);
+    assert_eq!(app.input.replay_depth(), 0);
     assert!(app.ui.notification_error);
     assert!(
         app.ui

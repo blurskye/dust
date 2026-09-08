@@ -3,8 +3,12 @@ use super::*;
 #[test]
 fn configured_notification_timeout_expires_visible_message() {
     let mut app = app();
-    app.configuration.settings.ui.notifications.timeout_ms = 1;
-    app.ui.notification = Some("transient".into());
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.ui.notifications.timeout_ms = 1;
+        app.configuration.install_fixture(fixture);
+    }
+    app.notify_message("transient".into(), false);
     app.update_notification_timer();
     std::thread::sleep(Duration::from_millis(2));
     app.update_notification_timer();
@@ -21,14 +25,14 @@ fn stale_configuration_generations_are_never_applied() {
 #[test]
 fn complete_configuration_reload_is_atomic() {
     let mut app = app();
-    let original_theme = app.configuration.theme.clone();
+    let original_theme = app.configuration.theme().clone();
     let explanation = app
         .configuration
         .explain("ui.command_line.width")
         .expect("explanation");
     assert_eq!(explanation.source, "bundled defaults");
     assert_eq!(explanation.contributors, vec!["bundled defaults"]);
-    let original_width = app.configuration.settings.ui.command_line.width;
+    let original_width = app.configuration.settings().ui.command_line.width;
     let mut invalid = crate::config::load_bundled_config();
     invalid.config.ui.command_line.width = original_width + 1;
     invalid
@@ -38,10 +42,10 @@ fn complete_configuration_reload_is_atomic() {
         .insert("editor.insert".into(), "unknown.command".into());
     assert!(app.apply_configuration_candidate(invalid, false).is_err());
     assert_eq!(
-        app.configuration.settings.ui.command_line.width,
+        app.configuration.settings().ui.command_line.width,
         original_width
     );
-    assert_eq!(app.configuration.theme, original_theme);
+    assert_eq!(app.configuration.theme(), &original_theme);
 
     let mut valid = crate::config::load_bundled_config();
     valid.config.ui.command_line.width = original_width + 1;
@@ -49,10 +53,10 @@ fn complete_configuration_reload_is_atomic() {
     app.apply_configuration_candidate(valid, false)
         .expect("valid complete snapshot");
     assert_eq!(
-        app.configuration.settings.ui.command_line.width,
+        app.configuration.settings().ui.command_line.width,
         original_width + 1
     );
-    assert_eq!(app.configuration.dashboard.identity, "CUSTOM DASH");
+    assert_eq!(app.configuration.dashboard().identity, "CUSTOM DASH");
 }
 
 #[test]
@@ -132,7 +136,7 @@ fn user_keymaps_execute_typed_commands_and_unmap_defaults() {
     let mut app = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abc"), None);
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.path = PathBuf::from("keymaps.toml");
     loaded.entries.extend([
@@ -164,7 +168,7 @@ fn user_keymaps_execute_typed_commands_and_unmap_defaults() {
     let (keymaps, diagnostic) = compile_keymaps(
         &app.commands,
         &loaded,
-        &app.configuration.settings.input.keymaps,
+        &app.configuration.settings().input.keymaps,
     );
     assert!(diagnostic.is_none());
     assert!(
@@ -173,17 +177,17 @@ fn user_keymaps_execute_typed_commands_and_unmap_defaults() {
             .iter()
             .any(|conflict| conflict.contains("shadows"))
     );
-    app.configuration.keymaps = keymaps;
+    app.configuration.install_bindings(keymaps, false);
     let inspection = app
         .configuration
-        .keymaps
+        .keymaps()
         .inspect("editor.normal", "editor.quit")
         .expect("inspect remap");
     assert_eq!(inspection.source_keys, "<leader> q");
     assert_eq!(inspection.keys, "space q");
     let unmap = app
         .configuration
-        .keymaps
+        .keymaps()
         .inspect_id("user.test.user-keymaps-execute-typed-commands-and-unmap-defaults.case-2")
         .expect("exact-sequence unmap inspection");
     assert_eq!(unmap.operation, KeymapOperation::Unmap);
@@ -243,17 +247,17 @@ fn symbolic_leaders_expand_before_dispatch_and_preserve_literal_space_actions() 
     assert_eq!(literal_space.source_keys, "space");
     assert_eq!(literal_space.keys, "space");
 
-    let mut dispatch = keymaps.clone();
+    let mut dispatch = crate::editor::input::KeymapSequence::default();
     assert_eq!(
-        dispatch.resolve("editor.normal", KeyEvent::character(',')),
+        keymaps.resolve(&mut dispatch, "editor.normal", KeyEvent::character(',')),
         MappingResolution::Pending
     );
     assert_eq!(
-        dispatch.resolve("editor.normal", KeyEvent::character('f')),
+        keymaps.resolve(&mut dispatch, "editor.normal", KeyEvent::character('f')),
         MappingResolution::Pending
     );
     assert!(matches!(
-        dispatch.resolve("editor.normal", KeyEvent::character('b')),
+        keymaps.resolve(&mut dispatch, "editor.normal", KeyEvent::character('b')),
         MappingResolution::Ready(invocation)
             if invocation.id.as_str() == "buffer.picker.open"
     ));
@@ -281,7 +285,7 @@ fn expanded_duplicate_sequences_are_rejected_with_symbolic_diagnostics() {
     let (_, diagnostic) = compile_keymaps(
         &app.commands,
         &loaded,
-        &app.configuration.settings.input.keymaps,
+        &app.configuration.settings().input.keymaps,
     );
     let diagnostic = diagnostic.expect("expanded duplicate must fail");
     assert!(diagnostic.contains("<leader> z"));
@@ -292,10 +296,10 @@ fn expanded_duplicate_sequences_are_rejected_with_symbolic_diagnostics() {
 #[test]
 fn invalid_leader_policy_rejects_the_complete_configuration_transactionally() {
     let mut app = app();
-    let original_policy = app.configuration.settings.input.keymaps.clone();
+    let original_policy = app.configuration.settings().input.keymaps.clone();
     let original_binding = app
         .configuration
-        .keymaps
+        .keymaps()
         .binding_for("editor.normal", "buffer.picker.open")
         .expect("bundled binding")
         .to_owned();
@@ -306,10 +310,10 @@ fn invalid_leader_policy_rejects_the_complete_configuration_transactionally() {
             .apply_configuration_candidate(candidate, false)
             .expect_err("invalid leader must reject the whole candidate");
         assert!(error.contains("input.keymaps.leader"), "{error}");
-        assert_eq!(app.configuration.settings.input.keymaps, original_policy);
+        assert_eq!(app.configuration.settings().input.keymaps, original_policy);
         assert_eq!(
             app.configuration
-                .keymaps
+                .keymaps()
                 .binding_for("editor.normal", "buffer.picker.open"),
             Some(original_binding.as_str())
         );
@@ -367,7 +371,7 @@ fn identity_rebind_moves_a_bundled_mapping_without_leaving_the_old_sequence() {
     let (keymaps, diagnostic) = compile_keymaps(
         &app.commands,
         &loaded,
-        &app.configuration.settings.input.keymaps,
+        &app.configuration.settings().input.keymaps,
     );
     assert!(diagnostic.is_none(), "{diagnostic:?}");
     assert!(
@@ -397,13 +401,13 @@ fn identity_rebind_moves_a_bundled_mapping_without_leaving_the_old_sequence() {
         target
     );
 
-    let mut dispatch = keymaps;
+    let mut dispatch = crate::editor::input::KeymapSequence::default();
     assert_eq!(
-        dispatch.resolve("editor.normal", KeyEvent::character('g')),
+        keymaps.resolve(&mut dispatch, "editor.normal", KeyEvent::character('g')),
         MappingResolution::Pending
     );
     assert!(matches!(
-        dispatch.resolve("editor.normal", KeyEvent::character('b')),
+        keymaps.resolve(&mut dispatch, "editor.normal", KeyEvent::character('b')),
         MappingResolution::Ready(invocation)
             if invocation.id.as_str() == "buffer.picker.open"
     ));
@@ -435,7 +439,7 @@ fn identity_disable_inherits_symbolic_location_and_tracks_leader_changes() {
         assert!(diagnostic.is_none(), "{diagnostic:?}");
         assert!(
             keymaps
-                .binding_for("editor.normal", "explorer.open")
+                .binding_for("editor.normal", "explorer.panel.toggle")
                 .is_none()
         );
         let inspection = keymaps.inspect_id(target).expect("disable inspection");
@@ -444,20 +448,21 @@ fn identity_disable_inherits_symbolic_location_and_tracks_leader_changes() {
         assert_eq!(inspection.source_keys, "<leader> f e");
         assert_eq!(inspection.keys, format!("{leader} f e"));
 
-        let mut dispatch = keymaps;
+        let mut dispatch = crate::editor::input::KeymapSequence::default();
         assert_eq!(
-            dispatch.resolve(
+            keymaps.resolve(
+                &mut dispatch,
                 "editor.normal",
                 KeyEvent::character(leader.chars().next().expect("leader"))
             ),
             MappingResolution::Pending
         );
         assert_eq!(
-            dispatch.resolve("editor.normal", KeyEvent::character('f')),
+            keymaps.resolve(&mut dispatch, "editor.normal", KeyEvent::character('f')),
             MappingResolution::Pending
         );
         assert_eq!(
-            dispatch.resolve("editor.normal", KeyEvent::character('e')),
+            keymaps.resolve(&mut dispatch, "editor.normal", KeyEvent::character('e')),
             MappingResolution::Disabled
         );
     }
@@ -513,7 +518,7 @@ fn malformed_keymap_identity_rejects_the_configuration_transactionally() {
     let mut app = app();
     let original = app
         .configuration
-        .keymaps
+        .keymaps()
         .binding_for("editor.normal", "buffer.picker.open")
         .expect("original")
         .to_owned();
@@ -541,7 +546,7 @@ fn malformed_keymap_identity_rejects_the_configuration_transactionally() {
         assert!(error.contains("invalid id"), "{error}");
         assert_eq!(
             app.configuration
-                .keymaps
+                .keymaps()
                 .binding_for("editor.normal", "buffer.picker.open"),
             Some(original.as_str())
         );
@@ -567,21 +572,21 @@ fn invalid_user_keymap_set_is_rejected_transactionally() {
     let (keymaps, diagnostic) = compile_keymaps(
         &app.commands,
         &loaded,
-        &app.configuration.settings.input.keymaps,
+        &app.configuration.settings().input.keymaps,
     );
-    assert!(!keymaps.resolvers.is_empty());
+    assert!(keymaps.has_bindings());
     assert!(diagnostic.is_some_and(|message| message.contains("keeping bundled keymaps")));
 
     let (reloaded, reload_diagnostic) = reload_keymaps(
         &app.commands,
-        &app.configuration.keymaps,
+        app.configuration.keymaps(),
         &loaded,
-        &app.configuration.settings.input.keymaps,
+        &app.configuration.settings().input.keymaps,
     );
     assert_eq!(
         reloaded.binding_for("editor.normal", "edit.delete_char"),
         app.configuration
-            .keymaps
+            .keymaps()
             .binding_for("editor.normal", "edit.delete_char")
     );
     assert!(
@@ -604,7 +609,7 @@ fn keymap_inspection_by_id_reports_identity_operation_sequences_and_source() {
     let message = app.ui.notification.expect("inspection notification");
     assert!(message.contains(id));
     assert!(message.contains("<leader> f e => space f e"));
-    assert!(message.contains("[command] explorer.open"));
+    assert!(message.contains("[command] explorer.panel.toggle"));
     assert!(message.contains("<bundled:keymaps>:declaration"));
 }
 
@@ -628,7 +633,7 @@ fn keymap_inspection_reports_real_user_path_and_byte_range() {
     let (keymaps, diagnostic) = compile_keymaps(
         &app.commands,
         &bundled,
-        &app.configuration.settings.input.keymaps,
+        &app.configuration.settings().input.keymaps,
     );
     assert!(diagnostic.is_none());
     let inspection = keymaps
@@ -640,7 +645,7 @@ fn keymap_inspection_reports_real_user_path_and_byte_range() {
     assert_eq!(inspection.keys, "z");
     assert!(inspection.source.starts_with(&path.display().to_string()));
     assert!(inspection.source.contains(":bytes 0.."));
-    app.configuration.keymaps = keymaps;
+    app.configuration.install_bindings(keymaps, false);
 }
 
 #[test]
@@ -665,7 +670,7 @@ fn duplicate_user_ids_are_rejected_transactionally() {
     let (_, diagnostic) = compile_keymaps(
         &app.commands,
         &loaded,
-        &app.configuration.settings.input.keymaps,
+        &app.configuration.settings().input.keymaps,
     );
     assert!(
         diagnostic
@@ -692,14 +697,14 @@ fn configured_focus_loss_cancels_pending_mapping() {
     let (keymaps, diagnostic) = compile_keymaps(
         &app.commands,
         &loaded,
-        &app.configuration.settings.input.keymaps,
+        &app.configuration.settings().input.keymaps,
     );
     assert!(diagnostic.is_none());
-    app.configuration.keymaps = keymaps;
+    app.configuration.install_bindings(keymaps, false);
     app.handle_configured_key(KeyEvent::character('z'));
-    assert!(app.pending_keymap.is_some());
+    assert!(app.input.mapping_pending());
     app.handle_event(crate::ui::UiEvent::FocusLost);
-    assert!(app.pending_keymap.is_none());
+    assert!(!app.input.mapping_pending());
 }
 
 #[test]
@@ -733,10 +738,10 @@ fn prompt_special_keys_are_remappable_from_configuration() {
     let (keymaps, diagnostic) = compile_keymaps(
         &app.commands,
         &loaded,
-        &app.configuration.settings.input.keymaps,
+        &app.configuration.settings().input.keymaps,
     );
     assert!(diagnostic.is_none());
-    app.configuration.keymaps = keymaps;
+    app.configuration.install_bindings(keymaps, false);
     app.open_prompt(crate::ui::PromptKind::Command, String::new());
     app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Escape));
     assert!(app.ui.prompt.is_some());

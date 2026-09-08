@@ -1,11 +1,12 @@
 #![forbid(unsafe_code)]
 
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use crate::{
     config::{Config, load_bundled_config},
     editor::input::{
-        GrammarInput, InputAction, InputError, KeyEvent, MappingResolution, ModalResolver,
+        GrammarInput, InputAction, InputError, KeyEvent, KeymapSequence, MappingResolution,
+        ModalResolver,
     },
     editor::text::TextBuffer,
     editor::{AppEffect, ResolvedKeymaps, compile_keymaps, register_app_commands},
@@ -22,6 +23,7 @@ pub struct HeadlessEditor {
     pub registry: CommandRegistry<AppEffect>,
     pub input: ModalResolver,
     keymaps: ResolvedKeymaps,
+    sequences: HashMap<String, KeymapSequence>,
     config: Config,
 }
 
@@ -52,6 +54,7 @@ impl HeadlessEditor {
             registry,
             input: ModalResolver::with_count_limit(loaded.config.input.count_limit),
             keymaps,
+            sequences: HashMap::new(),
             config: loaded.config,
         }
     }
@@ -90,7 +93,11 @@ impl HeadlessEditor {
 
     pub fn feed(&mut self, key: KeyEvent) -> Result<InputAction, HarnessError> {
         let context = self.active_context();
-        match self.keymaps.resolve(&context, key.clone()) {
+        match self.keymaps.resolve(
+            self.sequences.entry(context.clone()).or_default(),
+            &context,
+            key.clone(),
+        ) {
             MappingResolution::Ready(invocation) => {
                 self.execute(invocation)?;
                 Ok(InputAction::Pending)

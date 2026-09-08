@@ -2,22 +2,12 @@ use super::*;
 
 impl InteractiveApplication {
     pub(in crate::editor::session) fn show_lsp_logs(&mut self) {
-        let previous = if self.picker_surface == PickerSurfaceKind::Logs {
-            self.picker.as_ref().map(|picker| {
-                (
-                    picker.presentation().query,
-                    picker.selected_item().map(|item| item.id.clone()),
-                )
-            })
+        let previous = if self.search.picker_surface() == PickerSurfaceKind::Logs {
+            self.search.picker_bookmark()
         } else {
             None
         };
-        let follow_tail = previous.is_none()
-            || self
-                .ui
-                .picker
-                .as_ref()
-                .is_some_and(|picker| picker.selected == picker.rows.len().checked_sub(1));
+        let follow_tail = previous.is_none() || self.search.picker_follows_tail();
         let items = self
             .lsp_logs
             .iter()
@@ -40,17 +30,7 @@ impl InteractiveApplication {
             self.message("lsp_logs", &[("logs", String::new())]),
             items,
         );
-        if let Some(picker) = &mut self.picker {
-            if let Some((query, selected)) = previous {
-                picker.set_query(query);
-                if let Some(selected) = selected {
-                    picker.select_id(&selected);
-                }
-            }
-            if follow_tail {
-                picker.select_last();
-            }
-        }
+        self.search.restore_picker_view(previous, follow_tail);
         self.sync_picker_ui();
     }
 
@@ -118,18 +98,20 @@ impl InteractiveApplication {
                     .collect::<Vec<_>>();
                 servers.sort();
                 servers.dedup();
-                self.ui.notification = Some(self.message(
-                    "lsp_status",
-                    &[(
-                        "servers",
-                        if servers.is_empty() {
-                            "none".into()
-                        } else {
-                            servers.join(", ")
-                        },
-                    )],
-                ));
-                self.ui.notification_error = false;
+                self.notify_message(
+                    self.message(
+                        "lsp_status",
+                        &[(
+                            "servers",
+                            if servers.is_empty() {
+                                "none".into()
+                            } else {
+                                servers.join(", ")
+                            },
+                        )],
+                    ),
+                    false,
+                );
                 if let Some(server) = self.active_lsp_server.as_deref() {
                     let _ = self.lsp.health(server);
                 }
@@ -138,7 +120,11 @@ impl InteractiveApplication {
                 if let Some(server) = self.active_lsp_server.clone() {
                     if let Some((buffer, document)) = self.active_lsp_document() {
                         let revision = BufferRevision(document.version);
-                        if let Err(error) = self.lsp.sync(&server, document) {
+                        if let Err(error) = self.lsp.sync_owned(
+                            &server,
+                            document,
+                            (buffer, self.state.buffers[buffer].text.source_version()),
+                        ) {
                             self.show_error(error);
                         } else {
                             self.lsp_synced_revisions.insert(buffer, revision);
@@ -166,43 +152,28 @@ impl InteractiveApplication {
             AppEffect::LspSessionSelect(key) => self.select_lsp_session(&key),
             AppEffect::LspLogs => self.show_lsp_logs(),
             AppEffect::LspInlayHintsToggle => {
-                self.configuration.settings.lsp.inlay_hints =
-                    !self.configuration.settings.lsp.inlay_hints;
-                let enabled = self.configuration.settings.lsp.inlay_hints;
+                let enabled = self.configuration.toggle_inlay_hints();
                 self.schedule_lsp_inlay_refresh(true);
-                self.ui.notification = Some(format!(
-                    "inlay hints {}",
-                    if enabled { "enabled" } else { "disabled" }
-                ));
-                self.ui.notification_error = false;
+                self.notify_message(
+                    format!(
+                        "inlay hints {}",
+                        if enabled { "enabled" } else { "disabled" }
+                    ),
+                    false,
+                );
             }
             AppEffect::LspRequest(feature) => self.request_lsp(feature),
             AppEffect::LspDocumentationScroll(direction) => {
-                if let Some(popup) = self.ui.documentation_popup.as_mut() {
-                    let page = usize::from(
-                        self.configuration
-                            .settings
-                            .ui
-                            .documentation_popup
-                            .max_height
-                            .saturating_sub(2),
-                    )
-                    .max(1);
-                    let maximum = popup.line_count().saturating_sub(page);
-                    let step = self
-                        .configuration
-                        .settings
-                        .ui
-                        .documentation_popup
-                        .scroll_step;
-                    popup.scroll = if direction < 0 {
-                        popup.scroll.saturating_sub(step)
-                    } else {
-                        popup.scroll.saturating_add(step).min(maximum)
-                    };
-                }
+                self.reconcile_editor_windows();
+                let policy = &self.configuration.settings().ui.documentation_popup;
+                self.input.scroll_documentation(
+                    direction,
+                    policy.scroll_step,
+                    self.window_session.content().documentation_rows.max(1),
+                );
+                self.project_input_documentation();
             }
-            AppEffect::LspDocumentationClose => self.ui.documentation_popup = None,
+            AppEffect::LspDocumentationClose => self.close_documentation(),
             AppEffect::LspCompletionDocumentationOpen => self.open_lsp_completion_documentation(),
             AppEffect::LspCompletionMove(direction) => self.move_lsp_completion(direction),
             AppEffect::DiagnosticNavigate { direction, filter } => {
@@ -220,9 +191,10 @@ impl InteractiveApplication {
             }
             AppEffect::SnippetNavigate(direction) => self.navigate_snippet(direction),
             AppEffect::SnippetCancel => {
-                self.snippet_session = None;
+                self.input.clear_snippet();
                 if let Some(view) = self.state.active_view {
                     self.state.views[view].selection = None;
+                    self.state.mark_editor_changed();
                 }
             }
             AppEffect::LspFoldToggle => {

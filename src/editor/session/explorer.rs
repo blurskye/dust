@@ -1,173 +1,388 @@
-use super::*;
-
-fn explorer_icon_role(color: crate::files::ExplorerIconColor) -> ExplorerSegmentRole {
-    match color {
-        crate::files::ExplorerIconColor::Azure => ExplorerSegmentRole::IconAzure,
-        crate::files::ExplorerIconColor::Blue => ExplorerSegmentRole::IconBlue,
-        crate::files::ExplorerIconColor::Cyan => ExplorerSegmentRole::IconCyan,
-        crate::files::ExplorerIconColor::Green => ExplorerSegmentRole::IconGreen,
-        crate::files::ExplorerIconColor::Grey => ExplorerSegmentRole::IconGrey,
-        crate::files::ExplorerIconColor::Orange => ExplorerSegmentRole::IconOrange,
-        crate::files::ExplorerIconColor::Purple => ExplorerSegmentRole::IconPurple,
-        crate::files::ExplorerIconColor::Red => ExplorerSegmentRole::IconRed,
-        crate::files::ExplorerIconColor::Yellow => ExplorerSegmentRole::IconYellow,
-    }
+//! Explorer tree, directory lane, preview, watch and viewport ownership.
+mod intent;
+mod preview;
+use super::workspace::WorkspaceVersion;
+use crate::files::{
+    DirectoryEntryKind, DirectoryService, ExplorerWatchBatch, ExplorerWatchEvent,
+    ExplorerWatchGeneration, ExplorerWatchService,
+};
+use crate::ui::{ExplorerSegmentRole, ExplorerUiRow, ExplorerUiSegment, ExplorerUiState};
+use crate::workspace::{
+    ExplorerChild, ExplorerKind, ExplorerLoadState, ExplorerNodeId, ExplorerState, WorkspaceRoot,
+};
+pub(in crate::editor::session) use intent::{MutationContext, MutationUpdate};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    path::PathBuf,
+    sync::Arc,
+};
+pub(in crate::editor::session) struct ExplorerSession {
+    tree: ExplorerState,
+    preview: Option<preview::Preview>,
+    mutation: Option<intent::MutationIntent>,
+    open: Option<intent::OpenIntent>,
+    clipboard: Option<(PathBuf, bool, WorkspaceVersion)>,
+    directory: DirectoryService,
+    pending: Option<(ExplorerNodeId, u64, u64, WorkspaceVersion, u64, Arc<()>)>,
+    epoch: Arc<()>,
+    roots: Vec<PathBuf>,
+    observed_roots: Vec<crate::workspace::RootIdentity>,
+    root_count: usize,
+    scroll: usize,
+    hidden: bool,
+    ignored: bool,
+    follow: Option<PathBuf>,
+    next_load: Option<ExplorerNodeId>,
+    watch: ExplorerWatchService,
+    watch_generation: Option<ExplorerWatchGeneration>,
+    watch_observation: Option<(u64, u64)>,
+    watch_visible: bool,
+    watch_reload: VecDeque<PathBuf>,
 }
-
-impl InteractiveApplication {
-    pub(super) fn explorer_first_presented_index(&self) -> usize {
+impl ExplorerSession {
+    pub(in crate::editor::session) fn new(watch: ExplorerWatchService) -> Self {
+        Self {
+            tree: ExplorerState::default(),
+            preview: None,
+            mutation: None,
+            open: None,
+            clipboard: None,
+            directory: DirectoryService::default(),
+            pending: None,
+            epoch: Arc::new(()),
+            roots: Vec::new(),
+            observed_roots: Vec::new(),
+            root_count: 0,
+            scroll: 0,
+            hidden: false,
+            ignored: false,
+            follow: None,
+            next_load: None,
+            watch,
+            watch_generation: None,
+            watch_observation: None,
+            watch_visible: false,
+            watch_reload: VecDeque::new(),
+        }
+    }
+    pub(in crate::editor::session) fn tree(&self) -> &ExplorerState {
+        &self.tree
+    }
+    pub(in crate::editor::session) fn pending(&self) -> bool {
+        self.pending.is_some()
+    }
+    pub(in crate::editor::session) fn reset_roots(
+        &mut self,
+        roots: &[WorkspaceRoot],
+        revision: u64,
+    ) {
+        self.epoch = Arc::new(());
+        self.observed_roots.clear();
+        self.next_load = None;
+        self.follow = None;
+        self.root_count = roots.len();
+        self.roots = roots
+            .iter()
+            .map(|r| r.identity.canonical_path.clone())
+            .collect();
+        self.tree.reset_roots(roots, revision);
+        self.watch_observation = None;
+        self.watch_reload.clear();
+    }
+    pub(in crate::editor::session) fn select(&mut self, id: ExplorerNodeId) {
+        self.tree.select(id);
+        self.retire_changed_preview_selection();
+    }
+    pub(in crate::editor::session) fn select_first_child(&mut self) {
+        self.tree.select_first_child();
+        self.retire_changed_preview_selection();
+    }
+    pub(in crate::editor::session) fn toggle_loaded(&mut self, id: ExplorerNodeId) {
+        self.tree.toggle_loaded(id);
+        self.retire_changed_preview_selection();
+    }
+    pub(in crate::editor::session) fn first_presented(&self) -> usize {
         usize::from(
-            self.workspace.roots().len() == 1
-                && self.explorer.visible_ids().first().is_some_and(|id| {
-                    self.explorer
+            self.root_count == 1
+                && self.tree.visible_ids().first().is_some_and(|id| {
+                    self.tree
                         .node(*id)
                         .is_some_and(|node| node.kind == ExplorerKind::Root)
                 }),
         )
     }
-
-    pub(super) fn move_explorer_selection(&mut self, delta: isize) {
-        let first_presented = self.explorer_first_presented_index();
-        self.explorer.move_selection_from(delta, first_presented);
-        self.sync_explorer_ui();
+    pub(in crate::editor::session) fn navigate(&mut self, delta: isize) {
+        self.tree.move_selection_from(delta, self.first_presented());
+        self.retire_changed_preview_selection();
     }
-
-    pub(super) fn page_explorer_selection(&mut self, direction: isize) {
-        let viewport = usize::from(self.workspace_render_height().saturating_sub(4))
-            .max(1)
-            .min(self.configuration.settings.ui.explorer.maximum_visible_rows);
-        self.move_explorer_selection(
-            direction.saturating_mul(isize::try_from(viewport).unwrap_or(isize::MAX)),
-        );
+    pub(in crate::editor::session) fn parent(&mut self) {
+        self.tree.collapse_or_parent_from(self.first_presented());
+        self.retire_changed_preview_selection();
     }
-
-    pub(super) fn explorer_collapse_or_parent(&mut self) {
-        let first_presented = self.explorer_first_presented_index();
-        self.explorer.collapse_or_parent_from(first_presented);
-        self.sync_explorer_ui();
+    pub(in crate::editor::session) fn toggle_hidden(&mut self) {
+        self.hidden = !self.hidden;
     }
-
-    // EXPLORER_WATCH_FOREGROUND_BEGIN: typed event coordination only.
-
-    pub(super) fn reconcile_explorer_watch(&mut self) {
-        if self.ui.explorer.is_none() {
-            if self.explorer_watch_generation.take().is_some() {
-                self.explorer_watch.cancel();
+    pub(in crate::editor::session) fn toggle_ignored(&mut self) {
+        self.ignored = !self.ignored;
+    }
+    pub(in crate::editor::session) fn load(
+        &mut self,
+        node: ExplorerNodeId,
+        scope: WorkspaceVersion,
+        configuration: u64,
+        maximum: usize,
+    ) -> Result<(), String> {
+        if self.pending.is_some() {
+            self.next_load = Some(node);
+            return Ok(());
+        }
+        let Some(path) = self.tree.node(node).map(|node| node.path.clone()) else {
+            return Ok(());
+        };
+        let generation = self
+            .directory
+            .list(
+                path,
+                self.roots.clone(),
+                self.tree.root_revision,
+                self.hidden,
+                self.ignored,
+                maximum,
+            )
+            .map_err(|e| e.to_string())?;
+        self.tree.begin_load(node, generation);
+        self.pending = Some((
+            node,
+            generation,
+            self.tree.root_revision,
+            scope,
+            configuration,
+            self.epoch.clone(),
+        ));
+        Ok(())
+    }
+    pub(in crate::editor::session) fn poll(
+        &mut self,
+        scope: WorkspaceVersion,
+        configuration: u64,
+    ) -> Option<Result<(), String>> {
+        let result = self.directory.poll_result()?;
+        let (node, generation, revision, expected, policy, epoch) = self.pending.take()?;
+        if expected != scope || policy != configuration || !Arc::ptr_eq(&epoch, &self.epoch) {
+            // Only retire the old load in its original tree; IDs can be reused after reset.
+            if revision == self.tree.root_revision {
+                self.tree.set_error(node, generation);
             }
-            self.explorer_watch_observation = None;
-            self.explorer_watch_reload_queue.clear();
-            return;
+            return Some(Ok(()));
         }
-        let observation = (
-            self.explorer.projection_generation(),
-            self.workspace.root_revision(),
-        );
-        if self.explorer_watch_observation == Some(observation) {
-            return;
+        match result {
+            Ok((listing, identities))
+                if listing.generation == generation
+                    && listing.root_revision == revision
+                    && revision == self.tree.root_revision =>
+            {
+                for identity in identities {
+                    self.observed_roots
+                        .retain(|old| old.canonical_path != identity.canonical_path);
+                    self.observed_roots.push(identity);
+                }
+                let children = listing
+                    .entries
+                    .into_iter()
+                    .map(|entry| ExplorerChild {
+                        path: entry.path,
+                        name: entry.name,
+                        kind: match entry.kind {
+                            DirectoryEntryKind::Directory => ExplorerKind::Directory,
+                            DirectoryEntryKind::File => ExplorerKind::File,
+                            DirectoryEntryKind::Symlink => ExplorerKind::Symlink,
+                        },
+                    })
+                    .collect();
+                let root_selected = self.tree.selected_id() == Some(node)
+                    && self
+                        .tree
+                        .node(node)
+                        .is_some_and(|node| node.kind == ExplorerKind::Root);
+                self.tree.apply_load(node, generation, revision, children);
+                if root_selected && self.root_count == 1 {
+                    self.tree.select_first_child();
+                    self.retire_changed_preview_selection();
+                }
+                Some(Ok(()))
+            }
+            Ok(_) => {
+                if revision == self.tree.root_revision {
+                    self.tree.set_error(node, generation);
+                }
+                Some(Ok(()))
+            }
+            Err(error) => {
+                self.tree.set_error(node, generation);
+                Some(Err(error.to_string()))
+            }
         }
-        let roots = self
-            .workspace
-            .roots()
-            .iter()
-            .map(|root| root.identity.canonical_path.clone())
-            .collect();
-        match self.explorer_watch.reconcile(
+    }
+    pub(in crate::editor::session) fn follow(&mut self, path: PathBuf) {
+        self.follow = Some(path);
+    }
+    pub(in crate::editor::session) fn continue_follow(
+        &mut self,
+    ) -> Result<Option<ExplorerNodeId>, String> {
+        if self.pending() {
+            return Ok(None);
+        }
+        let Some(target) = self.follow.as_ref() else {
+            return Ok(None);
+        };
+        if let Some(id) = self.tree.id_for_path(target) {
+            self.tree.select(id);
+            self.retire_changed_preview_selection();
+            self.follow = None;
+            return Ok(None);
+        }
+        let id = target
+            .ancestors()
+            .skip(1)
+            .find_map(|path| self.tree.id_for_path(path));
+        let Some(id) = id else {
+            self.follow = None;
+            return Err("active file has no explorer root".into());
+        };
+        self.tree.select(id);
+        self.retire_changed_preview_selection();
+        if self
+            .tree
+            .node(id)
+            .is_some_and(|node| node.load == ExplorerLoadState::Loaded)
+        {
+            self.follow = None;
+            return Err("active file is absent from the current explorer projection".into());
+        }
+        Ok(Some(id))
+    }
+    pub(in crate::editor::session) fn reconcile_watch(
+        &mut self,
+        visible: bool,
+    ) -> Result<(), String> {
+        if self.watch_visible && !visible {
+            self.epoch = Arc::new(());
+            self.follow = None;
+            self.next_load = None;
+        }
+        self.watch_visible = visible;
+        if !visible {
+            if self.watch_generation.take().is_some() {
+                self.watch.cancel();
+            }
+            self.watch_observation = None;
+            self.watch_reload.clear();
+            return Ok(());
+        }
+        let observation = (self.tree.projection_generation(), self.tree.root_revision);
+        if self.watch_observation == Some(observation) {
+            return Ok(());
+        }
+        self.watch_observation = Some(observation);
+        match self.watch.reconcile(
             observation.1,
-            roots,
-            self.explorer.watched_directories(),
+            self.roots.clone(),
+            self.tree.watched_directories(),
         ) {
             Ok(generation) => {
-                self.explorer_watch_generation = generation;
-                self.explorer_watch_observation = Some(observation)
+                self.watch_generation = generation;
+                Ok(())
             }
             Err(_) => {
-                self.explorer_watch_generation = None;
-                self.explorer_watch_observation = Some(observation);
-                self.show_error("explorer watch reconciliation failed")
+                self.watch_generation = None;
+                Err("explorer watch reconciliation failed".into())
             }
         }
     }
-
-    pub(super) fn accept_explorer_watch_batch(&mut self, batch: ExplorerWatchBatch) {
-        if Some(batch.generation) != self.explorer_watch_generation
-            || batch.root_revision != self.workspace.root_revision()
-            || self.ui.explorer.is_none()
+    pub(in crate::editor::session) fn accept_watch(
+        &mut self,
+        batch: ExplorerWatchBatch,
+        visible: bool,
+    ) {
+        if !visible
+            || Some(batch.generation) != self.watch_generation
+            || batch.root_revision != self.tree.root_revision
         {
             return;
         }
-        for directory in batch.directories {
-            if !self.explorer_watch_reload_queue.contains(&directory) {
-                self.explorer_watch_reload_queue.push_back(directory)
+        for path in batch.directories {
+            if !self.watch_reload.contains(&path) {
+                self.watch_reload.push_back(path);
             }
         }
     }
-
-    pub(super) fn process_explorer_watch_events(&mut self) {
-        for event in self.explorer_watch.poll() {
+    pub(in crate::editor::session) fn poll_watch(&mut self, visible: bool) -> Result<(), String> {
+        for event in self.watch.poll() {
             match event {
-                ExplorerWatchEvent::Batch(batch) => self.accept_explorer_watch_batch(batch),
+                ExplorerWatchEvent::Batch(batch) => self.accept_watch(batch, visible),
                 ExplorerWatchEvent::Failed {
                     generation,
                     root_revision,
-                } if Some(generation) == self.explorer_watch_generation
-                    && root_revision == self.workspace.root_revision() =>
+                } if Some(generation) == self.watch_generation
+                    && root_revision == self.tree.root_revision =>
                 {
-                    self.explorer_watch_generation = None;
-                    self.show_error("explorer watch worker rejected the active set")
+                    self.watch_generation = None;
+                    return Err("explorer watch worker rejected the active set".into());
                 }
                 _ => {}
             }
         }
-        self.start_next_explorer_watch_reload();
+        Ok(())
     }
-
-    pub(super) fn start_next_explorer_watch_reload(&mut self) {
-        if self.explorer_pending.is_some() {
-            return;
+    pub(in crate::editor::session) fn next_reload(&mut self) -> Option<ExplorerNodeId> {
+        if self.pending() {
+            return None;
         }
-        while let Some(path) = self.explorer_watch_reload_queue.pop_front() {
-            let Some(node) = self.explorer.id_for_path(&path) else {
+        if let Some(node) = self.next_load.take() {
+            return Some(node);
+        }
+        while let Some(path) = self.watch_reload.pop_front() {
+            let Some(id) = self.tree.id_for_path(&path) else {
                 continue;
             };
-            if self.explorer.node(node).is_some_and(|node| {
+            if self.tree.node(id).is_some_and(|node| {
                 matches!(node.kind, ExplorerKind::Root | ExplorerKind::Directory)
                     && node.expanded
-                    && matches!(node.load, ExplorerLoadState::Loaded)
+                    && node.load == ExplorerLoadState::Loaded
             }) {
-                self.load_explorer_node(node);
-                break;
+                return Some(id);
             }
         }
+        None
     }
-
-    // EXPLORER_WATCH_FOREGROUND_END
-
-    pub(super) fn sync_explorer_ui(&mut self) {
-        if self.ui.explorer.is_none() {
-            return;
+    pub(in crate::editor::session) fn reconfigure_watch(
+        &mut self,
+        watch: Option<ExplorerWatchService>,
+    ) {
+        if let Some(watch) = watch {
+            self.watch = watch;
+            self.watch_generation = None;
+            self.watch_reload.clear();
         }
-        let hidden_root_rows = self.explorer_first_presented_index();
-        self.explorer.ensure_selection_from(hidden_root_rows);
-        let visible_ids = self.explorer.visible_ids();
+        self.watch_observation = None;
+    }
+    pub(in crate::editor::session) fn projection(
+        &mut self,
+        config: &crate::config::ExplorerConfig,
+        body: crate::ui::window::WindowRect,
+        git_status: &BTreeMap<PathBuf, crate::workspace::git::GitFileStatus>,
+        title: String,
+    ) -> ExplorerUiState {
+        let hidden_root_rows = self.first_presented();
+        self.tree.ensure_selection_from(hidden_root_rows);
+        let visible_ids = self.tree.visible_ids();
         let total = visible_ids.len().saturating_sub(hidden_root_rows);
-        let selected_id = self.explorer.selected_id();
+        let selected_id = self.tree.selected_id();
         let selected = selected_id
-            .and_then(|id| self.explorer.visible_index(id))
+            .and_then(|id| self.tree.visible_index(id))
             .and_then(|index| index.checked_sub(hidden_root_rows));
-        let viewport_rows = usize::from(self.workspace_render_height().saturating_sub(4)).max(1);
-        let maximum = self
-            .configuration
-            .settings
-            .ui
-            .explorer
-            .maximum_visible_rows
-            .min(viewport_rows);
-        let previous_scroll = self
-            .ui
-            .explorer
-            .as_ref()
-            .map_or(0, |explorer| explorer.scroll)
-            .min(total.saturating_sub(maximum));
+        let maximum = usize::from(body.height);
+        let previous_scroll = self.scroll.min(total.saturating_sub(maximum));
         let scroll = selected.map_or(previous_scroll, |selected| {
             if selected < previous_scroll {
                 selected
@@ -177,22 +392,15 @@ impl InteractiveApplication {
                 previous_scroll
             }
         });
-        let rich_icons = self.configuration.settings.ui.explorer.icon_mode
-            == crate::config::ExplorerIconMode::NerdFont;
-        let glyphs = self
-            .configuration
-            .settings
-            .ui
-            .explorer
-            .active_glyphs()
-            .clone();
+        let rich_icons = config.icon_mode == crate::config::ExplorerIconMode::NerdFont;
+        let glyphs = config.active_glyphs();
         let rows = visible_ids
             .iter()
             .skip(hidden_root_rows.saturating_add(scroll))
             .take(maximum)
-            .filter_map(|id| self.explorer.node(*id))
+            .filter_map(|id| self.tree.node(*id))
             .map(|node| {
-                let lineage = self.explorer.tree_lineage(node.id);
+                let lineage = self.tree.tree_lineage(node.id);
                 let mut tree = String::new();
                 for (index, is_last) in lineage.iter().enumerate() {
                     let final_segment = index + 1 == lineage.len();
@@ -208,7 +416,7 @@ impl InteractiveApplication {
                         &glyphs.tree_vertical
                     });
                 }
-                let git_status = self.git_status_decorations.get(&node.path);
+                let git_status = git_status.get(&node.path);
                 let name_role = if git_status.is_some() {
                     ExplorerSegmentRole::Git
                 } else {
@@ -292,470 +500,237 @@ impl InteractiveApplication {
                 }
             })
             .collect();
-        self.ui.explorer = Some(ExplorerUiState {
-            title: self.message("explorer_title", &[]),
+        self.scroll = scroll;
+        ExplorerUiState {
+            title,
             total,
             rows,
             scroll,
-            loading: self.explorer_pending.is_some(),
-            preview_lines: self.explorer_preview_lines.clone(),
-        });
-        self.request_explorer_preview();
-        self.reconcile_explorer_watch();
-        self.reconcile_editor_windows();
-    }
-
-    pub(super) fn request_explorer_preview(&mut self) {
-        if !self.configuration.settings.ui.explorer.preview_enabled {
-            return;
-        }
-        let Some(node) = self.explorer.selected_node() else {
-            return;
-        };
-        if !matches!(node.kind, ExplorerKind::File) {
-            self.explorer_preview_path = None;
-            self.explorer_preview_lines.clear();
-            return;
-        }
-        let path = node.path.clone();
-        if self.explorer_preview_path.as_ref() == Some(&path) {
-            return;
-        }
-        self.explorer_preview_generation = self.explorer_preview_generation.saturating_add(1);
-        let generation = self.explorer_preview_generation;
-        self.explorer_preview_path = Some(path.clone());
-        self.explorer_preview_lines.clear();
-        let roots = self
-            .workspace
-            .roots()
-            .iter()
-            .map(|root| root.identity.canonical_path.clone())
-            .collect();
-        if let Ok(id) = self.vfs.read_scoped_bounded(
-            path.clone(),
-            roots,
-            self.configuration
-                .settings
-                .ui
-                .explorer
-                .maximum_preview_bytes as u64,
-        ) {
-            self.pending_vfs
-                .insert(id, PendingVfs::ExplorerPreview { path, generation });
+            loading: self.pending.is_some(),
+            preview_lines: self.preview_lines(),
         }
     }
-
-    pub(super) fn open_explorer(&mut self) {
-        if !self.configuration.settings.ui.explorer.bundled_enabled {
-            self.show_error("the bundled explorer contribution is disabled");
-            return;
-        }
-        self.surface_windows.allow_explorer();
-        if self.explorer.root_revision != self.workspace.root_revision()
-            || self.explorer.visible_ids().is_empty()
-        {
-            self.explorer
-                .reset_roots(self.workspace.roots(), self.workspace.root_revision());
-        }
-        self.ui.explorer = Some(ExplorerUiState {
-            title: String::new(),
-            rows: Vec::new(),
-            scroll: 0,
-            loading: false,
-            total: 0,
-            preview_lines: Vec::new(),
-        });
-        self.ui.explorer_focused = true;
-        self.sync_explorer_ui();
-        self.git_status_silent_attempted = None;
-        self.start_git_status_refresh_silent();
-        let root_to_load = self.explorer.selected_node().and_then(|node| {
-            (node.kind == ExplorerKind::Root && node.load != ExplorerLoadState::Loaded)
-                .then_some(node.id)
-        });
-        if let Some(root) = root_to_load {
-            self.load_explorer_node(root);
-        }
-        self.ensure_cursor_visible();
+    #[cfg(test)]
+    pub(in crate::editor::session) fn watch_generation(&self) -> Option<ExplorerWatchGeneration> {
+        self.watch_generation
     }
-
-    pub(super) fn load_explorer_node(&mut self, node: ExplorerNodeId) {
-        if self.explorer_pending.is_some() {
-            return;
-        }
-        let Some(path) = self.explorer.node(node).map(|node| node.path.clone()) else {
-            return;
-        };
-        let roots = self
-            .workspace
-            .roots()
-            .iter()
-            .map(|root| root.identity.canonical_path.clone())
-            .collect();
-        match self.directory_service.list(
-            path,
-            roots,
-            self.workspace.root_revision(),
-            self.explorer_hidden,
-            self.explorer_ignored,
-            self.configuration.settings.workspace.maximum_picker_items,
-        ) {
-            Ok(generation) => {
-                self.explorer.begin_load(node, generation);
-                self.explorer_pending = Some((node, generation, self.workspace.root_revision()));
-                self.sync_explorer_ui();
-            }
-            Err(error) => self.show_error(error),
-        }
+    #[cfg(test)]
+    pub(in crate::editor::session) fn watch_reconciles(&self) -> u64 {
+        self.watch.reconcile_count()
     }
-
-    pub(super) fn follow_active_file_in_explorer(&mut self) {
-        let Some(path) = self
-            .state
-            .active_buffer_id()
-            .and_then(|id| self.state.buffers[id].path.clone())
-        else {
-            self.show_error("active buffer has no file path");
-            return;
-        };
-        if self.workspace.root_for_canonical_path(&path).is_none() {
-            self.show_error("active file is outside workspace roots");
-            return;
-        }
-        self.explorer_follow_path = Some(path);
-        self.open_explorer();
-        self.continue_explorer_follow();
+    #[cfg(test)]
+    pub(in crate::editor::session) fn watch_queue_empty(&self) -> bool {
+        self.watch_reload.is_empty()
     }
-
-    pub(super) fn continue_explorer_follow(&mut self) {
-        if self.explorer_pending.is_some() {
-            return;
-        }
-        let Some(target) = self.explorer_follow_path.clone() else {
-            return;
-        };
-        if let Some(id) = self.explorer.id_for_path(&target) {
-            self.explorer.select(id);
-            self.explorer_follow_path = None;
-            self.sync_explorer_ui();
-            return;
-        }
-        let mut ancestor = target.parent();
-        let mut found = None;
-        while let Some(path) = ancestor {
-            if let Some(id) = self.explorer.id_for_path(path) {
-                found = Some(id);
-                break;
-            }
-            ancestor = path.parent()
-        }
-        let Some(id) = found else {
-            self.explorer_follow_path = None;
-            self.show_error("active file has no explorer root");
-            return;
-        };
-        self.explorer.select(id);
-        let Some(node) = self.explorer.node(id).cloned() else {
-            return;
-        };
-        if matches!(node.load, ExplorerLoadState::Loaded) {
-            self.explorer_follow_path = None;
-            self.show_error("active file is absent from the current explorer projection");
-            self.sync_explorer_ui()
-        } else {
-            self.load_explorer_node(id)
-        }
+    #[cfg(test)]
+    pub(in crate::editor::session) fn following(&self) -> bool {
+        self.follow.is_some()
     }
-
-    pub(super) fn explorer_toggle(&mut self) {
-        let Some(node) = self.explorer.selected_node().cloned() else {
-            return;
-        };
-        match node.kind {
-            ExplorerKind::Root | ExplorerKind::Directory => match node.load {
-                ExplorerLoadState::Loaded => {
-                    self.explorer.toggle_loaded(node.id);
-                    self.sync_explorer_ui();
-                }
-                _ => self.load_explorer_node(node.id),
-            },
-            ExplorerKind::File | ExplorerKind::Symlink => self.explorer_open_file(false),
-        }
+}
+fn explorer_icon_role(color: crate::files::ExplorerIconColor) -> ExplorerSegmentRole {
+    match color {
+        crate::files::ExplorerIconColor::Azure => ExplorerSegmentRole::IconAzure,
+        crate::files::ExplorerIconColor::Blue => ExplorerSegmentRole::IconBlue,
+        crate::files::ExplorerIconColor::Cyan => ExplorerSegmentRole::IconCyan,
+        crate::files::ExplorerIconColor::Green => ExplorerSegmentRole::IconGreen,
+        crate::files::ExplorerIconColor::Grey => ExplorerSegmentRole::IconGrey,
+        crate::files::ExplorerIconColor::Orange => ExplorerSegmentRole::IconOrange,
+        crate::files::ExplorerIconColor::Purple => ExplorerSegmentRole::IconPurple,
+        crate::files::ExplorerIconColor::Red => ExplorerSegmentRole::IconRed,
+        crate::files::ExplorerIconColor::Yellow => ExplorerSegmentRole::IconYellow,
     }
+}
 
-    pub(super) fn process_explorer_result(&mut self) {
-        let Some(result) = self.directory_service.try_result() else {
-            return;
-        };
-        let Some((node, generation, revision)) = self.explorer_pending.take() else {
-            return;
-        };
-        match result {
-            Ok(listing)
-                if listing.generation == generation
-                    && listing.root_revision == revision
-                    && revision == self.workspace.root_revision() =>
-            {
-                let children = listing
-                    .entries
-                    .into_iter()
-                    .map(|entry| ExplorerChild {
-                        path: entry.path,
-                        name: entry.name,
-                        kind: match entry.kind {
-                            DirectoryEntryKind::Directory => ExplorerKind::Directory,
-                            DirectoryEntryKind::File => ExplorerKind::File,
-                            DirectoryEntryKind::Symlink => ExplorerKind::Symlink,
-                        },
-                    })
-                    .collect();
-                let selected_loaded_root = self.explorer.selected_id() == Some(node)
-                    && self
-                        .explorer
-                        .node(node)
-                        .is_some_and(|node| node.kind == ExplorerKind::Root);
-                self.explorer
-                    .apply_load(node, generation, revision, children);
-                if selected_loaded_root && self.workspace.roots().len() == 1 {
-                    self.explorer.select_first_child();
-                }
-            }
-            Ok(_) => {}
-            Err(error) => {
-                self.explorer.set_error(node, generation);
-                self.show_error(error);
-            }
-        }
-        self.sync_explorer_ui();
-        self.continue_explorer_follow();
-        self.start_next_explorer_watch_reload();
+pub(in crate::editor::session) fn explorer_watch_policy(
+    config: &crate::config::ExplorerWatchConfig,
+) -> crate::files::ExplorerWatchPolicy {
+    crate::files::ExplorerWatchPolicy {
+        enabled: config.enabled,
+        poll_interval: std::time::Duration::from_millis(config.poll_interval_ms),
+        debounce: std::time::Duration::from_millis(config.debounce_ms),
+        maximum_directories: config.maximum_directories,
+        maximum_entries_per_directory: config.maximum_entries_per_directory,
+        maximum_events: config.maximum_events,
+        maximum_path_bytes: config.maximum_path_bytes,
+        queue_capacity: config.queue_capacity,
     }
+}
 
-    pub(super) fn explorer_open_file(&mut self, split: bool) {
-        let Some(node) = self.explorer.selected_node() else {
-            return;
-        };
-        if matches!(node.kind, ExplorerKind::Root | ExplorerKind::Directory) {
-            self.explorer_toggle();
-            return;
-        }
-        let roots = self
-            .workspace
-            .roots()
-            .iter()
-            .map(|root| root.identity.canonical_path.clone())
-            .collect();
-        match self.vfs.read_scoped(node.path.clone(), roots) {
-            Ok(id) => {
-                self.pending_vfs
-                    .insert(id, PendingVfs::ExplorerOpen { split });
-                self.ui.explorer_focused = false;
-            }
-            Err(error) => self.show_error(error),
-        }
-    }
-
-    fn explorer_selected_parent(&self) -> Option<PathBuf> {
-        let node = self.explorer.selected_node()?;
-        match node.kind {
-            ExplorerKind::Root | ExplorerKind::Directory => Some(node.path.clone()),
-            ExplorerKind::File | ExplorerKind::Symlink => node.path.parent().map(Path::to_path_buf),
-        }
-    }
-
-    fn explorer_selected_mutable_path(&mut self) -> Option<PathBuf> {
-        let Some(node) = self.explorer.selected_node() else {
-            self.show_error("select an explorer path first");
-            return None;
-        };
-        if node.kind == ExplorerKind::Root {
-            self.show_error("workspace roots cannot be renamed or deleted from the explorer");
-            return None;
-        }
-        Some(node.path.clone())
-    }
-
-    fn queue_explorer_mutation(&mut self, operation: ExplorerMutation) {
-        let roots = self
-            .workspace
-            .roots()
-            .iter()
-            .map(|root| root.identity.canonical_path.clone())
-            .collect();
-        match self.vfs.explorer_mutate(
-            operation,
-            roots,
-            self.configuration
-                .settings
-                .workspace
-                .search
-                .maximum_file_bytes,
-        ) {
-            Ok(id) => {
-                self.pending_vfs.insert(id, PendingVfs::ExplorerMutation);
-                self.ui.notification = Some("applying explorer operation…".into());
-                self.ui.notification_error = false;
-            }
-            Err(error) => self.show_error(error),
-        }
-    }
-
-    pub(super) fn create_explorer_path(&mut self, input: String) {
-        let directory = input.ends_with('/') || input.ends_with(std::path::MAIN_SEPARATOR);
-        let input = input.trim_end_matches(['/', std::path::MAIN_SEPARATOR]);
-        if input.is_empty() {
-            self.show_error("explorer path must not be empty");
-            return;
-        }
-        let Some(parent) = self.explorer_selected_parent() else {
-            self.show_error("select an explorer directory first");
-            return;
-        };
-        let entered = PathBuf::from(input);
-        let path = if entered.is_absolute() {
-            entered
-        } else {
-            parent.join(entered)
-        };
-        self.queue_explorer_mutation(ExplorerMutation::Create { path, directory });
-    }
-
-    pub(super) fn rename_explorer_path(&mut self, target: String) {
-        if target.trim().is_empty() {
-            self.show_error("rename target must not be empty");
-            return;
-        }
-        let Some(source) = self.explorer_selected_mutable_path() else {
-            return;
-        };
-        let entered = PathBuf::from(target);
-        let target = if entered.is_absolute() {
-            entered
-        } else {
-            source
-                .parent()
-                .map_or_else(|| entered.clone(), |parent| parent.join(&entered))
-        };
-        self.queue_explorer_mutation(ExplorerMutation::Rename { source, target });
-    }
-
-    pub(super) fn request_explorer_delete(&mut self) {
-        let Some(path) = self.explorer_selected_mutable_path() else {
-            return;
-        };
-        self.explorer_delete_target = Some(path.clone());
-        self.open_prompt(PromptKind::ExplorerDelete, String::new());
-        if let Some(prompt) = &mut self.ui.prompt {
-            prompt.help = Some(format!(
-                "Permanently deletes `{}`. Type `delete`.",
-                path.display()
-            ));
-        }
-    }
-
-    pub(super) fn confirm_explorer_delete(&mut self, phrase: String) {
-        let Some(path) = self.explorer_delete_target.take() else {
-            self.show_error("explorer delete request is stale");
-            return;
-        };
-        if phrase.trim() != "delete" {
-            self.show_error("explorer delete confirmation did not match");
-            return;
-        }
-        self.queue_explorer_mutation(ExplorerMutation::Delete { path });
-    }
-
-    pub(super) fn set_explorer_clipboard(&mut self, cut: bool) {
-        let Some(path) = self.explorer_selected_mutable_path() else {
-            return;
-        };
-        self.explorer_clipboard = Some((path.clone(), cut));
-        self.ui.notification = Some(format!(
-            "{} `{}`; select a destination and press p",
-            if cut { "moving" } else { "copied" },
-            path.display()
-        ));
-        self.ui.notification_error = false;
-    }
-
-    pub(super) fn paste_explorer_clipboard(&mut self) {
-        let Some((source, cut)) = self.explorer_clipboard.clone() else {
-            self.show_error("explorer clipboard is empty");
-            return;
-        };
-        let Some(parent) = self.explorer_selected_parent() else {
-            self.show_error("select an explorer destination first");
-            return;
-        };
-        let Some(name) = source.file_name() else {
-            self.show_error("copied explorer path has no file name");
-            return;
-        };
-        let target = parent.join(name);
-        self.queue_explorer_mutation(if cut {
-            ExplorerMutation::Rename { source, target }
-        } else {
-            ExplorerMutation::Copy { source, target }
-        });
-    }
-
-    pub(super) fn yank_explorer_path(&mut self) {
-        let Some(node) = self.explorer.selected_node() else {
-            self.show_error("select an explorer path first");
-            return;
-        };
-        let text = node.path.display().to_string();
-        self.state.registers.set(
-            '"',
-            RegisterValue {
-                text: text.clone(),
-                shape: RegisterShape::Character,
-            },
-            self.state.policy.registers_enabled,
-            self.state.policy.mirror_named_to_unnamed,
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+    fn fixture(root: &std::path::Path) -> (ExplorerSession, WorkspaceVersion) {
+        let identity = crate::workspace::RootIdentity::capture(root).unwrap();
+        let state = crate::workspace::WorkspaceState::new(
+            crate::workspace::WorkspaceId(1),
+            [("root".into(), identity)],
+        )
+        .unwrap();
+        let workspace = crate::editor::session::workspace::WorkspaceSession::new(
+            state,
+            root.join("trust.json"),
+            1,
+            false,
+            false,
+            1,
         );
-        self.ui.notification = Some(format!("yanked `{text}`"));
-        self.ui.notification_error = false;
+        let config = crate::config::load_bundled_config();
+        let mut owner = ExplorerSession::new(
+            ExplorerWatchService::start(explorer_watch_policy(&config.config.ui.explorer.watch))
+                .unwrap(),
+        );
+        owner.reset_roots(workspace.roots(), workspace.root_revision());
+        (owner, workspace.version())
     }
-
-    pub(super) fn explorer_mouse_select(&mut self) {
-        let Some((column, row)) = self.mouse_position else {
-            return;
-        };
-        let Some(rect) = self.explorer_window_rect() else {
-            return;
-        };
-        if !rect_contains_point(rect, column, row) || row < rect.y.saturating_add(3) {
-            return;
+    fn drain(owner: &mut ExplorerSession, scope: WorkspaceVersion) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while owner.pending() {
+            owner.poll(scope.clone(), 1);
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
         }
-        let Some(explorer_ui) = self.ui.explorer.as_ref() else {
-            return;
-        };
-        let index = usize::from(row.saturating_sub(rect.y).saturating_sub(3));
-        let Some(id) = explorer_ui.rows.get(index).map(|row| row.node_id) else {
-            return;
-        };
-        self.explorer.select(ExplorerNodeId(id));
-        self.ui.explorer_focused = true;
-        self.sync_explorer_ui();
     }
-
-    pub(super) fn refresh_explorer(&mut self) {
-        self.explorer_pending = None;
-        self.explorer_watch_reload_queue.clear();
-        self.explorer_watch_observation = None;
-        self.explorer_preview_path = None;
-        self.explorer_preview_lines.clear();
-        self.explorer_preview_generation = self.explorer_preview_generation.saturating_add(1);
-        self.explorer
-            .reset_roots(self.workspace.roots(), self.workspace.root_revision());
-        self.sync_explorer_ui();
-        let root = self.explorer.selected_node().and_then(|node| {
-            (node.kind == ExplorerKind::Root && node.load != ExplorerLoadState::Loaded)
-                .then_some(node.id)
-        });
-        if let Some(root) = root {
-            self.load_explorer_node(root);
+    #[test]
+    fn closing_and_reopening_retires_old_directory_results_before_tree_projection() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("one.txt");
+        std::fs::write(&path, "one").unwrap();
+        let (mut owner, source) = fixture(root.path());
+        let node = owner.tree.selected_id().unwrap();
+        owner.reconcile_watch(true).unwrap();
+        owner.load(node, source.clone(), 1, 100).unwrap();
+        owner.reconcile_watch(false).unwrap();
+        drain(&mut owner, source.clone());
+        assert!(owner.tree.id_for_path(&path).is_none());
+        assert!(owner.next_reload().is_none());
+        owner.reconcile_watch(true).unwrap();
+        owner.load(node, source.clone(), 1, 100).unwrap();
+        drain(&mut owner, source);
+        assert!(owner.tree.id_for_path(&path).is_some());
+    }
+    #[test]
+    fn retired_directory_policy_and_preview_selection_have_terminal_dispositions() {
+        use crate::files::RequestId;
+        let root = tempfile::tempdir().unwrap();
+        let a = root.path().join("a.txt");
+        let b = root.path().join("b.txt");
+        std::fs::write(&a, "a").unwrap();
+        std::fs::write(&b, "b").unwrap();
+        let (mut owner, source) = fixture(root.path());
+        let node = owner.tree.selected_id().unwrap();
+        owner.load(node, source.clone(), 1, 100).unwrap();
+        let wait = |owner: &mut ExplorerSession| {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while owner.pending() {
+                owner.poll(source.clone(), 2);
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        };
+        wait(&mut owner);
+        assert_eq!(
+            owner.tree.node(node).unwrap().load,
+            ExplorerLoadState::Error
+        );
+        owner.load(node, source.clone(), 2, 100).unwrap();
+        wait(&mut owner);
+        assert_eq!(
+            owner.tree.node(node).unwrap().load,
+            ExplorerLoadState::Loaded
+        );
+        let a = owner.tree.id_for_path(&a).unwrap();
+        let b = owner.tree.id_for_path(&b).unwrap();
+        let mut policy = crate::config::ExplorerConfig::default();
+        policy.preview_enabled = true;
+        policy.maximum_preview_bytes = 16;
+        policy.maximum_preview_lines = 2;
+        owner.select(a);
+        let request = owner
+            .prepare_preview(source.clone(), 2, &policy, "binary", "failed: {diagnostic}")
+            .1
+            .unwrap();
+        assert!(owner.admit_preview(request.ticket, Ok(RequestId(1))));
+        owner.select(b);
+        owner.select(a); // Selecting the same path again cannot revive the retired ticket.
+        assert!(owner.accept_preview(RequestId(1), &Ok(vec![255; 32]), source.clone(), 2));
+        assert!(owner.preview_lines().is_empty());
+        let request = owner
+            .prepare_preview(source.clone(), 2, &policy, "binary", "failed: {diagnostic}")
+            .1
+            .unwrap();
+        assert!(owner.admit_preview(request.ticket, Ok(RequestId(2))));
+        assert!(owner.accept_preview(
+            RequestId(2),
+            &Ok(b"one\0\ntwo\nthree".to_vec()),
+            source.clone(),
+            2
+        ));
+        assert_eq!(owner.preview_lines(), ["one", "two"]);
+        assert!(!owner.accept_preview(RequestId(2), &Ok(b"duplicate".to_vec()), source.clone(), 2));
+        owner.clear_preview();
+        let request = owner
+            .prepare_preview(source.clone(), 2, &policy, "binary", "failed: {diagnostic}")
+            .1
+            .unwrap();
+        assert!(owner.admit_preview(request.ticket, Ok(RequestId(3))));
+        assert!(owner.accept_preview(RequestId(3), &Ok(vec![255; 32]), source.clone(), 2));
+        assert_eq!(
+            owner.preview_lines(),
+            ["failed: preview exceeds admitted byte limit"]
+        );
+        owner.reconcile_watch(true).unwrap();
+        owner.reconcile_watch(false).unwrap();
+        assert!(owner.preview_lines().is_empty());
+    }
+    #[test]
+    #[ignore = "explicit explorer ownership cost probe"]
+    fn explorer_owner_cost_probe() {
+        let root = tempfile::tempdir().unwrap();
+        for n in 0..40 {
+            std::fs::write(root.path().join(format!("file-{n:02}.txt")), "file").unwrap();
         }
+        let (mut owner, source) = fixture(root.path());
+        let node = owner.tree.selected_id().unwrap();
+        owner.load(node, source.clone(), 1, 100).unwrap();
+        drain(&mut owner, source);
+        let config = crate::config::load_bundled_config();
+        let git = BTreeMap::new();
+        let body = crate::ui::window::WindowRect {
+            x: 0,
+            y: 3,
+            width: 30,
+            height: 20,
+        };
+        let before = (
+            crate::ui::window::WindowGraph::test_clone_count(),
+            crate::editor::EditorState::test_clone_count(),
+            crate::editor::text::TextBuffer::test_materializations(),
+        );
+        eprintln!("DUST_ALLOC_START");
+        let start = Instant::now();
+        let mut rows = 0;
+        for _ in 0..100 {
+            rows += std::hint::black_box(owner.projection(
+                &config.config.ui.explorer,
+                body,
+                &git,
+                "Files".into(),
+            ))
+            .rows
+            .len();
+        }
+        let elapsed = start.elapsed();
+        eprintln!("DUST_ALLOC_END");
+        let after = crate::editor::text::TextBuffer::test_materializations();
+        println!(
+            "case=explorer_projection iterations=100 rows_materialized={rows} elapsed_ns={} graph_copies={} editor_copies={} text_decodes={} text_displays={}",
+            elapsed.as_nanos(),
+            crate::ui::window::WindowGraph::test_clone_count() - before.0,
+            crate::editor::EditorState::test_clone_count() - before.1,
+            after.0 - before.2.0,
+            after.1 - before.2.1
+        );
+        assert_eq!(rows, 2000);
     }
 }

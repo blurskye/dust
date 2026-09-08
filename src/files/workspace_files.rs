@@ -56,9 +56,10 @@ pub struct WorkspaceFileService {
 impl WorkspaceFileService {
     pub fn start(&mut self, policy: WorkspaceFilePolicy) -> Result<u64, WorkspaceFileError> {
         validate_workspace_file_policy(&policy)?;
-        self.cancel();
-        self.generation = self.generation.saturating_add(1);
-        let generation = self.generation;
+        let generation = self
+            .generation
+            .checked_add(1)
+            .ok_or(WorkspaceFileError::Unsafe("request identity exhausted"))?;
         let cancellation = Arc::new(AtomicBool::new(false));
         let worker = Arc::clone(&cancellation);
         let (sender, receiver) = mpsc::sync_channel(policy.event_queue_capacity);
@@ -66,6 +67,8 @@ impl WorkspaceFileService {
             .name(format!("dust-workspace-files-{generation}"))
             .spawn(move || run_workspace_files(generation, policy, worker, sender))
             .map_err(WorkspaceFileError::Spawn)?;
+        self.cancel();
+        self.generation = generation;
         self.cancellation = Some(cancellation);
         self.receiver = Some(receiver);
         Ok(generation)
@@ -78,6 +81,15 @@ impl WorkspaceFileService {
     }
     pub fn try_event(&self) -> Option<WorkspaceFileEvent> {
         self.receiver.as_ref().and_then(|r| r.try_recv().ok())
+    }
+    pub(crate) fn poll_event(&self) -> Result<Option<WorkspaceFileEvent>, &'static str> {
+        match self.receiver.as_ref().map(|receiver| receiver.try_recv()) {
+            Some(Ok(event)) => Ok(Some(event)),
+            Some(Err(mpsc::TryRecvError::Disconnected)) => {
+                Err("workspace file worker stopped before completion")
+            }
+            _ => Ok(None),
+        }
     }
     pub const fn generation(&self) -> u64 {
         self.generation

@@ -1,4 +1,9 @@
-use super::*;
+use super::{
+    AppEffect, BTreeSet, CommandRegistry, ConfigurationSources, DashboardAction, KeymapCompilation,
+    LoadedConfig, PathBuf, ResolvedConfiguration, UnicodeSegmentation, UnicodeWidthStr,
+    compile_keymap_entries, compile_keymaps, keymap_entries_for_policy, plugin_owner_from_id,
+    register_app_commands, register_builtin_commands, validate_configured_commands,
+};
 
 pub(in crate::editor::session) fn base_safe_keymaps(
     loaded: &LoadedConfig,
@@ -235,39 +240,4 @@ pub(in crate::editor::session) fn configured_text_width(
         }
     }
     column
-}
-
-pub(in crate::editor::session) fn configured_file_bytes(
-    text: &TextBuffer,
-    configured: &crate::config::EditorConfig,
-) -> Vec<u8> {
-    use crate::config::{BomPolicy, FinalNewlinePolicy, LineEndingPolicy};
-    let mut source = text.to_string();
-    match configured.final_newline {
-        FinalNewlinePolicy::Preserve => {}
-        FinalNewlinePolicy::Insert if !source.ends_with('\n') => source.push('\n'),
-        FinalNewlinePolicy::Remove => {
-            while source.ends_with('\n') {
-                source.pop();
-            }
-        }
-        FinalNewlinePolicy::Insert => {}
-    }
-    let mut format = text.format().clone();
-    format.utf8_bom = match configured.utf8_bom {
-        BomPolicy::Preserve => format.utf8_bom,
-        BomPolicy::Always => true,
-        BomPolicy::Never => false,
-    };
-    let configured_ending = match configured.line_endings {
-        LineEndingPolicy::Preserve => None,
-        LineEndingPolicy::Lf => Some(crate::editor::text::LineEnding::Lf),
-        LineEndingPolicy::CrLf => Some(crate::editor::text::LineEnding::CrLf),
-        LineEndingPolicy::Cr => Some(crate::editor::text::LineEnding::Cr),
-    };
-    if let Some(ending) = configured_ending {
-        format.preferred_line_ending = ending;
-        format.line_endings = vec![ending; source.bytes().filter(|byte| *byte == b'\n').count()];
-    }
-    crate::editor::text::encode_utf8(&source, &format)
 }

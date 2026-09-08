@@ -1,41 +1,13 @@
 use super::*;
 
 impl InteractiveApplication {
-    pub(in crate::editor::session) fn queue_startup_reads(&mut self) {
-        while let Some((path, primary)) = self.startup_reads.front().cloned() {
-            match self.vfs.read(path) {
-                Ok(id) => {
-                    self.startup_reads.pop_front();
-                    self.startup_reads_pending = self.startup_reads_pending.saturating_add(1);
-                    self.pending_vfs
-                        .insert(id, PendingVfs::StartupOpen { primary });
-                }
-                Err(VfsError::QueueFull) => break,
-                Err(error) => {
-                    self.startup_reads.pop_front();
-                    self.show_error(error);
-                }
-            }
-        }
-        self.finish_startup_reads_if_complete();
-    }
-
-    pub(in crate::editor::session) fn finish_startup_reads_if_complete(&mut self) {
-        if self.startup_reads.is_empty() && self.startup_reads_pending == 0 {
-            if let Some(buffer) = self.startup_primary_buffer.take() {
-                let _ = self.state.show_buffer(buffer);
-                self.ui.dashboard = false;
-            }
-        }
-    }
-
     pub(in crate::editor::session) fn nix_workspace_available_for(
         &self,
         definition: &ToolDefinition,
     ) -> bool {
         nix_workspace_shell_for_host(
             definition,
-            self.configuration.settings.lsp.nix_workspace_fallback,
+            self.configuration.settings().lsp.nix_workspace_fallback,
             is_nixos_host(),
         )
         .is_some()

@@ -18,8 +18,7 @@ pub(super) fn render_documentation_popup(
     if !policy.enabled || line_count == 0 || editor_width < 4 || available_height < 3 {
         return;
     }
-    let page_rows = usize::from(policy.max_height.saturating_sub(2))
-        .min(usize::from(available_height.saturating_sub(2)));
+    let page_rows = crate::ui::geometry::documentation_page_rows(config, editor_width, height);
     let scrollable = line_count > page_rows;
     let widest = (0..line_count)
         .filter_map(|index| popup.line_at(index))
@@ -41,10 +40,7 @@ pub(super) fn render_documentation_popup(
         .unwrap_or(policy.max_width)
         .min(policy.max_width)
         .min(width_limit);
-    let visible_rows = line_count
-        .saturating_sub(popup.scroll)
-        .min(usize::from(policy.max_height.saturating_sub(2)))
-        .min(usize::from(available_height.saturating_sub(2)));
+    let visible_rows = line_count.saturating_sub(popup.scroll).min(page_rows);
     let box_height = u16::try_from(visible_rows.saturating_add(2))
         .unwrap_or(policy.max_height)
         .min(policy.max_height)
@@ -337,14 +333,6 @@ pub(super) fn render_dashboard(
         );
     }
     Frame { grid, cursor: None }
-}
-
-pub(super) fn text_width(text: &str, ambiguous_width: AmbiguousWidth) -> usize {
-    if ambiguous_width == AmbiguousWidth::Wide {
-        UnicodeWidthStr::width_cjk(text)
-    } else {
-        UnicodeWidthStr::width(text)
-    }
 }
 
 pub(super) fn center_text(

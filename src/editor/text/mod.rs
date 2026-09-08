@@ -20,3 +20,4 @@ pub use encoding::{DecodedText, EncodingError, FileFormat, LineEnding, decode_ut
 pub use grapheme::{display_width, next_grapheme_boundary, previous_grapheme_boundary};
 pub use position::{BufferRevision, ByteOffset, ByteRange, PositionError};
 pub use rope::TextBuffer;
+pub(crate) use rope::TextVersion;

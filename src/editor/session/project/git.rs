@@ -21,7 +21,7 @@ impl InteractiveApplication {
         crate::editor::BufferId,
         u64,
     )> {
-        if !self.configuration.settings.editor.git_signs.enabled {
+        if !self.configuration.settings().editor.git_signs.enabled {
             return None;
         }
         let status = self
@@ -406,9 +406,7 @@ impl InteractiveApplication {
             return;
         }
         self.open_prompt(PromptKind::GitReset, String::new());
-        if let Some(prompt) = &mut self.ui.prompt {
-            prompt.help = Some("Discards worktree changes. Type `reset this hunk`.".into())
-        }
+        self.prompt_help("Discards worktree changes. Type `reset this hunk`.".into());
     }
 
     pub(in crate::editor::session) fn confirm_reset_selected_git_hunk(&mut self, phrase: String) {
@@ -524,15 +522,15 @@ impl InteractiveApplication {
                 self.git_mutation_generation = None;
                 self.clear_git_status();
                 self.start_git_status_refresh();
-                self.ui.notification = Some(
+                self.notify_message(
                     if was_reset {
                         "Git hunk reset"
                     } else {
                         "Git hunk staged"
                     }
                     .into(),
+                    false,
                 );
-                self.ui.notification_error = false
             }
             Ok(None) => {}
             Err(error) => {

@@ -3,6 +3,17 @@ use super::*;
 #[derive(Clone, Debug)]
 pub(super) enum SessionCommand {
     Sync(LspDocument),
+    SyncOwned {
+        document: LspDocument,
+        source: (crate::editor::BufferId, crate::editor::text::TextVersion),
+    },
+    RespondOwnedApplyEdit {
+        request_id: ServerRequestId,
+        key: std::sync::Arc<()>,
+        applied: bool,
+        reason: Option<String>,
+        completed: SyncSender<Result<(), String>>,
+    },
     Save(LspDocument),
     Close(String),
     Request {
@@ -24,12 +35,13 @@ pub(super) enum SessionCommand {
 
 pub(super) struct SessionHandle {
     sender: SyncSender<SessionCommand>,
+    origin: std::sync::Arc<()>,
     thread: Option<JoinHandle<()>>,
 }
 
 pub struct LspService {
-    events: SyncSender<LspEvent>,
-    receiver: Receiver<LspEvent>,
+    events: SyncSender<OwnedLspEvent>,
+    receiver: Receiver<OwnedLspEvent>,
     sessions: BTreeMap<String, SessionHandle>,
 }
 
@@ -89,6 +101,13 @@ impl LspService {
         &mut self,
         launch: LspSessionLaunch<'_>,
     ) -> Result<(), LspError> {
+        self.start_session_owned(launch, None)
+    }
+    pub(crate) fn start_session_owned(
+        &mut self,
+        launch: LspSessionLaunch<'_>,
+        initial_source: Option<(crate::editor::BufferId, crate::editor::text::TextVersion)>,
+    ) -> Result<(), LspError> {
         let LspSessionLaunch {
             session_key,
             definition,
@@ -112,8 +131,19 @@ impl LspService {
             ));
         }
         let (sender, commands) = mpsc::sync_channel(COMMAND_QUEUE);
-        let events = self.events.clone();
         let server = session_key.to_owned();
+        let origin = std::sync::Arc::new(());
+        let events = EventSender {
+            channel: self.events.clone(),
+            commands: sender.clone(),
+            context: EditContext {
+                session: origin.clone(),
+                server: server.clone().into(),
+                encoding: PositionEncoding::Utf16,
+                diagnostic_ambiguous: false,
+                sources: std::sync::Arc::new(HashMap::new()),
+            },
+        };
         // Canonical preflight pins the executable identity, but multicall and
         // rustup proxy binaries still dispatch from the requested argv[0].
         let executable_name = requested_executable_name(definition);
@@ -138,6 +168,7 @@ impl LspService {
                     environment,
                     commands,
                     events,
+                    initial_source,
                 );
             })
             .map_err(LspError::Thread)?;
@@ -145,12 +176,51 @@ impl LspService {
             session_key.to_owned(),
             SessionHandle {
                 sender,
+                origin,
                 thread: Some(thread),
             },
         );
         Ok(())
     }
 
+    pub(crate) fn diagnostic_producer(
+        &self,
+        server: &str,
+        prefix: &str,
+    ) -> Option<crate::workspace::DiagnosticProducer> {
+        let session = self.sessions.get(server)?;
+        Some(crate::workspace::DiagnosticProducer::from_runtime(
+            crate::workspace::DiagnosticOwner::new(format!("{prefix}{server}")).ok()?,
+            session.origin.clone(),
+        ))
+    }
+    pub(crate) fn sync_owned(
+        &self,
+        server: &str,
+        document: LspDocument,
+        source: (crate::editor::BufferId, crate::editor::text::TextVersion),
+    ) -> Result<(), LspError> {
+        self.send(server, SessionCommand::SyncOwned { document, source })
+    }
+    pub(crate) fn owns_event_context(&self, context: &EditContext) -> bool {
+        self.sessions
+            .get(context.server.as_ref())
+            .is_some_and(|session| std::sync::Arc::ptr_eq(&session.origin, &context.session))
+    }
+    pub(crate) fn edit_context_current(&self, context: &EditContext) -> bool {
+        self.sessions
+            .get(context.server.as_ref())
+            .is_some_and(|session| {
+                std::sync::Arc::ptr_eq(&session.origin, &context.session)
+                    && session
+                        .thread
+                        .as_ref()
+                        .is_none_or(|thread| !thread.is_finished())
+            })
+    }
+    pub(crate) fn try_owned_event(&self) -> Option<OwnedLspEvent> {
+        self.receiver.try_recv().ok()
+    }
     pub fn sync(&self, server: &str, document: LspDocument) -> Result<(), LspError> {
         self.send(server, SessionCommand::Sync(document))
     }
@@ -237,7 +307,7 @@ impl LspService {
     }
 
     pub fn try_event(&self) -> Option<LspEvent> {
-        self.receiver.try_recv().ok()
+        self.receiver.try_recv().ok().map(|event| event.event)
     }
 
     fn send(&self, server: &str, command: SessionCommand) -> Result<(), LspError> {
@@ -273,6 +343,10 @@ pub(super) struct PendingRequest {
     pub(super) document: LspDocument,
     pub(super) generation: u64,
     pub(super) deadline: Instant,
+    pub(super) encoding: PositionEncoding,
+    pub(super) sources: std::sync::Arc<
+        HashMap<String, (crate::editor::BufferId, crate::editor::text::TextVersion)>,
+    >,
 }
 
 pub(super) fn requested_executable_name(definition: &ToolDefinition) -> String {
@@ -295,7 +369,8 @@ pub(super) fn run_session(
     mut configuration: LspServerConfiguration,
     environment: BTreeMap<String, String>,
     commands: Receiver<SessionCommand>,
-    events: SyncSender<LspEvent>,
+    mut events: EventSender,
+    initial_source: Option<(crate::editor::BufferId, crate::editor::text::TextVersion)>,
 ) {
     let mut command = Command::new(&executable);
     #[cfg(unix)]
@@ -403,9 +478,16 @@ pub(super) fn run_session(
     let mut base_capabilities = LspCapabilities::default();
     let mut dynamic_registrations = HashMap::<String, String>::new();
     let mut documents = HashMap::<String, LspDocument>::new();
+    let mut document_sources = HashMap::new();
+    let mut diagnostic_lineage = super::origins::DiagnosticLineage::default();
     if let Some(document) = initial_document {
+        if let Some(source) = initial_source {
+            diagnostic_lineage.observe(document.uri(), &source);
+            document_sources.insert(document.uri(), source);
+        }
         documents.insert(document.uri(), document);
     }
+    let mut apply_requests = HashMap::<ServerRequestId, std::sync::Arc<()>>::new();
     let mut opened_documents = HashSet::new();
     let mut pending = HashMap::<i64, PendingRequest>::new();
     let mut next_request_id = 2_i64;
@@ -428,6 +510,9 @@ pub(super) fn run_session(
                     initialized,
                     &capabilities,
                     &mut documents,
+                    &mut document_sources,
+                    &mut diagnostic_lineage,
+                    &mut apply_requests,
                     &mut opened_documents,
                     &mut pending,
                     &mut next_request_id,
@@ -451,6 +536,7 @@ pub(super) fn run_session(
                         Ok(negotiated) => {
                             base_capabilities = negotiated.clone();
                             capabilities = negotiated;
+                            events.context.encoding = capabilities.position_encoding;
                         }
                         Err(error) => {
                             send_event(
@@ -502,6 +588,10 @@ pub(super) fn run_session(
                             capabilities: &mut capabilities,
                             registrations: &mut dynamic_registrations,
                             configuration: &configuration,
+                            sources: &document_sources,
+                            diagnostic_lineage: &diagnostic_lineage,
+                            documents: &documents,
+                            apply_requests: &mut apply_requests,
                         },
                         &message,
                     );
@@ -593,16 +683,35 @@ pub(super) fn handle_command(
     initialized: bool,
     capabilities: &LspCapabilities,
     documents: &mut HashMap<String, LspDocument>,
+    document_sources: &mut HashMap<
+        String,
+        (crate::editor::BufferId, crate::editor::text::TextVersion),
+    >,
+    diagnostic_lineage: &mut super::origins::DiagnosticLineage,
+    apply_requests: &mut HashMap<ServerRequestId, std::sync::Arc<()>>,
     opened_documents: &mut HashSet<String>,
     pending: &mut HashMap<i64, PendingRequest>,
     next_request_id: &mut i64,
     request_timeout: Duration,
     recent_logs: usize,
-    events: &SyncSender<LspEvent>,
+    events: &EventSender,
     stopping: &mut bool,
     configuration: &mut LspServerConfiguration,
 ) {
+    let command = match command {
+        SessionCommand::SyncOwned { document, source } => {
+            diagnostic_lineage.observe(document.uri(), &source);
+            document_sources.insert(document.uri(), source);
+            SessionCommand::Sync(document)
+        }
+        SessionCommand::Sync(document) => {
+            document_sources.remove(&document.uri());
+            SessionCommand::Sync(document)
+        }
+        other => other,
+    };
     match command {
+        SessionCommand::SyncOwned { .. } => unreachable!("normalized owned sync"),
         SessionCommand::Sync(document) => {
             let uri = document.uri();
             let previous = documents.insert(uri.clone(), document.clone());
@@ -616,6 +725,12 @@ pub(super) fn handle_command(
         }
         SessionCommand::Save(document) => {
             let uri = document.uri();
+            if documents
+                .get(&uri)
+                .is_none_or(|old| old.version != document.version || old.text != document.text)
+            {
+                document_sources.remove(&uri);
+            }
             let previous = documents.insert(uri.clone(), document.clone());
             if initialized {
                 if opened_documents.insert(uri) {
@@ -630,6 +745,7 @@ pub(super) fn handle_command(
             }
         }
         SessionCommand::Close(uri) => {
+            document_sources.remove(&uri);
             documents.remove(&uri);
             if initialized && opened_documents.remove(&uri) {
                 send_close(stdin, &uri);
@@ -641,6 +757,12 @@ pub(super) fn handle_command(
             offset,
             generation,
         } => {
+            if documents
+                .get(&document.uri())
+                .is_none_or(|old| old.version != document.version || old.text != document.text)
+            {
+                document_sources.remove(&document.uri());
+            }
             if !initialized {
                 send_event(
                     events,
@@ -711,6 +833,19 @@ pub(super) fn handle_command(
                 "jsonrpc":"2.0", "id":id, "method":feature.method(), "params":params
             });
             if write_content_length_message(stdin, &message).is_ok() {
+                let edit_sources = if matches!(
+                    feature,
+                    LspFeature::Rename { .. }
+                        | LspFeature::Formatting
+                        | LspFeature::RangeFormatting { .. }
+                        | LspFeature::CodeAction { .. }
+                        | LspFeature::CompletionResolve { .. }
+                        | LspFeature::PullDiagnostics { .. }
+                ) {
+                    document_sources.clone()
+                } else {
+                    HashMap::new()
+                };
                 pending.insert(
                     id,
                     PendingRequest {
@@ -718,6 +853,8 @@ pub(super) fn handle_command(
                         document,
                         generation,
                         deadline: Instant::now() + request_timeout,
+                        encoding: capabilities.position_encoding,
+                        sources: std::sync::Arc::new(edit_sources),
                     },
                 );
             }
@@ -745,20 +882,34 @@ pub(super) fn handle_command(
                 send_cancel(stdin, id);
             }
         }
+        SessionCommand::RespondOwnedApplyEdit {
+            request_id,
+            key,
+            applied,
+            reason,
+            completed,
+        } => {
+            if apply_requests
+                .get(&request_id)
+                .is_some_and(|expected| std::sync::Arc::ptr_eq(expected, &key))
+            {
+                apply_requests.remove(&request_id);
+                let _ =
+                    completed.try_send(write_apply_response(stdin, request_id, applied, reason));
+            } else {
+                let _ = completed.try_send(Err(
+                    "requesting edit identity retired before response".into()
+                ));
+            }
+        }
         SessionCommand::RespondApplyEdit {
             request_id,
             applied,
             reason,
         } => {
-            let result = if applied {
-                json!({"applied":true})
-            } else {
-                json!({"applied":false,"failureReason":reason.unwrap_or_else(||"edit rejected".into())})
-            };
-            let _ = write_content_length_message(
-                stdin,
-                &json!({"jsonrpc":"2.0","id":request_id.value(),"result":result}),
-            );
+            if apply_requests.remove(&request_id).is_some() {
+                let _ = write_apply_response(stdin, request_id, applied, reason);
+            }
         }
         SessionCommand::Health => send_event(
             events,
@@ -775,5 +926,61 @@ pub(super) fn handle_command(
             },
         ),
         SessionCommand::Stop => *stopping = true,
+    }
+}
+
+fn write_apply_response(
+    stdin: &mut ChildStdin,
+    request_id: ServerRequestId,
+    applied: bool,
+    reason: Option<String>,
+) -> Result<(), String> {
+    let result = if applied {
+        json!({"applied":true})
+    } else {
+        json!({"applied":false,"failureReason":reason.unwrap_or_else(||"edit rejected".into())})
+    };
+    write_content_length_message(
+        stdin,
+        &json!({"jsonrpc":"2.0","id":request_id.value(),"result":result}),
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+impl LspService {
+    pub(crate) fn replace_edit_source_fixture(
+        &mut self,
+        uri: String,
+        source: (crate::editor::BufferId, crate::editor::text::TextVersion),
+        encoding: PositionEncoding,
+    ) -> super::origins::EditSourceFixture {
+        let (sender, commands) = mpsc::sync_channel(1);
+        let origin = std::sync::Arc::new(());
+        let server = "owned-edit-fixture".to_owned();
+        let events = EventSender {
+            channel: self.events.clone(),
+            commands: sender.clone(),
+            context: EditContext {
+                session: origin.clone(),
+                server: server.clone().into(),
+                encoding,
+                diagnostic_ambiguous: false,
+                sources: std::sync::Arc::new(HashMap::from([(uri, source)])),
+            },
+        };
+        self.sessions.insert(
+            server,
+            SessionHandle {
+                sender,
+                origin,
+                thread: None,
+            },
+        );
+        super::origins::EditSourceFixture {
+            events,
+            commands,
+            pending: HashMap::new(),
+        }
     }
 }

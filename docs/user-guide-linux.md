@@ -150,3 +150,8 @@ User configuration is loaded transactionally. Invalid reloads retain the previou
 - Theme: `themes/*.toml`
 
 Run `dust --check-config` before restarting after large edits. `:config explain key` shows where a resolved value came from; `:keymap inspect key context` explains a binding.
+
+
+### Toggle the file explorer
+
+Press `<leader> f e` (Space, then `f`, then `e` by default) to open or close the explorer. The same shortcut works while the explorer is focused and from the normal editor when the panel remains visible. A customized leader is respected. Escape still closes the explorer; `l` still expands/collapses the selected directory. The command is `:explorer.panel.toggle`; `:explorer.open` and `:explorer.close` retain their explicit behavior.

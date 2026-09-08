@@ -31,7 +31,14 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn start_lsp(&mut self, requested: Option<String>) {
-        if !self.configuration.settings.lsp.enabled {
+        self.start_lsp_authorized(requested, None);
+    }
+    pub(in crate::editor::session) fn start_lsp_authorized(
+        &mut self,
+        requested: Option<String>,
+        authorization: Option<ExecutionAuthorization>,
+    ) {
+        if !self.configuration.settings().lsp.enabled {
             self.show_error(self.message("lsp_disabled", &[]));
             return;
         }
@@ -112,10 +119,10 @@ impl InteractiveApplication {
                                 LspRuntimeSource::Path,
                                 executable,
                             );
-                            self.ui.notification = Some(
+                            self.notify_message(
                                 "checking rust-analyzer in the active rustup toolchain…".into(),
+                                false,
                             );
-                            self.ui.notification_error = false;
                             return;
                         }
                     }
@@ -142,7 +149,7 @@ impl InteractiveApplication {
             LspRuntimeSource::Nix => {
                 let Some(shell) = nix_workspace_shell_for_host(
                     &definition,
-                    self.configuration.settings.lsp.nix_workspace_fallback,
+                    self.configuration.settings().lsp.nix_workspace_fallback,
                     is_nixos_host(),
                 ) else {
                     self.show_error("Dust via Nix is unavailable on this host");
@@ -184,7 +191,12 @@ impl InteractiveApplication {
         else {
             return;
         };
-        if !self.execution_revalidated {
+        if !authorization.is_some_and(|permit| {
+            permit.consume(
+                &self.workspace,
+                ExecutionAdmission::Lsp(definition.id.clone()),
+            )
+        }) {
             self.defer_trusted_execution(DeferredExecution::StartLsp(Some(definition.id.clone())));
             return;
         }
@@ -198,10 +210,10 @@ impl InteractiveApplication {
             self.show_error(error);
             return;
         }
-        match self.lsp_project_roots.resolve(
+        match self.workspace.discover_project(
+            crate::editor::session::workspace::DiscoveryKind::Language,
             document.path.clone(),
-            root_path.clone(),
-            self.workspace.root_revision(),
+            root_id,
             definition.project_root_markers.clone(),
             definition.project_root_strategy,
         ) {
@@ -223,7 +235,10 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn process_lsp_project_root(&mut self) {
-        let Some(result) = self.lsp_project_roots.try_result() else {
+        let Some(result) = self
+            .workspace
+            .project_result(crate::editor::session::workspace::DiscoveryKind::Language)
+        else {
             return;
         };
         let Some((generation, pending)) = self.pending_lsp_project_root.take() else {
@@ -313,65 +328,6 @@ impl InteractiveApplication {
         });
     }
 
-    pub(in crate::editor::session) fn process_dap_project_root(&mut self) {
-        let Some(result) = self.dap_project_roots.try_result() else {
-            return;
-        };
-        let Some((generation, pending)) = self.pending_dap_project_root.take() else {
-            return;
-        };
-        let resolution = match result {
-            Ok(resolution) if resolution.generation == generation => resolution,
-            Ok(_) => return,
-            Err(error) => {
-                self.show_error(error);
-                return;
-            }
-        };
-        if resolution.root_revision != self.workspace.root_revision()
-            || resolution.document != pending.document.path
-            || resolution.workspace_root != pending.workspace_root
-            || !self
-                .workspace
-                .require_path(&pending.document.path)
-                .is_ok_and(|root| root == pending.root_id)
-            || !self
-                .workspace
-                .require_path(&pending.program)
-                .is_ok_and(|root| root == pending.root_id)
-        {
-            return;
-        }
-        let Some(project_root) = resolution.project_root else {
-            self.show_error("debug adapter requires a valid catalog-backed project root");
-            return;
-        };
-        let request = ExecutionPreflightRequest {
-            executable: pending.adapter_executable,
-            cwd: project_root.clone(),
-            roots: self
-                .workspace
-                .roots()
-                .iter()
-                .map(|root| root.identity.canonical_path.clone())
-                .collect(),
-            root_revision: self.workspace.root_revision(),
-        };
-        match self.execution_preflight.request(request) {
-            Ok(id) => {
-                self.pending_execution_preflight.insert(
-                    id,
-                    PendingExecutionPreflight::DapToolAdapter {
-                        definition: pending.definition,
-                        project_root,
-                        program: pending.program,
-                    },
-                );
-            }
-            Err(error) => self.show_error(error),
-        }
-    }
-
     pub(in crate::editor::session) fn finish_lsp_project_root(
         &mut self,
         pending: PendingLspProjectRoot,
@@ -457,13 +413,26 @@ impl InteractiveApplication {
         &mut self,
         session_key: &str,
         buffer: crate::editor::BufferId,
-        document: LspDocument,
+        mut document: LspDocument,
     ) {
-        if self.lsp.change(session_key, document.clone()).is_ok() {
-            self.lsp_session_synced.insert(
-                (session_key.into(), buffer),
-                BufferRevision(document.version),
-            );
+        let Some(current) = self
+            .state
+            .buffers
+            .get(buffer)
+            .filter(|current| current.path.as_ref() == Some(&document.path))
+        else {
+            return;
+        };
+        document.version = current.text.revision().0;
+        document.text = current.text.to_string();
+        let source = current.text.source_version();
+        if self
+            .lsp
+            .sync_owned(session_key, document.clone(), (buffer, source.clone()))
+            .is_ok()
+        {
+            self.lsp_session_synced
+                .insert((session_key.into(), buffer), source);
             if let Some(state) = self.lsp_sessions.get_mut(session_key) {
                 state.documents.insert(buffer, document);
             }
@@ -483,7 +452,7 @@ impl InteractiveApplication {
                 .collect(),
             root_revision: self.workspace.root_revision(),
         };
-        match self.execution_preflight.request(request) {
+        match self.workspace.request_preflight(request) {
             Ok(id) => {
                 self.pending_execution_preflight.insert(
                     id,
@@ -550,11 +519,11 @@ impl InteractiveApplication {
         };
         let policy = crate::language::lsp::LspPolicy {
             request_timeout: Duration::from_millis(
-                self.configuration.settings.lsp.request_timeout_ms,
+                self.configuration.settings().lsp.request_timeout_ms,
             ),
-            maximum_log_lines: self.configuration.settings.lsp.maximum_log_lines,
+            maximum_log_lines: self.configuration.settings().lsp.maximum_log_lines,
         };
-        let server_configuration = if self.configuration.settings.lsp.inlay_hint_level
+        let server_configuration = if self.configuration.settings().lsp.inlay_hint_level
             == crate::config::InlayHintLevel::Max
         {
             crate::language::lsp::LspServerConfiguration::maximum_inlay_hints(&definition.id)
@@ -564,9 +533,8 @@ impl InteractiveApplication {
                 &result.executable,
             )
         };
-        match self
-            .lsp
-            .start_session_absolute_with_policy(crate::language::lsp::LspSessionLaunch {
+        match self.lsp.start_session_owned(
+            crate::language::lsp::LspSessionLaunch {
                 session_key: &session_key,
                 definition: &definition,
                 executable: result.executable.clone(),
@@ -576,17 +544,37 @@ impl InteractiveApplication {
                 policy,
                 configuration: server_configuration,
                 environment,
-            }) {
+            },
+            Some((buffer, current.text.source_version())),
+        ) {
             Ok(()) => {
+                for prefix in ["lsp.", "lsp-pull:"] {
+                    if let Some(producer) = self.lsp.diagnostic_producer(&session_key, prefix) {
+                        self.diagnostics.activate(producer);
+                    }
+                }
+                self.sync_ui_diagnostics();
                 let mut documents = self
                     .lsp_sessions
                     .get(&session_key)
                     .map_or_else(HashMap::new, |state| state.documents.clone());
                 documents.insert(buffer, document.clone());
                 if restart {
-                    for (replay_buffer, replay) in &documents {
-                        if *replay_buffer != buffer {
-                            let _ = self.lsp.sync(&session_key, replay.clone());
+                    for (replay_buffer, replay) in &mut documents {
+                        if *replay_buffer != buffer
+                            && let Some(current) = self
+                                .state
+                                .buffers
+                                .get(*replay_buffer)
+                                .filter(|current| current.path.as_ref() == Some(&replay.path))
+                        {
+                            replay.version = current.text.revision().0;
+                            replay.text = current.text.to_string();
+                            let _ = self.lsp.sync_owned(
+                                &session_key,
+                                replay.clone(),
+                                (*replay_buffer, current.text.source_version()),
+                            );
                         }
                     }
                 }
@@ -619,21 +607,32 @@ impl InteractiveApplication {
                     self.active_lsp_server = Some(session_key.clone());
                     self.lsp_capabilities = None;
                 }
-                self.lsp_session_synced
-                    .insert((session_key, buffer), BufferRevision(document.version));
+                self.lsp_session_synced.insert(
+                    (session_key, buffer),
+                    self.state.buffers[buffer].text.source_version(),
+                );
             }
             Err(error) => self.show_error(error),
         }
     }
 
     pub(in crate::editor::session) fn restart_lsp_session(&mut self, key: String) {
+        self.restart_lsp_authorized(key, None);
+    }
+    pub(in crate::editor::session) fn restart_lsp_authorized(
+        &mut self,
+        key: String,
+        authorization: Option<ExecutionAuthorization>,
+    ) {
         let Some(state) = self.lsp_sessions.get(&key) else {
             return;
         };
         if state.circuit_open || !state.desired_running {
             return;
         }
-        if !self.execution_revalidated {
+        if !authorization.is_some_and(|permit| {
+            permit.consume(&self.workspace, ExecutionAdmission::Restart(key.clone()))
+        }) {
             self.defer_trusted_execution(DeferredExecution::RestartLsp(key));
             return;
         }

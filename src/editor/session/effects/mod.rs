@@ -2,6 +2,7 @@ use super::*;
 
 mod configuration;
 mod core;
+pub(super) use core::{ExecutionAdmission, ExecutionAuthorization};
 mod debugger;
 mod extensions;
 mod language;

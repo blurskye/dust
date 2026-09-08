@@ -61,7 +61,7 @@ impl InteractiveApplication {
             self.process_lsp_inlay_refresh();
             return;
         }
-        self.ui.documentation_popup = None;
+        self.close_documentation();
         let Some(view_id) = self.state.active_view else {
             return;
         };
@@ -189,66 +189,33 @@ impl InteractiveApplication {
         source_range: Option<ByteRange>,
         source_sections: Vec<LspMarkupContent>,
     ) {
-        let policy = &self.configuration.settings.ui.documentation_popup;
-        if !policy.enabled {
-            self.ui.documentation_popup = None;
-            return;
+        if kind != DocumentationPopupKind::Completion {
+            self.reconcile_editor_windows();
+            self.input.hold_focus(self.window_session.capture_focus());
         }
-        let mut remaining_lines = policy.maximum_lines;
-        let mut remaining_bytes = policy.maximum_bytes;
-        let mut sections = Vec::new();
-        for source in source_sections.into_iter().take(policy.maximum_sections) {
-            if remaining_lines == 0 || remaining_bytes == 0 {
-                break;
-            }
-            let normalized = source.value.replace("\r\n", "\n").replace('\r', "\n");
-            let mut lines = Vec::new();
-            for line in normalized.split('\n') {
-                if remaining_lines == 0 || remaining_bytes == 0 {
-                    break;
-                }
-                let sanitized = line
-                    .chars()
-                    .filter(|character| !character.is_control() || *character == '\t')
-                    .take(8192)
-                    .collect::<String>();
-                let take = sanitized.len().min(remaining_bytes);
-                let mut end = take;
-                while !sanitized.is_char_boundary(end) {
-                    end = end.saturating_sub(1);
-                }
-                lines.push(sanitized[..end].to_owned());
-                remaining_bytes = remaining_bytes.saturating_sub(end);
-                remaining_lines = remaining_lines.saturating_sub(1);
-            }
-            if !lines.iter().all(|line| line.trim().is_empty()) {
-                sections.push(DocumentationSection {
-                    heading: None,
-                    markup: match source.kind {
+        self.input.present_documentation(
+            kind,
+            title,
+            provider,
+            source_range,
+            source_sections.into_iter().map(|source| {
+                (
+                    match source.kind {
                         LspMarkupKind::PlainText => DocumentationMarkupKind::PlainText,
                         LspMarkupKind::Markdown => DocumentationMarkupKind::Markdown,
                     },
-                    lines,
-                });
-            }
-        }
-        if sections.is_empty() {
-            self.ui.documentation_popup = None;
-            return;
-        }
-        self.ui.documentation_popup = Some(DocumentationPopupState {
-            kind,
-            title,
-            provider: provider.chars().take(256).collect(),
-            source_range,
-            sections,
-            scroll: 0,
-        });
+                    source.value,
+                )
+            }),
+            &self.configuration.settings().ui.documentation_popup,
+        );
+        self.restore_input_focus();
+        self.project_input_documentation();
     }
 
     pub(in crate::editor::session) fn open_lsp_completion_documentation(&mut self) {
         let Some((generation, owner)) = self.lsp_completion_owner.clone() else {
-            self.ui.documentation_popup = None;
+            self.close_documentation();
             self.show_error("completion documentation is stale");
             return;
         };
@@ -267,7 +234,7 @@ impl InteractiveApplication {
             || self.lsp_projection_owner.as_ref() != Some(&owner)
             || !live_owner
         {
-            self.ui.documentation_popup = None;
+            self.close_documentation();
             self.show_error("completion documentation is stale");
             return;
         }
@@ -309,6 +276,17 @@ impl InteractiveApplication {
         method: &str,
         uri: &str,
         result: LspFeatureResult,
+    ) {
+        self.present_lsp_result_owned(server, generation, method, uri, result, None);
+    }
+    pub(in crate::editor::session) fn present_lsp_result_owned(
+        &mut self,
+        server: &str,
+        generation: u64,
+        method: &str,
+        uri: &str,
+        result: LspFeatureResult,
+        context: Option<crate::language::lsp::EditContext>,
     ) {
         let server_label = self.lsp_server_label(server);
         match result {
@@ -398,15 +376,16 @@ impl InteractiveApplication {
                         document.uri = uri.into();
                     }
                 }
-                self.begin_workspace_proposal(
+                self.begin_workspace_proposal_owned(
                     self.message("workspace_edit_lsp_label", &[]),
                     edit,
                     None,
                     self.lsp_position_encoding(),
+                    context,
                 );
             }
             LspFeatureResult::CodeActions(actions) => {
-                self.open_lsp_code_actions_picker(server, actions);
+                self.open_lsp_code_actions_picker(server, actions, context);
             }
             LspFeatureResult::PullDiagnostics(result) => {
                 if let Some(id) = result.result_id.clone() {
@@ -415,64 +394,26 @@ impl InteractiveApplication {
                 if result.unchanged {
                     return;
                 }
-                if let Some(path) = path_from_file_uri(uri)
-                    && let Some((_, buffer)) = self
-                        .state
-                        .buffers
-                        .iter()
-                        .find(|(_, buffer)| buffer.path.as_ref() == Some(&path))
-                    && let Ok(owner) = DiagnosticOwner::new(format!("lsp-pull:{server}"))
-                {
-                    let encoding = self.lsp_position_encoding();
-                    let codec = PositionCodec::new(&buffer.text);
-                    let diagnostics = result
-                        .items
-                        .into_iter()
-                        .filter_map(|item| {
-                            let start = codec
-                                .lsp_to_byte(
-                                    item.range.start.line,
-                                    item.range.start.character,
-                                    encoding,
-                                )
-                                .ok()?;
-                            let end = codec
-                                .lsp_to_byte(
-                                    item.range.end.line,
-                                    item.range.end.character,
-                                    encoding,
-                                )
-                                .ok()?;
-                            let range = ByteRange::new(start, end).ok()?;
-                            Some(Diagnostic {
-                                uri: uri.into(),
-                                version: Some(buffer.text.revision()),
-                                range,
-                                severity: match item.severity.unwrap_or(1) {
-                                    1 => DiagnosticSeverity::Error,
-                                    2 => DiagnosticSeverity::Warning,
-                                    3 => DiagnosticSeverity::Information,
-                                    _ => DiagnosticSeverity::Hint,
-                                },
-                                source: item.source.unwrap_or_else(|| server_label.clone()),
-                                code: item.code,
-                                message: item.message,
-                                related: Vec::new(),
-                                tags: Vec::new(),
-                                fixes: Vec::new(),
-                                timestamp: crate::clock::system_time(),
-                            })
-                        })
-                        .collect();
-                    let revision = Some(buffer.text.revision());
-                    let _ = self.diagnostics.replace(
-                        owner,
-                        uri.into(),
-                        revision,
-                        revision,
-                        diagnostics,
-                    );
-                    self.sync_ui_diagnostics();
+                let normalized = context
+                    .as_ref()
+                    .ok_or_else(|| "pull diagnostics lack a requesting context".to_string())
+                    .and_then(|context| {
+                        crate::editor::session::lsp_edits::LspEditSources::diagnostic_batch(
+                            context,
+                            &self.lsp,
+                            &self.state,
+                            (uri, None, result.items),
+                            true,
+                            self.configuration
+                                .settings()
+                                .workspace
+                                .maximum_diagnostics_per_owner_uri,
+                            &server_label,
+                        )
+                    });
+                match normalized.and_then(|batch| self.diagnostics.publish(batch, &self.state)) {
+                    Ok(()) => self.sync_ui_diagnostics(),
+                    Err(error) => self.append_lsp_log(error),
                 }
             }
             LspFeatureResult::SemanticTokens(result) => {
@@ -689,5 +630,358 @@ impl InteractiveApplication {
             }
             LspFeatureResult::Empty => self.show_error(self.message("lsp_no_result", &[])),
         }
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn begin_workspace_proposal(
+        &mut self,
+        label: String,
+        edit: LspWorkspaceEdit,
+        response: Option<crate::language::lsp::ApplyEditReply>,
+        encoding: PositionEncoding,
+    ) {
+        self.begin_workspace_proposal_owned(label, edit, response, encoding, None);
+    }
+    pub(in crate::editor::session) fn begin_workspace_proposal_owned(
+        &mut self,
+        label: String,
+        edit: LspWorkspaceEdit,
+        response: Option<crate::language::lsp::ApplyEditReply>,
+        encoding: PositionEncoding,
+        context: Option<crate::language::lsp::EditContext>,
+    ) {
+        if let Err(error) = self.workspace_edits.check_begin().and_then(|()| {
+            self.state
+                .window_version()
+                .revision()
+                .map(|_| ())
+                .ok_or_else(|| "editor source revision is exhausted".into())
+        }) {
+            self.lsp_edit_sources.reject_reply(response, error.clone());
+            self.show_error(error);
+            return;
+        }
+        let documents = self
+            .state
+            .buffers
+            .iter()
+            .filter_map(|(id, buffer)| {
+                Some(crate::editor::session::lsp_edits::EditDocument {
+                    id,
+                    path: buffer.path.as_deref()?,
+                    text: &buffer.text,
+                })
+            })
+            .collect::<Vec<_>>();
+        let plan = match self
+            .lsp_edit_sources
+            .start(edit, encoding, context, response, &documents, &self.lsp)
+        {
+            Ok(plan) => plan,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        let ticket = match self.state.workspace_edit_sources().and_then(|source| {
+            self.workspace_edits.begin(
+                self.workspace.version(),
+                self.configuration.binding_revision(),
+                source,
+            )
+        }) {
+            Ok(ticket) => ticket,
+            Err(error) => {
+                let _ = self
+                    .lsp_edit_sources
+                    .finish(&plan.key, false, Some(error.clone()));
+                self.show_error(error);
+                return;
+            }
+        };
+        let maximum = usize::try_from(
+            self.configuration
+                .settings()
+                .workspace
+                .search
+                .maximum_file_bytes,
+        )
+        .unwrap_or(usize::MAX);
+        let roots = self
+            .workspace
+            .roots()
+            .iter()
+            .map(|root| root.identity.canonical_path.clone())
+            .collect();
+        if let Err(error) = self.workspace_edits.start_files(
+            ticket,
+            label,
+            Some(plan.key),
+            plan.all_files,
+            plan.files,
+            roots,
+            maximum,
+        ) {
+            self.abort_workspace_edit(error);
+            return;
+        }
+        loop {
+            let Some((index, file)) = self.workspace_edits.next_file() else {
+                break;
+            };
+            let snapshot =
+                if let crate::editor::session::workspace_edits::InputFile::Read(path) = file {
+                    self.state.workspace_snapshot(
+                        self.workspace_edits
+                            .preparing_sources()
+                            .expect("admitted source"),
+                        path,
+                        maximum,
+                    )
+                } else {
+                    Ok(None)
+                };
+            let snapshot = match snapshot {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    self.abort_workspace_edit(error);
+                    return;
+                }
+            };
+            if let Some(snapshot) = snapshot {
+                if let Err(error) = self.workspace_edits.open_snapshot(index, snapshot) {
+                    self.abort_workspace_edit(error);
+                    return;
+                }
+            } else {
+                let admitted = self
+                    .workspace_edits
+                    .prepare_io(
+                        index,
+                        &self.workspace,
+                        self.configuration.binding_revision_ref(),
+                        &self.state,
+                    )
+                    .and_then(|permit| self.documents.submit_workspace_io(permit));
+                if let Err(error) = admitted {
+                    self.abort_workspace_edit(error);
+                    return;
+                }
+            }
+        }
+        if self.workspace_edits.files_ready() {
+            self.finish_workspace_proposal();
+        } else {
+            self.notify_message(self.message("workspace_edit_loading", &[]), false);
+        }
+    }
+    fn check_workspace_edit_origin(&self) -> Result<(), String> {
+        let Some(key) = self.workspace_edits.origin() else {
+            return Ok(());
+        };
+        if self.plugin_edits.owns(key) {
+            return self.plugin_edits.check(
+                key,
+                &self.plugins,
+                &self.state,
+                &self.workspace.version(),
+                self.configuration.binding_revision(),
+            );
+        }
+        let documents = self
+            .state
+            .buffers
+            .iter()
+            .filter_map(|(id, buffer)| {
+                Some(crate::editor::session::lsp_edits::EditDocument {
+                    id,
+                    path: buffer.path.as_deref()?,
+                    text: &buffer.text,
+                })
+            })
+            .collect::<Vec<_>>();
+        self.lsp_edit_sources.check(key, &documents, &self.lsp)
+    }
+    pub(in crate::editor::session) fn finish_workspace_proposal(&mut self) {
+        let result = (|| {
+            self.workspace_edits.current_preparation(
+                &self.workspace.version(),
+                self.configuration.binding_revision(),
+            )?;
+            self.check_workspace_edit_origin()?;
+            let source = self
+                .workspace_edits
+                .preparing_sources()
+                .ok_or("workspace preparation source missing")?;
+            let files = self.workspace_edits.prepared_files()?;
+            self.state
+                .validate_workspace_sources(source, files.paths())?;
+            let key = self
+                .workspace_edits
+                .preparing_origin()
+                .ok_or("workspace source origin missing")?;
+            let drafts = self.lsp_edit_sources.decode(key, files)?;
+            self.workspace_edits.finish_preparation(
+                drafts,
+                self.workspace.edit_scope(),
+                &self.workspace.version(),
+                self.configuration.binding_revision(),
+            )
+        })();
+        match result {
+            Ok(()) => self.show_workspace_proposal(),
+            Err(error) => self.abort_workspace_edit(error),
+        }
+    }
+    pub(in crate::editor::session) fn retire_workspace_picker(
+        &mut self,
+        id: crate::workspace::ProposalId,
+    ) {
+        if self.workspace_edits.proposal().is_none_or(|p| p.id != id) {
+            return;
+        }
+        let retired = self.workspace_edits.reject();
+        for request in retired.requests {
+            self.documents.cancel_request(request);
+        }
+        if let Some(key) = retired.origin {
+            let _ = self.finish_workspace_edit_origin(
+                &key,
+                false,
+                Some("workspace preview dismissed".into()),
+            );
+        }
+    }
+    fn finish_workspace_edit_origin(
+        &mut self,
+        key: &crate::editor::session::workspace_edits::OriginKey,
+        applied: bool,
+        reason: Option<String>,
+    ) -> Result<(), String> {
+        if self.plugin_edits.owns(key) {
+            self.plugin_edits.finish(key)
+        } else {
+            self.lsp_edit_sources.finish(key, applied, reason)
+        }
+    }
+    pub(in crate::editor::session) fn abort_workspace_edit(&mut self, reason: String) {
+        let retired = self.workspace_edits.reject();
+        for id in retired.requests {
+            self.documents.cancel_request(id);
+        }
+        if let Some(origin) = retired.origin {
+            let _ = self.finish_workspace_edit_origin(&origin, false, Some(reason.clone()));
+        }
+        self.close_picker();
+        self.show_error(reason);
+    }
+    pub(in crate::editor::session) fn reject_workspace_proposal(&mut self) {
+        let retired = self.workspace_edits.reject();
+        for id in retired.requests {
+            self.documents.cancel_request(id);
+        }
+        if let Some(origin) = retired.origin {
+            let _ = self.finish_workspace_edit_origin(
+                &origin,
+                false,
+                Some("workspace edit rejected".into()),
+            );
+        }
+        self.close_picker();
+        self.notify_message(self.message("workspace_edit_rejected", &[]), false);
+    }
+    pub(in crate::editor::session) fn accept_workspace_proposal(&mut self) {
+        if let Err(error) = self.check_workspace_edit_origin() {
+            self.abort_workspace_edit(error);
+            return;
+        }
+        let transaction = self.transaction_id();
+        let prepared = (|| {
+            let (source, proposal) = self.workspace_edits.approval(
+                &self.workspace.version(),
+                self.configuration.binding_revision(),
+            )?;
+            let changes = self
+                .workspace_edits
+                .resources()
+                .iter()
+                .map(|intent| {
+                    let target = match &intent.kind {
+                        ResourceIntentKind::Rename { target, .. } => Some(target.as_path()),
+                        ResourceIntentKind::Delete => None,
+                    };
+                    self.state.check_resource_destination(target)?;
+                    self.state.workspace_resource_change(source, &intent.source)
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            let draft = self
+                .state
+                .prepare_workspace_edit(source, proposal, transaction)?;
+            Ok::<_, String>((draft, changes))
+        })();
+        let (draft, changes) = match prepared {
+            Ok(value) => value,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        if let Err(error) = self.workspace_edits.stage_approval(&draft, changes) {
+            self.show_error(error);
+            return;
+        }
+        if let Err(error) = self.commit_editor_draft(draft, None, false) {
+            self.workspace_edits.abandon_approval();
+            self.show_error(error);
+            return;
+        }
+        match self.workspace_edits.accepted(self.state.publication()) {
+            Ok(Some(origin)) => {
+                if let Err(error) = self.finish_workspace_edit_origin(&origin, true, None) {
+                    self.show_error(error);
+                    return;
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        }
+        self.close_picker();
+        self.notify_message(self.message("workspace_edit_applied", &[]), false);
+    }
+    pub(in crate::editor::session) fn apply_lsp_workspace_edit(
+        &mut self,
+        edit: LspWorkspaceEdit,
+    ) -> Result<(), String> {
+        let id = self.transaction_id();
+        let documents = self
+            .state
+            .buffers
+            .iter()
+            .filter_map(|(id, buffer)| {
+                Some(crate::editor::session::lsp_edits::EditDocument {
+                    id,
+                    path: buffer.path.as_deref()?,
+                    text: &buffer.text,
+                })
+            })
+            .collect::<Vec<_>>();
+        let transaction =
+            crate::editor::session::lsp_edits::LspEditSources::completion_transaction(
+                edit,
+                self.lsp_position_encoding(),
+                &documents,
+                id,
+            )?;
+        let draft = self
+            .state
+            .prepare_transaction(&transaction)
+            .map_err(|e| e.to_string())?;
+        self.commit_editor_draft(draft, None, false)?;
+        self.notify_message(self.message("lsp_edit_applied", &[]), false);
+        Ok(())
     }
 }

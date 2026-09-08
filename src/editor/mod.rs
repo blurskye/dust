@@ -26,6 +26,8 @@ pub use state::{
     RegisterStore, RegisterValue, ReplaceRecord, Selection, SelectionKind, Tab, TabId,
     TransactionId, View, ViewId,
 };
+pub(crate) use state::{EditorTopology, EditorVersion, EditorWindowVersion};
+pub(crate) use transaction::EditorDraft;
 pub use transaction::{
     EditorOperation, EditorTransaction, Precondition, TransactionError, UndoPolicy, UndoTree,
 };

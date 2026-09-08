@@ -15,7 +15,14 @@ impl InteractiveApplication {
         title: String,
         items: Vec<(PickerItem, PickerPayload)>,
     ) {
-        self.install_surface_picker_state(surface, title, items, String::new(), true);
+        self.install_surface_picker_state(
+            surface,
+            title,
+            items,
+            String::new(),
+            true,
+            PickerOrigin::General,
+        );
     }
 
     pub(in crate::editor::session) fn install_surface_picker_state(
@@ -25,30 +32,70 @@ impl InteractiveApplication {
         items: Vec<(PickerItem, PickerPayload)>,
         query: String,
         complete: bool,
+        origin: PickerOrigin,
     ) {
-        self.completion_generation = self.completion_generation.saturating_add(1);
-        self.picker_preview_generation = self.picker_preview_generation.saturating_add(1);
-        self.picker_preview_path = None;
-        self.picker_preview = None;
-        let generation = self.completion_generation;
-        let mut picker = PickerState::new(
-            generation,
-            title,
-            self.configuration.settings.workspace.maximum_picker_items,
-        );
-        self.picker_payloads.clear();
-        let rows = items
+        let retired_preview = self
+            .search
+            .workspace_picker()
+            .filter(|id| !matches!(origin, PickerOrigin::WorkspaceEdit(current) if current == *id));
+        let (rows, payloads): (Vec<_>, Vec<_>) = items
             .into_iter()
             .map(|(item, payload)| {
-                self.picker_payloads.insert(item.id.clone(), payload);
-                item
+                let id = item.id.clone();
+                (item, (id, payload))
             })
-            .collect::<Vec<_>>();
-        picker.append(generation, rows, complete);
-        picker.set_unfiltered_query(query);
-        self.picker_surface = surface;
-        self.picker = Some(picker);
+            .unzip();
+        let epoch = match self.search.install_picker(
+            PickerContent {
+                surface,
+                origin,
+                title,
+                items: rows,
+                query,
+                complete,
+            },
+            self.configuration.settings().workspace.maximum_picker_items,
+            self.workspace.version(),
+            self.configuration.binding_revision(),
+        ) {
+            Ok(epoch) => epoch,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        self.input.capture_changed();
+        // A refused replacement must not destroy the still-valid old preview.
+        if let Some(id) = retired_preview {
+            self.retire_workspace_picker(id);
+        }
+        self.lsp_edit_sources
+            .retain_actions(payloads.iter().filter_map(|(_, payload)| match payload {
+                PickerPayload::CodeAction(key) => Some(key),
+                _ => None,
+            }));
+        self.input.cancel_prompt_completions();
+        self.clear_picker_preview();
+        self.picker_payloads = payloads
+            .into_iter()
+            .map(|(id, payload)| (id, (epoch.clone(), payload)))
+            .collect();
         self.sync_picker_ui();
+    }
+
+    pub(in crate::editor::session) fn retire_stale_picker(&mut self) {
+        if self.search.picker_is_stale(
+            self.workspace.version(),
+            self.configuration.binding_revision(),
+        ) {
+            self.close_picker();
+        }
+    }
+
+    pub(in crate::editor::session) fn selected_picker_payload(&self) -> Option<&PickerPayload> {
+        let item = self.search.picker()?.selected_item()?;
+        let (epoch, payload) = self.picker_payloads.get(&item.id)?;
+        self.search.owns_picker_epoch(epoch).then_some(payload)
     }
 
     pub(in crate::editor::session) fn open_lsp_locations_picker(
@@ -119,22 +166,34 @@ impl InteractiveApplication {
         &mut self,
         server: &str,
         actions: Vec<crate::language::lsp::LspCodeAction>,
+        context: Option<crate::language::lsp::EditContext>,
     ) {
+        let choices = match self.lsp_edit_sources.install_actions(
+            actions,
+            context,
+            &self.lsp,
+            self.configuration.settings().workspace.maximum_picker_items,
+        ) {
+            Ok(choices) => choices,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
         let server = self.lsp_server_label(server);
-        let items = actions
+        let items = choices
             .into_iter()
             .enumerate()
-            .map(|(index, action)| {
-                let id = PickerItemId(format!("code-action:{index}:{}", action.title));
+            .map(|(index, choice)| {
                 (
                     PickerItem {
-                        id,
-                        label: action.title.clone(),
-                        detail: action.kind.clone().unwrap_or_default(),
+                        id: PickerItemId(format!("code-action:{index}:{}", choice.title)),
+                        label: choice.title,
+                        detail: choice.detail,
                         source: server.clone(),
                         action: PickerAction::None,
                     },
-                    PickerPayload::CodeAction(action),
+                    PickerPayload::CodeAction(choice.key),
                 )
             })
             .collect();
@@ -146,19 +205,27 @@ impl InteractiveApplication {
         kind: &str,
         rows: Vec<(String, String, DapControl)>,
     ) {
+        let rows = self.debugger_session.controls(rows);
+        self.install_debug_rows(kind, rows);
+    }
+    pub(in crate::editor::session) fn install_debug_rows(
+        &mut self,
+        kind: &str,
+        rows: Vec<crate::editor::session::debugger::DebugRow>,
+    ) {
         let items = rows
             .into_iter()
             .enumerate()
-            .map(|(index, (label, detail, control))| {
+            .map(|(index, row)| {
                 (
                     PickerItem {
                         id: PickerItemId(format!("dap:{kind}:{index}")),
-                        label,
-                        detail,
+                        label: row.label,
+                        detail: row.detail,
                         source: "dap".into(),
                         action: PickerAction::None,
                     },
-                    PickerPayload::DapControl(control),
+                    PickerPayload::Debug(row.key),
                 )
             })
             .collect();
@@ -169,43 +236,14 @@ impl InteractiveApplication {
         );
     }
 
-    pub(in crate::editor::session) fn open_dap_frames_picker(&mut self, rows: Vec<DapStackFrame>) {
-        let items = rows
-            .into_iter()
-            .enumerate()
-            .map(|(index, row)| {
-                (
-                    PickerItem {
-                        id: PickerItemId(format!("dap:frame:{index}:{}", row.id)),
-                        label: row.name.clone(),
-                        detail: row
-                            .path
-                            .as_ref()
-                            .map(|path| format!("{}:{}:{}", path.display(), row.line, row.column))
-                            .unwrap_or_default(),
-                        source: "dap".into(),
-                        action: PickerAction::None,
-                    },
-                    PickerPayload::DapFrame(row),
-                )
-            })
-            .collect();
-        self.install_surface_picker(
-            PickerSurfaceKind::Debug,
-            self.message("dap_picker_title", &[("kind", "frames".into())]),
-            items,
-        );
-    }
-
     pub(in crate::editor::session) fn open_builtin_picker(&mut self, kind: PickerKind) {
         match kind {
             PickerKind::Diagnostics => {
                 let items = self
                     .diagnostics
-                    .problems(None, None)
-                    .into_iter()
+                    .choices()
                     .enumerate()
-                    .map(|(index, problem)| {
+                    .map(|(index, (key, problem, validity))| {
                         let id = PickerItemId(format!("diagnostic:{index}:{}", problem.uri));
                         let path = path_from_file_uri(&problem.uri)
                             .map_or_else(|| problem.uri.clone(), |path| path.display().to_string());
@@ -213,14 +251,11 @@ impl InteractiveApplication {
                             PickerItem {
                                 id,
                                 label: problem.message.clone(),
-                                detail: path,
-                                source: problem.source,
+                                detail: format!("{path} · {}", validity.label()),
+                                source: problem.source.clone(),
                                 action: PickerAction::None,
                             },
-                            PickerPayload::Diagnostic {
-                                uri: problem.uri,
-                                range: problem.range,
-                            },
+                            PickerPayload::Diagnostic(key),
                         )
                     })
                     .collect();
@@ -244,7 +279,7 @@ impl InteractiveApplication {
                                 label: state.path.as_ref().map_or_else(
                                     || {
                                         self.configuration
-                                            .settings
+                                            .settings()
                                             .ui
                                             .status_line
                                             .scratch_label
@@ -254,7 +289,7 @@ impl InteractiveApplication {
                                 ),
                                 detail: if state.dirty {
                                     self.configuration
-                                        .settings
+                                        .settings()
                                         .ui
                                         .status_line
                                         .dirty_marker
@@ -410,7 +445,7 @@ impl InteractiveApplication {
                                 label: command.clone(),
                                 detail: self
                                     .configuration
-                                    .settings
+                                    .settings()
                                     .command_labels
                                     .get(&command)
                                     .cloned()
@@ -433,41 +468,20 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn sync_picker_ui(&mut self) {
-        self.ui.picker = self.picker.as_ref().map(|picker| {
-            let presentation = picker.presentation();
-            PickerUiState {
-                surface: self.picker_surface,
-                title: presentation.title,
-                query: presentation.query,
-                rows: presentation
-                    .rows
-                    .into_iter()
-                    .map(|(id, label, detail, source)| PickerRow {
-                        id: id.0,
-                        label,
-                        detail,
-                        source,
-                    })
-                    .collect(),
-                selected: presentation.selected,
-                scroll: presentation.scroll,
-                loading: presentation.loading,
-                preview: self.picker_preview.clone(),
-            }
-        });
+        self.retire_stale_picker();
+        self.ui.picker = self.search.picker_projection();
         self.sync_picker_preview();
         if let Some(picker) = &mut self.ui.picker {
-            picker.preview.clone_from(&self.picker_preview);
+            picker.preview.clone_from(self.search.preview());
         }
+        self.refresh_window_content();
     }
 
     pub(in crate::editor::session) fn picker_insert(&mut self, text: &str) {
-        let query = self.picker.as_mut().map(|picker| {
-            picker.insert_query(text);
-            picker.query().to_owned()
-        });
+        self.retire_stale_picker();
+        let query = self.search.picker_insert(text);
         self.sync_picker_ui();
-        if self.workspace_search_live
+        if self.search.live()
             && let Some(query) = query
         {
             self.restart_live_workspace_search(query);
@@ -475,12 +489,10 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn picker_backspace(&mut self) {
-        let query = self.picker.as_mut().map(|picker| {
-            picker.backspace_query();
-            picker.query().to_owned()
-        });
+        self.retire_stale_picker();
+        let query = self.search.picker_backspace();
         self.sync_picker_ui();
-        if self.workspace_search_live
+        if self.search.live()
             && let Some(query) = query
         {
             self.restart_live_workspace_search(query);
@@ -488,155 +500,101 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn picker_move(&mut self, direction: i8) {
-        if let Some(picker) = &mut self.picker {
-            picker.move_selection(direction, self.configuration.settings.workspace.picker_wrap);
-            let rows = usize::from(
-                self.terminal_height
-                    .saturating_mul(u16::from(
-                        self.configuration.settings.ui.picker.height_percent,
-                    ))
-                    .saturating_div(100)
-                    .saturating_sub(4),
-            );
-            picker.ensure_selected_visible(rows);
-            self.sync_picker_ui();
-        }
+        self.retire_stale_picker();
+        self.search.picker_move(
+            direction,
+            self.configuration.settings().workspace.picker_wrap,
+        );
+        self.sync_picker_ui();
     }
 
+    fn clear_picker_preview(&mut self) {
+        if let Some(id) = self.search.clear_preview() {
+            self.documents.cancel_request(id);
+        }
+    }
     fn sync_picker_preview(&mut self) {
         let Some((label, payload)) = self
-            .picker
-            .as_ref()
+            .search
+            .picker()
             .and_then(PickerState::selected_item)
             .and_then(|item| {
-                self.picker_payloads
-                    .get(&item.id)
+                self.selected_picker_payload()
                     .cloned()
                     .map(|payload| (item.label.clone(), payload))
             })
         else {
-            self.picker_preview_path = None;
-            self.picker_preview = None;
+            self.clear_picker_preview();
             return;
         };
+        let payload = if let PickerPayload::TaskTest(key) = payload {
+            let Some((path, line, column)) = self.tasks.resolve_test(&key) else {
+                self.clear_picker_preview();
+                return;
+            };
+            PickerPayload::MatcherSource(MatcherSource { path, line, column })
+        } else {
+            payload
+        };
         match payload {
-            PickerPayload::WorkspaceSearch(found) => {
-                self.picker_preview_path = Some(found.canonical_path.clone());
-                self.picker_preview = Some(Self::search_picker_preview(
-                    &found,
-                    self.configuration.settings.ui.picker.maximum_preview_bytes,
-                ));
+            PickerPayload::WorkspaceSearch(key) => {
+                if let Some(id) = self.search.preview_match(
+                    &key,
+                    self.configuration
+                        .settings()
+                        .ui
+                        .picker
+                        .maximum_preview_bytes,
+                ) {
+                    self.documents.cancel_request(id);
+                }
             }
             PickerPayload::MatcherSource(source) => {
-                if self.picker_preview_path.as_ref() == Some(&source.path) {
-                    return;
+                let (retired, ticket) = self.search.prepare_preview(
+                    source.path.clone(),
+                    label,
+                    self.configuration
+                        .settings()
+                        .ui
+                        .picker
+                        .loading_label
+                        .clone(),
+                    self.workspace.version(),
+                    self.configuration.binding_revision(),
+                );
+                if let Some(id) = retired {
+                    self.documents.cancel_request(id);
                 }
-                self.picker_preview_generation = self.picker_preview_generation.saturating_add(1);
-                let generation = self.picker_preview_generation;
-                self.picker_preview_path = Some(source.path.clone());
-                self.picker_preview = Some(PickerPreview {
-                    title: label,
-                    lines: vec![self.configuration.settings.ui.picker.loading_label.clone()],
-                    first_line: 0,
-                    highlight_line: None,
-                });
+                let Some(ticket) = ticket else {
+                    return;
+                };
                 let roots = self
                     .workspace
                     .roots()
                     .iter()
                     .map(|root| root.identity.canonical_path.clone())
                     .collect();
-                if let Ok(id) = self.vfs.read_scoped_bounded(
-                    source.path.clone(),
-                    roots,
-                    self.configuration.settings.ui.picker.maximum_preview_bytes as u64,
-                ) {
-                    self.pending_vfs.insert(
-                        id,
-                        PendingVfs::PickerPreview {
-                            path: source.path,
-                            generation,
-                        },
-                    );
+                let maximum = self
+                    .configuration
+                    .settings()
+                    .ui
+                    .picker
+                    .maximum_preview_bytes;
+                match self
+                    .documents
+                    .read_scoped_bounded(source.path, roots, maximum as u64)
+                {
+                    Ok(id) => {
+                        if !self.search.admit_preview(ticket, id, maximum) {
+                            self.documents.cancel_request(id);
+                        }
+                    }
+                    Err(error) => self.search.preview_failed(ticket, error.to_string()),
                 }
             }
-            _ => {
-                self.picker_preview_path = None;
-                self.picker_preview = None;
-            }
+            _ => self.clear_picker_preview(),
         }
     }
-
-    fn search_picker_preview(
-        found: &crate::files::WorkspaceSearchMatch,
-        maximum_bytes: usize,
-    ) -> PickerPreview {
-        let bytes = found.snapshot.as_ref();
-        let maximum_bytes = maximum_bytes.max(1);
-        let match_start = found.range.start.min(bytes.len());
-        let mut start = match_start.saturating_sub(maximum_bytes / 3);
-        while start < match_start
-            && bytes
-                .get(start)
-                .is_some_and(|byte| byte & 0b1100_0000 == 0b1000_0000)
-        {
-            start = start.saturating_add(1);
-        }
-        if start > 0
-            && let Some(line_break) = bytes[start..match_start]
-                .iter()
-                .position(|byte| *byte == b'\n')
-        {
-            start = start.saturating_add(line_break).saturating_add(1);
-        }
-        let mut end = start.saturating_add(maximum_bytes).min(bytes.len());
-        while end > start && std::str::from_utf8(&bytes[start..end]).is_err() {
-            end = end.saturating_sub(1);
-        }
-        let before_lines = bytes[start..match_start]
-            .iter()
-            .filter(|byte| **byte == b'\n')
-            .count();
-        let mut first_line = found.line.saturating_sub(before_lines);
-        let selected_offset = found.line.saturating_sub(first_line);
-        let first_visible_offset = selected_offset.saturating_sub(8);
-        let lines = std::str::from_utf8(&bytes[start..end]).map_or_else(
-            |_| vec!["binary preview unavailable".into()],
-            |text| Self::picker_preview_lines_from(text, first_visible_offset, 512),
-        );
-        first_line = first_line.saturating_add(first_visible_offset);
-        PickerPreview {
-            title: found.relative_path.display().to_string(),
-            lines,
-            first_line,
-            highlight_line: Some(found.line),
-        }
-    }
-
-    pub(in crate::editor::session) fn picker_preview_lines(
-        text: &str,
-        maximum_lines: usize,
-    ) -> Vec<String> {
-        Self::picker_preview_lines_from(text, 0, maximum_lines)
-    }
-
-    fn picker_preview_lines_from(
-        text: &str,
-        first_line: usize,
-        maximum_lines: usize,
-    ) -> Vec<String> {
-        text.lines()
-            .skip(first_line)
-            .take(maximum_lines)
-            .map(|line| {
-                line.chars()
-                    .filter(|character| !character.is_control() || *character == '\t')
-                    .take(4096)
-                    .collect()
-            })
-            .collect()
-    }
-
     pub(in crate::editor::session) fn open_plugin_picker(
         &mut self,
         provider: String,
@@ -713,57 +671,95 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn close_picker(&mut self) {
-        if self.workspace_file_generation.take().is_some() {
-            self.workspace_files.cancel();
-            self.workspace_file_root_revision = None;
-            self.workspace_file_entries.clear();
+        self.debugger_session.dismiss_choices();
+        if self.ui.picker.is_some() {
+            self.input.capture_changed();
+        }
+        if let Some(id) = self.search.workspace_picker() {
+            self.retire_workspace_picker(id);
+        }
+        self.lsp_edit_sources.clear_actions();
+        if let Some(id) = self.search.close_picker() {
+            self.documents.cancel_request(id);
         }
         if let Some(request) = self.active_plugin_picker.take() {
             self.plugin_providers.cancel(request);
         }
-        self.active_output_task = None;
-        if self.workspace_search_live {
-            self.workspace_search.cancel();
-            self.workspace_search_generation = None;
-            self.workspace_search_workflow = None;
-            self.workspace_search_matches.clear();
-            self.workspace_search_intent = None;
-            self.workspace_search_live = false;
-            self.workspace_search_query.clear();
-        }
-        self.picker = None;
+        self.tasks.select_output(None);
         self.picker_payloads.clear();
-        self.picker_preview_generation = self.picker_preview_generation.saturating_add(1);
-        self.picker_preview_path = None;
-        self.picker_preview = None;
         self.ui.picker = None;
+        self.refresh_window_content();
     }
 
     pub(in crate::editor::session) fn accept_picker(&mut self) {
+        self.retire_stale_picker();
         let selected = self
-            .picker
-            .as_ref()
+            .search
+            .picker()
             .and_then(PickerState::selected_item)
             .map(|item| item.id.clone());
         let payload = selected
             .as_ref()
-            .and_then(|id| self.picker_payloads.remove(id));
+            .and_then(|id| self.picker_payloads.remove(id))
+            .and_then(|(epoch, payload)| self.search.owns_picker_epoch(&epoch).then_some(payload));
+        if let Some(PickerPayload::ProposalFile(index)) = &payload {
+            if let Err(error) = self.workspace_edits.toggle(*index) {
+                self.show_error(error);
+            }
+            self.show_workspace_proposal();
+            return;
+        }
+        // Retain only the accepted source match before close retires live search data.
+        let search_match = match &payload {
+            Some(PickerPayload::WorkspaceSearch(id)) => self
+                .search
+                .matches()
+                .iter()
+                .find(|found| &found.id == id)
+                .cloned(),
+            _ => None,
+        };
+        let code_action = match &payload {
+            Some(PickerPayload::CodeAction(key)) => {
+                Some(self.lsp_edit_sources.take_action(key, &self.lsp))
+            }
+            _ => None,
+        };
+        let debug_selection = match &payload {
+            Some(PickerPayload::Debug(key)) => Some(self.debugger_session.take_selection(key)),
+            _ => None,
+        };
         self.close_picker();
         match payload {
-            Some(PickerPayload::WorkspaceSearch(found)) => {
-                self.navigate_workspace_search_match(found)
+            Some(PickerPayload::WorkspaceSearch(_)) => {
+                if let Some(found) = search_match {
+                    self.navigate_workspace_search_match(found);
+                }
             }
             Some(PickerPayload::LspLocation(location)) => self.navigate_lsp_location(&location),
-            Some(PickerPayload::Diagnostic { uri, range }) => {
-                self.navigate_byte_location(&uri, range)
+            Some(PickerPayload::Diagnostic(key)) => {
+                if let Some(row) = self.diagnostics.resolve(&key, &self.state) {
+                    let (uri, range) = (row.uri.clone(), row.range);
+                    self.navigate_byte_location(&uri, range);
+                } else {
+                    self.show_error("diagnostic source retired");
+                }
             }
-            Some(PickerPayload::CodeAction(action)) => {
+            Some(PickerPayload::CodeAction(_)) => {
+                let (action, context) = match code_action.expect("selected code action") {
+                    Ok(action) => action,
+                    Err(error) => {
+                        self.show_error(error);
+                        return;
+                    }
+                };
                 if let Some(edit) = action.edit {
-                    self.begin_workspace_proposal(
+                    self.begin_workspace_proposal_owned(
                         action.title,
                         edit,
                         None,
                         self.lsp_position_encoding(),
+                        context,
                     );
                 }
             }
@@ -773,10 +769,10 @@ impl InteractiveApplication {
                 }
             }
             Some(PickerPayload::WorkspaceRoot(root)) => self.activate_workspace_root(root),
-            Some(PickerPayload::Terminal(id)) => {
-                if self.terminals.contains_key(&id) {
-                    self.active_terminal = Some(id);
-                    self.terminal_focused = true;
+            Some(PickerPayload::Terminal(key)) => {
+                if let Some(id) = self.terminal_session.resolve(&key) {
+                    self.terminal_session.select(id);
+                    self.set_terminal_focus(true);
                     self.resize_active_terminal_to_panel();
                     self.sync_terminal_panel();
                 } else {
@@ -784,16 +780,28 @@ impl InteractiveApplication {
                 }
             }
             Some(PickerPayload::LspSession(key)) => self.select_lsp_session(&key),
-            Some(PickerPayload::DapFrame(frame)) => {
-                let _ = self.dap.control(DapControl::Scopes { frame_id: frame.id });
-                if let Some(reference) = frame.source_reference {
-                    let _ = self.dap.control(DapControl::Source { reference });
-                } else if let Some(path) = frame.path {
-                    self.navigate_matcher_source(MatcherSource {
-                        path,
-                        line: frame.line.saturating_sub(1) as usize,
-                        column: frame.column.saturating_sub(1) as usize,
-                    });
+            Some(PickerPayload::Debug(_)) => {
+                self.debugger_session.refresh(
+                    &self.configuration.settings().debug,
+                    self.workspace.version(),
+                );
+                let target = crate::editor::session::debugger::SourceTarget {
+                    navigation: self
+                        .window_session
+                        .navigation_stamp(self.state.window_version(), self.state.active_view),
+                    capture: self.input.capture_epoch(),
+                };
+                match debug_selection
+                    .expect("debug selection routed")
+                    .and_then(|selection| self.debugger_session.activate(selection, target))
+                {
+                    Ok(Some(location)) => self.navigate_matcher_source(MatcherSource {
+                        path: location.path,
+                        line: location.line.saturating_sub(1) as usize,
+                        column: location.column.saturating_sub(1) as usize,
+                    }),
+                    Ok(None) => {}
+                    Err(error) => self.show_error(error),
                 }
             }
             Some(PickerPayload::GitHunk {
@@ -824,6 +832,13 @@ impl InteractiveApplication {
                     self.show_error("Git hunk is stale")
                 }
             }
+            Some(PickerPayload::TaskTest(key)) => {
+                if let Some((path, line, column)) = self.tasks.resolve_test(&key) {
+                    self.navigate_matcher_source(MatcherSource { path, line, column });
+                } else {
+                    self.show_error("test result source retired");
+                }
+            }
             Some(PickerPayload::MatcherSource(source)) => self.navigate_matcher_source(source),
             Some(PickerPayload::PersistedLocation(location)) => {
                 self.navigate_persisted_location(location)
@@ -838,17 +853,6 @@ impl InteractiveApplication {
             ),
             Some(PickerPayload::RegistryMetadata(metadata)) => {
                 self.request_registry(RegistryRequest::Fetch { metadata }, true)
-            }
-            Some(PickerPayload::DapControl(control)) => {
-                if let Err(error) = self.dap.control(control) {
-                    self.show_error(error)
-                }
-            }
-            Some(PickerPayload::ProposalFile(index)) => {
-                if let Some(proposal) = &mut self.workspace_proposal {
-                    let _ = proposal.toggle_file(index);
-                    self.show_workspace_proposal();
-                }
             }
             Some(PickerPayload::Command(command)) if !command.is_empty() => {
                 if let Ok(invocation) = CommandInvocation::new(&command, InvocationSource::Picker) {

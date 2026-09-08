@@ -38,8 +38,7 @@ impl InteractiveApplication {
                         self.remove_plugin_contribution_generation(&id, load);
                     }
                     self.commands.unregister_plugin(&id);
-                    self.ui.notification = Some(self.message("plugin_disabled", &[("id", id)]));
-                    self.ui.notification_error = false;
+                    self.notify_message(self.message("plugin_disabled", &[("id", id)]), false);
                 }
             }
             AppEffect::PluginPickerOpen { provider, query } => {
@@ -75,7 +74,7 @@ impl InteractiveApplication {
                     .find(&plugin, load, &source, &key)
                 {
                     let _ = self.state.show_buffer(entry.buffer);
-                    self.ui.dashboard = false;
+                    self.set_dashboard_visibility(false);
                     self.reconcile_editor_windows();
                     return Ok(());
                 }
@@ -108,7 +107,7 @@ impl InteractiveApplication {
                     {
                         let buffer = entry.buffer;
                         let _ = self.state.show_buffer(buffer);
-                        self.ui.dashboard = false;
+                        self.set_dashboard_visibility(false);
                         self.reconcile_editor_windows();
                         return Ok(());
                     }
@@ -135,25 +134,37 @@ impl InteractiveApplication {
                     revision,
                     closed: false,
                 };
-                let mut state = self.state.clone();
+                let current = self.state.version();
+                let mut state = self.state.draft();
                 let mut bridge = self.plugin_virtual_editor.clone();
                 match bridge.publish(&mut state, &snapshot) {
                     Ok(_) => {
-                        let mut graph = self.windows.clone();
-                        let mut editor = self.editor_windows.clone();
-                        if let Err(error) = editor.reconcile(
-                            &state,
-                            &mut graph,
-                            &self.configuration.settings.ui.buffer_line.scratch_label,
-                        ) {
-                            self.show_error(format!("health document graph rejected: {error}"));
-                            return Ok(());
-                        }
+                        let accepted = self
+                            .window_session
+                            .prepare_editor_transition(
+                                state,
+                                &current,
+                                self.plugin_contributions.version(),
+                                &self.configuration.settings().ui.buffer_line.scratch_label,
+                                None,
+                            )
+                            .and_then(|transition| {
+                                self.window_session.accept_editor_transition(
+                                    transition,
+                                    &current,
+                                    &self.plugin_contributions.version(),
+                                )
+                            });
+                        let state = match accepted {
+                            Ok(state) => state,
+                            Err(error) => {
+                                self.show_error(format!("health document graph rejected: {error}"));
+                                return Ok(());
+                            }
+                        };
                         self.state = state;
                         self.plugin_virtual_editor = bridge;
-                        self.windows = graph;
-                        self.editor_windows = editor;
-                        self.ui.dashboard = false;
+                        self.set_dashboard_visibility(false);
                         self.reconcile_editor_windows();
                     }
                     Err(error) => self.show_error(format!("health document rejected: {error:?}")),
@@ -209,42 +220,54 @@ impl InteractiveApplication {
                     return Ok(());
                 }
                 self.refresh_plugin_host_events();
-                let snapshot = self.state.active_buffer_id().and_then(|id| {
-                    self.state.buffers.get(id).map(|buffer| PluginSnapshot {
-                        buffer: id.data().as_ffi(),
-                        revision: buffer.text.revision().0,
-                        utf8: buffer.text.to_string(),
-                    })
-                });
-                if let Err(error) =
-                    self.plugins
-                        .execute(crate::extensions::PluginExecutionRequest {
-                            plugin: plugin.clone(),
-                            command: command.clone(),
-                            arguments: Vec::new(),
-                            snapshot,
-                            config: BTreeMap::new(),
-                            ui_events: self
-                                .pending_plugin_ui_events
-                                .remove(&(plugin.clone(), load))
-                                .unwrap_or_default(),
-                            host_events: self.plugin_host_events.deliver(&plugin, load),
-                            storage_results: self
-                                .pending_plugin_storage_results
-                                .remove(&(plugin.clone(), load))
-                                .unwrap_or_default(),
-                            provider_requests: self.plugin_providers.requests(&plugin, load),
-                            virtual_document_requests: self
-                                .plugin_virtual_documents
-                                .requests_for_command(
-                                    &plugin,
-                                    load,
-                                    &format!("plugin.{plugin}.{command}"),
-                                ),
-                            generation: self.configuration_generation,
-                        })
-                {
-                    self.show_error(error)
+                self.retire_plugin_edit_sources();
+                let maximum = usize::try_from(
+                    self.configuration
+                        .settings()
+                        .workspace
+                        .search
+                        .maximum_file_bytes,
+                )
+                .unwrap_or(usize::MAX);
+                let admitted = self.plugin_edits.prepare(
+                    &mut self.plugins,
+                    &plugin,
+                    &command,
+                    &self.state,
+                    &self.workspace,
+                    self.configuration.binding_revision_ref(),
+                    maximum,
+                );
+                let result = match admitted {
+                    Err(error) => Err(error),
+                    Ok(loan) => loan.submit(crate::extensions::PluginExecutionRequest {
+                        plugin: plugin.clone(),
+                        command: command.clone(),
+                        arguments: Vec::new(),
+                        snapshot: None,
+                        config: BTreeMap::new(),
+                        ui_events: self
+                            .pending_plugin_ui_events
+                            .remove(&(plugin.clone(), load))
+                            .unwrap_or_default(),
+                        host_events: self.plugin_host_events.deliver(&plugin, load),
+                        storage_results: self
+                            .pending_plugin_storage_results
+                            .remove(&(plugin.clone(), load))
+                            .unwrap_or_default(),
+                        provider_requests: self.plugin_providers.requests(&plugin, load),
+                        virtual_document_requests: self
+                            .plugin_virtual_documents
+                            .requests_for_command(
+                                &plugin,
+                                load,
+                                &format!("plugin.{plugin}.{command}"),
+                            ),
+                        generation: self.configuration.generation(),
+                    }),
+                };
+                if let Err(error) = result {
+                    self.show_error(error);
                 }
             }
             AppEffect::PackageInstall {
@@ -253,22 +276,15 @@ impl InteractiveApplication {
                 component,
                 update,
             } => {
-                if self.safe_mode {
+                if self.workspace.safe_mode() {
                     self.show_error(self.message("safe_mode_blocked", &[]));
-                } else if !self.execution_revalidated {
+                } else {
                     self.defer_trusted_execution(DeferredExecution::InstallPackage {
                         package_manifest,
                         plugin_manifest,
                         component,
                         update,
                     });
-                } else {
-                    self.install_package_after_validation(
-                        package_manifest,
-                        plugin_manifest,
-                        component,
-                        update,
-                    )
                 }
             }
             AppEffect::PackageRegistrySearch(query) => {
@@ -291,23 +307,14 @@ impl InteractiveApplication {
                 name,
                 version,
             } => {
-                if self.safe_mode {
+                if self.workspace.safe_mode() {
                     self.show_error(self.message("safe_mode_blocked", &[]))
-                } else if !self.execution_revalidated {
+                } else {
                     self.defer_trusted_execution(DeferredExecution::InstallRegistry {
                         publisher,
                         name,
                         version,
                     })
-                } else {
-                    self.request_registry(
-                        RegistryRequest::Show {
-                            publisher,
-                            name,
-                            version,
-                        },
-                        true,
-                    )
                 }
             }
             AppEffect::PackageList => {

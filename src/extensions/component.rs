@@ -60,6 +60,27 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         {
             return Err("invalid edit proposal".into());
         }
+        // Bound the complete guest-produced batch, not just each host call.
+        if self.proposals.len() >= 1024
+            || self
+                .proposals
+                .iter()
+                .map(|(_, _, edits)| edits.len())
+                .sum::<usize>()
+                + edits.len()
+                > 4096
+            || self
+                .proposals
+                .iter()
+                .flat_map(|(_, _, edits)| edits)
+                .chain(&edits)
+                .try_fold(0usize, |bytes, edit| {
+                    bytes.checked_add(edit.replacement.len())
+                })
+                .is_none_or(|bytes| bytes > 1024 * 1024)
+        {
+            return Err("edit proposal batch ceiling exceeded".into());
+        }
         self.proposals.push((buffer, revision, edits));
         Ok(self.proposals.len() as u64)
     }

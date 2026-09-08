@@ -1,416 +1,361 @@
-use super::*;
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 
-impl InteractiveApplication {
-    pub(super) fn syntax_language_label(&self, language: SyntaxLanguage) -> String {
-        self.message(
-            match language {
-                SyntaxLanguage::Rust => "syntax_language_rust",
-                SyntaxLanguage::TypeScript => "syntax_language_typescript",
-                SyntaxLanguage::Tsx => "syntax_language_tsx",
-                SyntaxLanguage::JavaScript => "syntax_language_javascript",
-                SyntaxLanguage::Go => "syntax_language_go",
-                SyntaxLanguage::Json => "syntax_language_json",
-                SyntaxLanguage::Toml => "syntax_language_toml",
-                SyntaxLanguage::Markdown => "syntax_language_markdown",
-            },
-            &[],
-        )
+use crate::{
+    config::SyntaxConfig,
+    editor::{
+        BufferId,
+        text::{BufferRevision, TextBuffer},
+    },
+    language::syntax::{
+        SyntaxDocumentId, SyntaxEvent, SyntaxLanguage, SyntaxPolicy, SyntaxResult, SyntaxService,
+        SyntaxSupport,
+    },
+};
+
+pub(super) struct SyntaxDocument<'a> {
+    pub buffer: BufferId,
+    pub text: &'a TextBuffer,
+    pub language: Option<SyntaxLanguage>,
+    pub enabled: bool,
+}
+
+struct SyntaxFailure {
+    revision: BufferRevision,
+    generation: u64,
+    language: SyntaxLanguage,
+    diagnostic: String,
+}
+
+#[derive(Debug, PartialEq)]
+pub(super) enum IndentError {
+    Pending,
+    Unsupported,
+    Truncated,
+}
+
+/// Owns parser admission, document identities, debounce and accepted results.
+pub(super) struct SyntaxSession {
+    service: SyntaxService,
+    documents: HashMap<BufferId, SyntaxDocumentId>,
+    submitted: HashMap<BufferId, (BufferRevision, u64, SyntaxLanguage)>,
+    accepted: HashMap<BufferId, SyntaxResult>,
+    failures: HashMap<BufferId, SyntaxFailure>,
+    due: HashMap<BufferId, (BufferRevision, Instant)>,
+    next_document: u64,
+    next_generation: u64,
+}
+
+impl SyntaxSession {
+    pub(super) fn new(queue_capacity: usize) -> Self {
+        Self {
+            service: SyntaxService::start(queue_capacity),
+            documents: HashMap::new(),
+            submitted: HashMap::new(),
+            accepted: HashMap::new(),
+            failures: HashMap::new(),
+            due: HashMap::new(),
+            next_document: 1,
+            next_generation: 1,
+        }
     }
 
-    pub(super) fn syntax_support_label(&self, support: SyntaxSupport) -> String {
-        self.message(
-            match support {
-                SyntaxSupport::Full => "syntax_support_full",
-                SyntaxSupport::Partial => "syntax_support_partial",
-                SyntaxSupport::Unsupported => "syntax_support_unsupported",
-            },
-            &[],
-        )
+    fn close(&mut self, buffer: BufferId) {
+        if let Some(document) = self.documents.remove(&buffer) {
+            self.service.cancel(document);
+        }
+        self.submitted.remove(&buffer);
+        self.accepted.remove(&buffer);
+        self.failures.remove(&buffer);
+        self.due.remove(&buffer);
     }
 
-    pub(super) fn apply_syntax_indent_line(&mut self) {
-        let Some(view_id) = self.state.active_view else {
-            return;
-        };
-        let view = &self.state.views[view_id];
-        let buffer_id = view.buffer;
-        let cursor = view.cursor;
-        let Some(buffer) = self.state.buffers.get(buffer_id) else {
-            return;
-        };
-        let Some(language) = buffer.path.as_deref().and_then(language_for_path) else {
-            self.show_error(self.message("syntax_indent_unavailable", &[]));
-            return;
-        };
-        let revision = buffer.text.revision();
-        let line = match buffer.text.byte_to_line(cursor) {
-            Ok(line) => line,
-            Err(error) => {
-                self.show_error(error);
-                return;
-            }
-        };
-        let Some(result) = self.syntax_accepted.get(&buffer_id) else {
-            self.show_error(self.message("syntax_indent_pending", &[]));
-            return;
-        };
-        if result.language != language || result.revision != revision.0 {
-            self.show_error(self.message("syntax_indent_pending", &[]));
-            return;
-        }
-        if result.capabilities.indents == SyntaxSupport::Unsupported {
-            self.show_error(self.message(
-                "syntax_indent_unsupported",
-                &[("language", self.syntax_language_label(language))],
-            ));
-            return;
-        }
-        if result.indents_truncated {
-            self.show_error(self.message("syntax_indent_truncated", &[]));
-            return;
-        }
-        let levels = result
-            .indents
+    /// Returns how many source strings were materialized, for admission-cost checks.
+    /// No source snapshot is created before its revision/debounce checks succeed.
+    pub(super) fn tick(
+        &mut self,
+        documents: &[SyntaxDocument<'_>],
+        config: &SyntaxConfig,
+        now: Instant,
+        too_large: &str,
+    ) -> usize {
+        let live = documents
             .iter()
-            .filter(|range| line > range.start_row && line < range.end_row)
-            .count();
-        let desired = if self.state.policy.expand_tabs {
-            " ".repeat(levels.saturating_mul(self.state.policy.indent_width))
-        } else {
-            "\t".repeat(levels)
-        };
-        let text = match buffer.text.line(line) {
-            Ok(text) => text,
-            Err(error) => {
-                self.show_error(error);
-                return;
-            }
-        };
-        let whitespace = text
-            .bytes()
-            .take_while(|byte| matches!(*byte, b' ' | b'\t'))
-            .count();
-        if text.get(..whitespace) == Some(desired.as_str()) {
-            self.ui.notification = Some(self.message("syntax_indent_unchanged", &[]));
-            self.ui.notification_error = false;
-            return;
-        }
-        let start = match buffer.text.line_to_byte(line) {
-            Ok(start) => start,
-            Err(error) => {
-                self.show_error(error);
-                return;
-            }
-        };
-        let end = ByteOffset(start.get().saturating_add(whitespace));
-        let edits = TextEditSet::new(
-            revision,
-            vec![TextEdit::new(
-                ByteRange::new(start, end).expect("ordered indentation"),
-                desired,
-            )],
-        );
-        let transaction = EditorTransaction::new(self.transaction_id())
-            .with_precondition(Precondition::BufferRevision {
-                buffer: buffer_id,
-                revision,
+            .filter_map(|doc| {
+                (config.enabled && doc.enabled)
+                    .then_some(doc.language)
+                    .flatten()
+                    .map(|language| (doc.buffer, (doc.text.revision(), language)))
             })
-            .with_precondition(Precondition::BufferWritable(buffer_id))
-            .with_precondition(Precondition::ViewDisplays {
-                view: view_id,
-                buffer: buffer_id,
-            })
-            .with_operation(EditorOperation::ApplyEdits {
-                buffer: buffer_id,
-                edits,
-            });
-        if let Err(error) = self.state.apply_transaction(&transaction) {
-            self.show_error(error)
-        } else {
-            self.ui.notification = Some(self.message("syntax_indent_applied", &[]));
-            self.ui.notification_error = false;
+            .collect::<HashMap<_, _>>();
+        let removed = self
+            .documents
+            .keys()
+            .chain(self.due.keys())
+            .filter(|id| !live.contains_key(id))
+            .copied()
+            .collect::<Vec<_>>();
+        for buffer in removed {
+            self.close(buffer);
         }
-    }
-
-    pub(super) fn accepts_syntax_event(
-        &self,
-        buffer: crate::editor::BufferId,
-        revision: u64,
-        generation: u64,
-        language: SyntaxLanguage,
-    ) -> bool {
-        self.syntax_submitted.get(&buffer)
-            == Some(&(BufferRevision(revision), generation, language))
-            && self.state.buffers.get(buffer).is_some_and(|state| {
-                state.text.revision().0 == revision
-                    && state.path.as_deref().and_then(language_for_path) == Some(language)
-            })
-    }
-
-    pub(super) fn process_syntax(&mut self) {
-        if !self.configuration.settings.syntax.enabled {
-            for document in self.syntax_documents.values().copied() {
-                self.syntax.cancel(document);
-            }
-            self.syntax_documents.clear();
-            self.syntax_submitted.clear();
-            self.syntax_accepted.clear();
-            self.syntax_failures.clear();
-            self.syntax_due.clear();
-            self.ui.syntax_spans.clear();
-            self.ui.syntax_folds.clear();
-            return;
-        }
-        let live = self.state.buffers.keys().collect::<Vec<_>>();
-        self.syntax_documents.retain(|buffer, document| {
-            let keep = live.contains(buffer);
-            if !keep {
-                self.syntax.cancel(*document);
-            }
-            keep
+        self.accepted.retain(|buffer, result| {
+            live.get(buffer) == Some(&(BufferRevision(result.revision), result.language))
         });
-        self.syntax_submitted
-            .retain(|buffer, _| live.contains(buffer));
-        self.syntax_accepted.retain(|buffer, result| {
-            live.contains(buffer)
-                && self.state.buffers.get(*buffer).is_some_and(|state| {
-                    state.path.as_deref().and_then(language_for_path) == Some(result.language)
-                        && state.text.revision().0 == result.revision
-                })
-        });
-        self.syntax_failures.retain(|buffer, failure| {
-            live.contains(buffer)
-                && self.state.buffers.get(*buffer).is_some_and(|state| {
-                    state.text.revision() == failure.revision
-                        && state.path.as_deref().and_then(language_for_path)
-                            == Some(failure.language)
-                })
-                && self.syntax_submitted.get(buffer)
+        self.failures.retain(|buffer, failure| {
+            live.get(buffer) == Some(&(failure.revision, failure.language))
+                && self.submitted.get(buffer)
                     == Some(&(failure.revision, failure.generation, failure.language))
         });
-        self.syntax_due.retain(|buffer, _| live.contains(buffer));
-        for buffer in &live {
+        let mut materialized = 0;
+        for doc in documents {
+            let Some(&(revision, language)) = live.get(&doc.buffer) else {
+                continue;
+            };
             if self
-                .state
-                .buffers
-                .get(*buffer)
-                .and_then(|state| state.path.as_deref())
-                .and_then(language_for_path)
-                .is_none()
-            {
-                if let Some(document) = self.syntax_documents.remove(buffer) {
-                    self.syntax.cancel(document);
-                }
-                self.syntax_submitted.remove(buffer);
-                self.syntax_accepted.remove(buffer);
-                self.syntax_failures.remove(buffer);
-                self.syntax_due.remove(buffer);
-            }
-        }
-        let now = Instant::now();
-        let candidates = self
-            .state
-            .buffers
-            .iter()
-            .filter_map(|(id, buffer)| {
-                let path = buffer.path.as_ref()?;
-                let language = language_for_path(path)?;
-                let large = self.effective_large_file(id);
-                Some((id, buffer.text.revision(), language, large))
-            })
-            .collect::<Vec<_>>();
-        for (buffer, revision, language, large) in candidates {
-            if self
-                .syntax_submitted
-                .get(&buffer)
-                .is_some_and(|(submitted, _, previous)| {
-                    *submitted != revision || *previous != language
+                .submitted
+                .get(&doc.buffer)
+                .is_some_and(|(previous, _, previous_language)| {
+                    *previous == revision && *previous_language == language
                 })
             {
-                self.syntax_failures.remove(&buffer);
-                self.syntax_accepted.remove(&buffer);
-            }
-            if large && self.configuration.settings.editor.large_file.disable_syntax {
-                if let Some(document) = self.syntax_documents.remove(&buffer) {
-                    self.syntax.cancel(document);
-                }
-                self.syntax_submitted.remove(&buffer);
-                self.syntax_accepted.remove(&buffer);
-                self.syntax_failures.remove(&buffer);
-                self.syntax_due.remove(&buffer);
                 continue;
             }
-            if self.syntax_submitted.get(&buffer).is_some_and(
-                |(submitted, _, submitted_language)| {
-                    *submitted == revision && *submitted_language == language
-                },
-            ) {
-                continue;
-            }
-            let due = self.syntax_due.entry(buffer).or_insert((
-                revision,
-                now + Duration::from_millis(self.configuration.settings.syntax.debounce_ms),
-            ));
+            let due = self
+                .due
+                .entry(doc.buffer)
+                .or_insert((revision, now + Duration::from_millis(config.debounce_ms)));
             if due.0 != revision {
-                *due = (
-                    revision,
-                    now + Duration::from_millis(self.configuration.settings.syntax.debounce_ms),
-                );
+                *due = (revision, now + Duration::from_millis(config.debounce_ms));
                 continue;
             }
             if now < due.1 {
                 continue;
             }
-            let document = *self.syntax_documents.entry(buffer).or_insert_with(|| {
-                let id = SyntaxDocumentId(self.next_syntax_document);
-                self.next_syntax_document = self.next_syntax_document.saturating_add(1);
+            let document = *self.documents.entry(doc.buffer).or_insert_with(|| {
+                let id = SyntaxDocumentId(self.next_document);
+                self.next_document = self.next_document.saturating_add(1);
                 id
             });
-            let generation = self.next_syntax_generation;
-            self.next_syntax_generation = self.next_syntax_generation.saturating_add(1);
-            let configured = &self.configuration.settings.syntax;
+            let generation = self.next_generation;
+            self.next_generation = self.next_generation.saturating_add(1);
             let policy = SyntaxPolicy {
-                maximum_source_bytes: configured.maximum_source_bytes,
-                maximum_spans: configured.maximum_spans,
-                maximum_folds: configured.maximum_folds,
-                maximum_indent_rows: configured.maximum_indent_rows,
+                maximum_source_bytes: config.maximum_source_bytes,
+                maximum_spans: config.maximum_spans,
+                maximum_folds: config.maximum_folds,
+                maximum_indent_rows: config.maximum_indent_rows,
             };
-            let Some(source) = self
-                .state
-                .buffers
-                .get(buffer)
-                .map(|state| state.text.to_string())
-            else {
-                continue;
-            };
+            materialized += 1;
             if self
-                .syntax
-                .submit(document, generation, revision.0, language, source, policy)
+                .service
+                .submit(
+                    document,
+                    generation,
+                    revision.0,
+                    language,
+                    doc.text.to_string(),
+                    policy,
+                )
                 .is_ok()
             {
-                self.syntax_submitted
-                    .insert(buffer, (revision, generation, language));
-                self.syntax_due.remove(&buffer);
+                self.submitted
+                    .insert(doc.buffer, (revision, generation, language));
+                self.due.remove(&doc.buffer);
             }
         }
-        while let Ok(Some(event)) = self.syntax.try_event() {
-            match event {
-                SyntaxEvent::Parsed(result) => {
-                    if let Some((&buffer, _)) = self
-                        .syntax_documents
-                        .iter()
-                        .find(|(_, document)| **document == result.document)
-                    {
-                        if self.accepts_syntax_event(
-                            buffer,
-                            result.revision,
-                            result.generation,
-                            result.language,
-                        ) {
-                            self.syntax_failures.remove(&buffer);
-                            self.syntax_accepted.insert(buffer, result);
-                        }
-                    }
-                }
-                SyntaxEvent::Failed {
-                    document,
-                    generation,
-                    revision,
-                    language,
-                    diagnostic,
-                } => {
-                    if let Some((&buffer, _)) = self
-                        .syntax_documents
-                        .iter()
-                        .find(|(_, candidate)| **candidate == document)
-                        && self.accepts_syntax_event(buffer, revision, generation, language)
-                    {
-                        self.syntax_accepted.remove(&buffer);
-                        self.syntax_failures.insert(
-                            buffer,
-                            SyntaxFailure {
-                                revision: BufferRevision(revision),
-                                generation,
-                                language,
-                                diagnostic,
-                            },
-                        );
-                    }
-                }
-                SyntaxEvent::Skipped {
-                    document,
-                    generation,
-                    revision,
-                    language,
-                } => {
-                    if let Some((&buffer, _)) = self
-                        .syntax_documents
-                        .iter()
-                        .find(|(_, candidate)| **candidate == document)
-                        && self.accepts_syntax_event(buffer, revision, generation, language)
-                    {
-                        self.syntax_accepted.remove(&buffer);
-                        self.syntax_failures.insert(
-                            buffer,
-                            SyntaxFailure {
-                                revision: BufferRevision(revision),
-                                generation,
-                                language,
-                                diagnostic: self.message("syntax_source_too_large", &[]),
-                            },
-                        );
-                    }
-                }
-            }
+        while let Ok(Some(event)) = self.service.try_event() {
+            self.accept_event(event, &live, too_large);
         }
+        materialized
+    }
 
-        let collapsed = self
-            .ui
-            .syntax_folds
+    fn accept_event(
+        &mut self,
+        event: SyntaxEvent,
+        live: &HashMap<BufferId, (BufferRevision, SyntaxLanguage)>,
+        too_large: &str,
+    ) {
+        let (document, revision, generation, language) = match &event {
+            SyntaxEvent::Parsed(result) => (
+                result.document,
+                result.revision,
+                result.generation,
+                result.language,
+            ),
+            SyntaxEvent::Failed {
+                document,
+                revision,
+                generation,
+                language,
+                ..
+            }
+            | SyntaxEvent::Skipped {
+                document,
+                revision,
+                generation,
+                language,
+            } => (*document, *revision, *generation, *language),
+        };
+        let Some((&buffer, _)) = self
+            .documents
             .iter()
-            .filter(|fold| fold.collapsed)
-            .map(|fold| (fold.view, fold.start_line, fold.end_line))
-            .collect::<HashSet<_>>();
-        let mut syntax_folds = Vec::new();
-        for (view_id, view) in self.state.views.iter() {
-            if let Some(result) = self.syntax_accepted.get(&view.buffer) {
-                for fold in &result.folds {
-                    syntax_folds.push(UiFold {
-                        view: view_id,
-                        start_line: fold.start_row,
-                        end_line: fold.end_row,
-                        collapsed: collapsed.contains(&(view_id, fold.start_row, fold.end_row)),
-                    });
-                }
+            .find(|(_, candidate)| **candidate == document)
+        else {
+            return;
+        };
+        if self.submitted.get(&buffer) != Some(&(BufferRevision(revision), generation, language))
+            || live.get(&buffer) != Some(&(BufferRevision(revision), language))
+        {
+            return;
+        }
+        match event {
+            SyntaxEvent::Parsed(result) => {
+                self.failures.remove(&buffer);
+                self.accepted.insert(buffer, result);
+            }
+            SyntaxEvent::Failed { diagnostic, .. } => {
+                self.accepted.remove(&buffer);
+                self.failures.insert(
+                    buffer,
+                    SyntaxFailure {
+                        revision: BufferRevision(revision),
+                        generation,
+                        language,
+                        diagnostic,
+                    },
+                );
+            }
+            SyntaxEvent::Skipped { .. } => {
+                self.accepted.remove(&buffer);
+                self.failures.insert(
+                    buffer,
+                    SyntaxFailure {
+                        revision: BufferRevision(revision),
+                        generation,
+                        language,
+                        diagnostic: too_large.to_owned(),
+                    },
+                );
             }
         }
-        self.ui.syntax_folds = syntax_folds;
-        self.ui.syntax_spans = self
-            .syntax_accepted
+    }
+
+    pub(super) fn result(&self, buffer: BufferId) -> Option<&SyntaxResult> {
+        self.accepted.get(&buffer)
+    }
+    pub(super) fn results(&self) -> impl Iterator<Item = (&BufferId, &SyntaxResult)> {
+        self.accepted.iter()
+    }
+    pub(super) fn failure(&self, buffer: BufferId) -> Option<&str> {
+        self.failures
+            .get(&buffer)
+            .map(|failure| failure.diagnostic.as_str())
+    }
+
+    pub(super) fn indentation(
+        &self,
+        buffer: BufferId,
+        revision: BufferRevision,
+        language: SyntaxLanguage,
+        line: usize,
+    ) -> Result<usize, IndentError> {
+        let result = self
+            .result(buffer)
+            .filter(|result| result.revision == revision.0 && result.language == language)
+            .ok_or(IndentError::Pending)?;
+        if result.capabilities.indents == SyntaxSupport::Unsupported {
+            return Err(IndentError::Unsupported);
+        }
+        if result.indents_truncated {
+            return Err(IndentError::Truncated);
+        }
+        Ok(result
+            .indents
             .iter()
-            .flat_map(|(buffer, result)| {
-                result.spans.iter().filter_map(|span| {
-                    Some(UiSyntaxSpan {
-                        buffer: *buffer,
-                        revision: BufferRevision(result.revision),
-                        range: ByteRange::new(ByteOffset(span.start), ByteOffset(span.end)).ok()?,
-                        role: span.role,
-                    })
-                })
-            })
-            .collect();
+            .filter(|range| line > range.start_row && line < range.end_row)
+            .count())
     }
 }
 
-pub(in crate::editor::session) fn semantic_role(name: &str) -> crate::language::syntax::SyntaxRole {
+pub(super) fn semantic_role(name: &str) -> crate::language::syntax::SyntaxRole {
+    use crate::language::syntax::SyntaxRole;
     match name {
-        "comment" => crate::language::syntax::SyntaxRole::Comment,
-        "string" => crate::language::syntax::SyntaxRole::String,
-        "number" => crate::language::syntax::SyntaxRole::Number,
-        "keyword" | "modifier" | "operator" => crate::language::syntax::SyntaxRole::Keyword,
-        "type" | "class" | "enum" | "interface" | "struct" => {
-            crate::language::syntax::SyntaxRole::Type
+        "comment" => SyntaxRole::Comment,
+        "string" => SyntaxRole::String,
+        "number" => SyntaxRole::Number,
+        "keyword" | "modifier" | "operator" => SyntaxRole::Keyword,
+        "type" | "class" | "enum" | "interface" | "struct" => SyntaxRole::Type,
+        _ => SyntaxRole::Variable,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use slotmap::SlotMap;
+
+    #[test]
+    fn unchanged_ticks_materialize_no_additional_source_and_disable_cancels_identity() {
+        let mut ids = SlotMap::<BufferId, ()>::with_key();
+        let buffer = ids.insert(());
+        let text = TextBuffer::from_text("fn main() {}\n");
+        let documents = [SyntaxDocument {
+            buffer,
+            text: &text,
+            language: Some(SyntaxLanguage::Rust),
+            enabled: true,
+        }];
+        let config = SyntaxConfig {
+            debounce_ms: 0,
+            ..Default::default()
+        };
+        let mut session = SyntaxSession::new(2);
+        let now = Instant::now();
+        assert_eq!(session.tick(&documents, &config, now, "too large"), 1);
+        for _ in 0..100 {
+            assert_eq!(session.tick(&documents, &config, now, "too large"), 0);
         }
-        _ => crate::language::syntax::SyntaxRole::Variable,
+        session.tick(
+            &documents,
+            &SyntaxConfig {
+                enabled: false,
+                ..config
+            },
+            now,
+            "too large",
+        );
+        assert!(session.documents.is_empty());
+        assert!(session.submitted.is_empty());
+        assert_eq!(session.results().count(), 0);
+    }
+
+    #[test]
+    fn stale_generation_revision_language_and_closed_document_cannot_publish_failure() {
+        let mut ids = SlotMap::<BufferId, ()>::with_key();
+        let buffer = ids.insert(());
+        let document = SyntaxDocumentId(42);
+        let mut session = SyntaxSession::new(2);
+        session.documents.insert(buffer, document);
+        session
+            .submitted
+            .insert(buffer, (BufferRevision(3), 7, SyntaxLanguage::Rust));
+        let live = HashMap::from([(buffer, (BufferRevision(3), SyntaxLanguage::Rust))]);
+        let event = |revision, generation, language| SyntaxEvent::Failed {
+            document,
+            revision,
+            generation,
+            language,
+            diagnostic: "failure".into(),
+        };
+        session.accept_event(event(3, 6, SyntaxLanguage::Rust), &live, "large");
+        session.accept_event(event(2, 7, SyntaxLanguage::Rust), &live, "large");
+        session.accept_event(event(3, 7, SyntaxLanguage::Go), &live, "large");
+        assert_eq!(session.failure(buffer), None);
+        session.accept_event(event(3, 7, SyntaxLanguage::Rust), &live, "large");
+        assert_eq!(session.failure(buffer), Some("failure"));
+        session.close(buffer);
+        session.accept_event(event(3, 7, SyntaxLanguage::Rust), &live, "large");
+        assert_eq!(session.failure(buffer), None);
     }
 }

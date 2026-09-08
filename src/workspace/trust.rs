@@ -332,13 +332,19 @@ impl WorkspaceTrustService {
         }
     }
 
-    fn next_generation(&mut self) -> u64 {
-        self.next_generation = self.next_generation.saturating_add(1);
-        self.next_generation
+    fn next_generation(&mut self) -> Result<u64, TrustStateError> {
+        self.next_generation =
+            self.next_generation
+                .checked_add(1)
+                .ok_or_else(|| TrustStateError::Invalid {
+                    path: PathBuf::new(),
+                    reason: "trust request generation exhausted".into(),
+                })?;
+        Ok(self.next_generation)
     }
 
     pub fn load(&mut self, path: PathBuf) -> Result<u64, TrustStateError> {
-        let generation = self.next_generation();
+        let generation = self.next_generation()?;
         self.sender
             .try_send(TrustRequest::Load { generation, path })
             .map_err(map_trust_send_error)?;
@@ -346,7 +352,7 @@ impl WorkspaceTrustService {
     }
 
     pub fn inspect_root(&mut self, path: PathBuf) -> Result<u64, TrustStateError> {
-        let generation = self.next_generation();
+        let generation = self.next_generation()?;
         self.sender
             .try_send(TrustRequest::InspectRoot { generation, path })
             .map_err(map_trust_send_error)?;
@@ -359,7 +365,7 @@ impl WorkspaceTrustService {
         identities: Vec<RootIdentity>,
         seen: Vec<RootIdentity>,
     ) -> Result<u64, TrustStateError> {
-        let generation = self.next_generation();
+        let generation = self.next_generation()?;
         self.sender
             .try_send(TrustRequest::Persist {
                 generation,
@@ -387,5 +393,23 @@ pub(super) fn map_trust_send_error(error: TrySendError<TrustRequest>) -> TrustSt
     match error {
         TrySendError::Full(_) => TrustStateError::QueueFull,
         TrySendError::Disconnected(_) => TrustStateError::WorkerStopped,
+    }
+}
+
+#[cfg(test)]
+mod generation_tests {
+    use super::*;
+    #[test]
+    fn exhausted_generation_never_reuses_an_admitted_identity() {
+        let mut service = WorkspaceTrustService::start(1);
+        service.next_generation = u64::MAX;
+        assert!(matches!(
+            service.inspect_root(PathBuf::new()),
+            Err(TrustStateError::Invalid { .. })
+        ));
+        assert!(matches!(
+            service.load(PathBuf::new()),
+            Err(TrustStateError::Invalid { .. })
+        ));
     }
 }

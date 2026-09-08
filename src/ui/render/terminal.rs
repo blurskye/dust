@@ -15,7 +15,7 @@ pub(super) fn active_compositor<'a>(
     })
 }
 
-pub(super) fn terminal_geometry_from_rect(rect: WindowRect) -> Option<TerminalPanelGeometry> {
+pub(crate) fn terminal_geometry_from_rect(rect: WindowRect) -> Option<TerminalPanelGeometry> {
     (rect.width > 0 && rect.height >= 3).then_some(TerminalPanelGeometry {
         x: rect.x,
         width: rect.width,
@@ -34,7 +34,15 @@ pub(super) fn terminal_tab_label(tab: &TerminalTabState, config: &Config) -> Str
         .title_format
         .replace("{id}", &tab.id.to_string())
         .replace("{profile}", &tab.profile);
-    if !tab.running {
+    if let Some(status) = match tab.phase {
+        TerminalPhase::Preflight => Some(" [preflight]"),
+        TerminalPhase::Starting => Some(" [starting]"),
+        TerminalPhase::Failed => Some(" [failed]"),
+        _ => None,
+    } {
+        title.push_str(status);
+    }
+    if tab.phase == TerminalPhase::Exited {
         title.push_str(
             &tab.exit_code
                 .map_or_else(|| " [signal]".into(), |code| format!(" [exit {code}]")),

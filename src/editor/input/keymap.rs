@@ -97,22 +97,29 @@ pub enum MappingResolution {
     Replay(Vec<KeyEvent>),
 }
 
+/// Compiled bindings contain no live key-sequence state.
 #[derive(Clone, Debug, Default)]
-pub struct KeymapResolver {
+pub(crate) struct KeymapBindings {
     layers: BTreeMap<KeymapLayer, Keymap>,
+}
+
+impl KeymapBindings {
+    pub(crate) fn layer_mut(&mut self, layer: KeymapLayer) -> &mut Keymap {
+        self.layers.entry(layer).or_default()
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct KeymapSequence {
     pending: Vec<KeyEvent>,
     pending_exact: Option<CommandInvocation>,
 }
 
-impl KeymapResolver {
-    pub fn layer_mut(&mut self, layer: KeymapLayer) -> &mut Keymap {
-        self.layers.entry(layer).or_default()
-    }
-
-    pub fn feed(&mut self, key: KeyEvent) -> MappingResolution {
+impl KeymapSequence {
+    pub(crate) fn feed(&mut self, bindings: &KeymapBindings, key: KeyEvent) -> MappingResolution {
         let fallback = self.pending_exact.take();
         self.pending.push(key);
-        for (_, keymap) in self.layers.iter().rev() {
+        for (_, keymap) in bindings.layers.iter().rev() {
             match keymap.lookup(&self.pending) {
                 Lookup::Disabled => {
                     self.pending.clear();
@@ -157,6 +164,32 @@ impl KeymapResolver {
     pub fn cancel(&mut self) {
         self.pending.clear();
         self.pending_exact = None;
+    }
+}
+
+/// Standalone compatibility API; live sessions keep bindings and sequence apart.
+#[derive(Clone, Debug, Default)]
+pub struct KeymapResolver {
+    bindings: KeymapBindings,
+    sequence: KeymapSequence,
+}
+
+impl KeymapResolver {
+    pub fn layer_mut(&mut self, layer: KeymapLayer) -> &mut Keymap {
+        self.bindings.layer_mut(layer)
+    }
+    pub fn feed(&mut self, key: KeyEvent) -> MappingResolution {
+        self.sequence.feed(&self.bindings, key)
+    }
+    #[must_use]
+    pub fn pending_sequence(&self) -> &[KeyEvent] {
+        self.sequence.pending_sequence()
+    }
+    pub fn flush_timeout(&mut self) -> MappingResolution {
+        self.sequence.flush_timeout()
+    }
+    pub fn cancel(&mut self) {
+        self.sequence.cancel();
     }
 }
 

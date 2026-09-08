@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
 use crate::{
-    editor::text::{ByteOffset, TextBuffer},
-    editor::{BufferId, EditorState},
+    editor::text::TextBuffer,
+    editor::{BufferId, EditorDraft, EditorState},
     extensions::{PluginLoadId, PluginVirtualDocumentSnapshot},
 };
 use std::collections::BTreeMap;
@@ -32,7 +32,7 @@ pub(in crate::editor::session) struct VirtualDocumentEditorBridge {
 impl VirtualDocumentEditorBridge {
     pub(in crate::editor::session) fn publish(
         &mut self,
-        state: &mut EditorState,
+        state: &mut EditorDraft,
         snapshot: &PluginVirtualDocumentSnapshot,
     ) -> Result<BufferId, VirtualDocumentEditorError> {
         let key = (snapshot.plugin.clone(), snapshot.load, snapshot.document);
@@ -45,12 +45,6 @@ impl VirtualDocumentEditorBridge {
             {
                 return Err(VirtualDocumentEditorError::StaleRevision);
             }
-            let views = state
-                .views
-                .iter()
-                .filter(|(_, v)| v.buffer == entry.buffer)
-                .map(|(id, v)| (id, v.cursor, v.selection, v.scroll_line, v.scroll_column))
-                .collect::<Vec<_>>();
             if !state.replace_virtual_read_only(
                 entry.buffer,
                 entry.revision,
@@ -58,27 +52,6 @@ impl VirtualDocumentEditorBridge {
                 TextBuffer::from_text(&snapshot.text),
             ) {
                 return Err(VirtualDocumentEditorError::StaleRevision);
-            }
-            let len = state.buffers[entry.buffer].text.len_bytes();
-            for (id, cursor, selection, line, column) in views {
-                if let Some(view) = state.views.get_mut(id) {
-                    view.cursor = ByteOffset(cursor.get().min(len));
-                    while !state.buffers[entry.buffer]
-                        .text
-                        .is_char_boundary(view.cursor)
-                    {
-                        view.cursor = ByteOffset(view.cursor.get().saturating_sub(1));
-                    }
-                    view.selection =
-                        selection.filter(|s| s.anchor.get() <= len && s.head.get() <= len);
-                    view.scroll_line = line.min(
-                        state.buffers[entry.buffer]
-                            .text
-                            .len_lines()
-                            .saturating_sub(1),
-                    );
-                    view.scroll_column = column;
-                }
             }
             entry.revision = snapshot.revision;
             return Ok(entry.buffer);
@@ -202,6 +175,7 @@ impl VirtualDocumentEditorBridge {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::editor::text::ByteOffset;
     use std::path::PathBuf;
     fn snap(revision: u64, text: &str) -> PluginVirtualDocumentSnapshot {
         PluginVirtualDocumentSnapshot {
@@ -217,25 +191,33 @@ mod tests {
             closed: false,
         }
     }
+    fn publish(
+        bridge: &mut VirtualDocumentEditorBridge,
+        state: &mut EditorState,
+        snapshot: &PluginVirtualDocumentSnapshot,
+    ) -> Result<BufferId, VirtualDocumentEditorError> {
+        let mut draft = state.draft();
+        let buffer = bridge.publish(&mut draft, snapshot)?;
+        *state = draft.accept(&state.version()).unwrap();
+        Ok(buffer)
+    }
     #[test]
     fn publish_refresh_is_identity_preserving_stale_atomic_and_generation_owned() {
         let mut state = EditorState::new(PathBuf::from("/tmp"));
         let mut bridge = VirtualDocumentEditorBridge::default();
-        let b = bridge.publish(&mut state, &snap(1, "héllo")).unwrap();
+        let b = publish(&mut bridge, &mut state, &snap(1, "héllo")).unwrap();
         let view = state.active_view.unwrap();
         state.views[view].cursor = ByteOffset(3);
         let buffers = state.buffers.len();
         assert_eq!(
-            bridge
-                .publish(&mut state, &snap(2, "héllo refreshed"))
-                .unwrap(),
+            publish(&mut bridge, &mut state, &snap(2, "héllo refreshed")).unwrap(),
             b
         );
         assert_eq!(state.active_view, Some(view));
         assert_eq!(state.views[view].cursor, ByteOffset(3));
         let before = state.buffers[b].text.to_string();
         assert_eq!(
-            bridge.publish(&mut state, &snap(4, "stale")),
+            publish(&mut bridge, &mut state, &snap(4, "stale")),
             Err(VirtualDocumentEditorError::StaleRevision)
         );
         assert_eq!(state.buffers[b].text.to_string(), before);

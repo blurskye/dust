@@ -280,8 +280,16 @@ pub(super) fn handle_response(
     server: &str,
     request: PendingRequest,
     message: Value,
-    events: &SyncSender<LspEvent>,
+    events: &EventSender,
 ) {
+    let events = &EventSender {
+        context: EditContext {
+            encoding: request.encoding,
+            sources: request.sources.clone(),
+            ..events.context.clone()
+        },
+        ..events.clone()
+    };
     if let Some(error) = message.get("error") {
         send_event(
             events,
@@ -979,13 +987,13 @@ pub(super) fn lsp_progress_event(server: &str, message: &Value) -> Option<LspEve
     })
 }
 
-pub(super) fn send_event(events: &SyncSender<LspEvent>, event: LspEvent) {
-    let _ = events.try_send(event);
+pub(super) fn send_event(events: &EventSender, event: LspEvent) {
+    events.send(event);
 }
 
 pub(super) fn fail_child(
     child: &mut std::process::Child,
-    events: &SyncSender<LspEvent>,
+    events: &EventSender,
     server: &str,
     message: &str,
 ) {

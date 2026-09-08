@@ -319,6 +319,7 @@ pub enum PersistenceEvent {
     },
 }
 pub struct PersistenceService {
+    last_id: Option<u64>,
     ids: Arc<dyn crate::clock::IdSource>,
     sender: SyncSender<Request>,
     receiver: Receiver<PersistenceEvent>,
@@ -328,11 +329,44 @@ impl PersistenceService {
         Self::start_with_ids(capacity, Arc::new(crate::clock::AtomicIds::new(1)))
     }
     pub fn start_with_ids(capacity: usize, ids: Arc<dyn crate::clock::IdSource>) -> Self {
+        Self::start_gated(capacity, ids, None)
+    }
+    #[cfg(test)]
+    pub(crate) fn gated_for_test(capacity: usize) -> (Self, mpsc::Sender<()>) {
+        let (send, receive) = mpsc::channel();
+        (
+            Self::start_gated(
+                capacity,
+                Arc::new(crate::clock::AtomicIds::new(1)),
+                Some(receive),
+            ),
+            send,
+        )
+    }
+    #[cfg(test)]
+    pub(crate) fn stopped_for_test() -> Self {
+        let (sender, _) = mpsc::sync_channel(1);
+        let (_, receiver) = mpsc::sync_channel(1);
+        Self {
+            ids: Arc::new(crate::clock::AtomicIds::new(1)),
+            last_id: None,
+            sender,
+            receiver,
+        }
+    }
+    fn start_gated(
+        capacity: usize,
+        ids: Arc<dyn crate::clock::IdSource>,
+        gate: Option<Receiver<()>>,
+    ) -> Self {
         let (tx, rx) = mpsc::sync_channel::<Request>(capacity.clamp(1, 64));
         let (etx, erx) = mpsc::sync_channel(capacity.clamp(1, 64));
         thread::Builder::new()
             .name("dust-persistence".into())
             .spawn(move || {
+                if let Some(gate) = gate {
+                    let _ = gate.recv();
+                }
                 while let Ok(request) = rx.recv() {
                     let event = match request {
                         Request::Read {
@@ -356,25 +390,35 @@ impl PersistenceService {
                             Err(error) => PersistenceEvent::Failed { generation, error },
                         },
                     };
-                    let _ = etx.try_send(event);
+                    if etx.send(event).is_err() {
+                        break;
+                    }
                 }
             })
             .expect("persistence worker");
         Self {
+            last_id: None,
             ids,
             sender: tx,
             receiver: erx,
         }
     }
-    fn id(&self) -> PersistenceId {
-        PersistenceId(self.ids.next())
+    fn id(&mut self) -> Result<PersistenceId, PersistenceError> {
+        let id = self.ids.next();
+        if self.last_id.is_some_and(|last| id <= last) {
+            return Err(PersistenceError::Io(io::Error::other(
+                "persistence request identity exhausted or reused",
+            )));
+        }
+        self.last_id = Some(id);
+        Ok(PersistenceId(id))
     }
     pub fn read(
         &mut self,
         path: PathBuf,
         policy: PersistencePolicy,
     ) -> Result<PersistenceId, PersistenceError> {
-        let generation = self.id();
+        let generation = self.id()?;
         self.sender
             .try_send(Request::Read {
                 generation,
@@ -391,7 +435,7 @@ impl PersistenceService {
         policy: PersistencePolicy,
     ) -> Result<PersistenceId, PersistenceError> {
         state.validate(&policy)?;
-        let generation = self.id();
+        let generation = self.id()?;
         self.sender
             .try_send(Request::Write {
                 generation,

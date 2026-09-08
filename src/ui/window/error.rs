@@ -19,7 +19,7 @@ pub(super) fn validate_owner(owner: &str, generation: u64) -> Result<(), WindowE
         .ok_or(WindowError::InvalidOwner)
 }
 
-pub(super) fn validate_title(title: &str) -> Result<(), WindowError> {
+pub(crate) fn validate_title(title: &str) -> Result<(), WindowError> {
     (title.len() <= MAXIMUM_TITLE_BYTES && !title.chars().any(char::is_control))
         .then_some(())
         .ok_or(WindowError::InvalidTitle)

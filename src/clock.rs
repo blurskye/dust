@@ -18,6 +18,34 @@ impl Clock for SystemClock {
         Instant::now()
     }
 }
+/// Explicitly advanced clock for deterministic session tests; reads never advance time.
+pub struct ManualClock {
+    system: SystemTime,
+    monotonic: Instant,
+    elapsed: RwLock<Duration>,
+}
+impl ManualClock {
+    pub fn new(system: SystemTime, monotonic: Instant) -> Self {
+        Self {
+            system,
+            monotonic,
+            elapsed: RwLock::new(Duration::ZERO),
+        }
+    }
+    pub fn advance(&self, elapsed: Duration) {
+        let mut current = self.elapsed.write().expect("manual clock lock");
+        *current = current.saturating_add(elapsed);
+    }
+}
+impl Clock for ManualClock {
+    fn system_time(&self) -> SystemTime {
+        self.system + *self.elapsed.read().expect("manual clock lock")
+    }
+    fn monotonic(&self) -> Instant {
+        self.monotonic + *self.elapsed.read().expect("manual clock lock")
+    }
+}
+
 pub struct FixedClock {
     system: SystemTime,
     monotonic: Instant,

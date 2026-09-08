@@ -1142,6 +1142,7 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "task.restart" = "Restart task"
 "explorer.open" = "Open file explorer"
 "explorer.close" = "Close file explorer"
+"explorer.panel.toggle" = "Toggle file explorer"
 "explorer.next" = "Select next explorer row"
 "explorer.previous" = "Select previous explorer row"
 "explorer.page_up" = "Page explorer selection up"

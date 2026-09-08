@@ -26,7 +26,8 @@ pub struct DirectoryListing {
 #[derive(Default)]
 pub struct DirectoryService {
     generation: u64,
-    receiver: Option<Receiver<Result<DirectoryListing, VfsError>>>,
+    receiver:
+        Option<Receiver<Result<(DirectoryListing, Vec<crate::workspace::RootIdentity>), VfsError>>>,
 }
 
 impl DirectoryService {
@@ -42,22 +43,70 @@ impl DirectoryService {
         if !(1..=100_000).contains(&maximum_entries) {
             return Err(VfsError::DirectoryLimit);
         }
-        self.generation = self.generation.saturating_add(1);
+        self.generation = self.generation.checked_add(1).ok_or_else(|| VfsError::Io {
+            operation: "allocate directory request identity",
+            path: directory.clone(),
+            source: std::io::Error::other("directory request identity exhausted"),
+        })?;
         let generation = self.generation;
         let (sender, receiver) = mpsc::sync_channel(1);
         let worker_directory = directory.clone();
         thread::Builder::new()
             .name(format!("dust-directory-{generation}"))
             .spawn(move || {
-                let result = list_scoped_directory(
-                    generation,
-                    root_revision,
-                    &worker_directory,
-                    &canonical_roots,
-                    include_hidden,
-                    include_ignored,
-                    maximum_entries,
-                );
+                let result = (|| {
+                    let canonical = canonical_path(&worker_directory)?;
+                    let allowed = canonical_roots
+                        .iter()
+                        .map(|path| crate::workspace::RootIdentity {
+                            canonical_path: path.clone(),
+                            filesystem_identity: None,
+                        })
+                        .collect::<Vec<_>>();
+                    let relevant = super::vfs::participating_roots(
+                        &[&worker_directory],
+                        &[&canonical],
+                        &allowed,
+                    )?;
+                    let capture = || {
+                        relevant
+                            .iter()
+                            .map(|root| &root.canonical_path)
+                            .map(|path| {
+                                let observed = crate::workspace::RootIdentity::capture(path)
+                                    .map_err(|error| VfsError::Io {
+                                        operation: "inspect directory scope",
+                                        path: path.clone(),
+                                        source: std::io::Error::other(error.to_string()),
+                                    })?;
+                                if &observed.canonical_path != path {
+                                    return Err(VfsError::OutsideScope(path.clone()));
+                                }
+                                Ok(observed)
+                            })
+                            .collect::<Result<Vec<_>, _>>()
+                    };
+                    let roots = capture()?;
+                    let listing = list_scoped_directory(
+                        generation,
+                        root_revision,
+                        &worker_directory,
+                        &canonical_roots,
+                        include_hidden,
+                        include_ignored,
+                        maximum_entries,
+                    )?;
+                    if capture()? != roots {
+                        return Err(VfsError::Io {
+                            operation: "check directory scope",
+                            path: worker_directory.clone(),
+                            source: std::io::Error::other(
+                                "workspace filesystem identity changed during listing",
+                            ),
+                        });
+                    }
+                    Ok((listing, roots))
+                })();
                 let _ = sender.send(result);
             })
             .map_err(|source| VfsError::Io {
@@ -69,10 +118,30 @@ impl DirectoryService {
         Ok(generation)
     }
 
+    pub(crate) fn poll_result(
+        &mut self,
+    ) -> Option<Result<(DirectoryListing, Vec<crate::workspace::RootIdentity>), VfsError>> {
+        match self.receiver.as_ref()?.try_recv() {
+            Ok(result) => {
+                self.receiver = None;
+                Some(result)
+            }
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.receiver = None;
+                Some(Err(VfsError::Io {
+                    operation: "receive directory result",
+                    path: PathBuf::new(),
+                    source: std::io::Error::other("directory worker stopped"),
+                }))
+            }
+        }
+    }
     pub fn try_result(&self) -> Option<Result<DirectoryListing, VfsError>> {
         self.receiver
             .as_ref()
             .and_then(|receiver| receiver.try_recv().ok())
+            .map(|result| result.map(|(listing, _)| listing))
     }
 }
 

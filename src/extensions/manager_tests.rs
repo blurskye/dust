@@ -1,6 +1,8 @@
 use super::*;
-fn manager(sender: SyncSender<Request>, receiver: Receiver<WorkerEvent>) -> PluginManager {
+fn manager(sender: SyncSender<QueuedRequest>, receiver: Receiver<WorkerEvent>) -> PluginManager {
     PluginManager {
+        owner: std::sync::Arc::new(()),
+        queued: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         sender,
         receiver,
         statuses: BTreeMap::new(),
@@ -721,13 +723,10 @@ fn active_load_ceiling_bounds_disable_ownership() {
 #[test]
 fn queue_full_cancellation_stays_pending_and_suppresses_events() {
     let (tx, rx) = mpsc::sync_channel(1);
-    tx.try_send(Request::Disable {
-        load: PluginLoadId(9),
-        plugin: "occupied".into(),
-    })
-    .unwrap();
     let (etx, erx) = mpsc::sync_channel(2);
     let mut manager = manager(tx, erx);
+    manager.loads.insert("occupied".into(), PluginLoadId(9));
+    manager.unload("occupied").unwrap();
     manager.loads.insert("demo".into(), PluginLoadId(1));
     manager
         .statuses
@@ -752,11 +751,11 @@ fn queue_full_cancellation_stays_pending_and_suppresses_events() {
     .unwrap();
     assert!(manager.poll().unwrap().is_empty());
     assert_eq!(manager.pending_disables.len(), 1);
-    let _ = rx.recv().unwrap();
+    let _ = rx.recv().unwrap().into_request();
     assert!(manager.poll().unwrap().is_empty());
     assert!(manager.pending_disables.is_empty());
     assert!(
-        matches!(rx.recv().unwrap(),Request::Disable{load:PluginLoadId(1),plugin}if plugin=="demo")
+        matches!(rx.recv().unwrap().into_request(),Request::Disable{load:PluginLoadId(1),plugin}if plugin=="demo")
     );
 }
 #[test]
@@ -788,11 +787,114 @@ fn disable_is_ordered_before_same_id_replacement_and_duplicates_are_rejected() {
         .unwrap();
     assert_ne!(replacement, PluginLoadId(1));
     assert!(matches!(
-        rx.recv().unwrap(),
+        rx.recv().unwrap().into_request(),
         Request::Disable {
             load: PluginLoadId(1),
             ..
         }
     ));
-    assert!(matches!(rx.recv().unwrap(),Request::LoadFromStore{load,..}if load==replacement));
+    assert!(
+        matches!(rx.recv().unwrap().into_request(),Request::LoadFromStore{load,..}if load==replacement)
+    );
+}
+
+// Bounded command endpoint, not a Wasm guest. It exercises production reservation,
+// request provenance and owned-event polling without constructing source replies.
+pub(crate) struct ExecutionFixture {
+    requests: Receiver<QueuedRequest>,
+    events: SyncSender<WorkerEvent>,
+}
+pub(crate) struct CapturedExecution {
+    load: PluginLoadId,
+    origin: Option<PluginInvocationOrigin>,
+    request: PluginExecutionRequest,
+}
+impl CapturedExecution {
+    pub(crate) fn snapshot(&self) -> Option<&PluginSnapshot> {
+        self.request.snapshot.as_ref()
+    }
+    pub(crate) fn same(&self, other: &Self) -> bool {
+        self.origin
+            .as_ref()
+            .unwrap()
+            .same(other.origin.as_ref().unwrap())
+    }
+}
+impl ExecutionFixture {
+    pub(crate) fn new(capacity: usize) -> (PluginManager, Self) {
+        let (tx, requests) = mpsc::sync_channel(capacity);
+        let (events, rx) = mpsc::sync_channel(capacity);
+        let mut manager = manager(tx, rx);
+        manager.maximum_loads = capacity;
+        manager.loads.insert("demo".into(), PluginLoadId(1));
+        manager
+            .statuses
+            .insert("demo".into(), PluginStatus::Active(vec!["run".into()]));
+        manager.next_load = 2;
+        (manager, Self { requests, events })
+    }
+    pub(crate) fn take(&self) -> CapturedExecution {
+        match self
+            .requests
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .into_request()
+        {
+            Request::Execute {
+                load,
+                origin,
+                invocation,
+            } => CapturedExecution {
+                load,
+                origin,
+                request: invocation,
+            },
+            other => panic!("expected invocation, got {other:?}"),
+        }
+    }
+    pub(crate) fn reply(&self, captured: &CapturedExecution, proposals: Vec<PluginEditProposal>) {
+        self.events
+            .try_send(WorkerEvent::Executed {
+                load: captured.load,
+                origin: captured.origin.clone(),
+                execution: PluginExecution {
+                    plugin: captured.request.plugin.clone(),
+                    command: captured.request.command.clone(),
+                    generation: captured.request.generation,
+                    result: String::new(),
+                    messages: Vec::new(),
+                    proposals,
+                    ui_requests: Vec::new(),
+                    host_event_acknowledgements: Vec::new(),
+                    storage_requests: Vec::new(),
+                    provider_chunks: Vec::new(),
+                    virtual_document_proposals: Vec::new(),
+                },
+            })
+            .unwrap();
+    }
+    pub(crate) fn fail(&self, captured: &CapturedExecution) {
+        self.events
+            .try_send(WorkerEvent::Failed {
+                load: captured.load,
+                plugin: captured.request.plugin.clone(),
+                error: PluginError::NotActive,
+            })
+            .unwrap();
+    }
+}
+pub(crate) fn empty_execution_request() -> PluginExecutionRequest {
+    PluginExecutionRequest {
+        plugin: "demo".into(),
+        command: "run".into(),
+        generation: 7,
+        arguments: Vec::new(),
+        snapshot: None,
+        config: BTreeMap::new(),
+        ui_events: Vec::new(),
+        host_events: Vec::new(),
+        storage_results: Vec::new(),
+        provider_requests: Vec::new(),
+        virtual_document_requests: Vec::new(),
+    }
 }

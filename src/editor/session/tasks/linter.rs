@@ -1,0 +1,528 @@
+//! Linter interpretation and bounded source-read obligations belong to their original job.
+use super::{AdapterContext, RunKey, RunningTask, TaskDiagnosticRun, TaskSession};
+use crate::editor::session::{
+    diagnostics::{DiagnosticBatch, DiagnosticSession, DiagnosticValidity},
+    documents::{TaskCancellation, TaskReadKey, TaskReadReply, TaskReadStopped, TaskSubmission},
+    workspace::WorkspaceSession,
+};
+use crate::{
+    editor::{
+        EditorState,
+        text::{ByteOffset, ByteRange, TextBuffer},
+    },
+    files::{RequestId, VfsResult},
+    workspace::{Diagnostic, DiagnosticProducer, DiagnosticSeverity},
+};
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::{Component, Path, PathBuf},
+};
+
+struct Raw {
+    line: usize,
+    column: usize,
+    severity: DiagnosticSeverity,
+    message: String,
+}
+struct Read {
+    key: TaskReadKey,
+    path: PathBuf,
+    raw: Vec<Raw>,
+}
+struct Build {
+    name: String,
+    key: RunKey,
+    source: TaskDiagnosticRun,
+    unread: BTreeMap<PathBuf, Vec<Raw>>,
+    pending: HashMap<RequestId, Read>,
+    grouped: BTreeMap<PathBuf, Vec<Diagnostic>>,
+    maximum: u64,
+    failed: Option<String>,
+}
+impl Build {
+    fn fail(&mut self, reason: impl Into<String>) {
+        if self.failed.is_none() {
+            self.failed = Some(reason.into());
+        }
+        self.unread.clear();
+    }
+}
+#[derive(Default)]
+pub(super) struct Linters {
+    next: u64,
+    builds: BTreeMap<u64, Build>,
+}
+impl Linters {
+    pub(super) fn stop_run(&mut self, key: &RunKey) -> Option<DiagnosticProducer> {
+        let mut producer = None;
+        for build in self
+            .builds
+            .values_mut()
+            .filter(|build| std::sync::Arc::ptr_eq(&build.key.epoch, &key.epoch))
+        {
+            producer = Some(build.source.producer().clone());
+            build.fail("linter stopped; admitted reads may still complete");
+        }
+        producer
+    }
+    pub(in crate::editor::session) fn retire(&mut self, reason: &str) {
+        for build in self.builds.values_mut() {
+            build.fail(reason);
+        }
+    }
+}
+/// Live source borrow spans request materialization, real submission and registration.
+pub(in crate::editor::session) struct LinterReadLoan<'a> {
+    build: &'a mut Build,
+    editor: &'a EditorState,
+    _workspace: &'a WorkspaceSession,
+    _configuration: &'a u64,
+    _diagnostics: &'a DiagnosticSession,
+    roots: &'a [crate::workspace::WorkspaceRoot],
+}
+impl LinterReadLoan<'_> {
+    pub(in crate::editor::session) fn request(
+        &self,
+        worker: &std::sync::Arc<()>,
+    ) -> Result<(PathBuf, Vec<crate::workspace::RootIdentity>, u64), String> {
+        if self
+            .build
+            .pending
+            .values()
+            .any(|read| !read.key.from_worker(worker))
+        {
+            return Err("linter read worker changed with outstanding reads".into());
+        }
+        let path = self
+            .build
+            .unread
+            .first_key_value()
+            .ok_or("linter read retired")?
+            .0;
+        self.build.source.checked_document(path, self.editor)?;
+        Ok((
+            path.clone(),
+            self.roots
+                .iter()
+                .map(|root| root.identity.clone())
+                .collect(),
+            self.build.maximum,
+        ))
+    }
+    pub(in crate::editor::session) fn finish(
+        self,
+        submission: TaskSubmission,
+    ) -> Result<bool, String> {
+        match submission.into_result() {
+            Ok(None) => Ok(false),
+            Ok(Some(key)) => {
+                let (path, raw) = self
+                    .build
+                    .unread
+                    .pop_first()
+                    .expect("source loan retains its pending read");
+                self.build.pending.insert(key.id(), Read { key, path, raw });
+                Ok(true)
+            }
+            Err(error) => {
+                self.build.fail(error.clone());
+                Err(error)
+            }
+        }
+    }
+}
+pub(in crate::editor::session) enum LinterUpdate {
+    Publish {
+        producer: DiagnosticProducer,
+        batches: Vec<DiagnosticBatch>,
+    },
+    Failed(String),
+}
+impl TaskSession {
+    pub(in crate::editor::session) fn begin_linter(
+        &mut self,
+        task: RunningTask,
+        editor: &EditorState,
+        workspace: &WorkspaceSession,
+        configuration: u64,
+        diagnostics: &DiagnosticSession,
+        maximum_items: usize,
+        maximum_bytes: u64,
+    ) -> Result<(), String> {
+        if !self.current(&task, workspace, configuration) {
+            return Err("linter run retired".into());
+        }
+        let AdapterContext::Linter { matcher } = &task.adapter else {
+            return Ok(());
+        };
+        let source = task
+            .diagnostic_source
+            .as_ref()
+            .ok_or("linter has no producing source")?;
+        if !source.editor_current(editor)
+            || !source.current(diagnostics, workspace, configuration)
+            || configuration == u64::MAX
+            || maximum_bytes == 0
+            || maximum_items == 0
+            || self.linters.builds.len() >= 64
+        {
+            return Err("linter source retired, exhausted or full".into());
+        }
+        let next = self
+            .linters
+            .next
+            .checked_add(1)
+            .ok_or("linter build identity exhausted")?;
+        // Parse only once; every matched record must be usable before any source read is sent.
+        let text = std::str::from_utf8(&task.output).map_err(|_| "linter output is not UTF-8")?;
+        let regex = self
+            .matchers
+            .get(&task.requested)
+            .ok_or("linter matcher unavailable")?;
+        let mut raw = BTreeMap::<PathBuf, Vec<Raw>>::new();
+        for (index, captures) in regex
+            .captures_iter(text)
+            .take(maximum_items.min(65536).saturating_add(1))
+            .enumerate()
+        {
+            if index >= maximum_items.min(65536) {
+                return Err("linter output exceeds its diagnostic limit".into());
+            }
+            let path = captures
+                .name(&matcher.path_group)
+                .ok_or("linter record has no path")?
+                .as_str();
+            let path = PathBuf::from(path);
+            // Lexical parent traversal is not a participating-root proof.
+            if path.components().any(|c| matches!(c, Component::ParentDir)) {
+                return Err("linter path traverses its root".into());
+            }
+            let path = if path.is_absolute() {
+                path
+            } else {
+                task.root.join(path)
+            };
+            if !path.starts_with(&task.root) {
+                return Err("linter path is outside its task root".into());
+            }
+            source.checked_document(&path, editor)?;
+            let line = captures
+                .name(&matcher.line_group)
+                .and_then(|c| c.as_str().parse::<usize>().ok())
+                .filter(|v| *v > 0)
+                .ok_or("invalid linter line")?
+                - 1;
+            let column = match matcher
+                .column_group
+                .as_ref()
+                .and_then(|name| captures.name(name))
+            {
+                Some(c) => {
+                    c.as_str()
+                        .parse::<usize>()
+                        .ok()
+                        .filter(|v| *v > 0)
+                        .ok_or("invalid linter column")?
+                        - 1
+                }
+                None => 0,
+            };
+            let severity = matcher
+                .severity_group
+                .as_ref()
+                .and_then(|name| captures.name(name))
+                .map_or(DiagnosticSeverity::Error, |c| {
+                    match c.as_str().to_ascii_lowercase().as_str() {
+                        "warn" | "warning" => DiagnosticSeverity::Warning,
+                        "info" | "information" => DiagnosticSeverity::Information,
+                        "hint" => DiagnosticSeverity::Hint,
+                        _ => DiagnosticSeverity::Error,
+                    }
+                });
+            let message = captures
+                .name(&matcher.message_group)
+                .ok_or("linter record has no message")?
+                .as_str()
+                .chars()
+                .take(4096)
+                .collect();
+            if !raw.contains_key(&path) && raw.len() >= 1024 {
+                return Err("too many linter source files".into());
+            }
+            raw.entry(path).or_default().push(Raw {
+                line,
+                column,
+                severity,
+                message,
+            });
+        }
+        let mut grouped = BTreeMap::new();
+        let mut unread = BTreeMap::new();
+        for (path, raw) in raw {
+            if let Some(buffer) = editor
+                .buffers
+                .iter()
+                .find_map(|(_, b)| (b.path.as_ref() == Some(&path)).then_some(b))
+            {
+                grouped.insert(
+                    path.clone(),
+                    convert(
+                        &path,
+                        raw,
+                        &buffer.text,
+                        Some(buffer.text.revision()),
+                        &task.requested,
+                    )?,
+                );
+            } else {
+                unread.insert(path, raw);
+            }
+        }
+        self.linters.next = next;
+        self.linters.builds.insert(
+            next,
+            Build {
+                name: task.requested,
+                key: task.key,
+                source: source.clone(),
+                unread,
+                pending: HashMap::new(),
+                grouped,
+                maximum: maximum_bytes,
+                failed: None,
+            },
+        );
+        Ok(())
+    }
+    pub(in crate::editor::session) fn linter_count(&self) -> usize {
+        self.linters.builds.len()
+    }
+    pub(in crate::editor::session) fn retire_linter_sources(
+        &mut self,
+        editor: &EditorState,
+        workspace: &WorkspaceSession,
+        configuration: u64,
+        diagnostics: &DiagnosticSession,
+    ) {
+        for build in self.linters.builds.values_mut() {
+            if !build.source.editor_current(editor)
+                || self.closed
+                || !self
+                    .keys
+                    .get(&build.name)
+                    .is_some_and(|key| std::sync::Arc::ptr_eq(&key.epoch, &build.key.epoch))
+                || !build.source.current(diagnostics, workspace, configuration)
+            {
+                build.fail("linter producing run retired");
+                continue;
+            }
+            if build
+                .unread
+                .keys()
+                .chain(build.grouped.keys())
+                .chain(build.pending.values().map(|read| &read.path))
+                .any(|path| build.source.checked_document(path, editor).is_err())
+            {
+                build.fail("linter source document changed");
+            }
+        }
+    }
+    pub(in crate::editor::session) fn linter_read<'a>(
+        &'a mut self,
+        editor: &'a EditorState,
+        workspace: &'a WorkspaceSession,
+        configuration: &'a u64,
+        diagnostics: &'a DiagnosticSession,
+    ) -> Option<LinterReadLoan<'a>> {
+        self.retire_linter_sources(editor, workspace, *configuration, diagnostics);
+        let build = self
+            .linters
+            .builds
+            .values_mut()
+            .find(|b| b.failed.is_none() && !b.unread.is_empty())?;
+        Some(LinterReadLoan {
+            build,
+            editor,
+            _workspace: workspace,
+            _configuration: configuration,
+            _diagnostics: diagnostics,
+            roots: workspace.roots(),
+        })
+    }
+    pub(in crate::editor::session) fn accept_linter_read(
+        &mut self,
+        reply: TaskReadReply,
+        editor: &EditorState,
+        workspace: &WorkspaceSession,
+        configuration: u64,
+        diagnostics: &DiagnosticSession,
+    ) -> Result<(), String> {
+        if !self.linters.builds.values().any(|build| {
+            build
+                .pending
+                .get(&reply.id())
+                .is_some_and(|read| reply.matches(&read.key))
+        }) {
+            return Err("unowned or duplicate linter source terminal".into());
+        }
+        self.retire_linter_sources(editor, workspace, configuration, diagnostics);
+        let Some(build) = self.linters.builds.values_mut().find(|build| {
+            build
+                .pending
+                .get(&reply.id())
+                .is_some_and(|read| reply.matches(&read.key))
+        }) else {
+            return Err("unowned or duplicate linter source terminal".into());
+        };
+        let read = build
+            .pending
+            .remove(&reply.id())
+            .expect("matched source read");
+        if build.failed.is_some() {
+            return Ok(());
+        }
+        let result: Result<(), String> = (|| {
+            let VfsResult::Read { path, result, .. } = reply.into_result() else {
+                return Err("wrong linter source terminal".into());
+            };
+            if path != read.path {
+                return Err("linter read path changed".into());
+            }
+            build.source.checked_document(&path, editor)?;
+            let bytes = result.map_err(|e| e.to_string())?;
+            if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > build.maximum {
+                return Err("linter source exceeds its admitted byte limit".into());
+            }
+            let text = TextBuffer::from_bytes(&bytes).map_err(|e| e.to_string())?;
+            let items = convert(&path, read.raw, &text, None, &build.name)?;
+            build.grouped.insert(path, items);
+            Ok(())
+        })();
+        if let Err(error) = result {
+            build.fail(error);
+        }
+        Ok(())
+    }
+    pub(in crate::editor::session) fn linter_cancellations(&self) -> Vec<TaskReadKey> {
+        self.linters
+            .builds
+            .values()
+            .filter(|b| b.failed.is_some())
+            .flat_map(|b| b.pending.values().map(|r| r.key.clone()))
+            .collect()
+    }
+    pub(in crate::editor::session) fn linter_cancelled(&mut self, cancel: TaskCancellation) {
+        let key = cancel.into_key();
+        for build in self.linters.builds.values_mut() {
+            if build
+                .pending
+                .get(&key.id())
+                .is_some_and(|r| r.key.same(&key))
+            {
+                build.pending.remove(&key.id());
+                break;
+            }
+        }
+    }
+    pub(in crate::editor::session) fn linter_worker_stopped(&mut self, stop: TaskReadStopped) {
+        for build in self.linters.builds.values_mut() {
+            if build.pending.values().any(|read| stop.matches(&read.key)) {
+                build.fail("linter source worker stopped before completion");
+                build.pending.retain(|_, read| !stop.matches(&read.key));
+            }
+        }
+    }
+    pub(in crate::editor::session) fn finish_linter_obligations(&mut self, reason: &str) -> usize {
+        let count = self.linters.builds.values().map(|b| b.pending.len()).sum();
+        self.linters.retire(reason);
+        for build in self.linters.builds.values_mut() {
+            build.pending.clear();
+        }
+        count
+    }
+    pub(in crate::editor::session) fn next_linter_update(
+        &mut self,
+        editor: &EditorState,
+        workspace: &WorkspaceSession,
+        configuration: u64,
+        diagnostics: &DiagnosticSession,
+    ) -> Option<LinterUpdate> {
+        self.retire_linter_sources(editor, workspace, configuration, diagnostics);
+        let id = *self
+            .linters
+            .builds
+            .iter()
+            .find(|(_, b)| b.unread.is_empty() && b.pending.is_empty())?
+            .0;
+        let build = self.linters.builds.remove(&id)?;
+        if let Some(error) = build.failed {
+            return Some(LinterUpdate::Failed(error));
+        }
+        let result = build
+            .grouped
+            .into_iter()
+            .map(|(path, items)| {
+                Ok(DiagnosticBatch {
+                    document: build.source.document(&path, editor)?,
+                    producer: build.source.producer().clone(),
+                    uri: crate::language::lsp::file_uri(&path),
+                    validity: DiagnosticValidity::DiskReport,
+                    items,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>();
+        Some(match result {
+            Ok(batches) => LinterUpdate::Publish {
+                producer: build.source.producer().clone(),
+                batches,
+            },
+            Err(error) => LinterUpdate::Failed(error),
+        })
+    }
+}
+fn convert(
+    path: &Path,
+    raw: Vec<Raw>,
+    text: &TextBuffer,
+    version: Option<crate::editor::text::BufferRevision>,
+    source: &str,
+) -> Result<Vec<Diagnostic>, String> {
+    let uri = crate::language::lsp::file_uri(path);
+    raw.into_iter()
+        .map(|raw| {
+            let line = text
+                .line_to_byte(raw.line)
+                .map_err(|_| "linter line is outside its source")?;
+            let offset = line
+                .get()
+                .checked_add(raw.column)
+                .ok_or("linter column overflow")?;
+            let end = text
+                .line_to_byte(raw.line.saturating_add(1))
+                .map(|next| next.get().saturating_sub(1))
+                .unwrap_or(text.len_bytes());
+            if offset > end {
+                return Err("linter column crosses its source line".into());
+            }
+            let start = ByteOffset(offset);
+            text.validate_offset(start)
+                .map_err(|_| "linter column is outside its source or splits UTF-8")?;
+            Ok(Diagnostic {
+                uri: uri.clone(),
+                version,
+                range: ByteRange::new(start, start).map_err(|e| e.to_string())?,
+                severity: raw.severity,
+                source: source.into(),
+                code: None,
+                message: raw.message,
+                related: Vec::new(),
+                tags: Vec::new(),
+                fixes: Vec::new(),
+                timestamp: crate::clock::system_time(),
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests;

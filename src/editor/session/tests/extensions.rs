@@ -4,7 +4,7 @@ use super::*;
 fn retained_plugin_window_projection_is_idle_and_generation_owned() {
     let mut app = app();
     app.state.open_text(TextBuffer::from_text("editor"), None);
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
     let index = crate::extensions::index_manifest_contributions(
@@ -19,7 +19,7 @@ fn retained_plugin_window_projection_is_idle_and_generation_owned() {
     let request = crate::extensions::PluginUiRequest {
         token: 1,
         kind: crate::extensions::PluginUiRequestKind::OpenWindow {
-            expected_graph_revision: app.windows.revision().expect("revision"),
+            expected_graph_revision: app.window_session.graph().revision().expect("revision"),
             content_type: "plugin.demo.panel".into(),
             title: "Demo".into(),
             placement: crate::extensions::PluginRequestedPlacement::Floating {
@@ -42,13 +42,11 @@ fn retained_plugin_window_projection_is_idle_and_generation_owned() {
             }),
         },
     };
-    let event = app
-        .plugin_windows
-        .process(&mut app.windows, &index, request);
+    let event = app.apply_plugin_ui_request(&index, request);
     assert!(event.error.is_none(), "{:?}", event.error);
     let window = app.plugin_windows.snapshots()[0].window;
     app.ui.plugin_surfaces = app.plugin_windows.snapshots();
-    app.surface_windows.invalidate();
+    app.window_session.invalidate_native();
     app.reconcile_editor_windows();
     assert!(
         app.compositor_projection()
@@ -56,26 +54,26 @@ fn retained_plugin_window_projection_is_idle_and_generation_owned() {
             .window(window)
             .is_some()
     );
-    let reconciliation_count = app.editor_windows.reconciliation_count();
-    let graph = app.windows.clone();
+    let reconciliation_count = app.window_session.editor_ids().reconciliation_count();
+    let graph = app.window_session.graph().clone();
     for _ in 0..256 {
         app.reconcile_editor_windows();
     }
     assert_eq!(
-        app.editor_windows.reconciliation_count(),
+        app.window_session.editor_ids().reconciliation_count(),
         reconciliation_count
     );
-    assert_eq!(app.windows, graph);
+    assert_eq!(app.window_session.graph(), &graph);
     app.remove_plugin_contribution_generation("demo", PluginLoadId(77));
     assert!(app.ui.plugin_surfaces.is_empty());
-    assert!(app.windows.window(window).is_none());
+    assert!(app.window_session.graph().window(window).is_none());
 }
 
 #[test]
 fn plugin_host_events_are_snapshot_owned_coalesced_and_idle() {
     let mut app = app();
     app.state.open_text(TextBuffer::from_text("editor"), None);
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
     manifest
@@ -188,10 +186,10 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
         .expect("chunk");
     app.active_plugin_picker = Some(request);
     app.present_plugin_picker(request);
-    assert_eq!(app.picker_surface, PickerSurfaceKind::Generic);
+    assert_eq!(app.search.picker_surface(), PickerSurfaceKind::Generic);
     assert_eq!(
-        app.picker
-            .as_ref()
+        app.search
+            .picker()
             .and_then(crate::workspace::PickerState::selected_item)
             .map(|item| item.label.as_str()),
         Some("Beta")
@@ -227,7 +225,7 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
 fn private_plugin_surface_geometry_snapshot_and_idle_projection_are_application_owned() {
     let mut app = app();
     app.state.open_text(TextBuffer::from_text("editor"), None);
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
     manifest
@@ -250,9 +248,8 @@ fn private_plugin_surface_geometry_snapshot_and_idle_projection_are_application_
     app.plugin_contributions
         .install(index.clone())
         .expect("catalog");
-    let revision = app.windows.revision().expect("revision");
-    let opened = app.plugin_windows.process(
-        &mut app.windows,
+    let revision = app.window_session.graph().revision().expect("revision");
+    let opened = app.apply_plugin_ui_request(
         &index,
         crate::extensions::PluginUiRequest {
             token: 1,
@@ -272,7 +269,7 @@ fn private_plugin_surface_geometry_snapshot_and_idle_projection_are_application_
     );
     assert!(opened.error.is_none(), "{:?}", opened.error);
     let handle = opened.handle.expect("handle");
-    app.surface_windows.invalidate();
+    app.window_session.invalidate_native();
     app.reconcile_editor_windows();
     let geometry = app
         .pending_plugin_ui_events
@@ -280,8 +277,7 @@ fn private_plugin_surface_geometry_snapshot_and_idle_projection_are_application_
         .and_then(|events| events.iter().find_map(|event| event.geometry.clone()))
         .expect("local geometry event");
     assert_eq!((geometry.width, geometry.height), (12, 4));
-    let replaced = app.plugin_windows.process(
-        &mut app.windows,
+    let replaced = app.apply_plugin_ui_request(
         &index,
         crate::extensions::PluginUiRequest {
             token: 2,
@@ -314,26 +310,29 @@ fn private_plugin_surface_geometry_snapshot_and_idle_projection_are_application_
         },
     );
     assert!(replaced.error.is_none(), "{:?}", replaced.error);
-    app.surface_windows.invalidate();
+    app.window_session.invalidate_native();
     app.reconcile_editor_windows();
     assert_eq!(app.ui.private_surfaces.len(), 1);
     assert_eq!(app.ui.private_surfaces[0].cells[0].grapheme, "X");
-    let graph = app.windows.clone();
+    let graph = app.window_session.graph().clone();
     let ui = app.ui.private_surfaces.clone();
-    let reconciliations = app.editor_windows.reconciliation_count();
+    let reconciliations = app.window_session.editor_ids().reconciliation_count();
     for _ in 0..256 {
         app.reconcile_editor_windows();
     }
-    assert_eq!(app.windows, graph);
+    assert_eq!(app.window_session.graph(), &graph);
     assert_eq!(app.ui.private_surfaces, ui);
-    assert_eq!(app.editor_windows.reconciliation_count(), reconciliations);
+    assert_eq!(
+        app.window_session.editor_ids().reconciliation_count(),
+        reconciliations
+    );
 }
 
 #[test]
 fn retained_interaction_commands_use_host_focus_scroll_and_mouse_state() {
     let mut app = app();
     app.state.open_text(TextBuffer::from_text("editor"), None);
-    app.ui.dashboard = false;
+    app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
     let index =
@@ -342,9 +341,8 @@ fn retained_interaction_commands_use_host_focus_scroll_and_mouse_state() {
     app.plugin_contributions
         .install(index.clone())
         .expect("catalog");
-    let revision = app.windows.revision().expect("revision");
-    let event = app.plugin_windows.process(
-        &mut app.windows,
+    let revision = app.window_session.graph().revision().expect("revision");
+    let event = app.apply_plugin_ui_request(
         &index,
         crate::extensions::PluginUiRequest {
             token: 1,
@@ -413,13 +411,13 @@ fn retained_interaction_commands_use_host_focus_scroll_and_mouse_state() {
     app.invoke_mapped_command("surface.retained.scroll.down");
     assert_eq!(app.ui.plugin_surfaces[0].scroll, 1);
     let window = app.ui.plugin_surfaces[0].window;
-    app.surface_windows.invalidate();
+    app.window_session.invalidate_native();
     app.reconcile_editor_windows();
     let rect = app
         .compositor_projection()
         .and_then(|projection| projection.window(window).map(|window| window.rect))
         .expect("plugin rectangle");
-    app.mouse_position = Some((rect.x, rect.y));
+    app.input.observe_mouse(rect.x, rect.y);
     app.invoke_mapped_command("surface.retained.mouse.select");
     assert_eq!(
         app.ui.plugin_surfaces[0]
@@ -513,9 +511,13 @@ fn stale_generation_cleanup_preserves_replacement_ui_events() {
 #[test]
 fn expected_index_failure_before_sibling_index_aborts_the_complete_batch() {
     let mut app = app();
-    app.configuration.deferred_plugin_keymaps = true;
-    app.configuration.expected_plugin_indexes =
-        ["bad".to_owned(), "good".to_owned()].into_iter().collect();
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.deferred_plugin_keymaps = true;
+        fixture.expected_plugin_indexes =
+            ["bad".to_owned(), "good".to_owned()].into_iter().collect();
+        app.configuration.install_fixture(fixture);
+    }
     let bad = tempfile::tempdir().expect("bad plugin store");
     fs::write(bad.path().join("manifest.toml"), "not = [valid").expect("bad manifest");
     let good = tempfile::tempdir().expect("good plugin store");
@@ -558,7 +560,7 @@ fn expected_index_failure_before_sibling_index_aborts_the_complete_batch() {
     assert!(app.plugin_contributions.get("good").is_none());
     assert!(
         app.configuration
-            .keymaps
+            .keymaps()
             .inspect_id("plugin.good.keymap.dashboard")
             .is_none()
     );
@@ -623,7 +625,7 @@ fn deferred_user_plugin_move_compiles_after_index_then_falls_back_after_activati
     assert!(configuration.deferred_plugin_keymaps);
     assert!(configuration.settings.windows.rules.is_empty());
     assert_eq!(configuration.raw_windows.rules.len(), 1);
-    app.configuration = configuration;
+    app.configuration.install_fixture(configuration);
     let load = app
         .plugins
         .index_from_store(
@@ -642,25 +644,25 @@ fn deferred_user_plugin_move_compiles_after_index_then_falls_back_after_activati
     }
     let moved = app
         .configuration
-        .keymaps
+        .keymaps()
         .inspect_id("plugin.demo.keymap.dashboard")
         .expect("user replacement");
     assert_eq!(moved.keys, "z");
     assert_eq!(moved.contribution_layer, InputContextLayer::User);
     assert_eq!(
         app.configuration
-            .keymaps
+            .keymaps()
             .inspect_id("user.test.demo-retained-next")
             .map(|mapping| mapping.context),
         Some("plugin.demo.chat".into())
     );
     assert_eq!(
-        app.configuration.settings.windows.rules[0].content_type,
+        app.configuration.settings().windows.rules[0].content_type,
         "plugin.demo.panel"
     );
     assert!(
         app.configuration
-            .keymaps
+            .keymaps()
             .inspect_key("dashboard", "x y")
             .is_none()
     );
@@ -672,17 +674,17 @@ fn deferred_user_plugin_move_compiles_after_index_then_falls_back_after_activati
     assert!(!app.plugins.is_active_generation("demo", load));
     assert!(
         app.configuration
-            .keymaps
+            .keymaps()
             .inspect_id("plugin.demo.keymap.dashboard")
             .is_none()
     );
     assert!(
         app.configuration
-            .keymaps
+            .keymaps()
             .inspect_id("user.test.demo-retained-next")
             .is_none()
     );
-    assert!(app.configuration.settings.windows.rules.is_empty());
+    assert!(app.configuration.settings().windows.rules.is_empty());
 }
 
 #[test]
@@ -798,7 +800,7 @@ fn enabled_plugin_references_are_deferred_but_unknown_namespaces_still_reject() 
     assert!(super::resolve_configuration(&app.commands, unknown_window, true).is_err());
 
     let mut running = self::app();
-    let previous = running.configuration.settings.plugins.clone();
+    let previous = running.configuration.settings().plugins.clone();
     let mut changed = crate::config::load_bundled_config();
     changed.config.plugins.entries.insert(
         "demo".into(),
@@ -812,7 +814,7 @@ fn enabled_plugin_references_are_deferred_but_unknown_namespaces_still_reject() 
         .apply_configuration_candidate(changed, false)
         .expect_err("plugin topology reload must stage before mutation");
     assert!(error.contains("plugin topology"));
-    assert_eq!(running.configuration.settings.plugins, previous);
+    assert_eq!(running.configuration.settings().plugins, previous);
 }
 
 #[test]

@@ -4,12 +4,16 @@ use super::*;
 pub(super) struct ServerMessageContext<'a> {
     pub server: &'a str,
     pub stdin: &'a mut ChildStdin,
-    pub events: &'a SyncSender<LspEvent>,
+    pub events: &'a EventSender,
     pub logs: &'a mut VecDeque<String>,
     pub base_capabilities: &'a LspCapabilities,
     pub capabilities: &'a mut LspCapabilities,
     pub registrations: &'a mut HashMap<String, String>,
     pub configuration: &'a LspServerConfiguration,
+    pub sources: &'a HashMap<String, (crate::editor::BufferId, crate::editor::text::TextVersion)>,
+    pub diagnostic_lineage: &'a super::origins::DiagnosticLineage,
+    pub documents: &'a HashMap<String, LspDocument>,
+    pub apply_requests: &'a mut HashMap<ServerRequestId, std::sync::Arc<()>>,
 }
 
 pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: &Value) {
@@ -22,6 +26,10 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
         capabilities,
         registrations,
         configuration,
+        sources,
+        diagnostic_lineage,
+        documents,
+        apply_requests,
     } = context;
     let method = message
         .get("method")
@@ -33,14 +41,48 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
                 .pointer("/params/uri")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            let version = message.pointer("/params/version").and_then(Value::as_u64);
-            let diagnostics = diagnostics(
-                message
-                    .pointer("/params/diagnostics")
-                    .unwrap_or(&Value::Null),
-            );
+            let reported = message
+                .pointer("/params/version")
+                .filter(|value| !value.is_null());
+            let version = reported.and_then(Value::as_u64);
+            let ambiguous = diagnostic_lineage.ambiguous(uri);
+            let rejected = ambiguous
+                || diagnostic_lineage.tracked(uri)
+                    && (!sources.contains_key(uri)
+                        || reported.is_some() && version.is_none()
+                        || version.is_some_and(|version| {
+                            documents
+                                .get(uri)
+                                .is_none_or(|document| document.version != version)
+                        }));
+            // Header/source refusal precedes per-diagnostic string/range normalization.
+            // Unowned public-service notifications retain their compatibility payload.
+            let diagnostics = if rejected {
+                Vec::new()
+            } else {
+                diagnostics(
+                    message
+                        .pointer("/params/diagnostics")
+                        .unwrap_or(&Value::Null),
+                )
+            };
+            let event_source = EventSender {
+                context: EditContext {
+                    encoding: capabilities.position_encoding,
+                    diagnostic_ambiguous: ambiguous,
+                    sources: std::sync::Arc::new(
+                        sources
+                            .get(uri)
+                            .filter(|_| !rejected)
+                            .map(|source| HashMap::from([(uri.to_owned(), source.clone())]))
+                            .unwrap_or_default(),
+                    ),
+                    ..events.context.clone()
+                },
+                ..events.clone()
+            };
             send_event(
-                events,
+                &event_source,
                 LspEvent::Diagnostics {
                     server: server.into(),
                     uri: uri.into(),
@@ -157,18 +199,36 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
             .map(workspace_edit)
             .transpose();
         match (request_id, edit) {
-            (Some(request_id), Ok(Some(edit))) => send_event(
-                events,
-                LspEvent::ApplyEditRequest {
-                    server: server.into(),
-                    request_id,
-                    label: message
-                        .pointer("/params/label")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned),
-                    edit,
-                },
-            ),
+            (Some(request_id), Ok(Some(edit))) => {
+                if apply_requests.contains_key(&request_id) {
+                    return;
+                }
+                let key = std::sync::Arc::new(());
+                let delivered = apply_requests.len() < MAX_PENDING_REQUESTS
+                    && events.apply(
+                        LspEvent::ApplyEditRequest {
+                            server: server.into(),
+                            request_id: request_id.clone(),
+                            label: message
+                                .pointer("/params/label")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned),
+                            edit,
+                        },
+                        request_id.clone(),
+                        key.clone(),
+                        capabilities.position_encoding,
+                        sources.clone(),
+                    );
+                if delivered {
+                    apply_requests.insert(request_id, key);
+                } else {
+                    let _ = write_content_length_message(
+                        stdin,
+                        &json!({"jsonrpc":"2.0","id":request_id.value(),"result":{"applied":false,"failureReason":"workspace edit admission queue is full"}}),
+                    );
+                }
+            }
             _ => {
                 if let Some(id) = message.get("id") {
                     let _ = write_content_length_message(
@@ -250,7 +310,7 @@ pub(super) fn expire_requests(
     server: &str,
     stdin: &mut ChildStdin,
     pending: &mut HashMap<i64, PendingRequest>,
-    events: &SyncSender<LspEvent>,
+    events: &EventSender,
 ) {
     let now = Instant::now();
     let expired = pending
