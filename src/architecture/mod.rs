@@ -106,7 +106,7 @@ pub fn audit_source(root: &Path) -> Result<ArchitectureAudit, ArchitectureError>
     let external_tui =
         fs::read_to_string(root.join("tests/external_tui.rs")).map_err(ArchitectureError::Io)?;
 
-    if !session.contains("tool_installer.install")
+    if !session.contains("self.installer.install")
         || !session.contains("PendingExecutionPreflight::Lsp")
         || !session.contains("advance_debug")
         || !language.contains("start_session_absolute_with_policy")

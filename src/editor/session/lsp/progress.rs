@@ -12,8 +12,7 @@ impl InteractiveApplication {
             return;
         };
         let key = Self::tool_version_key(&definition, LspRuntimeSource::Path, Some(&executable));
-        self.tool_versions.remove(&key);
-        self.tool_version_pending.remove(&key);
+        self.tooling.forget_probe(&key);
         self.queue_tool_version_probe(&definition, LspRuntimeSource::Path, executable);
     }
 

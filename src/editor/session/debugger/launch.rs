@@ -495,180 +495,74 @@ impl DebugSession {
 }
 
 #[cfg(test)]
-pub(super) fn original_launch_fixture() {
-    use crate::editor::session::workspace::{
-        DiscoveryKind, WorkspacePreflightEvent, WorkspaceUpdate,
-    };
-    use std::time::{Duration, Instant};
-    fn permit(workspace: &mut WorkspaceSession, intent: &DebugIntent) -> DebugPermit {
-        let id = workspace
-            .begin_validation()
-            .unwrap_or_else(|_| panic!("owned validation"));
-        let deadline = Instant::now() + Duration::from_secs(2);
-        loop {
-            for event in workspace.poll() {
-                if let WorkspaceUpdate::Validated {
-                    id: actual,
-                    permit: Some(permit),
-                } = event
-                {
-                    assert_eq!(actual, id);
-                    return workspace.debug_permit(permit, id, intent.nonce()).unwrap();
-                }
-            }
-            assert!(Instant::now() < deadline);
-            std::thread::sleep(Duration::from_millis(2));
-        }
-    }
-    let directory = tempfile::tempdir().unwrap();
-    let identity = RootIdentity::capture(directory.path()).unwrap();
-    let state = crate::workspace::WorkspaceState::new(
-        crate::workspace::WorkspaceId(1),
-        [("root".into(), identity.clone())],
-    )
-    .unwrap();
-    let mut workspace =
-        WorkspaceSession::new(state, directory.path().join("trust"), 2, false, false, 2);
-    workspace
-        .fixture_identity(RootId(1), identity.clone())
-        .unwrap();
-    workspace.fixture_trust_identity(identity);
-    workspace.reconcile_trust();
-    let mut policy = DebugConfig::default();
-    policy.adapters.insert(
-        "owned".into(),
-        DebugAdapterConfig {
-            program: std::env::current_exe().unwrap(),
-            arguments: vec!["original".into()],
-            environment: BTreeMap::new(),
-        },
-    );
-    policy.sessions.insert(
-        "owned".into(),
-        DebugSessionConfig {
-            adapter: "owned".into(),
-            request: DebugRequestKind::Attach,
-            cwd: None,
-            program: None,
-            run_in_terminal_profile: Some("shell".into()),
-            arguments: BTreeMap::new(),
-            path_maps: BTreeMap::new(),
-        },
-    );
-    let mut owner = DebugSession::new(&policy, workspace.version());
-    let terminals = crate::config::TerminalsConfig::default();
-    let old = owner
-        .request_debug(
-            Some("owned"),
-            None,
-            None,
-            None,
-            &policy,
-            &terminals,
-            1,
-            &workspace,
-            &[],
-        )
-        .unwrap();
-    let old_permit = permit(&mut workspace, &old);
-    let fresh = owner
-        .request_debug(
-            Some("owned"),
-            None,
-            None,
-            None,
-            &policy,
-            &terminals,
-            1,
-            &workspace,
-            &[],
-        )
-        .unwrap();
-    assert_ne!(old, fresh);
-    let captured = owner.launch.as_ref().unwrap().terminal.as_ref().unwrap();
-    assert_eq!(captured.name, "shell");
-    assert_eq!(captured.cwd, directory.path());
-    assert_eq!(captured.profile, terminals.profiles["shell"]);
-    assert!(owner.authorize_debug(old, old_permit, &workspace).is_err());
-    let fresh_permit = permit(&mut workspace, &fresh);
-    owner
-        .authorize_debug(fresh.clone(), fresh_permit, &workspace)
-        .unwrap();
-    owner
-        .advance_debug(
-            workspace.execution_lane(DiscoveryKind::Debugger),
-            &policy,
-            1,
-            &[],
-        )
-        .unwrap();
-    assert!(matches!(
-        owner.launch.as_ref().unwrap().phase,
-        Phase::Preflight { .. }
-    ));
-    assert_eq!(
-        owner.launch.as_ref().unwrap().adapter.arguments,
-        ["original"]
-    );
-    // A separately constructed owner cannot consume the first owner's intent.
-    let mut foreign = DebugSession::new(&policy, workspace.version());
-    let foreign_permit = permit(&mut workspace, &fresh);
-    assert!(
-        foreign
-            .authorize_debug(fresh, foreign_permit, &workspace)
-            .is_err()
-    );
-    let _ = owner.stop();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        let events = workspace.preflight_events();
-        if !events.is_empty() {
-            for event in events {
-                match event {
-                    WorkspacePreflightEvent::Ready(ready) => {
-                        assert!(owner.debug_preflight(ready).is_err())
+pub(super) use tests::original_launch_fixture;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    pub(in crate::editor::session::debugger) fn original_launch_fixture() {
+        use crate::editor::session::workspace::{
+            DiscoveryKind, WorkspacePreflightEvent, WorkspaceUpdate,
+        };
+        use std::time::{Duration, Instant};
+        fn permit(workspace: &mut WorkspaceSession, intent: &DebugIntent) -> DebugPermit {
+            let id = workspace
+                .begin_validation()
+                .unwrap_or_else(|_| panic!("owned validation"));
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                for event in workspace.poll() {
+                    if let WorkspaceUpdate::Validated {
+                        id: actual,
+                        permit: Some(permit),
+                    } = event
+                    {
+                        assert_eq!(actual, id);
+                        return workspace.debug_permit(permit, id, intent.nonce()).unwrap();
                     }
-                    _ => panic!("original preflight failed"),
                 }
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(2));
             }
-            break;
         }
-        assert!(Instant::now() < deadline);
-        std::thread::sleep(Duration::from_millis(2));
-    }
-    assert_eq!(owner.pending(), 0);
-    let intent = owner
-        .request_debug(
-            Some("owned"),
-            None,
-            None,
-            None,
-            &policy,
-            &terminals,
-            1,
-            &workspace,
-            &[],
+        let directory = tempfile::tempdir().unwrap();
+        let identity = RootIdentity::capture(directory.path()).unwrap();
+        let state = crate::workspace::WorkspaceState::new(
+            crate::workspace::WorkspaceId(1),
+            [("root".into(), identity.clone())],
         )
         .unwrap();
-    let authorization = permit(&mut workspace, &intent);
-    owner
-        .authorize_debug(intent, authorization, &workspace)
-        .unwrap();
-    assert!(
-        owner
-            .advance_debug(
-                workspace.execution_lane(DiscoveryKind::Debugger),
-                &policy,
-                2,
-                &[]
-            )
-            .is_err(),
-        "configuration revision substitution admitted original launch"
-    );
-    assert!(owner.launch.is_none());
-    owner.begin_shutdown();
-    assert!(
-        owner
+        let mut workspace =
+            WorkspaceSession::new(state, directory.path().join("trust"), 2, false, false, 2);
+        workspace
+            .fixture_identity(RootId(1), identity.clone())
+            .unwrap();
+        workspace.fixture_trust_identity(identity);
+        workspace.reconcile_trust();
+        let mut policy = DebugConfig::default();
+        policy.adapters.insert(
+            "owned".into(),
+            DebugAdapterConfig {
+                program: std::env::current_exe().unwrap(),
+                arguments: vec!["original".into()],
+                environment: BTreeMap::new(),
+            },
+        );
+        policy.sessions.insert(
+            "owned".into(),
+            DebugSessionConfig {
+                adapter: "owned".into(),
+                request: DebugRequestKind::Attach,
+                cwd: None,
+                program: None,
+                run_in_terminal_profile: Some("shell".into()),
+                arguments: BTreeMap::new(),
+                path_maps: BTreeMap::new(),
+            },
+        );
+        let mut owner = DebugSession::new(&policy, workspace.version());
+        let terminals = crate::config::TerminalsConfig::default();
+        let old = owner
             .request_debug(
                 Some("owned"),
                 None,
@@ -676,10 +570,122 @@ pub(super) fn original_launch_fixture() {
                 None,
                 &policy,
                 &terminals,
-                2,
+                1,
                 &workspace,
-                &[]
+                &[],
             )
-            .is_err()
-    );
+            .unwrap();
+        let old_permit = permit(&mut workspace, &old);
+        let fresh = owner
+            .request_debug(
+                Some("owned"),
+                None,
+                None,
+                None,
+                &policy,
+                &terminals,
+                1,
+                &workspace,
+                &[],
+            )
+            .unwrap();
+        assert_ne!(old, fresh);
+        let captured = owner.launch.as_ref().unwrap().terminal.as_ref().unwrap();
+        assert_eq!(captured.name, "shell");
+        assert_eq!(captured.cwd, directory.path());
+        assert_eq!(captured.profile, terminals.profiles["shell"]);
+        assert!(owner.authorize_debug(old, old_permit, &workspace).is_err());
+        let fresh_permit = permit(&mut workspace, &fresh);
+        owner
+            .authorize_debug(fresh.clone(), fresh_permit, &workspace)
+            .unwrap();
+        owner
+            .advance_debug(
+                workspace.execution_lane(DiscoveryKind::Debugger),
+                &policy,
+                1,
+                &[],
+            )
+            .unwrap();
+        assert!(matches!(
+            owner.launch.as_ref().unwrap().phase,
+            Phase::Preflight { .. }
+        ));
+        assert_eq!(
+            owner.launch.as_ref().unwrap().adapter.arguments,
+            ["original"]
+        );
+        // A separately constructed owner cannot consume the first owner's intent.
+        let mut foreign = DebugSession::new(&policy, workspace.version());
+        let foreign_permit = permit(&mut workspace, &fresh);
+        assert!(
+            foreign
+                .authorize_debug(fresh, foreign_permit, &workspace)
+                .is_err()
+        );
+        let _ = owner.stop();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let events = workspace.preflight_events();
+            if !events.is_empty() {
+                for event in events {
+                    match event {
+                        WorkspacePreflightEvent::Ready(ready) => {
+                            assert!(owner.debug_preflight(ready).is_err())
+                        }
+                        _ => panic!("original preflight failed"),
+                    }
+                }
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(owner.pending(), 0);
+        let intent = owner
+            .request_debug(
+                Some("owned"),
+                None,
+                None,
+                None,
+                &policy,
+                &terminals,
+                1,
+                &workspace,
+                &[],
+            )
+            .unwrap();
+        let authorization = permit(&mut workspace, &intent);
+        owner
+            .authorize_debug(intent, authorization, &workspace)
+            .unwrap();
+        assert!(
+            owner
+                .advance_debug(
+                    workspace.execution_lane(DiscoveryKind::Debugger),
+                    &policy,
+                    2,
+                    &[]
+                )
+                .is_err(),
+            "configuration revision substitution admitted original launch"
+        );
+        assert!(owner.launch.is_none());
+        owner.begin_shutdown();
+        assert!(
+            owner
+                .request_debug(
+                    Some("owned"),
+                    None,
+                    None,
+                    None,
+                    &policy,
+                    &terminals,
+                    2,
+                    &workspace,
+                    &[]
+                )
+                .is_err()
+        );
+    }
 }

@@ -204,21 +204,7 @@ impl InteractiveApplication {
                 .take(configured.maximum_entries)
                 .collect(),
             watches: self.debugger_session.persisted_watches(),
-            metadata: self
-                .lsp_nix_workspace_preferred
-                .iter()
-                .map(|id| (format!("lsp.runtime.{id}"), "nix".into()))
-                .chain(
-                    self.lsp_managed_preferred
-                        .iter()
-                        .map(|id| (format!("lsp.runtime.{id}"), "managed".into())),
-                )
-                .chain(
-                    self.lsp_managed_versions
-                        .iter()
-                        .map(|(id, version)| (format!("lsp.version.{id}"), version.clone())),
-                )
-                .collect(),
+            metadata: self.tooling.metadata(),
         };
         if let Err(error) = self.persistence.save(state, self.persistence_policy()) {
             self.ui.config_diagnostic = Some(error);
@@ -230,44 +216,7 @@ impl InteractiveApplication {
             match event {
                 Ok(state) => {
                     let session = state.session.clone();
-                    let valid_lsp = |id: &str| {
-                        self.tools.iter().any(|entry| {
-                            entry.definition.id == id && entry.definition.kind == ToolKind::Lsp
-                        })
-                    };
-                    self.lsp_nix_workspace_preferred = state
-                        .metadata
-                        .iter()
-                        .filter_map(|(key, value)| {
-                            let id = key.strip_prefix("lsp.runtime.")?;
-                            (value == "nix" && valid_lsp(id)).then(|| id.to_owned())
-                        })
-                        .collect();
-                    self.lsp_managed_preferred = state
-                        .metadata
-                        .iter()
-                        .filter_map(|(key, value)| {
-                            let id = key.strip_prefix("lsp.runtime.")?;
-                            (value == "managed" && valid_lsp(id)).then(|| id.to_owned())
-                        })
-                        .collect();
-                    self.lsp_managed_versions = state
-                        .metadata
-                        .iter()
-                        .filter_map(|(key, version)| {
-                            let id = key.strip_prefix("lsp.version.")?;
-                            self.tools
-                                .iter()
-                                .find(|entry| {
-                                    entry.definition.id == id
-                                        && entry.definition.kind == ToolKind::Lsp
-                                })
-                                .and_then(|entry| entry.definition.managed_version(version))
-                                .and_then(|definition| {
-                                    definition.version.map(|version| (id.to_owned(), version))
-                                })
-                        })
-                        .collect();
+                    self.tooling.restore(&state.metadata);
                     if let Some(session) = &session
                         && let Err(diagnostic) =
                             self.apply_persisted_window_rules(&session.window_rules)

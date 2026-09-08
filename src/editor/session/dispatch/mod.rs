@@ -4,6 +4,10 @@ use super::explorer::explorer_watch_policy;
 use super::input::InputSession;
 use super::search::{PickerContent, PickerEpoch, PickerOrigin};
 use super::terminal::{TerminalInput, TerminalUpdate};
+use super::tooling::{
+    LspRuntimeSource, ToolInstall, lsp_runtime_source_allowed_on_host,
+    nix_workspace_shell_for_host, tool_kind_key,
+};
 use super::windows::{
     EditorWindowBridge, NativeDescriptions, NativeSurfaceSignature, NativeSurfaceTarget,
     ProjectionRequest, WindowCandidate, WindowSession,
@@ -42,8 +46,6 @@ mod persistence;
 mod project;
 #[path = "../prompts.rs"]
 mod prompts;
-#[path = "../recovery.rs"]
-mod recovery;
 #[path = "../state.rs"]
 mod state;
 use state::*;
@@ -95,8 +97,8 @@ use crate::extensions::{
     PluginVirtualDocumentBroker,
 };
 use crate::files::{
-    ExplorerMutation, ExplorerWatchService, ProjectRootResolution, RecoveryRecord, RequestId,
-    ResourceIntentKind, VfsError, VfsResult, VfsWorker, WorkspaceFilePolicy, WorkspaceSearchMatch,
+    ExplorerMutation, ExplorerWatchService, ProjectRootResolution, RequestId, ResourceIntentKind,
+    VfsError, VfsResult, VfsWorker, WorkspaceFilePolicy, WorkspaceSearchMatch,
     WorkspaceSearchPolicy,
 };
 use crate::language::lsp::{
@@ -117,12 +119,10 @@ use crate::telemetry::{LiveCrashSnapshot, LogLevel};
 use crate::tools::{
     NIX_LSP_NIXPKGS_REVISION, NixWorkspaceService, PackageOperation, PackageService,
     PackageServiceEvent, RegistryPackageMetadata, RegistryPackageSummary, RegistryRequest,
-    RegistryResult, RegistryService, ToolDefinition, ToolEntry, ToolInstaller, ToolKind,
-    ToolOperation, ToolStatus, ToolVersionRequest, ToolVersionService, discover_executable,
-    inspect_tools, is_nixos_host, managed_tool_executable, managed_tool_installed_version,
+    RegistryResult, RegistryService, ToolDefinition, ToolKind, ToolOperation, ToolStatus,
+    discover_executable, is_nixos_host, managed_tool_executable, managed_tool_installed_version,
     nix_lsp_launch_environment, nix_lsp_launch_environment_for_workspace_at,
-    nix_lsp_profile_installed, nix_lsp_shell, nix_lsp_tool_installed, nix_lsp_workspace_root,
-    tool_launch_environment,
+    nix_lsp_profile_installed, nix_lsp_workspace_root, tool_launch_environment,
 };
 use crate::ui::{
     CompletionItem, DocumentationMarkupKind, DocumentationPopupKind,
@@ -191,18 +191,7 @@ struct InteractiveApplication {
     window_session: WindowSession,
     terminal_width: u16,
     terminal_height: u16,
-    tools: Vec<ToolEntry>,
-    /// Catalog LSP IDs explicitly switched from PATH preference to the verified
-    /// upstream artifact processed by Dust's private Nix compatibility runtime.
-    lsp_nix_workspace_preferred: BTreeSet<String>,
-    /// Catalog LSP IDs explicitly switched to Dust's direct managed artifact.
-    lsp_managed_preferred: BTreeSet<String>,
-    /// Exact catalog-managed version selected per LSP ID.
-    lsp_managed_versions: BTreeMap<String, String>,
-    tool_installer: ToolInstaller,
-    tool_version_service: ToolVersionService,
-    tool_version_pending: BTreeSet<String>,
-    tool_versions: BTreeMap<String, Result<String, String>>,
+    tooling: super::tooling::ToolingSession,
     lsp_last_errors: BTreeMap<String, String>,
     lsp: LspService,
     active_lsp_server: Option<String>,
@@ -231,13 +220,7 @@ struct InteractiveApplication {
     lsp_completion_owner: Option<(u64, LspProjectionOwner)>,
 
     debugger_session: DebugSession,
-    recovery_directory: PathBuf,
-    recovery_records: Vec<(PathBuf, RecoveryRecord)>,
-    recovery_revisions: HashMap<crate::editor::BufferId, BufferRevision>,
-    recovery_pruned_revisions: HashMap<crate::editor::BufferId, BufferRevision>,
-    recovery_scheduled: HashMap<crate::editor::BufferId, (BufferRevision, Instant)>,
-    recovery_discovery_queued: bool,
-    recovery_cleanup_queued: bool,
+    recovery: super::recovery::RecoverySession,
     next_transaction: u64,
     git: super::git::GitSession,
     execution_validation: Option<PendingExecutionValidation>,
@@ -573,6 +556,7 @@ impl InteractiveApplication {
         );
         let debugger_session =
             DebugSession::new(&configuration.settings.debug, workspace.version());
+        let tooling = super::tooling::ToolingSession::new();
         let mut application = InteractiveApplication {
             state,
             plugin_windows: PluginWindowHost::default(),
@@ -604,14 +588,7 @@ impl InteractiveApplication {
             window_session: WindowSession::new(dashboard_visible, terminal_panel_height),
             terminal_width: 0,
             terminal_height: 0,
-            tools: inspect_tools(),
-            lsp_nix_workspace_preferred: BTreeSet::new(),
-            lsp_managed_preferred: BTreeSet::new(),
-            lsp_managed_versions: BTreeMap::new(),
-            tool_installer: ToolInstaller::start(),
-            tool_version_service: ToolVersionService::start(),
-            tool_version_pending: BTreeSet::new(),
-            tool_versions: BTreeMap::new(),
+            tooling,
             lsp_last_errors: BTreeMap::new(),
             lsp: LspService::new(),
             active_lsp_server: None,
@@ -638,13 +615,7 @@ impl InteractiveApplication {
             lsp_request_owner: None,
             lsp_completion_owner: None,
             debugger_session,
-            recovery_directory: state_directory.join("recovery"),
-            recovery_records: Vec::new(),
-            recovery_revisions: HashMap::new(),
-            recovery_pruned_revisions: HashMap::new(),
-            recovery_scheduled: HashMap::new(),
-            recovery_discovery_queued: false,
-            recovery_cleanup_queued: false,
+            recovery: super::recovery::RecoverySession::new(state_directory.join("recovery")),
             next_transaction: 1_000_000,
             git: super::git::GitSession::default(),
             execution_validation: None,

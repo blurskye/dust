@@ -26,7 +26,8 @@ impl InteractiveApplication {
             });
         let refresh = self.ui.tool_menu.as_ref().is_some_and(|menu| {
             menu.rows.iter().any(|row| {
-                self.tools
+                self.tooling
+                    .entries()
                     .iter()
                     .find(|entry| {
                         entry.definition.id == row.id && entry.definition.kind == ToolKind::Lsp
@@ -55,7 +56,8 @@ impl InteractiveApplication {
         matching_session: bool,
     ) {
         let launchable_server = self
-            .tools
+            .tooling
+            .entries()
             .iter()
             .find(|entry| {
                 entry.definition.kind == ToolKind::Lsp

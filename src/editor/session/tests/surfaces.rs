@@ -587,14 +587,16 @@ fn virtual_read_only_origin_never_queues_save_reload_or_recovery_io() {
         fixture.settings.recovery.enabled = true;
         app.configuration.install_fixture(fixture);
     }
-    app.recovery_discovery_queued = true;
+    app.recovery.skip_maintenance();
     {
         let mut fixture = app.configuration.fixture_snapshot();
         fixture.settings.recovery.cleanup_enabled = false;
         app.configuration.install_fixture(fixture);
     }
     app.schedule_recovery_work();
-    assert!(!app.recovery_scheduled.contains_key(&buffer));
+    assert!(!app.recovery.scheduled().contains_key(&buffer));
+    app.queue_dirty_recovery_before_exit();
+    assert!(!app.recovery.writing(None));
     assert!(app.capture_session().is_none());
 }
 
@@ -714,7 +716,7 @@ fn recovery_debounce_coalesces_revisions_and_clean_state_deletes_last_journal() 
         fixture.settings.recovery.write_debounce_ms = 10;
         app.configuration.install_fixture(fixture);
     }
-    app.recovery_discovery_queued = true;
+    app.recovery.skip_maintenance();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("base"), None);
     app.set_dashboard_visibility(false);
@@ -726,18 +728,14 @@ fn recovery_debounce_coalesces_revisions_and_clean_state_deletes_last_journal() 
     app.schedule_recovery_work();
     let latest_revision = app.state.buffers[buffer].text.revision();
     assert_ne!(first_revision, latest_revision);
-    assert_eq!(app.recovery_scheduled.len(), 1);
-    assert_eq!(app.recovery_scheduled[&buffer].0, latest_revision);
-    assert!(
-        !app.pending_vfs
-            .values()
-            .any(|pending| { matches!(pending, super::PendingVfs::RecoveryWrite { .. }) })
-    );
+    assert_eq!(app.recovery.scheduled().len(), 1);
+    assert_eq!(app.recovery.scheduled()[&buffer].0, latest_revision);
+    assert!(!app.recovery.writing(None));
     std::thread::sleep(Duration::from_millis(12));
     app.schedule_recovery_work();
     wait_vfs(&mut app);
-    let journal = app.recovery_path(buffer);
-    let recovered = crate::files::discover_recovery(&app.recovery_directory);
+    let journal = app.recovery.path(buffer);
+    let recovered = crate::files::discover_recovery(app.recovery.directory());
     assert_eq!(recovered.records.len(), 1);
     assert_eq!(recovered.records[0].1.revision, latest_revision.0);
 
@@ -745,7 +743,7 @@ fn recovery_debounce_coalesces_revisions_and_clean_state_deletes_last_journal() 
     app.schedule_recovery_work();
     wait_vfs(&mut app);
     assert!(!journal.exists());
-    assert!(!app.recovery_revisions.contains_key(&buffer));
+    assert!(!app.recovery.revisions().contains_key(&buffer));
 
     {
         let mut fixture = app.configuration.fixture_snapshot();
@@ -758,7 +756,7 @@ fn recovery_debounce_coalesces_revisions_and_clean_state_deletes_last_journal() 
     app.state.buffers[buffer].mark_saved(revision);
     app.schedule_recovery_work();
     wait_vfs(&mut app);
-    assert!(!app.recovery_path(buffer).exists());
+    assert!(!app.recovery.path(buffer).exists());
 }
 
 #[test]
@@ -770,8 +768,7 @@ fn recovery_delete_completion_cannot_forget_a_newer_queued_write() {
         fixture.settings.recovery.cleanup_enabled = false;
         app.configuration.install_fixture(fixture);
     }
-    app.recovery_discovery_queued = true;
-    app.recovery_cleanup_queued = true;
+    app.recovery.skip_maintenance();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("base"), None);
     app.set_dashboard_visibility(false);
@@ -783,28 +780,21 @@ fn recovery_delete_completion_cannot_forget_a_newer_queued_write() {
     let saved_revision = app.state.buffers[buffer].text.revision();
     app.state.buffers[buffer].mark_saved(saved_revision);
     app.schedule_recovery_work();
-    assert!(
-        app.pending_vfs
-            .values()
-            .any(|pending| { matches!(pending, super::PendingVfs::RecoveryDelete { .. }) })
-    );
+    assert!(app.recovery.deleting());
 
     app.invoke_insert_text("B".into());
     let latest = app.state.buffers[buffer].text.revision();
     app.schedule_recovery_work();
-    assert_eq!(app.recovery_revisions.get(&buffer), Some(&latest));
+    assert_eq!(app.recovery.revisions().get(&buffer), Some(&latest));
+    app.recovery.check_foreign_completions();
     wait_vfs(&mut app);
 
-    let recovered = crate::files::discover_recovery(&app.recovery_directory);
+    let recovered = crate::files::discover_recovery(app.recovery.directory());
     assert_eq!(recovered.records.len(), 1);
     assert_eq!(recovered.records[0].1.revision, latest.0);
-    assert_eq!(app.recovery_revisions.get(&buffer), Some(&latest));
+    assert_eq!(app.recovery.revisions().get(&buffer), Some(&latest));
     app.schedule_recovery_work();
-    assert!(
-        !app.pending_vfs
-            .values()
-            .any(|pending| { matches!(pending, super::PendingVfs::RecoveryWrite { .. }) })
-    );
+    assert!(!app.recovery.writing(None));
 }
 
 #[test]
@@ -817,8 +807,7 @@ fn retention_pruning_suppresses_only_the_pruned_live_revision_without_churn() {
         fixture.settings.recovery.maximum_age_days = 0;
         app.configuration.install_fixture(fixture);
     }
-    app.recovery_discovery_queued = true;
-    app.recovery_cleanup_queued = true;
+    app.recovery.skip_maintenance();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("base"), None);
     let buffer = app.state.active_buffer_id().expect("buffer");
@@ -828,25 +817,16 @@ fn retention_pruning_suppresses_only_the_pruned_live_revision_without_churn() {
     wait_vfs(&mut app);
     app.schedule_recovery_work();
     wait_vfs(&mut app);
-    assert!(!app.recovery_path(buffer).exists());
-    assert_eq!(
-        app.recovery_pruned_revisions.get(&buffer),
-        Some(&pruned_revision)
-    );
+    assert!(!app.recovery.path(buffer).exists());
+    assert_eq!(app.recovery.pruned().get(&buffer), Some(&pruned_revision));
     app.schedule_recovery_work();
-    assert!(
-        !app.pending_vfs
-            .values()
-            .any(|pending| { matches!(pending, super::PendingVfs::RecoveryWrite { .. }) })
-    );
+    assert!(!app.recovery.writing(None));
 
     app.invoke_insert_text("B".into());
     let newer = app.state.buffers[buffer].text.revision();
     app.schedule_recovery_work();
     assert_ne!(newer, pruned_revision);
-    assert!(app.pending_vfs.values().any(|pending| {
-        matches!(pending, super::PendingVfs::RecoveryWrite { revision, .. } if *revision == newer)
-    }));
+    assert!(app.recovery.writing(Some(newer)));
 }
 
 #[test]
@@ -861,7 +841,7 @@ fn disabled_recovery_policy_schedules_no_work() {
         .open_text(crate::editor::text::TextBuffer::from_text("base"), None);
     app.invoke_insert_text("X".into());
     app.schedule_recovery_work();
-    assert!(app.recovery_scheduled.is_empty());
+    assert!(app.recovery.scheduled().is_empty());
     assert!(app.pending_vfs.is_empty());
 }
 

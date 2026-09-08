@@ -975,7 +975,7 @@ fn same_session_root_replacement_cancels_all_protected_action_kinds() {
                         &app.configuration.settings().terminals,
                         app.configuration.binding_revision(),
                         &app.workspace,
-                        &app.tools,
+                        &app.tooling.entries(),
                     )
                     .unwrap();
                 super::DeferredExecution::StartDebug(intent)

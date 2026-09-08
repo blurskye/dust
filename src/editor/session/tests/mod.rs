@@ -35,11 +35,10 @@ use tempfile::tempdir;
 
 use super::{
     DeferredExecution, InteractiveApplication, KeymapOperation, LSP_INLAY_HINT_WARMUP_RETRY_LIMIT,
-    LspProjectionOwner, LspRuntimeSource, PendingExecutionPreflight, PendingVfs,
-    build_restored_layout, capture_persisted_layout, compile_keymaps,
-    compile_keymaps_with_plugin_catalog, configuration_generation_is_newer,
-    lsp_runtime_source_allowed_on_host, reload_keymaps, resolve_configuration,
-    validate_configured_commands,
+    LspProjectionOwner, LspRuntimeSource, PendingExecutionPreflight, build_restored_layout,
+    capture_persisted_layout, compile_keymaps, compile_keymaps_with_plugin_catalog,
+    configuration_generation_is_newer, lsp_runtime_source_allowed_on_host, reload_keymaps,
+    resolve_configuration, validate_configured_commands,
 };
 use crate::editor::{AppEffect, PickerKind, StartupTarget};
 use crate::{

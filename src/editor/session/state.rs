@@ -49,42 +49,6 @@ pub(in crate::editor::session) struct LspAutostartObservation {
     pub(in crate::editor::session) launchable_server: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::editor::session) enum LspRuntimeSource {
-    Path,
-    Managed,
-    Nix,
-}
-
-impl LspRuntimeSource {
-    pub(in crate::editor::session) const fn key(self) -> &'static str {
-        match self {
-            Self::Path => "path",
-            Self::Managed => "managed",
-            Self::Nix => "nix",
-        }
-    }
-
-    pub(in crate::editor::session) const fn label(self) -> &'static str {
-        match self {
-            Self::Path => "PATH",
-            Self::Managed => "Dust download",
-            Self::Nix => "Dust via Nix",
-        }
-    }
-}
-
-pub(in crate::editor::session) const fn lsp_runtime_source_allowed_on_host(
-    source: LspRuntimeSource,
-    nixos_host: bool,
-) -> bool {
-    match source {
-        LspRuntimeSource::Path => true,
-        LspRuntimeSource::Managed => !nixos_host,
-        LspRuntimeSource::Nix => nixos_host,
-    }
-}
-
 #[derive(Clone, Debug)]
 pub(in crate::editor::session) enum LspLaunch {
     Direct {
@@ -152,17 +116,6 @@ impl LspLaunch {
 pub(in crate::editor::session) enum LspLaunchSource {
     Direct { executable: PathBuf, managed: bool },
     NixWorkspace { nix: PathBuf, shell: String },
-}
-
-pub(in crate::editor::session) fn nix_workspace_shell_for_host(
-    definition: &ToolDefinition,
-    fallback_enabled: bool,
-    nixos_host: bool,
-) -> Option<&str> {
-    fallback_enabled
-        .then_some(())
-        .filter(|()| nixos_host)
-        .and_then(|()| nix_lsp_shell(definition))
 }
 
 #[derive(Clone, Debug)]
@@ -478,15 +431,5 @@ pub(in crate::editor::session) enum PendingVfs {
     Completion {
         key: crate::editor::session::input::PromptCompletionKey,
     },
-    RecoveryDiscovery,
-    RecoveryCleanup,
-    RecoveryWrite {
-        buffer: crate::editor::BufferId,
-        revision: BufferRevision,
-    },
     CrashDelete,
-    RecoveryDelete {
-        path: PathBuf,
-        buffer: Option<(crate::editor::BufferId, BufferRevision)>,
-    },
 }

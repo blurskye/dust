@@ -47,10 +47,10 @@ impl InteractiveApplication {
             return;
         };
         let entry = if let Some(id) = requested.as_ref() {
-            let entry = self
-                .tools
-                .iter()
-                .find(|entry| entry.definition.id == *id && entry.definition.kind == ToolKind::Lsp);
+            let entry =
+                self.tooling.entries().iter().find(|entry| {
+                    entry.definition.id == *id && entry.definition.kind == ToolKind::Lsp
+                });
             if !entry.is_some_and(|entry| entry.definition.supports_language(&document.language_id))
             {
                 self.show_error(format!(
@@ -61,7 +61,8 @@ impl InteractiveApplication {
             }
             entry
         } else {
-            self.tools
+            self.tooling
+                .entries()
                 .iter()
                 .find(|entry| {
                     entry.definition.kind == ToolKind::Lsp
@@ -71,7 +72,7 @@ impl InteractiveApplication {
                         && matches!(entry.status, ToolStatus::Installed(_))
                 })
                 .or_else(|| {
-                    self.tools.iter().find(|entry| {
+                    self.tooling.entries().iter().find(|entry| {
                         entry.definition.kind == ToolKind::Lsp
                             && entry
                                 .definition
@@ -107,7 +108,7 @@ impl InteractiveApplication {
                         LspRuntimeSource::Path,
                         Some(&executable),
                     );
-                    match self.tool_versions.get(&key) {
+                    match self.tooling.version(&key) {
                         Some(Ok(_)) => {}
                         Some(Err(_)) => {
                             self.show_error(Self::unavailable_rust_analyzer_message());

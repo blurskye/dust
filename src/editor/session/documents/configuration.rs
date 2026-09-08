@@ -104,14 +104,10 @@ impl InteractiveApplication {
                 BTreeMap::new(),
             );
         }
-        if candidate.view().settings.recovery != self.configuration.settings().recovery {
-            self.recovery_discovery_queued = false;
-            self.recovery_cleanup_queued = false;
-            self.recovery_pruned_revisions.clear();
-        }
-        if !candidate.view().settings.recovery.enabled {
-            self.recovery_scheduled.clear();
-        }
+        self.recovery.configure(
+            &self.configuration.settings().recovery,
+            &candidate.view().settings.recovery,
+        );
         if self.window_session.dashboard_visible()
             && !candidate.view().settings.startup.show_dashboard
         {

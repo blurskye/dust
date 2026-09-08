@@ -1,6 +1,25 @@
 use super::*;
 
 impl InteractiveApplication {
+    pub(in crate::editor::session) fn schedule_recovery_work(&mut self) {
+        self.recovery.schedule(
+            &self.state,
+            &self.configuration.settings().recovery,
+            Instant::now(),
+            false,
+            self.documents.recovery_io(),
+        );
+    }
+    pub(in crate::editor::session) fn queue_dirty_recovery_before_exit(&mut self) {
+        self.recovery.schedule(
+            &self.state,
+            &self.configuration.settings().recovery,
+            Instant::now(),
+            true,
+            self.documents.recovery_io(),
+        );
+    }
+
     pub(in crate::editor::session) fn process_vfs_results(&mut self) {
         loop {
             let result = match self
@@ -41,6 +60,7 @@ impl InteractiveApplication {
                     for id in requests {
                         self.pending_vfs.remove(&id);
                     }
+                    self.recovery.stopped();
                     self.search.clear_preview();
                     self.explorer.clear_preview();
                     self.explorer.retire_intents();
@@ -91,113 +111,34 @@ impl InteractiveApplication {
                     break;
                 }
             };
+            let result = match self.recovery.accept(result) {
+                Ok(update) => {
+                    use crate::editor::session::recovery::RecoveryUpdate;
+                    match update {
+                        RecoveryUpdate::Quiet | RecoveryUpdate::Pruned(0) => {}
+                        RecoveryUpdate::Error(error) => self.show_error(error),
+                        RecoveryUpdate::Pruned(count) => self.notify_message(
+                            self.message("recovery_pruned", &[("count", count.to_string())]),
+                            false,
+                        ),
+                        RecoveryUpdate::Discarded => {
+                            self.notify_message(self.message("recovery_discarded", &[]), false)
+                        }
+                    }
+                    continue;
+                }
+                Err(result) => result,
+            };
             match result {
-                VfsResult::RecoveryDiscovered { id, discovery } => {
-                    if matches!(
-                        self.pending_vfs.remove(&id),
-                        Some(PendingVfs::RecoveryDiscovery)
-                    ) {
-                        self.recovery_records = discovery.records;
-                        if !discovery.diagnostics.is_empty() {
-                            self.show_error(discovery.diagnostics.join("; "));
-                        }
-                    }
+                VfsResult::RecoveryDiscovered { .. }
+                | VfsResult::RecoveryCleaned { .. }
+                | VfsResult::RecoveryWritten { .. } => {
+                    self.show_error(self.message("unexpected_completion", &[]))
                 }
-                VfsResult::RecoveryCleaned { id, cleanup } => {
-                    if matches!(
-                        self.pending_vfs.remove(&id),
-                        Some(PendingVfs::RecoveryCleanup)
-                    ) {
-                        self.recovery_records
-                            .retain(|(path, _)| !cleanup.deleted.contains(path));
-                        let pruned_live = self
-                            .recovery_revisions
-                            .iter()
-                            .filter_map(|(buffer, revision)| {
-                                let path = self.recovery_path(*buffer);
-                                let newer_write_pending =
-                                    self.pending_vfs.values().any(|pending| {
-                                        matches!(
-                                            pending,
-                                            PendingVfs::RecoveryWrite {
-                                                buffer: pending_buffer,
-                                                ..
-                                            } if pending_buffer == buffer
-                                        )
-                                    });
-                                (cleanup.deleted.contains(&path) && !newer_write_pending)
-                                    .then_some((*buffer, *revision))
-                            })
-                            .collect::<Vec<_>>();
-                        for (buffer, revision) in pruned_live {
-                            self.recovery_revisions.remove(&buffer);
-                            self.recovery_pruned_revisions.insert(buffer, revision);
-                        }
-                        if !cleanup.diagnostics.is_empty() {
-                            self.show_error(cleanup.diagnostics.join("; "));
-                        } else if !cleanup.deleted.is_empty() {
-                            self.notify_message(
-                                self.message(
-                                    "recovery_pruned",
-                                    &[("count", cleanup.deleted.len().to_string())],
-                                ),
-                                false,
-                            );
-                        }
-                    }
-                }
-                VfsResult::RecoveryWritten {
-                    id,
-                    path: _,
-                    result,
-                } => {
-                    let pending = self.pending_vfs.remove(&id);
-                    match (pending, result) {
-                        (Some(PendingVfs::RecoveryWrite { .. }), Ok(())) => {
-                            self.recovery_cleanup_queued = false;
-                        }
-                        (Some(PendingVfs::RecoveryWrite { buffer, revision }), Err(error)) => {
-                            if self.recovery_revisions.get(&buffer) == Some(&revision) {
-                                self.recovery_revisions.remove(&buffer);
-                            }
-                            self.show_error(error);
-                        }
-                        (_, Err(error)) => self.show_error(error),
-                        _ => self.show_error(self.message("unexpected_completion", &[])),
-                    }
-                }
-                VfsResult::Deleted {
-                    id,
-                    path: _,
-                    result,
-                } => {
-                    let pending = self.pending_vfs.remove(&id);
-                    match (pending, result) {
+                VfsResult::Deleted { id, result, .. } => {
+                    match (self.pending_vfs.remove(&id), result) {
                         (Some(PendingVfs::CrashDelete), Ok(())) => {
-                            self.notify_message(self.message("crash_cleared", &[]), false);
-                        }
-                        (
-                            Some(PendingVfs::RecoveryDelete {
-                                path: expected,
-                                buffer,
-                            }),
-                            Ok(()),
-                        ) => {
-                            self.recovery_records
-                                .retain(|(record_path, _)| *record_path != expected);
-                            if let Some((buffer, expected_revision)) = buffer {
-                                if self.recovery_revisions.get(&buffer) == Some(&expected_revision)
-                                {
-                                    self.recovery_revisions.remove(&buffer);
-                                }
-                                if self.recovery_pruned_revisions.get(&buffer)
-                                    == Some(&expected_revision)
-                                {
-                                    self.recovery_pruned_revisions.remove(&buffer);
-                                }
-                            } else {
-                                self.notify_message(self.message("recovery_discarded", &[]), false);
-                            }
+                            self.notify_message(self.message("crash_cleared", &[]), false)
                         }
                         (_, Err(error)) => self.show_error(error),
                         _ => self.show_error(self.message("unexpected_completion", &[])),

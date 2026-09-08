@@ -10,7 +10,7 @@ impl InteractiveApplication {
             &self.configuration.settings().terminals,
             self.configuration.binding_revision(),
             &self.workspace,
-            &self.tools,
+            &self.tooling.entries(),
         ) {
             Ok(intent) => self.defer_trusted_execution(DeferredExecution::StartDebug(intent)),
             Err(error) => self.show_error(error),
@@ -36,7 +36,7 @@ impl InteractiveApplication {
             &self.configuration.settings().terminals,
             self.configuration.binding_revision(),
             &self.workspace,
-            &self.tools,
+            &self.tooling.entries(),
         ) {
             Ok(intent) => self.defer_trusted_execution(DeferredExecution::StartDebug(intent)),
             Err(error) => self.show_error(error),
@@ -67,7 +67,7 @@ impl InteractiveApplication {
                 .execution_lane(crate::editor::session::workspace::DiscoveryKind::Debugger),
             &self.configuration.settings().debug,
             self.configuration.binding_revision(),
-            &self.tools,
+            &self.tooling.entries(),
         ) {
             Ok(Some(name)) => {
                 self.notify_message(self.message("dap_started", &[("adapter", name)]), false)

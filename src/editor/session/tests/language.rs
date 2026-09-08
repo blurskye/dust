@@ -10,10 +10,10 @@ fn installed_language_server_autostarts_after_workspace_trust_is_exact() {
         Some(path),
     );
     app.set_dashboard_visibility(false);
-    app.tools
-        .retain(|entry| entry.definition.kind != crate::tools::ToolKind::Lsp);
+    app.tooling
+        .fixture_retain(|entry| entry.definition.kind != crate::tools::ToolKind::Lsp);
     let false_executable = crate::tools::discover_executable("false").expect("false executable");
-    app.tools.push(crate::tools::ToolEntry {
+    app.tooling.fixture_insert(crate::tools::ToolEntry {
         definition: crate::tools::ToolDefinition {
             id: "automatic-rust".into(),
             name: "Automatic Rust".into(),
@@ -72,10 +72,10 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
     let nested = fs::canonicalize(nested).unwrap();
     app.state
         .open_text(TextBuffer::from_text("fn main() {}"), Some(source));
-    app.tools
-        .retain(|entry| entry.definition.kind != ToolKind::Lsp);
+    app.tooling
+        .fixture_retain(|entry| entry.definition.kind != ToolKind::Lsp);
     let false_executable = crate::tools::discover_executable("false").expect("false executable");
-    app.tools.push(crate::tools::ToolEntry {
+    app.tooling.fixture_insert(crate::tools::ToolEntry {
         definition: crate::tools::ToolDefinition {
             id: "nested-rust".into(),
             name: "Nested Rust".into(),
@@ -153,10 +153,10 @@ fn nested_marker_backed_project_gets_its_own_dap_preflight_root() {
     let nested = fs::canonicalize(nested).unwrap();
     app.state
         .open_text(TextBuffer::from_text("fn main() {}"), Some(source.clone()));
-    app.tools
-        .retain(|entry| entry.definition.kind != ToolKind::Dap);
+    app.tooling
+        .fixture_retain(|entry| entry.definition.kind != ToolKind::Dap);
     let false_executable = crate::tools::discover_executable("false").expect("false executable");
-    app.tools.push(crate::tools::ToolEntry {
+    app.tooling.fixture_insert(crate::tools::ToolEntry {
         definition: crate::tools::ToolDefinition {
             id: "nested-rust-dap".into(),
             name: "Nested Rust DAP".into(),
@@ -213,7 +213,7 @@ fn untrusted_workspace_blocks_project_local_language_server_launch() {
         b"not executable",
     )
     .expect("project-local server");
-    app.tools.push(crate::tools::ToolEntry {
+    app.tooling.fixture_insert(crate::tools::ToolEntry {
         definition: crate::tools::ToolDefinition {
             id: "project-local".into(),
             name: "Project local".into(),
@@ -662,7 +662,8 @@ fn failed_rustup_proxy_probe_is_not_a_launchable_path_runtime() {
     let proxy = directory.path().join("rust-analyzer");
     fs::hard_link(&rustup, &proxy).expect("rustup proxy");
     let mut definition = app
-        .tools
+        .tooling
+        .entries()
         .iter()
         .find(|entry| entry.definition.id == "rust-analyzer")
         .expect("rust-analyzer catalog entry")
@@ -672,8 +673,8 @@ fn failed_rustup_proxy_probe_is_not_a_launchable_path_runtime() {
     assert!(app.selected_lsp_runtime_available(&definition));
     let key =
         InteractiveApplication::tool_version_key(&definition, LspRuntimeSource::Path, Some(&proxy));
-    app.tool_versions
-        .insert(key, Err("active toolchain has no rust-analyzer".into()));
+    app.tooling
+        .fixture_version(key, Err("active toolchain has no rust-analyzer".into()));
     assert!(!app.selected_lsp_runtime_available(&definition));
     let path_runtime = app
         .runtime_options_for(&definition)
@@ -687,13 +688,16 @@ fn failed_rustup_proxy_probe_is_not_a_launchable_path_runtime() {
     let message = InteractiveApplication::unavailable_rust_analyzer_message();
     assert!(message.contains("Press i in :lsp"));
     assert!(!message.contains("version probe exited"));
+    app.tooling
+        .check_probe_worker_replacement(&definition, proxy);
 }
 
 #[test]
 fn lsp_status_never_labels_failed_or_backing_off_sessions_as_starting() {
     let mut app = app();
     let definition = app
-        .tools
+        .tooling
+        .entries()
         .iter()
         .find(|entry| entry.definition.id == "rust-analyzer")
         .expect("rust-analyzer catalog entry")
@@ -767,10 +771,10 @@ fn lsp_tool_menu_reports_real_path_version_executable_and_lifecycle() {
     app.state
         .open_text(TextBuffer::from_text("fn main() {}"), Some(source));
     app.set_dashboard_visibility(false);
-    app.tools
-        .retain(|entry| entry.definition.kind != ToolKind::Lsp);
+    app.tooling
+        .fixture_retain(|entry| entry.definition.kind != ToolKind::Lsp);
     let echo = crate::tools::discover_executable("echo").expect("echo executable");
-    app.tools.push(crate::tools::ToolEntry {
+    app.tooling.fixture_insert(crate::tools::ToolEntry {
         definition: crate::tools::ToolDefinition {
             id: "observed-rust".into(),
             name: "Observed Rust".into(),
@@ -811,10 +815,10 @@ fn lsp_tool_menu_reports_real_path_version_executable_and_lifecycle() {
 #[test]
 fn installed_path_server_without_a_qualified_probe_never_says_not_probed() {
     let mut app = app();
-    app.tools
-        .retain(|entry| entry.definition.kind != ToolKind::Lsp);
+    app.tooling
+        .fixture_retain(|entry| entry.definition.kind != ToolKind::Lsp);
     let echo = crate::tools::discover_executable("echo").expect("echo executable");
-    app.tools.push(crate::tools::ToolEntry {
+    app.tooling.fixture_insert(crate::tools::ToolEntry {
         definition: crate::tools::ToolDefinition {
             id: "external-no-version-command".into(),
             name: "External Server".into(),
@@ -844,9 +848,9 @@ fn installed_path_server_without_a_qualified_probe_never_says_not_probed() {
 #[test]
 fn lsp_tool_menu_hides_missing_noninstallable_compatibility_entries() {
     let mut app = app();
-    app.tools
-        .retain(|entry| entry.definition.kind != ToolKind::Lsp);
-    app.tools.push(crate::tools::ToolEntry {
+    app.tooling
+        .fixture_retain(|entry| entry.definition.kind != ToolKind::Lsp);
+    app.tooling.fixture_insert(crate::tools::ToolEntry {
         definition: crate::tools::ToolDefinition {
             id: "missing-catalog-server".into(),
             name: "Missing Catalog Server".into(),
@@ -873,9 +877,9 @@ fn lsp_tool_menu_hides_missing_noninstallable_compatibility_entries() {
 #[test]
 fn enter_installs_a_missing_managed_lsp_instead_of_trying_to_start_it() {
     let mut app = app();
-    app.tools
-        .retain(|entry| entry.definition.kind != ToolKind::Lsp);
-    app.tools.push(crate::tools::ToolEntry {
+    app.tooling
+        .fixture_retain(|entry| entry.definition.kind != ToolKind::Lsp);
+    app.tooling.fixture_insert(crate::tools::ToolEntry {
         definition: crate::tools::ToolDefinition {
             id: "installable-lsp".into(),
             name: "Installable LSP".into(),
@@ -998,10 +1002,15 @@ fn lsp_tool_menu_is_registry_driven_filterable_and_configurable() {
             .unwrap()
             .selected = 1;
         app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Enter));
-        assert!(app.lsp_nix_workspace_preferred.contains("rust-analyzer"));
+        assert!(
+            app.tooling
+                .metadata()
+                .get("lsp.runtime.rust-analyzer")
+                .is_some_and(|s| s == "nix")
+        );
         assert_eq!(
-            app.lsp_managed_versions
-                .get("rust-analyzer")
+            app.tooling
+                .managed_version("rust-analyzer")
                 .map(String::as_str),
             Some("0.3.3025")
         );
@@ -1049,10 +1058,15 @@ fn lsp_tool_menu_is_registry_driven_filterable_and_configurable() {
             .unwrap()
             .selected = older;
         app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Enter));
-        assert!(app.lsp_managed_preferred.contains("rust-analyzer"));
+        assert!(
+            app.tooling
+                .metadata()
+                .get("lsp.runtime.rust-analyzer")
+                .is_some_and(|s| s == "managed")
+        );
         assert_eq!(
-            app.lsp_managed_versions
-                .get("rust-analyzer")
+            app.tooling
+                .managed_version("rust-analyzer")
                 .map(String::as_str),
             Some("0.3.3008")
         );

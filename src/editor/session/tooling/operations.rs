@@ -8,35 +8,13 @@ impl InteractiveApplication {
             .as_ref()
             .map_or_else(|| "all".into(), |menu| menu.category.clone());
         let selected = self.selected_tool_id();
-        self.tools = inspect_tools();
-        self.tool_version_service = ToolVersionService::start();
-        self.tool_versions.clear();
-        self.tool_version_pending.clear();
+        self.tooling.refresh();
         self.queue_tool_version_probes(&category);
         self.rebuild_tool_menu(&category, selected.as_deref());
     }
 
     pub(in crate::editor::session) fn process_tool_version_results(&mut self) {
-        let rustup_key = self
-            .tools
-            .iter()
-            .find(|entry| entry.definition.id == "rust-analyzer")
-            .and_then(|entry| {
-                let path = discover_executable(&entry.definition.executable)?;
-                Self::rust_analyzer_is_rustup_proxy(&path).then(|| {
-                    Self::tool_version_key(&entry.definition, LspRuntimeSource::Path, Some(&path))
-                })
-            });
-        let mut changed = false;
-        let mut unavailable_rustup = false;
-        while let Some(result) = self.tool_version_service.try_result() {
-            self.tool_version_pending.remove(&result.id);
-            if rustup_key.as_ref() == Some(&result.id) && result.result.is_err() {
-                unavailable_rustup = true;
-            }
-            self.tool_versions.insert(result.id, result.result);
-            changed = true;
-        }
+        let (changed, unavailable_rustup) = self.tooling.poll_versions();
         if changed {
             self.lsp_autostart_observation = None;
             let category = self.ui.tool_menu.as_ref().map(|menu| menu.category.clone());
@@ -68,14 +46,18 @@ impl InteractiveApplication {
 
     pub(in crate::editor::session) fn activate_tool_by_id(&mut self, id: &str) {
         let Some(index) = self
-            .tools
+            .tooling
+            .entries()
             .iter()
             .position(|entry| entry.definition.id == id)
         else {
             return;
         };
-        let definition = self.tools[index].definition.clone();
-        let path_available = matches!(self.tools[index].status, ToolStatus::Installed(_));
+        let definition = self.tooling.entries()[index].definition.clone();
+        let path_available = matches!(
+            self.tooling.entries()[index].status,
+            ToolStatus::Installed(_)
+        );
         if definition.kind == ToolKind::Lsp {
             if self.selected_lsp_runtime_available(&definition) {
                 if let Some((_, document)) = self.active_lsp_document()
@@ -104,7 +86,7 @@ impl InteractiveApplication {
                     && Self::rust_analyzer_is_rustup_proxy(&path)
                 {
                     let key = Self::tool_version_key(&definition, source, Some(&path));
-                    if matches!(self.tool_versions.get(&key), Some(Err(_))) {
+                    if matches!(self.tooling.version(&key), Some(Err(_))) {
                         self.show_error(Self::unavailable_rust_analyzer_message());
                         return;
                     }
@@ -129,7 +111,7 @@ impl InteractiveApplication {
             }
             return;
         }
-        if let ToolStatus::Unavailable(diagnostic) = &self.tools[index].status {
+        if let ToolStatus::Unavailable(diagnostic) = &self.tooling.entries()[index].status {
             self.show_error(diagnostic.clone());
             return;
         }
@@ -141,7 +123,8 @@ impl InteractiveApplication {
             return;
         };
         let focused = self
-            .tools
+            .tooling
+            .entries()
             .iter()
             .find(|entry| entry.definition.id == id)
             .filter(|entry| entry.definition.kind == ToolKind::Lsp)
@@ -155,7 +138,10 @@ impl InteractiveApplication {
         if let Some((source, Some(version))) = focused
             && matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix)
         {
-            self.lsp_managed_versions.insert(id.clone(), version);
+            if let Err(error) = self.tooling.select_version(&id, version) {
+                self.show_error(error);
+                return;
+            }
         }
         self.install_tool_by_id(&id, source);
     }
@@ -174,13 +160,14 @@ impl InteractiveApplication {
         authorization: Option<ExecutionAuthorization>,
     ) {
         let Some(index) = self
-            .tools
+            .tooling
+            .entries()
             .iter()
             .position(|entry| entry.definition.id == id)
         else {
             return;
         };
-        let base_definition = self.tools[index].definition.clone();
+        let base_definition = self.tooling.entries()[index].definition.clone();
         let source = source.unwrap_or(LspRuntimeSource::Managed);
         if base_definition.kind == ToolKind::Lsp
             && !lsp_runtime_source_allowed_on_host(source, is_nixos_host())
@@ -207,7 +194,7 @@ impl InteractiveApplication {
                 }
                 let key = Self::tool_version_key(&definition, source, Some(&proxy));
                 let rustup = proxy.with_file_name("rustup");
-                (matches!(self.tool_versions.get(&key), Some(Err(_))) && rustup.is_file())
+                (matches!(self.tooling.version(&key), Some(Err(_))) && rustup.is_file())
                     .then_some((rustup, proxy))
             })
         } else {
@@ -231,8 +218,10 @@ impl InteractiveApplication {
                 }
                 LspRuntimeSource::Path => {}
                 LspRuntimeSource::Managed
-                    if self
-                        .managed_variant_installed(&self.tools[index].definition, &definition) =>
+                    if self.managed_variant_installed(
+                        &self.tooling.entries()[index].definition,
+                        &definition,
+                    ) =>
                 {
                     self.notify_message(
                         format!(
@@ -247,7 +236,7 @@ impl InteractiveApplication {
                 LspRuntimeSource::Nix
                     if nix_lsp_profile_installed(&definition)
                         && self.managed_variant_installed(
-                            &self.tools[index].definition,
+                            &self.tooling.entries()[index].definition,
                             &definition,
                         ) =>
                 {
@@ -294,13 +283,12 @@ impl InteractiveApplication {
                 self.show_error("rustup installation requires an active workspace root");
                 return;
             };
-            self.tool_installer.install_rustup_component(
-                definition.clone(),
+            self.tooling.install(ToolInstall::Rustup {
+                definition: definition.clone(),
                 rustup,
                 proxy,
                 cwd,
-                "rust-analyzer".into(),
-            )
+            })
         } else if definition.kind == ToolKind::Lsp && source == LspRuntimeSource::Nix {
             let Some(nix) = discover_executable("nix") else {
                 self.show_error("Dust via Nix is unavailable: nix was not found");
@@ -310,9 +298,10 @@ impl InteractiveApplication {
                 self.show_error("no verified upstream artifact or Dust Nix runtime is available for this language server");
                 return;
             }
-            self.tool_installer.install_nix(definition.clone(), nix)
+            self.tooling
+                .install(ToolInstall::Nix(definition.clone(), nix))
         } else {
-            if let ToolStatus::Unavailable(diagnostic) = &self.tools[index].status {
+            if let ToolStatus::Unavailable(diagnostic) = &self.tooling.entries()[index].status {
                 self.show_error(diagnostic.clone());
                 return;
             }
@@ -320,15 +309,11 @@ impl InteractiveApplication {
                 self.show_error(self.message("tool_no_installer", &[("tool", definition.name)]));
                 return;
             }
-            self.tool_installer.install(definition.clone())
+            self.tooling
+                .install(ToolInstall::Managed(definition.clone()))
         };
         match operation {
             Ok(()) => {
-                self.tools[index].status = ToolStatus::Installing {
-                    phase: "preparing".into(),
-                    completed: 0,
-                    total: None,
-                };
                 self.notify_message(
                     format!(
                         "installing {} {} {}…",
@@ -364,13 +349,14 @@ impl InteractiveApplication {
             return;
         };
         let Some(index) = self
-            .tools
+            .tooling
+            .entries()
             .iter()
             .position(|entry| entry.definition.id == id)
         else {
             return;
         };
-        let base_definition = self.tools[index].definition.clone();
+        let base_definition = self.tooling.entries()[index].definition.clone();
         let source = if base_definition.kind == ToolKind::Lsp {
             self.focused_runtime_source(&base_definition)
         } else {
@@ -409,7 +395,8 @@ impl InteractiveApplication {
                         return;
                     }
                     self.stop_lsp_sessions_for_server(&id);
-                    self.tool_installer.uninstall(definition.clone())
+                    self.tooling
+                        .install(ToolInstall::Uninstall(definition.clone(), false))
                 }
                 LspRuntimeSource::Nix => {
                     if !nix_lsp_profile_installed(&definition)
@@ -422,16 +409,12 @@ impl InteractiveApplication {
                         return;
                     }
                     self.stop_lsp_sessions_for_server(&id);
-                    self.tool_installer.uninstall_nix(definition.clone())
+                    self.tooling
+                        .install(ToolInstall::Uninstall(definition.clone(), true))
                 }
             };
         match operation {
             Ok(()) => {
-                self.tools[index].status = ToolStatus::Installing {
-                    phase: "uninstalling".into(),
-                    completed: 0,
-                    total: None,
-                };
                 self.notify_message(
                     format!(
                         "uninstalling {} {} runtime…",
@@ -480,44 +463,15 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn process_tool_progress(&mut self) {
-        let mut changed = None;
-        while let Ok(Some(progress)) = self.tool_installer.try_progress() {
-            let Some(entry) = self
-                .tools
-                .iter_mut()
-                .find(|entry| entry.definition.id == progress.id)
-            else {
-                continue;
-            };
-            entry.status = ToolStatus::Installing {
-                phase: progress.phase,
-                completed: progress.completed,
-                total: progress.total,
-            };
-            changed = Some(entry.definition.id.clone());
-        }
+        let changed = self.tooling.poll_progress();
         if let (Some(id), Some(menu)) = (changed, &self.ui.tool_menu) {
             self.rebuild_tool_menu(&menu.category.clone(), Some(&id));
         }
     }
 
     pub(in crate::editor::session) fn process_tool_results(&mut self) {
-        while let Ok(Some(result)) = self.tool_installer.try_result() {
-            let name = self
-                .tools
-                .iter()
-                .find(|entry| entry.definition.id == result.id)
-                .map_or_else(|| result.id.clone(), |entry| entry.definition.name.clone());
-            let diagnostic = result.result.err();
-            self.tools = inspect_tools();
-            if let Some(diagnostic) = diagnostic {
-                if let Some(entry) = self
-                    .tools
-                    .iter_mut()
-                    .find(|entry| entry.definition.id == result.id)
-                {
-                    entry.status = ToolStatus::Failed(diagnostic.clone());
-                }
+        while let Some((name, result)) = self.tooling.poll_install() {
+            if let Err(diagnostic) = result.result {
                 self.show_error(format!(
                     "{} {} failed: {diagnostic}",
                     match result.operation {
@@ -554,12 +508,6 @@ impl InteractiveApplication {
                 self.lsp_last_errors.remove(&result.id);
             }
             self.lsp_autostart_observation = None;
-            self.tool_version_service = ToolVersionService::start();
-            let prefix = format!("{}:", result.id);
-            self.tool_versions
-                .retain(|key, _| !key.starts_with(&prefix));
-            self.tool_version_pending
-                .retain(|key| !key.starts_with(&prefix));
             if let Some(menu) = &self.ui.tool_menu {
                 let category = menu.category.clone();
                 self.queue_tool_version_probes(&category);
@@ -589,14 +537,5 @@ pub(in crate::editor::session) fn tool_install_progress_label(
             completed.saturating_mul(100).min(total.saturating_mul(100)) / total
         ),
         None => phase.into(),
-    }
-}
-
-pub(in crate::editor::session) const fn tool_kind_key(kind: ToolKind) -> &'static str {
-    match kind {
-        ToolKind::Lsp => "lsp",
-        ToolKind::Dap => "dap",
-        ToolKind::Formatter => "formatter",
-        ToolKind::Linter => "linter",
     }
 }

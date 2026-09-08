@@ -96,13 +96,13 @@ impl InteractiveApplication {
                 self.notify_message(
                     self.message(
                         "recovery_summary",
-                        &[("count", self.recovery_records.len().to_string())],
+                        &[("count", self.recovery.records().len().to_string())],
                     ),
                     false,
                 );
             }
             AppEffect::RecoveryRecoverLatest => {
-                if let Some((_, record)) = self.recovery_records.last() {
+                if let Some((_, record)) = self.recovery.records().last() {
                     self.state
                         .open_text(TextBuffer::from_text(&record.content), None);
                     self.set_dashboard_visibility(false);
@@ -112,17 +112,10 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::RecoveryDiscardLatest => {
-                if let Some((path, _)) = self.recovery_records.last() {
-                    let path = path.clone();
-                    match self.documents.delete(path.clone()) {
-                        Ok(id) => {
-                            self.pending_vfs
-                                .insert(id, PendingVfs::RecoveryDelete { path, buffer: None });
-                        }
-                        Err(error) => self.show_error(error),
-                    }
-                } else {
-                    self.show_error(self.message("recovery_none", &[]));
+                match self.recovery.discard_latest(self.documents.recovery_io()) {
+                    Ok(true) => {}
+                    Ok(false) => self.show_error(self.message("recovery_none", &[])),
+                    Err(error) => self.show_error(error),
                 }
             }
             AppEffect::SessionSave => {

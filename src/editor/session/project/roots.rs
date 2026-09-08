@@ -39,7 +39,8 @@ impl InteractiveApplication {
                 .any(|state| state.restart_due.is_some())
             || self.debugger_session.is_running()
             || self
-                .tools
+                .tooling
+                .entries()
                 .iter()
                 .any(|tool| matches!(tool.status, ToolStatus::Installing { .. }))
             || self.search.pending()

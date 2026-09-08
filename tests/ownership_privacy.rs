@@ -265,6 +265,9 @@ fn copied_production_tree_enforces_migrated_owner_privacy() {
     );
     let positive = r#"
 fn terminal_domain(owner:&mut super::terminal::TerminalSession) {let _=owner.selected();let _=owner.descriptions();}
+fn recovery_domain(owner:&super::recovery::RecoverySession) {let _=owner.records();}
+fn tooling_domain(owner:&super::tooling::ToolingSession) {let _=owner.entries();let _=owner.metadata();}
+fn recovery_io_domain(owner:&mut super::documents::DocumentSession) {drop(owner.recovery_io());}
 fn git_domain(owner:&super::git::GitSession) {let _=owner.status();let _=owner.hunks();let _=owner.decorations();let _=owner.has_selection();}
 fn debugger_domain(owner:&mut super::debugger::DebugSession) {let _=owner.is_running();let _=owner.persisted_breakpoints();let _=owner.reply_failures();}
 fn debugger_reply_domain(reply:&crate::debugger::DapTerminalReply) {let _=reply.outcome();let _=reply.receipt().outcome();}
@@ -646,6 +649,36 @@ fn legitimate_client(editor: &mut crate::editor::EditorState) { editor.workspace
             "debugger_selection",
             "fn bypass(selection:&mut super::debugger::DebugSelection) {let _=&mut selection.source;}",
             "source",
+            "E0616",
+        ),
+        (
+            "recovery_pending",
+            "fn bypass(owner:&mut super::recovery::RecoverySession) {owner.pending.clear();}",
+            "pending",
+            "E0616",
+        ),
+        (
+            "recovery_revisions",
+            "fn bypass(owner:&mut super::recovery::RecoverySession) {owner.revisions.clear();}",
+            "revisions",
+            "E0616",
+        ),
+        (
+            "recovery_io_loan",
+            "fn bypass(owner:&mut super::documents::DocumentSession) {let loan=owner.recovery_io();owner.close_admission();drop(loan);}",
+            "owner",
+            "E0499",
+        ),
+        (
+            "tooling_installer",
+            "fn bypass(owner:&mut super::tooling::ToolingSession) {let _=&mut owner.installer;}",
+            "installer",
+            "E0616",
+        ),
+        (
+            "tooling_catalog",
+            "fn bypass(owner:&mut super::tooling::ToolingSession) {owner.entries.clear();}",
+            "entries",
             "E0616",
         ),
         (

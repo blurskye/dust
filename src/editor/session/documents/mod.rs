@@ -595,40 +595,23 @@ impl DocumentSession {
         Ok(id)
     }
 
-    pub(in crate::editor::session) fn discover_recovery(
-        &mut self,
-        directory: PathBuf,
-        maximum_records: usize,
-    ) -> Result<RequestId, VfsError> {
-        self.check_admission()?;
-        let id = self.vfs.discover_recovery(directory, maximum_records)?;
-        self.pending_legacy.insert(id);
-        Ok(id)
-    }
-
-    pub(in crate::editor::session) fn write_recovery(
-        &mut self,
-        path: PathBuf,
-        record: RecoveryRecord,
-    ) -> Result<RequestId, VfsError> {
-        self.check_admission()?;
-        let id = self.vfs.write_recovery(path, record)?;
-        self.pending_legacy.insert(id);
-        Ok(id)
-    }
-
-    pub(in crate::editor::session) fn cleanup_recovery(
-        &mut self,
-        directory: PathBuf,
-        maximum_records: usize,
-        maximum_age_days: u64,
-    ) -> Result<RequestId, VfsError> {
-        self.check_admission()?;
-        let id = self
-            .vfs
-            .cleanup_recovery(directory, maximum_records, maximum_age_days)?;
-        self.pending_legacy.insert(id);
-        Ok(id)
+    pub(in crate::editor::session) fn recovery_io(&mut self) -> RecoveryIo<'_> {
+        let remaining = if self.closing || self.stopped {
+            0
+        } else {
+            self.maximum_pending.saturating_sub(
+                self.pending_legacy.len()
+                    + self.pending_workspace.len()
+                    + self.pending_tasks.len()
+                    + self.pending_startup.len()
+                    + self.pending_files.len(),
+            )
+        };
+        RecoveryIo {
+            vfs: &mut self.vfs,
+            pending: &mut self.pending_legacy,
+            remaining,
+        }
     }
 
     pub(in crate::editor::session) fn delete(
@@ -639,6 +622,65 @@ impl DocumentSession {
         let id = self.vfs.delete(path)?;
         self.pending_legacy.insert(id);
         Ok(id)
+    }
+}
+
+/// Narrow loan of the actual VFS transport and its remaining document admission.
+/// Recovery retains its own original request obligations; this loan only routes I/O.
+pub(in crate::editor::session) struct RecoveryIo<'a> {
+    vfs: &'a mut VfsWorker,
+    pending: &'a mut HashSet<RequestId>,
+    remaining: usize,
+}
+impl RecoveryIo<'_> {
+    fn submit(
+        &mut self,
+        send: impl FnOnce(&mut VfsWorker) -> Result<RequestId, VfsError>,
+    ) -> Result<RequestId, VfsError> {
+        if self.remaining == 0 {
+            return Err(VfsError::QueueFull);
+        }
+        let id = send(self.vfs)?;
+        self.remaining -= 1;
+        self.pending.insert(id);
+        Ok(id)
+    }
+    pub(in crate::editor::session) fn discover(
+        &mut self,
+        path: &Path,
+        maximum: usize,
+    ) -> Result<RequestId, VfsError> {
+        self.submit(|vfs| vfs.discover_recovery(path.to_owned(), maximum))
+    }
+    pub(in crate::editor::session) fn cleanup(
+        &mut self,
+        path: &Path,
+        maximum: usize,
+        days: u64,
+    ) -> Result<RequestId, VfsError> {
+        self.submit(|vfs| vfs.cleanup_recovery(path.to_owned(), maximum, days))
+    }
+    pub(in crate::editor::session) fn delete(
+        &mut self,
+        path: &Path,
+    ) -> Result<RequestId, VfsError> {
+        self.submit(|vfs| vfs.delete(path.to_owned()))
+    }
+    pub(in crate::editor::session) fn write(
+        &mut self,
+        path: &Path,
+        buffer: &crate::editor::Buffer,
+    ) -> Result<RequestId, VfsError> {
+        self.submit(|vfs| {
+            vfs.write_recovery(
+                path.to_owned(),
+                RecoveryRecord::new(
+                    buffer.path.as_deref(),
+                    buffer.text.revision().0,
+                    buffer.text.to_string(),
+                ),
+            )
+        })
     }
 }
 

@@ -54,7 +54,8 @@ impl InteractiveApplication {
             })
             .flatten()
             .and_then(|language| {
-                self.tools
+                self.tooling
+                    .entries()
                     .iter()
                     .find(|entry| {
                         entry.definition.kind == ToolKind::Lsp
@@ -62,7 +63,7 @@ impl InteractiveApplication {
                             && matches!(entry.status, ToolStatus::Installed(_))
                     })
                     .or_else(|| {
-                        self.tools.iter().find(|entry| {
+                        self.tooling.entries().iter().find(|entry| {
                             entry.definition.kind == ToolKind::Lsp
                                 && entry.definition.automatically_supports_language(&language)
                         })
@@ -449,7 +450,8 @@ impl InteractiveApplication {
             .active_lsp_document()
             .map(|(_, document)| document.language_id);
         let mut entries = self
-            .tools
+            .tooling
+            .entries()
             .iter()
             .filter(|entry| category == "all" || tool_kind_key(entry.definition.kind) == category)
             .filter(|entry| {
@@ -769,7 +771,8 @@ impl InteractiveApplication {
             .min(rows.len().saturating_sub(1));
         let runtime_picker = previous_picker.and_then(|(server_id, focused, scroll)| {
             let definition = self
-                .tools
+                .tooling
+                .entries()
                 .iter()
                 .find(|entry| {
                     entry.definition.id == server_id && entry.definition.kind == ToolKind::Lsp
@@ -931,7 +934,8 @@ impl InteractiveApplication {
             return;
         };
         let Some(definition) = self
-            .tools
+            .tooling
+            .entries()
             .iter()
             .find(|entry| entry.definition.id == id)
             .map(|entry| entry.definition.clone())
@@ -983,26 +987,9 @@ impl InteractiveApplication {
             self.show_error("this runtime is not installed or installable on the current host");
             return;
         }
-        self.lsp_nix_workspace_preferred.remove(&id);
-        self.lsp_managed_preferred.remove(&id);
-        match source {
-            LspRuntimeSource::Path => {}
-            LspRuntimeSource::Managed => {
-                let Some(version) = version_pin else {
-                    self.show_error("this managed runtime has no installable version");
-                    return;
-                };
-                self.lsp_managed_preferred.insert(id.clone());
-                self.lsp_managed_versions.insert(id.clone(), version);
-            }
-            LspRuntimeSource::Nix => {
-                let Some(version) = version_pin else {
-                    self.show_error("this Dust via Nix runtime has no installable version");
-                    return;
-                };
-                self.lsp_nix_workspace_preferred.insert(id.clone());
-                self.lsp_managed_versions.insert(id.clone(), version);
-            }
+        if let Err(error) = self.tooling.select_runtime(&id, source, version_pin) {
+            self.show_error(error);
+            return;
         }
         self.stop_lsp_sessions_for_server(&id);
         self.lsp_autostart_observation = None;
@@ -1023,8 +1010,8 @@ impl InteractiveApplication {
             match source {
                 LspRuntimeSource::Managed => format!(
                     "{id} ACTIVE build: Dust download {}",
-                    self.lsp_managed_versions
-                        .get(&id)
+                    self.tooling
+                        .managed_version(&id)
                         .map(String::as_str)
                         .unwrap_or("unknown")
                 ),

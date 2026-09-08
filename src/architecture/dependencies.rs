@@ -369,6 +369,8 @@ impl Graph {
                         "terminal",
                         "debugger",
                         "git",
+                        "recovery",
+                        "tooling",
                     ]
                     .iter()
                     .any(|owner| {

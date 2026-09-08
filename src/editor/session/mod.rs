@@ -11,10 +11,13 @@ mod lsp_edits;
 mod notifications;
 mod persistence;
 mod plugin_edits;
+mod recovery;
 mod search;
 mod syntax;
 mod tasks;
 mod terminal;
+#[path = "tooling/session.rs"]
+mod tooling;
 mod windows;
 mod workspace;
 mod workspace_edits;
