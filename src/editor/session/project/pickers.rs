@@ -811,18 +811,13 @@ impl InteractiveApplication {
                 hunk,
                 new_line,
             }) => {
-                if self.git_status_snapshot.as_ref().is_some_and(|s| {
-                    s.revision == status_revision
-                        && s.repository_id == repository
-                        && s.root_revision == self.workspace.root_revision()
-                }) {
-                    if let Some(snapshot) = self.git_hunk_snapshot.as_ref()
-                        && let Some(selected) =
-                            snapshot.hunks.iter().find(|candidate| candidate.id == hunk)
-                    {
-                        self.selected_git_hunk =
-                            Some((snapshot.clone(), selected.clone(), path.clone()));
-                    }
+                if self.git.select(
+                    status_revision,
+                    repository,
+                    self.workspace.root_revision(),
+                    &path,
+                    hunk,
+                ) {
                     self.navigate_matcher_source(MatcherSource {
                         path,
                         line: new_line,

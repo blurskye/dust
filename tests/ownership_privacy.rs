@@ -265,6 +265,7 @@ fn copied_production_tree_enforces_migrated_owner_privacy() {
     );
     let positive = r#"
 fn terminal_domain(owner:&mut super::terminal::TerminalSession) {let _=owner.selected();let _=owner.descriptions();}
+fn git_domain(owner:&super::git::GitSession) {let _=owner.status();let _=owner.hunks();let _=owner.decorations();let _=owner.has_selection();}
 fn debugger_domain(owner:&mut super::debugger::DebugSession) {let _=owner.is_running();let _=owner.persisted_breakpoints();let _=owner.reply_failures();}
 fn debugger_reply_domain(reply:&crate::debugger::DapTerminalReply) {let _=reply.outcome();let _=reply.receipt().outcome();}
 fn debugger_launch_domain(workspace:&mut super::workspace::WorkspaceSession) {drop(workspace.execution_lane(super::workspace::DiscoveryKind::Debugger));}
@@ -645,6 +646,18 @@ fn legitimate_client(editor: &mut crate::editor::EditorState) { editor.workspace
             "debugger_selection",
             "fn bypass(selection:&mut super::debugger::DebugSelection) {let _=&mut selection.source;}",
             "source",
+            "E0616",
+        ),
+        (
+            "git_runtime",
+            "fn bypass(owner:&mut super::git::GitSession) {owner.status.cancel();}",
+            "status",
+            "E0616",
+        ),
+        (
+            "git_selection",
+            "fn bypass(owner:&mut super::git::GitSession) {owner.selected=None;}",
+            "selected",
             "E0616",
         ),
         (

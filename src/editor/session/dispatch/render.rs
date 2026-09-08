@@ -531,7 +531,7 @@ impl InteractiveApplication {
         self.ui.explorer = Some(self.explorer.projection(
             &self.configuration.settings().ui.explorer,
             body,
-            &self.git_status_decorations,
+            self.git.decorations(),
             title,
         ));
         self.reconcile_explorer_watch();
@@ -592,7 +592,7 @@ impl InteractiveApplication {
         });
         self.set_explorer_focus(true);
         self.sync_explorer_ui();
-        self.git_status_silent_attempted = None;
+        self.git.retry_status();
         self.start_git_status_refresh_silent();
         let root_to_load = self.explorer.tree().selected_node().and_then(|node| {
             (node.kind == ExplorerKind::Root && node.load != ExplorerLoadState::Loaded)

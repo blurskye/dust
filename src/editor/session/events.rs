@@ -3,8 +3,8 @@ use super::*;
 impl InteractiveApplication {
     pub(super) fn sync_status_summary_ui(&mut self) {
         self.ui.git_changed_files = self
-            .git_status_snapshot
-            .as_ref()
+            .git
+            .status()
             .map_or(0, |snapshot| snapshot.entries.len());
         self.ui.running_tasks = self.tasks.running_count();
     }

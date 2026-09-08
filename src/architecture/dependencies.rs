@@ -368,6 +368,7 @@ impl Graph {
                         "tasks",
                         "terminal",
                         "debugger",
+                        "git",
                     ]
                     .iter()
                     .any(|owner| {

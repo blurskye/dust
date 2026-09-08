@@ -1053,18 +1053,18 @@ fn explorer_auto_git_status_is_silent_outside_a_repository() {
     app.set_dashboard_visibility(false);
     app.open_explorer();
     let deadline = Instant::now() + Duration::from_secs(3);
-    while app.git_status_generation.is_some() {
+    while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
         thread::yield_now();
     }
-    assert!(app.git_status_snapshot.is_none());
+    assert!(app.git.status().is_none());
     assert!(!app.ui.notification_error);
-    let generation = app.git_status.generation();
+    let generation = app.git.status_generation();
     for _ in 0..256 {
         app.reconcile_git_signs();
         app.process_git_status_events();
-        assert_eq!(app.git_status.generation(), generation);
+        assert_eq!(app.git.status_generation(), generation);
     }
 }
 
@@ -1089,23 +1089,23 @@ fn active_tracked_buffer_starts_git_status_and_updates_unsaved_signs_without_exp
     app.set_dashboard_visibility(false);
 
     app.reconcile_git_signs();
-    assert!(app.git_status_generation.is_some());
+    assert!(app.git.status_pending());
     let deadline = Instant::now() + Duration::from_secs(3);
-    while app.git_status_generation.is_some() {
+    while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
         thread::yield_now();
     }
-    assert!(app.git_status_snapshot.is_some());
+    assert!(app.git.status().is_some());
     assert!(app.ui.explorer.is_none());
     app.handle_configured_key(KeyEvent::character('d'));
     app.handle_configured_key(KeyEvent::character('d'));
     assert!(app.state.buffers[buffer].dirty);
     let revision = app.state.buffers[buffer].text.revision().0;
     app.reconcile_git_signs();
-    assert!(app.git_sign_generation.is_some());
+    assert!(app.git.signs_pending());
     let deadline = Instant::now() + Duration::from_secs(3);
-    while app.git_sign_generation.is_some() {
+    while app.git.signs_pending() {
         app.process_git_sign_events();
         assert!(Instant::now() < deadline);
         thread::yield_now();
@@ -1133,21 +1133,21 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
     drop(tree);
     fs::write(&path, "normal\nadded\n").unwrap();
     app.open_explorer();
-    assert!(app.git_status_generation.is_some());
-    assert!(app.git_status_silent);
+    assert!(app.git.status_pending());
+    assert!(app.git.silent());
     let deadline = Instant::now() + Duration::from_secs(3);
-    while app.git_status_generation.is_some() {
+    while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
         thread::yield_now();
     }
-    let revision = app.git_status_snapshot.as_ref().unwrap().revision;
+    let revision = app.git.status().unwrap().revision;
     assert_eq!(
-        app.git_status_decorations.get(&path),
+        app.git.decorations().get(&path),
         Some(&crate::workspace::git::GitFileStatus::Modified)
     );
     assert_eq!(
-        app.git_status_decorations.get(&app.state.workspace_root),
+        app.git.decorations().get(&app.state.workspace_root),
         Some(&crate::workspace::git::GitFileStatus::Modified)
     );
     wait_explorer(&mut app);
@@ -1175,12 +1175,12 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
             .iter()
             .any(|segment| segment.text == "M")
     );
-    assert!(!app.git_status_silent);
-    let generation = app.git_status.generation();
+    assert!(!app.git.silent());
+    let generation = app.git.status_generation();
     for _ in 0..256 {
         app.process_git_status_events();
-        assert_eq!(app.git_status.generation(), generation);
-        assert_eq!(app.git_status_snapshot.as_ref().unwrap().revision, revision)
+        assert_eq!(app.git.status_generation(), generation);
+        assert_eq!(app.git.status().unwrap().revision, revision)
     }
     app.open_git_status_picker();
     assert_eq!(
@@ -1197,7 +1197,7 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
     );
     app.reconcile_git_signs();
     let deadline = Instant::now() + Duration::from_secs(3);
-    while app.git_sign_generation.is_some() {
+    while app.git.signs_pending() {
         app.process_git_sign_events();
         assert!(Instant::now() < deadline);
         thread::yield_now();
@@ -1230,7 +1230,7 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
     let normal_sign_cell = frame.grid.get(sign_x, sign_y - 1).unwrap();
     assert_eq!(normal_sign_cell.symbol, "│");
     assert_eq!(normal_sign_cell.style, crate::ui::Style::Muted);
-    let sign_generation = app.git_sign_hunks.generation();
+    let sign_generation = app.git.sign_generation();
     let signs = app.ui.git_signs.clone();
     for _ in 0..256 {
         app.reconcile_git_signs();
@@ -1243,12 +1243,12 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
             100,
             30,
         );
-        assert_eq!(app.git_sign_hunks.generation(), sign_generation);
+        assert_eq!(app.git.sign_generation(), sign_generation);
         assert_eq!(app.ui.git_signs, signs);
     }
     app.start_git_hunks();
     let deadline = Instant::now() + Duration::from_secs(3);
-    while app.git_hunk_generation.is_some() {
+    while app.git.hunks_pending() {
         app.process_git_hunk_events();
         assert!(Instant::now() < deadline);
         thread::yield_now();
@@ -1258,7 +1258,7 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
         Some("Git hunks")
     );
     app.accept_picker();
-    assert!(app.selected_git_hunk.is_some());
+    assert!(app.git.has_selection());
     app.preview_selected_git_hunk();
     assert_eq!(
         app.ui.documentation_popup.as_ref().map(|popup| popup.kind),
@@ -1266,9 +1266,9 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
     );
     app.navigate_git_hunk(1);
     wait_vfs(&mut app);
-    assert!(app.selected_git_hunk.is_some());
+    assert!(app.git.has_selection());
     app.stage_selected_git_hunk();
-    assert!(app.git_mutation_generation.is_none());
+    assert!(!app.git.mutation_pending());
     assert!(app.ui.notification_error);
 
     app.set_explorer_focus(false);
@@ -1280,7 +1280,7 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
     app.reconcile_git_signs();
     assert!(app.ui.git_signs.is_empty());
     let deadline = Instant::now() + Duration::from_secs(3);
-    while app.git_sign_generation.is_some() {
+    while app.git.signs_pending() {
         app.process_git_sign_events();
         assert!(Instant::now() < deadline);
         thread::yield_now();
@@ -1346,7 +1346,7 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
     );
     app.start_git_status_refresh();
     let deadline = Instant::now() + Duration::from_secs(4);
-    while app.git_status_generation.is_some() {
+    while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
         thread::yield_now()
@@ -1354,18 +1354,40 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
     app.start_open(path.clone());
     wait_vfs(&mut app);
     app.start_git_hunks();
-    while app.git_hunk_generation.is_some() {
+    while app.git.hunks_pending() {
         app.process_git_hunk_events();
         assert!(Instant::now() < deadline);
         thread::yield_now()
     }
-    assert_eq!(app.git_hunk_snapshot.as_ref().unwrap().hunks.len(), 2);
+    let snapshot = app.git.hunks().unwrap().clone();
+    assert_eq!(snapshot.hunks.len(), 2);
+    assert!(!app.git.select(
+        snapshot.status_revision,
+        snapshot.repository_id,
+        snapshot.root_revision,
+        &path.with_extension("foreign"),
+        snapshot.hunks[0].id
+    ));
+    assert!(!app.git.select(
+        snapshot.status_revision,
+        snapshot.repository_id,
+        snapshot.root_revision + 1,
+        &path,
+        snapshot.hunks[0].id
+    ));
+    assert!(!app.git.has_selection());
     app.accept_picker();
-    assert!(app.selected_git_hunk.is_some());
+    assert!(app.git.has_selection());
+    assert!(
+        app.git
+            .mutate(false, true, snapshot.root_revision + 1)
+            .is_err()
+    );
+    assert!(!app.git.mutation_pending());
     let before = crate::workspace::git::git_index_fingerprint(&app.state.workspace_root).unwrap();
     app.stage_selected_git_hunk();
-    assert!(app.git_mutation_generation.is_some());
-    while app.git_mutation_generation.is_some() || app.git_status_generation.is_some() {
+    assert!(app.git.mutation_pending());
+    while app.git.mutation_pending() || app.git.status_pending() {
         app.process_git_mutation_events();
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -1374,9 +1396,9 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
     let after = crate::workspace::git::git_index_fingerprint(&app.state.workspace_root).unwrap();
     assert_ne!(before, after);
     assert_eq!(fs::read_to_string(&path).unwrap(), changed);
-    assert!(app.selected_git_hunk.is_none());
-    assert!(app.git_hunk_snapshot.is_none());
-    let status = app.git_status_snapshot.clone().unwrap();
+    assert!(!app.git.has_selection());
+    assert!(app.git.hunks().is_none());
+    let status = app.git.status().cloned().unwrap();
     let mut policy = crate::workspace::git::GitHunkPolicy {
         scope_root: status.scope_root,
         repository_id: status.repository_id,
@@ -1406,7 +1428,7 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
     );
     app.start_git_hunks();
     let deadline = Instant::now() + Duration::from_secs(4);
-    while app.git_hunk_generation.is_some() {
+    while app.git.hunks_pending() {
         app.process_git_hunk_events();
         assert!(Instant::now() < deadline);
         thread::yield_now()
@@ -1437,7 +1459,7 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
     app.request_reset_selected_git_hunk();
     app.close_prompt();
     app.confirm_reset_selected_git_hunk("reset this hunk".into());
-    while app.git_mutation_generation.is_some() || app.git_status_generation.is_some() {
+    while app.git.mutation_pending() || app.git.status_pending() {
         app.process_git_mutation_events();
         app.process_git_status_events();
         assert!(Instant::now() < deadline);

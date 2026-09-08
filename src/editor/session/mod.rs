@@ -5,6 +5,7 @@ mod diagnostics;
 mod dispatch;
 mod documents;
 mod explorer;
+mod git;
 mod input;
 mod lsp_edits;
 mod notifications;
