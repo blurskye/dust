@@ -163,11 +163,14 @@ impl InteractiveApplication {
     }
 
     pub(super) fn show_output_picker(&mut self, name: &str) {
-        let previous = if self.tasks.active_output() == Some(name) {
+        let previous = if self.tasks.active_output() == Some(name)
+            && self.search.picker_surface() == PickerSurfaceKind::Output
+        {
             self.search.picker_bookmark()
         } else {
             None
         };
+        let normal = previous.is_some() && self.input.picker_normal();
         let follow_tail = previous.is_none() || self.search.picker_follows_tail();
         self.tasks.select_output(Some(name));
         let items = self
@@ -182,6 +185,7 @@ impl InteractiveApplication {
             items,
         );
         self.search.restore_picker_view(previous, follow_tail);
+        self.input.set_picker_normal(normal);
         self.sync_picker_ui();
     }
 

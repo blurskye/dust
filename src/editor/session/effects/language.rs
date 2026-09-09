@@ -7,6 +7,7 @@ impl InteractiveApplication {
         } else {
             None
         };
+        let normal = previous.is_some() && self.input.picker_normal();
         let follow_tail = previous.is_none() || self.search.picker_follows_tail();
         let items = self
             .language
@@ -32,6 +33,7 @@ impl InteractiveApplication {
             items,
         );
         self.search.restore_picker_view(previous, follow_tail);
+        self.input.set_picker_normal(normal);
         self.sync_picker_ui();
     }
 

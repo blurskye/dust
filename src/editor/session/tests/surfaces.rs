@@ -144,6 +144,41 @@ fn notifications_expire_but_remain_available_in_bounded_history() {
 }
 
 #[test]
+fn live_logs_and_output_refresh_preserve_picker_normal_without_leaking_it_to_new_sources() {
+    let mut app = app();
+    for logs in [false, true] {
+        app.close_picker();
+        if logs {
+            app.show_lsp_logs();
+        } else {
+            app.show_output_picker("one");
+        }
+        app.handle_configured_key("j".parse().unwrap());
+        app.handle_configured_key("escape".parse().unwrap());
+        for _ in 0..3 {
+            if logs {
+                app.show_lsp_logs();
+            } else {
+                app.show_output_picker("one");
+            }
+            assert_eq!(app.active_input_context(), "picker_normal");
+            assert_eq!(app.ui.picker.as_ref().unwrap().query, "j");
+            assert!(
+                app.ui
+                    .picker
+                    .as_ref()
+                    .unwrap()
+                    .input_hint
+                    .starts_with("Normal")
+            );
+        }
+        app.show_output_picker("different-source");
+        assert_eq!(app.active_input_context(), "picker");
+        assert_eq!(app.ui.picker.as_ref().unwrap().query, "");
+    }
+}
+
+#[test]
 fn problems_logs_output_and_debug_keep_distinct_graph_surface_identities() {
     let mut app = app();
     app.state.open_text(TextBuffer::from_text("editor"), None);
