@@ -112,6 +112,10 @@ fn theme_picker_previews_cancels_applies_and_never_overwrites_a_newer_reload() {
     let choose = |app: &mut InteractiveApplication| {
         app.process_effect(AppEffect::SelectTheme);
         assert_eq!(app.active_input_context(), "theme_picker");
+        assert_eq!(
+            app.ui.picker.as_ref().unwrap().input_hint,
+            "Press Escape to cancel"
+        );
         assert!(app.ui.picker.as_ref().unwrap().loading);
         for key in "amber".chars() {
             app.handle_configured_key(KeyEvent::character(key));

@@ -51,8 +51,8 @@ def main() -> None:
         assert "THEME_PREVIEW_SOURCE_00" in choices and "THEME_PREVIEW_SOURCE_20" in choices
         # Even in a 220x70 terminal the dialog is only 64x12 cells, near the top.
         assert choices.splitlines()[4].index("Dust themes") == 81, choices
-        assert "Live preview" in choices.splitlines()[15], choices
-        assert "escape cancel" in choices.splitlines()[15], choices
+        assert "Press Escape to cancel" in choices.splitlines()[15], choices
+        assert "Live preview" not in choices and "enter remember" not in choices
         preview = b"\x1b[38;2;1;2;3m"
         original = b"\x1b[38;2;201;209;217m"
         assert b"\x1b[38;2;76;79;105m" in delta(2), "Down did not preview Catppuccin Latte"

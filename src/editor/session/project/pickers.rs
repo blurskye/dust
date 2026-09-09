@@ -477,6 +477,7 @@ impl InteractiveApplication {
         };
         self.configuration.preview_theme(theme);
         let context = self.active_input_context();
+        let theme_picker = self.search.theme_picker_key().is_some();
         if let Some(picker) = &mut self.ui.picker {
             let (mode, commands): (&str, &[(&str, &str)]) =
                 if self.search.workspace_picker().is_some() {
@@ -488,11 +489,8 @@ impl InteractiveApplication {
                             ("workspace.edit.reject", "reject"),
                         ],
                     )
-                } else if self.search.theme_picker_key().is_some() {
-                    (
-                        "Live preview",
-                        &[("picker.accept", "remember"), ("picker.cancel", "cancel")],
-                    )
+                } else if theme_picker {
+                    ("", &[("picker.cancel", "cancel")])
                 } else if self.input.picker_normal() {
                     (
                         "Normal",
@@ -523,11 +521,26 @@ impl InteractiveApplication {
                                 && binding.command.as_deref() == Some(*command)
                         })
                         .or_else(|| self.configuration.keymaps().inspect(&context, command))
-                        .map(|binding| format!("{} {action}", binding.keys))
+                        .map(|binding| {
+                            if theme_picker {
+                                let key = if binding.keys == "escape" {
+                                    "Escape"
+                                } else {
+                                    &binding.keys
+                                };
+                                format!("Press {key} to {action}")
+                            } else {
+                                format!("{} {action}", binding.keys)
+                            }
+                        })
                 })
                 .collect::<Vec<_>>()
                 .join(" · ");
-            picker.input_hint = format!("{mode} · {hints}");
+            picker.input_hint = if mode.is_empty() {
+                hints
+            } else {
+                format!("{mode} · {hints}")
+            };
         }
         self.sync_picker_preview();
         if let Some(picker) = &mut self.ui.picker {
