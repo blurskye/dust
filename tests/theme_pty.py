@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Owned-PTY compact theme chooser, arrow preview, cancel and session-apply probe."""
+"""Owned-PTY compact theme chooser, palette preview and remembered-state probes."""
 import argparse
 import json
 import pathlib
@@ -79,7 +79,36 @@ def main() -> None:
         assert preview in restored[3][len(restored[2]):], "Escape did not restore the remembered theme"
         assert json.loads(json.loads(state_path.read_text())["metadata"]["ui.theme.snapshot"]) == saved
         assert (config / "config.toml").read_text() == settings
-    print("theme PTY: compact 64x12 chooser, seven bundled themes, Up/Down live preview, Escape rollback, state save/restart, cancelled preview not persisted and clean exit passed")
+        code, output, extra = run(binary, directory, [str(source)], [
+            (1.0, b":theme.select\r", None),
+            (0.7, b"Tokyo Night", None),
+            (0.7, b"\x1b[B", None),
+            (0.7, b"\x1b[B", None),
+            (0.7, b"\x1b[B", None),
+            (0.7, b"\x1b", None),
+            (0.7, b":theme.select\r", None),
+            (0.7, b"Ros", None),
+            (0.7, b"\x1b[B", None),
+            (0.7, b"\x1b[B", None),
+            (0.7, b"\r", None),
+            (0.7, b":q\r", None),
+        ], clean=False, config_home=config)
+        assert code == 0
+        for index, label, background in [
+            (2, "Tokyo Night", (26, 27, 38)),
+            (3, "Tokyo Night Day", (225, 226, 231)),
+            (4, "Tokyo Night Moon", (34, 36, 54)),
+            (5, "Tokyo Night Storm", (36, 40, 59)),
+            (8, "Rosé Pine", (25, 23, 36)),
+            (9, "Rosé Pine Dawn", (250, 244, 237)),
+            (10, "Rosé Pine Moon", (35, 33, 54)),
+        ]:
+            assert f"> {label}" in terminal_screen(extra[index]), (index, label)
+            sgr = f"\x1b[48;2;{background[0]};{background[1]};{background[2]}m".encode()
+            assert sgr in extra[index][len(extra[index - 1]):], f"{label} preview did not reach painter"
+        assert json.loads(json.loads(state_path.read_text())["metadata"]["ui.theme.snapshot"])["name"] == "rose-pine-moon"
+        assert (config / "config.toml").read_text() == settings
+    print("theme PTY: compact chooser, 14 bundled themes, new dark/light palette previews, Escape rollback, state save/restart and clean exit passed")
 
 
 if __name__ == "__main__":

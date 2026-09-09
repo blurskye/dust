@@ -217,6 +217,7 @@ pub fn write_deterministic_archive(
         ("LICENSES/MIT-catppuccin.txt", 1024 * 1024),
         ("LICENSES/MIT-nord.txt", 1024 * 1024),
         ("LICENSES/MIT-gruvbox.txt", 1024 * 1024),
+        ("LICENSES/MIT-rose-pine.txt", 1024 * 1024),
         ("wit/dust-plugin.wit", 1024 * 1024),
         ("docs/plugin-sdk.md", 4 * 1024 * 1024),
     ] {

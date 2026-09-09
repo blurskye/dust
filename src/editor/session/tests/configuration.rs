@@ -151,7 +151,7 @@ fn theme_picker_previews_cancels_applies_and_never_overwrites_a_newer_reload() {
         app.handle_configured_key("backspace".parse().unwrap());
     }
     assert_eq!(app.configuration.theme(), &amber); // clearing the query retains the selected row
-    assert_eq!(app.ui.picker.as_ref().unwrap().rows.len(), 8);
+    assert_eq!(app.ui.picker.as_ref().unwrap().rows.len(), 15);
     assert_eq!(
         app.ui
             .picker

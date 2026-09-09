@@ -6,6 +6,16 @@ GPL-3.0-or-later.
 
 The authoritative ABI is [`wit/dust-plugin.wit`](../wit/dust-plugin.wit), package `dust:plugin@0.1.0`, world `editor-plugin`. Third-party editor plugins must be WebAssembly Components implementing that world. Core Wasm modules, WASI applications, native libraries, and subprocess shims are not plugins.
 
+## Theme support
+
+Component plugins currently have **no theme-contribution API**: contribution
+schema 1 has no `themes` field, and WIT exposes no global palette setter.
+Private/retained UI can use host semantic styles, but this does not register a
+selectable editor theme. Custom themes currently use validated Dust TOML files
+in the user's `themes/` directory; see [the theme guide](user-guide-linux.md#select-a-theme).
+Native Neovim/Lua themes are not executable Dust plugins. Declarative plugin
+palette contributions and theme-only package installation remain unimplemented.
+
 ## Lifecycle
 
 1. Dust reads and bounds the manifest from its immutable content-addressed store without reading Component bytes. Every manifest has an explicit contribution schema version and declares namespaced input contexts, typed commands/argument schemas, suggested mappings, key groups, retained/private content types, bounded subscriptions, supported provider metadata, and optional storage quota (empty arrays are valid). A content declaration owns its stable `plugin.<owner>.<content>` ID, title, presenter kind, default and allowed ordinary placements, focusability, `1..=16` instance ceiling, input context, and declared command linkage.

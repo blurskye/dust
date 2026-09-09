@@ -34,6 +34,34 @@ const BUNDLED: &[(&str, &str)] = &[
         include_str!("../../assets/themes/gruvbox-dark.toml"),
     ),
     ("nord", include_str!("../../assets/themes/nord.toml")),
+    (
+        "tokyo-night",
+        include_str!("../../assets/themes/tokyo-night.toml"),
+    ),
+    (
+        "tokyo-night-storm",
+        include_str!("../../assets/themes/tokyo-night-storm.toml"),
+    ),
+    (
+        "tokyo-night-moon",
+        include_str!("../../assets/themes/tokyo-night-moon.toml"),
+    ),
+    (
+        "tokyo-night-day",
+        include_str!("../../assets/themes/tokyo-night-day.toml"),
+    ),
+    (
+        "rose-pine",
+        include_str!("../../assets/themes/rose-pine.toml"),
+    ),
+    (
+        "rose-pine-moon",
+        include_str!("../../assets/themes/rose-pine-moon.toml"),
+    ),
+    (
+        "rose-pine-dawn",
+        include_str!("../../assets/themes/rose-pine-dawn.toml"),
+    ),
 ];
 pub(super) fn bundled_named(name: &str) -> Option<ThemeChoice> {
     let (_, source) = BUNDLED.iter().find(|(id, _)| *id == name)?;
@@ -51,6 +79,13 @@ pub(crate) fn theme_display_name(name: &str) -> String {
         "catppuccin-mocha" => "Catppuccin Mocha",
         "gruvbox-dark" => "Gruvbox Dark",
         "nord" => "Nord",
+        "tokyo-night" => "Tokyo Night",
+        "tokyo-night-storm" => "Tokyo Night Storm",
+        "tokyo-night-moon" => "Tokyo Night Moon",
+        "tokyo-night-day" => "Tokyo Night Day",
+        "rose-pine" => "Rosé Pine",
+        "rose-pine-moon" => "Rosé Pine Moon",
+        "rose-pine-dawn" => "Rosé Pine Dawn",
         other => other,
     }
     .into()

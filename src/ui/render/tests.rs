@@ -1902,7 +1902,7 @@ fn theme_geometry_is_compact_and_bounded_without_resizing_other_pickers() {
         loading: false,
         preview: None,
     };
-    for count in [0, 1, 7, 39] {
+    for count in [0, 1, 7, 14, 46] {
         picker.rows = (0..count)
             .map(|index| PickerRow {
                 id: index.to_string(),

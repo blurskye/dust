@@ -23,6 +23,13 @@ fn bundled_theme_ports_validate_and_load_by_name_without_installed_files() {
         "catppuccin-mocha",
         "gruvbox-dark",
         "nord",
+        "tokyo-night",
+        "tokyo-night-storm",
+        "tokyo-night-moon",
+        "tokyo-night-day",
+        "rose-pine",
+        "rose-pine-moon",
+        "rose-pine-dawn",
     ] {
         let bundle = capture_configuration_bundle_with(name, |path| {
             let text = if path.file_name().is_some_and(|file| file == "config.toml") {

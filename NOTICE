@@ -27,3 +27,10 @@ Catppuccin), Nord (Copyright (c) 2016-present Sven Greb), and gruvbox.nvim
 See LICENSES/MIT-catppuccin.txt, LICENSES/MIT-nord.txt,
 LICENSES/MIT-gruvbox.txt and assets/themes/README.md for pinned sources.
 These are Dust semantic-role ports, not the upstream editor implementations.
+
+Additional theme palettes are adapted from folke/tokyonight.nvim under the
+Apache License 2.0, and Rosé Pine (Copyright (c) mvllow) under the MIT License.
+See LICENSES/Apache-2.0.txt, LICENSES/MIT-rose-pine.txt and
+assets/themes/README.md. The upstream palette data has been adapted to Dust
+semantic styles and explicit terminal fallbacks; no upstream theme runtime
+is included.
