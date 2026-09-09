@@ -17,6 +17,7 @@ use crate::{
         PersistedState, PersistedTab, PersistedWindowRule,
     },
 };
+use std::ops::ControlFlow::{self, Break, Continue};
 use std::{
     collections::{BTreeSet, HashMap},
     path::PathBuf,
@@ -110,7 +111,7 @@ impl RestoreReady {
 }
 pub(in crate::editor::session) enum RestoreUpdate {
     Waiting,
-    Ready(RestoreReady),
+    Ready(Box<RestoreReady>),
     Failed(String),
 }
 impl PersistenceSession {
@@ -206,20 +207,20 @@ impl PersistenceSession {
         &mut self,
         event: VfsResult,
         context: RestoreContext<'_>,
-    ) -> Result<RestoreUpdate, VfsResult> {
+    ) -> ControlFlow<RestoreUpdate, VfsResult> {
         let id = event.request_id();
         if self.retired_reads.remove(&id) {
-            return Ok(RestoreUpdate::Waiting);
+            return Break(RestoreUpdate::Waiting);
         }
         let Some(restore) = self
             .restore
             .as_ref()
             .filter(|restore| restore.requests.contains_key(&id))
         else {
-            return Err(event);
+            return Continue(event);
         };
         let VfsResult::Read { path, result, .. } = event else {
-            return Err(event);
+            return Continue(event);
         };
         let current = !self.closing && restore.source.current(&context);
         let requested = self
@@ -230,7 +231,7 @@ impl PersistenceSession {
             .remove(&id)
             .expect("owned read identity");
         if !current {
-            return Ok(RestoreUpdate::Failed(
+            return Break(RestoreUpdate::Failed(
                 "session restore source changed; current editing was preserved".into(),
             ));
         }
@@ -240,7 +241,7 @@ impl PersistenceSession {
             .iter()
             .any(|root| path.starts_with(&root.identity.canonical_path))
         {
-            return Ok(RestoreUpdate::Failed(
+            return Break(RestoreUpdate::Failed(
                 "session restore read left its workspace".into(),
             ));
         }
@@ -249,19 +250,19 @@ impl PersistenceSession {
             .and_then(|bytes| TextBuffer::from_bytes(&bytes).map_err(|error| error.to_string()))
         {
             Ok(text) => text,
-            Err(error) => return Ok(RestoreUpdate::Failed(error)),
+            Err(error) => return Break(RestoreUpdate::Failed(error)),
         };
         let restore = self.restore.as_mut().expect("checked restore source");
         restore.loaded.insert(requested, (path, text));
         if !restore.remaining.is_empty() || !restore.requests.is_empty() {
-            return Ok(RestoreUpdate::Waiting);
+            return Break(RestoreUpdate::Waiting);
         }
         let restore = self.restore.take().expect("completed restore");
-        Ok(RestoreUpdate::Ready(RestoreReady {
+        Break(RestoreUpdate::Ready(Box::new(RestoreReady {
             source: restore.source,
             session: restore.session,
             loaded: restore.loaded,
-        }))
+        })))
     }
     pub(in crate::editor::session) fn recent_files(&self) -> &[PathBuf] {
         &self.recent_files

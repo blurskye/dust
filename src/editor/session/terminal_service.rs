@@ -55,12 +55,13 @@ impl InteractiveApplication {
                     .terminal_session
                     .resolve(&open.key)
                     .expect("new terminal");
-                match self.workspace.request_preflight(open.request) {
-                    Ok(request) => {
-                        self.pending_execution_preflight.insert(
-                            request,
-                            PendingExecutionPreflight::Terminal { key: open.key },
-                        );
+                match self.terminal_session.queue_preflight(
+                    open.key.clone(),
+                    open.request,
+                    self.workspace
+                        .execution_lane(crate::editor::session::workspace::DiscoveryKind::Language),
+                ) {
+                    Ok(()) => {
                         if let Some(reply) = reply {
                             self.debugger_session.register_terminal(id, reply);
                         }
@@ -99,6 +100,11 @@ impl InteractiveApplication {
         }
     }
 
+    pub(in crate::editor::session) fn pending_preflight_count(&self) -> usize {
+        self.tasks.preflight_count()
+            + self.terminal_session.preflight_count()
+            + self.language.preflight_count()
+    }
     pub(super) fn process_execution_preflight(&mut self) {
         let events = self.workspace.preflight_events();
         for event in events {
@@ -116,32 +122,53 @@ impl InteractiveApplication {
                         self.advance_debug_launch();
                         continue;
                     }
-                    let result = ready.result();
-                    let Some(action) = self.pending_execution_preflight.remove(&result.id) else {
+                    if self.language.owns_preflight(ready.result().id) {
+                        match self.language.finish_preflight(
+                            ready,
+                            &self.state,
+                            &self.workspace,
+                            self.configuration.binding_revision(),
+                            &self.configuration.settings().lsp,
+                        ) {
+                            Ok(Some(key)) => {
+                                for prefix in ["lsp.", "lsp-pull:"] {
+                                    if let Some(producer) =
+                                        self.language.diagnostic_producer(&key, prefix)
+                                    {
+                                        self.diagnostics.activate(producer);
+                                    }
+                                }
+                                self.sync_ui_diagnostics();
+                            }
+                            Ok(None) => {}
+                            Err(error) => self.show_error(error),
+                        }
                         continue;
-                    };
+                    }
+                    let result = ready.result();
+                    let id = result.id;
                     if result.root_revision != self.workspace.root_revision()
                         || self
                             .workspace
                             .authorize_execution(ExecutionSource::ProjectLocal)
                             .is_err()
                     {
-                        if let PendingExecutionPreflight::Task { step } = &action {
-                            self.tasks.reject_step(step);
+                        if let Some(step) = self.tasks.take_preflight(id) {
+                            self.tasks.reject_step(&step);
                         }
-                        if let PendingExecutionPreflight::Terminal { key } = &action {
-                            if let Some(id) = self.terminal_session.resolve(key) {
+                        if let Some(key) = self.terminal_session.take_preflight(id) {
+                            if let Some(id) = self.terminal_session.resolve(&key) {
                                 if let Some(reply) = self.debugger_session.take_terminal(&id) {
                                     let _ = reply
                                         .respond(false, Some("terminal workspace retired".into()));
                                 }
                             }
-                            self.terminal_session.reject(key);
+                            self.terminal_session.reject(&key);
                             self.sync_terminal_panel();
                         }
                         continue;
                     }
-                    if let PendingExecutionPreflight::Task { step } = action {
+                    if let Some(step) = self.tasks.take_preflight(id) {
                         match self.tasks.launch(
                             step,
                             ready,
@@ -160,7 +187,7 @@ impl InteractiveApplication {
                         }
                         continue;
                     }
-                    if let PendingExecutionPreflight::Terminal { key } = action {
+                    if let Some(key) = self.terminal_session.take_preflight(id) {
                         let id = self.terminal_session.resolve(&key);
                         if id.is_some_and(|id| !self.debugger_session.terminal_current(&id)) {
                             self.terminal_session.reject(&key);
@@ -184,33 +211,6 @@ impl InteractiveApplication {
                         self.sync_terminal_panel();
                         continue;
                     }
-                    let result = ready.into_result();
-                    match action {
-                        PendingExecutionPreflight::Lsp {
-                            session_key,
-                            definition,
-                            launch,
-                            root_id,
-                            project_root,
-                            buffer,
-                            document,
-                            restart,
-                        } => self.launch_preflighted_lsp(
-                            super::lsp::LspLaunchRequest {
-                                session_key,
-                                definition,
-                                launch,
-                                root_id,
-                                project_root,
-                                buffer,
-                                document,
-                                restart,
-                            },
-                            result,
-                        ),
-                        PendingExecutionPreflight::Task { .. } => continue,
-                        PendingExecutionPreflight::Terminal { .. } => unreachable!("routed above"),
-                    }
                 }
                 ExecutionPreflightEvent::Failed {
                     id,
@@ -222,20 +222,26 @@ impl InteractiveApplication {
                         self.show_error(message);
                         continue;
                     }
-                    let action = self.pending_execution_preflight.remove(&id);
-                    if let Some(PendingExecutionPreflight::Task { step }) = &action {
-                        self.tasks.reject_step(step);
+                    if self.language.fail_preflight(id) {
+                        self.show_error(message);
+                        continue;
                     }
-                    if let Some(PendingExecutionPreflight::Terminal { key }) = &action {
-                        if let Some(id) = self.terminal_session.resolve(key) {
+                    let mut owned = false;
+                    if let Some(step) = self.tasks.take_preflight(id) {
+                        self.tasks.reject_step(&step);
+                        owned = true;
+                    }
+                    if let Some(key) = self.terminal_session.take_preflight(id) {
+                        if let Some(id) = self.terminal_session.resolve(&key) {
                             if let Some(reply) = self.debugger_session.take_terminal(&id) {
                                 let _ = reply.respond(false, Some(message.clone()));
                             }
                         }
-                        self.terminal_session.reject(key);
+                        self.terminal_session.reject(&key);
                         self.sync_terminal_panel();
+                        owned = true;
                     }
-                    if root_revision == self.workspace.root_revision() {
+                    if owned && root_revision == self.workspace.root_revision() {
                         self.show_error(message)
                     }
                 }

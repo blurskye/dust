@@ -424,9 +424,7 @@ impl JobEngine {
                 self.sender.clone(),
                 total.clone(),
                 request.policy.clone(),
-                readers.clone(),
-                io_failed.clone(),
-                slot.clone(),
+                (readers.clone(), io_failed.clone(), slot.clone()),
             );
         }
         if let Some(stderr) = child.stderr.take() {
@@ -437,9 +435,7 @@ impl JobEngine {
                 self.sender.clone(),
                 total,
                 request.policy.clone(),
-                readers.clone(),
-                io_failed.clone(),
-                slot.clone(),
+                (readers.clone(), io_failed.clone(), slot.clone()),
             );
         }
         self.jobs.insert(
@@ -556,10 +552,9 @@ fn stream_reader(
     sender: SyncSender<JobEvent>,
     total: Arc<AtomicUsize>,
     policy: JobPolicy,
-    readers: Arc<AtomicUsize>,
-    failed: Arc<AtomicBool>,
-    slot: Arc<JobSlot>,
+    completion: (Arc<AtomicUsize>, Arc<AtomicBool>, Arc<JobSlot>),
 ) {
+    let (readers, failed, slot) = completion;
     readers.fetch_add(1, Ordering::AcqRel);
     thread::spawn(move || {
         struct End(Arc<AtomicUsize>);
@@ -592,8 +587,8 @@ fn stream_reader(
             let allowed = reserve_output(&total, policy.maximum_output_bytes, bytes.len());
             bytes.truncate(allowed);
             let truncated = line_truncated || bytes.len() < read || allowed < read;
-            if !bytes.is_empty() || truncated {
-                if sender
+            if (!bytes.is_empty() || truncated)
+                && sender
                     .send(JobEvent::Output {
                         job: id,
                         stream,
@@ -601,9 +596,8 @@ fn stream_reader(
                         truncated,
                     })
                     .is_err()
-                {
-                    break;
-                }
+            {
+                break;
             }
             if truncated && allowed == 0 {
                 break;

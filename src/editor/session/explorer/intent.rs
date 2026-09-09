@@ -421,12 +421,10 @@ impl ExplorerSession {
                 || open.source != (scope, configuration)
                 || !open.editor.same_editor(editor)
                 || editor.revision().is_none()
-        }) {
-            if let Some(open) = self.open.take()
-                && let Some((id, _)) = open.read
-            {
-                ids.push(id);
-            }
+        }) && let Some(open) = self.open.take()
+            && let Some((id, _)) = open.read
+        {
+            ids.push(id);
         }
         (ids, may_write)
     }

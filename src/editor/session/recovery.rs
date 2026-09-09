@@ -5,6 +5,7 @@ use crate::{
     editor::{BufferId, EditorState, text::BufferRevision},
     files::{RecoveryRecord, RequestId, VfsResult},
 };
+use std::ops::ControlFlow::{self, Break, Continue};
 use std::{
     collections::HashMap,
     path::PathBuf,
@@ -207,16 +208,16 @@ impl RecoverySession {
         self.revisions.clear();
         self.scheduled.clear();
     }
-    pub(super) fn accept(&mut self, result: VfsResult) -> Result<RecoveryUpdate, VfsResult> {
+    pub(super) fn accept(&mut self, result: VfsResult) -> ControlFlow<RecoveryUpdate, VfsResult> {
         let id = match &result {
             VfsResult::RecoveryDiscovered { id, .. }
             | VfsResult::RecoveryCleaned { id, .. }
             | VfsResult::RecoveryWritten { id, .. }
             | VfsResult::Deleted { id, .. } => *id,
-            _ => return Err(result),
+            _ => return Continue(result),
         };
         let Some(pending) = self.pending.get(&id) else {
-            return Err(result);
+            return Continue(result);
         };
         let matches = match (pending, &result) {
             (Pending::Discovery, VfsResult::RecoveryDiscovered { .. })
@@ -228,13 +229,13 @@ impl RecoverySession {
             _ => false,
         };
         if !matches {
-            return Err(result);
+            return Continue(result);
         }
         let pending = self
             .pending
             .remove(&id)
             .expect("matched original recovery request");
-        Ok(match (pending, result) {
+        Break(match (pending, result) {
             (Pending::Discovery, VfsResult::RecoveryDiscovered { discovery, .. }) => {
                 self.records = discovery.records;
                 if discovery.diagnostics.is_empty() {
@@ -342,7 +343,7 @@ impl RecoverySession {
                 path: path.clone(),
                 result: Ok(())
             })
-            .is_err()
+            .is_continue()
         );
         assert!(
             self.accept(VfsResult::RecoveryWritten {
@@ -350,7 +351,7 @@ impl RecoverySession {
                 path: path.with_extension("foreign"),
                 result: Ok(())
             })
-            .is_err()
+            .is_continue()
         );
         assert_eq!(self.pending.len(), count);
         assert!(self.pending.contains_key(&id));

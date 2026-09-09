@@ -123,13 +123,13 @@ impl PluginEditSources {
     pub(super) fn prepare<'a>(
         &'a mut self,
         manager: &'a mut PluginManager,
-        plugin: &str,
-        command: &str,
+        invocation: (&str, &str),
         editor: &'a EditorState,
         workspace: &'a WorkspaceSession,
         configuration: &'a u64,
         maximum: usize,
     ) -> Result<InvocationLoan<'a>, String> {
+        let (plugin, command) = invocation;
         if self.closed || self.pending.len() >= 64 || *configuration == u64::MAX || maximum == 0 {
             return Err("plugin source admission is closed, full or exhausted".into());
         }
@@ -390,7 +390,7 @@ mod tests {
                     utf8: "forged payload".into(),
                 });
                 source
-                    .prepare(manager, "demo", "run", editor, &workspace, &1, 1024)
+                    .prepare(manager, ("demo", "run"), editor, &workspace, &1, 1024)
                     .unwrap()
                     .submit(request)
                     .unwrap();
@@ -400,7 +400,7 @@ mod tests {
         let before = TextBuffer::test_materializations();
         assert!(
             source
-                .prepare(&mut manager, "demo", "run", &editor, &workspace, &1, 1024)
+                .prepare(&mut manager, ("demo", "run"), &editor, &workspace, &1, 1024)
                 .unwrap()
                 .submit(wrong)
                 .is_err()
@@ -414,7 +414,7 @@ mod tests {
         let before = TextBuffer::test_materializations();
         assert!(
             source
-                .prepare(&mut manager, "demo", "run", &editor, &workspace, &1, 1024)
+                .prepare(&mut manager, ("demo", "run"), &editor, &workspace, &1, 1024)
                 .is_err()
         );
         assert_eq!(
@@ -426,7 +426,7 @@ mod tests {
         assert_eq!(first.snapshot().unwrap().utf8, "éab");
         assert_eq!(first.snapshot().unwrap().buffer, buffer.data().as_ffi());
         let loan = source
-            .prepare(&mut manager, "demo", "run", &editor, &workspace, &1, 1024)
+            .prepare(&mut manager, ("demo", "run"), &editor, &workspace, &1, 1024)
             .unwrap();
         drop(loan); // Reservation returned and no pending source record added.
         submit(&mut source, &mut manager, &editor);
@@ -549,8 +549,7 @@ mod tests {
             source
                 .prepare(
                     &mut replacement,
-                    "demo",
-                    "run",
+                    ("demo", "run"),
                     &editor,
                     &workspace,
                     &1,

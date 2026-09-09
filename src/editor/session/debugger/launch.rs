@@ -70,16 +70,15 @@ pub(super) struct Launch {
 impl DebugSession {
     pub(in crate::editor::session) fn request_debug(
         &mut self,
-        name: Option<&str>,
-        requested: Option<&str>,
+        selection: (Option<&str>, Option<&str>),
         program: Option<PathBuf>,
         document: Option<(&Path, &str)>,
-        policy: &DebugConfig,
-        terminals: &crate::config::TerminalsConfig,
-        revision: u64,
+        policy: (&DebugConfig, &crate::config::TerminalsConfig, u64),
         workspace: &WorkspaceSession,
         tools: &[ToolEntry],
     ) -> Result<DebugIntent, String> {
+        let (name, requested) = selection;
+        let (policy, terminals, revision) = policy;
         if !self.service.available() {
             return Err("debugger launch is closed or full".into());
         }
@@ -564,13 +563,10 @@ mod tests {
         let terminals = crate::config::TerminalsConfig::default();
         let old = owner
             .request_debug(
-                Some("owned"),
+                (Some("owned"), None),
                 None,
                 None,
-                None,
-                &policy,
-                &terminals,
-                1,
+                (&policy, &terminals, 1),
                 &workspace,
                 &[],
             )
@@ -578,13 +574,10 @@ mod tests {
         let old_permit = permit(&mut workspace, &old);
         let fresh = owner
             .request_debug(
-                Some("owned"),
+                (Some("owned"), None),
                 None,
                 None,
-                None,
-                &policy,
-                &terminals,
-                1,
+                (&policy, &terminals, 1),
                 &workspace,
                 &[],
             )
@@ -644,13 +637,10 @@ mod tests {
         assert_eq!(owner.pending(), 0);
         let intent = owner
             .request_debug(
-                Some("owned"),
+                (Some("owned"), None),
                 None,
                 None,
-                None,
-                &policy,
-                &terminals,
-                1,
+                (&policy, &terminals, 1),
                 &workspace,
                 &[],
             )
@@ -675,13 +665,10 @@ mod tests {
         assert!(
             owner
                 .request_debug(
-                    Some("owned"),
+                    (Some("owned"), None),
                     None,
                     None,
-                    None,
-                    &policy,
-                    &terminals,
-                    2,
+                    (&policy, &terminals, 2),
                     &workspace,
                     &[]
                 )

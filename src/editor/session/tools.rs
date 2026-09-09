@@ -43,53 +43,56 @@ impl InteractiveApplication {
         use crate::editor::session::extensions::RegistryUpdate;
         for update in self.extension.poll_registry() {
             match update {
-                RegistryUpdate::Present(RegistryResult::Search(result)) => {
-                    let items = result
-                        .packages
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, package)| {
-                            (
+                RegistryUpdate::Present(result) => match *result {
+                    RegistryResult::Search(result) => {
+                        let items = result
+                            .packages
+                            .into_iter()
+                            .enumerate()
+                            .map(|(index, package)| {
+                                (
+                                    PickerItem {
+                                        id: PickerItemId(format!(
+                                            "registry:{index}:{}/{}",
+                                            package.publisher, package.name
+                                        )),
+                                        label: format!("{}/{}", package.publisher, package.name),
+                                        detail: format!(
+                                            "{}{}",
+                                            package.version,
+                                            if package.yanked { " · yanked" } else { "" }
+                                        ),
+                                        source: package.description.clone(),
+                                        action: PickerAction::None,
+                                    },
+                                    PickerPayload::RegistrySummary(package),
+                                )
+                            })
+                            .collect();
+                        self.install_picker(
+                            self.message("package_registry_search_title", &[]),
+                            items,
+                        );
+                    }
+                    RegistryResult::Show(metadata) => {
+                        let label = format!("{}/{}", metadata.publisher, metadata.name);
+                        let detail = format!("{} · {}", metadata.version, metadata.artifact_sha256);
+                        self.install_picker(
+                            self.message("package_registry_show_title", &[]),
+                            vec![(
                                 PickerItem {
-                                    id: PickerItemId(format!(
-                                        "registry:{index}:{}/{}",
-                                        package.publisher, package.name
-                                    )),
-                                    label: format!("{}/{}", package.publisher, package.name),
-                                    detail: format!(
-                                        "{}{}",
-                                        package.version,
-                                        if package.yanked { " · yanked" } else { "" }
-                                    ),
-                                    source: package.description.clone(),
+                                    id: PickerItemId(format!("registry-show:{label}")),
+                                    label,
+                                    detail,
+                                    source: metadata.artifact_path.clone(),
                                     action: PickerAction::None,
                                 },
-                                PickerPayload::RegistrySummary(package),
-                            )
-                        })
-                        .collect();
-                    self.install_picker(self.message("package_registry_search_title", &[]), items);
-                }
-                RegistryUpdate::Present(RegistryResult::Show(metadata)) => {
-                    let label = format!("{}/{}", metadata.publisher, metadata.name);
-                    let detail = format!("{} · {}", metadata.version, metadata.artifact_sha256);
-                    self.install_picker(
-                        self.message("package_registry_show_title", &[]),
-                        vec![(
-                            PickerItem {
-                                id: PickerItemId(format!("registry-show:{label}")),
-                                label,
-                                detail,
-                                source: metadata.artifact_path.clone(),
-                                action: PickerAction::None,
-                            },
-                            PickerPayload::RegistryMetadata(Box::new(metadata)),
-                        )],
-                    );
-                }
-                RegistryUpdate::Present(RegistryResult::Artifact { .. }) => {
-                    self.show_error("unowned registry artifact")
-                }
+                                PickerPayload::RegistryMetadata(Box::new(metadata)),
+                            )],
+                        );
+                    }
+                    RegistryResult::Artifact { .. } => self.show_error("unowned registry artifact"),
+                },
                 RegistryUpdate::ValidateArtifact => {
                     self.defer_trusted_execution(DeferredExecution::PrepareRegistryArtifact);
                     if self.execution_validation.is_none() {

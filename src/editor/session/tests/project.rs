@@ -16,8 +16,7 @@ fn diagnostic_navigation_filters_severity_wraps_and_expands_the_landed_line() {
         std::sync::Arc::new(crate::clock::SystemClock),
     )
     .unwrap();
-    app.terminal_width = 80;
-    app.terminal_height = 24;
+    app.window_session.observe_size((80, 24));
     let path = app.state.workspace_root.join("diagnostic.rs");
     let (buffer, view) = app.state.open_text(
         TextBuffer::from_text("ok\nerror\nwarning\n"),
@@ -650,8 +649,8 @@ fn explorer_watch_batches_reload_through_directory_service_and_preserve_identity
             &app.ui,
             app.configuration.settings(),
             app.configuration.dashboard(),
-            app.terminal_width,
-            app.terminal_height,
+            app.window_session.width(),
+            app.window_session.height(),
         );
     }
     assert_eq!(app.explorer.watch_reconciles(), reconciles);
@@ -672,7 +671,8 @@ fn explorer_watch_batches_reload_through_directory_service_and_preserve_identity
 #[test]
 fn explorer_projection_formats_only_the_terminal_viewport() {
     let mut app = app();
-    app.terminal_height = 10;
+    app.window_session
+        .observe_size((app.window_session.width(), 10));
     for index in 0..40 {
         fs::write(
             app.state.workspace_root.join(format!("file{index}.txt")),
@@ -967,15 +967,16 @@ fn same_session_root_replacement_cancels_all_protected_action_kinds() {
                 let intent = app
                     .debugger_session
                     .request_debug(
-                        Some("owned"),
+                        (Some("owned"), None),
                         None,
                         None,
-                        None,
-                        &policy,
-                        &app.configuration.settings().terminals,
-                        app.configuration.binding_revision(),
+                        (
+                            &policy,
+                            &app.configuration.settings().terminals,
+                            app.configuration.binding_revision(),
+                        ),
                         &app.workspace,
-                        &app.tooling.entries(),
+                        app.tooling.entries(),
                     )
                     .unwrap();
                 super::DeferredExecution::StartDebug(intent)
@@ -1203,8 +1204,7 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
         thread::yield_now();
     }
     assert!(!app.ui.git_signs.is_empty());
-    app.terminal_width = 100;
-    app.terminal_height = 30;
+    app.window_session.observe_size((100, 30));
     app.reconcile_editor_windows();
     let frame = crate::ui::render(
         &app.state,
@@ -1826,8 +1826,7 @@ fn task_formatter_uses_authorized_worker_and_refuses_reloaded_snapshot() {
         std::sync::Arc::new(crate::clock::SystemClock),
     )
     .unwrap();
-    app.terminal_width = 80;
-    app.terminal_height = 24;
+    app.window_session.observe_size((80, 24));
     let path = root.path().join("source.txt");
     fs::write(&path, "abc").unwrap();
     let (buffer, _) = app
@@ -1942,8 +1941,7 @@ fn linter_job_and_vfs_publish_only_original_source_then_recover() {
         std::sync::Arc::new(crate::clock::SystemClock),
     )
     .unwrap();
-    app.terminal_width = 80;
-    app.terminal_height = 24;
+    app.window_session.observe_size((80, 24));
     let (buffer, _) = app.state.open_text(
         TextBuffer::from_text("abc\n"),
         Some(root.path().join("open.txt")),

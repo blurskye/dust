@@ -294,12 +294,17 @@ fn picker_epochs_scope_and_close_preserve_only_current_interaction() {
         origin: PickerOrigin::General,
         title: "Picker".into(),
         items: (0..45)
-            .map(|n| PickerItem {
-                id: PickerItemId(format!("row-{n:02}")),
-                label: format!("jk {n:02}"),
-                detail: String::new(),
-                source: String::new(),
-                action: PickerAction::None,
+            .map(|n| {
+                (
+                    PickerItem {
+                        id: PickerItemId(format!("row-{n:02}")),
+                        label: format!("jk {n:02}"),
+                        detail: String::new(),
+                        source: String::new(),
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::Command(format!("command-{n}")),
+                )
             })
             .collect(),
         query: String::new(),
@@ -348,4 +353,65 @@ fn picker_epochs_scope_and_close_preserve_only_current_interaction() {
     assert!(!owner.pending());
     assert!(owner.poll(scope(root.path()), 1).is_empty());
     assert!(owner.matches().is_empty());
+}
+
+#[test]
+fn picker_rows_and_actions_share_first_wins_bounds_and_replacement() {
+    use crate::{
+        ui::PickerSurfaceKind,
+        workspace::{PickerAction, PickerItem, PickerItemId},
+    };
+    let root = tempfile::tempdir().unwrap();
+    let source = scope(root.path());
+    let mut owner = SearchSession::default();
+    let row = |id: &str, value: &str| {
+        (
+            PickerItem {
+                id: PickerItemId(id.into()),
+                label: value.into(),
+                detail: String::new(),
+                source: String::new(),
+                action: PickerAction::None,
+            },
+            PickerPayload::Command(value.into()),
+        )
+    };
+    let content = |items| PickerContent {
+        surface: PickerSurfaceKind::Generic,
+        origin: PickerOrigin::General,
+        title: "owned".into(),
+        items,
+        query: String::new(),
+        complete: true,
+    };
+    owner
+        .install_picker(
+            content(vec![
+                row("same", "first"),
+                row("same", "wrong"),
+                row("overflow", "overflow"),
+            ]),
+            1,
+            source.clone(),
+            1,
+        )
+        .unwrap();
+    assert_eq!(
+        owner.picker().unwrap().selected_item().unwrap().label,
+        "first"
+    );
+    assert!(
+        matches!(owner.take_picker_payload(), Some(PickerPayload::Command(command)) if command == "first")
+    );
+    owner.picker_move(1, false);
+    assert!(owner.take_picker_payload().is_none());
+    owner
+        .install_picker(content(vec![row("same", "replacement")]), 1, source, 1)
+        .unwrap();
+    assert!(
+        matches!(owner.selected_picker_payload(), Some(PickerPayload::Command(command)) if command == "replacement")
+    );
+    owner.close_picker();
+    assert!(owner.take_picker_payload().is_none());
+    assert!(owner.selected_picker_payload().is_none());
 }

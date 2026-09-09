@@ -3,8 +3,7 @@ use super::*;
 #[test]
 fn adversarial_grapheme_rows_make_render_mouse_and_reversed_pages_agree() {
     let mut app = app();
-    app.terminal_width = 3;
-    app.terminal_height = 7;
+    app.window_session.observe_size((3, 7));
     {
         let mut fixture = app.configuration.fixture_snapshot();
         fixture.settings.editor.wrap = true;
@@ -91,8 +90,7 @@ fn adversarial_grapheme_rows_make_render_mouse_and_reversed_pages_agree() {
 #[test]
 fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently() {
     let mut app = app();
-    app.terminal_width = 12;
-    app.terminal_height = 8;
+    app.window_session.observe_size((12, 8));
     {
         let mut fixture = app.configuration.fixture_snapshot();
         fixture.settings.editor.wrap = true;
@@ -143,7 +141,8 @@ fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently()
         fixture.settings.editor.viewport.vertical_margin = 100;
         app.configuration.install_fixture(fixture);
     }
-    app.terminal_height = 4;
+    app.window_session
+        .observe_size((app.window_session.width(), 4));
     app.ensure_cursor_visible();
     let tiny_viewport = active_pane_viewport(
         &app.state,
@@ -174,7 +173,8 @@ fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently()
             .is_some()
     );
 
-    app.terminal_height = 8;
+    app.window_session
+        .observe_size((app.window_session.width(), 8));
     {
         let mut fixture = app.configuration.fixture_snapshot();
         fixture.settings.editor.viewport.vertical_margin = 0;
@@ -269,8 +269,8 @@ fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently()
             &app.ui,
             app.configuration.settings(),
             app.configuration.dashboard(),
-            app.terminal_width,
-            app.terminal_height,
+            app.window_session.width(),
+            app.window_session.height(),
         );
     }
     assert_eq!(
@@ -292,7 +292,8 @@ fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently()
 #[test]
 fn vertical_margin_keeps_cursor_context_above_and_below() {
     let mut app = app();
-    app.terminal_height = 10;
+    app.window_session
+        .observe_size((app.window_session.width(), 10));
     {
         let mut fixture = app.configuration.fixture_snapshot();
         fixture.settings.editor.viewport.vertical_margin = 2;
@@ -312,7 +313,7 @@ fn vertical_margin_keeps_cursor_context_above_and_below() {
         &app.state,
         &app.ui,
         app.configuration.settings(),
-        app.terminal_width,
+        app.window_session.width(),
         app.workspace_render_height(),
     )
     .unwrap();
@@ -328,8 +329,7 @@ fn vertical_margin_keeps_cursor_context_above_and_below() {
 #[test]
 fn exact_pane_horizontal_follow_is_display_safe_and_view_owned() {
     let mut app = app();
-    app.terminal_width = 18;
-    app.terminal_height = 8;
+    app.window_session.observe_size((18, 8));
     {
         let mut fixture = app.configuration.fixture_snapshot();
         fixture.settings.editor.wrap = false;
@@ -392,8 +392,7 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
         fixture.settings.editor.viewport.horizontal_margin = 0;
         app.configuration.install_fixture(fixture);
     }
-    app.terminal_width = 2;
-    app.terminal_height = 6;
+    app.window_session.observe_size((2, 6));
     app.ensure_cursor_visible();
     assert_eq!(app.state.views[view].scroll_column, 4);
     let frame = render(
@@ -401,8 +400,8 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
         &app.ui,
         app.configuration.settings(),
         app.configuration.dashboard(),
-        app.terminal_width,
-        app.terminal_height,
+        app.window_session.width(),
+        app.window_session.height(),
     );
     assert!(frame.cursor.is_some_and(|(x, y, _)| x == 0 && y == 0));
     app.input.observe_mouse(1, 0);
@@ -418,7 +417,8 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
     }
     app.state.views[view].cursor = ByteOffset("a\t".len());
     app.state.views[view].scroll_column = 0;
-    app.terminal_width = 1;
+    app.window_session
+        .observe_size((1, app.window_session.height()));
     app.ensure_cursor_visible();
     assert_eq!(app.state.views[view].scroll_column, 4);
     let one_cell = render(
@@ -426,44 +426,47 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
         &app.ui,
         app.configuration.settings(),
         app.configuration.dashboard(),
-        app.terminal_width,
-        app.terminal_height,
+        app.window_session.width(),
+        app.window_session.height(),
     );
     assert!(one_cell.cursor.is_some_and(|(x, _, _)| x == 0));
 
-    app.terminal_width = 2;
+    app.window_session
+        .observe_size((2, app.window_session.height()));
     app.ensure_cursor_visible();
     let two_cell = render(
         &app.state,
         &app.ui,
         app.configuration.settings(),
         app.configuration.dashboard(),
-        app.terminal_width,
-        app.terminal_height,
+        app.window_session.width(),
+        app.window_session.height(),
     );
     assert!(two_cell.cursor.is_some_and(|(x, _, _)| x == 1));
     app.input.observe_mouse(1, 0);
     app.apply_mouse_cursor(false);
     assert_eq!(app.state.views[view].cursor, ByteOffset("a\t".len()));
 
-    app.terminal_width = 50;
+    app.window_session
+        .observe_size((50, app.window_session.height()));
     app.ensure_cursor_visible();
     let widened = render(
         &app.state,
         &app.ui,
         app.configuration.settings(),
         app.configuration.dashboard(),
-        app.terminal_width,
-        app.terminal_height,
+        app.window_session.width(),
+        app.window_session.height(),
     );
     assert!(
         widened
             .cursor
-            .is_some_and(|(x, _, _)| x < app.terminal_width)
+            .is_some_and(|(x, _, _)| x < app.window_session.width())
     );
 
     let buffer = app.state.views[view].buffer;
-    app.terminal_width = 2;
+    app.window_session
+        .observe_size((2, app.window_session.height()));
     {
         let mut fixture = app.configuration.fixture_snapshot();
         fixture.settings.editor.wrap = true;
@@ -485,7 +488,8 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
         fixture.settings.editor.line_numbers = crate::config::LineNumbers::Off;
         app.configuration.install_fixture(fixture);
     }
-    app.terminal_width = 2;
+    app.window_session
+        .observe_size((2, app.window_session.height()));
     app.state.buffers[buffer].text = TextBuffer::from_text("ab界X");
     app.state.views[view].cursor = ByteOffset("ab界".len());
     app.state.views[view].scroll_column = 0;
@@ -496,8 +500,8 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
         &app.ui,
         app.configuration.settings(),
         app.configuration.dashboard(),
-        app.terminal_width,
-        app.terminal_height,
+        app.window_session.width(),
+        app.window_session.height(),
     );
     assert!(wide.cursor.is_some_and(|(x, _, _)| x == 0));
 
@@ -506,7 +510,8 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
         fixture.settings.ui.panes.minimum_width = 3;
         app.configuration.install_fixture(fixture);
     }
-    app.terminal_width = 6;
+    app.window_session
+        .observe_size((6, app.window_session.height()));
     app.state
         .split_active(crate::editor::Axis::Horizontal, 100)
         .expect("minimum-ratio split");
@@ -518,8 +523,8 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
         &app.state,
         &app.ui,
         app.configuration.settings(),
-        app.terminal_width,
-        app.terminal_height,
+        app.window_session.width(),
+        app.window_session.height(),
     )
     .expect("focused tiny-layout viewport");
     assert_eq!(zero_viewport.width, 6);
@@ -565,8 +570,7 @@ fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
         fixture.settings.editor.line_numbers = crate::config::LineNumbers::Off;
         app.configuration.install_fixture(fixture);
     }
-    app.terminal_width = 90;
-    app.terminal_height = 18;
+    app.window_session.observe_size((90, 18));
     app.state.views[view].cursor = ByteOffset(80);
     app.ensure_cursor_visible();
     assert_eq!(app.state.views[view].scroll_column, 0);
@@ -582,21 +586,22 @@ fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
     app.ensure_cursor_visible();
     let docked = app.state.views[view].scroll_column;
     assert!(docked > 0);
-    let panel = explorer_panel_width(app.configuration.settings(), app.terminal_width)
+    let panel = explorer_panel_width(app.configuration.settings(), app.window_session.width())
         .expect("explorer panel");
     let frame = render(
         &app.state,
         &app.ui,
         app.configuration.settings(),
         app.configuration.dashboard(),
-        app.terminal_width,
-        app.terminal_height,
+        app.window_session.width(),
+        app.window_session.height(),
     );
     assert!(frame.cursor.is_some_and(|(x, y, _)| {
-        x > panel && x < app.terminal_width && y < app.terminal_height - 1
+        x > panel && x < app.window_session.width() && y < app.window_session.height() - 1
     }));
 
-    app.terminal_width = 30;
+    app.window_session
+        .observe_size((30, app.window_session.height()));
     app.ensure_cursor_visible();
     let narrowed = app.state.views[view].scroll_column;
     assert!(narrowed > docked);
@@ -610,21 +615,20 @@ fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
     app.ensure_cursor_visible();
     let gutter_shifted = app.state.views[view].scroll_column;
     assert!(gutter_shifted > 0);
-    app.terminal_width = 100;
+    app.window_session
+        .observe_size((100, app.window_session.height()));
     app.ensure_cursor_visible();
     let widened = render(
         &app.state,
         &app.ui,
         app.configuration.settings(),
         app.configuration.dashboard(),
-        app.terminal_width,
-        app.terminal_height,
+        app.window_session.width(),
+        app.window_session.height(),
     );
-    assert!(
-        widened
-            .cursor
-            .is_some_and(|(x, y, _)| { x < app.terminal_width && y < app.terminal_height - 1 })
-    );
+    assert!(widened.cursor.is_some_and(|(x, y, _)| {
+        x < app.window_session.width() && y < app.window_session.height() - 1
+    }));
 
     // Moving onto a shorter line must pull a stale horizontal offset back.
     app.state.views[view].cursor = ByteOffset(text.len());
@@ -633,7 +637,8 @@ fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
 
     // Unequal nested splits use the exact focused leaf width and keep the
     // terminal cursor inside that leaf after the geometry changes.
-    app.terminal_width = 90;
+    app.window_session
+        .observe_size((90, app.window_session.height()));
     app.state.views[view].cursor = ByteOffset(80);
     app.state
         .split_active(crate::editor::Axis::Horizontal, 300)
@@ -648,8 +653,8 @@ fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
         &app.state,
         &app.ui,
         app.configuration.settings(),
-        app.terminal_width,
-        app.terminal_height,
+        app.window_session.width(),
+        app.window_session.height(),
     )
     .expect("focused leaf viewport");
     assert!(app.state.views[focused].scroll_column > 0);
@@ -658,8 +663,8 @@ fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
         &app.ui,
         app.configuration.settings(),
         app.configuration.dashboard(),
-        app.terminal_width,
-        app.terminal_height,
+        app.window_session.width(),
+        app.window_session.height(),
     );
     assert!(frame.cursor.is_some_and(|(x, y, _)| {
         x >= viewport.x

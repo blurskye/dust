@@ -114,7 +114,13 @@ impl PtyAdmission<'_> {
                 }
                 let _finished = Finished(finished);
                 if let Err(error) = run(
-                    id, request, root, &events, cancel, input_rx, resize_rx, resident,
+                    id,
+                    request,
+                    root,
+                    &events,
+                    cancel,
+                    (input_rx, resize_rx),
+                    resident,
                 ) {
                     let _ = events.send(PtyEvent::Failed {
                         id,
@@ -327,10 +333,10 @@ fn run(
     root: Option<crate::workspace::RootIdentity>,
     events: &SyncSender<PtyEvent>,
     cancel: Arc<AtomicBool>,
-    input: Receiver<Input>,
-    resize: Receiver<(u16, u16)>,
+    controls: (Receiver<Input>, Receiver<(u16, u16)>),
     resident: Arc<Slot>,
 ) -> Result<(), PtyError> {
+    let (input, resize) = controls;
     use portable_pty::{CommandBuilder, PtySize, native_pty_system};
     let fail = |error: String| PtyError::Spawn(error);
     if cancel.load(Ordering::Acquire) {

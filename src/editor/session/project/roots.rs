@@ -91,7 +91,7 @@ impl InteractiveApplication {
         if removed_lsp {
             self.sync_ui_diagnostics();
         }
-        self.pending_execution_preflight.clear();
+        self.language.retire_launches();
         for (plugin, load) in self.extension.retire_packages() {
             self.remove_plugin_contribution_generation(&plugin, load);
         }

@@ -684,6 +684,97 @@ impl RecoveryIo<'_> {
     }
 }
 
+// Admissions are constructed only by this bounded router after the VFS result.
+// Constructed and consumed inside submission while the source loan is live.
+// Callers cannot fabricate an enqueue acknowledgement or detach its permit.
+pub(in crate::editor::session) struct WorkspaceSubmission {
+    worker: Arc<()>,
+    result: Result<RequestId, String>,
+}
+impl WorkspaceSubmission {
+    pub(in crate::editor::session) fn into_parts(self) -> (Arc<()>, Result<RequestId, String>) {
+        (self.worker, self.result)
+    }
+}
+pub(in crate::editor::session) struct WorkspaceCancellation {
+    worker: Arc<()>,
+    id: RequestId,
+}
+impl WorkspaceCancellation {
+    pub(in crate::editor::session) fn id(&self) -> RequestId {
+        self.id
+    }
+    pub(in crate::editor::session) fn is_from(&self, worker: &Arc<()>) -> bool {
+        Arc::ptr_eq(&self.worker, worker)
+    }
+}
+pub(in crate::editor::session) struct WorkspaceIoReply {
+    worker: Arc<()>,
+    result: VfsResult,
+}
+impl WorkspaceIoReply {
+    pub(in crate::editor::session) fn id(&self) -> RequestId {
+        self.result.request_id()
+    }
+    pub(in crate::editor::session) fn is_from(&self, worker: &Arc<()>) -> bool {
+        Arc::ptr_eq(&self.worker, worker)
+    }
+    pub(in crate::editor::session) fn result(&self) -> &VfsResult {
+        &self.result
+    }
+    pub(in crate::editor::session) fn into_result(self) -> VfsResult {
+        self.result
+    }
+}
+impl DocumentSession {
+    pub(in crate::editor::session) fn submit_workspace_io(
+        &mut self,
+        permit: super::workspace_edits::IoPermit<'_>,
+    ) -> Result<(), String> {
+        let result = (|| {
+            self.check_admission().map_err(|e| e.to_string())?;
+            let file = permit.file(&self.owner)?;
+            use super::workspace_edits::InputFile;
+            match file {
+                InputFile::Read(path) => {
+                    self.read_scoped_bounded(path, permit.roots().to_vec(), permit.maximum() as u64)
+                }
+                InputFile::Create(path) => self.resolve_create(path, permit.roots().to_vec()),
+                InputFile::Resource { source, target } => {
+                    self.resolve_resource(source, target, permit.roots().to_vec(), permit.maximum())
+                }
+            }
+            .map_err(|e| e.to_string())
+        })();
+        if let Ok(id) = &result {
+            self.pending_legacy.remove(id);
+            self.pending_workspace.insert(*id);
+        }
+        permit.finish(WorkspaceSubmission {
+            worker: self.owner.clone(),
+            result,
+        })
+    }
+    pub(in crate::editor::session) fn submit_workspace_resource(
+        &mut self,
+        mut permit: super::workspace_edits::ResourcePermit<'_>,
+    ) -> Result<(), String> {
+        let result = (|| {
+            self.check_admission().map_err(|e| e.to_string())?;
+            let intent = permit.take_intent(&self.owner)?;
+            self.apply_resource(intent).map_err(|e| e.to_string())
+        })();
+        if let Ok(id) = &result {
+            self.pending_legacy.remove(id);
+            self.pending_workspace.insert(*id);
+        }
+        permit.finish(WorkspaceSubmission {
+            worker: self.owner.clone(),
+            result,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -880,96 +971,5 @@ mod tests {
                 )
                 .is_empty()
         );
-    }
-}
-
-// Admissions are constructed only by this bounded router after the VFS result.
-// Constructed and consumed inside submission while the source loan is live.
-// Callers cannot fabricate an enqueue acknowledgement or detach its permit.
-pub(in crate::editor::session) struct WorkspaceSubmission {
-    worker: Arc<()>,
-    result: Result<RequestId, String>,
-}
-impl WorkspaceSubmission {
-    pub(in crate::editor::session) fn into_parts(self) -> (Arc<()>, Result<RequestId, String>) {
-        (self.worker, self.result)
-    }
-}
-pub(in crate::editor::session) struct WorkspaceCancellation {
-    worker: Arc<()>,
-    id: RequestId,
-}
-impl WorkspaceCancellation {
-    pub(in crate::editor::session) fn id(&self) -> RequestId {
-        self.id
-    }
-    pub(in crate::editor::session) fn is_from(&self, worker: &Arc<()>) -> bool {
-        Arc::ptr_eq(&self.worker, worker)
-    }
-}
-pub(in crate::editor::session) struct WorkspaceIoReply {
-    worker: Arc<()>,
-    result: VfsResult,
-}
-impl WorkspaceIoReply {
-    pub(in crate::editor::session) fn id(&self) -> RequestId {
-        self.result.request_id()
-    }
-    pub(in crate::editor::session) fn is_from(&self, worker: &Arc<()>) -> bool {
-        Arc::ptr_eq(&self.worker, worker)
-    }
-    pub(in crate::editor::session) fn result(&self) -> &VfsResult {
-        &self.result
-    }
-    pub(in crate::editor::session) fn into_result(self) -> VfsResult {
-        self.result
-    }
-}
-impl DocumentSession {
-    pub(in crate::editor::session) fn submit_workspace_io(
-        &mut self,
-        permit: super::workspace_edits::IoPermit<'_>,
-    ) -> Result<(), String> {
-        let result = (|| {
-            self.check_admission().map_err(|e| e.to_string())?;
-            let file = permit.file(&self.owner)?;
-            use super::workspace_edits::InputFile;
-            match file {
-                InputFile::Read(path) => {
-                    self.read_scoped_bounded(path, permit.roots().to_vec(), permit.maximum() as u64)
-                }
-                InputFile::Create(path) => self.resolve_create(path, permit.roots().to_vec()),
-                InputFile::Resource { source, target } => {
-                    self.resolve_resource(source, target, permit.roots().to_vec(), permit.maximum())
-                }
-            }
-            .map_err(|e| e.to_string())
-        })();
-        if let Ok(id) = &result {
-            self.pending_legacy.remove(id);
-            self.pending_workspace.insert(*id);
-        }
-        permit.finish(WorkspaceSubmission {
-            worker: self.owner.clone(),
-            result,
-        })
-    }
-    pub(in crate::editor::session) fn submit_workspace_resource(
-        &mut self,
-        mut permit: super::workspace_edits::ResourcePermit<'_>,
-    ) -> Result<(), String> {
-        let result = (|| {
-            self.check_admission().map_err(|e| e.to_string())?;
-            let intent = permit.take_intent(&self.owner)?;
-            self.apply_resource(intent).map_err(|e| e.to_string())
-        })();
-        if let Ok(id) = &result {
-            self.pending_legacy.remove(id);
-            self.pending_workspace.insert(*id);
-        }
-        permit.finish(WorkspaceSubmission {
-            worker: self.owner.clone(),
-            result,
-        })
     }
 }

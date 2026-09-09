@@ -64,6 +64,7 @@ pub(in crate::editor::session) enum TerminalUpdate {
 }
 pub(super) struct TerminalSession {
     service: PtyService,
+    preflights: HashMap<crate::process::PreflightId, TerminalKey>,
     tabs: HashMap<PtyId, TerminalRuntime>,
     selected: Option<PtyId>,
     next: Option<u64>,
@@ -79,6 +80,7 @@ impl TerminalSession {
     pub(in crate::editor::session) fn new(policy: &TerminalsConfig) -> Self {
         Self {
             service: PtyService::start(policy.queue_capacity),
+            preflights: HashMap::new(),
             tabs: HashMap::new(),
             selected: None,
             next: Some(1),
@@ -327,6 +329,46 @@ impl TerminalSession {
             capture: source.capture,
         })
     }
+    pub(in crate::editor::session) fn preflight_count(&self) -> usize {
+        self.preflights.len()
+    }
+    pub(in crate::editor::session) fn take_preflight(
+        &mut self,
+        id: crate::process::PreflightId,
+    ) -> Option<TerminalKey> {
+        self.preflights.remove(&id)
+    }
+    pub(in crate::editor::session) fn queue_preflight(
+        &mut self,
+        key: TerminalKey,
+        request: ExecutionPreflightRequest,
+        mut lane: super::workspace::ExecutionLane<'_>,
+    ) -> Result<(), String> {
+        let id = self
+            .resolve(&key)
+            .ok_or("terminal preflight source retired")?;
+        let tab = &self.tabs[&id];
+        let original = &tab
+            .pending
+            .as_ref()
+            .ok_or("terminal preflight already consumed")?
+            .request;
+        if self.closed
+            || !lane.current(&tab.scope)
+            || self.preflights.len() >= 256
+            || self.preflights.values().any(|pending| pending == &key)
+            || !lane.preflight_available()?
+            || original.executable != request.executable
+            || original.cwd != request.cwd
+            || original.roots != request.roots
+            || original.root_revision != request.root_revision
+        {
+            return Err("terminal preflight source changed or full".into());
+        }
+        let id = lane.preflight(request).map_err(|error| error.to_string())?;
+        self.preflights.insert(id, key);
+        Ok(())
+    }
     pub(in crate::editor::session) fn launch(
         &mut self,
         key: TerminalKey,
@@ -379,6 +421,7 @@ impl TerminalSession {
         Ok(id)
     }
     pub(in crate::editor::session) fn close(&mut self, id: PtyId) -> bool {
+        self.preflights.retain(|_, key| key.id != id);
         let Some(tab) = self.tabs.remove(&id) else {
             return false;
         };
@@ -393,6 +436,7 @@ impl TerminalSession {
         true
     }
     pub(in crate::editor::session) fn reset(&mut self) {
+        self.preflights.clear();
         self.cancel_open();
         let ids = self.tabs.keys().copied().collect::<Vec<_>>();
         for id in ids {
@@ -409,6 +453,7 @@ impl TerminalSession {
         false
     }
     pub(in crate::editor::session) fn begin_shutdown(&mut self) {
+        self.preflights.clear();
         self.closed = true;
         self.reset();
         self.service.begin_shutdown();

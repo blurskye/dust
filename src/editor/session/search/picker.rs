@@ -1,10 +1,52 @@
-//! Canonical picker interaction and derived presentation; provider payloads stay outside this owner.
+//! Canonical picker rows, actions, interaction and derived presentation.
 use super::{SearchSession, WorkspaceVersion};
+use crate::{
+    extensions::PluginLoadId,
+    persistence::PersistedLocation,
+    tools::{RegistryPackageMetadata, RegistryPackageSummary},
+};
 use crate::{
     ui::{PickerRow, PickerSurfaceKind, PickerUiState},
     workspace::{PickerItem, PickerItemId, PickerState},
 };
-use std::sync::Arc;
+use std::{
+    collections::{HashMap, hash_map::Entry},
+    path::PathBuf,
+    sync::Arc,
+};
+#[derive(Clone, Debug)]
+pub(in crate::editor::session) enum PickerPayload {
+    WorkspaceSearch(String),
+    LspLocation(crate::language::lsp::LspLocation),
+    Diagnostic(crate::editor::session::diagnostics::DiagnosticKey),
+    CodeAction(crate::editor::session::lsp_edits::CodeActionKey),
+    Buffer(crate::editor::BufferId),
+    Command(String),
+    ProposalFile(usize),
+    WorkspaceRoot(crate::workspace::RootId),
+    Terminal(crate::editor::session::terminal::TerminalKey),
+    LspSession(String),
+    Debug(crate::editor::session::debugger::DebugKey),
+    PersistedLocation(PersistedLocation),
+    GitHunk {
+        path: PathBuf,
+        status_revision: u64,
+        repository: crate::workspace::git::GitRepositoryId,
+        hunk: crate::workspace::git::GitHunkId,
+        new_line: usize,
+    },
+    MatcherSource(MatcherSource),
+    TaskTest(crate::editor::session::tasks::TestKey),
+    RegistrySummary(RegistryPackageSummary),
+    RegistryMetadata(Box<RegistryPackageMetadata>),
+    PluginProviderItem {
+        plugin: String,
+        load: PluginLoadId,
+        request: u64,
+        item: String,
+        action_command: String,
+    },
+}
 
 #[derive(Clone)]
 pub(in crate::editor::session) struct PickerEpoch(Arc<()>);
@@ -20,12 +62,13 @@ pub(in crate::editor::session) struct PickerContent {
     pub surface: PickerSurfaceKind,
     pub origin: PickerOrigin,
     pub title: String,
-    pub items: Vec<PickerItem>,
+    pub items: Vec<(PickerItem, PickerPayload)>,
     pub query: String,
     pub complete: bool,
 }
 struct PickerInteraction {
     state: PickerState,
+    payloads: HashMap<PickerItemId, PickerPayload>,
     surface: PickerSurfaceKind,
     origin: PickerOrigin,
     source: (WorkspaceVersion, u64),
@@ -50,7 +93,20 @@ impl SearchSession {
             .checked_add(1)
             .ok_or("picker generation exhausted")?;
         let mut state = PickerState::new(generation, content.title, maximum);
-        state.append(generation, content.items, content.complete);
+        let mut payloads = HashMap::new();
+        state.append(
+            generation,
+            content.items.into_iter().filter_map(|(item, payload)| {
+                // First row wins, exactly as PickerState::append does; overflow is never retained.
+                if let Entry::Vacant(entry) = payloads.entry(item.id.clone()) {
+                    entry.insert(payload);
+                    Some(item)
+                } else {
+                    None
+                }
+            }),
+            content.complete,
+        );
         state.set_unfiltered_query(content.query);
         if !matches!(content.origin, PickerOrigin::Files) {
             self.cancel_files();
@@ -63,6 +119,7 @@ impl SearchSession {
         let epoch = PickerEpoch(Arc::new(()));
         self.picker.interaction = Some(PickerInteraction {
             state,
+            payloads,
             surface: content.surface,
             origin: content.origin,
             source: (scope, configuration),
@@ -70,6 +127,28 @@ impl SearchSession {
         });
         self.picker.generation = generation;
         Ok(epoch)
+    }
+    pub(in crate::editor::session) fn selected_picker_payload(&self) -> Option<&PickerPayload> {
+        let picker = self.picker.interaction.as_ref()?;
+        picker.payloads.get(&picker.state.selected_item()?.id)
+    }
+    pub(in crate::editor::session) fn take_picker_payload(&mut self) -> Option<PickerPayload> {
+        let picker = self.picker.interaction.as_mut()?;
+        picker.payloads.remove(&picker.state.selected_item()?.id)
+    }
+    pub(in crate::editor::session) fn picker_code_actions<'a>(
+        &'a self,
+        epoch: &'a PickerEpoch,
+    ) -> impl Iterator<Item = &'a crate::editor::session::lsp_edits::CodeActionKey> {
+        self.picker
+            .interaction
+            .iter()
+            .filter(move |_| self.owns_picker_epoch(epoch))
+            .flat_map(|picker| picker.payloads.values())
+            .filter_map(|payload| match payload {
+                PickerPayload::CodeAction(key) => Some(key),
+                _ => None,
+            })
     }
     pub(in crate::editor::session) fn workspace_picker(
         &self,
@@ -189,4 +268,11 @@ impl SearchSession {
             preview: self.preview.clone(),
         })
     }
+}
+
+#[derive(Clone, Debug)]
+pub(in crate::editor::session) struct MatcherSource {
+    pub(in crate::editor::session) path: PathBuf,
+    pub(in crate::editor::session) line: usize,
+    pub(in crate::editor::session) column: usize,
 }

@@ -163,8 +163,7 @@ impl ExtensionSession {
         }
         let loan = self.edits.prepare(
             &mut self.manager,
-            plugin,
-            command,
+            (plugin, command),
             context.editor,
             context.workspace,
             context.configuration,

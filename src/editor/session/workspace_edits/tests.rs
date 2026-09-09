@@ -185,8 +185,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
             InputFile::Read(disk.clone()),
             InputFile::Create(created.clone()),
         ],
-        vec![root.path().into()],
-        1024,
+        (vec![root.path().into()], 1024),
     )
     .unwrap();
     let permit = io.prepare_io(0, &workspace, &1, &editor).unwrap();
@@ -205,8 +204,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
         None,
         false,
         vec![InputFile::Read(disk.clone())],
-        vec![root.path().into()],
-        1024,
+        (vec![root.path().into()], 1024),
     )
     .unwrap();
     release.send(()).unwrap();
@@ -249,8 +247,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
             None,
             false,
             vec![InputFile::Read(disk.clone())],
-            vec![root.path().into()],
-            1024,
+            (vec![root.path().into()], 1024),
         )
         .unwrap();
     let permit = foreign_io.prepare_io(0, &workspace, &1, &editor).unwrap();
@@ -302,8 +299,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
         None,
         false,
         vec![InputFile::Create(created.clone())],
-        vec![root.path().into()],
-        1024,
+        (vec![root.path().into()], 1024),
     )
     .unwrap();
     let permit = io.prepare_io(0, &workspace, &1, &editor).unwrap();
@@ -336,8 +332,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
         None,
         false,
         vec![InputFile::Read(disk)],
-        vec![root.path().into()],
-        1024,
+        (vec![root.path().into()], 1024),
     )
     .unwrap();
     let permit = io.prepare_io(0, &workspace, &1, &editor).unwrap();
@@ -366,11 +361,13 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
         &resource,
         &target,
     );
-    let permit = resources
-        .prepare_resource(&workspace, &1, &editor)
-        .unwrap()
-        .unwrap();
-    drop(permit); // An unused loan neither consumes the stage nor submits work.
+    {
+        // An unused loan neither consumes the stage nor submits work.
+        let _permit = resources
+            .prepare_resource(&workspace, &1, &editor)
+            .unwrap()
+            .unwrap();
+    }
     let (notices, requests) = resources.retire_resources("configuration changed");
     assert_eq!(notices.len(), 1);
     assert!(requests.is_empty());
@@ -554,8 +551,7 @@ fn stage_resource(
                 source: source.into(),
                 target: Some(target.into()),
             }],
-            vec![source.parent().unwrap().into()],
-            1024,
+            (vec![source.parent().unwrap().into()], 1024),
         )
         .unwrap();
     let permit = owner.prepare_io(0, workspace, &1, editor).unwrap();

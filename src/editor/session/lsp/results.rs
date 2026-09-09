@@ -595,16 +595,12 @@ impl InteractiveApplication {
             Some(plan.key),
             plan.all_files,
             plan.files,
-            roots,
-            maximum,
+            (roots, maximum),
         ) {
             self.abort_workspace_edit(error);
             return;
         }
-        loop {
-            let Some((index, file)) = self.workspace_edits.next_file() else {
-                break;
-            };
+        while let Some((index, file)) = self.workspace_edits.next_file() {
             let snapshot =
                 if let crate::editor::session::workspace_edits::InputFile::Read(path) = file {
                     self.state.workspace_snapshot(

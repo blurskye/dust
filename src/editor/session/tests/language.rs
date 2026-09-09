@@ -102,7 +102,7 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
     app.start_lsp(Some("nested-rust".into()));
     wait_execution_validation(&mut app);
     let deadline = Instant::now() + Duration::from_secs(2);
-    while app.pending_lsp_project_root.is_some() {
+    while app.language.project_pending() {
         app.process_lsp_project_root();
         assert!(
             Instant::now() < deadline,
@@ -111,16 +111,9 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
         thread::yield_now();
     }
     let action = app
-        .pending_execution_preflight
-        .values()
-        .find_map(|action| match action {
-            super::PendingExecutionPreflight::Lsp {
-                session_key,
-                project_root,
-                ..
-            } => Some((session_key, project_root)),
-            _ => None,
-        })
+        .language
+        .fixture_preflight_projects()
+        .next()
         .expect("nested project must queue an LSP preflight");
     assert_eq!(action.1, &nested);
     let expected_key = crate::language::lsp::LspSessionKey {
@@ -130,7 +123,7 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
     }
     .transport_key();
     assert_eq!(action.0, &expected_key);
-    while !app.pending_execution_preflight.is_empty() {
+    while app.pending_preflight_count() != 0 {
         app.process_execution_preflight();
         assert!(Instant::now() < deadline, "LSP startup admission timed out");
         thread::yield_now();
@@ -329,11 +322,11 @@ fn untrusted_workspace_blocks_project_local_language_server_launch() {
     app.start_lsp(Some("project-local".into()));
     wait_execution_validation(&mut app);
     let deadline = Instant::now() + Duration::from_secs(2);
-    while app.pending_lsp_project_root.is_some() && Instant::now() < deadline {
+    while app.language.project_pending() && Instant::now() < deadline {
         app.process_lsp_project_root();
         thread::sleep(Duration::from_millis(5));
     }
-    while !app.pending_execution_preflight.is_empty() && Instant::now() < deadline {
+    while app.pending_preflight_count() != 0 && Instant::now() < deadline {
         app.process_execution_preflight();
         thread::sleep(Duration::from_millis(5));
     }
@@ -1047,11 +1040,12 @@ fn tool_menu_navigation_keeps_the_selected_server_inside_the_rendered_list() {
         app.move_tool_menu(1);
         let menu = app.ui.tool_menu.as_ref().expect("menu");
         let configured = &app.configuration.settings().ui.tool_manager;
-        let modal_height =
-            (u32::from(app.terminal_height) * u32::from(configured.height_percent) / 100) as u16;
+        let modal_height = (u32::from(app.window_session.height())
+            * u32::from(configured.height_percent)
+            / 100) as u16;
         let modal_height = modal_height
-            .max(configured.minimum_height.min(app.terminal_height))
-            .min(app.terminal_height);
+            .max(configured.minimum_height.min(app.window_session.height()))
+            .min(app.window_session.height());
         let visible = usize::from(modal_height.saturating_sub(18)).max(1);
         assert!(menu.selected >= menu.scroll);
         assert!(menu.selected < menu.scroll.saturating_add(visible));
@@ -1222,8 +1216,7 @@ fn plugin_workspace_preview_uses_invocation_source_and_retires_on_dismissal() {
         std::sync::Arc::new(crate::clock::SystemClock),
     )
     .unwrap();
-    app.terminal_width = 80;
-    app.terminal_height = 24;
+    app.window_session.observe_size((80, 24));
     let path = root.path().join("source.txt");
     fs::write(&path, "éab").unwrap();
     let (buffer, _) = app.state.open_text(

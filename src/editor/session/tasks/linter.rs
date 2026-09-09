@@ -89,7 +89,7 @@ impl LinterReadLoan<'_> {
             .build
             .pending
             .values()
-            .any(|read| !read.key.from_worker(worker))
+            .any(|read| !read.key.belongs_to_worker(worker))
         {
             return Err("linter read worker changed with outstanding reads".into());
         }
@@ -146,9 +146,9 @@ impl TaskSession {
         workspace: &WorkspaceSession,
         configuration: u64,
         diagnostics: &DiagnosticSession,
-        maximum_items: usize,
-        maximum_bytes: u64,
+        limits: (usize, u64),
     ) -> Result<(), String> {
+        let (maximum_items, maximum_bytes) = limits;
         if !self.current(&task, workspace, configuration) {
             return Err("linter run retired".into());
         }

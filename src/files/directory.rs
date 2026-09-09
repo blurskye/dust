@@ -23,11 +23,12 @@ pub struct DirectoryListing {
     pub truncated: bool,
 }
 
+type DirectoryResult = Result<(DirectoryListing, Vec<crate::workspace::RootIdentity>), VfsError>;
+
 #[derive(Default)]
 pub struct DirectoryService {
     generation: u64,
-    receiver:
-        Option<Receiver<Result<(DirectoryListing, Vec<crate::workspace::RootIdentity>), VfsError>>>,
+    receiver: Option<Receiver<DirectoryResult>>,
 }
 
 impl DirectoryService {

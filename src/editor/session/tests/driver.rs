@@ -176,8 +176,8 @@ impl TestSession {
             &self.application.ui,
             self.application.configuration.settings(),
             self.application.configuration.dashboard(),
-            self.application.terminal_width,
-            self.application.terminal_height,
+            self.application.window_session.width(),
+            self.application.window_session.height(),
         )
     }
     pub(super) fn explorer_fixture(&mut self) {

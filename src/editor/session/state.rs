@@ -1,59 +1,5 @@
 use super::*;
 
-pub(in crate::editor::session) enum PendingExecutionPreflight {
-    Task {
-        step: crate::editor::session::tasks::TaskStep,
-    },
-    Terminal {
-        key: crate::editor::session::terminal::TerminalKey,
-    },
-    Lsp {
-        session_key: String,
-        definition: ToolDefinition,
-        launch: LspLaunch,
-        root_id: crate::workspace::RootId,
-        project_root: PathBuf,
-        buffer: crate::editor::BufferId,
-        document: LspDocument,
-        restart: bool,
-    },
-}
-
-#[derive(Clone, Debug)]
-pub(in crate::editor::session) struct MatcherSource {
-    pub(in crate::editor::session) path: PathBuf,
-    pub(in crate::editor::session) line: usize,
-    pub(in crate::editor::session) column: usize,
-}
-#[derive(Clone, Debug)]
-pub(in crate::editor::session) enum LspLaunchSource {
-    Direct { executable: PathBuf, managed: bool },
-    NixWorkspace { nix: PathBuf, shell: String },
-}
-
-#[derive(Clone, Debug)]
-pub(in crate::editor::session) struct PendingLspProjectRoot {
-    pub(in crate::editor::session) definition: ToolDefinition,
-    pub(in crate::editor::session) launch_source: LspLaunchSource,
-    pub(in crate::editor::session) root_id: crate::workspace::RootId,
-    pub(in crate::editor::session) workspace_root: PathBuf,
-    pub(in crate::editor::session) buffer: crate::editor::BufferId,
-    pub(in crate::editor::session) document: LspDocument,
-}
-
-#[derive(Clone, Debug)]
-pub(in crate::editor::session) struct PendingNixLspWorkspace {
-    pub(in crate::editor::session) session_key: String,
-    pub(in crate::editor::session) definition: ToolDefinition,
-    pub(in crate::editor::session) nix: PathBuf,
-    pub(in crate::editor::session) shell: String,
-    pub(in crate::editor::session) root_id: crate::workspace::RootId,
-    pub(in crate::editor::session) project_root: PathBuf,
-    pub(in crate::editor::session) buffer: crate::editor::BufferId,
-    pub(in crate::editor::session) document: LspDocument,
-    pub(in crate::editor::session) restart: bool,
-}
-
 #[derive(Clone, Debug)]
 pub(in crate::editor::session) enum DeferredExecution {
     InstallTool {
@@ -262,40 +208,6 @@ pub(in crate::editor::session) fn compose_command_picker_items(
         .into_iter()
         .filter_map(|id| by_id.remove(&id))
         .collect())
-}
-
-#[derive(Clone, Debug)]
-pub(in crate::editor::session) enum PickerPayload {
-    WorkspaceSearch(String),
-    LspLocation(crate::language::lsp::LspLocation),
-    Diagnostic(crate::editor::session::diagnostics::DiagnosticKey),
-    CodeAction(crate::editor::session::lsp_edits::CodeActionKey),
-    Buffer(crate::editor::BufferId),
-    Command(String),
-    ProposalFile(usize),
-    WorkspaceRoot(crate::workspace::RootId),
-    Terminal(crate::editor::session::terminal::TerminalKey),
-    LspSession(String),
-    Debug(crate::editor::session::debugger::DebugKey),
-    PersistedLocation(PersistedLocation),
-    GitHunk {
-        path: PathBuf,
-        status_revision: u64,
-        repository: crate::workspace::git::GitRepositoryId,
-        hunk: crate::workspace::git::GitHunkId,
-        new_line: usize,
-    },
-    MatcherSource(MatcherSource),
-    TaskTest(crate::editor::session::tasks::TestKey),
-    RegistrySummary(RegistryPackageSummary),
-    RegistryMetadata(Box<RegistryPackageMetadata>),
-    PluginProviderItem {
-        plugin: String,
-        load: PluginLoadId,
-        request: u64,
-        item: String,
-        action_command: String,
-    },
 }
 
 #[derive(Clone, Debug)]

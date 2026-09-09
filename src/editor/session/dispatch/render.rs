@@ -160,7 +160,7 @@ impl InteractiveApplication {
                 pending_effects: self
                     .pending_vfs
                     .len()
-                    .saturating_add(self.pending_execution_preflight.len())
+                    .saturating_add(self.pending_preflight_count())
                     .saturating_add(self.tasks.linter_count()),
                 plugins_failed: self
                     .extension
@@ -195,7 +195,7 @@ impl InteractiveApplication {
     pub(super) fn compositor_projection(&self) -> Option<&CompositorProjection> {
         self.window_session.current_for_editor(
             &self.state.window_version(),
-            (self.terminal_width, self.terminal_height),
+            (self.window_session.width(), self.window_session.height()),
         )
     }
 
@@ -229,7 +229,7 @@ impl InteractiveApplication {
 
     pub(super) fn workspace_render_height(&self) -> u16 {
         self.workspace_bounds()
-            .map_or(self.terminal_height, |bounds| bounds.height)
+            .map_or(self.window_session.height(), |bounds| bounds.height)
     }
 
     pub(super) fn terminal_body_dimensions(&self) -> Option<(u16, u16)> {
@@ -321,7 +321,7 @@ impl InteractiveApplication {
         }
         let explorer_fallback = WindowPlacement::Docked {
             edge: DockEdge::Left,
-            size: explorer_panel_width(self.configuration.settings(), self.terminal_width)
+            size: explorer_panel_width(self.configuration.settings(), self.window_session.width())
                 .unwrap_or(1)
                 .saturating_add(1),
         };

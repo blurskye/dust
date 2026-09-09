@@ -145,7 +145,7 @@ fn linter_owner_validates_whole_sources_and_retires_original_publications() {
             b"open:1:1:ok\n",
         );
         tasks
-            .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+            .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
             .unwrap();
         let Some(LinterUpdate::Publish { producer, batches }) =
             tasks.next_linter_update(&editor, &workspace, 1, &diagnostics)
@@ -173,7 +173,7 @@ fn linter_owner_validates_whole_sources_and_retires_original_publications() {
     );
     assert!(
         tasks
-            .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+            .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
             .is_err()
     );
     assert_eq!(diagnostics.choices().count(), 1); // independent second producer survives
@@ -187,7 +187,7 @@ fn linter_owner_validates_whole_sources_and_retires_original_publications() {
         b"open:1:1:old\n",
     );
     tasks
-        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
         .unwrap();
     editor.open_text(
         TextBuffer::from_text("unrelated"),
@@ -215,7 +215,7 @@ fn linter_owner_validates_whole_sources_and_retires_original_publications() {
     let foreign = EditorState::new(root.path().into());
     assert!(
         tasks
-            .begin_linter(task, &foreign, &workspace, 1, &diagnostics, 100, 1024)
+            .begin_linter(task, &foreign, &workspace, 1, &diagnostics, (100, 1024))
             .unwrap_err()
             .contains("source retired")
     );
@@ -230,7 +230,7 @@ fn linter_owner_validates_whole_sources_and_retires_original_publications() {
         b"unopened:1:1:old",
     );
     tasks
-        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
         .unwrap();
     let task = completed(
         &mut tasks,
@@ -242,7 +242,7 @@ fn linter_owner_validates_whole_sources_and_retires_original_publications() {
         b"open:1:1:new",
     );
     tasks
-        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
         .unwrap();
     assert!(matches!(
         tasks.next_linter_update(&editor, &workspace, 1, &diagnostics),
@@ -267,7 +267,7 @@ fn linter_owner_validates_whole_sources_and_retires_original_publications() {
         b"unopened:1:1:stopped",
     );
     tasks
-        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
         .unwrap();
     let stopped = tasks.stop("first").unwrap().unwrap();
     diagnostics.clear_source(&stopped);
@@ -288,7 +288,7 @@ fn linter_owner_validates_whole_sources_and_retires_original_publications() {
     );
     assert!(
         tasks
-            .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+            .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
             .unwrap_err()
             .contains("identity exhausted")
     );
@@ -311,13 +311,13 @@ fn linter_reads_reserve_real_capacity_keep_worker_identity_and_refuse_stale_deco
         b"a:1:1:a\nb:1:1:b\n",
     );
     tasks
-        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
         .unwrap();
-    drop(
-        tasks
+    {
+        let _unused_loan = tasks
             .linter_read(&editor, &workspace, &1, &diagnostics)
-            .unwrap(),
-    );
+            .unwrap();
+    }
     assert_eq!(
         tasks.linters.builds.values().next().unwrap().unread.len(),
         2
@@ -367,7 +367,7 @@ fn linter_reads_reserve_real_capacity_keep_worker_identity_and_refuse_stale_deco
         b"a:1:1:a\nb:1:1:b\n",
     );
     tasks
-        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
         .unwrap();
     assert!(
         resumed
@@ -431,7 +431,7 @@ fn linter_reads_reserve_real_capacity_keep_worker_identity_and_refuse_stale_deco
         b"a:1:1:a\n",
     );
     tasks
-        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
         .unwrap();
     first
         .submit_linter_read(
@@ -452,7 +452,7 @@ fn linter_reads_reserve_real_capacity_keep_worker_identity_and_refuse_stale_deco
         b"a:1:1:b\n",
     );
     other
-        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
         .unwrap();
     second
         .submit_linter_read(
@@ -513,7 +513,7 @@ fn linter_reads_reserve_real_capacity_keep_worker_identity_and_refuse_stale_deco
         b"b:1:1:b\n",
     );
     tasks
-        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
         .unwrap();
     let (vfs, release) = VfsWorker::start_gated_for_test(1);
     let mut stopped = documents(vfs, &editor, &workspace);
@@ -557,7 +557,7 @@ fn linter_reads_reserve_real_capacity_keep_worker_identity_and_refuse_stale_deco
         b"b:1:1:b",
     );
     tasks
-        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 2)
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 2))
         .unwrap();
     let mut bounded = documents(VfsWorker::start(1), &editor, &workspace);
     bounded
@@ -593,7 +593,7 @@ fn linter_reads_reserve_real_capacity_keep_worker_identity_and_refuse_stale_deco
         b"b:1:1:b",
     );
     tasks
-        .begin_linter(task, &editor, &workspace, 1, &diagnostics, 100, 1024)
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
         .unwrap();
     let (vfs, release) = VfsWorker::start_gated_for_test(1);
     let mut replaced = documents(vfs, &editor, &workspace);

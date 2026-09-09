@@ -265,7 +265,8 @@ fn copied_production_tree_enforces_migrated_owner_privacy() {
     );
     let positive = r#"
 fn terminal_domain(owner:&mut super::terminal::TerminalSession) {let _=owner.selected();let _=owner.descriptions();}
-fn lsp_domain(owner:&super::lsp::LspSession) {let _=owner.sessions();let _=owner.capabilities();}
+fn lsp_domain(owner:&super::lsp::LspSession) {let _=owner.sessions();let _=owner.capabilities();let _=owner.preflight_count();}
+fn viewport_domain(owner:&mut super::windows::WindowSession) {owner.observe_size((80,24));let _=owner.width();}
 fn extension_domain(owner:&super::extensions::ExtensionSession) {let _=owner.statuses();let _=owner.load_id("demo");let _=owner.provider_presentable(1);let _=owner.window_snapshots();}
 fn history_domain(owner:&mut super::persistence::PersistenceSession) {owner.record_recent(std::path::PathBuf::from("/owned"),8);let _=owner.recent_files();}
 fn virtual_publication_domain(owner:&mut super::extensions::ExtensionSession,editor:&crate::editor::EditorState,windows:&super::windows::WindowSession) {drop(owner.prepare_health(false,0,super::extensions::VirtualContext{editor,windows,scratch:"scratch"}));}
@@ -319,7 +320,7 @@ fn legitimate_client(editor: &mut crate::editor::EditorState) { editor.workspace
         success && errors.is_empty(),
         "full-source positive control failed; privacy is NOT proved: {diagnostic}"
     );
-    for (name, body, field, code) in [
+    let cases = [
         (
             "accepted",
             "fn bypass(owner: &mut super::configuration::ConfigurationSession) { owner.accepted.settings.lsp.inlay_hints = false; }",
@@ -394,9 +395,15 @@ fn legitimate_client(editor: &mut crate::editor::EditorState) { editor.workspace
         ),
         (
             "editor_bridge_writer",
+            "fn bypass(owner: &mut super::windows::WindowSession, editor: &crate::editor::EditorState) { let _ = owner.editor_ids().reconcile(&editor.into(), &mut crate::ui::window::WindowGraph::default(), \"scratch\"); }",
+            "reconcile",
+            "E0624",
+        ),
+        (
+            "retired_editor_bridge_reset",
             "fn bypass(owner: &mut super::windows::WindowSession) { let _ = owner.editor_ids().reset(&mut crate::ui::window::WindowGraph::default()); }",
             "reset",
-            "E0624",
+            "E0599",
         ),
         (
             "native_bridge_writer",
@@ -702,6 +709,36 @@ fn legitimate_client(editor: &mut crate::editor::EditorState) { editor.workspace
             "lsp_active_runtime",
             "fn bypass(owner:&mut super::lsp::LspSession) {owner.active=None;}",
             "active",
+            "E0616",
+        ),
+        (
+            "lsp_launch_preparation",
+            "fn bypass(owner:&mut super::lsp::LspSession) {let _=&mut owner.preparation;}",
+            "preparation",
+            "E0616",
+        ),
+        (
+            "task_preflights",
+            "fn bypass(owner:&mut super::tasks::TaskSession) {owner.preflights.clear();}",
+            "preflights",
+            "E0616",
+        ),
+        (
+            "terminal_preflights",
+            "fn bypass(owner:&mut super::terminal::TerminalSession) {owner.preflights.clear();}",
+            "preflights",
+            "E0616",
+        ),
+        (
+            "picker_interaction",
+            "fn bypass(owner:&mut super::search::SearchSession) {let _=&mut owner.picker;}",
+            "picker",
+            "E0616",
+        ),
+        (
+            "observed_viewport",
+            "fn bypass(owner:&mut super::windows::WindowSession) {owner.observed_size=(1,1);}",
+            "observed_size",
             "E0616",
         ),
         (
@@ -1054,7 +1091,7 @@ fn legitimate_client(editor: &mut crate::editor::EditorState) { editor.workspace
         ),
         (
             "plugin_invocation_loan",
-            r#"fn bypass(source:&mut super::plugin_edits::PluginEditSources, manager:&mut crate::extensions::PluginManager, editor:&crate::editor::EditorState, workspace:&super::workspace::WorkspaceSession, request:crate::extensions::PluginExecutionRequest) { let loan=source.prepare(manager,"demo","run",editor,workspace,&1,1024).unwrap(); manager.disable("demo").unwrap(); let _=loan.submit(request); }"#,
+            r#"fn bypass(source:&mut super::plugin_edits::PluginEditSources, manager:&mut crate::extensions::PluginManager, editor:&crate::editor::EditorState, workspace:&super::workspace::WorkspaceSession, request:crate::extensions::PluginExecutionRequest) { let loan=source.prepare(manager,("demo","run"),editor,workspace,&1,1024).unwrap(); manager.disable("demo").unwrap(); let _=loan.submit(request); }"#,
             "manager",
             "E0499",
         ),
@@ -1202,7 +1239,8 @@ fn legitimate_client(editor: &mut crate::editor::EditorState) { editor.workspace
             "generation",
             "E0616",
         ),
-    ] {
+    ];
+    for &(name, body, field, code) in cases.iter().filter(|case| case.3 != "E0616") {
         install(body);
         let (success, errors, diagnostic) = check_complete_tree(tree, &target, name, deadline);
         assert!(!success, "full-source mutation compiled: {name}");
@@ -1220,6 +1258,76 @@ fn legitimate_client(editor: &mut crate::editor::EditorState) { editor.workspace
             "wrong field: {name}: {diagnostic}"
         );
         eprintln!("copied-tree privacy: {name}: {code} on {field}");
+    }
+    // Independent field-privacy failures can be checked together. Borrow checking,
+    // resolution and missing-method controls remain isolated, so one compiler phase
+    // cannot mask another. Keep the original aggregate deadline and exact diagnostics.
+    let fields = cases
+        .iter()
+        .filter(|case| case.3 == "E0616")
+        .collect::<Vec<_>>();
+    for (batch, cases) in fields.chunks(8).enumerate() {
+        let mut root_source = original.clone();
+        let mut dispatch_source = original_dispatch.clone();
+        let mut spans = Vec::new();
+        for (index, &&(name, body, field, code)) in cases.iter().enumerate() {
+            let authorization = body.contains("ExecutionAuthorization");
+            let (source, path, imports) = if authorization {
+                (
+                    &mut dispatch_source,
+                    "src/editor/session/dispatch/mod.rs",
+                    "use super::{ExecutionAuthorization,ExecutionAdmission};",
+                )
+            } else {
+                (&mut root_source, "src/editor/session/mod.rs", "")
+            };
+            let first = source.bytes().filter(|byte| *byte == b'\n').count() + 2;
+            let last = first + body.bytes().filter(|byte| *byte == b'\n').count();
+            source.push_str(&format!(
+                "\n#[allow(dead_code)] mod ownership_probe_batch_{index} {{ {imports} {body} }}\n"
+            ));
+            spans.push((name, field, code, path, first, last));
+        }
+        fs::write(&module, root_source).unwrap();
+        fs::write(&dispatch, dispatch_source).unwrap();
+        let (success, errors, diagnostic) =
+            check_complete_tree(tree, &target, &format!("field_batch_{batch}"), deadline);
+        assert!(!success, "field privacy batch compiled: {batch}");
+        assert_eq!(
+            errors.len(),
+            spans.len(),
+            "unexpected field batch diagnostics: {diagnostic}"
+        );
+        for (name, field, code, path, first, last) in spans {
+            let matches = errors
+                .iter()
+                .filter(|error| {
+                    error["spans"].as_array().unwrap().iter().any(|span| {
+                        span["is_primary"] == true
+                            && span["file_name"]
+                                .as_str()
+                                .is_some_and(|file| file.ends_with(path))
+                            && span["line_start"]
+                                .as_u64()
+                                .is_some_and(|line| (first..=last).contains(&(line as usize)))
+                    })
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                matches.len(),
+                1,
+                "missing/duplicate diagnostic for {name}: {diagnostic}"
+            );
+            assert_eq!(
+                matches[0]["code"]["code"], code,
+                "wrong compiler phase: {name}: {diagnostic}"
+            );
+            assert!(
+                matches[0]["message"].as_str().unwrap().contains(field),
+                "wrong field: {name}: {diagnostic}"
+            );
+            eprintln!("copied-tree privacy: {name}: {code} on {field}");
+        }
     }
     install(positive);
     dust::architecture::audit_source(tree).expect("valid production dependency control");

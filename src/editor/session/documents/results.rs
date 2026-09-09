@@ -1,4 +1,5 @@
 use super::*;
+use std::ops::ControlFlow::{Break, Continue};
 
 impl InteractiveApplication {
     pub(in crate::editor::session) fn schedule_recovery_work(&mut self) {
@@ -121,20 +122,20 @@ impl InteractiveApplication {
                     configuration: self.configuration.binding_revision(),
                 },
             ) {
-                Ok(RestoreUpdate::Waiting) => continue,
-                Ok(RestoreUpdate::Ready(ready)) => {
-                    self.finish_session_restore(ready);
+                Break(RestoreUpdate::Waiting) => continue,
+                Break(RestoreUpdate::Ready(ready)) => {
+                    self.finish_session_restore(*ready);
                     continue;
                 }
-                Ok(RestoreUpdate::Failed(error)) => {
+                Break(RestoreUpdate::Failed(error)) => {
                     self.cancel_session_restore();
                     self.show_error(error);
                     continue;
                 }
-                Err(result) => result,
+                Continue(result) => result,
             };
             let result = match self.recovery.accept(result) {
-                Ok(update) => {
+                Break(update) => {
                     use crate::editor::session::recovery::RecoveryUpdate;
                     match update {
                         RecoveryUpdate::Quiet | RecoveryUpdate::Pruned(0) => {}
@@ -149,7 +150,7 @@ impl InteractiveApplication {
                     }
                     continue;
                 }
-                Err(result) => result,
+                Continue(result) => result,
             };
             match result {
                 VfsResult::RecoveryDiscovered { .. }

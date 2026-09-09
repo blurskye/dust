@@ -3,12 +3,13 @@ use super::*;
 impl InteractiveApplication {
     fn tool_menu_height(&self) -> u16 {
         let configured = &self.configuration.settings().ui.tool_manager;
-        let height = (u32::from(self.terminal_height) * u32::from(configured.height_percent) / 100)
-            .try_into()
-            .unwrap_or(self.terminal_height);
+        let height =
+            (u32::from(self.window_session.height()) * u32::from(configured.height_percent) / 100)
+                .try_into()
+                .unwrap_or(self.window_session.height());
         height
-            .max(configured.minimum_height.min(self.terminal_height))
-            .min(self.terminal_height)
+            .max(configured.minimum_height.min(self.window_session.height()))
+            .min(self.window_session.height())
     }
 
     fn tool_menu_list_visible_rows(&self) -> usize {
@@ -105,18 +106,7 @@ impl InteractiveApplication {
             })
             .collect::<Vec<_>>();
         sessions.sort();
-        starting = starting
-            || self
-                .pending_lsp_project_root
-                .as_ref()
-                .is_some_and(|(_, pending)| pending.definition.id == id)
-            || self
-                .pending_nix_lsp_workspace
-                .as_ref()
-                .is_some_and(|(_, pending)| pending.definition.id == id)
-            || self.pending_execution_preflight.values().any(|pending| {
-                matches!(pending, PendingExecutionPreflight::Lsp { definition, .. } if definition.id == id)
-            });
+        starting = starting || self.language.launch_pending(id);
         let lifecycle = if running > 0 {
             if running == 1 {
                 "running".into()

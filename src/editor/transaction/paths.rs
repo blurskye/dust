@@ -158,7 +158,7 @@ mod tests {
         editor.set_buffer_dirty(buffer, true);
         let (draft, recent) = editor.reconcile_paths(change, Some(&target)).unwrap();
         editor = draft.unwrap().accept(&editor.version()).unwrap();
-        assert_eq!(recent, [target.clone()]);
+        assert_eq!(recent.as_slice(), std::slice::from_ref(&target));
         assert_eq!(
             editor.buffers[buffer].path.as_ref().unwrap().as_os_str(),
             target.as_os_str()

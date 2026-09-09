@@ -106,8 +106,13 @@ pub fn audit_source(root: &Path) -> Result<ArchitectureAudit, ArchitectureError>
     let external_tui =
         fs::read_to_string(root.join("tests/external_tui.rs")).map_err(ArchitectureError::Io)?;
 
+    let lsp_launch = fs::read_to_string(source_root.join("editor/session/lsp/launch.rs"))
+        .map_err(ArchitectureError::Io)?;
     if !session.contains("self.installer.install")
-        || !session.contains("PendingExecutionPreflight::Lsp")
+        || !lsp_launch.contains("pending.source.current(&context)")
+        || !lsp_launch.contains(".preflight(request.clone())")
+        || !lsp_launch.contains("ready.into_execution_result(&request, workspace)")
+        || !session.contains("self.language.finish_preflight(")
         || !session.contains("advance_debug")
         || !language.contains("start_session_absolute_with_policy")
         || !language.contains("PreflightRequired")

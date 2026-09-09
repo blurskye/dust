@@ -1,5 +1,5 @@
 //! Search worker admission, accepted results and interaction retirement.
-//! Provider payload integration remains in dispatch during the coordinated migration.
+//! Selected opaque actions share the lifetime and bounds of their actual rows.
 mod picker;
 mod preview;
 use super::workspace::WorkspaceVersion;
@@ -12,7 +12,9 @@ use crate::workspace::search_workflow::{
     SearchSourceKind, SearchStreamGeneration, SearchWorkflowBroker, SearchWorkflowChunk,
     SearchWorkflowId, SearchWorkflowItem, SearchWorkflowSpec,
 };
-pub(in crate::editor::session) use picker::{PickerContent, PickerEpoch, PickerOrigin};
+pub(in crate::editor::session) use picker::{
+    MatcherSource, PickerContent, PickerOrigin, PickerPayload,
+};
 
 #[derive(Default)]
 pub(in crate::editor::session) struct SearchSession {

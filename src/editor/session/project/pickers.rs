@@ -44,19 +44,12 @@ impl InteractiveApplication {
             .search
             .workspace_picker()
             .filter(|id| !matches!(origin, PickerOrigin::WorkspaceEdit(current) if current == *id));
-        let (rows, payloads): (Vec<_>, Vec<_>) = items
-            .into_iter()
-            .map(|(item, payload)| {
-                let id = item.id.clone();
-                (item, (id, payload))
-            })
-            .unzip();
         let epoch = match self.search.install_picker(
             PickerContent {
                 surface,
                 origin,
                 title,
-                items: rows,
+                items,
                 query,
                 complete,
             },
@@ -80,16 +73,9 @@ impl InteractiveApplication {
             self.retire_workspace_picker(id);
         }
         self.language
-            .retain_actions(payloads.iter().filter_map(|(_, payload)| match payload {
-                PickerPayload::CodeAction(key) => Some(key),
-                _ => None,
-            }));
+            .retain_actions(self.search.picker_code_actions(&epoch));
         self.input.cancel_prompt_completions();
         self.clear_picker_preview();
-        self.picker_payloads = payloads
-            .into_iter()
-            .map(|(id, payload)| (id, (epoch.clone(), payload)))
-            .collect();
         self.sync_picker_ui();
     }
 
@@ -103,9 +89,7 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn selected_picker_payload(&self) -> Option<&PickerPayload> {
-        let item = self.search.picker()?.selected_item()?;
-        let (epoch, payload) = self.picker_payloads.get(&item.id)?;
-        self.search.owns_picker_epoch(epoch).then_some(payload)
+        self.search.selected_picker_payload()
     }
 
     pub(in crate::editor::session) fn open_lsp_locations_picker(
@@ -684,22 +668,13 @@ impl InteractiveApplication {
         }
         self.extension.picker_installed(None);
         self.tasks.select_output(None);
-        self.picker_payloads.clear();
         self.ui.picker = None;
         self.refresh_window_content();
     }
 
     pub(in crate::editor::session) fn accept_picker(&mut self) {
         self.retire_stale_picker();
-        let selected = self
-            .search
-            .picker()
-            .and_then(PickerState::selected_item)
-            .map(|item| item.id.clone());
-        let payload = selected
-            .as_ref()
-            .and_then(|id| self.picker_payloads.remove(id))
-            .and_then(|(epoch, payload)| self.search.owns_picker_epoch(&epoch).then_some(payload));
+        let payload = self.search.take_picker_payload();
         if let Some(PickerPayload::ProposalFile(index)) = &payload {
             if let Err(error) = self.workspace_edits.toggle(*index) {
                 self.show_error(error);

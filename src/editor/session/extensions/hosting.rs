@@ -25,7 +25,7 @@ use crate::{
 
 pub(in crate::editor::session) enum WindowUpdate<'a> {
     Ready(PluginUiEvent),
-    Publish(WindowPublication<'a>, PluginWindowTransition),
+    Publish(WindowPublication<'a>, Box<PluginWindowTransition>),
 }
 pub(in crate::editor::session) struct WindowPublication<'a> {
     current: &'a mut PluginWindowHost,
@@ -164,7 +164,7 @@ impl ExtensionSession {
                 catalog,
                 event,
             },
-            transition,
+            Box::new(transition),
         )
     }
     pub(in crate::editor::session) fn window_generations(&self) -> Vec<(String, u64)> {

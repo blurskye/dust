@@ -132,7 +132,7 @@ pub(super) struct TaskStep {
 pub(super) enum TaskUpdate {
     Output,
     Finished {
-        task: RunningTask,
+        task: Box<RunningTask>,
         code: Option<i32>,
         truncated: bool,
         next: bool,
@@ -145,6 +145,7 @@ pub(super) enum TaskUpdate {
 pub(super) struct TaskSession {
     linters: linter::Linters,
     jobs: JobSupervisor,
+    preflights: HashMap<crate::process::PreflightId, TaskStep>,
     running: HashMap<JobId, RunningTask>,
     keys: HashMap<String, RunKey>,
     plans: HashMap<String, Plan>,
@@ -163,6 +164,7 @@ impl TaskSession {
         let mut owner = Self {
             linters: linter::Linters::default(),
             jobs: JobSupervisor::new(config.processes.event_capacity),
+            preflights: HashMap::new(),
             running: HashMap::new(),
             keys: HashMap::new(),
             plans: HashMap::new(),
@@ -324,6 +326,46 @@ impl TaskSession {
             request,
         ))
     }
+    pub(in crate::editor::session) fn preflight_count(&self) -> usize {
+        self.preflights.len()
+    }
+    pub(in crate::editor::session) fn take_preflight(
+        &mut self,
+        id: crate::process::PreflightId,
+    ) -> Option<TaskStep> {
+        self.preflights.remove(&id)
+    }
+    pub(in crate::editor::session) fn queue_preflight(
+        &mut self,
+        step: TaskStep,
+        mut lane: super::workspace::ExecutionLane<'_>,
+    ) -> Result<(), String> {
+        let result = (|| {
+            if self.closed
+                || self.preflights.len() >= 256
+                || !lane.current(&step.key.workspace)
+                || !self
+                    .keys
+                    .get(&step.requested)
+                    .is_some_and(|key| Arc::ptr_eq(&key.epoch, &step.key.epoch))
+                || !lane.preflight_available()?
+            {
+                return Err("task preflight source retired or full".into());
+            }
+            lane.preflight(step.request.clone())
+                .map_err(|error| error.to_string())
+        })();
+        match result {
+            Ok(id) => {
+                self.preflights.insert(id, step);
+                Ok(())
+            }
+            Err(error) => {
+                self.reject_step(&step);
+                Err(error)
+            }
+        }
+    }
     pub(super) fn reject_step(&mut self, step: &TaskStep) {
         if self
             .keys
@@ -478,6 +520,7 @@ impl TaskSession {
         self.active_output = name.map(str::to_owned);
     }
     pub(super) fn stop(&mut self, name: &str) -> Result<Option<DiagnosticProducer>, String> {
+        self.preflights.retain(|_, step| step.requested != name);
         let current = self.keys.remove(name);
         let mut producer = current.as_ref().and_then(|key| self.linters.stop_run(key));
         self.plans.remove(name);
@@ -505,6 +548,7 @@ impl TaskSession {
         }
     }
     pub(super) fn retire_workspace(&mut self) {
+        self.preflights.clear();
         self.linters
             .retire("task source configuration/workspace retired");
         self.keys.clear();
@@ -518,6 +562,7 @@ impl TaskSession {
         self.active_output = None;
     }
     pub(super) fn begin_shutdown(&mut self) {
+        self.preflights.clear();
         self.closed = true;
         self.linters
             .retire("task source configuration/workspace retired");
@@ -646,7 +691,7 @@ impl TaskSession {
                         .into(),
                     );
                     return Some(TaskUpdate::Finished {
-                        task,
+                        task: Box::new(task),
                         code,
                         truncated,
                         next,

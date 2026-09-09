@@ -42,10 +42,7 @@ impl InteractiveApplication {
                             ("terminal", self.notices.terminal_capabilities().to_owned()),
                             ("jobs", self.tasks.running_count().to_string()),
                             ("ptys", self.terminal_session.running_count().to_string()),
-                            (
-                                "preflights",
-                                self.pending_execution_preflight.len().to_string(),
-                            ),
+                            ("preflights", self.pending_preflight_count().to_string()),
                             ("tasks", self.tasks.status_count().to_string()),
                             ("plugins", self.extension.statuses().len().to_string()),
                             (

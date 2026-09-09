@@ -762,6 +762,35 @@ impl EditorDraft {
     }
 }
 
+impl EditorState {
+    pub(crate) fn prepare_document_location(
+        &self,
+        buffer: BufferId,
+        position: ByteOffset,
+        transaction: TransactionId,
+    ) -> Result<EditorDraft, String> {
+        self.buffers
+            .get(buffer)
+            .ok_or("navigation buffer closed")?
+            .text
+            .validate_offset(position)
+            .map_err(|e| e.to_string())?;
+        if self.window_version().revision().is_none() {
+            return Err("navigation editor exhausted".into());
+        }
+        let mut draft = self.draft();
+        let view = draft.show_document(buffer)?;
+        draft
+            .apply_operations(
+                &EditorTransaction::new(transaction)
+                    .with_precondition(Precondition::ViewDisplays { view, buffer })
+                    .with_operation(EditorOperation::SetCursor { view, position })
+                    .with_undo_policy(UndoPolicy::Ignore),
+            )
+            .map_err(|e| e.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -870,34 +899,5 @@ mod tests {
         );
         assert!(state.apply_transaction(&transaction).is_err());
         assert_eq!(state.buffers[buffer].text.to_string(), "abc");
-    }
-}
-
-impl EditorState {
-    pub(crate) fn prepare_document_location(
-        &self,
-        buffer: BufferId,
-        position: ByteOffset,
-        transaction: TransactionId,
-    ) -> Result<EditorDraft, String> {
-        self.buffers
-            .get(buffer)
-            .ok_or("navigation buffer closed")?
-            .text
-            .validate_offset(position)
-            .map_err(|e| e.to_string())?;
-        if self.window_version().revision().is_none() {
-            return Err("navigation editor exhausted".into());
-        }
-        let mut draft = self.draft();
-        let view = draft.show_document(buffer)?;
-        draft
-            .apply_operations(
-                &EditorTransaction::new(transaction)
-                    .with_precondition(Precondition::ViewDisplays { view, buffer })
-                    .with_operation(EditorOperation::SetCursor { view, position })
-                    .with_undo_policy(UndoPolicy::Ignore),
-            )
-            .map_err(|e| e.to_string())
     }
 }

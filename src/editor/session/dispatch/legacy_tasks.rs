@@ -59,7 +59,7 @@ impl InteractiveApplication {
         self.start_task_step(name.into());
     }
     pub(super) fn start_task_step(&mut self, requested: String) {
-        let (step, request) = match self.tasks.step(
+        let (step, _) = match self.tasks.step(
             &requested,
             &self.workspace,
             self.configuration.binding_revision(),
@@ -70,15 +70,12 @@ impl InteractiveApplication {
                 return;
             }
         };
-        match self.workspace.request_preflight(request) {
-            Ok(id) => {
-                self.pending_execution_preflight
-                    .insert(id, PendingExecutionPreflight::Task { step });
-            }
-            Err(error) => {
-                self.tasks.reject_step(&step);
-                self.show_error(error);
-            }
+        if let Err(error) = self.tasks.queue_preflight(
+            step,
+            self.workspace
+                .execution_lane(crate::editor::session::workspace::DiscoveryKind::Language),
+        ) {
+            self.show_error(error);
         }
     }
 
@@ -273,17 +270,19 @@ impl InteractiveApplication {
                             && matches!(task.adapter(), AdapterContext::Linter { .. })
                         {
                             if let Err(error) = self.tasks.begin_linter(
-                                task,
+                                *task,
                                 &self.state,
                                 &self.workspace,
                                 self.configuration.binding_revision(),
                                 &self.diagnostics,
-                                self.configuration.settings().workspace.maximum_diagnostics,
-                                self.configuration
-                                    .settings()
-                                    .workspace
-                                    .search
-                                    .maximum_file_bytes,
+                                (
+                                    self.configuration.settings().workspace.maximum_diagnostics,
+                                    self.configuration
+                                        .settings()
+                                        .workspace
+                                        .search
+                                        .maximum_file_bytes,
+                                ),
                             ) {
                                 self.show_error(error);
                             }

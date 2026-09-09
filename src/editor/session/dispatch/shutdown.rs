@@ -33,6 +33,7 @@ impl InteractiveApplication {
                 self.diagnostics.clear_owner(&owner);
             }
         }
+        self.language.close_preparation();
         self.debugger_session.begin_shutdown();
         self.tasks.begin_shutdown();
         self.terminal_session.begin_shutdown();
@@ -40,6 +41,7 @@ impl InteractiveApplication {
         self.drain_linter_sources();
         self.documents.close_admission();
         while (self.documents.has_work()
+            || self.language.preparation_pending()
             || self.language.pending_replies()
             || self.tasks.running_count() != 0
             || self.terminal_session.pending() != 0
@@ -56,6 +58,9 @@ impl InteractiveApplication {
                 self.show_error(error);
             }
             std::thread::sleep(Duration::from_millis(2));
+        }
+        if self.language.preparation_pending() {
+            self.show_error("Nix workspace preparation remains at shared shutdown deadline; filesystem outcome unknown");
         }
         let unfinished_reads = self
             .tasks

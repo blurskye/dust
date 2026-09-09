@@ -11,9 +11,9 @@ impl TaskReadKey {
         self.id
     }
     pub(in crate::editor::session) fn same(&self, other: &Self) -> bool {
-        self.id == other.id && self.from_worker(&other.worker)
+        self.id == other.id && self.belongs_to_worker(&other.worker)
     }
-    pub(in crate::editor::session) fn from_worker(&self, worker: &Arc<()>) -> bool {
+    pub(in crate::editor::session) fn belongs_to_worker(&self, worker: &Arc<()>) -> bool {
         Arc::ptr_eq(&self.worker, worker)
     }
 }
@@ -65,7 +65,7 @@ impl TaskReadStopped {
         Self { worker }
     }
     pub(in crate::editor::session) fn matches(&self, key: &TaskReadKey) -> bool {
-        key.from_worker(&self.worker)
+        key.belongs_to_worker(&self.worker)
     }
 }
 impl DocumentSession {
@@ -103,7 +103,7 @@ impl DocumentSession {
         &mut self,
         key: &TaskReadKey,
     ) -> Option<TaskCancellation> {
-        if key.from_worker(&self.owner)
+        if key.belongs_to_worker(&self.owner)
             && self.pending_tasks.contains(&key.id)
             && self.vfs.cancel(key.id)
         {

@@ -641,10 +641,12 @@ mod tests {
         );
         let a = owner.tree.id_for_path(&a).unwrap();
         let b = owner.tree.id_for_path(&b).unwrap();
-        let mut policy = crate::config::ExplorerConfig::default();
-        policy.preview_enabled = true;
-        policy.maximum_preview_bytes = 16;
-        policy.maximum_preview_lines = 2;
+        let policy = crate::config::ExplorerConfig {
+            preview_enabled: true,
+            maximum_preview_bytes: 16,
+            maximum_preview_lines: 2,
+            ..Default::default()
+        };
         owner.select(a);
         let request = owner
             .prepare_preview(source.clone(), 2, &policy, "binary", "failed: {diagnostic}")

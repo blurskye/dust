@@ -9,14 +9,16 @@ impl InteractiveApplication {
             .ui
             .explorer
             .as_ref()
-            .and_then(|_| explorer_panel_width(self.configuration.settings(), self.terminal_width))
+            .and_then(|_| {
+                explorer_panel_width(self.configuration.settings(), self.window_session.width())
+            })
             .map_or(1, |width| width.saturating_add(1));
         let terminal_size = self
             .displayed_terminal()
             .and_then(|_| {
                 terminal_panel_geometry(
                     self.configuration.settings(),
-                    self.terminal_height,
+                    self.window_session.height(),
                     self.window_session.terminal_height(),
                 )
             })
@@ -35,8 +37,8 @@ impl InteractiveApplication {
             }),
             terminal_size,
             terminal_set_revision: self.terminal_session.revision(),
-            terminal_width: self.terminal_width,
-            terminal_height: self.terminal_height,
+            terminal_width: self.window_session.width(),
+            terminal_height: self.window_session.height(),
             dashboard_visible: self.window_session.dashboard_visible()
                 || self.state.active_view.is_none(),
             picker_rect: self.ui.picker.as_ref().and_then(|_| {
@@ -45,8 +47,8 @@ impl InteractiveApplication {
                     WindowRect {
                         x: 0,
                         y: 0,
-                        width: self.terminal_width,
-                        height: self.terminal_height,
+                        width: self.window_session.width(),
+                        height: self.window_session.height(),
                     },
                 )
             }),
@@ -56,8 +58,8 @@ impl InteractiveApplication {
                     WindowRect {
                         x: 0,
                         y: 0,
-                        width: self.terminal_width,
-                        height: self.terminal_height,
+                        width: self.window_session.width(),
+                        height: self.window_session.height(),
                     },
                 )
                 .map(|_| picker.surface)
@@ -146,8 +148,8 @@ impl InteractiveApplication {
                         WindowRect {
                             x: 0,
                             y: 0,
-                            width: self.terminal_width,
-                            height: self.terminal_height,
+                            width: self.window_session.width(),
+                            height: self.window_session.height(),
                         },
                         self.configuration.settings().ui.panes.minimum_width,
                         self.configuration.settings().ui.panes.minimum_height,
@@ -160,7 +162,7 @@ impl InteractiveApplication {
                     );
                     let protected = self.input.prompt().map(|prompt| {
                         let geometry = prompt_geometry(
-                            self.terminal_width,
+                            self.window_session.width(),
                             preliminary.workspace_bounds.height,
                             &self.configuration.settings().ui.command_line,
                             prompt.error.is_some() || prompt.help.is_some(),

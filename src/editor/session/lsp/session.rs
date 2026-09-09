@@ -1,3 +1,8 @@
+#[path = "launch.rs"]
+mod launch;
+pub(in crate::editor::session) use launch::{
+    LaunchContext, LspLaunchRequest, LspLaunchSource, PendingLspProjectRoot,
+};
 #[path = "projection.rs"]
 mod projection;
 // LSP runtime bookkeeping and accepted document lineage. No mutable editor authority.
@@ -120,6 +125,7 @@ pub(in crate::editor::session) struct LspRuntimeState {
 #[derive(Default)]
 pub(super) struct LspSession {
     projection: projection::Projection,
+    preparation: launch::Preparation,
     service: LspService,
     edits: LspEditSources,
     sessions: HashMap<String, LspRuntimeState>,
@@ -327,7 +333,10 @@ impl LspSession {
         // No registry entry is installed unless the real transport admitted startup.
         let previous = self.sessions.remove(&key);
         let restart_count = previous.as_ref().map_or(0, |s| s.restart_count);
-        let activate = previous.as_ref().is_none_or(|s| s.activate_on_restart);
+        let activate = previous.as_ref().map_or_else(
+            || editor.active_buffer_id() == Some(buffer),
+            |s| s.activate_on_restart,
+        );
         let mut documents = previous.map_or_else(HashMap::new, |s| s.documents);
         documents.insert(buffer, document.clone());
         self.forget_synced(&key);

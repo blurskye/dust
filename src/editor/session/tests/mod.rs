@@ -35,8 +35,8 @@ use tempfile::tempdir;
 
 use super::{
     DeferredExecution, InteractiveApplication, KeymapOperation, LspProjectionOwner,
-    LspRuntimeSource, PendingExecutionPreflight, build_restored_layout, capture_persisted_layout,
-    compile_keymaps, compile_keymaps_with_plugin_catalog, configuration_generation_is_newer,
+    LspRuntimeSource, build_restored_layout, capture_persisted_layout, compile_keymaps,
+    compile_keymaps_with_plugin_catalog, configuration_generation_is_newer,
     lsp_runtime_source_allowed_on_host, reload_keymaps, resolve_configuration,
     validate_configured_commands,
 };
@@ -103,8 +103,7 @@ fn app() -> InteractiveApplication {
         std::sync::Arc::new(crate::clock::SystemClock),
     )
     .expect("application construction");
-    app.terminal_width = 80;
-    app.terminal_height = 24;
+    app.window_session.observe_size((80, 24));
     app.notices.set_terminal_capabilities("test".into());
     app
 }

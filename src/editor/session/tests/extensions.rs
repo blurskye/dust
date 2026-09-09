@@ -50,7 +50,7 @@ fn retained_plugin_window_projection_is_idle_and_generation_owned() {
     };
     app.window_session.invalidate_native();
     let receipt = app.window_session.accept_plugin_transition(
-        transition,
+        *transition,
         &app.state.window_version(),
         source.catalog(),
     );

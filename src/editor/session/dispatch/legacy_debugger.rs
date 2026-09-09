@@ -2,15 +2,16 @@ use super::*;
 impl InteractiveApplication {
     pub(super) fn start_dap_configuration(&mut self, name: &str) {
         match self.debugger_session.request_debug(
-            Some(name),
+            (Some(name), None),
             None,
             None,
-            None,
-            &self.configuration.settings().debug,
-            &self.configuration.settings().terminals,
-            self.configuration.binding_revision(),
+            (
+                &self.configuration.settings().debug,
+                &self.configuration.settings().terminals,
+                self.configuration.binding_revision(),
+            ),
             &self.workspace,
-            &self.tooling.entries(),
+            self.tooling.entries(),
         ) {
             Ok(intent) => self.defer_trusted_execution(DeferredExecution::StartDebug(intent)),
             Err(error) => self.show_error(error),
@@ -28,15 +29,16 @@ impl InteractiveApplication {
             return;
         };
         match self.debugger_session.request_debug(
-            None,
-            requested.as_deref(),
+            (None, requested.as_deref()),
             program,
             Some(document),
-            &self.configuration.settings().debug,
-            &self.configuration.settings().terminals,
-            self.configuration.binding_revision(),
+            (
+                &self.configuration.settings().debug,
+                &self.configuration.settings().terminals,
+                self.configuration.binding_revision(),
+            ),
             &self.workspace,
-            &self.tooling.entries(),
+            self.tooling.entries(),
         ) {
             Ok(intent) => self.defer_trusted_execution(DeferredExecution::StartDebug(intent)),
             Err(error) => self.show_error(error),
@@ -67,7 +69,7 @@ impl InteractiveApplication {
                 .execution_lane(crate::editor::session::workspace::DiscoveryKind::Debugger),
             &self.configuration.settings().debug,
             self.configuration.binding_revision(),
-            &self.tooling.entries(),
+            self.tooling.entries(),
         ) {
             Ok(Some(name)) => {
                 self.notify_message(self.message("dap_started", &[("adapter", name)]), false)

@@ -167,9 +167,7 @@ impl TerminalSession {
         id: PtyId,
         line: bool,
     ) -> Option<(String, bool)> {
-        let Some(terminal) = self.tabs.get_mut(&id) else {
-            return None;
-        };
+        let terminal = self.tabs.get_mut(&id)?;
         if terminal.mode == TerminalPanelMode::Input {
             return None;
         }

@@ -555,8 +555,7 @@ mod tests {
                 Some(plan.key.clone()),
                 plan.all_files,
                 plan.files,
-                vec![root.path().into()],
-                1024,
+                (vec![root.path().into()], 1024),
             )
             .unwrap();
         let snapshot = editor

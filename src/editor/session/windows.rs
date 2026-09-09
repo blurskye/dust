@@ -72,12 +72,26 @@ pub(super) struct WindowSession {
     focus_stamp: Arc<()>,
     dashboard: bool,
     terminal_height: u16,
+    observed_size: (u16, u16),
     core: WindowCore,
     layout: Option<CompositorLayoutState>,
     content: SurfaceContentGeometry,
 }
 
 impl WindowSession {
+    pub(in crate::editor::session) fn observe_size(&mut self, size: (u16, u16)) {
+        if self.observed_size != size {
+            self.observed_size = size;
+            self.invalidate();
+        }
+    }
+    pub(in crate::editor::session) fn width(&self) -> u16 {
+        self.observed_size.0
+    }
+    pub(in crate::editor::session) fn height(&self) -> u16 {
+        self.observed_size.1
+    }
+
     pub(super) fn invalidate(&mut self) {
         self.layout = None;
         self.content = SurfaceContentGeometry::default();

@@ -3,10 +3,11 @@ use super::documents::{DocumentEvent, DocumentSession, LargeFileOverride, mode_n
 use super::explorer::explorer_watch_policy;
 use super::input::InputSession;
 use super::lsp::{LspAutostartObservation, LspLaunch};
+use super::lsp::{LspLaunchRequest, LspLaunchSource, PendingLspProjectRoot};
 #[cfg(test)]
 use super::lsp::{LspProjectionOwner, LspRuntimeState};
 use super::persistence::{RestoreContext, RestoreReady, RestoreUpdate};
-use super::search::{PickerContent, PickerEpoch, PickerOrigin};
+use super::search::{MatcherSource, PickerContent, PickerOrigin, PickerPayload};
 use super::terminal::{TerminalInput, TerminalUpdate};
 use super::tooling::{
     LspRuntimeSource, ToolInstall, lsp_runtime_source_allowed_on_host,
@@ -93,9 +94,8 @@ use crate::editor::{
 };
 use crate::extensions::{PluginEvent, PluginLimits, PluginLoadId, PluginStatus};
 use crate::files::{
-    ExplorerMutation, ExplorerWatchService, ProjectRootResolution, RequestId, ResourceIntentKind,
-    VfsError, VfsResult, VfsWorker, WorkspaceFilePolicy, WorkspaceSearchMatch,
-    WorkspaceSearchPolicy,
+    ExplorerMutation, ExplorerWatchService, RequestId, ResourceIntentKind, VfsError, VfsResult,
+    VfsWorker, WorkspaceFilePolicy, WorkspaceSearchMatch, WorkspaceSearchPolicy,
 };
 use crate::language::lsp::{
     LspDocument, LspEvent, LspFeature, LspFeatureResult, LspMarkupContent, LspMarkupKind,
@@ -108,12 +108,11 @@ use crate::persistence::{
     PersistedLargeFileOverride, PersistedLocation, PersistedSession, PersistedState,
     PersistedWindowRule, PersistencePolicy, PersistenceService, STATE_VERSION,
 };
-use crate::process::{ExecutionPreflightRequest, PreflightId, PtyId};
+use crate::process::PtyId;
 use crate::telemetry::{LiveCrashSnapshot, LogLevel};
 use crate::tools::{
-    NIX_LSP_NIXPKGS_REVISION, NixWorkspaceService, PackageOperation, RegistryPackageMetadata,
-    RegistryPackageSummary, RegistryRequest, RegistryResult, RegistryService, ToolDefinition,
-    ToolKind, ToolOperation, ToolStatus, discover_executable, is_nixos_host,
+    NIX_LSP_NIXPKGS_REVISION, PackageOperation, RegistryRequest, RegistryResult, RegistryService,
+    ToolDefinition, ToolKind, ToolOperation, ToolStatus, discover_executable, is_nixos_host,
     managed_tool_executable, managed_tool_installed_version, nix_lsp_launch_environment,
     nix_lsp_profile_installed, nix_lsp_workspace_root,
 };
@@ -150,7 +149,6 @@ struct InteractiveApplication {
     extension: super::extensions::ExtensionSession,
     workspace: super::workspace::WorkspaceSession,
     diagnostics: super::diagnostics::DiagnosticSession,
-    picker_payloads: HashMap<PickerItemId, (PickerEpoch, PickerPayload)>,
     workspace_edits: super::workspace_edits::WorkspaceEditSession,
     commands: CommandRegistry<AppEffect>,
     input: InputSession,
@@ -161,13 +159,8 @@ struct InteractiveApplication {
     pending_vfs: HashMap<RequestId, PendingVfs>,
     should_quit: bool,
     window_session: WindowSession,
-    terminal_width: u16,
-    terminal_height: u16,
     tooling: super::tooling::ToolingSession,
     language: super::lsp::LspSession,
-    pending_lsp_project_root: Option<(u64, PendingLspProjectRoot)>,
-    nix_lsp_workspace: NixWorkspaceService,
-    pending_nix_lsp_workspace: Option<(u64, PendingNixLspWorkspace)>,
 
     debugger_session: DebugSession,
     recovery: super::recovery::RecoverySession,
@@ -179,7 +172,6 @@ struct InteractiveApplication {
     persistence: super::persistence::PersistenceSession,
     tasks: crate::editor::session::tasks::TaskSession,
     terminal_session: super::terminal::TerminalSession,
-    pending_execution_preflight: HashMap<PreflightId, PendingExecutionPreflight>,
 }
 
 pub fn run_interactive(
@@ -253,7 +245,7 @@ pub fn run_interactive(
     application
         .notices
         .set_terminal_capabilities(terminal.capability_summary());
-    (application.terminal_width, application.terminal_height) = terminal.size()?;
+    application.window_session.observe_size(terminal.size()?);
 
     while !application.should_quit {
         application.process_vfs_results();
@@ -304,8 +296,8 @@ pub fn run_interactive(
             &application.ui,
             application.configuration.settings(),
             application.configuration.dashboard(),
-            application.terminal_width,
-            application.terminal_height,
+            application.window_session.width(),
+            application.window_session.height(),
         );
         terminal.set_mouse(application.configuration.settings().ui.mouse)?;
         terminal.set_color_mode(application.configuration.settings().ui.color_mode);
@@ -492,7 +484,6 @@ impl InteractiveApplication {
             ),
             workspace,
             diagnostics,
-            picker_payloads: HashMap::new(),
             workspace_edits: super::workspace_edits::WorkspaceEditSession::default(),
             commands,
             input: InputSession::new(configuration.settings.input.count_limit),
@@ -506,13 +497,8 @@ impl InteractiveApplication {
             pending_vfs: HashMap::new(),
             should_quit: false,
             window_session: WindowSession::new(dashboard_visible, terminal_panel_height),
-            terminal_width: 0,
-            terminal_height: 0,
             tooling,
             language: super::lsp::LspSession::default(),
-            pending_lsp_project_root: None,
-            nix_lsp_workspace: NixWorkspaceService::default(),
-            pending_nix_lsp_workspace: None,
             debugger_session,
             recovery: super::recovery::RecoverySession::new(state_directory.join("recovery")),
             next_transaction: 1_000_000,
@@ -528,7 +514,6 @@ impl InteractiveApplication {
             notices,
             clock,
             terminal_session,
-            pending_execution_preflight: HashMap::new(),
         };
         application.project_configuration();
         application.project_window_activation();

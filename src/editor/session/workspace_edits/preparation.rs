@@ -131,9 +131,9 @@ impl WorkspaceEditSession {
         origin: Option<OriginKey>,
         all_files: bool,
         files: Vec<InputFile>,
-        roots: Vec<PathBuf>,
-        maximum: usize,
+        policy: (Vec<PathBuf>, usize),
     ) -> Result<(), String> {
+        let (roots, maximum) = policy;
         self.check_ticket(&ticket)?;
         let preparing = self.preparing.as_mut().expect("checked source");
         preparing.label = label;

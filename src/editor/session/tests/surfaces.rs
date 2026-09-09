@@ -34,8 +34,7 @@ fn prompt_mouse_context_is_independently_configurable() {
 #[test]
 fn dashboard_and_picker_are_stable_graph_overlays_with_projected_geometry() {
     let mut app = app();
-    app.terminal_width = 100;
-    app.terminal_height = 30;
+    app.window_session.observe_size((100, 30));
     app.reconcile_editor_windows();
     let dashboard = app
         .window_session
@@ -288,7 +287,7 @@ fn protected_prompt_region_blocks_ordinary_compositor_hit_testing() {
     app.open_prompt(crate::ui::PromptKind::WorkspaceTrust, String::new());
     app.reconcile_editor_windows();
     let geometry = crate::ui::prompt_geometry(
-        app.terminal_width,
+        app.window_session.width(),
         app.workspace_render_height(),
         &app.configuration.settings().ui.command_line,
         false,
@@ -362,8 +361,7 @@ fn normalized_mouse_position_invokes_real_cursor_placement() {
 #[test]
 fn nonwrapped_mouse_uses_the_same_snapped_tab_origin_as_rendering() {
     let mut app = app();
-    app.terminal_width = 6;
-    app.terminal_height = 5;
+    app.window_session.observe_size((6, 5));
     {
         let mut fixture = app.configuration.fixture_snapshot();
         fixture.settings.editor.wrap = false;
@@ -412,7 +410,7 @@ fn mouse_click_focuses_the_real_target_pane_before_placing_cursor() {
         &app.state,
         &app.ui,
         app.configuration.settings(),
-        app.terminal_width,
+        app.window_session.width(),
         app.workspace_render_height(),
     )
     .into_iter()
@@ -1146,7 +1144,8 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
         (custom_entry.icon.as_str(), custom_entry.closeable),
         ("C", false)
     );
-    app.terminal_width = 300;
+    app.window_session
+        .observe_size((300, app.window_session.height()));
     app.reconcile_editor_windows();
     let bounds = app.workspace_bounds().unwrap();
     let local = (0..bounds.width)
@@ -1209,10 +1208,10 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
             &app.ui,
             app.configuration.settings(),
             app.configuration.dashboard(),
-            app.terminal_width,
-            app.terminal_height,
+            app.window_session.width(),
+            app.window_session.height(),
         );
-        assert_eq!(frame.grid.width(), app.terminal_width);
+        assert_eq!(frame.grid.width(), app.window_session.width());
         assert_eq!(app.window_session.content_stamp(), signature);
         assert_eq!(app.ui.content_tabs, tabs);
     }
@@ -1563,7 +1562,7 @@ fn explorer_is_a_graph_dock_and_bundled_disable_is_transactional() {
         }
     ));
     let rect = app.explorer_window_rect().expect("projected explorer");
-    assert!(rect.width > 1 && rect.height == app.terminal_height);
+    assert!(rect.width > 1 && rect.height == app.window_session.height());
 
     let mut disabled = crate::config::load_bundled_config();
     disabled.config.ui.explorer.bundled_enabled = false;
@@ -1609,8 +1608,7 @@ fn generic_native_window_operations_are_revision_checked_atomic_and_identity_pre
     let mut app = app();
     app.state.open_text(TextBuffer::from_text("editor"), None);
     app.set_dashboard_visibility(false);
-    app.terminal_width = 100;
-    app.terminal_height = 30;
+    app.window_session.observe_size((100, 30));
     app.open_explorer();
     app.terminal_session.fixture(
         PtyId(7),
@@ -2032,8 +2030,7 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
     .unwrap();
     app.state.open_text(TextBuffer::from_text("editor"), None);
     app.set_dashboard_visibility(false);
-    app.terminal_width = 80;
-    app.terminal_height = 24;
+    app.window_session.observe_size((80, 24));
     let mut first_screen = PtyScreen::new(80, 8, 100);
     first_screen.feed("first terminal");
     let mut second_screen = PtyScreen::new(80, 8, 100);

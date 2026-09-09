@@ -18,7 +18,7 @@ pub(in crate::editor::session) enum ExtensionUpdate {
     Failed { operation: String, error: String },
 }
 pub(in crate::editor::session) enum RegistryUpdate {
-    Present(RegistryResult),
+    Present(Box<RegistryResult>),
     ValidateArtifact,
     Error(String),
 }
@@ -175,7 +175,7 @@ impl ExtensionSession {
                     RegistryUpdate::ValidateArtifact
                 }
             }
-            Ok(result) => RegistryUpdate::Present(result),
+            Ok(result) => RegistryUpdate::Present(Box::new(result)),
             Err(error) => RegistryUpdate::Error(error.to_string()),
         })
     }

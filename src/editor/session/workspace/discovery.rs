@@ -25,11 +25,6 @@ impl ExecutionReady {
     pub(in crate::editor::session) fn result(&self) -> &crate::process::ExecutionPreflightResult {
         &self.result
     }
-    pub(in crate::editor::session) fn into_result(
-        self,
-    ) -> crate::process::ExecutionPreflightResult {
-        self.result
-    }
     pub(in crate::editor::session) fn into_execution_result(
         self,
         request: &ExecutionPreflightRequest,
@@ -107,6 +102,7 @@ impl WorkspaceSession {
             DiscoveryKind::Debugger => &mut self.debugger_roots,
         }
     }
+    #[cfg(test)]
     pub(in crate::editor::session) fn discover_project(
         &mut self,
         kind: DiscoveryKind,
@@ -142,6 +138,7 @@ impl WorkspaceSession {
             Ok(result)
         }))
     }
+    #[cfg(test)]
     pub(in crate::editor::session) fn request_preflight(
         &mut self,
         request: ExecutionPreflightRequest,
@@ -210,6 +207,142 @@ impl WorkspaceSession {
             }
         }
         accepted
+    }
+}
+
+/// Borrowed transport capability: no workspace mutation or trust-granting API.
+pub(in crate::editor::session) struct ExecutionLane<'a> {
+    discovery: &'a mut Discovery,
+    preflights: &'a mut Preflights,
+    roots: &'a [crate::workspace::WorkspaceRoot],
+    source: WorkspaceVersion,
+    revision: u64,
+    allowed: bool,
+}
+impl WorkspaceSession {
+    pub(in crate::editor::session) fn execution_lane(
+        &mut self,
+        kind: DiscoveryKind,
+    ) -> ExecutionLane<'_> {
+        let discovery = match kind {
+            DiscoveryKind::Language => &mut self.language_roots,
+            DiscoveryKind::Debugger => &mut self.debugger_roots,
+        };
+        ExecutionLane {
+            discovery,
+            preflights: &mut self.preflights,
+            roots: self.state.roots(),
+            source: self.version.clone(),
+            revision: self.state.root_revision(),
+            allowed: !self.safe_mode
+                && self.state.trust() == crate::workspace::WorkspaceTrust::Trusted,
+        }
+    }
+}
+impl ExecutionLane<'_> {
+    pub(in crate::editor::session) fn request(
+        &self,
+        executable: PathBuf,
+        cwd: PathBuf,
+    ) -> ExecutionPreflightRequest {
+        ExecutionPreflightRequest {
+            executable,
+            cwd,
+            roots: self
+                .roots
+                .iter()
+                .map(|root| root.identity.canonical_path.clone())
+                .collect(),
+            root_revision: self.revision,
+        }
+    }
+    pub(in crate::editor::session) fn discovery_available(&self) -> bool {
+        self.discovery.pending.is_none()
+    }
+    pub(in crate::editor::session) fn root_revision(&self) -> u64 {
+        self.revision
+    }
+    pub(in crate::editor::session) fn current(&self, source: &WorkspaceVersion) -> bool {
+        self.allowed && &self.source == source
+    }
+    pub(in crate::editor::session) fn preflight_available(&self) -> Result<bool, String> {
+        if !self.preflights.worker.identity_available() {
+            return Err("execution preflight identity exhausted".into());
+        }
+        Ok(self.allowed && self.preflights.pending.len() < self.preflights.capacity)
+    }
+    pub(in crate::editor::session) fn discover(
+        &mut self,
+        document: PathBuf,
+        root: RootId,
+        markers: Vec<String>,
+        strategy: ProjectRootStrategy,
+    ) -> Result<u64, String> {
+        let identity = self
+            .roots
+            .iter()
+            .find(|r| r.id == root)
+            .ok_or("discovery root is closed")?
+            .identity
+            .clone();
+        if !document.starts_with(&identity.canonical_path) {
+            return Err("discovery document is outside its root".into());
+        }
+        let source = self.source.clone();
+        let revision = self.revision;
+        let discovery = &mut *self.discovery;
+        // A detached old probe is not a cancelled filesystem call. Keep one
+        // admitted probe per protocol lane until it produces a terminal result.
+        if discovery.pending.is_some() {
+            return Err("project-root discovery is already pending".into());
+        }
+        let generation = discovery
+            .worker
+            .resolve(
+                document.clone(),
+                identity.canonical_path.clone(),
+                revision,
+                markers,
+                strategy,
+            )
+            .map_err(|e| e.to_string())?;
+        discovery.pending = Some(DiscoveryIntent {
+            generation,
+            source,
+            root,
+            identity,
+            document,
+        });
+        Ok(generation)
+    }
+    pub(in crate::editor::session) fn preflight(
+        &mut self,
+        mut request: ExecutionPreflightRequest,
+    ) -> Result<PreflightId, PreflightError> {
+        if request.root_revision != self.revision || !self.allowed {
+            return Err(PreflightError::Invalid);
+        }
+        if self.preflights.pending.len() >= self.preflights.capacity {
+            return Err(PreflightError::QueueFull);
+        }
+        let identities = self
+            .roots
+            .iter()
+            .map(|r| r.identity.clone())
+            .collect::<Vec<_>>();
+        if identities.iter().any(|r| r.filesystem_identity.is_none()) {
+            return Err(PreflightError::Invalid);
+        }
+        request.roots = identities
+            .iter()
+            .map(|r| r.canonical_path.clone())
+            .collect();
+        let original = request.clone();
+        let id = self.preflights.worker.request_scoped(request, identities)?;
+        self.preflights
+            .pending
+            .insert(id, (self.source.clone(), original));
+        Ok(id)
     }
 }
 
@@ -324,125 +457,5 @@ mod tests {
         }
         assert!(owner.preflight_events().is_empty());
         assert!(owner.preflights.pending.is_empty());
-    }
-}
-
-/// Borrowed transport capability: no workspace mutation or trust-granting API.
-pub(in crate::editor::session) struct ExecutionLane<'a> {
-    discovery: &'a mut Discovery,
-    preflights: &'a mut Preflights,
-    roots: &'a [crate::workspace::WorkspaceRoot],
-    source: WorkspaceVersion,
-    revision: u64,
-    allowed: bool,
-}
-impl WorkspaceSession {
-    pub(in crate::editor::session) fn execution_lane(
-        &mut self,
-        kind: DiscoveryKind,
-    ) -> ExecutionLane<'_> {
-        let discovery = match kind {
-            DiscoveryKind::Language => &mut self.language_roots,
-            DiscoveryKind::Debugger => &mut self.debugger_roots,
-        };
-        ExecutionLane {
-            discovery,
-            preflights: &mut self.preflights,
-            roots: self.state.roots(),
-            source: self.version.clone(),
-            revision: self.state.root_revision(),
-            allowed: !self.safe_mode
-                && self.state.trust() == crate::workspace::WorkspaceTrust::Trusted,
-        }
-    }
-}
-impl ExecutionLane<'_> {
-    pub(in crate::editor::session) fn discovery_available(&self) -> bool {
-        self.discovery.pending.is_none()
-    }
-    pub(in crate::editor::session) fn root_revision(&self) -> u64 {
-        self.revision
-    }
-    pub(in crate::editor::session) fn current(&self, source: &WorkspaceVersion) -> bool {
-        self.allowed && &self.source == source
-    }
-    pub(in crate::editor::session) fn preflight_available(&self) -> Result<bool, String> {
-        if !self.preflights.worker.identity_available() {
-            return Err("execution preflight identity exhausted".into());
-        }
-        Ok(self.allowed && self.preflights.pending.len() < self.preflights.capacity)
-    }
-    pub(in crate::editor::session) fn discover(
-        &mut self,
-        document: PathBuf,
-        root: RootId,
-        markers: Vec<String>,
-        strategy: ProjectRootStrategy,
-    ) -> Result<u64, String> {
-        let identity = self
-            .roots
-            .iter()
-            .find(|r| r.id == root)
-            .ok_or("discovery root is closed")?
-            .identity
-            .clone();
-        if !document.starts_with(&identity.canonical_path) {
-            return Err("discovery document is outside its root".into());
-        }
-        let source = self.source.clone();
-        let revision = self.revision;
-        let discovery = &mut *self.discovery;
-        // A detached old probe is not a cancelled filesystem call. Keep one
-        // admitted probe per protocol lane until it produces a terminal result.
-        if discovery.pending.is_some() {
-            return Err("project-root discovery is already pending".into());
-        }
-        let generation = discovery
-            .worker
-            .resolve(
-                document.clone(),
-                identity.canonical_path.clone(),
-                revision,
-                markers,
-                strategy,
-            )
-            .map_err(|e| e.to_string())?;
-        discovery.pending = Some(DiscoveryIntent {
-            generation,
-            source,
-            root,
-            identity,
-            document,
-        });
-        Ok(generation)
-    }
-    pub(in crate::editor::session) fn preflight(
-        &mut self,
-        mut request: ExecutionPreflightRequest,
-    ) -> Result<PreflightId, PreflightError> {
-        if request.root_revision != self.revision || !self.allowed {
-            return Err(PreflightError::Invalid);
-        }
-        if self.preflights.pending.len() >= self.preflights.capacity {
-            return Err(PreflightError::QueueFull);
-        }
-        let identities = self
-            .roots
-            .iter()
-            .map(|r| r.identity.clone())
-            .collect::<Vec<_>>();
-        if identities.iter().any(|r| r.filesystem_identity.is_none()) {
-            return Err(PreflightError::Invalid);
-        }
-        request.roots = identities
-            .iter()
-            .map(|r| r.canonical_path.clone())
-            .collect();
-        let original = request.clone();
-        let id = self.preflights.worker.request_scoped(request, identities)?;
-        self.preflights
-            .pending
-            .insert(id, (self.source.clone(), original));
-        Ok(id)
     }
 }

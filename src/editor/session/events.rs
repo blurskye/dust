@@ -124,8 +124,7 @@ impl InteractiveApplication {
     pub(super) fn handle_event(&mut self, event: UiEvent) {
         match event {
             UiEvent::Resize(width, height) => {
-                self.terminal_width = width;
-                self.terminal_height = height;
+                self.window_session.observe_size((width, height));
                 self.window_session.invalidate();
                 self.project_window_geometry();
                 self.window_session.invalidate_native();

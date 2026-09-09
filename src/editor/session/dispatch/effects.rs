@@ -693,7 +693,7 @@ impl InteractiveApplication {
             WindowUpdate::Ready(event) => event,
             WindowUpdate::Publish(source, transition) => {
                 let receipt = self.window_session.accept_plugin_transition(
-                    transition,
+                    *transition,
                     &self.state.window_version(),
                     source.catalog(),
                 );
@@ -899,8 +899,7 @@ impl InteractiveApplication {
                 vec![crate::editor::session::workspace_edits::InputFile::Read(
                     path.clone(),
                 )],
-                roots,
-                maximum,
+                (roots, maximum),
             )?;
             let snapshot = self
                 .state
