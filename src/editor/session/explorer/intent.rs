@@ -11,6 +11,29 @@ use std::{
     sync::Arc,
 };
 
+pub(super) struct RenamePrompt {
+    path: PathBuf,
+    root: PathBuf,
+    epoch: Arc<()>,
+    scope: WorkspaceVersion,
+    configuration: u64,
+    editor: EditorWindowVersion,
+    pending: Option<RequestId>,
+    inspected: Option<crate::files::ExplorerRenameSource>,
+    submitted: Option<Arc<()>>,
+}
+pub(in crate::editor::session) struct RenameInspection<'a>(&'a mut RenamePrompt);
+impl RenameInspection<'_> {
+    pub(in crate::editor::session) fn register(self, id: RequestId) {
+        self.0.pending = Some(id);
+    }
+}
+pub(in crate::editor::session) struct RenamePromptRequest {
+    pub initial: String,
+    pub root: PathBuf,
+    pub path: PathBuf,
+    pub roots: Vec<crate::workspace::RootIdentity>,
+}
 pub(in crate::editor::session) struct MutationContext {
     pub workspace: WorkspaceVersion,
     pub configuration: u64,
@@ -125,6 +148,181 @@ impl ExplorerSession {
             path: self.selected_parent()?.join(input),
             directory,
         })
+    }
+    pub(in crate::editor::session) fn begin_rename(
+        &mut self,
+        scope: WorkspaceVersion,
+        configuration: u64,
+        editor: EditorWindowVersion,
+        roots: &[WorkspaceRoot],
+    ) -> Result<RenamePromptRequest, String> {
+        if self.rename.is_some() || self.mutation.is_some() {
+            return Err("an explorer operation is already pending".into());
+        }
+        let path = self.mutable_path()?;
+        let root = self
+            .roots
+            .iter()
+            .filter(|root| path.starts_with(root))
+            .max_by_key(|root| root.components().count())
+            .ok_or("rename source has no workspace root")?
+            .clone();
+        let initial = path
+            .strip_prefix(&root)
+            .ok()
+            .and_then(Path::to_str)
+            .filter(|value| !value.chars().any(char::is_control) && value.len() <= 4096)
+            .ok_or("rename source cannot be represented safely in the prompt")?
+            .to_owned();
+        if editor.revision().is_none()
+            || roots
+                .iter()
+                .map(|r| &r.identity.canonical_path)
+                .ne(self.roots.iter())
+        {
+            return Err("explorer rename source retired".into());
+        }
+        self.rename = Some(RenamePrompt {
+            path: path.clone(),
+            root: root.clone(),
+            epoch: self.epoch.clone(),
+            scope,
+            configuration,
+            editor,
+            pending: None,
+            inspected: None,
+            submitted: None,
+        });
+        Ok(RenamePromptRequest {
+            initial,
+            root,
+            path,
+            roots: self.operation_roots(roots),
+        })
+    }
+    pub(in crate::editor::session) fn rename_inspection(
+        &mut self,
+    ) -> Result<RenameInspection<'_>, String> {
+        self.rename
+            .as_mut()
+            .filter(|rename| {
+                rename.pending.is_none() && rename.inspected.is_none() && rename.submitted.is_none()
+            })
+            .map(RenameInspection)
+            .ok_or_else(|| "rename inspection admission retired or already consumed".into())
+    }
+    pub(in crate::editor::session) fn accept_rename_inspection(
+        &mut self,
+        id: RequestId,
+        result: Result<crate::files::ExplorerRenameSource, crate::files::VfsError>,
+        scope: WorkspaceVersion,
+        configuration: u64,
+        editor: &EditorWindowVersion,
+    ) -> Option<Result<PathBuf, String>> {
+        if !self
+            .rename
+            .as_ref()
+            .is_some_and(|rename| rename.pending == Some(id))
+        {
+            return None;
+        }
+        let current = self.rename_current(&scope, configuration, editor);
+        let rename = self.rename.as_mut().expect("matched rename inspection");
+        rename.pending = None;
+        Some(if !current {
+            Err("explorer rename source retired".into())
+        } else {
+            result
+                .map_err(|error| error.to_string())
+                .and_then(|source| {
+                    if source.path() != rename.path {
+                        return Err("explorer rename source path changed".into());
+                    }
+                    rename.inspected = Some(source);
+                    Ok(rename.root.clone())
+                })
+        })
+    }
+    pub(in crate::editor::session) fn rename_current(
+        &self,
+        scope: &WorkspaceVersion,
+        configuration: u64,
+        editor: &EditorWindowVersion,
+    ) -> bool {
+        self.rename.as_ref().is_some_and(|rename| {
+            Arc::ptr_eq(&rename.epoch, &self.epoch)
+                && &rename.scope == scope
+                && rename.configuration == configuration
+                && rename.editor.same_editor(editor)
+                && editor.revision().is_some()
+        })
+    }
+    pub(in crate::editor::session) fn rename_value(
+        &self,
+        value: &str,
+        scope: WorkspaceVersion,
+        configuration: u64,
+        editor: &EditorWindowVersion,
+    ) -> Result<ExplorerMutation, String> {
+        if !self.rename_current(&scope, configuration, editor) {
+            return Err("explorer rename source retired".into());
+        }
+        let rename = self.rename.as_ref().expect("current rename");
+        if rename.inspected.is_none() {
+            return Err(
+                "rename source inspection is not ready; reopen the prompt if inspection failed"
+                    .into(),
+            );
+        }
+        if value.is_empty()
+            || value.len() > 4096
+            || value.chars().any(char::is_control)
+            || !Path::new(value)
+                .components()
+                .all(|c| matches!(c, std::path::Component::Normal(_)))
+        {
+            return Err(
+                "enter a nonempty workspace-relative path without traversal (maximum 4096 bytes)"
+                    .into(),
+            );
+        }
+        let target = rename.root.join(value);
+        if target == rename.path {
+            return Err("rename target is unchanged".into());
+        }
+        Ok(ExplorerMutation::Rename {
+            source: rename.path.clone(),
+            target,
+        })
+    }
+    pub(in crate::editor::session) fn submitted_rename_source(
+        &mut self,
+    ) -> crate::files::ExplorerRenameSource {
+        let rename = self.rename.as_mut().expect("validated rename prompt");
+        rename.submitted = self.mutation.as_ref().map(|intent| intent.key.clone());
+        rename
+            .inspected
+            .as_ref()
+            .expect("inspected rename source")
+            .clone()
+    }
+    pub(in crate::editor::session) fn cancel_rename(&mut self) -> Vec<RequestId> {
+        let Some(rename) = self.rename.take() else {
+            return Vec::new();
+        };
+        let mut ids: Vec<_> = rename.pending.into_iter().collect();
+        if self.mutation.as_ref().is_some_and(|intent| {
+            rename
+                .submitted
+                .as_ref()
+                .is_some_and(|key| Arc::ptr_eq(key, &intent.key))
+                && matches!(intent.phase, Phase::Admitting | Phase::Preparing(_))
+        }) && let Some(intent) = self.mutation.take()
+            && let Phase::Preparing(id) = intent.phase
+        {
+            ids.push(id);
+        }
+        ids
     }
     pub(in crate::editor::session) fn rename(
         &self,
@@ -398,7 +596,12 @@ impl ExplorerSession {
         configuration: u64,
         editor: &EditorWindowVersion,
     ) -> (Vec<RequestId>, bool) {
-        let mut ids = Vec::new();
+        let mut ids =
+            if self.rename.is_some() && !self.rename_current(&scope, configuration, editor) {
+                self.cancel_rename()
+            } else {
+                Vec::new()
+            };
         let mut may_write = false;
         if self
             .mutation
@@ -436,7 +639,7 @@ impl ExplorerSession {
         })
     }
     pub(in crate::editor::session) fn retire_intents(&mut self) -> (Vec<RequestId>, bool) {
-        let mut ids = Vec::new();
+        let mut ids = self.cancel_rename();
         if let Some(open) = self.open.take()
             && let Some((id, _)) = open.read
         {

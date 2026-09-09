@@ -2,6 +2,9 @@ use super::*;
 
 impl InteractiveApplication {
     pub(super) fn open_prompt(&mut self, kind: PromptKind, initial: String) {
+        if kind != PromptKind::ExplorerRename {
+            self.cancel_explorer_rename_prompt();
+        }
         if kind != PromptKind::ExplorerDelete {
             self.cancel_explorer_confirmation();
         }
@@ -21,6 +24,7 @@ impl InteractiveApplication {
         self.refresh_completions();
     }
     pub(super) fn close_prompt(&mut self) {
+        self.cancel_explorer_rename_prompt();
         if self
             .input
             .prompt()
@@ -106,7 +110,10 @@ impl InteractiveApplication {
         };
         if !matches!(
             prompt.kind,
-            PromptKind::WorkspaceTrust | PromptKind::GitReset | PromptKind::ExplorerDelete
+            PromptKind::WorkspaceTrust
+                | PromptKind::GitReset
+                | PromptKind::ExplorerDelete
+                | PromptKind::ExplorerRename
         ) {
             self.record_prompt_history(prompt.kind, &prompt.input);
         }
@@ -145,6 +152,7 @@ impl InteractiveApplication {
                 self.confirm_explorer_delete(prompt.input);
                 self.close_prompt();
             }
+            PromptKind::ExplorerRename => self.submit_explorer_rename_prompt(&prompt.input),
             PromptKind::SearchForward | PromptKind::SearchBackward => {
                 if prompt.input.is_empty() {
                     let message = self.message("search_empty", &[]);

@@ -252,6 +252,7 @@ pub enum AppEffect {
     },
     ExplorerCreate(String),
     ExplorerRename(String),
+    ExplorerRenamePrompt,
     ExplorerDeleteRequest,
     ExplorerDeleteConfirm(String),
     ExplorerClipboard {

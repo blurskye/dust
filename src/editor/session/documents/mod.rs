@@ -552,6 +552,27 @@ impl DocumentSession {
         self.pending_legacy.insert(id);
         Ok(id)
     }
+    pub(in crate::editor::session) fn inspect_explorer_rename(
+        &mut self,
+        path: PathBuf,
+        roots: Vec<crate::workspace::RootIdentity>,
+        maximum: u64,
+    ) -> Result<RequestId, VfsError> {
+        self.check_admission()?;
+        let id = self.vfs.inspect_explorer_rename(path, roots, maximum)?;
+        self.pending_legacy.insert(id);
+        Ok(id)
+    }
+    pub(in crate::editor::session) fn prepare_explorer_rename(
+        &mut self,
+        source: crate::files::ExplorerRenameSource,
+        target: PathBuf,
+    ) -> Result<RequestId, VfsError> {
+        self.check_admission()?;
+        let id = self.vfs.prepare_explorer_rename(source, target)?;
+        self.pending_legacy.insert(id);
+        Ok(id)
+    }
     pub(in crate::editor::session) fn prepare_explorer(
         &mut self,
         operation: ExplorerMutation,

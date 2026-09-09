@@ -419,6 +419,13 @@ impl InteractiveApplication {
         )? {
             CommandEffect::None => {}
             CommandEffect::ClosedExplorer => {
+                if self
+                    .input
+                    .prompt()
+                    .is_some_and(|p| p.kind == crate::ui::PromptKind::ExplorerRename)
+                {
+                    self.close_prompt();
+                }
                 self.ui.explorer = None;
                 self.set_explorer_focus(false);
                 self.reconcile_explorer_watch();

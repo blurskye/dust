@@ -24,6 +24,16 @@ pub struct PromptTextConfig {
     pub git_reset_marker: String,
     pub explorer_delete_title: String,
     pub explorer_delete_marker: String,
+    #[serde(default = "rename_prompt_title")]
+    pub explorer_rename_title: String,
+    #[serde(default = "rename_prompt_marker")]
+    pub explorer_rename_marker: String,
+}
+fn rename_prompt_title() -> String {
+    "Rename path".into()
+}
+fn rename_prompt_marker() -> String {
+    "> ".into()
 }
 
 impl Default for PromptTextConfig {
@@ -41,6 +51,8 @@ impl Default for PromptTextConfig {
             git_reset_marker: "> ".into(),
             explorer_delete_title: "Delete this path?".into(),
             explorer_delete_marker: "> ".into(),
+            explorer_rename_title: rename_prompt_title(),
+            explorer_rename_marker: rename_prompt_marker(),
         }
     }
 }

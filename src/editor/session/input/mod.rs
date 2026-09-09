@@ -120,7 +120,9 @@ impl InputSession {
     pub(in crate::editor::session) fn capture_context(&self) -> Option<&'static str> {
         if let Some(prompt) = &self.prompt {
             return Some(match prompt.kind {
-                crate::ui::PromptKind::Command => "command_prompt",
+                crate::ui::PromptKind::Command | crate::ui::PromptKind::ExplorerRename => {
+                    "command_prompt"
+                }
                 crate::ui::PromptKind::SearchForward | crate::ui::PromptKind::SearchBackward => {
                     "search_prompt"
                 }

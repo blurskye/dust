@@ -169,6 +169,14 @@ impl InputSession {
     }
     pub(in crate::editor::session) fn prompt_insert(&mut self, text: &str) {
         if let Some(prompt) = &mut self.prompt {
+            if prompt.kind == PromptKind::ExplorerRename
+                && (prompt.input.len().saturating_add(text.len()) > 4096
+                    || text.chars().any(char::is_control))
+            {
+                prompt.error =
+                    Some("rename path must contain no controls and at most 4096 bytes".into());
+                return;
+            }
             if prompt.input.is_char_boundary(prompt.cursor) {
                 prompt.input.insert_str(prompt.cursor, text);
                 prompt.cursor += text.len();
@@ -221,7 +229,10 @@ impl InputSession {
         };
         if matches!(
             kind,
-            PromptKind::WorkspaceTrust | PromptKind::GitReset | PromptKind::ExplorerDelete
+            PromptKind::WorkspaceTrust
+                | PromptKind::GitReset
+                | PromptKind::ExplorerDelete
+                | PromptKind::ExplorerRename
         ) {
             return;
         }
@@ -434,7 +445,10 @@ impl InputSession {
         if input.is_empty() {
             return;
         }
-        if kind == PromptKind::WorkspaceTrust {
+        if matches!(
+            kind,
+            PromptKind::WorkspaceTrust | PromptKind::ExplorerRename
+        ) {
             return;
         }
         let configured = if kind == PromptKind::Command {

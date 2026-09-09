@@ -322,6 +322,8 @@ git_reset_title = "Reset this Git hunk?"
 git_reset_marker = "> "
 explorer_delete_title = "Delete this path?"
 explorer_delete_marker = "> "
+explorer_rename_title = "Rename path"
+explorer_rename_marker = "> "
 
 [startup]
 show_dashboard = true
@@ -1158,6 +1160,7 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "explorer.file.split_open" = "Split-open explorer file"
 "explorer.create" = "Create explorer file or directory"
 "explorer.rename" = "Rename selected explorer path"
+"explorer.rename.prompt" = "Rename selected explorer path with a prefilled prompt"
 "explorer.delete" = "Delete selected explorer path"
 "explorer.delete.confirm" = "Confirm explorer path deletion"
 "explorer.copy" = "Copy selected explorer path"

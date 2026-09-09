@@ -347,6 +347,23 @@ impl InteractiveApplication {
         reply: crate::files::ExplorerIoReply,
     ) {
         use crate::editor::session::explorer::MutationUpdate;
+        if let crate::files::ExplorerIoReply::RenameInspected { id, result } = reply {
+            match self.explorer.accept_rename_inspection(
+                id,
+                result,
+                self.workspace.version(),
+                self.configuration.binding_revision(),
+                &self.state.window_version(),
+            ) {
+                Some(Ok(root)) => self.prompt_help(format!(
+                    "Relative to `{}`. Enter renames; Esc cancels.",
+                    root.display()
+                )),
+                Some(Err(error)) => self.prompt_error(error),
+                None => {}
+            }
+            return;
+        }
         if let crate::files::ExplorerIoReply::Opened { id, path, result } = reply {
             let Some(reply) = self.explorer.accept_open(
                 id,
@@ -428,8 +445,27 @@ impl InteractiveApplication {
                     path.display()
                 ));
             }
-            MutationUpdate::Apply(prepared) => self.apply_prepared_explorer(prepared),
-            MutationUpdate::Failed(error) => self.show_error(error),
+            MutationUpdate::Apply(prepared) => {
+                if self
+                    .input
+                    .prompt()
+                    .is_some_and(|p| p.kind == PromptKind::ExplorerRename)
+                {
+                    self.close_prompt();
+                }
+                self.apply_prepared_explorer(prepared);
+            }
+            MutationUpdate::Failed(error) => {
+                if self
+                    .input
+                    .prompt()
+                    .is_some_and(|p| p.kind == PromptKind::ExplorerRename)
+                {
+                    self.prompt_error(error);
+                } else {
+                    self.show_error(error);
+                }
+            }
             MutationUpdate::Complete { operation, change } => {
                 let reconciliation = (|| -> Result<(), String> {
                     self.window_session

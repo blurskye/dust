@@ -55,6 +55,7 @@ pub enum PromptKind {
     WorkspaceTrust,
     GitReset,
     ExplorerDelete,
+    ExplorerRename,
 }
 
 impl PromptKind {
@@ -67,6 +68,7 @@ impl PromptKind {
             Self::WorkspaceTrust => &text.workspace_trust_title,
             Self::GitReset => &text.git_reset_title,
             Self::ExplorerDelete => &text.explorer_delete_title,
+            Self::ExplorerRename => &text.explorer_rename_title,
         }
     }
 
@@ -79,6 +81,7 @@ impl PromptKind {
             Self::WorkspaceTrust => &text.workspace_trust_marker,
             Self::GitReset => &text.git_reset_marker,
             Self::ExplorerDelete => &text.explorer_delete_marker,
+            Self::ExplorerRename => &text.explorer_rename_marker,
         }
     }
 }

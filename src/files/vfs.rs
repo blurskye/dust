@@ -753,6 +753,43 @@ impl VfsWorker {
         )?;
         Ok(id)
     }
+    pub(crate) fn inspect_explorer_rename(
+        &mut self,
+        path: PathBuf,
+        roots: Vec<crate::workspace::RootIdentity>,
+        maximum: u64,
+    ) -> Result<RequestId, VfsError> {
+        let id = self.next_request_id()?;
+        self.submit_io(
+            VfsRequest::Read {
+                id,
+                path: path.clone(),
+            },
+            None,
+            Some(ExplorerIo::InspectRename {
+                path,
+                roots,
+                maximum,
+            }),
+        )?;
+        Ok(id)
+    }
+    pub(crate) fn prepare_explorer_rename(
+        &mut self,
+        source: crate::files::ExplorerRenameSource,
+        target: PathBuf,
+    ) -> Result<RequestId, VfsError> {
+        let id = self.next_request_id()?;
+        self.submit_io(
+            VfsRequest::Read {
+                id,
+                path: source.path().into(),
+            },
+            None,
+            Some(ExplorerIo::PrepareRename { source, target }),
+        )?;
+        Ok(id)
+    }
     pub(crate) fn prepare_explorer(
         &mut self,
         operation: ExplorerMutation,

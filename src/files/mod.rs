@@ -28,7 +28,9 @@ pub use icons::*;
 mod recovery;
 pub use recovery::*;
 mod explorer_intent;
-pub(crate) use explorer_intent::{ExplorerIo, ExplorerIoReply, PreparedExplorerMutation};
+pub(crate) use explorer_intent::{
+    ExplorerIo, ExplorerIoReply, ExplorerRenameSource, PreparedExplorerMutation,
+};
 mod vfs;
 pub use vfs::*;
 mod project_root;

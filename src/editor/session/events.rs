@@ -157,6 +157,7 @@ impl InteractiveApplication {
                         PromptKind::WorkspaceTrust
                             | PromptKind::GitReset
                             | PromptKind::ExplorerDelete
+                            | PromptKind::ExplorerRename
                     )
                 }) {
                     self.close_prompt();

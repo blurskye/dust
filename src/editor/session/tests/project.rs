@@ -146,6 +146,182 @@ fn explorer_command_prompt_creates_a_file_from_the_selected_directory() {
 }
 
 #[test]
+fn explorer_prefilled_rename_keeps_original_target_and_dirty_split_views() {
+    let mut app = app();
+    let root = app.state.workspace_root.clone();
+    let source = root.join("source.rs");
+    let other = root.join("other.rs");
+    fs::write(&source, "disk text").unwrap();
+    fs::write(&other, "other").unwrap();
+    fs::create_dir(root.join("nested")).unwrap();
+    let (buffer, first) = app
+        .state
+        .open_text(TextBuffer::from_text("dirty text"), Some(source.clone()));
+    app.state.set_buffer_dirty(buffer, true);
+    let second = app
+        .state
+        .split_active(crate::editor::Axis::Vertical, 500)
+        .unwrap();
+    app.state.views[first].cursor = ByteOffset(1);
+    app.state.views[second].cursor = ByteOffset(4);
+    app.open_explorer();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while app.explorer.tree().id_for_path(&source).is_none() {
+        app.process_explorer_result();
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    app.explorer
+        .select(app.explorer.tree().id_for_path(&source).unwrap());
+    app.handle_configured_key(KeyEvent::character('e'));
+    let prompt = app.input.prompt().expect("e opens shared prompt");
+    assert_eq!(prompt.kind, crate::ui::PromptKind::ExplorerRename);
+    assert_eq!(prompt.input, "source.rs");
+    assert_eq!(prompt.cursor, "source.rs".len());
+    let frame = render(
+        &app.state,
+        &app.ui,
+        app.configuration.settings(),
+        app.configuration.dashboard(),
+        80,
+        24,
+    );
+    let screen = (0..24)
+        .map(|row| frame.grid.row_text(row))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(screen.contains("Rename path"));
+    assert!(screen.contains("source.rs"));
+    app.handle_event(UiEvent::Paste("invalid\nname".into()));
+    assert_eq!(app.input.prompt().unwrap().input, "source.rs");
+    wait_vfs(&mut app);
+    // Selection changes must never retarget the original rename request.
+    app.explorer
+        .select(app.explorer.tree().id_for_path(&other).unwrap());
+    for _ in 0.."source.rs".len() {
+        app.prompt_backspace();
+    }
+    app.prompt_insert("../escape.rs");
+    app.submit_prompt();
+    assert!(app.input.prompt().unwrap().error.is_some());
+    assert!(!app.explorer.mutation_pending());
+    for _ in 0.."../escape.rs".len() {
+        app.prompt_backspace();
+    }
+    let value = "nested/new 'é'.rs";
+    app.handle_event(UiEvent::Paste(value.into()));
+    app.submit_prompt();
+    app.submit_prompt(); // a second Enter cannot submit a second mutation
+    wait_vfs(&mut app);
+    let target = root.join(value);
+    assert!(app.input.prompt().is_none());
+    assert!(!source.exists());
+    assert_eq!(fs::read_to_string(&target).unwrap(), "disk text");
+    assert_eq!(fs::read_to_string(&other).unwrap(), "other");
+    assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&target));
+    assert!(app.state.buffers[buffer].dirty);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "dirty text");
+    assert_eq!(app.state.views[first].buffer, buffer);
+    assert_eq!(app.state.views[second].buffer, buffer);
+    assert_eq!(app.state.views[first].cursor, ByteOffset(1));
+    assert_eq!(app.state.views[second].cursor, ByteOffset(4));
+    assert!(app.input.command_history().is_empty());
+    assert!(app.input.search_history().is_empty());
+}
+
+#[test]
+fn explorer_rename_prompt_refuses_replaced_files_and_retired_or_cancelled_requests() {
+    let mut app = app();
+    let source = app.state.workspace_root.join("source.txt");
+    let target = app.state.workspace_root.join("target.txt");
+    fs::write(&source, "original").unwrap();
+    fs::write(&target, "collision").unwrap();
+    app.open_explorer();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while app.explorer.tree().id_for_path(&source).is_none() {
+        app.process_explorer_result();
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    app.explorer
+        .select(app.explorer.tree().id_for_path(&source).unwrap());
+    app.handle_configured_key(KeyEvent::character('r'));
+    wait_vfs(&mut app);
+    for _ in 0.."source.txt".len() {
+        app.prompt_backspace();
+    }
+    app.prompt_insert("target.txt");
+    app.submit_prompt();
+    wait_vfs(&mut app);
+    assert_eq!(app.input.prompt().unwrap().input, "target.txt");
+    assert!(app.input.prompt().unwrap().error.is_some());
+    assert_eq!(fs::read_to_string(&target).unwrap(), "collision");
+    fs::remove_file(&target).unwrap();
+    let parked = source.with_extension("parked");
+    fs::rename(&source, &parked).unwrap();
+    fs::write(&source, "replacement").unwrap();
+    app.submit_prompt();
+    wait_vfs(&mut app);
+    assert!(app.input.prompt().unwrap().error.is_some());
+    assert_eq!(fs::read_to_string(&source).unwrap(), "replacement");
+    assert_eq!(fs::read_to_string(&parked).unwrap(), "original");
+    assert!(!target.exists());
+    app.close_prompt();
+    // Closing before inspection delivery cannot resurrect a prompt or enable a rename.
+    app.open_explorer_rename_prompt();
+    app.handle_configured_key("escape".parse().unwrap());
+    wait_vfs(&mut app);
+    assert!(app.input.prompt().is_none());
+    assert!(
+        app.explorer
+            .rename_value(
+                "target.txt",
+                app.workspace.version(),
+                app.configuration.binding_revision(),
+                &app.state.window_version()
+            )
+            .is_err()
+    );
+    // Cancelling after preparation admission still performs no mutation.
+    app.open_explorer_rename_prompt();
+    wait_vfs(&mut app);
+    for _ in 0.."source.txt".len() {
+        app.prompt_backspace();
+    }
+    app.prompt_insert("target.txt");
+    app.submit_prompt();
+    app.close_prompt();
+    wait_vfs(&mut app);
+    assert!(source.exists());
+    assert!(!target.exists());
+    app.open_explorer_rename_prompt();
+    app.handle_event(UiEvent::FocusLost);
+    wait_vfs(&mut app);
+    assert!(app.input.prompt().is_none());
+    app.open_explorer_rename_prompt();
+    app.process_effect(AppEffect::ExplorerClose);
+    wait_vfs(&mut app);
+    assert!(app.input.prompt().is_none());
+    app.open_explorer();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while app.explorer.tree().id_for_path(&source).is_none() {
+        app.process_explorer_result();
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    app.explorer
+        .select(app.explorer.tree().id_for_path(&source).unwrap());
+    // A root epoch change retires the original prompt, even for equal path strings.
+    app.open_explorer_rename_prompt();
+    app.explorer
+        .reset_roots(app.workspace.roots(), app.workspace.root_revision());
+    app.retire_stale_explorer_intents();
+    wait_vfs(&mut app);
+    assert!(app.input.prompt().is_none());
+    assert!(!target.exists());
+}
+
+#[test]
 fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
     let mut app = app();
     let source = app.state.workspace_root.join("source.txt");

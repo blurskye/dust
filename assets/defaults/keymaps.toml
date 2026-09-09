@@ -1093,8 +1093,12 @@ arguments = { kind = "command", initial = "exploreradd " }
 id = "builtin.explorer.surface.explorer-rename.r"
 context = "explorer"
 keys = "r"
-command = "command_line.open"
-arguments = { kind = "command", initial = "explorerrename " }
+command = "explorer.rename.prompt"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-rename.e"
+context = "explorer"
+keys = "e"
+command = "explorer.rename.prompt"
 [[keymap]]
 id = "builtin.explorer.surface.explorer-delete.d"
 context = "explorer"

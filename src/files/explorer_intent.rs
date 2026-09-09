@@ -14,12 +14,35 @@ pub(crate) struct PreparedExplorerMutation {
     identities: Vec<(PathBuf, fs::File)>,
     maximum: u64,
 }
+/// Read-only source inspection retained while the user edits a rename prompt.
+#[derive(Clone, Debug)]
+pub(crate) struct ExplorerRenameSource {
+    inspected: std::sync::Arc<PreparedExplorerMutation>,
+    roots: std::sync::Arc<[RootIdentity]>,
+}
+impl ExplorerRenameSource {
+    pub(crate) fn path(&self) -> &Path {
+        self.inspected
+            .operation
+            .source()
+            .expect("inspected rename source")
+    }
+}
 impl PreparedExplorerMutation {
     pub(crate) fn operation(&self) -> &ExplorerMutation {
         &self.operation
     }
 }
 pub(crate) enum ExplorerIo {
+    InspectRename {
+        path: PathBuf,
+        roots: Vec<RootIdentity>,
+        maximum: u64,
+    },
+    PrepareRename {
+        source: ExplorerRenameSource,
+        target: PathBuf,
+    },
     Open {
         path: PathBuf,
         roots: Vec<RootIdentity>,
@@ -33,6 +56,10 @@ pub(crate) enum ExplorerIo {
 }
 #[derive(Debug)]
 pub(crate) enum ExplorerIoReply {
+    RenameInspected {
+        id: RequestId,
+        result: Result<ExplorerRenameSource, VfsError>,
+    },
     Opened {
         id: RequestId,
         path: PathBuf,
@@ -50,7 +77,10 @@ pub(crate) enum ExplorerIoReply {
 impl ExplorerIoReply {
     pub(crate) fn id(&self) -> RequestId {
         match self {
-            Self::Prepared { id, .. } | Self::Applied { id, .. } | Self::Opened { id, .. } => *id,
+            Self::RenameInspected { id, .. }
+            | Self::Prepared { id, .. }
+            | Self::Applied { id, .. }
+            | Self::Opened { id, .. } => *id,
         }
     }
 }
@@ -160,7 +190,7 @@ fn prepare(
         maximum,
     })
 }
-fn apply(intent: PreparedExplorerMutation) -> Result<(), VfsError> {
+fn check_identities(intent: &PreparedExplorerMutation) -> Result<(), VfsError> {
     roots_current(&intent.roots)?;
     for (path, original) in &intent.identities {
         let current = fs::symlink_metadata(path).map_err(|e| error(path, e.to_string()))?;
@@ -171,6 +201,33 @@ fn apply(intent: PreparedExplorerMutation) -> Result<(), VfsError> {
             return Err(error(path, "explorer target filesystem identity changed"));
         }
     }
+    Ok(())
+}
+fn prepare_rename(
+    source: ExplorerRenameSource,
+    target: PathBuf,
+) -> Result<PreparedExplorerMutation, VfsError> {
+    check_identities(&source.inspected)?;
+    let mut prepared = prepare(
+        ExplorerMutation::Rename {
+            source: source.path().into(),
+            target,
+        },
+        source.roots.to_vec(),
+        source.inspected.maximum,
+    )?;
+    check_identities(&source.inspected)?;
+    // Retain the original open file identities through application, not just a new path lookup.
+    for (path, file) in &source.inspected.identities {
+        prepared.identities.push((
+            path.clone(),
+            file.try_clone().map_err(|e| error(path, e.to_string()))?,
+        ));
+    }
+    Ok(prepared)
+}
+fn apply(intent: PreparedExplorerMutation) -> Result<(), VfsError> {
+    check_identities(&intent)?;
     let roots = intent
         .roots
         .iter()
@@ -190,6 +247,32 @@ impl ExplorerIo {
             ),
         };
         match self {
+            Self::InspectRename {
+                path,
+                roots,
+                maximum,
+            } => ExplorerIoReply::RenameInspected {
+                id,
+                result: if cancelled {
+                    Err(cancellation())
+                } else {
+                    // Reuse source-only inspection. No Apply request exists for this opaque token.
+                    prepare(ExplorerMutation::Delete { path }, roots.clone(), maximum).map(
+                        |prepared| ExplorerRenameSource {
+                            inspected: std::sync::Arc::new(prepared),
+                            roots: roots.into(),
+                        },
+                    )
+                },
+            },
+            Self::PrepareRename { source, target } => ExplorerIoReply::Prepared {
+                id,
+                result: if cancelled {
+                    Err(cancellation())
+                } else {
+                    prepare_rename(source, target)
+                },
+            },
             Self::Open { path, roots } => {
                 if cancelled {
                     return ExplorerIoReply::Opened {
@@ -355,8 +438,27 @@ mod tests {
         let nested = a.join("nested");
         fs::create_dir(&nested).unwrap();
         roots.push(RootIdentity::capture(&nested).unwrap());
+        worker
+            .inspect_explorer_rename(source.clone(), roots.clone(), 1024)
+            .unwrap();
+        let ExplorerIoReply::RenameInspected {
+            result: Ok(rename_source),
+            ..
+        } = reply(&worker)
+        else {
+            panic!("rename source inspection");
+        };
         fs::rename(&nested, a.join("old-nested")).unwrap();
         std::os::unix::fs::symlink(&b, &nested).unwrap();
+        worker
+            .prepare_explorer_rename(rename_source, nested.join("renamed"))
+            .unwrap();
+        assert!(matches!(
+            reply(&worker),
+            ExplorerIoReply::Prepared { result: Err(_), .. }
+        ));
+        assert!(source.exists());
+        assert!(!b.join("renamed").exists());
         // Canonicalization points at a valid other root. The invalid lexical
         // participating root must still reject, not fall back to b or ancestor a.
         worker

@@ -151,6 +151,14 @@ pub(super) fn register_commands(
     )?;
     register(
         registry,
+        "explorer.rename.prompt",
+        "Rename selected explorer path with a prefilled prompt",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::ExplorerRenamePrompt,
+    )?;
+    register(
+        registry,
         "explorer.rename",
         "Rename selected explorer path",
         ContextRequirement::Workspace,

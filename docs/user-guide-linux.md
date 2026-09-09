@@ -51,7 +51,7 @@ Open the explorer with `f` on the dashboard, `Space f e` in Normal mode, or `:ex
 | Open / split-open | `Enter` / `s` |
 | Add file | `a`, enter `name.ext` |
 | Add directory | `a`, enter `name/` |
-| Rename | `r` |
+| Rename (prefilled path prompt) | `e` or `r` |
 | Delete | `d`, then type `delete` |
 | Copy / move selection | `c` / `m` |
 | Paste into selected directory | `p` |
@@ -60,6 +60,8 @@ Open the explorer with `f` on the dashboard, `Space f e` in Normal mode, or `:ex
 | Toggle hidden / ignored | `.` / `I` |
 | Open command menu | `:` |
 | Close explorer | `Escape` |
+
+Rename opens the shared **Rename path** prompt, prefilled relative to its displayed workspace root. Edit the path and press Enter; Escape cancels before application. A collision keeps the entered name available for correction. Source inspection is asynchronous; wait for it to finish before submitting. Names are literal (not shell or command-line text), limited to 4096 UTF-8 bytes without controls or `..` traversal. Open dirty buffers and their split views retain their text after rename. `:explorer.rename target=...` remains the direct selected-path command with parent-relative target semantics.
 
 Explorer mutations are asynchronous, confined to canonical workspace roots, reject overwrite and symlink mutation, and reconcile open buffers. Deleting an open file keeps its text as a dirty recoverable scratch buffer. Recursive copy and deletion of non-empty directories are intentionally refused; empty directories are supported.
 

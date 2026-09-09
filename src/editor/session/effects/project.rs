@@ -31,6 +31,13 @@ impl InteractiveApplication {
             }
             AppEffect::ExplorerOpen => self.open_explorer(),
             AppEffect::ExplorerClose => {
+                if self
+                    .input
+                    .prompt()
+                    .is_some_and(|p| p.kind == PromptKind::ExplorerRename)
+                {
+                    self.close_prompt();
+                }
                 self.ui.explorer = None;
                 self.set_explorer_focus(false);
                 self.reconcile_explorer_watch();
@@ -59,6 +66,7 @@ impl InteractiveApplication {
             AppEffect::ExplorerFileOpen { split } => self.explorer_open_file(split),
             AppEffect::ExplorerCreate(path) => self.create_explorer_path(path),
             AppEffect::ExplorerRename(target) => self.rename_explorer_path(target),
+            AppEffect::ExplorerRenamePrompt => self.open_explorer_rename_prompt(),
             AppEffect::ExplorerDeleteRequest => self.request_explorer_delete(),
             AppEffect::ExplorerDeleteConfirm(phrase) => self.confirm_explorer_delete(phrase),
             AppEffect::ExplorerClipboard { cut } => self.set_explorer_clipboard(cut),
@@ -594,6 +602,18 @@ impl InteractiveApplication {
                 true,
             );
         }
+        if self
+            .input
+            .prompt()
+            .is_some_and(|p| p.kind == PromptKind::ExplorerRename)
+            && !self.explorer.rename_current(
+                &self.workspace.version(),
+                self.configuration.binding_revision(),
+                &self.state.window_version(),
+            )
+        {
+            self.close_prompt();
+        }
         if !self.explorer.confirmation_pending()
             && self
                 .input
@@ -620,31 +640,18 @@ impl InteractiveApplication {
         &mut self,
         operation: Result<ExplorerMutation, String>,
         confirmation: bool,
-    ) {
-        let operation = match operation {
-            Ok(op) => op,
-            Err(error) => {
-                self.show_error(error);
-                return;
-            }
-        };
+        rename_prompt: bool,
+    ) -> Result<(), String> {
+        let operation = operation?;
         if self.explorer.mutation_pending() {
-            self.show_error("an explorer operation is already pending");
-            return;
+            return Err("an explorer operation is already pending".into());
         }
-        if let Err(error) = self.documents.check_admission() {
-            self.show_error(error);
-            return;
-        }
+        self.documents
+            .check_admission()
+            .map_err(|error| error.to_string())?;
         let change = match &operation {
             ExplorerMutation::Rename { source, .. } | ExplorerMutation::Delete { path: source } => {
-                match self.state.capture_path_change(source) {
-                    Ok(change) => Some(change),
-                    Err(error) => {
-                        self.show_error(error);
-                        return;
-                    }
-                }
+                Some(self.state.capture_path_change(source)?)
             }
             _ => None,
         };
@@ -654,7 +661,7 @@ impl InteractiveApplication {
             editor: self.state.window_version(),
             change,
         };
-        let request = match self.explorer.prepare_mutation(
+        let request = self.explorer.prepare_mutation(
             operation,
             context,
             self.workspace.roots(),
@@ -664,6 +671,50 @@ impl InteractiveApplication {
                 .search
                 .maximum_file_bytes,
             confirmation,
+        )?;
+        let result = if rename_prompt {
+            let source = self.explorer.submitted_rename_source();
+            let target = request
+                .operation
+                .target()
+                .expect("validated rename target")
+                .into();
+            self.documents.prepare_explorer_rename(source, target)
+        } else {
+            self.documents
+                .prepare_explorer(request.operation, request.roots, request.maximum)
+        }
+        .map_err(|e| e.to_string());
+        let id = result.as_ref().ok().copied();
+        if let Err(error) = self.explorer.admit_mutation(request.ticket, result) {
+            if let Some(id) = id {
+                self.documents.cancel_request(id);
+            }
+            return Err(error);
+        }
+        self.notify_message("checking explorer operation…".into(), false);
+        Ok(())
+    }
+    pub(in crate::editor::session) fn create_explorer_path(&mut self, input: String) {
+        if let Err(error) = self.queue_explorer_mutation(self.explorer.create(&input), false, false)
+        {
+            self.show_error(error);
+        }
+    }
+    pub(in crate::editor::session) fn rename_explorer_path(&mut self, target: String) {
+        if let Err(error) =
+            self.queue_explorer_mutation(self.explorer.rename(&target), false, false)
+        {
+            self.show_error(error);
+        }
+    }
+    pub(in crate::editor::session) fn open_explorer_rename_prompt(&mut self) {
+        self.close_prompt();
+        let request = match self.explorer.begin_rename(
+            self.workspace.version(),
+            self.configuration.binding_revision(),
+            self.state.window_version(),
+            self.workspace.roots(),
         ) {
             Ok(request) => request,
             Err(error) => {
@@ -671,29 +722,56 @@ impl InteractiveApplication {
                 return;
             }
         };
-        let result = self
-            .documents
-            .prepare_explorer(request.operation, request.roots, request.maximum)
-            .map_err(|e| e.to_string());
-        let id = result.as_ref().ok().copied();
-        if let Err(error) = self.explorer.admit_mutation(request.ticket, result) {
-            if let Some(id) = id {
-                self.documents.cancel_request(id);
-            }
+        let result = self.explorer.rename_inspection().and_then(|inspection| {
+            let id = self
+                .documents
+                .inspect_explorer_rename(
+                    request.path,
+                    request.roots,
+                    self.configuration
+                        .settings()
+                        .workspace
+                        .search
+                        .maximum_file_bytes,
+                )
+                .map_err(|error| error.to_string())?;
+            inspection.register(id);
+            Ok(())
+        });
+        if let Err(error) = result {
+            self.explorer.cancel_rename();
             self.show_error(error);
+            return;
+        }
+        self.open_prompt(PromptKind::ExplorerRename, request.initial);
+        self.prompt_help(format!(
+            "Relative to `{}`. Checking source… Enter renames; Esc cancels.",
+            request.root.display()
+        ));
+    }
+    pub(in crate::editor::session) fn submit_explorer_rename_prompt(&mut self, value: &str) {
+        let operation = self.explorer.rename_value(
+            value,
+            self.workspace.version(),
+            self.configuration.binding_revision(),
+            &self.state.window_version(),
+        );
+        if let Err(error) = self.queue_explorer_mutation(operation, false, true) {
+            self.prompt_error(error);
         } else {
-            self.notify_message("checking explorer operation…".into(), false);
+            self.prompt_help("Checking rename target… Esc cancels before application.".into());
         }
     }
-    pub(in crate::editor::session) fn create_explorer_path(&mut self, input: String) {
-        self.queue_explorer_mutation(self.explorer.create(&input), false);
-    }
-    pub(in crate::editor::session) fn rename_explorer_path(&mut self, target: String) {
-        self.queue_explorer_mutation(self.explorer.rename(&target), false);
+    pub(in crate::editor::session) fn cancel_explorer_rename_prompt(&mut self) {
+        for id in self.explorer.cancel_rename() {
+            self.documents.cancel_request(id);
+        }
     }
     pub(in crate::editor::session) fn request_explorer_delete(&mut self) {
         self.close_prompt();
-        self.queue_explorer_mutation(self.explorer.delete(), true);
+        if let Err(error) = self.queue_explorer_mutation(self.explorer.delete(), true, false) {
+            self.show_error(error);
+        }
     }
     pub(in crate::editor::session) fn confirm_explorer_delete(&mut self, phrase: String) {
         match self.explorer.confirm_delete(
@@ -729,6 +807,12 @@ impl InteractiveApplication {
         }
     }
     pub(in crate::editor::session) fn paste_explorer_clipboard(&mut self) {
-        self.queue_explorer_mutation(self.explorer.paste(&self.workspace.version()), false);
+        if let Err(error) = self.queue_explorer_mutation(
+            self.explorer.paste(&self.workspace.version()),
+            false,
+            false,
+        ) {
+            self.show_error(error);
+        }
     }
 }
