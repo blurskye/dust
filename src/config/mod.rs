@@ -9,7 +9,9 @@ pub use load::{
     load_config, load_keymaps, load_user_config, user_config_path, user_dashboard_path,
     user_keymaps_path, user_state_directory, user_theme_path,
 };
-pub(crate) use themes::{ThemeCatalog, ThemeChoice, ThemeRead};
+pub(crate) use themes::{
+    ThemeCatalog, ThemeChoice, ThemeRead, ThemeReadSource, theme_display_name,
+};
 
 use std::{
     collections::{BTreeMap, BTreeSet},

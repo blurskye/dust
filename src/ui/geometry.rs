@@ -21,6 +21,30 @@ pub struct PickerContentGeometry {
     pub stacked_divider: Option<u16>,
 }
 
+/// Theme selection leaves most of the editor visible for live color preview.
+/// Other picker sizes retain their configured behavior.
+#[must_use]
+pub(crate) fn picker_window_geometry(
+    picker: &PickerUiState,
+    config: &Config,
+    bounds: WindowRect,
+) -> Option<WindowRect> {
+    let mut rect = crate::ui::picker_geometry(config, bounds)?;
+    if picker.surface == crate::ui::PickerSurfaceKind::Theme {
+        rect.width = rect.width.min(64);
+        rect.height = rect
+            .height
+            .min(u16::try_from(picker.rows.len().clamp(2, 8)).unwrap_or(8) + 4);
+        rect.x = bounds
+            .x
+            .saturating_add(bounds.width.saturating_sub(rect.width) / 2);
+        rect.y = bounds
+            .y
+            .saturating_add((bounds.height.saturating_sub(rect.height) / 4).min(4));
+    }
+    Some(rect)
+}
+
 /// The preview decision uses the same bounded content sample as painting.
 #[must_use]
 pub fn picker_content_geometry(

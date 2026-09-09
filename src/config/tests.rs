@@ -13,6 +13,71 @@ use super::{
 };
 
 #[test]
+fn bundled_theme_ports_validate_and_load_by_name_without_installed_files() {
+    let mut backgrounds = BTreeSet::new();
+    for name in [
+        "dust",
+        "catppuccin-latte",
+        "catppuccin-frappe",
+        "catppuccin-macchiato",
+        "catppuccin-mocha",
+        "gruvbox-dark",
+        "nord",
+    ] {
+        let bundle = capture_configuration_bundle_with(name, |path| {
+            let text = if path.file_name().is_some_and(|file| file == "config.toml") {
+                CapturedText::Text(format!("[ui]\ntheme = \"{name}\"\n"))
+            } else {
+                CapturedText::Missing
+            };
+            captured(path, text)
+        });
+        let loaded = bundle.into_loaded();
+        assert!(
+            loaded.diagnostic.is_none(),
+            "{name}: {:?}",
+            loaded.diagnostic
+        );
+        assert_eq!(loaded.theme.name, name);
+        loaded.theme.validate().unwrap();
+        assert_eq!(
+            loaded.theme_path,
+            PathBuf::from(format!("<bundled:theme:{name}>"))
+        );
+        assert!(
+            backgrounds.insert(format!("{:?}", loaded.theme.styles.default.background)),
+            "themes need distinct backgrounds"
+        );
+    }
+    let mut installed = super::themes::bundled_named("nord").unwrap().theme;
+    installed.styles.default.foreground = super::ThemeColor::Red;
+    for (theme_source, valid) in [
+        (toml::to_string(&installed).unwrap(), true),
+        ("invalid toml".into(), false),
+    ] {
+        let bundle = capture_configuration_bundle_with("nord", |path| {
+            let text = match path.file_name().and_then(|name| name.to_str()) {
+                Some("config.toml") => CapturedText::Text("[ui]\ntheme = \"nord\"\n".into()),
+                Some("nord.toml") => CapturedText::Text(theme_source.clone()),
+                _ => CapturedText::Missing,
+            };
+            captured(path, text)
+        });
+        let loaded = bundle.into_loaded();
+        if valid {
+            assert!(loaded.diagnostic.is_none());
+            assert_eq!(loaded.theme, installed);
+            assert!(loaded.theme_path.is_absolute());
+        } else {
+            assert!(
+                loaded.diagnostic.is_some(),
+                "a malformed installed override must not silently load the bundled theme"
+            );
+        }
+    }
+}
+
+#[test]
 fn absent_file_uses_defaults_without_error() {
     let root = tempdir().expect("tempdir");
     let loaded = load_config(&root.path().join("missing.toml"));

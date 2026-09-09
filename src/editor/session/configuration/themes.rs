@@ -1,6 +1,6 @@
 //! Theme preview is a presentation override, never a global configuration reload.
 use super::ConfigurationSession;
-use crate::config::{ThemeCatalog, ThemeChoice, ThemeConfig, ThemeRead};
+use crate::config::{ThemeCatalog, ThemeChoice, ThemeConfig, ThemeRead, ThemeReadSource};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -16,6 +16,18 @@ pub(in crate::editor::session) struct ThemeKey {
 pub(super) struct Themes {
     applied: Option<Arc<ThemeChoice>>,
     interaction: Option<ThemeInteraction>,
+    restore_source: Option<Arc<()>>,
+    restore: Option<ThemeRestore>,
+}
+struct ThemeRestore {
+    source: Arc<()>,
+    receiver: Receiver<ThemeCatalog>,
+    cancelled: Arc<AtomicBool>,
+}
+impl Drop for ThemeRestore {
+    fn drop(&mut self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
 }
 struct ThemeInteraction {
     epoch: Arc<()>,
@@ -49,11 +61,13 @@ impl ThemeInteraction {
                             epoch: self.epoch.clone(),
                             index,
                         },
-                        choice.theme.name.clone(),
+                        crate::config::theme_display_name(&choice.theme.name),
                         if index == 0 {
-                            "Current session theme".into()
+                            "Current".into()
+                        } else if choice.path.to_string_lossy().starts_with("<bundled:") {
+                            "Bundled".into()
                         } else {
-                            choice.path.display().to_string()
+                            "Installed".into()
                         },
                     )
                 })
@@ -64,6 +78,87 @@ impl ThemeInteraction {
     }
 }
 impl ConfigurationSession {
+    pub(in crate::editor::session) fn begin_theme_restore(&mut self) {
+        self.themes.restore = None;
+        self.themes.restore_source = self
+            .themes
+            .interaction
+            .is_none()
+            .then(|| self.stamp.clone());
+    }
+    pub(in crate::editor::session) fn restore_theme(
+        &mut self,
+        snapshot: Option<&str>,
+    ) -> Result<(), String> {
+        let Some(source) = self
+            .themes
+            .restore_source
+            .take()
+            .filter(|source| Arc::ptr_eq(source, &self.stamp))
+        else {
+            return Ok(());
+        };
+        let Some(snapshot) = snapshot else {
+            return Ok(());
+        };
+        if snapshot.len() > 128 * 1024 {
+            return Err("saved theme exceeds 128 KiB; configured theme retained".into());
+        }
+        let (reply, receiver) = mpsc::sync_channel(1);
+        let cancelled = Arc::new(AtomicBool::new(false));
+        self.worker
+            .request_themes(ThemeRead {
+                source: ThemeReadSource::Saved(snapshot.into()),
+                cancelled: cancelled.clone(),
+                reply,
+            })
+            .map_err(|e| e.to_string())?;
+        self.themes.restore = Some(ThemeRestore {
+            source,
+            receiver,
+            cancelled,
+        });
+        Ok(())
+    }
+    pub(in crate::editor::session) fn poll_theme_restore(&mut self) -> Option<Result<(), String>> {
+        let restore = self.themes.restore.as_ref()?;
+        if !Arc::ptr_eq(&restore.source, &self.stamp) {
+            self.themes.restore = None;
+            return None;
+        }
+        let result = match restore.receiver.try_recv() {
+            Ok(catalog) => catalog,
+            Err(TryRecvError::Empty) => return None,
+            Err(TryRecvError::Disconnected) => ThemeCatalog {
+                choices: vec![],
+                diagnostics: vec!["saved-theme worker stopped; configured theme retained".into()],
+            },
+        };
+        self.themes.restore = None;
+        if let Some(choice) = result.choices.into_iter().next() {
+            self.themes.applied = Some(Arc::new(choice));
+            Some(Ok(()))
+        } else {
+            Some(Err(result.diagnostics.join("; ")))
+        }
+    }
+    pub(in crate::editor::session) fn theme_state(&self) -> Result<Option<String>, String> {
+        self.themes
+            .applied
+            .as_ref()
+            .map(|choice| {
+                let snapshot = serde_json::to_string(&choice.theme).map_err(|e| e.to_string())?;
+                if snapshot.len() > 128 * 1024
+                    || choice.theme.name.len() > 96
+                    || choice.theme.name.is_empty()
+                    || choice.theme.name.chars().any(char::is_control)
+                {
+                    return Err("theme exceeds editor-state limits; previous state retained".into());
+                }
+                Ok(snapshot)
+            })
+            .transpose()
+    }
     pub(in crate::editor::session) fn begin_theme_picker(&mut self) -> Result<ThemeRows, String> {
         let (reply, receiver) = mpsc::sync_channel(1);
         let cancelled = Arc::new(AtomicBool::new(false));
@@ -75,11 +170,13 @@ impl ConfigurationSession {
             .then(|| self.accepted.sources.settings.with_file_name("themes"));
         self.worker
             .request_themes(ThemeRead {
-                directory,
+                source: ThemeReadSource::Directory(directory),
                 cancelled: cancelled.clone(),
                 reply,
             })
             .map_err(|e| e.to_string())?;
+        self.themes.restore_source = None;
+        self.themes.restore = None;
         let current = self.themes.applied.clone().unwrap_or_else(|| {
             Arc::new(ThemeChoice {
                 theme: self.accepted.theme.clone(),
@@ -125,9 +222,15 @@ impl ConfigurationSession {
             },
         };
         interaction.pending = None;
-        interaction
-            .choices
-            .extend(result.choices.into_iter().map(Arc::new));
+        for choice in result.choices {
+            if !interaction
+                .choices
+                .iter()
+                .any(|existing| existing.theme == choice.theme)
+            {
+                interaction.choices.push(Arc::new(choice));
+            }
+        }
         Some(interaction.rows(result.diagnostics))
     }
     pub(in crate::editor::session) fn preview_theme(&mut self, key: Option<&ThemeKey>) {
@@ -178,8 +281,18 @@ impl ConfigurationSession {
                 &segments,
             )?
         };
+        let preview = self.themes.interaction.as_ref().is_some_and(|interaction| {
+            Arc::ptr_eq(&interaction.source, &self.stamp)
+                && interaction.revision == self.binding_revision
+                && interaction.selected.is_some()
+        });
         let source = format!(
-            "session-only theme from {} (not saved)",
+            "{} from {}",
+            if preview {
+                "theme preview (not saved)"
+            } else {
+                "editor-state theme selection"
+            },
             choice.path.display()
         );
         Some(crate::config::ConfigExplanation {

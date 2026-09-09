@@ -213,6 +213,10 @@ pub fn write_deterministic_archive(
         ("LICENSE", 1024 * 1024),
         ("NOTICE", 1024 * 1024),
         ("LICENSES/Apache-2.0.txt", 1024 * 1024),
+        ("LICENSES/MIT-mini.icons.txt", 1024 * 1024),
+        ("LICENSES/MIT-catppuccin.txt", 1024 * 1024),
+        ("LICENSES/MIT-nord.txt", 1024 * 1024),
+        ("LICENSES/MIT-gruvbox.txt", 1024 * 1024),
         ("wit/dust-plugin.wit", 1024 * 1024),
         ("docs/plugin-sdk.md", 4 * 1024 * 1024),
     ] {

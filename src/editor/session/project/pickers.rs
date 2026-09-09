@@ -490,8 +490,8 @@ impl InteractiveApplication {
                     )
                 } else if self.search.theme_picker_key().is_some() {
                     (
-                        "Preview · not saved",
-                        &[("picker.accept", "apply"), ("picker.cancel", "cancel")],
+                        "Live preview",
+                        &[("picker.accept", "remember"), ("picker.cancel", "cancel")],
                     )
                 } else if self.input.picker_normal() {
                     (
@@ -517,7 +517,12 @@ impl InteractiveApplication {
                 .filter_map(|(command, action)| {
                     self.configuration
                         .keymaps()
-                        .inspect(&context, command)
+                        .inspect_key(&context, "escape")
+                        .filter(|binding| {
+                            *command == "picker.cancel"
+                                && binding.command.as_deref() == Some(*command)
+                        })
+                        .or_else(|| self.configuration.keymaps().inspect(&context, command))
                         .map(|binding| format!("{} {action}", binding.keys))
                 })
                 .collect::<Vec<_>>()
@@ -738,8 +743,21 @@ impl InteractiveApplication {
             match self.configuration.apply_theme(key) {
                 Ok(name) => {
                     self.close_picker();
+                    let saving = self.configuration.settings().persistence.enabled
+                        && self.configuration.settings().persistence.save_on_exit;
+                    if saving {
+                        self.persistence.request_save();
+                    }
                     self.notify_message(
-                        format!("Theme {name} applied for this session only; default not saved"),
+                        format!(
+                            "Theme {} applied; {}",
+                            crate::config::theme_display_name(&name),
+                            if saving {
+                                "editor-state save requested"
+                            } else {
+                                "state saving is disabled"
+                            }
+                        ),
                         false,
                     );
                 }

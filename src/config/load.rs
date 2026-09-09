@@ -215,6 +215,12 @@ impl ConfigurationSourceBundle {
         if self.selected_theme == bundled.theme.name {
             loaded.theme = bundled.theme;
             loaded.theme_path = bundled.theme_path;
+        } else if let Some(choice) = matches!(self.theme.text, CapturedText::Missing)
+            .then(|| super::themes::bundled_named(&self.selected_theme))
+            .flatten()
+        {
+            loaded.theme = choice.theme;
+            loaded.theme_path = choice.path;
         } else {
             match parse_theme_capture(&self.theme) {
                 Ok(theme) if theme.name == self.selected_theme => {

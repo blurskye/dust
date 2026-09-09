@@ -124,7 +124,7 @@ use crate::ui::{
     ToolRuntimeOption, ToolRuntimePickerState, UiEvent, UiFold, UiInlayHint, UiState, UiSyntaxSpan,
     VisualRowAnchor, VisualRowModel, active_pane_viewport, editor_state_content_width,
     editor_state_gutter_width, editor_workspace_insets, explorer_panel_width, pane_viewports,
-    picker_geometry, prompt_geometry, render, snap_display_column, snap_display_column_forward,
+    prompt_geometry, render, snap_display_column, snap_display_column_forward,
     terminal_panel_geometry, terminal_tab_at_column,
 };
 use crate::workspace::{

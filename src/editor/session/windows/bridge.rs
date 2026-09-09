@@ -503,6 +503,7 @@ impl NativeSurfaceBridge {
                 PickerSurfaceKind::Output => "builtin.output",
                 PickerSurfaceKind::Logs => "builtin.logs",
                 PickerSurfaceKind::Debug => "builtin.debug",
+                PickerSurfaceKind::Theme => "builtin.theme",
             };
             let placement = self
                 .picker_placements
@@ -863,6 +864,7 @@ impl NativeSurfaceBridge {
             "builtin.output",
             "builtin.logs",
             "builtin.debug",
+            "builtin.theme",
         ];
         for (content_type, placement) in &placements {
             if !SUPPORTED.contains(&content_type.as_str()) {
@@ -899,6 +901,7 @@ impl NativeSurfaceBridge {
             self.configured_placements.get("builtin.output").copied(),
             self.configured_placements.get("builtin.logs").copied(),
             self.configured_placements.get("builtin.debug").copied(),
+            self.configured_placements.get("builtin.theme").copied(),
         ]
         .into_iter()
         .flatten()

@@ -1,6 +1,74 @@
 use super::*;
 
 #[test]
+fn saved_theme_restore_rejects_invalid_data_and_cannot_overwrite_newer_interactions() {
+    let mut app = app();
+    let original = app.configuration.theme().clone();
+    let mut saved = original.clone();
+    saved.name = "remembered".into();
+    saved.styles.default.foreground = crate::config::ThemeColor::Red;
+    let snapshot = serde_json::to_string(&saved).unwrap();
+    let wait = |app: &mut InteractiveApplication| {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Some(result) = app.configuration.poll_theme_restore() {
+                return result;
+            }
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(1));
+        }
+    };
+    app.configuration.begin_theme_restore();
+    app.configuration
+        .restore_theme(Some("invalid JSON"))
+        .unwrap();
+    assert!(wait(&mut app).is_err());
+    app.configuration.begin_theme_restore();
+    app.configuration
+        .restore_theme(Some(&snapshot.replace("\"red\"", "\"#aébcd\"")))
+        .unwrap();
+    assert!(
+        wait(&mut app).is_err(),
+        "malformed multibyte RGB must not panic the configuration worker"
+    );
+    assert_eq!(app.configuration.theme(), &original);
+    app.configuration.begin_theme_restore();
+    assert!(
+        app.configuration
+            .restore_theme(Some(&"x".repeat(128 * 1024 + 1)))
+            .is_err()
+    );
+    app.configuration.begin_theme_restore();
+    app.process_effect(AppEffect::SelectTheme);
+    // An old state result is refused before even validating its payload ceiling.
+    app.configuration
+        .restore_theme(Some(&"x".repeat(128 * 1024 + 1)))
+        .unwrap();
+    assert!(app.configuration.poll_theme_restore().is_none());
+    app.close_picker();
+    app.configuration.begin_theme_restore();
+    app.configuration.restore_theme(Some(&snapshot)).unwrap();
+    app.process_effect(AppEffect::SelectTheme);
+    app.close_picker();
+    assert!(app.configuration.poll_theme_restore().is_none());
+    assert_eq!(app.configuration.theme(), &original);
+    app.configuration.begin_theme_restore();
+    app.configuration.restore_theme(Some(&snapshot)).unwrap();
+    app.apply_configuration_candidate(crate::config::load_bundled_config(), false)
+        .unwrap();
+    assert!(app.configuration.poll_theme_restore().is_none());
+    assert_eq!(app.configuration.theme(), &original);
+    app.configuration.begin_theme_restore();
+    app.configuration.restore_theme(Some(&snapshot)).unwrap();
+    wait(&mut app).unwrap();
+    assert_eq!(app.configuration.theme(), &saved);
+    assert_eq!(
+        app.configuration.theme_state().unwrap().as_deref(),
+        Some(snapshot.as_str())
+    );
+}
+
+#[test]
 fn theme_picker_previews_cancels_applies_and_never_overwrites_a_newer_reload() {
     let root = tempdir().unwrap();
     let saved = tempdir().unwrap();
@@ -55,9 +123,17 @@ fn theme_picker_previews_cancels_applies_and_never_overwrites_a_newer_reload() {
             thread::sleep(Duration::from_millis(1));
         }
         assert_eq!(app.ui.picker.as_ref().unwrap().query, "amber");
+        app.reconcile_editor_windows();
+        let rect = app.ui.surface_content.picker.as_ref().unwrap().outer;
+        assert!(rect.width <= 64 && rect.height <= 12);
         let rows = &app.ui.picker.as_ref().unwrap().rows;
         assert!(!rows.is_empty());
         assert!(rows.iter().all(|row| row.label == "amber"));
+        assert_eq!(
+            rows.len(),
+            1,
+            "the applied installed theme must not appear twice"
+        );
     };
     choose(&mut app);
     assert_eq!(app.configuration.theme(), &amber);
@@ -75,9 +151,25 @@ fn theme_picker_previews_cancels_applies_and_never_overwrites_a_newer_reload() {
         app.handle_configured_key("backspace".parse().unwrap());
     }
     assert_eq!(app.configuration.theme(), &amber); // clearing the query retains the selected row
-    app.handle_configured_key("up".parse().unwrap()); // bundled Dust
+    assert_eq!(app.ui.picker.as_ref().unwrap().rows.len(), 8);
+    assert_eq!(
+        app.ui
+            .picker
+            .as_ref()
+            .unwrap()
+            .rows
+            .iter()
+            .filter(|row| row.label == "Dust")
+            .count(),
+        1
+    );
+    app.window_session.observe_size((220, 70));
+    app.reconcile_editor_windows();
+    let rect = app.ui.surface_content.picker.as_ref().unwrap().outer;
+    assert_eq!((rect.width, rect.height), (64, 12));
+    app.handle_configured_key("down".parse().unwrap()); // wrap from installed amber to current Dust
     assert_eq!(app.configuration.theme(), &original_theme);
-    app.handle_configured_key("down".parse().unwrap()); // installed amber
+    app.handle_configured_key("up".parse().unwrap()); // wrap back to installed amber
     assert_eq!(app.configuration.theme(), &amber);
     let old_key = match app.selected_picker_payload().unwrap() {
         crate::editor::session::search::PickerPayload::Theme(key) => key.clone(),
@@ -109,7 +201,51 @@ fn theme_picker_previews_cancels_applies_and_never_overwrites_a_newer_reload() {
             .value
             .contains("amber")
     );
-    // Opening another picker retires the preview, not the already applied session theme.
+    // Enter queues the ordinary state writer; it is not necessary to exit first.
+    app.process_persistence_events();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.persistence.pending() {
+        app.process_persistence_events();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(1));
+    }
+    let saved_state: crate::persistence::PersistedState =
+        serde_json::from_slice(&fs::read(saved.path().join("session.json")).unwrap()).unwrap();
+    let snapshot = saved_state.metadata.get("ui.theme.snapshot").unwrap();
+    assert_eq!(
+        serde_json::from_str::<crate::config::ThemeConfig>(snapshot).unwrap(),
+        amber
+    );
+    let mut restarted = InteractiveApplication::new(
+        StartupTarget::Dashboard {
+            root: root.path().into(),
+        },
+        loaded.clone(),
+        false,
+        saved.path().into(),
+        false,
+        false,
+        std::sync::Arc::new(crate::clock::SystemClock),
+    )
+    .unwrap();
+    restarted.load_persistence();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while restarted.configuration.theme() != &amber {
+        restarted.process_persistence_events();
+        restarted.process_theme_results();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(restarted.configuration.settings(), &original_settings);
+    assert!(
+        restarted
+            .configuration
+            .explain("ui.theme")
+            .unwrap()
+            .source
+            .contains("editor-state")
+    );
+    // Opening another picker retires the preview, not the already applied theme.
     choose(&mut app);
     app.open_builtin_picker(PickerKind::Commands);
     assert_eq!(app.configuration.theme(), &amber);

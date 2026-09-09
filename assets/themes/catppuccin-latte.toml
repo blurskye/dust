@@ -1,0 +1,515 @@
+# Dust semantic-role port; palette attribution: README.md and ../../LICENSES/MIT-catppuccin.txt
+name = "catppuccin-latte"
+
+[styles.default]
+foreground = "#4c4f69"
+background = "#eff1f5"
+foreground_256 = "indexed:240"
+background_256 = "indexed:255"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.muted]
+foreground = "#6c6f85"
+background = "#eff1f5"
+foreground_256 = "indexed:243"
+background_256 = "indexed:255"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = []
+
+[styles.accent]
+foreground = "#1e66f5"
+background = "#eff1f5"
+foreground_256 = "indexed:27"
+background_256 = "indexed:255"
+foreground_16 = "dark_blue"
+background_16 = "white"
+attributes = ["bold"]
+
+[styles.status]
+foreground = "#4c4f69"
+background = "#dce0e8"
+foreground_256 = "indexed:240"
+background_256 = "indexed:254"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.status_accent]
+foreground = "#eff1f5"
+background = "#1e66f5"
+foreground_256 = "indexed:255"
+background_256 = "indexed:27"
+foreground_16 = "white"
+background_16 = "dark_blue"
+attributes = ["bold"]
+
+[styles.selection]
+foreground = "#4c4f69"
+background = "#bcc0cc"
+foreground_256 = "indexed:240"
+background_256 = "indexed:251"
+foreground_16 = "black"
+background_16 = "grey"
+attributes = []
+
+[styles.search]
+foreground = "#eff1f5"
+background = "#df8e1d"
+foreground_256 = "indexed:255"
+background_256 = "indexed:172"
+foreground_16 = "white"
+background_16 = "dark_yellow"
+attributes = []
+
+[styles.error]
+foreground = "#d20f39"
+background = "#eff1f5"
+foreground_256 = "indexed:161"
+background_256 = "indexed:255"
+foreground_16 = "dark_red"
+background_16 = "white"
+attributes = ["bold"]
+
+[styles.warning]
+foreground = "#df8e1d"
+background = "#eff1f5"
+foreground_256 = "indexed:172"
+background_256 = "indexed:255"
+foreground_16 = "dark_yellow"
+background_16 = "white"
+attributes = []
+
+[styles.border]
+foreground = "#acb0be"
+background = "#eff1f5"
+foreground_256 = "indexed:249"
+background_256 = "indexed:255"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.buffer_line_background]
+foreground = "#6c6f85"
+background = "#eff1f5"
+foreground_256 = "indexed:243"
+background_256 = "indexed:255"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = []
+
+[styles.buffer_line_active]
+foreground = "#4c4f69"
+background = "#e6e9ef"
+foreground_256 = "indexed:240"
+background_256 = "indexed:255"
+foreground_16 = "black"
+background_16 = "white"
+attributes = ["bold"]
+
+[styles.buffer_line_inactive]
+foreground = "#6c6f85"
+background = "#eff1f5"
+foreground_256 = "indexed:243"
+background_256 = "indexed:255"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = []
+
+[styles.buffer_line_dirty]
+foreground = "#d20f39"
+background = "#e6e9ef"
+foreground_256 = "indexed:161"
+background_256 = "indexed:255"
+foreground_16 = "dark_red"
+background_16 = "white"
+attributes = ["bold"]
+
+[styles.buffer_line_icon]
+foreground = "#6c6f85"
+background = "#e6e9ef"
+foreground_256 = "indexed:243"
+background_256 = "indexed:255"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = []
+
+[styles.buffer_line_pin]
+foreground = "#8839ef"
+background = "#e6e9ef"
+foreground_256 = "indexed:99"
+background_256 = "indexed:255"
+foreground_16 = "dark_magenta"
+background_16 = "white"
+attributes = []
+
+[styles.buffer_line_diagnostic]
+foreground = "#fe640b"
+background = "#e6e9ef"
+foreground_256 = "indexed:202"
+background_256 = "indexed:255"
+foreground_16 = "dark_yellow"
+background_16 = "white"
+attributes = []
+
+[styles.buffer_line_close]
+foreground = "#6c6f85"
+background = "#e6e9ef"
+foreground_256 = "indexed:243"
+background_256 = "indexed:255"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = []
+
+[styles.buffer_line_separator]
+foreground = "#acb0be"
+background = "#eff1f5"
+foreground_256 = "indexed:249"
+background_256 = "indexed:255"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.key_hint_background]
+foreground = "#4c4f69"
+background = "#e6e9ef"
+foreground_256 = "indexed:240"
+background_256 = "indexed:255"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.key_hint_border]
+foreground = "#acb0be"
+background = "#e6e9ef"
+foreground_256 = "indexed:249"
+background_256 = "indexed:255"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.key_hint_key]
+foreground = "#1e66f5"
+background = "#e6e9ef"
+foreground_256 = "indexed:27"
+background_256 = "indexed:255"
+foreground_16 = "dark_blue"
+background_16 = "white"
+attributes = ["bold"]
+
+[styles.key_hint_group]
+foreground = "#8839ef"
+background = "#e6e9ef"
+foreground_256 = "indexed:99"
+background_256 = "indexed:255"
+foreground_16 = "dark_magenta"
+background_16 = "white"
+attributes = ["bold"]
+
+[styles.key_hint_command]
+foreground = "#4c4f69"
+background = "#e6e9ef"
+foreground_256 = "indexed:240"
+background_256 = "indexed:255"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.key_hint_prefix]
+foreground = "#6c6f85"
+background = "#e6e9ef"
+foreground_256 = "indexed:243"
+background_256 = "indexed:255"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = []
+
+[styles.documentation_background]
+foreground = "#4c4f69"
+background = "#e6e9ef"
+foreground_256 = "indexed:240"
+background_256 = "indexed:255"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.documentation_border]
+foreground = "#1e66f5"
+background = "#e6e9ef"
+foreground_256 = "indexed:27"
+background_256 = "indexed:255"
+foreground_16 = "dark_blue"
+background_16 = "white"
+attributes = []
+
+[styles.documentation_title]
+foreground = "#8839ef"
+background = "#e6e9ef"
+foreground_256 = "indexed:99"
+background_256 = "indexed:255"
+foreground_16 = "dark_magenta"
+background_16 = "white"
+attributes = ["bold"]
+
+[styles.documentation_text]
+foreground = "#4c4f69"
+background = "#e6e9ef"
+foreground_256 = "indexed:240"
+background_256 = "indexed:255"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.git_sign_added]
+foreground = "#40a02b"
+background = "#eff1f5"
+foreground_256 = "indexed:70"
+background_256 = "indexed:255"
+foreground_16 = "dark_green"
+background_16 = "white"
+attributes = []
+
+[styles.git_sign_changed]
+foreground = "#df8e1d"
+background = "#eff1f5"
+foreground_256 = "indexed:172"
+background_256 = "indexed:255"
+foreground_16 = "dark_yellow"
+background_16 = "white"
+attributes = []
+
+[styles.git_sign_deleted]
+foreground = "#d20f39"
+background = "#eff1f5"
+foreground_256 = "indexed:161"
+background_256 = "indexed:255"
+foreground_16 = "dark_red"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_background]
+foreground = "#4c4f69"
+background = "#eff1f5"
+foreground_256 = "indexed:240"
+background_256 = "indexed:255"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_header]
+foreground = "#1e66f5"
+background = "#dce0e8"
+foreground_256 = "indexed:27"
+background_256 = "indexed:254"
+foreground_16 = "dark_blue"
+background_16 = "white"
+attributes = ["bold"]
+
+[styles.explorer_count]
+foreground = "#6c6f85"
+background = "#dce0e8"
+foreground_256 = "indexed:243"
+background_256 = "indexed:254"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_tree]
+foreground = "#9ca0b0"
+background = "#eff1f5"
+foreground_256 = "indexed:248"
+background_256 = "indexed:255"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_icon]
+foreground = "#6c6f85"
+background = "#eff1f5"
+foreground_256 = "indexed:243"
+background_256 = "indexed:255"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_directory]
+foreground = "#1e66f5"
+background = "#eff1f5"
+foreground_256 = "indexed:27"
+background_256 = "indexed:255"
+foreground_16 = "dark_blue"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_file]
+foreground = "#4c4f69"
+background = "#eff1f5"
+foreground_256 = "indexed:240"
+background_256 = "indexed:255"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_symlink]
+foreground = "#8839ef"
+background = "#eff1f5"
+foreground_256 = "indexed:99"
+background_256 = "indexed:255"
+foreground_16 = "dark_magenta"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_git]
+foreground = "#df8e1d"
+background = "#eff1f5"
+foreground_256 = "indexed:172"
+background_256 = "indexed:255"
+foreground_16 = "dark_yellow"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_diagnostic]
+foreground = "#d20f39"
+background = "#eff1f5"
+foreground_256 = "indexed:161"
+background_256 = "indexed:255"
+foreground_16 = "dark_red"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_decoration]
+foreground = "#6c6f85"
+background = "#eff1f5"
+foreground_256 = "indexed:243"
+background_256 = "indexed:255"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_selection]
+foreground = "#4c4f69"
+background = "#bcc0cc"
+foreground_256 = "indexed:240"
+background_256 = "indexed:251"
+foreground_16 = "black"
+background_16 = "grey"
+attributes = []
+
+[styles.explorer_border]
+foreground = "#acb0be"
+background = "#eff1f5"
+foreground_256 = "indexed:249"
+background_256 = "indexed:255"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.terminal_background]
+foreground = "#4c4f69"
+background = "#dce0e8"
+foreground_256 = "indexed:240"
+background_256 = "indexed:254"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.terminal_border]
+foreground = "#acb0be"
+background = "#dce0e8"
+foreground_256 = "indexed:249"
+background_256 = "indexed:254"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.terminal_title]
+foreground = "#1e66f5"
+background = "#dce0e8"
+foreground_256 = "indexed:27"
+background_256 = "indexed:254"
+foreground_16 = "dark_blue"
+background_16 = "white"
+attributes = ["bold"]
+
+[styles.terminal_status]
+foreground = "#6c6f85"
+background = "#dce0e8"
+foreground_256 = "indexed:243"
+background_256 = "indexed:254"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = []
+
+[styles.terminal_status_accent]
+foreground = "#eff1f5"
+background = "#1e66f5"
+foreground_256 = "indexed:255"
+background_256 = "indexed:27"
+foreground_16 = "white"
+background_16 = "dark_blue"
+attributes = ["bold"]
+
+[styles.terminal_text]
+foreground = "#4c4f69"
+background = "#dce0e8"
+foreground_256 = "indexed:240"
+background_256 = "indexed:254"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.syntax_comment]
+foreground = "#6c6f85"
+background = "#eff1f5"
+foreground_256 = "indexed:243"
+background_256 = "indexed:255"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = ["italic"]
+
+[styles.syntax_string]
+foreground = "#40a02b"
+background = "#eff1f5"
+foreground_256 = "indexed:70"
+background_256 = "indexed:255"
+foreground_16 = "dark_green"
+background_16 = "white"
+attributes = []
+
+[styles.syntax_number]
+foreground = "#fe640b"
+background = "#eff1f5"
+foreground_256 = "indexed:202"
+background_256 = "indexed:255"
+foreground_16 = "dark_yellow"
+background_16 = "white"
+attributes = []
+
+[styles.syntax_keyword]
+foreground = "#d20f39"
+background = "#eff1f5"
+foreground_256 = "indexed:161"
+background_256 = "indexed:255"
+foreground_16 = "dark_red"
+background_16 = "white"
+attributes = ["bold"]
+
+[styles.syntax_type]
+foreground = "#df8e1d"
+background = "#eff1f5"
+foreground_256 = "indexed:172"
+background_256 = "indexed:255"
+foreground_16 = "dark_yellow"
+background_16 = "white"
+attributes = []
+
+[styles.syntax_variable]
+foreground = "#4c4f69"
+background = "#eff1f5"
+foreground_256 = "indexed:240"
+background_256 = "indexed:255"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []

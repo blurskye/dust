@@ -291,6 +291,7 @@ pub enum PickerSurfaceKind {
     Output,
     Logs,
     Debug,
+    Theme,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

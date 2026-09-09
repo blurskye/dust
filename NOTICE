@@ -20,3 +20,10 @@ The pinned external language-server and filetype compatibility snapshot is
 derived from mason-lspconfig.nvim and nvim-lspconfig, both licensed under the
 Apache License 2.0. See LICENSES/Apache-2.0.txt. Mason package metadata is
 derived from mason-registry under the Apache License 2.0.
+
+Bundled theme palettes are adapted from Catppuccin (Copyright (c) 2021
+Catppuccin), Nord (Copyright (c) 2016-present Sven Greb), and gruvbox.nvim
+(Copyright (c) 2021 NpX; Gruvbox originally by morhetz), under the MIT License.
+See LICENSES/MIT-catppuccin.txt, LICENSES/MIT-nord.txt,
+LICENSES/MIT-gruvbox.txt and assets/themes/README.md for pinned sources.
+These are Dust semantic-role ports, not the upstream editor implementations.

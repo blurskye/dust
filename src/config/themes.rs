@@ -11,6 +11,51 @@ use std::{
     sync::mpsc::SyncSender,
 };
 
+const BUNDLED: &[(&str, &str)] = &[
+    ("dust", super::load::BUNDLED_THEME),
+    (
+        "catppuccin-latte",
+        include_str!("../../assets/themes/catppuccin-latte.toml"),
+    ),
+    (
+        "catppuccin-frappe",
+        include_str!("../../assets/themes/catppuccin-frappe.toml"),
+    ),
+    (
+        "catppuccin-macchiato",
+        include_str!("../../assets/themes/catppuccin-macchiato.toml"),
+    ),
+    (
+        "catppuccin-mocha",
+        include_str!("../../assets/themes/catppuccin-mocha.toml"),
+    ),
+    (
+        "gruvbox-dark",
+        include_str!("../../assets/themes/gruvbox-dark.toml"),
+    ),
+    ("nord", include_str!("../../assets/themes/nord.toml")),
+];
+pub(super) fn bundled_named(name: &str) -> Option<ThemeChoice> {
+    let (_, source) = BUNDLED.iter().find(|(id, _)| *id == name)?;
+    Some(ThemeChoice {
+        theme: toml::from_str(source).expect("bundled themes are validated by tests"),
+        path: format!("<bundled:theme:{name}>").into(),
+    })
+}
+pub(crate) fn theme_display_name(name: &str) -> String {
+    match name {
+        "dust" => "Dust",
+        "catppuccin-latte" => "Catppuccin Latte",
+        "catppuccin-frappe" => "Catppuccin Frappé",
+        "catppuccin-macchiato" => "Catppuccin Macchiato",
+        "catppuccin-mocha" => "Catppuccin Mocha",
+        "gruvbox-dark" => "Gruvbox Dark",
+        "nord" => "Nord",
+        other => other,
+    }
+    .into()
+}
+
 pub(crate) struct ThemeChoice {
     pub(crate) theme: ThemeConfig,
     pub(crate) path: PathBuf,
@@ -19,8 +64,12 @@ pub(crate) struct ThemeCatalog {
     pub(crate) choices: Vec<ThemeChoice>,
     pub(crate) diagnostics: Vec<String>,
 }
+pub(crate) enum ThemeReadSource {
+    Directory(Option<PathBuf>),
+    Saved(String),
+}
 pub(crate) struct ThemeRead {
-    pub(crate) directory: Option<PathBuf>,
+    pub(crate) source: ThemeReadSource,
     pub(crate) cancelled: Arc<AtomicBool>,
     pub(crate) reply: SyncSender<ThemeCatalog>,
 }
@@ -28,14 +77,54 @@ pub(super) fn discover(request: ThemeRead) {
     if request.cancelled.load(Ordering::Acquire) {
         return;
     }
+    if let ThemeReadSource::Saved(source) = &request.source {
+        let result = (|| {
+            if source.len() > 128 * 1024 {
+                return Err("saved theme exceeds 128 KiB".to_string());
+            }
+            let theme: ThemeConfig =
+                serde_json::from_str(source).map_err(|e| format!("invalid saved theme: {e}"))?;
+            if theme.name.is_empty()
+                || theme.name.len() > 96
+                || theme.name.chars().any(|c| c.is_control())
+            {
+                return Err("invalid saved theme name".into());
+            }
+            theme.validate()?;
+            Ok(ThemeChoice {
+                path: format!("<editor-state:theme:{}>", theme.name).into(),
+                theme,
+            })
+        })();
+        let catalog = match result {
+            Ok(choice) => ThemeCatalog {
+                choices: vec![choice],
+                diagnostics: vec![],
+            },
+            Err(error) => ThemeCatalog {
+                choices: vec![],
+                diagnostics: vec![
+                    error
+                        .chars()
+                        .filter(|c| !c.is_control())
+                        .take(512)
+                        .collect(),
+                ],
+            },
+        };
+        if !request.cancelled.load(Ordering::Acquire) {
+            let _ = request.reply.try_send(catalog);
+        }
+        return;
+    }
     let mut catalog = ThemeCatalog {
-        choices: vec![ThemeChoice {
-            theme: super::load::bundled_theme(),
-            path: "<bundled:theme:dust>".into(),
-        }],
+        choices: BUNDLED
+            .iter()
+            .filter_map(|(name, _)| bundled_named(name))
+            .collect(),
         diagnostics: Vec::new(),
     };
-    if let Some(directory) = &request.directory {
+    if let ThemeReadSource::Directory(Some(directory)) = &request.source {
         match fs::read_dir(directory) {
             Ok(entries) => {
                 let mut paths = Vec::new();
@@ -62,7 +151,7 @@ pub(super) fn discover(request: ThemeRead) {
                     }
                     if index == 31 {
                         catalog.diagnostics.push(
-                            "Theme discovery limited to 31 installed files plus bundled Dust"
+                            "Theme discovery limited to 31 installed files plus bundled themes"
                                 .into(),
                         );
                         break;
@@ -175,7 +264,7 @@ mod tests {
         .unwrap();
         let (reply, receiver) = mpsc::sync_channel(1);
         discover(ThemeRead {
-            directory: Some(root.path().into()),
+            source: ThemeReadSource::Directory(Some(root.path().into())),
             cancelled: Arc::new(AtomicBool::new(false)),
             reply,
         });
@@ -186,7 +275,11 @@ mod tests {
                 .iter()
                 .map(|c| c.theme.name.as_str())
                 .collect::<Vec<_>>(),
-            ["dust", "valid"]
+            BUNDLED
+                .iter()
+                .map(|(name, _)| *name)
+                .chain(["valid"])
+                .collect::<Vec<_>>()
         );
         assert!(
             catalog
@@ -214,7 +307,7 @@ mod tests {
         );
         let (reply, receiver) = mpsc::sync_channel(1);
         discover(ThemeRead {
-            directory: Some(root.path().into()),
+            source: ThemeReadSource::Directory(Some(root.path().into())),
             cancelled: Arc::new(AtomicBool::new(true)),
             reply,
         });
@@ -229,12 +322,12 @@ mod tests {
         }
         let (reply, receiver) = mpsc::sync_channel(1);
         discover(ThemeRead {
-            directory: Some(root.path().into()),
+            source: ThemeReadSource::Directory(Some(root.path().into())),
             cancelled: Arc::new(AtomicBool::new(false)),
             reply,
         });
         let catalog = receiver.try_recv().unwrap();
-        assert_eq!(catalog.choices.len(), 32);
+        assert_eq!(catalog.choices.len(), BUNDLED.len() + 31);
         assert!(
             catalog
                 .diagnostics

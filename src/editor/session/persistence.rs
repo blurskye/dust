@@ -22,6 +22,7 @@ pub(in crate::editor::session) struct PersistenceSession {
     worker: PersistenceService,
     path: PathBuf,
     pending: Option<(PersistenceId, bool)>,
+    save_requested: bool,
     failure: Option<String>,
     closing: bool,
     save_expected: bool,
@@ -41,12 +42,21 @@ impl PersistenceSession {
             worker,
             path,
             pending: None,
+            save_requested: false,
             failure: None,
             closing: false,
             save_expected: false,
             saved_on_exit: false,
             exit_request: None,
         }
+    }
+    pub(in crate::editor::session) fn request_save(&mut self) {
+        if !self.closing {
+            self.save_requested = true;
+        }
+    }
+    pub(in crate::editor::session) fn take_save_request(&mut self) -> bool {
+        !self.pending() && !self.closing && std::mem::take(&mut self.save_requested)
     }
     pub(in crate::editor::session) fn pending(&self) -> bool {
         self.pending.is_some()
@@ -74,6 +84,7 @@ impl PersistenceSession {
         if self.pending() {
             return Err("persistence is already pending".into());
         }
+        self.save_requested = false;
         let id = self
             .worker
             .write(self.path.clone(), state, policy)
@@ -164,6 +175,29 @@ mod tests {
             assert!(std::time::Instant::now() < deadline);
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
+    }
+    #[test]
+    fn state_save_requests_coalesce_without_consuming_a_pending_write() {
+        let root = tempfile::tempdir().unwrap();
+        let (worker, release) = PersistenceService::gated_for_test(1);
+        let mut owner = PersistenceSession::new(worker, root.path().join("state.json"));
+        owner
+            .save(PersistedState::default(), PersistencePolicy::default())
+            .unwrap();
+        owner.request_save();
+        owner.request_save();
+        assert!(!owner.take_save_request());
+        drop(release);
+        drain(&mut owner);
+        assert!(owner.take_save_request());
+        assert!(!owner.take_save_request());
+        owner.begin_shutdown(true);
+        owner.request_save();
+        assert!(!owner.take_save_request());
+        assert!(
+            owner.shutdown_result().is_err(),
+            "an earlier write is not the exit snapshot"
+        );
     }
     #[test]
     fn full_and_stopped_exit_admission_are_not_successful_snapshots() {

@@ -213,10 +213,11 @@ def terminal_projection(
     x = 0
     y = 0
     index = 0
+    csi = re.compile(r"\x1b\[([?0-9;:]*)([ -/]*)([@-~])")
     while index < len(source):
         if source[index] == "\x1b":
             if index + 1 < len(source) and source[index + 1] == "[":
-                match = re.match(r"\x1b\[([?0-9;:]*)([ -/]*)([@-~])", source[index:])
+                match = csi.match(source, index)
                 if match:
                     raw_parameters = match.group(1).lstrip("?")
                     parameters = raw_parameters.split(";") if raw_parameters else []
@@ -231,7 +232,7 @@ def terminal_projection(
                         y = (numbers[0] if numbers else 1) - 1
                     elif final == "J" and numbers and numbers[0] in (2, 3):
                         grid = [[" "] * width for _ in range(height)]
-                    index += match.end()
+                    index = match.end()
                     continue
             index += 2
             continue

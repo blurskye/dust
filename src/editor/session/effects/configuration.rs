@@ -2,6 +2,9 @@ use super::*;
 
 impl InteractiveApplication {
     pub(in crate::editor::session) fn process_theme_results(&mut self) {
+        if let Some(Err(error)) = self.configuration.poll_theme_restore() {
+            self.show_error(error);
+        }
         self.retire_stale_picker();
         if let Some(rows) = self
             .configuration
@@ -24,7 +27,7 @@ impl InteractiveApplication {
                         id: PickerItemId(format!("theme:{index}")),
                         label: name,
                         detail: origin,
-                        source: "theme".into(),
+                        source: String::new(),
                         action: PickerAction::None,
                     },
                     PickerPayload::Theme(key),
@@ -32,8 +35,8 @@ impl InteractiveApplication {
             })
             .collect();
         self.install_surface_picker_state(
-            PickerSurfaceKind::Generic,
-            "Select theme · session only".into(),
+            PickerSurfaceKind::Theme,
+            "Dust themes".into(),
             items,
             String::new(),
             !rows.loading,

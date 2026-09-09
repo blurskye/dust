@@ -23,6 +23,18 @@ impl InteractiveApplication {
                 )
             })
             .map_or(1, |geometry| geometry.height);
+        let picker_rect = self.ui.picker.as_ref().and_then(|picker| {
+            crate::ui::geometry::picker_window_geometry(
+                picker,
+                self.configuration.settings(),
+                WindowRect {
+                    x: 0,
+                    y: 0,
+                    width: self.window_session.width(),
+                    height: self.window_session.height(),
+                },
+            )
+        });
         NativeSurfaceSignature {
             editor_tab: editor.active_tab(&(&self.state).into()),
             editor_window: editor.focused_window(&(&self.state).into()),
@@ -41,29 +53,13 @@ impl InteractiveApplication {
             terminal_height: self.window_session.height(),
             dashboard_visible: self.window_session.dashboard_visible()
                 || self.state.active_view.is_none(),
-            picker_rect: self.ui.picker.as_ref().and_then(|_| {
-                picker_geometry(
-                    self.configuration.settings(),
-                    WindowRect {
-                        x: 0,
-                        y: 0,
-                        width: self.window_session.width(),
-                        height: self.window_session.height(),
-                    },
-                )
-            }),
-            picker_surface: self.ui.picker.as_ref().and_then(|picker| {
-                picker_geometry(
-                    self.configuration.settings(),
-                    WindowRect {
-                        x: 0,
-                        y: 0,
-                        width: self.window_session.width(),
-                        height: self.window_session.height(),
-                    },
-                )
-                .map(|_| picker.surface)
-            }),
+            picker_rect,
+            picker_surface: self
+                .ui
+                .picker
+                .as_ref()
+                .filter(|_| picker_rect.is_some())
+                .map(|picker| picker.surface),
             protected_prompt_height: self
                 .input
                 .prompt()

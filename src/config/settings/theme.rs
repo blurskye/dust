@@ -49,7 +49,7 @@ impl ThemeColor {
                     .map_err(|_| format!("invalid indexed color `{value}`"))?;
                 Self::Indexed(index)
             }
-            _ if value.starts_with('#') && value.len() == 7 => {
+            _ if value.starts_with('#') && value.len() == 7 && value.is_ascii() => {
                 let red = u8::from_str_radix(&value[1..3], 16)
                     .map_err(|_| format!("invalid RGB color `{value}`"))?;
                 let green = u8::from_str_radix(&value[3..5], 16)

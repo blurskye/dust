@@ -140,8 +140,9 @@ fn attach_test_compositor(
     let picker_window = ui
         .picker
         .as_ref()
-        .and_then(|_| {
-            super::picker_geometry(
+        .and_then(|picker| {
+            crate::ui::geometry::picker_window_geometry(
+                picker,
                 config,
                 crate::ui::window::WindowRect {
                     x: 0,
@@ -1884,6 +1885,61 @@ fn retained_plugin_surface_rows_are_strictly_clipped_to_the_projected_window() {
     assert_eq!(frame.grid.get(7, 1).expect("outside right").symbol, " ");
     assert_eq!(frame.grid.get(2, 2).expect("outside left").symbol, " ");
     assert_eq!(frame.grid.get(3, 3).expect("outside bottom").symbol, " ");
+}
+
+#[test]
+fn theme_geometry_is_compact_and_bounded_without_resizing_other_pickers() {
+    use crate::ui::{PickerRow, PickerSurfaceKind, PickerUiState, window::WindowRect};
+    let config = crate::config::load_bundled_config().config;
+    let mut picker = PickerUiState {
+        input_hint: String::new(),
+        surface: PickerSurfaceKind::Theme,
+        title: "Dust themes".into(),
+        query: String::new(),
+        rows: vec![],
+        selected: None,
+        scroll: 0,
+        loading: false,
+        preview: None,
+    };
+    for count in [0, 1, 7, 39] {
+        picker.rows = (0..count)
+            .map(|index| PickerRow {
+                id: index.to_string(),
+                label: "Theme".into(),
+                detail: String::new(),
+                source: String::new(),
+            })
+            .collect();
+        for (width, height) in [(220, 70), (100, 30), (40, 12), (20, 8), (4, 6), (3, 5)] {
+            let bounds = WindowRect {
+                x: 3,
+                y: 2,
+                width,
+                height,
+            };
+            picker.surface = PickerSurfaceKind::Theme;
+            if let Some(rect) =
+                crate::ui::geometry::picker_window_geometry(&picker, &config, bounds)
+            {
+                assert!(rect.width <= 64 && rect.height <= 12);
+                assert!(rect.x >= bounds.x && rect.y >= bounds.y);
+                assert!(rect.x + rect.width <= bounds.x + width);
+                assert!(rect.y + rect.height <= bounds.y + height);
+                let content =
+                    crate::ui::geometry::picker_content_geometry(&picker, &config, rect).unwrap();
+                assert_eq!(content.outer, rect);
+                assert_eq!(content.list.height, rect.height - 4);
+            } else {
+                assert!(width < 4 || height < 6);
+            }
+            picker.surface = PickerSurfaceKind::Generic;
+            assert_eq!(
+                crate::ui::geometry::picker_window_geometry(&picker, &config, bounds),
+                super::picker_geometry(&config, bounds)
+            );
+        }
+    }
 }
 
 #[test]

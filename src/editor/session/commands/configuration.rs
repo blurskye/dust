@@ -6,7 +6,7 @@ pub(super) fn register_commands(
     register(
         registry,
         "theme.select",
-        "Select theme (preview, then apply for this session)",
+        "Select theme (live preview; remember in editor state)",
         ContextRequirement::Application,
         ArgumentSchema::default(),
         |_| AppEffect::SelectTheme,

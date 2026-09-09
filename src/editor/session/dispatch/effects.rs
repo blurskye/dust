@@ -1016,6 +1016,8 @@ impl InteractiveApplication {
             !self.documents.has_startup_work() && self.state.buffers.is_empty(),
         ) {
             self.ui.config_diagnostic = Some(error);
+        } else {
+            self.configuration.begin_theme_restore();
         }
     }
 
@@ -1084,6 +1086,17 @@ impl InteractiveApplication {
         if !configured.enabled || !configured.save_on_exit || self.persistence.pending() {
             return;
         }
+        let mut metadata = self.tooling.metadata();
+        match self.configuration.theme_state() {
+            Ok(Some(theme)) => {
+                metadata.insert("ui.theme.snapshot".into(), theme);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.ui.config_diagnostic = Some(error);
+                return;
+            }
+        }
         let state = PersistedState {
             version: STATE_VERSION,
             session: self.capture_session(),
@@ -1115,7 +1128,7 @@ impl InteractiveApplication {
                 .take(configured.maximum_entries)
                 .collect(),
             watches: self.debugger_session.persisted_watches(),
-            metadata: self.tooling.metadata(),
+            metadata,
         };
         if let Err(error) = self.persistence.save(state, self.persistence_policy()) {
             self.ui.config_diagnostic = Some(error);
@@ -1128,6 +1141,12 @@ impl InteractiveApplication {
                 Ok(mut state) => {
                     let session = state.session.clone();
                     self.tooling.restore(&state.metadata);
+                    if let Err(error) = self
+                        .configuration
+                        .restore_theme(state.metadata.get("ui.theme.snapshot").map(String::as_str))
+                    {
+                        self.ui.config_diagnostic = Some(error);
+                    }
                     if let Some(session) = &session
                         && let Err(diagnostic) =
                             self.apply_persisted_window_rules(&session.window_rules)
@@ -1160,6 +1179,9 @@ impl InteractiveApplication {
                 }
                 Err(error) => self.ui.config_diagnostic = Some(error),
             }
+        }
+        if self.persistence.take_save_request() {
+            self.save_persistence();
         }
     }
 

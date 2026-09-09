@@ -42,6 +42,7 @@ impl Config {
             "builtin.output",
             "builtin.logs",
             "builtin.debug",
+            "builtin.theme",
         ];
         if self.windows.rules.len() > 32 {
             return Err("windows.rule exceeds the 32-rule ceiling");

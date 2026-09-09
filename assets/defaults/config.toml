@@ -434,6 +434,7 @@ rule = [
   { content_type = "builtin.output", placement = { kind = "automatic" } },
   { content_type = "builtin.logs", placement = { kind = "automatic" } },
   { content_type = "builtin.debug", placement = { kind = "automatic" } },
+  { content_type = "builtin.theme", placement = { kind = "automatic" } },
 ]
 
 [workspace]
@@ -1176,7 +1177,7 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "picker.previous" = "Select previous picker item"
 "picker.accept" = "Accept picker item"
 "picker.cancel" = "Close picker"
-"theme.select" = "Select theme (preview, then apply for this session)"
+"theme.select" = "Select theme (live preview; remember in editor state)"
 "picker.mode.normal" = "Navigate picker results"
 "picker.mode.insert" = "Edit picker query"
 "picker.plugin.open" = "Open plugin picker source"
