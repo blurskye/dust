@@ -655,6 +655,30 @@ fn legitimate_client(editor: &mut crate::editor::EditorState) { editor.workspace
             "E0616",
         ),
         (
+            "lsp_projection_state",
+            "fn bypass(owner:&mut super::lsp::LspSession) {let _=&mut owner.projection;}",
+            "projection",
+            "E0616",
+        ),
+        (
+            "extension_contributions",
+            "fn bypass(owner:&mut super::extensions::ExtensionSession) {let _=&mut owner.plugin_contributions;}",
+            "plugin_contributions",
+            "E0616",
+        ),
+        (
+            "extension_package_commits",
+            "fn bypass(owner:&mut super::extensions::ExtensionSession) {owner.package_commits.clear();}",
+            "package_commits",
+            "E0616",
+        ),
+        (
+            "extension_registry",
+            "fn bypass(owner:&mut super::extensions::ExtensionSession) {let _=&mut owner.registry;}",
+            "registry",
+            "E0616",
+        ),
+        (
             "lsp_transport",
             "fn bypass(owner:&mut super::lsp::LspSession) {let _=&mut owner.service;}",
             "service",

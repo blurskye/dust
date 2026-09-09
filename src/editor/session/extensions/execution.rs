@@ -7,7 +7,8 @@ impl InteractiveApplication {
         request: crate::extensions::PluginUiRequest,
     ) -> crate::extensions::PluginUiEvent {
         let Some(index) = self
-            .plugin_contributions
+            .extension
+            .contributions()
             .get(&index.owner)
             .filter(|current| {
                 current.generation == index.generation && current.checksum == index.checksum
@@ -44,7 +45,7 @@ impl InteractiveApplication {
         {
             return event;
         }
-        let catalog = self.plugin_contributions.version();
+        let catalog = self.extension.contributions().version();
         let mut draft = match self.window_session.begin_plugin(
             &index.owner,
             index.generation,
@@ -66,7 +67,7 @@ impl InteractiveApplication {
             match self.window_session.commit_plugin(
                 draft,
                 &self.state.window_version(),
-                &self.plugin_contributions.version(),
+                &self.extension.contributions().version(),
             ) {
                 Ok(()) => self.plugin_windows = host,
                 Err(error) => {
@@ -107,7 +108,8 @@ impl InteractiveApplication {
             self.extension
                 .acknowledge(&plugin, load, &execution.host_event_acknowledgements);
             if let Some(policy) = self
-                .plugin_contributions
+                .extension
+                .contributions()
                 .get(&plugin)
                 .filter(|index| index.generation == load.0)
                 .and_then(|index| index.storage.clone())
@@ -139,7 +141,7 @@ impl InteractiveApplication {
                                     .prepare_editor_transition(
                                         state,
                                         &current,
-                                        self.plugin_contributions.version(),
+                                        self.extension.contributions().version(),
                                         &self.configuration.settings().ui.buffer_line.scratch_label,
                                         None,
                                     )
@@ -147,7 +149,7 @@ impl InteractiveApplication {
                                         self.window_session.accept_editor_transition(
                                             transition,
                                             &current,
-                                            &self.plugin_contributions.version(),
+                                            &self.extension.contributions().version(),
                                         )
                                     });
                                 let state = match accepted {
@@ -208,7 +210,8 @@ impl InteractiveApplication {
         if !execution.ui_requests.is_empty()
             && self.extension.is_active_generation(&plugin, load)
             && let Some(index) = self
-                .plugin_contributions
+                .extension
+                .contributions()
                 .get(&plugin)
                 .filter(|index| index.generation == load.0)
                 .cloned()

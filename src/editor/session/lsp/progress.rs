@@ -17,158 +17,51 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn append_lsp_log(&mut self, line: String) {
-        let maximum = self.configuration.settings().lsp.maximum_log_lines.max(1);
-        while self.lsp_logs.len() >= maximum {
-            self.lsp_logs.pop_front();
-        }
-        self.lsp_logs.push_back(line);
+        self.language
+            .append_log(line, self.configuration.settings().lsp.maximum_log_lines);
         if self.search.picker_surface() == PickerSurfaceKind::Logs && self.ui.picker.is_some() {
             self.show_lsp_logs();
         }
     }
 
     pub(in crate::editor::session) fn lsp_server_label(&self, server_key: &str) -> String {
-        self.language
-            .sessions()
-            .get(server_key)
-            .map(|session| session.server_id.clone())
-            .or_else(|| {
-                server_key
-                    .strip_prefix("root:")
-                    .and_then(|key| key.rsplit_once(':'))
-                    .map(|(_, server)| server.to_owned())
-            })
-            .unwrap_or_else(|| server_key.to_owned())
+        self.language.server_label(server_key)
     }
 
     pub(in crate::editor::session) fn update_lsp_progress(
         &mut self,
-        server_key: String,
+        server: String,
         token: String,
         kind: LspProgressKind,
         title: String,
         message: String,
         percentage: Option<u8>,
     ) {
-        if !self.configuration.settings().ui.lsp_progress.enabled {
-            self.ui.lsp_progress.clear();
-            self.ui.lsp_progress_frame = 0;
-            return;
-        }
-        let server = self.lsp_server_label(&server_key);
-        let had_active = self.ui.lsp_progress.iter().any(|item| !item.done);
-        if let Some(item) = self
-            .ui
-            .lsp_progress
-            .iter_mut()
-            .find(|item| item.server_key == server_key && item.token == token)
-        {
-            if kind == LspProgressKind::End {
-                if !title.is_empty() {
-                    item.title = title;
-                }
-                if !message.is_empty() {
-                    item.message = message;
-                }
-                item.percentage = None;
-                item.done = true;
-                item.completed_at = Some(Instant::now());
-                return;
-            }
-            if item.done && kind != LspProgressKind::Begin {
-                return;
-            }
-            item.server = server;
-            if kind == LspProgressKind::Begin || !title.is_empty() {
-                item.title = title;
-            }
-            if kind == LspProgressKind::Begin || !message.is_empty() {
-                item.message = message;
-            }
-            if kind == LspProgressKind::Begin || percentage.is_some() {
-                item.percentage = percentage;
-            }
-            if kind == LspProgressKind::Begin {
-                item.done = false;
-                item.completed_at = None;
-                if !had_active {
-                    self.lsp_progress_epoch = Instant::now();
-                    self.ui.lsp_progress_frame = 0;
-                }
-            }
-            return;
-        }
-        if kind == LspProgressKind::End {
-            return;
-        }
-
-        let was_empty = self.ui.lsp_progress.is_empty();
-        let maximum = usize::from(self.configuration.settings().ui.lsp_progress.max_rows);
-        if self.ui.lsp_progress.len() == maximum {
-            self.ui.lsp_progress.remove(0);
-        }
-        self.ui.lsp_progress.push(UiLspProgress {
-            server_key,
-            token,
-            server,
-            title,
-            message,
-            percentage,
-            done: false,
-            completed_at: None,
-        });
-        if was_empty {
-            self.lsp_progress_epoch = Instant::now();
-            self.ui.lsp_progress_frame = 0;
-        }
+        self.language.update_progress(
+            (server, token, kind, title, message, percentage),
+            &self.configuration.settings().ui.lsp_progress,
+            Instant::now(),
+        );
+        self.project_lsp_progress();
     }
-
-    pub(in crate::editor::session) fn clear_lsp_progress(&mut self, server_key: &str) {
-        self.ui
-            .lsp_progress
-            .retain(|item| item.server_key != server_key);
-        if self.ui.lsp_progress.is_empty() {
-            self.ui.lsp_progress_frame = 0;
-        }
+    pub(in crate::editor::session) fn clear_lsp_progress(&mut self, server: &str) {
+        self.language.clear_progress(server);
+        self.project_lsp_progress();
     }
-
+    fn project_lsp_progress(&mut self) {
+        let (rows, frame) = self.language.progress();
+        if self.ui.lsp_progress != rows {
+            self.ui.lsp_progress = rows.to_vec();
+        }
+        self.ui.lsp_progress_frame = frame;
+    }
     pub(in crate::editor::session) fn update_lsp_progress_animation(&mut self) {
-        if self.ui.lsp_progress.is_empty() {
-            return;
-        }
-        if !self.configuration.settings().ui.lsp_progress.enabled {
-            self.ui.lsp_progress.clear();
-            self.ui.lsp_progress_frame = 0;
-            return;
-        }
-        let now = Instant::now();
-        let policy = &self.configuration.settings().ui.lsp_progress;
-        let maximum = usize::from(policy.max_rows);
-        if self.ui.lsp_progress.len() > maximum {
-            let excess = self.ui.lsp_progress.len().saturating_sub(maximum);
-            self.ui.lsp_progress.drain(..excess);
-        }
-        let completed_timeout = Duration::from_millis(policy.completed_timeout_ms);
-        self.ui.lsp_progress.retain(|item| {
-            item.completed_at.is_none_or(|completed| {
-                now.saturating_duration_since(completed) < completed_timeout
-            })
-        });
-        if self.ui.lsp_progress.is_empty() {
-            self.ui.lsp_progress_frame = 0;
-            return;
-        }
-        if !self.ui.lsp_progress.iter().any(|item| !item.done) {
-            return;
-        }
-        let elapsed = now.saturating_duration_since(self.lsp_progress_epoch);
-        let phase = elapsed.as_millis() / u128::from(policy.spinner_interval_ms);
-        let frame = usize::try_from(phase % policy.spinner_frames.len() as u128).unwrap_or(0);
-        if self.ui.lsp_progress_frame != frame {
-            self.ui.lsp_progress_frame = frame;
-        }
+        self.language.animate_progress(
+            &self.configuration.settings().ui.lsp_progress,
+            Instant::now(),
+        );
+        self.project_lsp_progress();
     }
-
     pub(in crate::editor::session) fn handle_lsp_request_failure(
         &mut self,
         server: String,
@@ -177,12 +70,7 @@ impl InteractiveApplication {
         message: String,
     ) {
         if method == "textDocument/inlayHint" {
-            let owns_current_request = self
-                .lsp_inlay_request_owner
-                .as_ref()
-                .is_some_and(|(owned_generation, _)| *owned_generation == generation);
-            if owns_current_request {
-                self.lsp_inlay_request_owner = None;
+            if self.language.fail_inlay(&server, generation) {
                 self.schedule_lsp_inlay_warmup_retry();
                 let server = self.lsp_server_label(&server);
                 self.append_lsp_log(format!("{server}: inlay hint refresh failed: {message}"));
@@ -288,43 +176,12 @@ impl InteractiveApplication {
                         continue;
                     }
                     self.refresh_lsp_projection_owner();
-                    if method == "textDocument/inlayHint" {
-                        if !self.lsp_inlay_request_owner.as_ref().is_some_and(
-                            |(owned_generation, owner)| {
-                                *owned_generation == generation
-                                    && Some(owner) == self.lsp_projection_owner.as_ref()
-                                    && owner.server == server
-                                    && owner.uri == uri
-                                    && owner.revision.0 == version
-                            },
-                        ) {
-                            continue;
-                        }
-                        self.lsp_inlay_request_owner = None;
-                        self.present_lsp_result_owned(
-                            &server,
-                            generation,
-                            &method,
-                            &uri,
-                            result,
-                            Some(context),
-                        );
-                        continue;
-                    }
-                    if generation != self.lsp_request_generation
-                        || !self.lsp_request_owner.as_ref().is_some_and(
-                            |(owned_generation, owner)| {
-                                *owned_generation == generation
-                                    && Some(owner) == self.lsp_projection_owner.as_ref()
-                                    && owner.server == server
-                                    && owner.uri == uri
-                                    && owner.revision.0 == version
-                            },
-                        )
+                    if !self
+                        .language
+                        .accept_result(&server, generation, &method, &uri, version)
                     {
                         continue;
                     }
-                    self.lsp_request_owner = None;
                     self.present_lsp_result_owned(
                         &server,
                         generation,

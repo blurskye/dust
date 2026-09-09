@@ -147,6 +147,43 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
             .contains_key(&app.state.active_buffer_id().unwrap())
     );
     assert!(app.language.capabilities().is_none()); // `false` is not an initialized language server.
+    // Synthetic Running publication over the actual admitted transport: idle
+    // document sync must not start a fresh completion request every frame.
+    app.language.running(
+        &expected_key,
+        crate::language::lsp::LspCapabilities::default(),
+    );
+    app.refresh_lsp_projection_owner();
+    let generation = app.language.generation();
+    app.present_lsp_result(
+        &expected_key,
+        generation,
+        "textDocument/completion",
+        "",
+        crate::language::lsp::LspFeatureResult::Completion(vec![
+            crate::language::lsp::LspCompletionItem {
+                label: "main".into(),
+                detail: String::new(),
+                insert_text: "main".into(),
+                text_edit: None,
+                additional_edits: Vec::new(),
+                kind: None,
+                snippet: false,
+                documentation: None,
+                resolve_item: None,
+                resolved: false,
+            },
+        ]),
+    );
+    for _ in 0..3 {
+        app.sync_lsp_document();
+    }
+    assert_eq!(
+        app.language.generation(),
+        generation,
+        "idle frames restarted completion"
+    );
+    assert!(app.ui.language_completion.is_some());
     let (buffer, document) = app.active_lsp_document().unwrap();
     let source = app.state.buffers[buffer].text.source_version();
     assert!(matches!(
@@ -515,7 +552,8 @@ fn lsp_progress_hides_transport_keys_preserves_begin_titles_and_animates() {
         fixture.settings.ui.lsp_progress.spinner_interval_ms = 1_000;
         app.configuration.install_fixture(fixture);
     }
-    app.lsp_progress_epoch = Instant::now() - Duration::from_millis(1_500);
+    app.language
+        .fixture_progress_epoch(Instant::now() - Duration::from_millis(1_500));
     app.update_lsp_progress_animation();
     assert_eq!(app.ui.lsp_progress_frame, 1);
 
@@ -544,8 +582,9 @@ fn lsp_progress_hides_transport_keys_preserves_begin_titles_and_animates() {
     let completed = app.ui.lsp_progress.first_mut().expect("completed progress");
     assert!(completed.done);
     assert_eq!(completed.message, "Finished");
-    completed.completed_at =
-        Some(Instant::now() - Duration::from_millis(timeout.saturating_add(1)));
+    app.language.fixture_progress_completed(
+        Instant::now() - Duration::from_millis(timeout.saturating_add(1)),
+    );
     app.update_lsp_progress_animation();
     assert!(app.ui.lsp_progress.is_empty());
     assert!(app.ui.notification.is_none());
@@ -566,18 +605,19 @@ fn lsp_completion_applies_through_one_validated_transaction() {
             position_encoding: crate::editor::text::PositionEncoding::Utf16,
             ..Default::default()
         });
-    app.lsp_completion_items = vec![crate::language::lsp::LspCompletionItem {
-        label: "main".into(),
-        detail: "function".into(),
-        insert_text: "in".into(),
-        text_edit: None,
-        additional_edits: Vec::new(),
-        kind: None,
-        snippet: false,
-        documentation: None,
-        resolve_item: None,
-        resolved: false,
-    }];
+    app.language
+        .fixture_completion_items(vec![crate::language::lsp::LspCompletionItem {
+            label: "main".into(),
+            detail: "function".into(),
+            insert_text: "in".into(),
+            text_edit: None,
+            additional_edits: Vec::new(),
+            kind: None,
+            snippet: false,
+            documentation: None,
+            resolve_item: None,
+            resolved: false,
+        }]);
     app.ui.language_completion = Some(crate::ui::LanguageCompletionState {
         items: vec![crate::ui::CompletionItem {
             label: "main".into(),
@@ -611,6 +651,22 @@ fn lsp_completion_selection_scrolls_and_wraps_inside_the_visible_window() {
         selected: 0,
         scroll: 0,
     });
+    app.language.fixture_completion_items(
+        (0..5)
+            .map(|index| crate::language::lsp::LspCompletionItem {
+                label: format!("item-{index}"),
+                detail: String::new(),
+                insert_text: String::new(),
+                text_edit: None,
+                additional_edits: Vec::new(),
+                kind: None,
+                snippet: false,
+                documentation: None,
+                resolve_item: None,
+                resolved: false,
+            })
+            .collect(),
+    );
     for _ in 0..4 {
         app.move_lsp_completion(1);
     }

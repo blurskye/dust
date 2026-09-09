@@ -46,89 +46,33 @@ impl InteractiveApplication {
         }
     }
 
-    pub(in crate::editor::session) fn begin_package_activation_rollback(&mut self) {
-        if self.package_startup_rollback.is_some() || self.package_startup_rollback_attempted {
-            return;
-        }
-        let managed = std::mem::take(&mut self.package_managed_plugins);
-        let mut failed = HashMap::new();
-        for (id, load) in managed {
-            match self.extension.unload_generation(&id, load) {
-                Ok(()) => self.remove_plugin_contribution_generation(&id, load),
-                Err(error) => {
-                    failed.insert(id, load);
-                    self.show_error(error);
-                }
-            }
-        }
-        if !failed.is_empty() {
-            self.package_managed_plugins = failed;
-            return;
-        }
-        self.package_startup_pending.clear();
-        match self.packages.request(PackageOperation::Rollback) {
-            Ok(id) => {
-                self.package_startup_rollback_attempted = true;
-                self.package_startup_rollback = Some(id)
-            }
-            Err(error) => self.show_error(error),
-        }
-    }
-
     pub(in crate::editor::session) fn handle_plugin_worker_stopped(
         &mut self,
         error: crate::extensions::PluginError,
     ) {
-        if self.plugin_worker_reported {
+        let Some(unregister) = self.extension.worker_stopped() else {
             return;
-        }
-        self.plugin_worker_reported = true;
-        self.pending_index_activation.clear();
-        self.rejected_plugin_loads.clear();
-        for plugin in self
-            .extension
-            .statuses()
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>()
-        {
+        };
+        for plugin in unregister {
             self.commands.unregister_plugin(&plugin);
         }
         let owned_generations = self
-            .plugin_contributions
+            .extension
+            .contributions()
             .ordered()
             .map(|index| (index.owner.clone(), PluginLoadId(index.generation)))
             .collect::<Vec<_>>();
         for (plugin, load) in owned_generations {
             self.remove_plugin_contribution_generation(&plugin, load);
         }
-        self.plugin_contributions = PluginContributionCatalog::default();
-        self.extension.clear_events();
+        self.extension.clear_contributions();
         if let Ok(candidate) = self.configuration.prepare_base_bindings(
             &self.commands,
-            &self.plugin_contributions,
+            self.extension.contributions(),
             true,
         ) && let Err(error) = self.commit_contribution_candidate(candidate)
         {
             self.show_error(error);
-        }
-        for (plugin, (_, token)) in self.package_prepared.drain() {
-            self.commands.unregister_plugin(&plugin);
-            let _ = self.packages.request(PackageOperation::Abort { token });
-        }
-        for plugin in self
-            .package_startup_pending
-            .keys()
-            .chain(self.package_managed_plugins.keys())
-            .cloned()
-            .collect::<Vec<_>>()
-        {
-            self.commands.unregister_plugin(&plugin);
-        }
-        self.package_startup_pending.clear();
-        self.package_managed_plugins.clear();
-        for (plugin, _) in self.package_commits.values() {
-            self.commands.unregister_plugin(plugin);
         }
         self.notices.record(
             LogLevel::Error,
@@ -214,7 +158,7 @@ impl InteractiveApplication {
     ) -> Result<(), String> {
         let candidate = self
             .configuration
-            .prepare_plugin_contributions(&self.commands, &self.plugin_contributions)?;
+            .prepare_plugin_contributions(&self.commands, self.extension.contributions())?;
         self.commit_contribution_candidate(candidate)
     }
 
@@ -225,7 +169,7 @@ impl InteractiveApplication {
         // Both owners are checked before publication. There is no callback, wait,
         // or configuration mutation between this check and the two accepts.
         self.configuration
-            .check_contributions(&candidate, &self.plugin_contributions)?;
+            .check_contributions(&candidate, self.extension.contributions())?;
         let mut plugin_windows = self.plugin_windows.clone();
         plugin_windows.set_configured_rules(candidate.windows())?;
         let native_windows = crate::config::WindowsConfig {
@@ -241,7 +185,7 @@ impl InteractiveApplication {
         self.window_session
             .accept_current(windows, &self.state.window_version())?;
         self.configuration
-            .commit_contributions(candidate, &self.plugin_contributions)?;
+            .commit_contributions(candidate, self.extension.contributions())?;
         self.plugin_windows = plugin_windows;
         self.cancel_pending_mapping();
         self.reconcile_editor_windows();
@@ -289,12 +233,16 @@ impl InteractiveApplication {
             self.close_picker();
         }
 
-        if self.plugin_contributions.remove_generation(plugin, load.0) {
+        if self.extension.remove_contribution(plugin, load) {
             self.commands.unregister_plugin(plugin);
             if let Err(error) = self.recompile_plugin_contributions() {
                 match self
                     .configuration
-                    .prepare_builtin_contributions(&self.commands, &self.plugin_contributions, true)
+                    .prepare_builtin_contributions(
+                        &self.commands,
+                        self.extension.contributions(),
+                        true,
+                    )
                     .and_then(|candidate| self.commit_contribution_candidate(candidate))
                 {
                     Ok(()) => self.show_error(error),
@@ -308,30 +256,20 @@ impl InteractiveApplication {
         &mut self,
         diagnostic: impl std::fmt::Display,
     ) {
-        let pending = std::mem::take(&mut self.pending_index_activation);
-        for (owner, (load, _)) in pending {
-            self.rejected_plugin_loads.insert((owner.clone(), load));
+        for (owner, load) in self.extension.abort_indexes() {
             self.remove_plugin_contribution_generation(&owner, load);
             self.commands.unregister_plugin(&owner);
-            let _ = self.extension.disable_generation(&owner, load);
-            if let Some((_, token)) = self
-                .package_prepared
-                .remove(&owner)
-                .filter(|(candidate, _)| *candidate == load)
-            {
-                let _ = self.packages.request(PackageOperation::Abort { token });
-            }
         }
         let candidate = self
             .configuration
             .prepare_builtin_contributions(
                 &self.commands,
-                &self.plugin_contributions,
+                self.extension.contributions(),
                 self.configuration.deferred_plugin_keymaps(),
             )
             .unwrap_or_else(|_| {
                 self.configuration
-                    .prepare_builtin_rules(&self.plugin_contributions)
+                    .prepare_builtin_rules(self.extension.contributions())
             });
         if let Err(error) = self.commit_contribution_candidate(candidate) {
             self.show_error(error);
@@ -351,19 +289,8 @@ impl InteractiveApplication {
             .iter()
             .cloned()
             .collect::<Vec<_>>();
-        for owner in expected {
-            let load = if owner == failed_plugin {
-                Some(failed_load)
-            } else {
-                self.extension.load_id(&owner)
-            };
-            if let Some(load) = load {
-                self.rejected_plugin_loads.insert((owner.clone(), load));
-                self.pending_index_activation
-                    .entry(owner)
-                    .or_insert_with(|| (load, String::new()));
-            }
-        }
+        self.extension
+            .reject_expected(expected.into_iter(), (&failed_plugin, failed_load));
         self.abort_pending_index_batch(diagnostic);
     }
 }

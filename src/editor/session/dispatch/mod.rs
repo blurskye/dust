@@ -2,9 +2,9 @@ use super::configuration::{self, ConfigurationSession};
 use super::documents::{DocumentEvent, DocumentSession, LargeFileOverride, mode_name_large};
 use super::explorer::explorer_watch_policy;
 use super::input::InputSession;
+use super::lsp::{LspAutostartObservation, LspLaunch};
 #[cfg(test)]
-use super::lsp::LspRuntimeState;
-use super::lsp::{LspAutostartObservation, LspLaunch, LspProjectionOwner};
+use super::lsp::{LspProjectionOwner, LspRuntimeState};
 use super::search::{PickerContent, PickerEpoch, PickerOrigin};
 use super::terminal::{TerminalInput, TerminalUpdate};
 use super::tooling::{
@@ -74,7 +74,7 @@ pub use commands::{
 };
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
@@ -94,8 +94,8 @@ use crate::editor::{
     RegisterValue, TransactionId, UndoPolicy, ViewId, register_builtin_commands,
 };
 use crate::extensions::{
-    PluginContributionCatalog, PluginEvent, PluginLimits, PluginLoadId, PluginProviderBroker,
-    PluginProviderSessionStatus, PluginStatus, PluginVirtualDocumentBroker,
+    PluginEvent, PluginLimits, PluginLoadId, PluginProviderBroker, PluginProviderSessionStatus,
+    PluginStatus, PluginVirtualDocumentBroker,
 };
 use crate::files::{
     ExplorerMutation, ExplorerWatchService, ProjectRootResolution, RequestId, ResourceIntentKind,
@@ -103,9 +103,8 @@ use crate::files::{
     WorkspaceSearchPolicy,
 };
 use crate::language::lsp::{
-    LspCompletionItem, LspDocument, LspEvent, LspFeature, LspFeatureResult, LspMarkupContent,
-    LspMarkupKind, LspProgressKind, LspWorkspaceEdit, file_uri, language_id_for_path,
-    path_from_file_uri,
+    LspDocument, LspEvent, LspFeature, LspFeatureResult, LspMarkupContent, LspMarkupKind,
+    LspProgressKind, LspWorkspaceEdit, file_uri, language_id_for_path, path_from_file_uri,
 };
 use crate::language::syntax::{
     SyntaxLanguage, SyntaxSupport, builtin_languages, language_for_path,
@@ -118,23 +117,22 @@ use crate::persistence::{
 use crate::process::{ExecutionPreflightRequest, PreflightId, PtyId};
 use crate::telemetry::{LiveCrashSnapshot, LogLevel};
 use crate::tools::{
-    NIX_LSP_NIXPKGS_REVISION, NixWorkspaceService, PackageOperation, PackageService,
-    PackageServiceEvent, RegistryPackageMetadata, RegistryPackageSummary, RegistryRequest,
-    RegistryResult, RegistryService, ToolDefinition, ToolKind, ToolOperation, ToolStatus,
-    discover_executable, is_nixos_host, managed_tool_executable, managed_tool_installed_version,
-    nix_lsp_launch_environment, nix_lsp_profile_installed, nix_lsp_workspace_root,
+    NIX_LSP_NIXPKGS_REVISION, NixWorkspaceService, PackageOperation, RegistryPackageMetadata,
+    RegistryPackageSummary, RegistryRequest, RegistryResult, RegistryService, ToolDefinition,
+    ToolKind, ToolOperation, ToolStatus, discover_executable, is_nixos_host,
+    managed_tool_executable, managed_tool_installed_version, nix_lsp_launch_environment,
+    nix_lsp_profile_installed, nix_lsp_workspace_root,
 };
 use crate::ui::{
     CompletionItem, DocumentationMarkupKind, DocumentationPopupKind,
     EditorWindowBinding as UiEditorWindowBinding, EditorWindowLayoutState, KeyInputKind,
     LanguageCompletionState, NativeSurfaceWindowBinding, PickerSurfaceKind, PromptKind,
     TerminalError, TerminalOptions, TerminalPanelMode, TerminalSession, ToolMenuRow, ToolMenuState,
-    ToolRuntimeOption, ToolRuntimePickerState, UiEvent, UiFold, UiInlayHint, UiLspProgress,
-    UiState, UiSyntaxSpan, VisualRowAnchor, VisualRowModel, active_pane_viewport,
-    editor_state_content_width, editor_state_gutter_width, editor_workspace_insets,
-    explorer_panel_width, pane_viewports, picker_geometry, prompt_geometry, render,
-    snap_display_column, snap_display_column_forward, terminal_panel_geometry,
-    terminal_tab_at_column,
+    ToolRuntimeOption, ToolRuntimePickerState, UiEvent, UiFold, UiInlayHint, UiState, UiSyntaxSpan,
+    VisualRowAnchor, VisualRowModel, active_pane_viewport, editor_state_content_width,
+    editor_state_gutter_width, editor_workspace_insets, explorer_panel_width, pane_viewports,
+    picker_geometry, prompt_geometry, render, snap_display_column, snap_display_column_forward,
+    terminal_panel_geometry, terminal_tab_at_column,
 };
 use crate::workspace::{
     DiagnosticOwner, ExecutionSource, ExplorerKind, FileSnapshot, PickerAction, PickerItem,
@@ -153,11 +151,6 @@ use crate::editor::{ApplicationError, StartupTarget, build_state};
 use crate::ui::window::{
     CompositorProjection, DockEdge, SpatialDirection, WindowPlacement, WindowRect,
 };
-
-const LSP_INLAY_HINT_DEBOUNCE: Duration = Duration::from_millis(120);
-const LSP_INLAY_HINT_EMPTY_RETRY_BASE: Duration = Duration::from_millis(500);
-const LSP_INLAY_HINT_WARMUP_RETRY_LIMIT: u8 = 5;
-const LSP_INLAY_HINT_MAX_STARTUP_DELAY: Duration = Duration::from_secs(8);
 
 struct InteractiveApplication {
     notices: super::notifications::NoticeSession,
@@ -189,20 +182,6 @@ struct InteractiveApplication {
     pending_lsp_project_root: Option<(u64, PendingLspProjectRoot)>,
     nix_lsp_workspace: NixWorkspaceService,
     pending_nix_lsp_workspace: Option<(u64, PendingNixLspWorkspace)>,
-    lsp_request_generation: u64,
-    lsp_inlay_request_generation: u64,
-    lsp_inlay_request_owner: Option<(u64, LspProjectionOwner)>,
-    lsp_inlay_refresh_due: Option<Instant>,
-    lsp_inlay_empty_retries: u8,
-    lsp_logs: VecDeque<String>,
-    lsp_progress_epoch: Instant,
-    lsp_completion_items: Vec<LspCompletionItem>,
-    lsp_selection_ranges: Vec<ByteRange>,
-    lsp_semantic_raw: HashMap<(String, String), (Option<String>, Vec<u32>)>,
-    lsp_pull_ids: HashMap<(String, String), String>,
-    lsp_projection_owner: Option<LspProjectionOwner>,
-    lsp_request_owner: Option<(u64, LspProjectionOwner)>,
-    lsp_completion_owner: Option<(u64, LspProjectionOwner)>,
 
     debugger_session: DebugSession,
     recovery: super::recovery::RecoverySession,
@@ -218,21 +197,6 @@ struct InteractiveApplication {
     jump_list: Vec<PersistedLocation>,
     change_list: Vec<PersistedLocation>,
     tasks: crate::editor::session::tasks::TaskSession,
-    plugin_contributions: PluginContributionCatalog,
-    pending_index_activation: BTreeMap<String, (PluginLoadId, String)>,
-    rejected_plugin_loads: BTreeSet<(String, PluginLoadId)>,
-    packages: PackageService,
-    registry: RegistryService,
-    registry_intents: HashMap<u64, bool>,
-    pending_registry_artifact: Option<(RegistryPackageMetadata, Vec<u8>)>,
-    package_prepared: HashMap<String, (PluginLoadId, u64)>,
-    package_commits: HashMap<u64, (String, PluginLoadId)>,
-    package_startup_pending: HashMap<String, PluginLoadId>,
-    package_managed_plugins: HashMap<String, PluginLoadId>,
-    package_startup_request: Option<u64>,
-    package_startup_rollback: Option<u64>,
-    package_startup_rollback_attempted: bool,
-    plugin_worker_reported: bool,
     terminal_session: super::terminal::TerminalSession,
     pending_execution_preflight: HashMap<PreflightId, PendingExecutionPreflight>,
 }
@@ -267,10 +231,7 @@ pub fn run_interactive(
     application.rebuild_matcher_cache();
     if !application.workspace.safe_mode() {
         application.load_configured_plugins();
-        application.package_startup_request = application
-            .packages
-            .request(PackageOperation::Activations)
-            .ok();
+        application.extension.start_packages();
     }
     application.notices.record(
         LogLevel::Info,
@@ -546,6 +507,8 @@ impl InteractiveApplication {
             extension: super::extensions::ExtensionSession::new(
                 plugin_storage_root,
                 plugin_queue_capacity,
+                state_directory.join("packages"),
+                registry,
             ),
             plugin_providers: PluginProviderBroker::default(),
             plugin_virtual_documents: PluginVirtualDocumentBroker::default(),
@@ -574,20 +537,6 @@ impl InteractiveApplication {
             pending_lsp_project_root: None,
             nix_lsp_workspace: NixWorkspaceService::default(),
             pending_nix_lsp_workspace: None,
-            lsp_request_generation: 0,
-            lsp_inlay_request_generation: 0,
-            lsp_inlay_request_owner: None,
-            lsp_inlay_refresh_due: None,
-            lsp_inlay_empty_retries: 0,
-            lsp_logs: VecDeque::new(),
-            lsp_progress_epoch: Instant::now(),
-            lsp_completion_items: Vec::new(),
-            lsp_selection_ranges: Vec::new(),
-            lsp_semantic_raw: HashMap::new(),
-            lsp_pull_ids: HashMap::new(),
-            lsp_projection_owner: None,
-            lsp_request_owner: None,
-            lsp_completion_owner: None,
             debugger_session,
             recovery: super::recovery::RecoverySession::new(state_directory.join("recovery")),
             next_transaction: 1_000_000,
@@ -607,26 +556,6 @@ impl InteractiveApplication {
             tasks,
             notices,
             clock,
-            plugin_contributions: PluginContributionCatalog::default(),
-            pending_index_activation: BTreeMap::new(),
-            rejected_plugin_loads: BTreeSet::new(),
-            registry,
-            registry_intents: HashMap::new(),
-            pending_registry_artifact: None,
-            package_prepared: HashMap::new(),
-            package_commits: HashMap::new(),
-            package_startup_pending: HashMap::new(),
-            package_managed_plugins: HashMap::new(),
-            package_startup_request: None,
-            package_startup_rollback: None,
-            package_startup_rollback_attempted: false,
-            plugin_worker_reported: false,
-            packages: PackageService::start(
-                state_directory.join("packages"),
-                8,
-                16 * 1024 * 1024,
-                64 * 1024 * 1024,
-            ),
             terminal_session,
             pending_execution_preflight: HashMap::new(),
         };

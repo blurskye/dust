@@ -612,7 +612,8 @@ impl InteractiveApplication {
             return;
         }
         let Some(declaration) = self
-            .plugin_contributions
+            .extension
+            .contributions()
             .get(&plugin)
             .filter(|index| index.generation == load.0)
             .and_then(|index| index.providers.iter().find(|item| item.id == provider))

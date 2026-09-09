@@ -92,15 +92,7 @@ impl InteractiveApplication {
             self.sync_ui_diagnostics();
         }
         self.pending_execution_preflight.clear();
-        self.registry_intents.clear();
-        self.pending_registry_artifact = None;
-        for (plugin, (load, token)) in self.package_prepared.drain().collect::<Vec<_>>() {
-            let _ = self.extension.unload_generation(&plugin, load);
-            self.remove_plugin_contribution_generation(&plugin, load);
-            let _ = self.packages.request(PackageOperation::Abort { token });
-        }
-        for (plugin, load) in self.package_commits.values().cloned().collect::<Vec<_>>() {
-            let _ = self.extension.unload_generation(&plugin, load);
+        for (plugin, load) in self.extension.retire_packages() {
             self.remove_plugin_contribution_generation(&plugin, load);
         }
         self.debugger_session.reset();

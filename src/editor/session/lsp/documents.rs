@@ -147,6 +147,13 @@ impl InteractiveApplication {
             self.select_lsp_session(&sessions[0]);
         }
         self.detach_lsp_documents(buffer, detach);
+        let completion_open = self.ui.language_completion.is_some()
+            && self.language.projection().is_some_and(|owner| {
+                owner.buffer == buffer
+                    && Some(owner.view) == self.state.active_view
+                    && self.language.active() == Some(&owner.server)
+                    && owner.uri == document.uri()
+            });
         self.refresh_lsp_projection_owner();
         let mut changed = false;
         for server in &sessions {
@@ -165,12 +172,13 @@ impl InteractiveApplication {
             && !(self.configuration.settings().lsp.inlay_hint_level
                 == crate::config::InlayHintLevel::Max
                 && self.ui.lsp_inlay_hints.is_empty()
-                && self.lsp_inlay_refresh_due.is_some())
+                && self.language.inlay_pending())
         {
             self.schedule_lsp_inlay_refresh(false);
         }
         self.reconcile_lsp_autostart(buffer, &document, !sessions.is_empty());
-        if self.ui.language_completion.is_some()
+        if changed
+            && completion_open
             && self
                 .language
                 .active()

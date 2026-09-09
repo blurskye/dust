@@ -9,7 +9,8 @@ impl InteractiveApplication {
         };
         let follow_tail = previous.is_none() || self.search.picker_follows_tail();
         let items = self
-            .lsp_logs
+            .language
+            .logs()
             .iter()
             .enumerate()
             .map(|(index, line)| {
@@ -164,12 +165,11 @@ impl InteractiveApplication {
             }
             AppEffect::LspCompletionAccept => self.accept_lsp_completion(),
             AppEffect::LspCompletionCancel => {
-                let generation = self.lsp_request_generation;
+                let generation = self.language.generation();
                 if let Some(server) = self.language.active().map(String::as_str) {
                     let _ = self.language.cancel(server, generation);
                 }
-                self.lsp_completion_items.clear();
-                self.lsp_completion_owner = None;
+                self.language.clear_completion();
                 self.ui.language_completion = None;
             }
             AppEffect::SnippetNavigate(direction) => self.navigate_snippet(direction),
@@ -201,7 +201,8 @@ impl InteractiveApplication {
             AppEffect::LspSelectionExpand => {
                 if let (Some(view), Some(range)) = (
                     self.state.active_view,
-                    self.lsp_selection_ranges
+                    self.language
+                        .selection_ranges()
                         .iter()
                         .filter(|range| {
                             range.contains(self.state.views[self.state.active_view.unwrap()].cursor)

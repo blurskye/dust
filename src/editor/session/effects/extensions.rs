@@ -52,7 +52,7 @@ impl InteractiveApplication {
                     return Ok(());
                 }
                 let Some((plugin, load, command)) =
-                    self.plugin_contributions.ordered().find_map(|index| {
+                    self.extension.contributions().ordered().find_map(|index| {
                         index
                             .virtual_documents
                             .iter()
@@ -144,7 +144,7 @@ impl InteractiveApplication {
                             .prepare_editor_transition(
                                 state,
                                 &current,
-                                self.plugin_contributions.version(),
+                                self.extension.contributions().version(),
                                 &self.configuration.settings().ui.buffer_line.scratch_label,
                                 None,
                             )
@@ -152,7 +152,7 @@ impl InteractiveApplication {
                                 self.window_session.accept_editor_transition(
                                     transition,
                                     &current,
-                                    &self.plugin_contributions.version(),
+                                    &self.extension.contributions().version(),
                                 )
                             });
                         let state = match accepted {
@@ -188,7 +188,8 @@ impl InteractiveApplication {
                     return Ok(());
                 }
                 let command = self
-                    .plugin_contributions
+                    .extension
+                    .contributions()
                     .get(&entry.plugin)
                     .and_then(|index| {
                         index
@@ -294,31 +295,32 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::PackageList => {
-                if let Err(error) = self.packages.request(PackageOperation::List) {
+                if let Err(error) = self.extension.request_package(PackageOperation::List) {
                     self.show_error(error)
                 }
             }
             AppEffect::PackageVerify => {
-                if let Err(error) = self.packages.request(PackageOperation::Verify) {
+                if let Err(error) = self.extension.request_package(PackageOperation::Verify) {
                     self.show_error(error)
                 }
             }
             AppEffect::PackageRollback => {
-                self.package_startup_rollback_attempted = false;
-                if let Err(error) = self.packages.request(PackageOperation::Rollback) {
+                if let Err(error) = self.extension.request_package(PackageOperation::Rollback) {
                     self.show_error(error)
                 }
             }
             AppEffect::PackageRemove(name) => {
-                self.package_startup_rollback_attempted = false;
-                if let Err(error) = self.packages.request(PackageOperation::Remove(name)) {
+                if let Err(error) = self
+                    .extension
+                    .request_package(PackageOperation::Remove(name))
+                {
                     self.show_error(error)
                 }
             }
             AppEffect::PackageGarbageCollect => {
                 if let Err(error) = self
-                    .packages
-                    .request(PackageOperation::GarbageCollect { maximum: 256 })
+                    .extension
+                    .request_package(PackageOperation::GarbageCollect { maximum: 256 })
                 {
                     self.show_error(error)
                 }

@@ -46,7 +46,7 @@ impl InteractiveApplication {
     ) -> Result<(), String> {
         let candidate =
             self.configuration
-                .prepare(loaded, &self.commands, &self.plugin_contributions)?;
+                .prepare(loaded, &self.commands, self.extension.contributions())?;
         let replacement_explorer_watch = if candidate.view().settings.ui.explorer.watch
             != self.configuration.settings().ui.explorer.watch
         {
@@ -64,7 +64,7 @@ impl InteractiveApplication {
             .then(|| self.prepare_configured_window_rules(&candidate.view().settings.windows))
             .transpose()?;
         self.configuration
-            .stage_watch(&candidate, &self.plugin_contributions)?;
+            .stage_watch(&candidate, self.extension.contributions())?;
         if let Some(window_candidate) = window_candidate {
             self.window_session
                 .accept_current(window_candidate, &self.state.window_version())?;
@@ -115,7 +115,7 @@ impl InteractiveApplication {
             self.set_dashboard_visibility(false);
         }
         self.configuration
-            .commit(candidate, &self.plugin_contributions)?;
+            .commit(candidate, self.extension.contributions())?;
         for name in self.tasks.names() {
             if let Ok(owner) = DiagnosticOwner::new(format!("task:{name}")) {
                 self.diagnostics.clear_owner(&owner);

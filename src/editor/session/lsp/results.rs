@@ -1,59 +1,27 @@
 use super::*;
-use crate::editor::session::lsp::LspRuntimeState;
 
 impl InteractiveApplication {
     pub(in crate::editor::session) fn request_lsp_inlay_hints(&mut self) {
         self.refresh_lsp_projection_owner();
-        self.lsp_inlay_refresh_due = None;
-        let Some(owner) = self.lsp_projection_owner.clone() else {
+        let Some(owner) = self.language.projection() else {
             return;
         };
-        if self.ui.large_file_buffers.contains(&owner.buffer) {
+        if self.ui.large_file_buffers.contains(&owner.buffer)
+            || !self
+                .language
+                .sessions()
+                .get(&owner.server)
+                .and_then(|session| session.capabilities.as_ref())
+                .is_some_and(|capabilities| capabilities.inlay_hints)
+        {
             self.ui.lsp_inlay_hints.clear();
             return;
         }
-        let Some(capabilities) = self
-            .language
-            .sessions()
-            .get(&owner.server)
-            .and_then(|session| session.capabilities.as_ref())
-            .filter(|capabilities| capabilities.inlay_hints)
-            .cloned()
-        else {
-            self.ui.lsp_inlay_hints.clear();
-            return;
-        };
         let Some((buffer, document)) = self.active_lsp_document() else {
             return;
         };
-        if buffer != owner.buffer || document.uri() != owner.uri {
-            return;
-        }
-        let text = TextBuffer::from_text(&document.text);
-        let end = PositionCodec::new(&text)
-            .byte_to_lsp(ByteOffset(text.len_bytes()), capabilities.position_encoding)
-            .ok()
-            .map(|(line, character)| crate::language::lsp::LspPosition { line, character });
-        let Some(end) = end else { return };
-        let feature = LspFeature::InlayHints {
-            range: crate::language::lsp::LspRange {
-                start: crate::language::lsp::LspPosition {
-                    line: 0,
-                    character: 0,
-                },
-                end,
-            },
-        };
-        self.lsp_inlay_request_generation = self.lsp_inlay_request_generation.saturating_add(1);
-        let generation = u64::MAX
-            .saturating_sub(self.lsp_inlay_request_generation)
-            .max(u64::MAX / 2);
-        if self
-            .language
-            .request(&owner.server, feature, document, ByteOffset(0), generation)
-            .is_ok()
-        {
-            self.lsp_inlay_request_owner = Some((generation, owner));
+        if buffer == owner.buffer {
+            self.language.request_inlays(document);
         }
     }
 
@@ -73,26 +41,7 @@ impl InteractiveApplication {
         let Some((buffer, document)) = self.active_lsp_document() else {
             return;
         };
-        let supports = |state: &LspRuntimeState| {
-            state.definition.supports_language(&document.language_id)
-                && state.documents.contains_key(&buffer)
-                && document.path.starts_with(&state.root_path)
-        };
-        let server = self
-            .language
-            .active()
-            .filter(|key| self.language.sessions().get(*key).is_some_and(&supports))
-            .cloned()
-            .or_else(|| {
-                let mut matches = self
-                    .language
-                    .sessions()
-                    .iter()
-                    .filter_map(|(key, state)| supports(state).then_some(key.clone()))
-                    .collect::<Vec<_>>();
-                matches.sort();
-                matches.into_iter().next()
-            });
+        let server = self.language.supporting_server(buffer, &document);
         let Some(server) = server else {
             self.start_lsp(None);
             return;
@@ -147,32 +96,12 @@ impl InteractiveApplication {
                 },
             };
         }
-        if matches!(feature, LspFeature::PullDiagnostics { .. })
-            && let Some(previous) = self.lsp_pull_ids.get(&(server.clone(), document.uri()))
-        {
-            feature = LspFeature::PullDiagnostics {
-                previous_result_id: Some(previous.clone()),
-            };
-        }
-        if matches!(feature, LspFeature::SemanticTokensFull)
-            && let Some((Some(previous), _)) =
-                self.lsp_semantic_raw.get(&(server.clone(), document.uri()))
-        {
-            feature = LspFeature::SemanticTokensDelta {
-                previous_result_id: previous.clone(),
-            };
-        }
         self.refresh_lsp_projection_owner();
-        let Some(owner) = self.lsp_projection_owner.clone() else {
-            return;
-        };
-        self.lsp_request_generation = self.lsp_request_generation.saturating_add(1);
-        let generation = self.lsp_request_generation;
         match self
             .language
-            .request(&server, feature, document, offset, generation)
+            .request_projected(&server, feature, document, offset)
         {
-            Ok(()) => self.lsp_request_owner = Some((generation, owner)),
+            Ok(()) => (),
             // The worker has already reported (or will imminently report) its
             // real startup/exit failure. Avoid replacing that diagnostic with
             // a misleading raw transport-key "not running" error.
@@ -216,30 +145,6 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn open_lsp_completion_documentation(&mut self) {
-        let Some((generation, owner)) = self.lsp_completion_owner.clone() else {
-            self.close_documentation();
-            self.show_error("completion documentation is stale");
-            return;
-        };
-        let live_owner = self.state.active_view == Some(owner.view)
-            && self
-                .state
-                .views
-                .get(owner.view)
-                .is_some_and(|view| view.buffer == owner.buffer)
-            && self
-                .state
-                .buffers
-                .get(owner.buffer)
-                .is_some_and(|buffer| buffer.text.revision() == owner.revision);
-        if generation != self.lsp_request_generation
-            || self.lsp_projection_owner.as_ref() != Some(&owner)
-            || !live_owner
-        {
-            self.close_documentation();
-            self.show_error("completion documentation is stale");
-            return;
-        }
         let Some(selected) = self
             .ui
             .language_completion
@@ -248,24 +153,27 @@ impl InteractiveApplication {
         else {
             return;
         };
-        let Some((label, documentation)) =
-            self.lsp_completion_items.get(selected).and_then(|item| {
-                item.documentation
-                    .clone()
-                    .map(|documentation| (item.label.clone(), documentation))
-            })
-        else {
-            self.show_error("selected completion has no documentation");
-            return;
+        let (server, label, documentation) = match self
+            .language
+            .completion_documentation(&self.state, selected)
+        {
+            Ok(value) => value,
+            Err(error) => {
+                if error == "completion documentation is stale" {
+                    self.close_documentation();
+                }
+                self.show_error(error);
+                return;
+            }
         };
-        let server_label = self.lsp_server_label(&owner.server);
+        let server_label = self.lsp_server_label(&server);
         self.present_documentation_popup(
             DocumentationPopupKind::Completion,
             self.message(
                 "lsp_completion_documentation_title",
                 &[("server", server_label), ("label", label)],
             ),
-            owner.server,
+            server,
             None,
             vec![documentation],
         );
@@ -324,23 +232,22 @@ impl InteractiveApplication {
                 );
             }
             LspFeatureResult::Completion(items) => {
-                self.lsp_completion_items = items;
-                self.lsp_completion_owner = self
-                    .lsp_projection_owner
-                    .clone()
-                    .map(|owner| (generation, owner));
+                self.language.install_completions(items, generation);
                 self.ui.language_completion =
-                    (!self.lsp_completion_items.is_empty()).then(|| LanguageCompletionState {
-                        items: self
-                            .lsp_completion_items
-                            .iter()
-                            .map(|item| CompletionItem {
-                                label: item.label.clone(),
-                                detail: Self::lsp_completion_detail(item, &server_label),
-                            })
-                            .collect(),
-                        selected: 0,
-                        scroll: 0,
+                    (!self.language.completion_items().is_empty()).then(|| {
+                        LanguageCompletionState {
+                            items: self
+                                .language
+                                .completion_items()
+                                .iter()
+                                .map(|item| CompletionItem {
+                                    label: item.label.clone(),
+                                    detail: Self::lsp_completion_detail(item, &server_label),
+                                })
+                                .collect(),
+                            selected: 0,
+                            scroll: 0,
+                        }
                     });
                 if self.ui.language_completion.is_none() {
                     self.show_error(self.message("lsp_no_result", &[]));
@@ -349,14 +256,7 @@ impl InteractiveApplication {
                 }
             }
             LspFeatureResult::CompletionResolved(item) => {
-                if let Some(selected) = self
-                    .ui
-                    .language_completion
-                    .as_ref()
-                    .map(|completion| completion.selected)
-                    && selected < self.lsp_completion_items.len()
-                {
-                    self.lsp_completion_items[selected] = item;
+                if self.language.accept_resolved(generation, item, &self.state) {
                     self.accept_lsp_completion();
                 }
             }
@@ -391,7 +291,7 @@ impl InteractiveApplication {
             }
             LspFeatureResult::PullDiagnostics(result) => {
                 if let Some(id) = result.result_id.clone() {
-                    self.lsp_pull_ids.insert((server.into(), uri.into()), id);
+                    self.language.record_pull(server, uri, id);
                 }
                 if result.unchanged {
                     return;
@@ -420,10 +320,9 @@ impl InteractiveApplication {
                 }
             }
             LspFeatureResult::SemanticTokens(result) => {
-                self.lsp_semantic_raw.insert(
-                    (server.into(), uri.into()),
-                    (result.result_id.clone(), result.data.clone()),
-                );
+                if !self.language.record_semantic(server, uri, &result) {
+                    return;
+                }
                 if let Some(path) = path_from_file_uri(uri)
                     && let Some((buffer_id, buffer)) = self
                         .state
@@ -475,43 +374,15 @@ impl InteractiveApplication {
                 }
             }
             LspFeatureResult::SemanticTokenDelta(delta) => {
-                let key = (server.to_owned(), uri.to_owned());
-                let mut valid = false;
-                if let Some((result_id, data)) = self.lsp_semantic_raw.get_mut(&key) {
-                    valid = true;
-                    for edit in delta.edits {
-                        if edit.start.saturating_add(edit.delete_count) > data.len()
-                            || data
-                                .len()
-                                .saturating_sub(edit.delete_count)
-                                .saturating_add(edit.data.len())
-                                > 500_000
-                        {
-                            valid = false;
-                            break;
-                        }
-                        data.splice(edit.start..edit.start + edit.delete_count, edit.data);
-                    }
-                    if data.len() % 5 != 0 {
-                        valid = false
-                    }
-                    if valid {
-                        *result_id = delta.result_id.clone();
-                        let full = crate::language::lsp::LspSemanticTokens {
-                            result_id: result_id.clone(),
-                            data: data.clone(),
-                        };
-                        self.present_lsp_result(
-                            server,
-                            generation,
-                            method,
-                            uri,
-                            LspFeatureResult::SemanticTokens(full),
-                        );
-                    }
-                }
-                if !valid {
-                    self.lsp_semantic_raw.remove(&key);
+                if let Some(full) = self.language.semantic_delta(server, uri, delta) {
+                    self.present_lsp_result(
+                        server,
+                        generation,
+                        method,
+                        uri,
+                        LspFeatureResult::SemanticTokens(full),
+                    );
+                } else {
                     self.request_lsp(LspFeature::SemanticTokensFull);
                 }
             }
@@ -522,8 +393,7 @@ impl InteractiveApplication {
                 if items.is_empty() || provisional {
                     self.schedule_lsp_inlay_warmup_retry();
                 } else {
-                    self.lsp_inlay_empty_retries = 0;
-                    self.lsp_inlay_refresh_due = None;
+                    self.language.inlays_received();
                 }
                 if let Some(path) = path_from_file_uri(uri)
                     && let Some((buffer_id, buffer)) = self
@@ -626,7 +496,9 @@ impl InteractiveApplication {
                                     .collect()
                             }
                         }
-                        "textDocument/selectionRange" => self.lsp_selection_ranges = ranges,
+                        "textDocument/selectionRange" => {
+                            self.language.install_selection_ranges(ranges)
+                        }
                         _ => {}
                     }
                 }

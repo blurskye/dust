@@ -50,7 +50,8 @@ impl InteractiveApplication {
             return;
         };
         if self
-            .lsp_completion_items
+            .language
+            .completion_items()
             .get(selected)
             .is_some_and(|item| item.documentation.is_some())
         {
@@ -65,37 +66,19 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn move_lsp_completion(&mut self, direction: i8) {
+        let rows = usize::from(
+            self.configuration
+                .settings()
+                .ui
+                .command_line
+                .completion_max_rows
+                .max(1),
+        );
+        if let Some((selected, scroll)) = self.language.move_completion(direction, rows)
+            && let Some(completion) = self.ui.language_completion.as_mut()
         {
-            let Some(completion) = &mut self.ui.language_completion else {
-                return;
-            };
-            if completion.items.is_empty() {
-                return;
-            }
-            completion.selected = if direction < 0 {
-                completion
-                    .selected
-                    .checked_sub(1)
-                    .unwrap_or(completion.items.len() - 1)
-            } else {
-                (completion.selected + 1) % completion.items.len()
-            };
-            let visible_rows = usize::from(
-                self.configuration
-                    .settings()
-                    .ui
-                    .command_line
-                    .completion_max_rows
-                    .max(1),
-            );
-            if completion.selected < completion.scroll {
-                completion.scroll = completion.selected;
-            } else if completion.selected >= completion.scroll.saturating_add(visible_rows) {
-                completion.scroll = completion
-                    .selected
-                    .saturating_add(1)
-                    .saturating_sub(visible_rows);
-            }
+            completion.selected = selected;
+            completion.scroll = scroll;
         }
         self.refresh_lsp_completion_documentation();
     }
@@ -104,7 +87,12 @@ impl InteractiveApplication {
         let Some(completion) = &self.ui.language_completion else {
             return;
         };
-        let Some(item) = self.lsp_completion_items.get(completion.selected).cloned() else {
+        let Some(item) = self
+            .language
+            .completion_items()
+            .get(completion.selected)
+            .cloned()
+        else {
             return;
         };
         let Some((buffer_id, document)) = self.active_lsp_document() else {
@@ -115,24 +103,17 @@ impl InteractiveApplication {
                 .language
                 .capabilities()
                 .is_some_and(|capabilities| capabilities.completion_resolve)
-            && let Some(resolve_item) = item.resolve_item.clone()
+            && item.resolve_item.is_some()
         {
-            self.lsp_request_generation = self.lsp_request_generation.saturating_add(1);
             let offset = self
                 .state
                 .active_view
                 .map_or(ByteOffset(0), |view| self.state.views[view].cursor);
-            let Some(server) = self.language.active().cloned() else {
-                return;
-            };
-            if let Err(error) = self.language.request(
-                &server,
-                LspFeature::CompletionResolve { item: resolve_item },
-                document,
-                offset,
-                self.lsp_request_generation,
-            ) {
-                self.show_error(error)
+            if let Err(error) =
+                self.language
+                    .resolve_completion(completion.selected, document, offset)
+            {
+                self.show_error(error);
             }
             return;
         }
@@ -210,8 +191,7 @@ impl InteractiveApplication {
             );
             self.select_snippet_current();
         }
-        self.lsp_completion_items.clear();
-        self.lsp_completion_owner = None;
+        self.language.clear_completion();
         self.ui.language_completion = None;
     }
 

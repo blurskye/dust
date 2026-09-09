@@ -54,7 +54,6 @@ impl InteractiveApplication {
             graph_revision,
         );
         self.extension.observe(
-            &self.plugin_contributions,
             observation,
             self.workspace.roots().len(),
             self.ui.plugin_surfaces.len(),
@@ -86,20 +85,14 @@ impl InteractiveApplication {
                     plugin,
                     index,
                 } => {
-                    if self.rejected_plugin_loads.remove(&(plugin.clone(), load)) {
+                    if self.extension.take_rejected(&plugin, load) {
                         let _ = self.extension.disable_generation(&plugin, load);
                         continue;
                     }
                     let checksum = index.checksum.clone();
                     let mut accepted = self
-                        .plugin_contributions
-                        .install(index.clone())
-                        .map_err(|error| error.to_string())
-                        .and_then(|()| {
-                            self.extension
-                                .install_events(&index)
-                                .map_err(|error| error.to_string())
-                        })
+                        .extension
+                        .install_index(index.clone())
                         .and_then(|()| {
                             self.plugin_providers
                                 .install(&index)
@@ -115,14 +108,13 @@ impl InteractiveApplication {
                     if accepted.is_ok() && index.storage.is_some() {
                         self.extension.install_storage(&plugin, load);
                     }
-                    self.pending_index_activation
-                        .insert(plugin.clone(), (load, checksum.clone()));
+                    self.extension.queue_index(plugin.clone(), load, checksum);
                     let waiting_for_deferred = self.configuration.deferred_plugin_keymaps()
                         && !self
                             .configuration
                             .expected_plugin_indexes()
                             .iter()
-                            .all(|owner| self.plugin_contributions.get(owner).is_some());
+                            .all(|owner| self.extension.contributions().get(owner).is_some());
                     if accepted.is_ok() && waiting_for_deferred {
                         continue;
                     }
@@ -133,32 +125,18 @@ impl InteractiveApplication {
                         self.abort_pending_index_batch(error);
                         continue;
                     }
-                    let activations = if self.configuration.deferred_plugin_keymaps() {
-                        std::mem::take(&mut self.pending_index_activation)
-                    } else {
-                        BTreeMap::from([(plugin.clone(), (load, checksum))])
-                    };
-                    let activation_error =
-                        activations
-                            .into_iter()
-                            .find_map(|(owner, (candidate, checksum))| {
-                                self.extension
-                                    .activate_indexed(&owner, candidate, checksum)
-                                    .err()
-                                    .map(|error| (owner, candidate, error))
-                            });
-                    if let Some((failed_plugin, failed_load, error)) = activation_error {
+                    if let Err((failed_plugin, failed_load, error)) =
+                        self.extension.activate_pending(
+                            self.configuration.deferred_plugin_keymaps(),
+                            &plugin,
+                            load,
+                        )
+                    {
                         self.remove_plugin_contribution_generation(&failed_plugin, failed_load);
                         let _ = self
                             .extension
                             .disable_generation(&failed_plugin, failed_load);
-                        if let Some((_, token)) = self
-                            .package_prepared
-                            .remove(&failed_plugin)
-                            .filter(|(candidate, _)| *candidate == failed_load)
-                        {
-                            let _ = self.packages.request(PackageOperation::Abort { token });
-                        }
+                        self.extension.abort_prepared(&failed_plugin, failed_load);
                         self.show_error(error);
                         continue;
                     }
@@ -175,23 +153,14 @@ impl InteractiveApplication {
                 }
                 PluginEvent::Loaded { load, component } => {
                     let plugin = component.manifest.id.clone();
-                    if self.rejected_plugin_loads.remove(&(plugin.clone(), load)) {
+                    if self.extension.take_rejected(&plugin, load) {
                         let _ = self.extension.disable_generation(&plugin, load);
                         continue;
                     }
-                    let prepared = self
-                        .package_prepared
-                        .get(&plugin)
-                        .filter(|(candidate, _)| *candidate == load)
-                        .map(|(_, token)| *token);
-                    if prepared.is_some() {
-                        self.package_prepared.remove(&plugin);
-                    }
-                    if self.package_startup_pending.get(&plugin) == Some(&load) {
-                        self.package_startup_pending.remove(&plugin);
-                    }
+                    let prepared = self.extension.take_prepared(&plugin, load);
                     if let Some(index) = self
-                        .plugin_contributions
+                        .extension
+                        .contributions()
                         .get(&plugin)
                         .filter(|index| index.generation == load.0)
                     {
@@ -203,7 +172,9 @@ impl InteractiveApplication {
                             .collect::<BTreeSet<_>>();
                         if declared != activated {
                             if let Some(token) = prepared {
-                                let _ = self.packages.request(PackageOperation::Abort { token });
+                                let _ = self
+                                    .extension
+                                    .request_package(PackageOperation::Abort { token });
                             }
                             self.remove_plugin_contribution_generation(&plugin, load);
                             let _ = self.extension.disable_generation(&plugin, load);
@@ -277,16 +248,11 @@ impl InteractiveApplication {
                         });
                     }
                     if let Some(token) = prepared {
-                        match self.packages.request(PackageOperation::Commit { token }) {
-                            Ok(request) => {
-                                self.package_commits.insert(request, (plugin.clone(), load));
-                            }
-                            Err(error) => {
-                                let _ = self.extension.disable_generation(&plugin, load);
-                                self.remove_plugin_contribution_generation(&plugin, load);
-                                let _ = self.packages.request(PackageOperation::Abort { token });
-                                self.show_error(error)
-                            }
+                        if let Err(error) =
+                            self.extension.commit_package(plugin.clone(), load, token)
+                        {
+                            self.remove_plugin_contribution_generation(&plugin, load);
+                            self.show_error(error);
                         }
                     }
                     self.notices.record(
@@ -308,7 +274,7 @@ impl InteractiveApplication {
                     plugin,
                     error,
                 } => {
-                    if self.rejected_plugin_loads.remove(&(plugin.clone(), load)) {
+                    if self.extension.take_rejected(&plugin, load) {
                         continue;
                     }
                     if self.configuration.deferred_plugin_keymaps()
@@ -320,23 +286,13 @@ impl InteractiveApplication {
                         self.abort_expected_index_batch(plugin, load, error);
                         continue;
                     }
-                    if self.pending_index_activation.contains_key(&plugin) {
-                        self.rejected_plugin_loads.insert((plugin, load));
+                    if self.extension.index_pending(&plugin) {
+                        self.extension.reject_index(plugin, load);
                         self.abort_pending_index_batch(error);
                         continue;
                     }
-                    let prepared = self
-                        .package_prepared
-                        .get(&plugin)
-                        .filter(|(candidate, _)| *candidate == load)
-                        .map(|(_, token)| *token);
-                    if let Some(token) = prepared {
-                        self.package_prepared.remove(&plugin);
-                        let _ = self.packages.request(PackageOperation::Abort { token });
-                    } else if self.package_startup_pending.get(&plugin) == Some(&load) {
-                        self.package_startup_pending.remove(&plugin);
-                        self.begin_package_activation_rollback();
-                    }
+                    let updates = self.extension.failed_package_load(&plugin, load);
+                    self.apply_extension_updates(updates);
                     self.remove_plugin_contribution_generation(&plugin, load);
                     self.commands.unregister_plugin(&plugin);
                     self.notices.record(

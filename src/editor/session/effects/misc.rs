@@ -62,7 +62,7 @@ impl InteractiveApplication {
                                     .count()
                                     .to_string(),
                             ),
-                            ("packages", self.packages.pending_count().to_string()),
+                            ("packages", self.extension.pending_packages().to_string()),
                             ("lsp", self.language.sessions().len().to_string()),
                             ("persistence", self.persistence.pending().to_string()),
                             ("safe", self.workspace.safe_mode().to_string()),

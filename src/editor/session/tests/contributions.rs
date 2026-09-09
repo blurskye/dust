@@ -64,7 +64,7 @@ fn indexed_plugin_defaults_install_before_activation_and_roll_back_on_failure() 
         )
         .expect("index request");
     let deadline = Instant::now() + Duration::from_secs(2);
-    while app.plugin_contributions.get("demo").is_none() {
+    while app.extension.contributions().get("demo").is_none() {
         app.process_plugin_events();
         assert!(Instant::now() < deadline, "index integration timed out");
         thread::yield_now();
@@ -84,7 +84,7 @@ fn indexed_plugin_defaults_install_before_activation_and_roll_back_on_failure() 
     );
     assert_eq!(app.extension.load_id("demo"), previous);
     let deadline = Instant::now() + Duration::from_secs(2);
-    while app.plugin_contributions.get("demo").is_some() {
+    while app.extension.contributions().get("demo").is_some() {
         app.process_plugin_events();
         assert!(Instant::now() < deadline, "activation rollback timed out");
         thread::yield_now();

@@ -175,13 +175,13 @@ impl InteractiveApplication {
         self.window_session.check_plan(
             &plan,
             &self.state.window_version(),
-            &self.plugin_contributions.version(),
+            &self.extension.contributions().version(),
         )?;
         if plan.operations().is_empty() {
             self.window_session.accept_native_plan(
                 plan,
                 &self.state.window_version(),
-                &self.plugin_contributions.version(),
+                &self.extension.contributions().version(),
             )?;
             if let Some(id) = self
                 .window_session
@@ -215,7 +215,7 @@ impl InteractiveApplication {
             self.window_session.check_plan(
                 plan,
                 &self.state.window_version(),
-                &self.plugin_contributions.version(),
+                &self.extension.contributions().version(),
             )?;
         }
         self.window_session
@@ -260,7 +260,7 @@ impl InteractiveApplication {
                 .map_or("Picker", |picker| &picker.title),
             terminals: &terminals,
         };
-        let catalog = self.plugin_contributions.version();
+        let catalog = self.extension.contributions().version();
         let transition = if let Some(plan) = plan {
             self.window_session.prepare_editor_plan(
                 plan,
@@ -309,7 +309,7 @@ impl InteractiveApplication {
             .plan_focus(
                 target,
                 &self.state.window_version(),
-                self.plugin_contributions.version(),
+                self.extension.contributions().version(),
             )
             .and_then(|plan| self.apply_window_plan(plan));
         if let Err(error) = result {
@@ -328,7 +328,7 @@ impl InteractiveApplication {
             action,
             &(&self.state).into(),
             self.configuration.settings(),
-            self.plugin_contributions.version(),
+            self.extension.contributions().version(),
         ) {
             Ok(plan) => plan,
             Err(super::super::windows::LayoutPlanError::Dirty) => {
@@ -352,7 +352,7 @@ impl InteractiveApplication {
     pub(super) fn apply_retained_ui_interaction(&mut self, interaction: PluginUiInteraction) {
         match self.plugin_windows.interact_focused(
             self.window_session.graph(),
-            &self.plugin_contributions,
+            self.extension.contributions(),
             interaction,
         ) {
             Ok(action) => {
@@ -416,7 +416,7 @@ impl InteractiveApplication {
         let Some((window, x, y)) = target else { return };
         match self
             .plugin_windows
-            .private_action_at(window, x, y, &self.plugin_contributions)
+            .private_action_at(window, x, y, self.extension.contributions())
         {
             Ok((plugin, load, event)) => {
                 let action = event.action.clone();

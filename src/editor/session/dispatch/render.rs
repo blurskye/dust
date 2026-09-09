@@ -84,7 +84,7 @@ impl InteractiveApplication {
         if let Some(plan) = self.window_session.restore_focus_plan(
             capture,
             &self.state.window_version(),
-            self.plugin_contributions.version(),
+            self.extension.contributions().version(),
         ) {
             let _ = self.apply_window_plan(plan);
         }
@@ -407,7 +407,7 @@ impl InteractiveApplication {
                     pane_step: self.configuration.settings().ui.panes.resize_step,
                     terminal_step: self.configuration.settings().ui.terminal_panel.resize_step,
                 },
-                self.plugin_contributions.version(),
+                self.extension.contributions().version(),
             )
             .map_err(|error| match error {
                 CommandError::Dirty => self.message("dirty_close", &[]),
@@ -420,7 +420,7 @@ impl InteractiveApplication {
         match self.window_session.accept_window_command(
             plan,
             &self.state.window_version(),
-            &self.plugin_contributions.version(),
+            &self.extension.contributions().version(),
         )? {
             CommandEffect::None => {}
             CommandEffect::ClosedExplorer => {

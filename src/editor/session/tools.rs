@@ -29,28 +29,21 @@ impl InteractiveApplication {
             limits: self.plugin_limits(),
             update,
         };
-        if let Err(error) = self.packages.request(operation) {
+        if let Err(error) = self.extension.request_package(operation) {
             self.show_error(error)
         }
     }
 
     pub(super) fn request_registry(&mut self, request: RegistryRequest, install: bool) {
-        match self.registry.request(request) {
-            Ok(id) => {
-                self.registry_intents.insert(id, install);
-            }
-            Err(error) => self.show_error(error),
+        if let Err(error) = self.extension.request_registry(request, install) {
+            self.show_error(error);
         }
     }
-
     pub(super) fn process_registry_events(&mut self) {
-        let Ok(events) = self.registry.poll() else {
-            return;
-        };
-        for event in events {
-            let install = self.registry_intents.remove(&event.id).unwrap_or(false);
-            match event.result {
-                Ok(RegistryResult::Search(result)) => {
+        use crate::editor::session::extensions::RegistryUpdate;
+        for update in self.extension.poll_registry() {
+            match update {
+                RegistryUpdate::Present(RegistryResult::Search(result)) => {
                     let items = result
                         .packages
                         .into_iter()
@@ -77,232 +70,92 @@ impl InteractiveApplication {
                         .collect();
                     self.install_picker(self.message("package_registry_search_title", &[]), items);
                 }
-                Ok(RegistryResult::Show(metadata)) => {
-                    if install {
-                        self.request_registry(
-                            RegistryRequest::Fetch {
-                                metadata: Box::new(metadata),
+                RegistryUpdate::Present(RegistryResult::Show(metadata)) => {
+                    let label = format!("{}/{}", metadata.publisher, metadata.name);
+                    let detail = format!("{} · {}", metadata.version, metadata.artifact_sha256);
+                    self.install_picker(
+                        self.message("package_registry_show_title", &[]),
+                        vec![(
+                            PickerItem {
+                                id: PickerItemId(format!("registry-show:{label}")),
+                                label,
+                                detail,
+                                source: metadata.artifact_path.clone(),
+                                action: PickerAction::None,
                             },
-                            true,
-                        )
-                    } else {
-                        let label = format!("{}/{}", metadata.publisher, metadata.name);
-                        let detail = format!("{} · {}", metadata.version, metadata.artifact_sha256);
-                        self.install_picker(
-                            self.message("package_registry_show_title", &[]),
-                            vec![(
-                                PickerItem {
-                                    id: PickerItemId(format!("registry-show:{label}")),
-                                    label,
-                                    detail,
-                                    source: metadata.artifact_path.clone(),
-                                    action: PickerAction::None,
-                                },
-                                PickerPayload::RegistryMetadata(Box::new(metadata)),
-                            )],
-                        );
+                            PickerPayload::RegistryMetadata(Box::new(metadata)),
+                        )],
+                    );
+                }
+                RegistryUpdate::Present(RegistryResult::Artifact { .. }) => {
+                    self.show_error("unowned registry artifact")
+                }
+                RegistryUpdate::ValidateArtifact => {
+                    self.defer_trusted_execution(DeferredExecution::PrepareRegistryArtifact);
+                    if self.execution_validation.is_none() {
+                        self.extension.discard_artifact();
                     }
                 }
-                Ok(RegistryResult::Artifact { metadata, bytes }) => {
-                    if self.pending_registry_artifact.is_some() {
-                        self.show_error("another registry artifact is awaiting validation")
-                    } else {
-                        self.pending_registry_artifact = Some((metadata, bytes));
-                        self.defer_trusted_execution(DeferredExecution::PrepareRegistryArtifact);
-                        if self.execution_validation.is_none() {
-                            self.pending_registry_artifact = None;
-                        }
-                    }
-                }
-                Err(error) => self.show_error(self.message(
-                    "package_registry_failed",
-                    &[("diagnostic", error.to_string())],
-                )),
+                RegistryUpdate::Error(error) => self
+                    .show_error(self.message("package_registry_failed", &[("diagnostic", error)])),
             }
         }
     }
-
     pub(super) fn process_package_events(&mut self) {
-        if let Ok(events) = self.packages.poll() {
-            for event in events {
-                match event {
-                    PackageServiceEvent::Completed(mut result) => {
-                        let prepared_operation = result.prepared.is_some();
-                        let activation_operation = result.operation == "activations";
-                        if let Some(prepared) = result.prepared.take() {
-                            let id = prepared.plugin.id.clone();
-                            let token = prepared.token;
-                            let store =
-                                crate::config::user_state_directory().join("packages/store");
-                            if self.extension.load_id(&id).is_some() {
-                                let _ = self.packages.request(PackageOperation::Abort { token });
-                                self.show_error(
-                                    self.message("package_plugin_conflict", &[("plugin", id)]),
-                                );
-                                continue;
-                            }
-                            match self.extension.load(
-                                store,
-                                prepared.object,
-                                prepared.plugin,
-                                self.plugin_limits(),
-                            ) {
-                                Ok(load) => {
-                                    self.package_prepared.insert(id.clone(), (load, token));
-                                    self.notify_message(
-                                        self.message(
-                                            "package_prepared",
-                                            &[("package", prepared.manifest.name)],
-                                        ),
-                                        false,
-                                    );
-                                }
-                                Err(error) => {
-                                    let _ =
-                                        self.packages.request(PackageOperation::Abort { token });
-                                    self.show_error(error)
-                                }
-                            }
-                        }
-                        for (manifest, path) in std::mem::take(&mut result.activations) {
-                            let id = manifest.id.clone();
-                            if self.extension.load_id(&id).is_some() {
-                                self.show_error(
-                                    self.message("package_plugin_conflict", &[("plugin", id)]),
-                                );
-                                self.begin_package_activation_rollback();
-                                break;
-                            }
-                            let store =
-                                crate::config::user_state_directory().join("packages/store");
-                            match self
-                                .extension
-                                .load(store, path, manifest, self.plugin_limits())
-                            {
-                                Ok(load) => {
-                                    self.package_startup_pending.insert(id.clone(), load);
-                                    self.package_managed_plugins.insert(id, load);
-                                }
-                                Err(error) => {
-                                    self.show_error(error);
-                                    self.begin_package_activation_rollback();
-                                    break;
-                                }
-                            }
-                        }
-                        if let Some((plugin, load)) = self.package_commits.remove(&result.id) {
-                            if self.extension.load_id(&plugin) == Some(load) {
-                                self.package_managed_plugins.insert(plugin, load);
-                            } else {
-                                self.package_startup_rollback_attempted = false;
-                                self.begin_package_activation_rollback();
-                            }
-                        }
-                        if self.package_startup_request == Some(result.id) {
-                            self.package_startup_request = None;
-                        }
-                        let reconcile = matches!(result.operation.as_str(), "rollback" | "remove");
-                        if self.package_startup_rollback == Some(result.id) {
-                            self.package_startup_rollback = None;
-                        }
-                        if reconcile {
-                            let managed = std::mem::take(&mut self.package_managed_plugins);
-                            let mut failed = HashMap::new();
-                            for (id, load) in managed {
-                                match self.extension.unload_generation(&id, load) {
-                                    Ok(()) => self.remove_plugin_contribution_generation(&id, load),
-                                    Err(error) => {
-                                        failed.insert(id, load);
-                                        self.show_error(error);
-                                    }
-                                }
-                            }
-                            self.package_managed_plugins = failed;
-                            self.package_startup_pending.clear();
-                            if !self.package_managed_plugins.is_empty() {
-                                self.begin_package_activation_rollback();
-                                continue;
-                            }
-                            match self.packages.request(PackageOperation::Activations) {
-                                Ok(id) => self.package_startup_request = Some(id),
-                                Err(error) => {
-                                    self.show_error(error);
-                                    self.begin_package_activation_rollback();
-                                }
-                            }
-                        }
-                        if let Some(lock) = result.lock {
-                            let items = lock
-                                .packages
-                                .into_iter()
-                                .enumerate()
-                                .map(|(index, package)| {
-                                    (
-                                        PickerItem {
-                                            id: PickerItemId(format!(
-                                                "package:{index}:{}",
-                                                package.name
-                                            )),
-                                            label: package.name,
-                                            detail: package.version,
-                                            source: "package".into(),
-                                            action: PickerAction::None,
-                                        },
-                                        PickerPayload::Command(String::new()),
-                                    )
-                                })
-                                .collect();
-                            self.install_picker(self.message("package_picker_title", &[]), items);
-                        } else if !prepared_operation && !activation_operation {
-                            self.notify_message(
-                                self.message(
-                                    "package_operation_complete",
-                                    &[
-                                        ("operation", result.operation),
-                                        (
-                                            "count",
-                                            result
-                                                .verified
-                                                .or(result.removed)
-                                                .unwrap_or(0)
-                                                .to_string(),
-                                        ),
-                                    ],
-                                ),
-                                false,
-                            );
-                        }
-                    }
-                    PackageServiceEvent::Failed {
-                        id,
-                        operation,
-                        error,
-                    } => {
-                        if self.package_startup_request == Some(id) {
-                            self.package_startup_request = None;
-                            self.begin_package_activation_rollback();
-                        }
-                        if let Some((plugin, load)) = self.package_commits.remove(&id) {
-                            if self.package_managed_plugins.get(&plugin) == Some(&load) {
-                                self.package_managed_plugins.remove(&plugin);
-                            }
-                            let _ = self.extension.disable_generation(&plugin, load);
-                            self.remove_plugin_contribution_generation(&plugin, load);
-                        }
-                        self.notices.record(
-                            LogLevel::Error,
-                            "packages",
-                            "operation-failed",
-                            BTreeMap::from([
-                                ("operation".into(), operation.clone()),
-                                ("error".into(), error.to_string()),
-                            ]),
-                        );
-                        self.show_error(self.message(
-                            "package_operation_failed",
-                            &[("operation", operation), ("diagnostic", error.to_string())],
-                        ));
-                    }
+        let updates = self.extension.poll_packages(self.plugin_limits());
+        self.apply_extension_updates(updates);
+    }
+    pub(in crate::editor::session) fn apply_extension_updates(
+        &mut self,
+        updates: Vec<crate::editor::session::extensions::ExtensionUpdate>,
+    ) {
+        use crate::editor::session::extensions::ExtensionUpdate;
+        for update in updates {
+            match update {
+                ExtensionUpdate::Remove(plugin, load) => {
+                    self.remove_plugin_contribution_generation(&plugin, load)
+                }
+                ExtensionUpdate::Error(error) => self.show_error(error),
+                ExtensionUpdate::Conflict(plugin) => {
+                    self.show_error(self.message("package_plugin_conflict", &[("plugin", plugin)]))
+                }
+                ExtensionUpdate::Message(key, arguments) => {
+                    self.notify_message(self.message(key, &arguments), false)
+                }
+                ExtensionUpdate::Lock(lock) => {
+                    let items = lock
+                        .packages
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, package)| {
+                            (
+                                PickerItem {
+                                    id: PickerItemId(format!("package:{index}:{}", package.name)),
+                                    label: package.name,
+                                    detail: package.version,
+                                    source: "package".into(),
+                                    action: PickerAction::None,
+                                },
+                                PickerPayload::Command(String::new()),
+                            )
+                        })
+                        .collect();
+                    self.install_picker(self.message("package_picker_title", &[]), items);
+                }
+                ExtensionUpdate::Failed { operation, error } => {
+                    self.notices.record(
+                        LogLevel::Error,
+                        "packages",
+                        "operation-failed",
+                        BTreeMap::from([
+                            ("operation".into(), operation.clone()),
+                            ("error".into(), error.clone()),
+                        ]),
+                    );
+                    self.show_error(self.message(
+                        "package_operation_failed",
+                        &[("operation", operation), ("diagnostic", error)],
+                    ));
                 }
             }
         }

@@ -764,16 +764,11 @@ impl InteractiveApplication {
                 true,
             ),
             DeferredExecution::PrepareRegistryArtifact => {
-                if let Some((metadata, component)) = self.pending_registry_artifact.take()
-                    && let Err(error) = self.packages.request(PackageOperation::PrepareRegistry {
-                        metadata: Box::new(metadata),
-                        component,
-                        limits: self.plugin_limits(),
-                    })
-                {
-                    self.show_error(error)
+                if let Err(error) = self.extension.prepare_artifact(self.plugin_limits()) {
+                    self.show_error(error);
                 }
             }
+
             DeferredExecution::InstallPackage {
                 package_manifest,
                 plugin_manifest,

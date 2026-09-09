@@ -97,8 +97,8 @@ fn inlay_hint_results_are_revision_owned_and_projected_at_exact_unicode_offsets(
         &crate::language::lsp::file_uri(&path),
         crate::language::lsp::LspFeatureResult::InlayHints(Vec::new()),
     );
-    assert_eq!(app.lsp_inlay_empty_retries, 1);
-    assert!(app.lsp_inlay_refresh_due.is_some());
+    assert_eq!(app.language.inlay_retries(), 1);
+    assert!(app.language.inlay_pending());
     app.present_lsp_result(
         "rust-analyzer",
         7,
@@ -114,8 +114,8 @@ fn inlay_hint_results_are_revision_owned_and_projected_at_exact_unicode_offsets(
             },
         ]),
     );
-    assert_eq!(app.lsp_inlay_empty_retries, 2);
-    assert!(app.lsp_inlay_refresh_due.is_some());
+    assert_eq!(app.language.inlay_retries(), 2);
+    assert!(app.language.inlay_pending());
     assert_eq!(app.ui.lsp_inlay_hints[0].label, " -> {unknown}");
     app.present_lsp_result(
         "rust-analyzer",
@@ -138,8 +138,8 @@ fn inlay_hint_results_are_revision_owned_and_projected_at_exact_unicode_offsets(
     assert_eq!(hint.revision, app.state.buffers[buffer].text.revision());
     assert_eq!(hint.position, ByteOffset("let 界".len()));
     assert_eq!(hint.label, ": Value");
-    assert_eq!(app.lsp_inlay_empty_retries, 0);
-    assert!(app.lsp_inlay_refresh_due.is_none());
+    assert_eq!(app.language.inlay_retries(), 0);
+    assert!(!app.language.inlay_pending());
 
     {
         let mut fixture = app.configuration.fixture_snapshot();
@@ -152,9 +152,9 @@ fn inlay_hint_results_are_revision_owned_and_projected_at_exact_unicode_offsets(
         fixture.settings.lsp.inlay_hint_level = crate::config::InlayHintLevel::Max;
         app.configuration.install_fixture(fixture);
     }
-    for retry in 1..=super::LSP_INLAY_HINT_WARMUP_RETRY_LIMIT {
+    for retry in 1..=5 {
         assert!(app.schedule_lsp_inlay_warmup_retry());
-        assert_eq!(app.lsp_inlay_empty_retries, retry);
+        assert_eq!(app.language.inlay_retries(), retry);
     }
     assert!(!app.schedule_lsp_inlay_warmup_retry());
 }
@@ -180,7 +180,7 @@ fn background_inlay_failures_never_replace_the_user_notification() {
         app.configuration.install_fixture(fixture);
     }
     app.notify_message("stable notification".into(), false);
-    app.lsp_inlay_request_owner = Some((42, owner.clone()));
+    app.language.fixture_inlay_source(Some((42, owner.clone())));
 
     app.handle_lsp_request_failure(
         "rust-analyzer".into(),
@@ -188,8 +188,8 @@ fn background_inlay_failures_never_replace_the_user_notification() {
         "textDocument/inlayHint".into(),
         r#"{"code":-32801,"message":"content modified"}"#.into(),
     );
-    assert_eq!(app.lsp_inlay_request_owner, Some((42, owner)));
-    assert_eq!(app.lsp_inlay_empty_retries, 0);
+    assert_eq!(app.language.inlay_source(), Some((42, owner)));
+    assert_eq!(app.language.inlay_retries(), 0);
     assert_eq!(app.ui.notification.as_deref(), Some("stable notification"));
     assert!(!app.ui.notification_error);
 
@@ -199,12 +199,12 @@ fn background_inlay_failures_never_replace_the_user_notification() {
         "textDocument/inlayHint".into(),
         r#"{"code":-32801,"message":"content modified"}"#.into(),
     );
-    assert!(app.lsp_inlay_request_owner.is_none());
-    assert_eq!(app.lsp_inlay_empty_retries, 1);
-    assert!(app.lsp_inlay_refresh_due.is_some());
+    assert!(app.language.inlay_source().is_none());
+    assert_eq!(app.language.inlay_retries(), 1);
+    assert!(app.language.inlay_pending());
     assert_eq!(app.ui.notification.as_deref(), Some("stable notification"));
     assert!(!app.ui.notification_error);
-    assert!(app.lsp_logs.back().is_some_and(|line| {
+    assert!(app.language.logs().back().is_some_and(|line| {
         line.contains("inlay hint refresh failed") && line.contains("content modified")
     }));
 }
@@ -225,24 +225,26 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
         uri: "file:///completion.rs".into(),
         language: "rust".into(),
     };
-    app.lsp_request_generation = 7;
-    app.lsp_projection_owner = Some(owner.clone());
-    app.lsp_completion_owner = Some((7, owner.clone()));
-    app.lsp_completion_items = vec![crate::language::lsp::LspCompletionItem {
-        label: "value".into(),
-        detail: "usize".into(),
-        insert_text: "value".into(),
-        text_edit: None,
-        additional_edits: Vec::new(),
-        kind: None,
-        snippet: false,
-        documentation: Some(crate::language::lsp::LspMarkupContent {
-            kind: crate::language::lsp::LspMarkupKind::Markdown,
-            value: "**value docs**".into(),
-        }),
-        resolve_item: None,
-        resolved: true,
-    }];
+    app.language.fixture_generation(7);
+    app.language.fixture_projection(Some(owner.clone()));
+    app.language
+        .fixture_completion_source(Some((7, owner.clone())));
+    app.language
+        .fixture_completion_items(vec![crate::language::lsp::LspCompletionItem {
+            label: "value".into(),
+            detail: "usize".into(),
+            insert_text: "value".into(),
+            text_edit: None,
+            additional_edits: Vec::new(),
+            kind: None,
+            snippet: false,
+            documentation: Some(crate::language::lsp::LspMarkupContent {
+                kind: crate::language::lsp::LspMarkupKind::Markdown,
+                value: "**value docs**".into(),
+            }),
+            resolve_item: None,
+            resolved: true,
+        }]);
     app.ui.language_completion = Some(crate::ui::LanguageCompletionState {
         items: vec![crate::ui::CompletionItem {
             label: "value".into(),
@@ -260,13 +262,16 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
     assert_eq!(popup.kind, DocumentationPopupKind::Completion);
     assert_eq!(popup.provider, "fake-server");
     assert_eq!(popup.sections[0].markup, DocumentationMarkupKind::Markdown);
-    app.lsp_completion_items[0].documentation = Some(crate::language::lsp::LspMarkupContent {
-        kind: crate::language::lsp::LspMarkupKind::Markdown,
-        value: (0..40)
-            .map(|line| format!("line {line}"))
-            .collect::<Vec<_>>()
-            .join("\n"),
-    });
+    app.language.fixture_documentation(
+        0,
+        Some(crate::language::lsp::LspMarkupContent {
+            kind: crate::language::lsp::LspMarkupKind::Markdown,
+            value: (0..40)
+                .map(|line| format!("line {line}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        }),
+    );
     app.refresh_lsp_completion_documentation();
     assert_eq!(app.active_input_context(), "completion");
     app.handle_configured_key("ctrl-d".parse::<KeyEvent>().expect("Ctrl-d"));
@@ -279,12 +284,12 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
     );
     assert!(app.ui.language_completion.is_some());
 
-    app.lsp_request_generation = 8;
+    app.language.fixture_generation(8);
     app.invoke_mapped_command("lsp.completion.documentation.open");
     assert!(app.ui.documentation_popup.is_none());
     assert!(app.ui.notification_error);
 
-    app.lsp_request_generation = 7;
+    app.language.fixture_generation(7);
     let revision = app.state.buffers[buffer].text.revision();
     app.state.buffers[buffer]
         .text
@@ -301,8 +306,9 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
 
     let mut live_owner = owner;
     live_owner.revision = app.state.buffers[buffer].text.revision();
-    app.lsp_projection_owner = Some(live_owner.clone());
-    app.lsp_completion_owner = Some((7, live_owner));
+    app.language.fixture_projection(Some(live_owner.clone()));
+    app.language
+        .fixture_completion_source(Some((7, live_owner)));
     app.state
         .split_active(crate::editor::Axis::Horizontal, 500)
         .unwrap();

@@ -1,4 +1,6 @@
-//! LSP runtime bookkeeping and accepted document lineage. No mutable editor authority.
+#[path = "projection.rs"]
+mod projection;
+// LSP runtime bookkeeping and accepted document lineage. No mutable editor authority.
 use super::{
     lsp_edits::{CodeActionChoice, CodeActionKey, EditDocument, LspEditSources, SourcePlan},
     workspace_edits::{OriginKey, PreparedFiles},
@@ -11,8 +13,8 @@ use crate::{
     },
     language::lsp::{
         ApplyEditReply, EditContext, LspCapabilities, LspCodeAction, LspDiagnostic, LspDocument,
-        LspError, LspFeature, LspServerConfiguration, LspService, LspSessionLaunch,
-        LspWorkspaceEdit, OwnedLspEvent,
+        LspError, LspServerConfiguration, LspService, LspSessionLaunch, LspWorkspaceEdit,
+        OwnedLspEvent,
     },
     tools::{ToolDefinition, nix_lsp_launch_environment_for_workspace_at, tool_launch_environment},
     workspace::{RootId, WorkspaceTrust},
@@ -117,6 +119,7 @@ pub(in crate::editor::session) struct LspRuntimeState {
 }
 #[derive(Default)]
 pub(super) struct LspSession {
+    projection: projection::Projection,
     service: LspService,
     edits: LspEditSources,
     sessions: HashMap<String, LspRuntimeState>,
@@ -163,17 +166,6 @@ impl LspSession {
     }
     pub(super) fn save(&self, server: &str, document: LspDocument) -> Result<(), LspError> {
         self.service.save(server, document)
-    }
-    pub(super) fn request(
-        &self,
-        server: &str,
-        feature: LspFeature,
-        document: LspDocument,
-        offset: crate::editor::text::ByteOffset,
-        generation: u64,
-    ) -> Result<(), LspError> {
-        self.service
-            .request(server, feature, document, offset, generation)
     }
     pub(super) fn cancel(&self, server: &str, generation: u64) -> Result<(), LspError> {
         self.service.cancel(server, generation)

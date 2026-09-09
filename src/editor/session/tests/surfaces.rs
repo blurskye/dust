@@ -1094,7 +1094,7 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
             1,
             (
                 &app.state.window_version(),
-                &app.plugin_contributions.version(),
+                &app.extension.contributions().version(),
             ),
         )
         .unwrap();
@@ -1112,7 +1112,7 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
         .commit_plugin(
             draft,
             &app.state.window_version(),
-            &app.plugin_contributions.version(),
+            &app.extension.contributions().version(),
         )
         .unwrap();
     app.reconcile_editor_windows();
@@ -1737,14 +1737,14 @@ fn generic_native_window_operations_are_revision_checked_atomic_and_identity_pre
         .plan_focus(
             focus_target,
             &app.state.window_version(),
-            app.plugin_contributions.version(),
+            app.extension.contributions().version(),
         )
         .expect("native focus plan");
     app.window_session
         .accept_native_plan(
             plan,
             &app.state.window_version(),
-            &app.plugin_contributions.version(),
+            &app.extension.contributions().version(),
         )
         .expect("graph-only focus change");
     assert!(app.compositor_projection().is_none());

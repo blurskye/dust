@@ -71,15 +71,15 @@ impl TestSession {
         index: crate::extensions::PluginContributionIndex,
     ) {
         self.application
-            .plugin_contributions
-            .install(index)
+            .extension
+            .fixture_contribution(index)
             .unwrap();
     }
     pub(super) fn remove_catalog_load(&mut self, owner: &str, load: u64) {
         assert!(
             self.application
-                .plugin_contributions
-                .remove_generation(owner, load)
+                .extension
+                .remove_contribution(owner, crate::extensions::PluginLoadId(load))
         );
     }
     pub(super) fn plugin_request(
@@ -96,10 +96,10 @@ impl TestSession {
         let candidate = self
             .application
             .configuration
-            .prepare_builtin_rules(&self.application.plugin_contributions);
+            .prepare_builtin_rules(self.application.extension.contributions());
         self.application
-            .plugin_contributions
-            .install(index)
+            .extension
+            .fixture_contribution(index)
             .unwrap();
         self.application.commit_contribution_candidate(candidate)
     }
@@ -267,7 +267,7 @@ impl TestSession {
         let candidate = self
             .application
             .configuration
-            .prepare_builtin_rules(&self.application.plugin_contributions);
+            .prepare_builtin_rules(self.application.extension.contributions());
         self.application.configuration.toggle_inlay_hints();
         self.application.commit_contribution_candidate(candidate)
     }

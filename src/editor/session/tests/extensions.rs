@@ -13,8 +13,8 @@ fn retained_plugin_window_projection_is_idle_and_generation_owned() {
         "manifest.toml:bytes 0..1".into(),
     )
     .expect("index");
-    app.plugin_contributions
-        .install(index.clone())
+    app.extension
+        .fixture_contribution(index.clone())
         .expect("catalog");
     let request = crate::extensions::PluginUiRequest {
         token: 1,
@@ -91,8 +91,8 @@ fn plugin_host_events_are_snapshot_owned_coalesced_and_idle() {
     let index =
         crate::extensions::index_manifest_contributions(&manifest, 77, "event manifest".into())
             .expect("event index");
-    app.plugin_contributions
-        .install(index.clone())
+    app.extension
+        .fixture_contribution(index.clone())
         .expect("catalog");
     app.extension.install_events(&index).expect("event owner");
     app.refresh_plugin_host_events();
@@ -139,8 +139,8 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
     let index =
         crate::extensions::index_manifest_contributions(&manifest, 77, "provider manifest".into())
             .expect("provider index");
-    app.plugin_contributions
-        .install(index.clone())
+    app.extension
+        .fixture_contribution(index.clone())
         .expect("catalog");
     app.plugin_providers
         .install(&index)
@@ -245,8 +245,8 @@ fn private_plugin_surface_geometry_snapshot_and_idle_projection_are_application_
     let index =
         crate::extensions::index_manifest_contributions(&manifest, 77, "private manifest".into())
             .expect("index");
-    app.plugin_contributions
-        .install(index.clone())
+    app.extension
+        .fixture_contribution(index.clone())
         .expect("catalog");
     let revision = app.window_session.graph().revision().expect("revision");
     let opened = app.apply_plugin_ui_request(
@@ -339,8 +339,8 @@ fn retained_interaction_commands_use_host_focus_scroll_and_mouse_state() {
     let index =
         crate::extensions::index_manifest_contributions(&manifest, 77, "manifest.toml".into())
             .expect("index");
-    app.plugin_contributions
-        .install(index.clone())
+    app.extension
+        .fixture_contribution(index.clone())
         .expect("catalog");
     let revision = app.window_session.graph().revision().expect("revision");
     let event = app.apply_plugin_ui_request(
@@ -468,8 +468,8 @@ fn stale_generation_cleanup_preserves_replacement_ui_events() {
         "replacement manifest".into(),
     )
     .expect("replacement index");
-    app.plugin_contributions
-        .install(replacement)
+    app.extension
+        .fixture_contribution(replacement)
         .expect("replacement catalog");
     app.remove_plugin_contribution_generation("demo", PluginLoadId(77));
     assert!(
@@ -486,7 +486,8 @@ fn stale_generation_cleanup_preserves_replacement_ui_events() {
         Some(2)
     );
     assert_eq!(
-        app.plugin_contributions
+        app.extension
+            .contributions()
             .get("demo")
             .map(|index| index.generation),
         Some(78)
@@ -562,22 +563,22 @@ fn expected_index_failure_before_sibling_index_aborts_the_complete_batch() {
     let deadline = Instant::now() + Duration::from_secs(2);
     while app.extension.load_id("good").is_some()
         || app.extension.load_id("bad").is_some()
-        || !app.pending_index_activation.is_empty()
+        || !app.extension.pending_indexes().is_empty()
     {
         app.process_plugin_events();
         assert!(Instant::now() < deadline, "batch rejection timed out");
         thread::yield_now();
     }
     app.process_plugin_events();
-    assert!(app.plugin_contributions.get("bad").is_none());
-    assert!(app.plugin_contributions.get("good").is_none());
+    assert!(app.extension.contributions().get("bad").is_none());
+    assert!(app.extension.contributions().get("good").is_none());
     assert!(
         app.configuration
             .keymaps()
             .inspect_id("plugin.good.keymap.dashboard")
             .is_none()
     );
-    assert!(app.pending_index_activation.is_empty());
+    assert!(app.extension.pending_indexes().is_empty());
     assert!(!app.extension.is_active_generation("bad", bad_load));
     assert!(!app.extension.is_active_generation("good", good_load));
 }
@@ -650,7 +651,7 @@ fn deferred_user_plugin_move_compiles_after_index_then_falls_back_after_activati
         )
         .expect("index request");
     let deadline = Instant::now() + Duration::from_secs(2);
-    while app.plugin_contributions.get("demo").is_none() {
+    while app.extension.contributions().get("demo").is_none() {
         app.process_plugin_events();
         assert!(Instant::now() < deadline, "static acceptance timed out");
         thread::yield_now();
@@ -679,7 +680,7 @@ fn deferred_user_plugin_move_compiles_after_index_then_falls_back_after_activati
             .inspect_key("dashboard", "x y")
             .is_none()
     );
-    while app.plugin_contributions.get("demo").is_some() {
+    while app.extension.contributions().get("demo").is_some() {
         app.process_plugin_events();
         assert!(Instant::now() < deadline, "activation rollback timed out");
         thread::yield_now();
@@ -853,34 +854,36 @@ fn deferred_batch_abort_and_worker_loss_clear_static_ownership() {
 
     let mut app = app();
     for (owner, load) in [("one", PluginLoadId(41)), ("two", PluginLoadId(42))] {
-        app.plugin_contributions
-            .install(index(owner, load.0))
+        app.extension
+            .fixture_contribution(index(owner, load.0))
             .expect("provisional index");
-        app.pending_index_activation
-            .insert(owner.into(), (load, "0".repeat(64)));
+        app.extension
+            .fixture_pending_index(owner.into(), (load, "0".repeat(64)));
     }
     app.abort_pending_index_batch("expected index failed");
-    assert!(app.pending_index_activation.is_empty());
-    assert!(app.plugin_contributions.get("one").is_none());
-    assert!(app.plugin_contributions.get("two").is_none());
+    assert!(app.extension.pending_indexes().is_empty());
+    assert!(app.extension.contributions().get("one").is_none());
+    assert!(app.extension.contributions().get("two").is_none());
     assert!(
-        app.rejected_plugin_loads
+        app.extension
+            .rejected_indexes()
             .contains(&("one".into(), PluginLoadId(41)))
     );
     assert!(
-        app.rejected_plugin_loads
+        app.extension
+            .rejected_indexes()
             .contains(&("two".into(), PluginLoadId(42)))
     );
 
-    app.plugin_contributions
-        .install(index("three", 43))
+    app.extension
+        .fixture_contribution(index("three", 43))
         .expect("accepted index");
-    app.pending_index_activation
-        .insert("three".into(), (PluginLoadId(43), "0".repeat(64)));
+    app.extension
+        .fixture_pending_index("three".into(), (PluginLoadId(43), "0".repeat(64)));
     app.handle_plugin_worker_stopped(crate::extensions::PluginError::Stopped);
-    assert!(app.pending_index_activation.is_empty());
-    assert!(app.rejected_plugin_loads.is_empty());
-    assert!(app.plugin_contributions.get("three").is_none());
+    assert!(app.extension.pending_indexes().is_empty());
+    assert!(app.extension.rejected_indexes().is_empty());
+    assert!(app.extension.contributions().get("three").is_none());
     assert!(
         app.commands
             .specs()

@@ -224,7 +224,7 @@ impl InteractiveApplication {
                     .and_then(|projection| projection.hit_test(column, row))
                     .and_then(|window| {
                         self.plugin_windows
-                            .input_context(window, &self.plugin_contributions)
+                            .input_context(window, self.extension.contributions())
                     });
                 if self.ui.picker.is_none()
                     && self.input.prompt().is_none()
@@ -240,7 +240,7 @@ impl InteractiveApplication {
                             .plan_focus(
                                 window,
                                 &self.state.window_version(),
-                                self.plugin_contributions.version(),
+                                self.extension.contributions().version(),
                             )
                             .and_then(|plan| self.apply_window_plan(plan))
                             .is_ok()
@@ -365,7 +365,7 @@ impl InteractiveApplication {
         }
         if let Some(context) = self.window_session.graph().focused().and_then(|window| {
             self.plugin_windows
-                .input_context(window, &self.plugin_contributions)
+                .input_context(window, self.extension.contributions())
         }) {
             return context;
         }

@@ -10,14 +10,21 @@ use crate::extensions::{
     PluginStorageResult, PluginStorageService, PluginSubscriptionKind, PluginUiEvent,
     STORAGE_REQUEST_CEILING, STORAGE_RESULT_QUEUE_BYTE_CEILING,
 };
+use crate::tools::{PackageService, RegistryPackageMetadata, RegistryService};
 use crate::{
     editor::EditorState,
     extensions::{
         OwnedPluginEvent, PluginExecutionReply, PluginExecutionRequest, PluginLimits,
-        PluginManifest, PluginProviderBroker, PluginStatus, PluginVirtualRequestLane,
+        PluginProviderBroker, PluginStatus, PluginVirtualRequestLane,
     },
 };
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    path::PathBuf,
+};
+#[path = "integration.rs"]
+mod integration;
+pub(super) use integration::{ExtensionUpdate, RegistryUpdate};
 
 pub(in crate::editor::session) struct InvocationContext<'a> {
     pub editor: &'a EditorState,
@@ -32,6 +39,22 @@ pub(in crate::editor::session) struct InvocationContext<'a> {
 type BufferObservation = (u64, u64, usize, usize, usize, u8);
 pub(in crate::editor::session) type HostObservation = (u64, String, Option<BufferObservation>, u64);
 pub(super) struct ExtensionSession {
+    plugin_contributions: PluginContributionCatalog,
+    pending_index_activation: BTreeMap<String, (PluginLoadId, String)>,
+    rejected_plugin_loads: BTreeSet<(String, PluginLoadId)>,
+    packages: PackageService,
+    registry: RegistryService,
+    registry_intents: HashMap<u64, bool>,
+    pending_registry_artifact: Option<(RegistryPackageMetadata, Vec<u8>)>,
+    package_prepared: HashMap<String, (PluginLoadId, u64)>,
+    package_commits: HashMap<u64, (String, PluginLoadId)>,
+    package_startup_pending: HashMap<String, PluginLoadId>,
+    package_managed_plugins: HashMap<String, PluginLoadId>,
+    package_startup_request: Option<u64>,
+    package_startup_rollback: Option<u64>,
+    package_startup_rollback_attempted: bool,
+    plugin_worker_reported: bool,
+    package_store: PathBuf,
     manager: PluginManager,
     edits: PluginEditSources,
     ui: BTreeMap<(String, PluginLoadId), Vec<PluginUiEvent>>,
@@ -41,8 +64,29 @@ pub(super) struct ExtensionSession {
     results: BTreeMap<(String, PluginLoadId), Vec<PluginStorageResult>>,
 }
 impl ExtensionSession {
-    pub(super) fn new(root: PathBuf, capacity: usize) -> Self {
+    pub(super) fn new(
+        root: PathBuf,
+        capacity: usize,
+        package_root: PathBuf,
+        registry: RegistryService,
+    ) -> Self {
         Self {
+            plugin_contributions: PluginContributionCatalog::default(),
+            pending_index_activation: BTreeMap::new(),
+            rejected_plugin_loads: BTreeSet::new(),
+            registry_intents: HashMap::new(),
+            pending_registry_artifact: None,
+            package_prepared: HashMap::new(),
+            package_commits: HashMap::new(),
+            package_startup_pending: HashMap::new(),
+            package_managed_plugins: HashMap::new(),
+            package_startup_request: None,
+            package_startup_rollback: None,
+            package_startup_rollback_attempted: false,
+            plugin_worker_reported: false,
+            registry,
+            package_store: package_root.join("store"),
+            packages: PackageService::start(package_root, 8, 16 * 1024 * 1024, 64 * 1024 * 1024),
             manager: PluginManager::start(capacity),
             edits: PluginEditSources::default(),
             ui: BTreeMap::new(),
@@ -72,23 +116,6 @@ impl ExtensionSession {
         self.manager
             .index_from_store(plugin, store, manifest, component, limits)
     }
-    pub(super) fn load(
-        &mut self,
-        store: PathBuf,
-        path: PathBuf,
-        manifest: PluginManifest,
-        limits: PluginLimits,
-    ) -> Result<PluginLoadId, PluginError> {
-        self.manager.load(store, path, manifest, limits)
-    }
-    pub(super) fn activate_indexed(
-        &mut self,
-        plugin: &str,
-        load: PluginLoadId,
-        checksum: String,
-    ) -> Result<(), PluginError> {
-        self.manager.activate_indexed(plugin, load, checksum)
-    }
     pub(super) fn disable(&mut self, plugin: &str) -> Result<(), PluginError> {
         self.manager.disable(plugin)
     }
@@ -98,13 +125,6 @@ impl ExtensionSession {
         load: PluginLoadId,
     ) -> Result<(), PluginError> {
         self.manager.disable_generation(plugin, load)
-    }
-    pub(super) fn unload_generation(
-        &mut self,
-        plugin: &str,
-        load: PluginLoadId,
-    ) -> Result<(), PluginError> {
-        self.manager.unload_generation(plugin, load)
     }
     pub(super) fn poll_owned(&mut self) -> Result<Vec<OwnedPluginEvent>, PluginError> {
         self.manager.poll_owned()
@@ -267,12 +287,16 @@ impl ExtensionSession {
         self.storage.remove_generation(plugin, load);
         self.observation = None;
     }
-    pub(super) fn reset_runtime(&mut self, catalog: &PluginContributionCatalog) {
+    pub(super) fn reset_runtime(&mut self) {
         self.ui.clear();
         self.results.clear();
         self.events.reset_runtime();
         self.observation = None;
-        for index in catalog.ordered().filter(|index| index.storage.is_some()) {
+        for index in self
+            .plugin_contributions
+            .ordered()
+            .filter(|index| index.storage.is_some())
+        {
             self.storage
                 .reset_generation(&index.owner, PluginLoadId(index.generation));
         }
@@ -328,7 +352,6 @@ impl ExtensionSession {
     }
     pub(super) fn observe(
         &mut self,
-        catalog: &PluginContributionCatalog,
         observation: HostObservation,
         roots: usize,
         retained: usize,
@@ -337,7 +360,7 @@ impl ExtensionSession {
         if self.observation.as_ref() == Some(&observation) {
             return;
         }
-        for index in catalog.ordered() {
+        for index in self.plugin_contributions.ordered() {
             let plugin = &index.owner;
             let load = PluginLoadId(index.generation);
             let _ = self.events.observe(

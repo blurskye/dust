@@ -650,15 +650,7 @@ impl InteractiveApplication {
 
     pub(in crate::editor::session) fn clear_lsp_server_ownership(&mut self, server: &str) {
         self.language.forget_synced(&server);
-        self.lsp_semantic_raw
-            .retain(|(candidate, _), _| candidate != server);
-        self.lsp_pull_ids
-            .retain(|(candidate, _), _| candidate != server);
-        for prefix in ["lsp.", "lsp-pull:"] {
-            if let Ok(owner) = DiagnosticOwner::new(format!("{prefix}{server}")) {
-                self.diagnostics.clear_owner(&owner);
-            }
-        }
+        self.language.retire_projection_server(server);
     }
 
     pub(in crate::editor::session) fn detach_lsp_documents(
@@ -670,8 +662,7 @@ impl InteractiveApplication {
         for (server, uri) in documents {
             let _ = self.language.close(&server, uri.clone());
             self.language.invalidate_document(&server, buffer);
-            self.lsp_semantic_raw.remove(&(server.clone(), uri.clone()));
-            self.lsp_pull_ids.remove(&(server.clone(), uri.clone()));
+            self.language.retire_projection_document(&server, &uri);
             for prefix in ["lsp.", "lsp-pull:"] {
                 if let Ok(owner) = DiagnosticOwner::new(format!("{prefix}{server}")) {
                     self.diagnostics.clear_owner_uri(&owner, &uri);
