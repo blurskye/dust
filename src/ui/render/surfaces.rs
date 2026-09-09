@@ -209,9 +209,20 @@ pub(super) fn render_picker(
                 .set_cell(x, divider_y, &horizontal.to_string(), Style::Border);
         }
     }
-    frame
-        .grid
-        .put_text(left + 2, top, &format!(" {} ", picker.title), Style::Accent);
+    frame.grid.put_text_clipped(
+        left + 2,
+        top,
+        &format!(" {} ", picker.title),
+        Style::Accent,
+        list_right,
+    );
+    frame.grid.put_text_clipped(
+        left + 2,
+        top + height - 1,
+        &format!(" {} ", picker.input_hint),
+        Style::Muted,
+        list_right,
+    );
     if let Some(preview) = preview {
         let (title_x, title_y, title_right) = if let Some(divider) = divider {
             (divider + 2, top, left + width - 1)
@@ -228,9 +239,7 @@ pub(super) fn render_picker(
     }
     let content_left = left + 2;
     let query_y = top + 1;
-    frame
-        .grid
-        .put_text(content_left, query_y, &picker.query, Style::Default);
+
     let count = format!(
         "{}/{}",
         picker
@@ -246,6 +255,29 @@ pub(super) fn render_picker(
     let status_width =
         u16::try_from(text_width(&status, config.editor.ambiguous_width)).unwrap_or(0);
     let status_x = list_right.saturating_sub(status_width).saturating_sub(1);
+    let query_right = if status_x > content_left {
+        status_x.saturating_sub(1)
+    } else {
+        list_right
+    };
+    // Keep long queries inside their list, never over the count or preview.
+    let query_width = usize::from(query_right.saturating_sub(content_left).saturating_sub(1));
+    let mut start = picker.query.len();
+    let mut used = 0usize;
+    for (byte, grapheme) in
+        unicode_segmentation::UnicodeSegmentation::grapheme_indices(picker.query.as_str(), true)
+            .rev()
+    {
+        used = used.saturating_add(text_width(grapheme, config.editor.ambiguous_width));
+        if used > query_width {
+            break;
+        }
+        start = byte;
+    }
+    let query = &picker.query[start..];
+    frame
+        .grid
+        .put_text_clipped(content_left, query_y, query, Style::Default, query_right);
     if status_x > content_left {
         frame
             .grid
@@ -370,10 +402,10 @@ pub(super) fn render_picker(
         }
     }
     let cursor_x = content_left.saturating_add(
-        u16::try_from(text_width(&picker.query, config.editor.ambiguous_width)).unwrap_or(0),
+        u16::try_from(text_width(query, config.editor.ambiguous_width)).unwrap_or(0),
     );
     frame.cursor = Some((
-        cursor_x.min(list_right.saturating_sub(1)),
+        cursor_x.min(query_right.saturating_sub(1)),
         query_y,
         cursor_style(config.ui.cursor.prompt),
     ));

@@ -87,6 +87,27 @@ impl SearchSession {
         scope: WorkspaceVersion,
         configuration: u64,
     ) -> Result<PickerEpoch, &'static str> {
+        // Stream refreshes replace rows, not the user's interaction. A new search
+        // invocation closes the old picker before admitting its producer.
+        let previous = self
+            .picker
+            .interaction
+            .as_ref()
+            .filter(|picker| {
+                picker.source == (scope.clone(), configuration)
+                    && matches!(
+                        (picker.origin, content.origin),
+                        (PickerOrigin::Files, PickerOrigin::Files)
+                            | (PickerOrigin::Grep, PickerOrigin::Grep)
+                    )
+            })
+            .map(|picker| {
+                (
+                    picker.epoch.clone(),
+                    picker.state.query().to_owned(),
+                    picker.state.selected_item().map(|item| item.id.clone()),
+                )
+            });
         let generation = self
             .picker
             .generation
@@ -107,7 +128,26 @@ impl SearchSession {
             }),
             content.complete,
         );
-        state.set_unfiltered_query(content.query);
+        let mut epoch = PickerEpoch(Arc::new(()));
+        let mut query = content.query;
+        let mut selected = None;
+        if let Some((original, previous_query, previous_selection)) = previous {
+            epoch = original;
+            if matches!(content.origin, PickerOrigin::Files) {
+                query = previous_query.clone();
+            }
+            if query == previous_query {
+                selected = previous_selection;
+            }
+        }
+        if matches!(content.origin, PickerOrigin::Files) {
+            state.set_query(query);
+        } else {
+            state.set_unfiltered_query(query);
+        }
+        if let Some(selected) = selected {
+            state.select_id(&selected);
+        }
         if !matches!(content.origin, PickerOrigin::Files) {
             self.cancel_files();
         }
@@ -116,7 +156,6 @@ impl SearchSession {
             self.live = false;
             self.query.clear();
         }
-        let epoch = PickerEpoch(Arc::new(()));
         self.picker.interaction = Some(PickerInteraction {
             state,
             payloads,
@@ -160,6 +199,9 @@ impl SearchSession {
     }
     pub(in crate::editor::session) fn picker(&self) -> Option<&PickerState> {
         self.picker.interaction.as_ref().map(|picker| &picker.state)
+    }
+    pub(in crate::editor::session) fn picker_epoch(&self) -> Option<&PickerEpoch> {
+        self.picker.interaction.as_ref().map(|picker| &picker.epoch)
     }
     pub(in crate::editor::session) fn owns_picker_epoch(&self, epoch: &PickerEpoch) -> bool {
         self.picker
@@ -249,6 +291,7 @@ impl SearchSession {
         let picker = self.picker.interaction.as_ref()?;
         let presentation = picker.state.presentation();
         Some(PickerUiState {
+            input_hint: String::new(),
             surface: picker.surface,
             title: presentation.title,
             query: presentation.query,

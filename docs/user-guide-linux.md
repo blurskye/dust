@@ -78,6 +78,10 @@ Dust exposes the daily Telescope/Snacks-style workflows through its bounded pick
 - `Space s s` / `Space s S`: document/workspace symbols;
 - `Space s j` / `Space s m`: jumps/marks.
 
+Pickers open in **Insert** mode: every letter (including `j` and `k`) types into the query; arrow keys move through results and Enter accepts. Escape switches to **Picker Normal**, where `j`/`k` and arrows navigate, `i` returns to query editing, and Escape closes. `Ctrl-C` closes directly from either mode. The lower border shows the effective mode and configured keys. These modes do not change the underlying editor mode. Files preserves text entered before its first batch; streamed results retain the selected item while it remains present.
+
+Controls are configurable in the `picker` (Insert) and `picker_normal` contexts. The existing `j`/`k` mapping IDs now belong to `picker_normal`; the existing Insert-context Escape mapping invokes `picker.mode.normal`. `picker.cancel` remains the direct-close command. Workspace-edit review is deliberately separate: its existing toggle/apply/reject controls are not query editing.
+
 `Space f r` opens checked workspace replacement. The full parity inventory and missing Telescope sources are tracked in [`plans/neovim-feature-matrix.md`](plans/neovim-feature-matrix.md).
 
 ## Diagnostics and LSP

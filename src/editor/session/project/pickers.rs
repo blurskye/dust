@@ -44,6 +44,7 @@ impl InteractiveApplication {
             .search
             .workspace_picker()
             .filter(|id| !matches!(origin, PickerOrigin::WorkspaceEdit(current) if current == *id));
+        let previous_epoch = self.search.picker_epoch().cloned();
         let epoch = match self.search.install_picker(
             PickerContent {
                 surface,
@@ -67,7 +68,9 @@ impl InteractiveApplication {
             PickerOrigin::PluginProvider(request) => Some(request),
             _ => None,
         });
-        self.input.capture_changed();
+        if !previous_epoch.is_some_and(|epoch| self.search.owns_picker_epoch(&epoch)) {
+            self.input.begin_picker();
+        }
         // A refused replacement must not destroy the still-valid old preview.
         if let Some(id) = retired_preview {
             self.retire_workspace_picker(id);
@@ -465,6 +468,49 @@ impl InteractiveApplication {
     pub(in crate::editor::session) fn sync_picker_ui(&mut self) {
         self.retire_stale_picker();
         self.ui.picker = self.search.picker_projection();
+        let context = self.active_input_context();
+        if let Some(picker) = &mut self.ui.picker {
+            let (mode, commands): (&str, &[(&str, &str)]) =
+                if self.search.workspace_picker().is_some() {
+                    (
+                        "Review",
+                        &[
+                            ("workspace.edit.toggle", "toggle"),
+                            ("workspace.edit.accept", "apply"),
+                            ("workspace.edit.reject", "reject"),
+                        ],
+                    )
+                } else if self.input.picker_normal() {
+                    (
+                        "Normal",
+                        &[
+                            ("picker.mode.insert", "edit"),
+                            ("picker.accept", "accept"),
+                            ("picker.cancel", "close"),
+                        ],
+                    )
+                } else {
+                    (
+                        "Insert",
+                        &[
+                            ("picker.mode.normal", "normal"),
+                            ("picker.accept", "accept"),
+                            ("picker.cancel", "close"),
+                        ],
+                    )
+                };
+            let hints = commands
+                .iter()
+                .filter_map(|(command, action)| {
+                    self.configuration
+                        .keymaps()
+                        .inspect(&context, command)
+                        .map(|binding| format!("{} {action}", binding.keys))
+                })
+                .collect::<Vec<_>>()
+                .join(" · ");
+            picker.input_hint = format!("{mode} · {hints}");
+        }
         self.sync_picker_preview();
         if let Some(picker) = &mut self.ui.picker {
             picker.preview.clone_from(self.search.preview());

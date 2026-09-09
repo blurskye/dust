@@ -303,6 +303,8 @@ pub struct PickerPreview {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PickerUiState {
+    /// Effective interaction mode and hints derived from the accepted keymaps.
+    pub input_hint: String,
     pub surface: PickerSurfaceKind,
     pub title: String,
     pub query: String,

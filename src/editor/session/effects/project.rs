@@ -113,6 +113,13 @@ impl InteractiveApplication {
             AppEffect::PickerMove(direction) => self.picker_move(direction),
             AppEffect::PickerAccept => self.accept_picker(),
             AppEffect::PickerCancel => self.close_picker(),
+            AppEffect::PickerNormal | AppEffect::PickerInsertMode => {
+                if self.search.picker().is_some() && self.search.workspace_picker().is_none() {
+                    self.input
+                        .set_picker_normal(matches!(effect, AppEffect::PickerNormal));
+                    self.sync_picker_ui();
+                }
+            }
             AppEffect::WorkspaceEditToggle => {
                 self.retire_stale_picker();
                 let selected = self
@@ -211,7 +218,7 @@ impl InteractiveApplication {
                 "Files".into(),
                 Vec::new(),
                 String::new(),
-                true,
+                false,
                 PickerOrigin::Files,
             ),
             Err(error) => self.show_error(error),
@@ -227,6 +234,7 @@ impl InteractiveApplication {
         let entries = match result {
             Ok(entries) => entries,
             Err(error) => {
+                self.close_picker();
                 self.show_error(error);
                 return;
             }
@@ -263,7 +271,7 @@ impl InteractiveApplication {
                 "Files".into(),
                 items,
                 String::new(),
-                true,
+                !self.search.files_pending(),
                 PickerOrigin::Files,
             ),
             Err(error) => self.show_error(error.to_string()),
@@ -336,8 +344,12 @@ impl InteractiveApplication {
                         self.open_workspace_search_picker();
                     }
                 }
-                SearchUpdate::Failed(error) => self
-                    .show_error(self.message("workspace_search_failed", &[("diagnostic", error)])),
+                SearchUpdate::Failed(error) => {
+                    self.close_picker();
+                    self.show_error(
+                        self.message("workspace_search_failed", &[("diagnostic", error)]),
+                    );
+                }
                 SearchUpdate::Complete {
                     intent: Intent::Find,
                     files,

@@ -58,7 +58,6 @@ impl SearchSession {
     pub(in crate::editor::session) fn pending(&self) -> bool {
         self.generation.is_some()
     }
-    #[cfg(test)]
     pub(in crate::editor::session) fn files_pending(&self) -> bool {
         self.file_generation.is_some()
     }
@@ -133,11 +132,12 @@ impl SearchSession {
             self.cancel_files();
             return None;
         }
+        let mut changed = false;
         for _ in 0..256 {
             self.file_generation?;
             let event = match self.files.poll_event() {
                 Ok(Some(event)) => event,
-                Ok(None) => return None,
+                Ok(None) => break,
                 Err(error) => {
                     self.cancel_files();
                     return Some(Err(error.into()));
@@ -148,7 +148,10 @@ impl SearchSession {
                     generation,
                     entries,
                     ..
-                } if Some(generation) == self.file_generation => self.file_entries.extend(entries),
+                } if Some(generation) == self.file_generation => {
+                    self.file_entries.extend(entries);
+                    changed = true;
+                }
                 WorkspaceFileEvent::Complete { generation, .. }
                     if Some(generation) == self.file_generation =>
                 {
@@ -171,7 +174,7 @@ impl SearchSession {
                 _ => {}
             }
         }
-        None
+        changed.then(|| Ok(self.file_entries.clone()))
     }
     pub(in crate::editor::session) fn start(
         &mut self,

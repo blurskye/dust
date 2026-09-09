@@ -1247,7 +1247,24 @@ fn plugin_workspace_preview_uses_invocation_source_and_retires_on_dismissal() {
     endpoint.reply(&captured, proposed(0));
     app.process_plugin_events();
     assert!(app.workspace_edits.proposal().is_some());
-    // Enter toggles without dismissing the source-bound preview.
+    assert_eq!(app.active_input_context(), "workspace_edit");
+    assert!(
+        app.ui
+            .picker
+            .as_ref()
+            .unwrap()
+            .input_hint
+            .starts_with("Review")
+    );
+    for key in ["i", "j", "k"] {
+        app.handle_configured_key(key.parse().unwrap());
+    }
+    app.process_effect(AppEffect::PickerInsertMode);
+    assert_eq!(app.active_input_context(), "workspace_edit");
+    assert_eq!(app.ui.picker.as_ref().unwrap().query, "");
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "éab");
+    // The picker API toggles without dismissing the source-bound preview;
+    // the review keymap retains its explicit apply/reject commands.
     app.accept_picker();
     assert!(!app.workspace_edits.proposal().unwrap().files[0].selected);
     app.accept_picker();

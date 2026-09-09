@@ -12,6 +12,7 @@ const BUILTIN_SURFACES: &[&str] = &[
     "completion",
     "documentation",
     "picker",
+    "picker_normal",
     "workspace_edit",
     "explorer",
     "panel",

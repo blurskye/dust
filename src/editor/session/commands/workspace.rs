@@ -169,6 +169,16 @@ pub(super) fn register_commands(
         ),
         ("picker.cancel", "Close picker", AppEffect::PickerCancel),
         (
+            "picker.mode.normal",
+            "Navigate picker results",
+            AppEffect::PickerNormal,
+        ),
+        (
+            "picker.mode.insert",
+            "Edit picker query",
+            AppEffect::PickerInsertMode,
+        ),
+        (
             "workspace.edit.toggle",
             "Toggle workspace edit file",
             AppEffect::WorkspaceEditToggle,

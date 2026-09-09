@@ -245,6 +245,31 @@ impl TestSession {
         assert_eq!(self.application.search.matches().len(), 45);
         self.application.reconcile_editor_windows();
     }
+    pub(super) fn start_files_fixture(&mut self) {
+        for name in ["jack-1.txt", "jack-2.txt", "other.txt"] {
+            std::fs::write(self._workspace.path().join(name), "jack\n").unwrap();
+        }
+        self.application.start_workspace_file_picker();
+    }
+    pub(super) fn finish_search(&mut self) {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while self.application.search.files_pending() || self.application.search.pending() {
+            self.application.process_workspace_file_events();
+            self.application.process_workspace_search_events();
+            assert!(Instant::now() < deadline, "search fixture timed out");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        super::wait_vfs(&mut self.application);
+    }
+    pub(super) fn open_grep(&mut self) {
+        self.application.open_live_workspace_search();
+    }
+    pub(super) fn paste(&mut self, text: &str) {
+        self.application.handle_event(UiEvent::Paste(text.into()));
+    }
+    pub(super) fn editor_mode(&self) -> crate::editor::EditorMode {
+        self.application.state.views[self.application.state.active_view.unwrap()].mode
+    }
     pub(super) fn key(&mut self, key: &str) {
         self.application.handle_event(UiEvent::Key {
             key: key.parse().unwrap(),

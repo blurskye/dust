@@ -113,7 +113,12 @@ impl PickerState {
     }
 
     pub fn backspace_query(&mut self) {
-        self.query.pop();
+        if let Some((last, _)) =
+            unicode_segmentation::UnicodeSegmentation::grapheme_indices(self.query.as_str(), true)
+                .next_back()
+        {
+            self.query.truncate(last);
+        }
         self.recompute();
     }
 

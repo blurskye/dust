@@ -356,6 +356,91 @@ fn picker_epochs_scope_and_close_preserve_only_current_interaction() {
 }
 
 #[test]
+fn streaming_picker_keeps_query_selection_and_epoch_but_not_foreign_actions() {
+    use crate::{
+        ui::PickerSurfaceKind,
+        workspace::{PickerAction, PickerItem, PickerItemId},
+    };
+    let root = tempfile::tempdir().unwrap();
+    let source = scope(root.path());
+    let mut owner = SearchSession::default();
+    let content = |origin, ids: &[&str], query: &str| PickerContent {
+        surface: PickerSurfaceKind::Generic,
+        origin,
+        title: "stream".into(),
+        items: ids
+            .iter()
+            .map(|id| {
+                (
+                    PickerItem {
+                        id: PickerItemId((*id).into()),
+                        label: (*id).into(),
+                        detail: String::new(),
+                        source: String::new(),
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::Command((*id).into()),
+                )
+            })
+            .collect(),
+        query: query.into(),
+        complete: false,
+    };
+    for origin in [PickerOrigin::Files, PickerOrigin::Grep] {
+        owner.close_picker();
+        let epoch = owner
+            .install_picker(content(origin, &[], ""), 3, source.clone(), 1)
+            .unwrap();
+        owner.picker_insert("jack");
+        owner
+            .install_picker(
+                content(origin, &["jack-a", "jack-b", "other"], "jack"),
+                3,
+                source.clone(),
+                1,
+            )
+            .unwrap();
+        assert!(owner.owns_picker_epoch(&epoch));
+        owner.picker_move(1, false);
+        assert_eq!(
+            owner.picker().unwrap().selected_item().unwrap().id.0,
+            "jack-b"
+        );
+        owner
+            .install_picker(
+                content(
+                    origin,
+                    &["jack-c", "jack-b", "jack-b", "jack-a", "unreachable"],
+                    "jack",
+                ),
+                3,
+                source.clone(),
+                1,
+            )
+            .unwrap();
+        assert!(owner.owns_picker_epoch(&epoch));
+        assert_eq!(owner.picker().unwrap().query(), "jack");
+        assert_eq!(
+            owner.picker().unwrap().selected_item().unwrap().id.0,
+            "jack-b"
+        );
+        assert!(
+            matches!(owner.selected_picker_payload(), Some(PickerPayload::Command(id)) if id == "jack-b")
+        );
+        owner
+            .install_picker(content(origin, &["fresh"], ""), 3, source.clone(), 2)
+            .unwrap();
+        assert!(!owner.owns_picker_epoch(&epoch));
+        assert_eq!(owner.picker().unwrap().query(), "");
+        assert!(
+            matches!(owner.selected_picker_payload(), Some(PickerPayload::Command(id)) if id == "fresh")
+        );
+        owner.close_picker();
+        assert!(owner.selected_picker_payload().is_none());
+    }
+}
+
+#[test]
 fn picker_rows_and_actions_share_first_wins_bounds_and_replacement() {
     use crate::{
         ui::PickerSurfaceKind,

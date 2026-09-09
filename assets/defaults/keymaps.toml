@@ -2833,7 +2833,7 @@ command = "lsp.completion.trigger"
 
 [[keymap]]
 id = "builtin.picker.surface.picker-next.j"
-context = "picker"
+context = "picker_normal"
 keys = "j"
 command = "picker.next"
 
@@ -2845,7 +2845,7 @@ command = "picker.next"
 
 [[keymap]]
 id = "builtin.picker.surface.picker-previous.k"
-context = "picker"
+context = "picker_normal"
 keys = "k"
 command = "picker.previous"
 
@@ -2865,7 +2865,49 @@ command = "picker.accept"
 id = "builtin.picker.surface.picker-cancel.escape"
 context = "picker"
 keys = "escape"
+command = "picker.mode.normal"
+
+[[keymap]]
+id = "builtin.picker.surface.picker-cancel.ctrl-c"
+context = "picker"
+keys = "ctrl-c"
 command = "picker.cancel"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-next.down"
+context = "picker_normal"
+keys = "down"
+command = "picker.next"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-previous.up"
+context = "picker_normal"
+keys = "up"
+command = "picker.previous"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-accept.enter"
+context = "picker_normal"
+keys = "enter"
+command = "picker.accept"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-cancel.escape"
+context = "picker_normal"
+keys = "escape"
+command = "picker.cancel"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-cancel.ctrl-c"
+context = "picker_normal"
+keys = "ctrl-c"
+command = "picker.cancel"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-mode-insert.i"
+context = "picker_normal"
+keys = "i"
+command = "picker.mode.insert"
 
 [[keymap]]
 id = "builtin.picker.surface.picker-backspace.backspace"

@@ -338,7 +338,12 @@ impl InteractiveApplication {
             return "workspace_edit".into();
         }
         if self.ui.picker.is_some() {
-            return "picker".into();
+            return if self.input.picker_normal() {
+                "picker_normal"
+            } else {
+                "picker"
+            }
+            .into();
         }
         if self.ui.tool_menu.is_some() {
             return "tool_manager".into();

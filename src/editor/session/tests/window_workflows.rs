@@ -196,6 +196,20 @@ fn stacked_picker_selected_row_and_late_preview_share_the_painted_capacity_after
         Some(18)
     );
     session.key("escape");
+    assert!(
+        session
+            .projection()
+            .picker
+            .as_ref()
+            .unwrap()
+            .input_hint
+            .starts_with("Normal")
+    );
+    assert_eq!(
+        session.projection().picker.as_ref().unwrap().selected,
+        Some(18)
+    );
+    session.key("escape");
     assert!(session.projection().picker.is_none());
     assert!(session.projection().surface_content.picker.is_none());
     session.grep_snapshot_fixture();

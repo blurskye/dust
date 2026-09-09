@@ -60,6 +60,7 @@ fn dashboard_and_picker_are_stable_graph_overlays_with_projected_geometry() {
         .open_text(crate::editor::text::TextBuffer::from_text("editor"), None);
     app.set_dashboard_visibility(false);
     app.ui.picker = Some(crate::ui::PickerUiState {
+        input_hint: String::new(),
         surface: crate::ui::PickerSurfaceKind::Generic,
         title: "Search".into(),
         query: "needle".into(),

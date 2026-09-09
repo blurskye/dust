@@ -43,6 +43,7 @@ pub(super) struct InputSession {
     pending: Option<PendingKeymap>,
     hints: Option<KeyHintUiState>,
     prompt: Option<crate::ui::PromptState>,
+    picker_normal: bool,
     documentation: Option<crate::ui::DocumentationPopupState>,
     command_history: Vec<String>,
     search_history: Vec<String>,
@@ -64,6 +65,19 @@ pub(super) struct InputSession {
 }
 
 impl InputSession {
+    pub(in crate::editor::session) fn begin_picker(&mut self) {
+        self.picker_normal = false;
+        self.cancel_pending();
+        self.cancel_mapping();
+        self.capture_changed();
+    }
+    pub(in crate::editor::session) fn picker_normal(&self) -> bool {
+        self.picker_normal
+    }
+    pub(in crate::editor::session) fn set_picker_normal(&mut self, normal: bool) {
+        self.picker_normal = normal;
+        self.cancel_mapping();
+    }
     pub(in crate::editor::session) fn capture_epoch(&self) -> std::sync::Arc<()> {
         self.capture_epoch.clone()
     }
@@ -84,6 +98,7 @@ impl InputSession {
             pending: None,
             hints: None,
             prompt: None,
+            picker_normal: false,
             documentation: None,
             command_history: Vec::new(),
             search_history: Vec::new(),

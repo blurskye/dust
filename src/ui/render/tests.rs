@@ -1892,6 +1892,7 @@ fn generic_picker_is_centered_filtered_presentation_with_configured_markers() {
     let ui = UiState {
         dashboard: true,
         picker: Some(super::PickerUiState {
+            input_hint: "Insert · escape normal".into(),
             surface: super::PickerSurfaceKind::Generic,
             title: "Commands".into(),
             query: "health".into(),
@@ -1928,6 +1929,7 @@ fn picker_stacks_preview_when_two_readable_columns_do_not_fit() {
     let ui = UiState {
         dashboard: true,
         picker: Some(super::PickerUiState {
+            input_hint: "Insert · escape normal".into(),
             surface: super::PickerSurfaceKind::Generic,
             title: "Grep".into(),
             query: "needle".into(),

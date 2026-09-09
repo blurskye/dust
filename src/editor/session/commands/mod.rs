@@ -274,6 +274,8 @@ pub enum AppEffect {
     PickerMove(i8),
     PickerAccept,
     PickerCancel,
+    PickerNormal,
+    PickerInsertMode,
     WorkspaceEditToggle,
     WorkspaceEditAccept,
     WorkspaceEditReject,

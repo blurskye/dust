@@ -2,6 +2,131 @@ use super::driver::TestSession;
 use crate::config::LoadedConfig;
 use std::time::Duration;
 
+#[test]
+fn picker_modes_preserve_early_query_editor_mode_and_direct_cancel() {
+    let mut session = TestSession::new(crate::config::load_bundled_config());
+    session.new_buffer();
+    session.key("i");
+    assert_eq!(session.editor_mode(), crate::editor::EditorMode::Insert);
+    session.start_files_fixture();
+    assert!(session.projection().picker.as_ref().unwrap().loading);
+    for key in ["j", "a", "c", "k"] {
+        session.key(key);
+    }
+    assert_eq!(session.projection().picker.as_ref().unwrap().query, "jack");
+    session.key("escape");
+    assert!(
+        session
+            .projection()
+            .picker
+            .as_ref()
+            .unwrap()
+            .input_hint
+            .starts_with("Normal")
+    );
+    session.finish_search();
+    let picker = session.projection().picker.as_ref().unwrap();
+    assert_eq!(picker.query, "jack");
+    assert_eq!(picker.rows.len(), 2);
+    assert!(!picker.loading);
+    assert!(picker.input_hint.starts_with("Normal"));
+    for (key, selected) in [("j", 1), ("up", 0), ("down", 1), ("k", 0)] {
+        session.key(key);
+        assert_eq!(
+            session.projection().picker.as_ref().unwrap().selected,
+            Some(selected)
+        );
+        assert_eq!(session.projection().picker.as_ref().unwrap().query, "jack");
+    }
+    session.paste("not a normal-mode query");
+    assert_eq!(session.projection().picker.as_ref().unwrap().query, "jack");
+    session.key("i");
+    session.key("down");
+    assert_eq!(
+        session.projection().picker.as_ref().unwrap().selected,
+        Some(1)
+    );
+    session.key("up");
+    session.paste("e\u{301}");
+    session.key("backspace");
+    assert_eq!(session.projection().picker.as_ref().unwrap().query, "jack");
+    assert!(
+        session
+            .projection()
+            .picker
+            .as_ref()
+            .unwrap()
+            .input_hint
+            .starts_with("Insert")
+    );
+    session.key("ctrl-c");
+    assert!(session.projection().picker.is_none());
+    assert_eq!(session.editor_mode(), crate::editor::EditorMode::Insert);
+    session.start_files_fixture();
+    session.key("escape");
+    session.key("ctrl-c");
+    session.finish_search();
+    assert!(
+        session.projection().picker.is_none(),
+        "late files must not reopen a cancelled picker"
+    );
+    assert_eq!(session.editor_mode(), crate::editor::EditorMode::Insert);
+}
+
+#[test]
+fn grep_letters_and_mode_survive_restarts_and_controls_are_remappable() {
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.keymaps.entries.push(crate::config::KeymapEntry {
+        id: "builtin.picker.surface.picker-cancel.ctrl-c".into(),
+        context: Some("picker".into()),
+        mode: String::new(),
+        keys: Some("ctrl-x".into()),
+        command: Some("picker.cancel".into()),
+        arguments: Default::default(),
+        unmap: false,
+        disable: false,
+        pass_through: false,
+    });
+    let mut session = TestSession::new(loaded);
+    session.start_files_fixture();
+    session.open_grep();
+    for key in ["j", "a", "c", "k"] {
+        session.key(key);
+    }
+    assert_eq!(session.projection().picker.as_ref().unwrap().query, "jack");
+    assert!(
+        session
+            .projection()
+            .picker
+            .as_ref()
+            .unwrap()
+            .input_hint
+            .contains("ctrl-x close"),
+        "{}",
+        session.projection().picker.as_ref().unwrap().input_hint
+    );
+    session.key("escape");
+    session.finish_search();
+    assert_eq!(session.projection().picker.as_ref().unwrap().rows.len(), 3);
+    assert!(
+        session
+            .projection()
+            .picker
+            .as_ref()
+            .unwrap()
+            .input_hint
+            .starts_with("Normal")
+    );
+    session.key("i");
+    session.key("ctrl-c");
+    assert!(
+        session.projection().picker.is_some(),
+        "the old binding must be removed"
+    );
+    session.key("ctrl-x");
+    assert!(session.projection().picker.is_none());
+}
+
 fn bindings(entries: &[(&str, &str)]) -> LoadedConfig {
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.ui.key_hints.delay_ms = 0;
