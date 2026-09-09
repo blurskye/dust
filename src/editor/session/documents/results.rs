@@ -64,7 +64,7 @@ impl InteractiveApplication {
                     self.search.clear_preview();
                     self.explorer.clear_preview();
                     self.explorer.retire_intents();
-                    self.session_restore = None;
+                    self.persistence.restore_transport_stopped();
                     if self.workspace_edits.proposal().is_some() || self.workspace_edits.preparing()
                     {
                         self.reject_workspace_proposal();
@@ -110,6 +110,28 @@ impl InteractiveApplication {
                     self.show_error(error);
                     break;
                 }
+            };
+            let result = match self.persistence.accept_restore(
+                result,
+                RestoreContext {
+                    editor: &self.state,
+                    workspace: &self.workspace,
+                    input: &self.input,
+                    windows: &self.window_session,
+                    configuration: self.configuration.binding_revision(),
+                },
+            ) {
+                Ok(RestoreUpdate::Waiting) => continue,
+                Ok(RestoreUpdate::Ready(ready)) => {
+                    self.finish_session_restore(ready);
+                    continue;
+                }
+                Ok(RestoreUpdate::Failed(error)) => {
+                    self.cancel_session_restore();
+                    self.show_error(error);
+                    continue;
+                }
+                Err(result) => result,
             };
             let result = match self.recovery.accept(result) {
                 Ok(update) => {
@@ -174,10 +196,6 @@ impl InteractiveApplication {
                         TextBuffer::from_bytes(&bytes).map_err(InteractiveError::from)
                     }) {
                         Ok(text) => match pending {
-                            Some(PendingVfs::SessionRestore { requested_path }) => {
-                                self.accept_session_restore_read(requested_path, path, text)
-                            }
-
                             Some(PendingVfs::MatcherNavigation { source }) => {
                                 let (buffer, view) = self.state.open_text(text, Some(path.clone()));
                                 let start = self.state.buffers[buffer]
@@ -306,9 +324,6 @@ impl InteractiveApplication {
                             self.project_input_prompt();
                         }
                         (Some(PendingVfs::Completion { .. }), Err(_)) => {}
-                        (Some(PendingVfs::SessionRestore { .. }), Err(_)) => {
-                            self.fail_session_restore()
-                        }
                         (_, Err(error)) => self.show_error(error),
                         _ => self.show_error(self.message("unexpected_completion", &[])),
                     }

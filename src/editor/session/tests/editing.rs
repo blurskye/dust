@@ -497,7 +497,7 @@ fn delayed_open_preserves_newer_unsaved_canonical_buffer_and_closed_reload_canno
 #[test]
 #[ignore = "explicit startup lifecycle cost probe"]
 fn startup_lifecycle_cost_probe() {
-    use crate::editor::session::dispatch::plugin_windows::PluginWindowHost;
+    use crate::editor::session::extensions::ExtensionSession;
     let mut app = app();
     let root = app.state.workspace_root.clone();
     let state_directory = app.workspace.state_path().parent().unwrap().to_path_buf();
@@ -510,7 +510,7 @@ fn startup_lifecycle_cost_probe() {
     let baseline = (
         crate::ui::window::WindowGraph::test_clone_count(),
         crate::editor::EditorState::test_clone_count(),
-        PluginWindowHost::test_clone_count(),
+        ExtensionSession::fixture_window_clone_count(),
         TextBuffer::test_materializations(),
     );
     eprintln!("DUST_ALLOC_START");
@@ -525,7 +525,7 @@ fn startup_lifecycle_cost_probe() {
         bytes.len(),
         crate::ui::window::WindowGraph::test_clone_count() - baseline.0,
         crate::editor::EditorState::test_clone_count() - baseline.1,
-        PluginWindowHost::test_clone_count() - baseline.2,
+        ExtensionSession::fixture_window_clone_count() - baseline.2,
         materializations.0 - baseline.3.0,
         materializations.1 - baseline.3.1
     );

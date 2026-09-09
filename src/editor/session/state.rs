@@ -55,14 +55,6 @@ pub(in crate::editor::session) struct PendingNixLspWorkspace {
 }
 
 #[derive(Clone, Debug)]
-pub(in crate::editor::session) struct PendingSessionRestore {
-    pub(in crate::editor::session) session: PersistedSession,
-    pub(in crate::editor::session) waiting: usize,
-    pub(in crate::editor::session) loaded: HashMap<PathBuf, (PathBuf, TextBuffer)>,
-    pub(in crate::editor::session) failed: bool,
-}
-
-#[derive(Clone, Debug)]
 pub(in crate::editor::session) enum DeferredExecution {
     InstallTool {
         id: String,
@@ -308,9 +300,6 @@ pub(in crate::editor::session) enum PickerPayload {
 
 #[derive(Clone, Debug)]
 pub(in crate::editor::session) enum PendingVfs {
-    SessionRestore {
-        requested_path: PathBuf,
-    },
     LspNavigation {
         range: crate::language::lsp::LspRange,
         encoding: PositionEncoding,

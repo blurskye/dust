@@ -357,7 +357,8 @@ impl InteractiveApplication {
             }
             PickerKind::Recents => {
                 let items = self
-                    .recent_files
+                    .persistence
+                    .recent_files()
                     .iter()
                     .cloned()
                     .enumerate()
@@ -385,7 +386,8 @@ impl InteractiveApplication {
             }
             PickerKind::Marks => {
                 let items = self
-                    .marks
+                    .persistence
+                    .marks()
                     .iter()
                     .cloned()
                     .enumerate()
@@ -413,13 +415,13 @@ impl InteractiveApplication {
                     (
                         self.message("navigation_jump_source", &[]),
                         self.message("navigation_jumps_title", &[]),
-                        self.jump_list.clone(),
+                        self.persistence.jumps().to_vec(),
                     )
                 } else {
                     (
                         self.message("navigation_change_source", &[]),
                         self.message("navigation_changes_title", &[]),
-                        self.change_list.clone(),
+                        self.persistence.changes().to_vec(),
                     )
                 };
                 let items = rows

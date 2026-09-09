@@ -80,7 +80,27 @@ pub(in crate::editor::session) struct ContributionCandidate {
     windows: crate::config::WindowsConfig,
     deferred: bool,
 }
+pub(in crate::editor::session) struct WindowRuleSource {
+    stamp: Arc<()>,
+    catalog: crate::extensions::PluginCatalogVersion,
+    windows: crate::config::WindowsConfig,
+}
+pub(in crate::editor::session) struct ContributionReceipt(WindowRuleSource);
+impl WindowRuleSource {
+    pub(in crate::editor::session) fn accepts(&self, receipt: &ContributionReceipt) -> bool {
+        Arc::ptr_eq(&self.stamp, &receipt.0.stamp)
+            && self.catalog == receipt.0.catalog
+            && self.windows == receipt.0.windows
+    }
+}
 impl ContributionCandidate {
+    pub(in crate::editor::session) fn window_source(&self) -> WindowRuleSource {
+        WindowRuleSource {
+            stamp: self.stamp.clone(),
+            catalog: self.catalog.clone(),
+            windows: self.windows.clone(),
+        }
+    }
     pub(in crate::editor::session) fn windows(&self) -> &crate::config::WindowsConfig {
         &self.windows
     }

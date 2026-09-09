@@ -222,10 +222,7 @@ impl InteractiveApplication {
                 let plugin_context = self
                     .compositor_projection()
                     .and_then(|projection| projection.hit_test(column, row))
-                    .and_then(|window| {
-                        self.plugin_windows
-                            .input_context(window, self.extension.contributions())
-                    });
+                    .and_then(|window| self.extension.window_context(window));
                 if self.ui.picker.is_none()
                     && self.input.prompt().is_none()
                     && self.ui.tool_menu.is_none()
@@ -363,10 +360,12 @@ impl InteractiveApplication {
         if self.ui.explorer.is_some() && self.window_session.explorer_focused() {
             return "explorer".into();
         }
-        if let Some(context) = self.window_session.graph().focused().and_then(|window| {
-            self.plugin_windows
-                .input_context(window, self.extension.contributions())
-        }) {
+        if let Some(context) = self
+            .window_session
+            .graph()
+            .focused()
+            .and_then(|window| self.extension.window_context(window))
+        {
             return context;
         }
         if self.window_session.dashboard_visible() || self.state.active_view.is_none() {

@@ -1,6 +1,9 @@
 use crate::editor::text::TextBuffer;
 use crate::editor::{EditorTopology, EditorVersion, EditorWindowVersion};
 mod paths;
+mod restore;
+#[cfg(test)]
+pub(crate) use restore::build_restored_layout;
 mod workspace;
 pub(crate) use workspace::{
     EditorPublication, WorkspaceCommitCheck, WorkspaceEditSources, WorkspaceSnapshot,

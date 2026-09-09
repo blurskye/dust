@@ -266,7 +266,8 @@ fn copied_production_tree_enforces_migrated_owner_privacy() {
     let positive = r#"
 fn terminal_domain(owner:&mut super::terminal::TerminalSession) {let _=owner.selected();let _=owner.descriptions();}
 fn lsp_domain(owner:&super::lsp::LspSession) {let _=owner.sessions();let _=owner.capabilities();}
-fn extension_domain(owner:&super::extensions::ExtensionSession) {let _=owner.statuses();let _=owner.load_id("demo");let _=owner.provider_presentable(1);}
+fn extension_domain(owner:&super::extensions::ExtensionSession) {let _=owner.statuses();let _=owner.load_id("demo");let _=owner.provider_presentable(1);let _=owner.window_snapshots();}
+fn history_domain(owner:&mut super::persistence::PersistenceSession) {owner.record_recent(std::path::PathBuf::from("/owned"),8);let _=owner.recent_files();}
 fn virtual_publication_domain(owner:&mut super::extensions::ExtensionSession,editor:&crate::editor::EditorState,windows:&super::windows::WindowSession) {drop(owner.prepare_health(false,0,super::extensions::VirtualContext{editor,windows,scratch:"scratch"}));}
 fn virtual_request_domain(broker:&mut crate::extensions::PluginVirtualDocumentBroker) {drop(broker.request_lane());}
 fn recovery_domain(owner:&super::recovery::RecoverySession) {let _=owner.records();}
@@ -702,6 +703,42 @@ fn legitimate_client(editor: &mut crate::editor::EditorState) { editor.workspace
             "fn bypass(owner:&mut super::lsp::LspSession) {owner.active=None;}",
             "active",
             "E0616",
+        ),
+        (
+            "extension_window_host",
+            "fn bypass(owner:&mut super::extensions::ExtensionSession) {let _=&mut owner.windows;}",
+            "windows",
+            "E0616",
+        ),
+        (
+            "extension_window_rules_loan",
+            "fn bypass(owner:&mut super::extensions::ExtensionSession,candidate:&super::configuration::ContributionCandidate) {let staged=owner.prepare_window_rules(candidate);owner.reset_runtime();drop(staged);}",
+            "owner",
+            "E0499",
+        ),
+        (
+            "persistence_restore",
+            "fn bypass(owner:&mut super::persistence::PersistenceSession) {let _=&mut owner.restore;}",
+            "restore",
+            "E0616",
+        ),
+        (
+            "persistence_restore_loan",
+            "fn bypass(owner:&mut super::persistence::PersistenceSession,context:super::persistence::RestoreContext,path:&std::path::Path) {let loan=owner.restore_read(path,context).unwrap();owner.cancel_restore();drop(loan);}",
+            "owner",
+            "E0499",
+        ),
+        (
+            "persistence_history",
+            "fn bypass(owner:&mut super::persistence::PersistenceSession) {owner.recent_files.clear();}",
+            "recent_files",
+            "E0616",
+        ),
+        (
+            "configuration_receipt",
+            "fn bypass(candidate:&super::configuration::ContributionCandidate) {let _=super::configuration::ContributionReceipt(candidate.window_source());}",
+            "ContributionReceipt",
+            "E0603",
         ),
         (
             "extension_providers",

@@ -225,8 +225,6 @@ impl InteractiveApplication {
         // or configuration mutation between this check and the two accepts.
         self.configuration
             .check_contributions(&candidate, self.extension.contributions())?;
-        let mut plugin_windows = self.plugin_windows.clone();
-        plugin_windows.set_configured_rules(candidate.windows())?;
         let native_windows = crate::config::WindowsConfig {
             rules: candidate
                 .windows()
@@ -237,11 +235,13 @@ impl InteractiveApplication {
                 .collect(),
         };
         let windows = self.prepare_configured_window_rules(&native_windows)?;
+        let (rules, catalog) = self.extension.prepare_window_rules(&candidate)?;
         self.window_session
             .accept_current(windows, &self.state.window_version())?;
-        self.configuration
-            .commit_contributions(candidate, self.extension.contributions())?;
-        self.plugin_windows = plugin_windows;
+        let receipt = self
+            .configuration
+            .commit_contributions(candidate, catalog)?;
+        rules.finish(receipt)?;
         self.cancel_pending_mapping();
         self.reconcile_editor_windows();
         Ok(())
@@ -255,11 +255,11 @@ impl InteractiveApplication {
         match self
             .window_session
             .remove_plugin_generation(plugin, load.0)
-            .map(|()| self.plugin_windows.remove_generation(plugin, load.0))
+            .map(|()| self.extension.remove_windows(plugin, load.0))
         {
             Ok(removed) => {
                 if removed {
-                    self.ui.plugin_surfaces = self.plugin_windows.snapshots();
+                    self.ui.plugin_surfaces = self.extension.window_snapshots();
                     self.window_session.invalidate_native();
                     self.reconcile_editor_windows();
                 }
@@ -686,83 +686,20 @@ impl InteractiveApplication {
         index: &crate::extensions::PluginContributionIndex,
         request: crate::extensions::PluginUiRequest,
     ) -> crate::extensions::PluginUiEvent {
-        let Some(index) = self
+        match self
             .extension
-            .contributions()
-            .get(&index.owner)
-            .filter(|current| {
-                current.generation == index.generation && current.checksum == index.checksum
-            })
-        else {
-            return PluginWindowHost::rejected(
-                request.token,
-                self.window_session.graph().revision(),
-                crate::extensions::PluginUiErrorCode::GenerationLost,
-                "plugin UI request belongs to a retired catalog load".into(),
-            );
-        };
-        if let Err(detail) = self
-            .window_session
-            .require_editor_source(&self.state.window_version())
+            .prepare_window(index, request, &self.state, &self.window_session)
         {
-            return PluginWindowHost::rejected(
-                request.token,
-                self.window_session.graph().revision(),
-                crate::extensions::PluginUiErrorCode::StaleGraph,
-                detail,
-            );
-        }
-        if PluginWindowHost::is_retained_update(&request.kind) {
-            return self.plugin_windows.process_retained(
-                self.window_session.graph(),
-                index,
-                request,
-            );
-        }
-        if let Some(event) =
-            self.plugin_windows
-                .admit_window_request(self.window_session.graph(), index, &request)
-        {
-            return event;
-        }
-        let catalog = self.extension.contributions().version();
-        let mut draft = match self.window_session.begin_plugin(
-            &index.owner,
-            index.generation,
-            (&self.state.window_version(), &catalog),
-        ) {
-            Ok(draft) => draft,
-            Err(detail) => {
-                return PluginWindowHost::rejected(
-                    request.token,
-                    self.window_session.graph().revision(),
-                    crate::extensions::PluginUiErrorCode::StaleGraph,
-                    detail,
+            WindowUpdate::Ready(event) => event,
+            WindowUpdate::Publish(source, transition) => {
+                let receipt = self.window_session.accept_plugin_transition(
+                    transition,
+                    &self.state.window_version(),
+                    source.catalog(),
                 );
-            }
-        };
-        let mut host = self.plugin_windows.clone();
-        let mut event = host.process(&mut draft, index, request);
-        if event.error.is_none() {
-            match self.window_session.commit_plugin(
-                draft,
-                &self.state.window_version(),
-                &self.extension.contributions().version(),
-            ) {
-                Ok(()) => self.plugin_windows = host,
-                Err(error) => {
-                    event.handle = None;
-                    event.tree_revision = None;
-                    event.surface_revision = None;
-                    event.error = Some(crate::extensions::PluginUiError {
-                        code: crate::extensions::PluginUiErrorCode::StaleGraph,
-                        detail: error,
-                    });
-                }
+                source.finish(receipt, self.window_session.graph().revision())
             }
         }
-        event.graph_revision = self.window_session.graph().revision();
-        event
     }
 
     pub(in crate::editor::session) fn apply_plugin_execution(
@@ -872,7 +809,7 @@ impl InteractiveApplication {
                 .map(|request| self.apply_plugin_ui_request(&index, request))
                 .collect::<Vec<_>>();
             self.extension.queue_ui(plugin.clone(), load, events);
-            self.ui.plugin_surfaces = self.plugin_windows.snapshots();
+            self.ui.plugin_surfaces = self.extension.window_snapshots();
             self.window_session.invalidate_native();
             self.reconcile_editor_windows();
         }
@@ -1033,5 +970,314 @@ impl InteractiveApplication {
             }
             Err(error) => self.show_error(error),
         }
+    }
+}
+
+impl InteractiveApplication {
+    pub(super) fn effective_large_file(&self, buffer: crate::editor::BufferId) -> bool {
+        self.documents.effective_large_file(
+            buffer,
+            self.state.buffers.get(buffer).map(|buffer| &buffer.text),
+            &self.configuration.settings().editor.large_file,
+        )
+    }
+    pub(super) fn process_large_file_modes(&mut self) {
+        let large = self.documents.reconcile_policy(
+            &self.state.window_version(),
+            self.state
+                .buffers
+                .iter()
+                .map(|(id, buffer)| (id, buffer.path.as_deref(), &buffer.text)),
+            &self.configuration.settings().editor.large_file,
+        );
+        self.project_large_file_modes(large);
+    }
+
+    pub(super) fn persistence_policy(&self) -> PersistencePolicy {
+        PersistencePolicy {
+            maximum_file_bytes: self.configuration.settings().persistence.maximum_file_bytes,
+            maximum_entries: self.configuration.settings().persistence.maximum_entries,
+        }
+    }
+
+    pub(super) fn load_persistence(&mut self) {
+        let configured = &self.configuration.settings().persistence;
+        if !configured.enabled || !configured.restore_on_startup {
+            return;
+        }
+        if let Err(error) = self.persistence.load_session(
+            self.persistence_policy(),
+            RestoreContext {
+                editor: &self.state,
+                workspace: &self.workspace,
+                input: &self.input,
+                windows: &self.window_session,
+                configuration: self.configuration.binding_revision(),
+            },
+            !self.documents.has_startup_work() && self.state.buffers.is_empty(),
+        ) {
+            self.ui.config_diagnostic = Some(error);
+        }
+    }
+
+    pub(super) fn capture_window_rules(&self) -> Vec<PersistedWindowRule> {
+        self.window_session
+            .persisted_rules(self.terminal_session.selected().map(|id| id.0))
+    }
+
+    pub(super) fn prepare_configured_window_rules(
+        &self,
+        windows: &crate::config::WindowsConfig,
+    ) -> Result<WindowCandidate, String> {
+        let terminals = self.terminal_session.descriptions();
+        self.window_session.prepare_rules(
+            windows,
+            NativeDescriptions {
+                signature: self.native_surface_signature(self.window_session.editor_ids()),
+                explorer_title: &self.message("explorer_title", &[]),
+                dashboard_title: &self.configuration.dashboard().identity,
+                picker_title: self
+                    .ui
+                    .picker
+                    .as_ref()
+                    .map_or("Picker", |picker| &picker.title),
+                terminals: &terminals,
+            },
+        )
+    }
+
+    pub(super) fn apply_persisted_window_rules(
+        &mut self,
+        rules: &[PersistedWindowRule],
+    ) -> Result<(), String> {
+        let terminals = self.terminal_session.descriptions();
+        let candidate = self.window_session.prepare_persisted_rules(
+            rules,
+            NativeDescriptions {
+                signature: self.native_surface_signature(self.window_session.editor_ids()),
+                explorer_title: &self.message("explorer_title", &[]),
+                dashboard_title: &self.configuration.dashboard().identity,
+                picker_title: self
+                    .ui
+                    .picker
+                    .as_ref()
+                    .map_or("Picker", |picker| &picker.title),
+                terminals: &terminals,
+            },
+        )?;
+        self.window_session
+            .accept_current(candidate, &self.state.window_version())?;
+        let requires_projection = self.window_session.graph().active_tab().is_some();
+        self.reconcile_editor_windows();
+        if requires_projection && self.compositor_projection().is_none() {
+            return Err("persisted window projection could not be published".into());
+        }
+        Ok(())
+    }
+
+    pub(super) fn capture_session(&self) -> Option<PersistedSession> {
+        self.persistence
+            .capture_session(&self.state, &self.workspace, self.capture_window_rules())
+    }
+
+    pub(super) fn save_persistence(&mut self) {
+        let configured = &self.configuration.settings().persistence;
+        if !configured.enabled || !configured.save_on_exit || self.persistence.pending() {
+            return;
+        }
+        let state = PersistedState {
+            version: STATE_VERSION,
+            session: self.capture_session(),
+            recent_files: self.persistence.recent_files().to_vec(),
+            marks: self.persistence.marks().to_vec(),
+            jumps: self.persistence.jumps().to_vec(),
+            changes: self.persistence.changes().to_vec(),
+            command_history: if configured.persist_command_history {
+                self.input.command_history().to_vec()
+            } else {
+                Vec::new()
+            },
+            search_history: if configured.persist_search_history {
+                self.input.search_history().to_vec()
+            } else {
+                Vec::new()
+            },
+            breakpoints: self.debugger_session.persisted_breakpoints(),
+            large_file_overrides: self
+                .documents
+                .policy_overrides()
+                .filter_map(|(id, mode)| {
+                    let path = self.state.buffers.get(id)?.path.clone()?;
+                    Some(PersistedLargeFileOverride {
+                        path,
+                        mode: mode_name_large(mode).into(),
+                    })
+                })
+                .take(configured.maximum_entries)
+                .collect(),
+            watches: self.debugger_session.persisted_watches(),
+            metadata: self.tooling.metadata(),
+        };
+        if let Err(error) = self.persistence.save(state, self.persistence_policy()) {
+            self.ui.config_diagnostic = Some(error);
+        }
+    }
+
+    pub(super) fn process_persistence_events(&mut self) {
+        while let Some(event) = self.persistence.poll() {
+            match event {
+                Ok(mut state) => {
+                    let session = state.session.clone();
+                    self.tooling.restore(&state.metadata);
+                    if let Some(session) = &session
+                        && let Err(diagnostic) =
+                            self.apply_persisted_window_rules(&session.window_rules)
+                    {
+                        self.ui.config_diagnostic = Some(format!(
+                            "persistent window layout rejected transactionally: {diagnostic}"
+                        ));
+                    }
+                    let configured = &self.configuration.settings().persistence;
+                    self.persistence.restore_history(&mut state, configured);
+                    self.debugger_session.restore(
+                        state.breakpoints,
+                        state.watches,
+                        &self.workspace,
+                    );
+                    self.documents.restore_policy(
+                        state
+                            .large_file_overrides
+                            .into_iter()
+                            .map(|entry| (entry.path, entry.mode)),
+                    );
+                    self.input.restore_history(
+                        state.command_history,
+                        state.search_history,
+                        configured,
+                    );
+                    if let Some(session) = session {
+                        self.restore_session(session);
+                    }
+                }
+                Err(error) => self.ui.config_diagnostic = Some(error),
+            }
+        }
+    }
+
+    pub(super) fn restore_session(&mut self, session: PersistedSession) {
+        let paths = match self.persistence.begin_restore(
+            session,
+            RestoreContext {
+                editor: &self.state,
+                workspace: &self.workspace,
+                input: &self.input,
+                windows: &self.window_session,
+                configuration: self.configuration.binding_revision(),
+            },
+            self.configuration.settings().persistence.maximum_entries,
+        ) {
+            Ok(paths) => paths,
+            Err(error) => {
+                self.ui.config_diagnostic = Some(error);
+                return;
+            }
+        };
+        let roots = self
+            .workspace
+            .roots()
+            .iter()
+            .map(|root| root.identity.canonical_path.clone())
+            .collect::<Vec<_>>();
+        for path in paths {
+            let Some(read) = self.persistence.restore_read(
+                &path,
+                RestoreContext {
+                    editor: &self.state,
+                    workspace: &self.workspace,
+                    input: &self.input,
+                    windows: &self.window_session,
+                    configuration: self.configuration.binding_revision(),
+                },
+            ) else {
+                self.cancel_session_restore();
+                return;
+            };
+            match self.documents.read_scoped(path, roots.clone()) {
+                Ok(id) => {
+                    if let Err(error) = read.register(id) {
+                        self.cancel_session_restore();
+                        self.show_error(error);
+                        return;
+                    }
+                }
+                Err(error) => {
+                    drop(read);
+                    self.cancel_session_restore();
+                    self.show_error(error);
+                    return;
+                }
+            }
+        }
+    }
+    pub(super) fn cancel_session_restore(&mut self) {
+        for id in self.persistence.cancel_restore() {
+            self.documents.cancel_request(id);
+        }
+    }
+    pub(super) fn finish_session_restore(&mut self, ready: RestoreReady) {
+        let result = ready
+            .prepare(RestoreContext {
+                editor: &self.state,
+                workspace: &self.workspace,
+                input: &self.input,
+                windows: &self.window_session,
+                configuration: self.configuration.binding_revision(),
+            })
+            .and_then(|(draft, paths)| {
+                let terminals = self.terminal_session.descriptions();
+                let descriptions = NativeDescriptions {
+                    signature: self.native_surface_signature(self.window_session.editor_ids()),
+                    explorer_title: &self.message("explorer_title", &[]),
+                    dashboard_title: &self.configuration.dashboard().identity,
+                    picker_title: self
+                        .ui
+                        .picker
+                        .as_ref()
+                        .map_or("Picker", |picker| &picker.title),
+                    terminals: &terminals,
+                };
+                let current = self.state.version();
+                let catalog = self.extension.contributions().version();
+                let transition = self.window_session.prepare_restore_transition(
+                    draft,
+                    (&current, catalog.clone()),
+                    &self.configuration.settings().ui.buffer_line.scratch_label,
+                    descriptions,
+                    &self.extension.window_generations(),
+                )?;
+                let state = self
+                    .window_session
+                    .accept_editor_transition(transition, &current, &catalog)?;
+                Ok((state, paths))
+            });
+        match result {
+            Ok((state, paths)) => {
+                self.state = state;
+                self.extension.reset_runtime();
+                self.ui.plugin_surfaces.clear();
+                self.ui.private_surfaces.clear();
+                self.set_dashboard_visibility(false);
+                for path in paths {
+                    self.record_recent_file(path);
+                }
+                self.ensure_cursor_visible();
+                self.reconcile_editor_windows();
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+    pub(super) fn record_recent_file(&mut self, path: PathBuf) {
+        self.persistence
+            .record_recent(path, self.configuration.settings().persistence.recent_files);
     }
 }

@@ -1,12 +1,24 @@
-//! Persistence admission and exact terminal outcomes. Snapshot assembly and
-//! restore application remain in dispatch until their source owners migrate.
+//! Persistence I/O, history, capture and original restore obligations.
+//! Dispatch composes other owners' snapshots and consumes checked editor/window plans.
 use crate::persistence::{
     PersistedState, PersistenceError, PersistenceEvent, PersistenceId, PersistencePolicy,
     PersistenceService,
 };
 use std::path::PathBuf;
+#[path = "persistence/session.rs"]
+mod session;
+#[cfg(test)]
+pub(in crate::editor::session) use session::capture_persisted_layout;
+pub(in crate::editor::session) use session::{RestoreContext, RestoreReady, RestoreUpdate};
 
 pub(in crate::editor::session) struct PersistenceSession {
+    load_source: Option<session::RestoreSource>,
+    restore: Option<session::PendingRestore>,
+    retired_reads: std::collections::HashSet<crate::files::RequestId>,
+    recent_files: Vec<PathBuf>,
+    marks: Vec<crate::persistence::PersistedMark>,
+    jumps: Vec<crate::persistence::PersistedLocation>,
+    changes: Vec<crate::persistence::PersistedLocation>,
     worker: PersistenceService,
     path: PathBuf,
     pending: Option<(PersistenceId, bool)>,
@@ -19,6 +31,13 @@ pub(in crate::editor::session) struct PersistenceSession {
 impl PersistenceSession {
     pub(in crate::editor::session) fn new(worker: PersistenceService, path: PathBuf) -> Self {
         Self {
+            load_source: None,
+            restore: None,
+            retired_reads: Default::default(),
+            recent_files: Vec::new(),
+            marks: Vec::new(),
+            jumps: Vec::new(),
+            changes: Vec::new(),
             worker,
             path,
             pending: None,

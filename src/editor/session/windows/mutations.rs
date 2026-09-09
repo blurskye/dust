@@ -152,6 +152,43 @@ impl WindowSession {
         };
         self.stage_editor_transition(proposal, candidate, catalog)
     }
+    pub(in crate::editor::session) fn prepare_restore_transition(
+        &self,
+        proposal: crate::editor::EditorDraft,
+        source: (
+            &crate::editor::EditorVersion,
+            crate::extensions::PluginCatalogVersion,
+        ),
+        scratch: &str,
+        mut descriptions: NativeDescriptions<'_>,
+        generations: &[(String, u64)],
+    ) -> Result<super::EditorWindowCandidate, String> {
+        descriptions.signature.dashboard_visible = false;
+        let mut transition = self.prepare_editor_transition(
+            proposal,
+            source.0,
+            source.1,
+            scratch,
+            Some(descriptions),
+        )?;
+        for (plugin, load) in generations {
+            transition
+                .candidate
+                .core
+                .graph
+                .remove_owner_generation(&format!("plugin.{plugin}"), *load)
+                .map_err(|error| error.to_string())?;
+        }
+        transition.candidate.core.native.invalidate();
+        transition
+            .candidate
+            .core
+            .graph
+            .validate()
+            .map_err(|error| error.to_string())?;
+        transition.candidate.dashboard = Some(false);
+        Ok(transition)
+    }
     pub(in crate::editor::session) fn prepare_document_transition(
         &self,
         proposal: crate::editor::EditorDraft,
@@ -482,6 +519,7 @@ impl WindowSession {
         core.native.invalidate();
         Ok(())
     }
+    #[cfg(test)]
     pub(in crate::editor::session) fn reset_runtime(
         &mut self,
         plugin_generations: &[(String, u64)],
@@ -661,4 +699,111 @@ fn configured_window_placements(
         }
     }
     Ok(placements)
+}
+
+use crate::persistence::{PersistedWindowPlacement, PersistedWindowRule, validate_window_rules};
+impl WindowSession {
+    pub(in crate::editor::session) fn persisted_rules(
+        &self,
+        selected: Option<u64>,
+    ) -> Vec<PersistedWindowRule> {
+        let mut rules = self.native_ids().semantic_defaults(selected);
+        if !rules
+            .iter()
+            .any(|(content_type, _)| *content_type == "builtin.explorer")
+            && let Some(ids) = self.native_ids().explorer()
+            && let Some(window) = self.graph().window(ids.window)
+        {
+            rules.push(("builtin.explorer", window.placement));
+        }
+        if !rules
+            .iter()
+            .any(|(content_type, _)| *content_type == "builtin.terminal")
+            && let Some(ids) = selected.and_then(|id| self.native_ids().terminal(id))
+            && let Some(window) = self.graph().window(ids.window)
+        {
+            rules.push(("builtin.terminal", window.placement));
+        }
+        rules
+            .into_iter()
+            .filter_map(|(content_type, placement)| {
+                persisted_window_placement(placement).map(|placement| PersistedWindowRule {
+                    content_type: content_type.into(),
+                    placement,
+                })
+            })
+            .collect()
+    }
+
+    pub(in crate::editor::session) fn prepare_persisted_rules(
+        &self,
+        rules: &[PersistedWindowRule],
+        descriptions: NativeDescriptions<'_>,
+    ) -> Result<WindowCandidate, String> {
+        validate_window_rules(rules).map_err(|error| error.to_string())?;
+        let rules = rules
+            .iter()
+            .map(|rule| {
+                Ok((
+                    rule.content_type.as_str(),
+                    restored_window_placement(&rule.placement)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        self.prepare_semantic_defaults(&rules, descriptions)
+    }
+}
+fn persisted_window_placement(placement: WindowPlacement) -> Option<PersistedWindowPlacement> {
+    match placement {
+        WindowPlacement::Docked { edge, size } => Some(PersistedWindowPlacement::Docked {
+            edge: match edge {
+                DockEdge::Left => "left",
+                DockEdge::Right => "right",
+                DockEdge::Top => "top",
+                DockEdge::Bottom => "bottom",
+            }
+            .into(),
+            size,
+        }),
+        WindowPlacement::Floating(rect) => Some(PersistedWindowPlacement::Floating {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+        }),
+        WindowPlacement::Fullscreen => Some(PersistedWindowPlacement::Fullscreen),
+        WindowPlacement::Hidden => Some(PersistedWindowPlacement::Hidden),
+        WindowPlacement::Tiled | WindowPlacement::Overlay(_) => None,
+    }
+}
+
+fn restored_window_placement(
+    placement: &PersistedWindowPlacement,
+) -> Result<WindowPlacement, String> {
+    let placement = match placement {
+        PersistedWindowPlacement::Docked { edge, size } => WindowPlacement::Docked {
+            edge: match edge.as_str() {
+                "left" => DockEdge::Left,
+                "right" => DockEdge::Right,
+                "top" => DockEdge::Top,
+                "bottom" => DockEdge::Bottom,
+                _ => return Err(format!("unknown dock edge `{edge}`")),
+            },
+            size: *size,
+        },
+        PersistedWindowPlacement::Floating {
+            x,
+            y,
+            width,
+            height,
+        } => WindowPlacement::Floating(WindowRect {
+            x: *x,
+            y: *y,
+            width: *width,
+            height: *height,
+        }),
+        PersistedWindowPlacement::Fullscreen => WindowPlacement::Fullscreen,
+        PersistedWindowPlacement::Hidden => WindowPlacement::Hidden,
+    };
+    placement.validate().map_err(|error| error.to_string())
 }

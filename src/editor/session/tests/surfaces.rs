@@ -2647,3 +2647,119 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
         std::thread::sleep(Duration::from_millis(2));
     }
 }
+
+#[test]
+fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
+    use crate::{
+        editor::session::persistence::RestoreContext,
+        persistence::{
+            PersistedLayout, PersistedLocation, PersistedMark, PersistedPane, PersistedSession,
+            PersistedState, PersistedTab,
+        },
+    };
+    let mut app = app();
+    let path = app.state.workspace_root.join("restored.txt");
+    std::fs::write(&path, "héllo\n").unwrap();
+    let session = PersistedSession {
+        roots: vec![app.state.workspace_root.clone()],
+        tabs: vec![PersistedTab {
+            layout: PersistedLayout::Pane {
+                pane: PersistedPane {
+                    path: path.clone(),
+                    cursor: 2,
+                    anchor: 3,
+                    scroll_line: 0,
+                    scroll_column: 17,
+                },
+            },
+            focused_path: Some(path.clone()),
+        }],
+        active_tab: 0,
+        window_rules: Vec::new(),
+    };
+    macro_rules! context {
+        () => {
+            RestoreContext {
+                editor: &app.state,
+                workspace: &app.workspace,
+                input: &app.input,
+                windows: &app.window_session,
+                configuration: app.configuration.binding_revision(),
+            }
+        };
+    }
+    app.persistence.fixture_restore_source(context!());
+    app.restore_session(session.clone());
+    let (newer, view) = app
+        .state
+        .open_text(TextBuffer::from_text("newer unsaved"), None);
+    app.state.buffers[newer].dirty = true;
+    wait_vfs(&mut app);
+    assert_eq!(app.state.active_view, Some(view));
+    assert_eq!(app.state.buffers[newer].text.to_string(), "newer unsaved");
+    assert_eq!(app.state.buffers.len(), 1);
+    app.state.buffers[newer].dirty = false;
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    app.persistence.fixture_restore_source(context!());
+    app.restore_session(session.clone());
+    app.input.capture_changed();
+    wait_vfs(&mut app);
+    assert_eq!(app.state.active_view, Some(view));
+    let identity = app.state.window_version();
+    app.persistence.fixture_restore_source(context!());
+    app.restore_session(session.clone());
+    wait_vfs(&mut app);
+    let buffer = app.state.active_buffer_id().unwrap();
+    assert!(!app.state.buffers.contains_key(newer));
+    assert_ne!(buffer, newer);
+    assert!(identity.same_editor(&app.state.window_version()));
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "héllo\n");
+    let restored = &app.state.views[app.state.active_view.unwrap()];
+    assert_eq!(restored.cursor.get(), 1);
+    assert_eq!(restored.selection.unwrap().anchor.get(), 3);
+    assert_eq!(restored.scroll_column, 0); // default wrapping keeps the restored cursor visible
+    app.state.validate_layout().unwrap();
+    app.window_session.graph().validate().unwrap();
+    let before = app.state.version();
+    let mut missing = session;
+    if let PersistedLayout::Pane { pane } = &mut missing.tabs[0].layout {
+        pane.path = app.state.workspace_root.join("missing.txt");
+    }
+    app.persistence.fixture_restore_source(context!());
+    app.restore_session(missing);
+    wait_vfs(&mut app);
+    assert_eq!(app.state.version(), before);
+    // A delayed metadata load cannot overwrite newer marks or recent ordering.
+    let location = |byte| PersistedLocation {
+        path: path.clone(),
+        byte,
+        anchor: byte,
+        scroll_line: 0,
+        scroll_column: 0,
+    };
+    app.persistence.set_mark("x".into(), location(3), 8);
+    let live = app.state.workspace_root.join("live.txt");
+    app.persistence.record_recent(live.clone(), 8);
+    let mut saved = PersistedState {
+        marks: vec![PersistedMark {
+            name: "x".into(),
+            location: location(0),
+        }],
+        recent_files: vec![path],
+        ..PersistedState::default()
+    };
+    app.persistence
+        .restore_history(&mut saved, &app.configuration.settings().persistence);
+    assert_eq!(
+        app.persistence
+            .marks()
+            .iter()
+            .find(|mark| mark.name == "x")
+            .unwrap()
+            .location
+            .byte,
+        3
+    );
+    assert_eq!(app.persistence.recent_files()[0], live);
+}

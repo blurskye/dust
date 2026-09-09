@@ -5,6 +5,7 @@ use super::input::InputSession;
 use super::lsp::{LspAutostartObservation, LspLaunch};
 #[cfg(test)]
 use super::lsp::{LspProjectionOwner, LspRuntimeState};
+use super::persistence::{RestoreContext, RestoreReady, RestoreUpdate};
 use super::search::{PickerContent, PickerEpoch, PickerOrigin};
 use super::terminal::{TerminalInput, TerminalUpdate};
 use super::tooling::{
@@ -33,17 +34,15 @@ mod editing_input;
 mod effects;
 #[path = "../events.rs"]
 mod events;
-#[path = "../extensions/windows/mod.rs"]
-mod plugin_windows;
 
+#[cfg(test)]
+use super::persistence::capture_persisted_layout;
 use super::syntax::{IndentError, SyntaxDocument, SyntaxSession, semantic_role};
 use super::windows::rect_contains_point;
 #[cfg(test)]
-use persistence::{build_restored_layout, capture_persisted_layout};
+use crate::editor::transaction::build_restored_layout;
 #[path = "../lsp/mod.rs"]
 mod lsp;
-#[path = "legacy_persistence.rs"]
-mod persistence;
 #[path = "../project/mod.rs"]
 mod project;
 #[path = "../prompts.rs"]
@@ -106,9 +105,8 @@ use crate::language::syntax::{
     SyntaxLanguage, SyntaxSupport, builtin_languages, language_for_path,
 };
 use crate::persistence::{
-    PersistedLargeFileOverride, PersistedLayout, PersistedLocation, PersistedMark, PersistedPane,
-    PersistedSession, PersistedState, PersistedTab, PersistedWindowPlacement, PersistedWindowRule,
-    PersistencePolicy, PersistenceService, STATE_VERSION, validate_window_rules,
+    PersistedLargeFileOverride, PersistedLocation, PersistedSession, PersistedState,
+    PersistedWindowRule, PersistencePolicy, PersistenceService, STATE_VERSION,
 };
 use crate::process::{ExecutionPreflightRequest, PreflightId, PtyId};
 use crate::telemetry::{LiveCrashSnapshot, LogLevel};
@@ -139,7 +137,7 @@ use slotmap::Key;
 use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
 
-use self::plugin_windows::{PluginUiInteraction, PluginWindowHost};
+use super::extensions::{PluginUiInteraction, WindowUpdate};
 use crate::editor::{ApplicationError, StartupTarget, build_state};
 use crate::ui::window::{
     CompositorProjection, DockEdge, SpatialDirection, WindowPlacement, WindowRect,
@@ -149,7 +147,6 @@ struct InteractiveApplication {
     notices: super::notifications::NoticeSession,
     clock: std::sync::Arc<dyn crate::clock::Clock>,
     state: EditorState,
-    plugin_windows: PluginWindowHost,
     extension: super::extensions::ExtensionSession,
     workspace: super::workspace::WorkspaceSession,
     diagnostics: super::diagnostics::DiagnosticSession,
@@ -180,11 +177,6 @@ struct InteractiveApplication {
     explorer: super::explorer::ExplorerSession,
     syntax: SyntaxSession,
     persistence: super::persistence::PersistenceSession,
-    session_restore: Option<PendingSessionRestore>,
-    recent_files: Vec<PathBuf>,
-    marks: Vec<PersistedMark>,
-    jump_list: Vec<PersistedLocation>,
-    change_list: Vec<PersistedLocation>,
     tasks: crate::editor::session::tasks::TaskSession,
     terminal_session: super::terminal::TerminalSession,
     pending_execution_preflight: HashMap<PreflightId, PendingExecutionPreflight>,
@@ -492,7 +484,6 @@ impl InteractiveApplication {
         let tooling = super::tooling::ToolingSession::new();
         let mut application = InteractiveApplication {
             state,
-            plugin_windows: PluginWindowHost::default(),
             extension: super::extensions::ExtensionSession::new(
                 plugin_storage_root,
                 plugin_queue_capacity,
@@ -533,11 +524,6 @@ impl InteractiveApplication {
                 PersistenceService::start(persistence_queue_capacity),
                 persistence_path,
             ),
-            session_restore: None,
-            recent_files: Vec::new(),
-            marks: Vec::new(),
-            jump_list: Vec::new(),
-            change_list: Vec::new(),
             tasks,
             notices,
             clock,

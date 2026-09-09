@@ -193,3 +193,7 @@ pub(in crate::editor::session) fn rect_contains_point(
         && row >= rect.y
         && row < rect.y.saturating_add(rect.height)
 }
+
+pub(in crate::editor::session) use plugin::{
+    PluginWindowKey, PluginWindowReceipt, PluginWindowTransition,
+};

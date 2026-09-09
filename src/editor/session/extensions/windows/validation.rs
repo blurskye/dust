@@ -1,4 +1,12 @@
-use super::*;
+use super::{
+    BTreeMap, BTreeSet, DockEdge, MAXIMUM_PLUGIN_UI_CHILDREN, MAXIMUM_PLUGIN_UI_DEPTH,
+    MAXIMUM_PLUGIN_UI_NODE_TEXT_BYTES, MAXIMUM_PLUGIN_UI_NODES, MAXIMUM_PLUGIN_UI_TEXT_BYTES,
+    PluginContributionIndex, PluginPresenterKind, PluginPrivatePatch, PluginPrivateRect,
+    PluginPrivateSnapshot, PluginPrivateState, PluginPrivateStyle, PluginRequestedPlacement,
+    PluginSurfaceRow, PluginUiError, PluginUiErrorCode, PluginUiNodeKind, PluginUiStyle,
+    PluginUiTree, PluginWindowInstance, PluginWindowPlacementKind, UnicodeSegmentation,
+    UnicodeWidthStr, WindowError, WindowGraph, WindowId, WindowPlacement, WindowRect,
+};
 
 pub(in crate::editor::session) fn instance_revisions(
     handle: u64,

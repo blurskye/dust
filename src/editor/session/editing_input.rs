@@ -350,13 +350,12 @@ impl InteractiveApplication {
     }
 
     pub(super) fn apply_retained_ui_interaction(&mut self, interaction: PluginUiInteraction) {
-        match self.plugin_windows.interact_focused(
-            self.window_session.graph(),
-            self.extension.contributions(),
-            interaction,
-        ) {
+        match self
+            .extension
+            .window_interaction(self.window_session.graph(), interaction)
+        {
             Ok(action) => {
-                self.ui.plugin_surfaces = self.plugin_windows.snapshots();
+                self.ui.plugin_surfaces = self.extension.window_snapshots();
                 if let Some(action) = action {
                     self.invoke_mapped_command(&action);
                 }
@@ -379,13 +378,13 @@ impl InteractiveApplication {
             return;
         };
         if let Err(error) = self
-            .plugin_windows
-            .focus_node_at_row(window, usize::from(row.saturating_sub(rect.y)))
+            .extension
+            .focus_window_row(window, usize::from(row.saturating_sub(rect.y)))
         {
             self.show_error(error.detail);
             return;
         }
-        self.ui.plugin_surfaces = self.plugin_windows.snapshots();
+        self.ui.plugin_surfaces = self.extension.window_snapshots();
     }
 
     pub(super) fn activate_private_surface_action(&mut self, at_mouse: bool) {
@@ -414,24 +413,10 @@ impl InteractiveApplication {
             })
         };
         let Some((window, x, y)) = target else { return };
-        match self
-            .plugin_windows
-            .private_action_at(window, x, y, self.extension.contributions())
-        {
-            Ok((plugin, load, event)) => {
-                let action = event.action.clone();
-                if let Err(error) = self
-                    .extension
-                    .push_action(plugin, PluginLoadId(load), event)
-                {
-                    self.show_error(error);
-                    return;
-                }
-                if let Some(action) = action {
-                    self.invoke_mapped_command(&action);
-                }
-            }
-            Err(error) => self.show_error(error.detail),
+        match self.extension.private_action(window, x, y) {
+            Ok(Some(action)) => self.invoke_mapped_command(&action),
+            Ok(None) => {}
+            Err(error) => self.show_error(error),
         }
     }
 

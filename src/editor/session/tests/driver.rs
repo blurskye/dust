@@ -59,7 +59,7 @@ impl TestSession {
     pub(super) fn copy_counts(&self) -> (usize, usize, usize) {
         (
             crate::ui::window::WindowGraph::test_clone_count(),
-            super::super::PluginWindowHost::test_clone_count(),
+            crate::editor::session::extensions::ExtensionSession::fixture_window_clone_count(),
             self.application.window_session.content_builds(),
         )
     }

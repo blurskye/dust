@@ -106,8 +106,9 @@ impl ConfigurationSession {
         &mut self,
         candidate: ContributionCandidate,
         catalog: &PluginContributionCatalog,
-    ) -> Result<(), String> {
+    ) -> Result<super::ContributionReceipt, String> {
         self.check_contributions(&candidate, catalog)?;
+        let receipt = super::ContributionReceipt(candidate.window_source());
         if let Some(keymaps) = candidate.keymaps {
             self.accepted.keymaps = keymaps;
             self.accepted.deferred_plugin_keymaps = candidate.deferred;
@@ -115,7 +116,7 @@ impl ConfigurationSession {
         }
         self.accepted.settings.windows = candidate.windows;
         self.stamp = Arc::new(());
-        Ok(())
+        Ok(receipt)
     }
 
     fn resolve_plugin_window_rules(

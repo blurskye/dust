@@ -42,10 +42,57 @@ fn retained_plugin_window_projection_is_idle_and_generation_owned() {
             }),
         },
     };
+    let crate::editor::session::extensions::WindowUpdate::Publish(source, transition) = app
+        .extension
+        .prepare_window(&index, request.clone(), &app.state, &app.window_session)
+    else {
+        panic!("expected staged window");
+    };
+    app.window_session.invalidate_native();
+    let receipt = app.window_session.accept_plugin_transition(
+        transition,
+        &app.state.window_version(),
+        source.catalog(),
+    );
+    assert!(
+        source
+            .finish(receipt, app.window_session.graph().revision())
+            .error
+            .is_some()
+    );
+    assert!(app.extension.window_snapshots().is_empty());
+    let crate::editor::session::extensions::WindowUpdate::Publish(source, transition) = app
+        .extension
+        .prepare_window(&index, request.clone(), &app.state, &app.window_session)
+    else {
+        panic!("expected fresh window proposal");
+    };
+    let (other, _) = app
+        .window_session
+        .begin_plugin(
+            &index.owner,
+            index.generation,
+            (&app.state.window_version(), source.catalog()),
+        )
+        .unwrap()
+        .seal();
+    let receipt = app.window_session.accept_plugin_transition(
+        other,
+        &app.state.window_version(),
+        source.catalog(),
+    );
+    assert!(
+        source
+            .finish(receipt, app.window_session.graph().revision())
+            .error
+            .is_some()
+    );
+    drop(transition);
+    assert!(app.extension.window_snapshots().is_empty());
     let event = app.apply_plugin_ui_request(&index, request);
     assert!(event.error.is_none(), "{:?}", event.error);
-    let window = app.plugin_windows.snapshots()[0].window;
-    app.ui.plugin_surfaces = app.plugin_windows.snapshots();
+    let window = app.extension.window_snapshots()[0].window;
+    app.ui.plugin_surfaces = app.extension.window_snapshots();
     app.window_session.invalidate_native();
     app.reconcile_editor_windows();
     assert!(
@@ -424,7 +471,7 @@ fn retained_interaction_commands_use_host_focus_scroll_and_mouse_state() {
         },
     );
     assert!(event.error.is_none(), "{:?}", event.error);
-    app.ui.plugin_surfaces = app.plugin_windows.snapshots();
+    app.ui.plugin_surfaces = app.extension.window_snapshots();
     assert_eq!(
         app.ui.plugin_surfaces[0]
             .rows

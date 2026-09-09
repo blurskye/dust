@@ -7,18 +7,15 @@ impl InteractiveApplication {
     ) -> Result<(), AppEffect> {
         match effect {
             AppEffect::MarkSet(name) => {
-                if name.len() > 64 || name.chars().any(char::is_control) {
-                    return Ok(());
-                }
                 if let Some(location) = self.current_persisted_location() {
-                    self.marks.retain(|mark| mark.name != name);
-                    self.marks.push(PersistedMark { name, location });
-                    let maximum = self.configuration.settings().persistence.marks;
-                    if self.marks.len() > maximum {
-                        self.marks.drain(..self.marks.len() - maximum);
-                    }
+                    self.persistence.set_mark(
+                        name,
+                        location,
+                        self.configuration.settings().persistence.marks,
+                    );
                 }
             }
+
             AppEffect::SafeModeStatus => {
                 self.notify_message(
                     self.message(

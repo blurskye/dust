@@ -22,9 +22,15 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     path::PathBuf,
 };
+#[path = "hosting.rs"]
+mod hosting;
 #[path = "integration.rs"]
 mod integration;
+#[path = "windows/mod.rs"]
+mod windows;
+pub(super) use hosting::WindowUpdate;
 pub(super) use integration::{ExtensionUpdate, RegistryUpdate};
+pub(super) use windows::PluginUiInteraction;
 #[path = "content.rs"]
 mod content;
 #[path = "documents.rs"]
@@ -42,6 +48,7 @@ pub(in crate::editor::session) struct InvocationContext<'a> {
 type BufferObservation = (u64, u64, usize, usize, usize, u8);
 pub(in crate::editor::session) type HostObservation = (u64, String, Option<BufferObservation>, u64);
 pub(super) struct ExtensionSession {
+    windows: windows::PluginWindowHost,
     providers: PluginProviderBroker,
     virtual_documents: PluginVirtualDocumentBroker,
     virtual_editor: documents::VirtualDocumentEditorBridge,
@@ -78,6 +85,7 @@ impl ExtensionSession {
         registry: RegistryService,
     ) -> Self {
         Self {
+            windows: windows::PluginWindowHost::default(),
             providers: PluginProviderBroker::default(),
             virtual_documents: PluginVirtualDocumentBroker::default(),
             virtual_editor: documents::VirtualDocumentEditorBridge::default(),
@@ -301,6 +309,7 @@ impl ExtensionSession {
         self.observation = None;
     }
     pub(super) fn reset_runtime(&mut self) {
+        self.windows.clear_runtime();
         self.providers.reset_runtime();
         self.virtual_documents.reset_runtime();
         self.virtual_editor = documents::VirtualDocumentEditorBridge::default();

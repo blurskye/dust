@@ -2,8 +2,8 @@ use super::super::windows::{
     CommandEffect, CommandError, CommandPolicy, WindowCommand, rect_contains_point,
 };
 use super::{
-    AppEffect, CompositorProjection, DockEdge, FocusDirection, NativeSurfaceTarget, PluginLoadId,
-    PtyId, WindowPlacement, WindowRect, explorer_panel_width,
+    AppEffect, CompositorProjection, DockEdge, FocusDirection, NativeSurfaceTarget, PtyId,
+    WindowPlacement, WindowRect, explorer_panel_width,
 };
 use super::{Duration, InteractiveApplication, LiveCrashSnapshot, PluginStatus};
 use super::{PickerOrigin, PickerPayload, PickerSurfaceKind};
@@ -185,15 +185,10 @@ impl InteractiveApplication {
 impl InteractiveApplication {
     pub(super) fn sync_plugin_window_ui(&mut self) {
         let projection = self.compositor_projection().cloned();
-        let events = self
-            .plugin_windows
-            .synchronize_private_geometry(projection.as_ref());
-        for (plugin, load, event) in events {
-            self.extension.queue_ui(plugin, PluginLoadId(load), [event]);
-        }
-        self.ui.plugin_surfaces = self.plugin_windows.snapshots();
+        self.extension.synchronize_windows(projection.as_ref());
+        self.ui.plugin_surfaces = self.extension.window_snapshots();
         self.ui.private_surfaces = self
-            .plugin_windows
+            .extension
             .private_snapshots(self.window_session.graph());
     }
 

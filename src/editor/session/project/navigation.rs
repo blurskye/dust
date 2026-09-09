@@ -149,15 +149,11 @@ impl InteractiveApplication {
 
     pub(in crate::editor::session) fn push_change_location(&mut self) {
         if let Some(location) = self.current_persisted_location() {
-            if self.change_list.last().is_none_or(|previous| {
-                previous.path != location.path || previous.byte != location.byte
-            }) {
-                self.change_list.push(location);
-                let maximum = self.configuration.settings().persistence.changes;
-                if self.change_list.len() > maximum {
-                    self.change_list.drain(..self.change_list.len() - maximum);
-                }
-            }
+            self.persistence.record_location(
+                location,
+                true,
+                self.configuration.settings().persistence.changes,
+            );
         }
     }
 
@@ -202,11 +198,11 @@ impl InteractiveApplication {
             return;
         }
         if let Some(current) = self.current_persisted_location() {
-            self.jump_list.push(current);
-            let maximum = self.configuration.settings().persistence.jumps;
-            if self.jump_list.len() > maximum {
-                self.jump_list.drain(..self.jump_list.len() - maximum);
-            }
+            self.persistence.record_location(
+                current,
+                false,
+                self.configuration.settings().persistence.jumps,
+            );
         }
         let roots = self
             .workspace

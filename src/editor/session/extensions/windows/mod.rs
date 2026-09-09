@@ -19,7 +19,13 @@ use crate::{
 
 mod host;
 mod validation;
-use validation::*;
+use validation::{
+    apply_private_patch, ensure_focused_visible, first_focusable_node, focusable_nodes,
+    graph_placement, instance_revisions, is_focusable_node, map_graph_error, placement_kind,
+    private_declaration, private_style, rect_contains, require_active_window,
+    require_graph_revision, tree_rows, ui_error, validate_private_action,
+    validate_private_snapshot, validate_tree,
+};
 
 const MAXIMUM_PLUGIN_UI_NODES: usize = 256;
 const MAXIMUM_PLUGIN_UI_DEPTH: usize = 32;

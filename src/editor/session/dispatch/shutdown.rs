@@ -13,6 +13,7 @@ impl InteractiveApplication {
         if self.workspace_edits.preparing() || self.workspace_edits.proposal().is_some() {
             self.reject_workspace_proposal();
         }
+        self.cancel_session_restore();
         let discarded = self.extension.close_edits();
         if discarded != 0 {
             self.notices.record(

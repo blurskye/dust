@@ -17,7 +17,40 @@ pub(in crate::editor::session) struct PluginWindowDraft {
     graph: WindowGraph,
 }
 
+pub(in crate::editor::session) struct PluginWindowTransition {
+    draft: PluginWindowDraft,
+    key: Arc<()>,
+}
+pub(in crate::editor::session) struct PluginWindowKey(Arc<()>);
+pub(in crate::editor::session) struct PluginWindowReceipt(Arc<()>);
+impl PluginWindowReceipt {
+    pub(in crate::editor::session) fn matches(&self, key: &PluginWindowKey) -> bool {
+        Arc::ptr_eq(&self.0, &key.0)
+    }
+}
+impl PluginWindowDraft {
+    pub(in crate::editor::session) fn seal(self) -> (PluginWindowTransition, PluginWindowKey) {
+        let key = Arc::new(());
+        (
+            PluginWindowTransition {
+                draft: self,
+                key: key.clone(),
+            },
+            PluginWindowKey(key),
+        )
+    }
+}
 impl WindowSession {
+    pub(in crate::editor::session) fn accept_plugin_transition(
+        &mut self,
+        transition: PluginWindowTransition,
+        current: &crate::editor::EditorWindowVersion,
+        catalog: &crate::extensions::PluginCatalogVersion,
+    ) -> Result<PluginWindowReceipt, String> {
+        self.commit_plugin(transition.draft, current, catalog)?;
+        Ok(PluginWindowReceipt(transition.key))
+    }
+
     #[cfg(test)]
     pub(in crate::editor::session) fn begin_plugin_fixture(
         &self,

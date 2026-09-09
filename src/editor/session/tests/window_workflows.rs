@@ -388,7 +388,6 @@ fn terminal_selection_does_not_capture_keys_and_temporary_input_precedes_termina
     assert_eq!(session.keyboard_terminal(), Some(1));
     session.select_terminal_without_focus(2);
     assert_eq!(session.keyboard_terminal(), Some(1));
-    session.terminal_fixture();
     session.background_completion_fixture();
     assert_eq!(session.context(), "terminal");
     assert_eq!(session.keyboard_terminal(), Some(1));
