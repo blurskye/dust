@@ -142,12 +142,12 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
     app.extension
         .fixture_contribution(index.clone())
         .expect("catalog");
-    app.plugin_providers
-        .install(&index)
+    app.extension
+        .fixture_provider_install(&index)
         .expect("provider owner");
     let request = app
-        .plugin_providers
-        .start(crate::extensions::PluginProviderStart {
+        .extension
+        .fixture_provider_start(crate::extensions::PluginProviderStart {
             plugin: "demo".into(),
             load: PluginLoadId(77),
             provider: "plugin.demo.provider.files".into(),
@@ -157,12 +157,11 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
             buffer_revision: None,
         })
         .expect("request");
-    app.plugin_providers
-        .apply_chunk(
+    app.extension
+        .provider_chunk(
             "demo",
             PluginLoadId(77),
-            Some(app.workspace.root_revision()),
-            None,
+            (Some(app.workspace.root_revision()), None),
             crate::extensions::PluginPickerChunk {
                 request,
                 sequence: 1,
@@ -184,7 +183,7 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
             },
         )
         .expect("chunk");
-    app.active_plugin_picker = Some(request);
+    app.extension.picker_installed(Some(request));
     app.present_plugin_picker(request);
     assert_eq!(app.search.picker_surface(), PickerSurfaceKind::Generic);
     assert_eq!(
@@ -194,20 +193,26 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
             .map(|item| item.label.as_str()),
         Some("Beta")
     );
-    let stable = app.plugin_providers.projection(request);
+    let stable = app.extension.provider_projection(request);
     let stable_ui = app.ui.picker.clone();
     for _ in 0..256 {
-        assert_eq!(app.plugin_providers.projection(request), stable);
+        assert_eq!(app.extension.provider_projection(request), stable);
         assert_eq!(app.ui.picker, stable_ui);
     }
+    app.install_picker("Another picker".into(), Vec::new());
+    let replacement_ui = app.ui.picker.clone();
+    assert!(!app.extension.provider_visible(request));
+    app.extension.picker_installed(Some(request)); // cancelled sources cannot reactivate
+    app.present_plugin_picker(request);
+    assert_eq!(app.ui.picker, replacement_ui);
+    assert!(!app.extension.provider_visible(request));
     app.close_picker();
     assert_eq!(
-        app.plugin_providers
-            .apply_chunk(
+        app.extension
+            .provider_chunk(
                 "demo",
                 PluginLoadId(77),
-                Some(app.workspace.root_revision()),
-                None,
+                (Some(app.workspace.root_revision()), None),
                 crate::extensions::PluginPickerChunk {
                     request,
                     sequence: 2,
@@ -219,6 +224,34 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
             .code,
         crate::extensions::PluginProviderErrorCode::Cancelled
     );
+    // Reopening a one-request provider reserves new metadata without destroying
+    // the displayed source if subsequent picker admission is refused.
+    let mut broker = crate::extensions::PluginProviderBroker::default();
+    broker.install(&index).unwrap();
+    let start = || crate::extensions::PluginProviderStart {
+        plugin: "demo".into(),
+        load: PluginLoadId(77),
+        provider: "plugin.demo.provider.files".into(),
+        query: String::new(),
+        context: "editor".into(),
+        workspace_revision: None,
+        buffer_revision: None,
+    };
+    let old = broker.start(start()).unwrap();
+    let next = broker.reserve_replacing(start(), Some(old)).unwrap();
+    assert!(broker.presentable(old) && broker.presentable(next));
+    assert_eq!(
+        broker
+            .reserve_replacing(start(), Some(old))
+            .unwrap_err()
+            .code,
+        crate::extensions::PluginProviderErrorCode::QueueFull
+    );
+    broker.cancel(next);
+    assert!(broker.presentable(old));
+    let next = broker.reserve_replacing(start(), Some(old)).unwrap();
+    broker.cancel(old);
+    assert!(broker.presentable(next));
 }
 
 #[test]
@@ -889,4 +922,133 @@ fn deferred_batch_abort_and_worker_loss_clear_static_ownership() {
             .specs()
             .all(|spec| !matches!(spec.source, CommandSource::Plugin(_)))
     );
+}
+
+#[test]
+fn virtual_publication_keeps_original_request_until_checked_window_acceptance() {
+    use crate::editor::session::extensions::VirtualContext;
+    let mut app = app();
+    let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
+    manifest
+        .capabilities
+        .insert(crate::extensions::PluginCapability::VirtualDocuments);
+    manifest.contributions.virtual_documents =
+        vec![crate::extensions::PluginVirtualDocumentContribution {
+            id: "plugin.demo.virtual.help".into(),
+            title: "Help".into(),
+            language: "markdown".into(),
+            mode: crate::extensions::PluginVirtualDocumentMode::ReadOnly,
+            maximum_concurrent_documents: 1,
+            maximum_document_bytes: 4096,
+            maximum_document_lines: 128,
+            maximum_patch_bytes: 256,
+            maximum_patches_per_request: 8,
+            deadline_milliseconds: 30_000,
+            command: "plugin.demo.run".into(),
+            context: "dashboard".into(),
+            provenance: None,
+        }];
+    let index =
+        crate::extensions::index_manifest_contributions(&manifest, 7, "virtual fixture".into())
+            .unwrap();
+    app.extension.fixture_contribution(index.clone()).unwrap();
+    let request = app.extension.fixture_virtual_request(&index);
+    let proposal = crate::extensions::PluginVirtualDocumentProposal {
+        request: request.request,
+        document: request.document,
+        cancellation_generation: request.cancellation_generation,
+        kind: crate::extensions::PluginVirtualDocumentProposalKind::Full(
+            crate::extensions::PluginVirtualDocumentFull {
+                expected_revision: None,
+                revision: 1,
+                title: "Help".into(),
+                language: "markdown".into(),
+                text: "# Original source\n".into(),
+            },
+        ),
+    };
+    let before = app.state.version();
+    assert!(
+        app.extension
+            .prepare_virtual(
+                "other",
+                PluginLoadId(7),
+                proposal.clone(),
+                VirtualContext {
+                    editor: &app.state,
+                    windows: &app.window_session,
+                    scratch: "scratch"
+                }
+            )
+            .is_err()
+    );
+    let (source, candidate) = app
+        .extension
+        .prepare_virtual(
+            "demo",
+            PluginLoadId(7),
+            proposal.clone(),
+            VirtualContext {
+                editor: &app.state,
+                windows: &app.window_session,
+                scratch: "scratch",
+            },
+        )
+        .unwrap();
+    // Retiring the window candidate cannot consume the original broker request.
+    app.window_session.invalidate_native();
+    assert!(
+        app.window_session
+            .accept_editor_transition(candidate, source.before(), source.catalog())
+            .is_err()
+    );
+    drop(source);
+    assert_eq!(app.state.version(), before);
+    let (source, candidate) = app
+        .extension
+        .prepare_virtual(
+            "demo",
+            PluginLoadId(7),
+            proposal.clone(),
+            VirtualContext {
+                editor: &app.state,
+                windows: &app.window_session,
+                scratch: "scratch",
+            },
+        )
+        .unwrap();
+    let accepted = app
+        .window_session
+        .accept_editor_transition(candidate, source.before(), source.catalog())
+        .unwrap();
+    app.state = source.finish(accepted).unwrap();
+    let virtual_buffer = app.state.active_buffer_id().unwrap();
+    assert_eq!(
+        app.state.buffers[virtual_buffer].text.to_string(),
+        "# Original source\n"
+    );
+    assert!(
+        app.extension
+            .prepare_virtual(
+                "demo",
+                PluginLoadId(7),
+                proposal,
+                VirtualContext {
+                    editor: &app.state,
+                    windows: &app.window_session,
+                    scratch: "scratch"
+                }
+            )
+            .is_err()
+    );
+    let (ordinary, view) = app.state.open_text(TextBuffer::from_text("ordinary"), None);
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let focus = app.window_session.graph().focused();
+    app.remove_plugin_contribution_generation("demo", PluginLoadId(7));
+    assert!(!app.state.buffers.contains_key(virtual_buffer));
+    assert_eq!(app.state.active_buffer_id(), Some(ordinary));
+    assert_eq!(app.state.active_view, Some(view));
+    assert_eq!(app.window_session.graph().focused(), focus);
+    assert_eq!(app.state.buffers[ordinary].text.to_string(), "ordinary");
 }

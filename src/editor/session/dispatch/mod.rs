@@ -30,12 +30,11 @@ use crate::editor::session::debugger::DebugSession;
 mod documents;
 #[path = "../editing_input.rs"]
 mod editing_input;
-#[path = "../effects/mod.rs"]
 mod effects;
 #[path = "../events.rs"]
 mod events;
-#[path = "../extensions/mod.rs"]
-mod extensions;
+#[path = "../extensions/windows/mod.rs"]
+mod plugin_windows;
 
 use super::syntax::{IndentError, SyntaxDocument, SyntaxSession, semantic_role};
 use super::windows::rect_contains_point;
@@ -93,10 +92,7 @@ use crate::editor::{
     EditorState, EditorTransaction, FocusDirection, InvocationSource, Precondition, RegisterShape,
     RegisterValue, TransactionId, UndoPolicy, ViewId, register_builtin_commands,
 };
-use crate::extensions::{
-    PluginEvent, PluginLimits, PluginLoadId, PluginProviderBroker, PluginProviderSessionStatus,
-    PluginStatus, PluginVirtualDocumentBroker,
-};
+use crate::extensions::{PluginEvent, PluginLimits, PluginLoadId, PluginStatus};
 use crate::files::{
     ExplorerMutation, ExplorerWatchService, ProjectRootResolution, RequestId, ResourceIntentKind,
     VfsError, VfsResult, VfsWorker, WorkspaceFilePolicy, WorkspaceSearchMatch,
@@ -143,10 +139,7 @@ use slotmap::Key;
 use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
 
-use self::{
-    extensions::documents::VirtualDocumentEditorBridge,
-    extensions::windows::{PluginUiInteraction, PluginWindowHost},
-};
+use self::plugin_windows::{PluginUiInteraction, PluginWindowHost};
 use crate::editor::{ApplicationError, StartupTarget, build_state};
 use crate::ui::window::{
     CompositorProjection, DockEdge, SpatialDirection, WindowPlacement, WindowRect,
@@ -158,10 +151,6 @@ struct InteractiveApplication {
     state: EditorState,
     plugin_windows: PluginWindowHost,
     extension: super::extensions::ExtensionSession,
-    plugin_providers: PluginProviderBroker,
-    plugin_virtual_documents: PluginVirtualDocumentBroker,
-    plugin_virtual_editor: VirtualDocumentEditorBridge,
-    active_plugin_picker: Option<u64>,
     workspace: super::workspace::WorkspaceSession,
     diagnostics: super::diagnostics::DiagnosticSession,
     picker_payloads: HashMap<PickerItemId, (PickerEpoch, PickerPayload)>,
@@ -510,10 +499,6 @@ impl InteractiveApplication {
                 state_directory.join("packages"),
                 registry,
             ),
-            plugin_providers: PluginProviderBroker::default(),
-            plugin_virtual_documents: PluginVirtualDocumentBroker::default(),
-            plugin_virtual_editor: VirtualDocumentEditorBridge::default(),
-            active_plugin_picker: None,
             workspace,
             diagnostics,
             picker_payloads: HashMap::new(),

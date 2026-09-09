@@ -497,6 +497,11 @@ fn health_virtual_dogfood_opens_refreshes_and_remains_read_only() {
         app.reconcile_editor_windows();
         assert_eq!(app.window_session.graph().focused(), ids.2);
     }
+    app.remove_plugin_contribution_generation("builtin.health", PluginLoadId(1));
+    assert!(!app.state.buffers.contains_key(buffer));
+    assert!(app.state.active_view.is_none());
+    assert!(app.window_session.dashboard_visible());
+    app.window_session.graph().validate().unwrap();
 }
 
 #[test]
@@ -516,8 +521,8 @@ fn accepted_virtual_snapshot_publishes_through_the_tiled_editor_bridge() {
     };
     let mut draft = app.state.draft();
     let buffer = app
-        .plugin_virtual_editor
-        .publish(&mut draft, &snapshot)
+        .extension
+        .fixture_virtual_publish(&mut draft, &snapshot)
         .expect("publish");
     app.state = draft.accept(&app.state.version()).unwrap();
     app.set_dashboard_visibility(false);
@@ -539,8 +544,8 @@ fn accepted_virtual_snapshot_publishes_through_the_tiled_editor_bridge() {
     refresh.text = "# Héllo\nrefreshed".into();
     let mut draft = app.state.draft();
     assert_eq!(
-        app.plugin_virtual_editor
-            .publish(&mut draft, &refresh)
+        app.extension
+            .fixture_virtual_publish(&mut draft, &refresh)
             .unwrap(),
         buffer
     );

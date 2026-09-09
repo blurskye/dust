@@ -15,7 +15,7 @@ use crate::{
     editor::EditorState,
     extensions::{
         OwnedPluginEvent, PluginExecutionReply, PluginExecutionRequest, PluginLimits,
-        PluginProviderBroker, PluginStatus, PluginVirtualRequestLane,
+        PluginProviderBroker, PluginStatus, PluginVirtualDocumentBroker,
     },
 };
 use std::{
@@ -25,6 +25,11 @@ use std::{
 #[path = "integration.rs"]
 mod integration;
 pub(super) use integration::{ExtensionUpdate, RegistryUpdate};
+#[path = "content.rs"]
+mod content;
+#[path = "documents.rs"]
+mod documents;
+pub(super) use content::{VirtualContext, VirtualOpen, VirtualPublication};
 
 pub(in crate::editor::session) struct InvocationContext<'a> {
     pub editor: &'a EditorState,
@@ -32,13 +37,15 @@ pub(in crate::editor::session) struct InvocationContext<'a> {
     pub configuration: &'a u64,
     pub generation: u64,
     pub maximum: usize,
-    pub providers: &'a PluginProviderBroker,
-    pub virtual_documents: PluginVirtualRequestLane<'a>,
 }
 
 type BufferObservation = (u64, u64, usize, usize, usize, u8);
 pub(in crate::editor::session) type HostObservation = (u64, String, Option<BufferObservation>, u64);
 pub(super) struct ExtensionSession {
+    providers: PluginProviderBroker,
+    virtual_documents: PluginVirtualDocumentBroker,
+    virtual_editor: documents::VirtualDocumentEditorBridge,
+    active_picker: Option<u64>,
     plugin_contributions: PluginContributionCatalog,
     pending_index_activation: BTreeMap<String, (PluginLoadId, String)>,
     rejected_plugin_loads: BTreeSet<(String, PluginLoadId)>,
@@ -71,6 +78,10 @@ impl ExtensionSession {
         registry: RegistryService,
     ) -> Self {
         Self {
+            providers: PluginProviderBroker::default(),
+            virtual_documents: PluginVirtualDocumentBroker::default(),
+            virtual_editor: documents::VirtualDocumentEditorBridge::default(),
+            active_picker: None,
             plugin_contributions: PluginContributionCatalog::default(),
             pending_index_activation: BTreeMap::new(),
             rejected_plugin_loads: BTreeSet::new(),
@@ -133,7 +144,7 @@ impl ExtensionSession {
         &mut self,
         plugin: &str,
         command: &str,
-        mut context: InvocationContext<'_>,
+        context: InvocationContext<'_>,
     ) -> Result<(), String> {
         let load = self
             .manager
@@ -151,6 +162,8 @@ impl ExtensionSession {
             context.configuration,
             context.maximum,
         )?;
+        let mut virtual_requests: crate::extensions::PluginVirtualRequestLane<'_> =
+            self.virtual_documents.request_lane();
         // Real manager/source admission stays borrowed while delivery and snapshot
         // payloads are built and queued. Full/retired refusal leaves queues intact.
         loan.submit(PluginExecutionRequest {
@@ -165,8 +178,8 @@ impl ExtensionSession {
                 .results
                 .remove(&(plugin.into(), load))
                 .unwrap_or_default(),
-            provider_requests: context.providers.requests(plugin, load),
-            virtual_document_requests: context.virtual_documents.deliver(
+            provider_requests: self.providers.requests(plugin, load),
+            virtual_document_requests: virtual_requests.deliver(
                 plugin,
                 load,
                 &format!("plugin.{plugin}.{command}"),
@@ -288,6 +301,10 @@ impl ExtensionSession {
         self.observation = None;
     }
     pub(super) fn reset_runtime(&mut self) {
+        self.providers.reset_runtime();
+        self.virtual_documents.reset_runtime();
+        self.virtual_editor = documents::VirtualDocumentEditorBridge::default();
+        self.active_picker = None;
         self.ui.clear();
         self.results.clear();
         self.events.reset_runtime();

@@ -11,6 +11,7 @@ pub(in crate::editor::session) struct PickerEpoch(Arc<()>);
 #[derive(Clone, Copy)]
 pub(in crate::editor::session) enum PickerOrigin {
     General,
+    PluginProvider(u64),
     WorkspaceEdit(crate::workspace::ProposalId),
     Files,
     Grep,
@@ -95,7 +96,9 @@ impl SearchSession {
         self.picker.interaction.as_ref().is_some_and(|picker| {
             picker.source != (scope, configuration)
                 || match picker.origin {
-                    PickerOrigin::General | PickerOrigin::WorkspaceEdit(_) => false,
+                    PickerOrigin::General
+                    | PickerOrigin::WorkspaceEdit(_)
+                    | PickerOrigin::PluginProvider(_) => false,
                     PickerOrigin::Files => self.file_scope.is_none(),
                     PickerOrigin::Grep => {
                         self.scope.is_none() && !(self.live && self.query.is_empty())

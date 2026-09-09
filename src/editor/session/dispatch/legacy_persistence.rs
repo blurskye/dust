@@ -366,10 +366,6 @@ impl InteractiveApplication {
         }
         self.plugin_windows.clear_runtime();
         self.extension.reset_runtime();
-        self.plugin_providers.reset_runtime();
-        self.plugin_virtual_documents.reset_runtime();
-        self.plugin_virtual_editor = VirtualDocumentEditorBridge::default();
-        self.active_plugin_picker = None;
         self.ui.plugin_surfaces.clear();
         self.ui.private_surfaces.clear();
         self.state = candidate;

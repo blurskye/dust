@@ -34,6 +34,12 @@ impl InteractiveApplication {
         complete: bool,
         origin: PickerOrigin,
     ) {
+        if let PickerOrigin::PluginProvider(request) = origin
+            && !self.extension.provider_presentable(request)
+        {
+            self.show_error("plugin picker source retired");
+            return;
+        }
         let retired_preview = self
             .search
             .workspace_picker()
@@ -64,6 +70,10 @@ impl InteractiveApplication {
                 return;
             }
         };
+        self.extension.picker_installed(match origin {
+            PickerOrigin::PluginProvider(request) => Some(request),
+            _ => None,
+        });
         self.input.capture_changed();
         // A refused replacement must not destroy the still-valid old preview.
         if let Some(id) = retired_preview {
@@ -599,64 +609,46 @@ impl InteractiveApplication {
         provider: String,
         query: String,
     ) {
-        let Some(plugin) = plugin_owner_from_id(&provider).map(str::to_owned) else {
-            self.show_error("plugin provider ID is malformed");
-            return;
-        };
-        let Some(load) = self.extension.load_id(&plugin) else {
-            self.show_error(crate::extensions::PluginError::NotActive);
-            return;
-        };
-        if !self.extension.is_active_generation(&plugin, load) {
-            self.show_error(crate::extensions::PluginError::NotActive);
-            return;
-        }
-        let Some(declaration) = self
-            .extension
-            .contributions()
-            .get(&plugin)
-            .filter(|index| index.generation == load.0)
-            .and_then(|index| index.providers.iter().find(|item| item.id == provider))
-            .cloned()
-        else {
-            self.show_error("plugin picker provider is not statically declared");
-            return;
-        };
-        self.close_picker();
         let buffer_revision = self
             .state
             .active_buffer_id()
             .and_then(|buffer| self.state.buffers.get(buffer))
             .map(|buffer| buffer.text.revision().0);
-        let request = match self
-            .plugin_providers
-            .start(crate::extensions::PluginProviderStart {
-                plugin: plugin.clone(),
-                load,
-                provider: provider.clone(),
-                query,
-                context: "editor".into(),
-                workspace_revision: Some(self.workspace.root_revision()),
-                buffer_revision,
-            }) {
-            Ok(request) => request,
+        let invocation = match self.extension.start_provider(
+            &provider,
+            query,
+            (self.workspace.root_revision(), buffer_revision),
+        ) {
+            Ok(invocation) => invocation,
             Err(error) => {
-                self.show_error(error.detail);
+                self.show_error(error);
                 return;
             }
         };
-        self.active_plugin_picker = Some(request);
-        self.install_picker(format!("Plugin · {provider}"), Vec::new());
-        let prefix = format!("plugin.{plugin}.");
-        let Some(command) = declaration.command.strip_prefix(&prefix).map(str::to_owned) else {
-            self.show_error("plugin picker command is malformed");
-            return;
-        };
-        self.process_effect(AppEffect::PluginExecute { plugin, command });
+        self.install_surface_picker_state(
+            PickerSurfaceKind::Generic,
+            format!("Plugin · {provider}"),
+            Vec::new(),
+            String::new(),
+            true,
+            PickerOrigin::PluginProvider(invocation.request),
+        );
+        if self.extension.provider_visible(invocation.request) {
+            self.process_effect(AppEffect::PluginExecute {
+                plugin: invocation.plugin,
+                command: invocation.command,
+            });
+        } else {
+            self.extension
+                .discard_unpresented_provider(invocation.request);
+        }
     }
 
     pub(in crate::editor::session) fn present_plugin_picker(&mut self, request: u64) {
-        let Some(projection) = self.plugin_providers.projection(request) else {
+        if !self.extension.provider_visible(request) {
+            return;
+        }
+        let Some(projection) = self.extension.provider_projection(request) else {
             return;
         };
         let items = match compose_plugin_picker_items(&projection) {
@@ -666,8 +658,14 @@ impl InteractiveApplication {
                 return;
             }
         };
-        self.install_picker(format!("Plugin · {}", projection.provider), items);
-        self.active_plugin_picker = Some(request);
+        self.install_surface_picker_state(
+            PickerSurfaceKind::Generic,
+            format!("Plugin · {}", projection.provider),
+            items,
+            String::new(),
+            true,
+            PickerOrigin::PluginProvider(request),
+        );
     }
 
     pub(in crate::editor::session) fn close_picker(&mut self) {
@@ -682,9 +680,7 @@ impl InteractiveApplication {
         if let Some(id) = self.search.close_picker() {
             self.documents.cancel_request(id);
         }
-        if let Some(request) = self.active_plugin_picker.take() {
-            self.plugin_providers.cancel(request);
-        }
+        self.extension.picker_installed(None);
         self.tasks.select_output(None);
         self.picker_payloads.clear();
         self.ui.picker = None;
@@ -725,6 +721,18 @@ impl InteractiveApplication {
         };
         let debug_selection = match &payload {
             Some(PickerPayload::Debug(key)) => Some(self.debugger_session.take_selection(key)),
+            _ => None,
+        };
+        let provider_selection = match &payload {
+            Some(PickerPayload::PluginProviderItem {
+                plugin,
+                load,
+                request,
+                item,
+                action_command,
+            }) => self
+                .extension
+                .provider_selection(plugin, *load, *request, item, action_command),
             _ => None,
         };
         self.close_picker();
@@ -852,31 +860,9 @@ impl InteractiveApplication {
                     self.invoke(invocation);
                 }
             }
-            Some(PickerPayload::PluginProviderItem {
-                plugin,
-                load,
-                request,
-                item,
-                action_command,
-            }) => {
-                let valid = self.extension.load_id(&plugin) == Some(load)
-                    && self.extension.is_active_generation(&plugin, load)
-                    && self
-                        .plugin_providers
-                        .projection(request)
-                        .is_some_and(|projection| {
-                            projection.action_command == action_command
-                                && projection
-                                    .items
-                                    .iter()
-                                    .any(|candidate| candidate.id == item)
-                        });
-                let prefix = format!("plugin.{plugin}.");
-                if valid && let Some(command) = action_command.strip_prefix(&prefix) {
-                    self.process_effect(AppEffect::PluginExecute {
-                        plugin,
-                        command: command.into(),
-                    });
+            Some(PickerPayload::PluginProviderItem { plugin, .. }) => {
+                if let Some(command) = provider_selection {
+                    self.process_effect(AppEffect::PluginExecute { plugin, command });
                 }
             }
             _ => {}

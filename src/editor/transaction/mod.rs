@@ -541,6 +541,44 @@ impl EditorState {
     }
 }
 impl EditorDraft {
+    pub(crate) fn version(&self) -> EditorVersion {
+        self.state.version()
+    }
+    pub(crate) fn remove_virtual_document(
+        &mut self,
+        buffer: BufferId,
+        owner: &str,
+        generation: u64,
+        document: u64,
+    ) -> Result<(), String> {
+        if !self.state.buffers.get(buffer).is_some_and(|buffer| matches!(&buffer.origin,
+            crate::editor::BufferOrigin::VirtualReadOnly { owner: current, generation: load, document: id, .. }
+                if current == owner && *load == generation && *id == document)) {
+            return Err("virtual document removal source changed".into());
+        }
+        let focus = self
+            .state
+            .active_tab
+            .and_then(|tab| self.state.tabs.get(tab).map(|value| (tab, value.focused)));
+        let views = self
+            .state
+            .views
+            .iter()
+            .filter_map(|(view, value)| (value.buffer == buffer).then_some(view))
+            .collect::<Vec<_>>();
+        for view in views {
+            self.state.close_view(view).map_err(str::to_owned)?;
+        }
+        self.state.remove_buffer(buffer);
+        if let Some((tab, pane)) = focus
+            && self.state.tabs.contains_key(tab)
+            && self.state.panes.contains_key(pane)
+        {
+            self.state.active_tab = Some(tab);
+            self.state.focus_pane_id(pane).map_err(str::to_owned)?;
+        }
+        Ok(())
+    }
     pub(crate) fn before_window(&self) -> &EditorWindowVersion {
         self.before.window()
     }

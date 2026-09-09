@@ -437,22 +437,18 @@ impl PluginVirtualDocumentBroker {
         }
         out
     }
-    pub fn apply(
-        &mut self,
+    fn request_source(
+        &self,
         plugin: &str,
         load: PluginLoadId,
-        proposal: PluginVirtualDocumentProposal,
-    ) -> Result<PluginVirtualDocumentSnapshot, PluginVirtualDocumentError> {
-        let pending = self
-            .pending
-            .get(&proposal.request)
-            .ok_or_else(|| {
-                err(
-                    PluginVirtualDocumentErrorCode::UnknownRequest,
-                    "unknown request",
-                )
-            })?
-            .clone();
+        proposal: &PluginVirtualDocumentProposal,
+    ) -> Result<&Pending, PluginVirtualDocumentError> {
+        let pending = self.pending.get(&proposal.request).ok_or_else(|| {
+            err(
+                PluginVirtualDocumentErrorCode::UnknownRequest,
+                "unknown request",
+            )
+        })?;
         if pending.plugin != plugin || pending.load != load {
             return Err(err(
                 PluginVirtualDocumentErrorCode::StaleGeneration,
@@ -483,6 +479,49 @@ impl PluginVirtualDocumentBroker {
                 "request deadline expired",
             ));
         }
+        if !self
+            .owners
+            .contains_key(&(plugin.into(), load, pending.source.clone()))
+        {
+            return Err(err(
+                PluginVirtualDocumentErrorCode::UnknownSource,
+                "source generation unavailable",
+            ));
+        }
+        let document = self.documents.get(&proposal.document).ok_or_else(|| {
+            err(
+                PluginVirtualDocumentErrorCode::UnknownDocument,
+                "unknown document",
+            )
+        })?;
+        if document.closed
+            && !matches!(
+                proposal.kind,
+                PluginVirtualDocumentProposalKind::CloseAcknowledged
+            )
+        {
+            return Err(err(
+                PluginVirtualDocumentErrorCode::Cancelled,
+                "document closed",
+            ));
+        }
+        Ok(pending)
+    }
+    pub(crate) fn check_proposal(
+        &self,
+        plugin: &str,
+        load: PluginLoadId,
+        proposal: &PluginVirtualDocumentProposal,
+    ) -> Result<(), PluginVirtualDocumentError> {
+        self.request_source(plugin, load, proposal).map(|_| ())
+    }
+    pub fn apply(
+        &mut self,
+        plugin: &str,
+        load: PluginLoadId,
+        proposal: PluginVirtualDocumentProposal,
+    ) -> Result<PluginVirtualDocumentSnapshot, PluginVirtualDocumentError> {
+        let pending = self.request_source(plugin, load, &proposal)?.clone();
         let owner = &self
             .owners
             .get(&(plugin.into(), load, pending.source.clone()))

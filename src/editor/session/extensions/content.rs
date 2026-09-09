@@ -1,0 +1,458 @@
+//! Provider interaction and source-bound virtual document publication.
+use super::{ExtensionSession, documents::VirtualDocumentEditorBridge};
+use crate::{
+    editor::session::windows::{EditorWindowCandidate, NativeDescriptions, WindowSession},
+    editor::{BufferId, EditorState, EditorVersion},
+    extensions::{
+        PluginCatalogVersion, PluginLoadId, PluginPickerChunk, PluginPickerProjection,
+        PluginProviderError, PluginProviderStart, PluginVirtualDocumentBroker,
+        PluginVirtualDocumentProposal, PluginVirtualDocumentSnapshot,
+    },
+};
+
+pub(in crate::editor::session) struct VirtualContext<'a> {
+    pub editor: &'a EditorState,
+    pub windows: &'a WindowSession,
+    pub scratch: &'a str,
+}
+pub(in crate::editor::session) struct VirtualPublication<'a> {
+    broker: &'a mut PluginVirtualDocumentBroker,
+    bridge: &'a mut VirtualDocumentEditorBridge,
+    next_broker: Option<PluginVirtualDocumentBroker>,
+    next_bridge: VirtualDocumentEditorBridge,
+    before: EditorVersion,
+    after: EditorVersion,
+    catalog: PluginCatalogVersion,
+}
+impl VirtualPublication<'_> {
+    pub(in crate::editor::session) fn before(&self) -> &EditorVersion {
+        &self.before
+    }
+    pub(in crate::editor::session) fn catalog(&self) -> &PluginCatalogVersion {
+        &self.catalog
+    }
+    pub(in crate::editor::session) fn finish(
+        self,
+        accepted: EditorState,
+    ) -> Result<EditorState, String> {
+        if accepted.version() != self.after {
+            return Err("virtual publication belongs to a different editor proposal".into());
+        }
+        if let Some(broker) = self.next_broker {
+            *self.broker = broker;
+        }
+        *self.bridge = self.next_bridge;
+        Ok(accepted)
+    }
+}
+pub(in crate::editor::session) enum VirtualOpen {
+    Existing(BufferId),
+    Execute { plugin: String, command: String },
+}
+pub(in crate::editor::session) struct ProviderInvocation {
+    pub request: u64,
+    pub plugin: String,
+    pub command: String,
+}
+#[derive(Debug)]
+pub(in crate::editor::session) struct ProviderUpdate {
+    pub refresh: Option<u64>,
+    pub command: Option<String>,
+}
+impl ExtensionSession {
+    pub(in crate::editor::session) fn start_provider(
+        &mut self,
+        provider: &str,
+        query: String,
+        revisions: (u64, Option<u64>),
+    ) -> Result<ProviderInvocation, String> {
+        let Some((plugin, load, command)) = self.plugin_contributions.ordered().find_map(|index| {
+            index
+                .providers
+                .iter()
+                .find(|item| item.id == provider)
+                .map(|declaration| {
+                    (
+                        index.owner.clone(),
+                        PluginLoadId(index.generation),
+                        declaration.command.clone(),
+                    )
+                })
+        }) else {
+            return Err("plugin picker provider is not statically declared".into());
+        };
+        if !self.manager.is_active_generation(&plugin, load) {
+            return Err(crate::extensions::PluginError::NotActive.to_string());
+        }
+        let command = command
+            .strip_prefix(&format!("plugin.{plugin}."))
+            .ok_or("plugin picker command is malformed")?
+            .to_owned();
+        let request = self
+            .providers
+            .reserve_replacing(
+                PluginProviderStart {
+                    plugin: plugin.clone(),
+                    load,
+                    provider: provider.into(),
+                    query,
+                    context: "editor".into(),
+                    workspace_revision: Some(revisions.0),
+                    buffer_revision: revisions.1,
+                },
+                self.active_picker,
+            )
+            .map_err(|error| error.detail)?;
+        Ok(ProviderInvocation {
+            request,
+            plugin,
+            command,
+        })
+    }
+    pub(in crate::editor::session) fn provider_presentable(&self, request: u64) -> bool {
+        self.providers.presentable(request)
+    }
+    pub(in crate::editor::session) fn discard_unpresented_provider(&mut self, request: u64) {
+        if !self.provider_visible(request) {
+            self.providers.cancel(request);
+        }
+    }
+    pub(in crate::editor::session) fn picker_installed(&mut self, provider: Option<u64>) {
+        if provider.is_some_and(|request| !self.provider_presentable(request)) {
+            return;
+        }
+        if self.active_picker != provider
+            && let Some(previous) = self.active_picker.take()
+        {
+            self.providers.cancel(previous);
+        }
+        self.active_picker = provider;
+    }
+    pub(in crate::editor::session) fn provider_visible(&self, request: u64) -> bool {
+        self.active_picker == Some(request)
+    }
+    pub(in crate::editor::session) fn provider_projection(
+        &self,
+        request: u64,
+    ) -> Option<PluginPickerProjection> {
+        self.providers.projection(request)
+    }
+    pub(in crate::editor::session) fn provider_chunk(
+        &mut self,
+        plugin: &str,
+        load: PluginLoadId,
+        revisions: (Option<u64>, Option<u64>),
+        chunk: PluginPickerChunk,
+    ) -> Result<ProviderUpdate, PluginProviderError> {
+        let request = chunk.request;
+        self.providers
+            .apply_chunk(plugin, load, revisions.0, revisions.1, chunk)?;
+        let command = self.providers.continuation(request).and_then(|command| {
+            command
+                .strip_prefix(&format!("plugin.{plugin}."))
+                .map(str::to_owned)
+        });
+        Ok(ProviderUpdate {
+            refresh: self.provider_visible(request).then_some(request),
+            command,
+        })
+    }
+    pub(in crate::editor::session) fn provider_selection(
+        &self,
+        plugin: &str,
+        load: PluginLoadId,
+        request: u64,
+        item: &str,
+        command: &str,
+    ) -> Option<String> {
+        if !self.provider_visible(request)
+            || !self.manager.is_active_generation(plugin, load)
+            || !self
+                .providers
+                .owns_selection(plugin, load, request, item, command)
+        {
+            return None;
+        }
+        command
+            .strip_prefix(&format!("plugin.{plugin}."))
+            .map(str::to_owned)
+    }
+    pub(in crate::editor::session) fn open_virtual(
+        &mut self,
+        source: &str,
+        key: String,
+        editor: &EditorState,
+    ) -> Result<VirtualOpen, String> {
+        if key.len() > crate::extensions::VIRTUAL_DOCUMENT_KEY_BYTE_CEILING
+            || key.chars().any(char::is_control)
+        {
+            return Err("invalid virtual document key".into());
+        }
+        let (plugin, load, command) = self
+            .plugin_contributions
+            .ordered()
+            .find_map(|index| {
+                index
+                    .virtual_documents
+                    .iter()
+                    .find(|declaration| declaration.id == source)
+                    .map(|declaration| {
+                        (
+                            index.owner.clone(),
+                            PluginLoadId(index.generation),
+                            declaration.command.clone(),
+                        )
+                    })
+            })
+            .ok_or("unknown virtual document source")?;
+        if !self.manager.is_active_generation(&plugin, load) {
+            return Err(crate::extensions::PluginError::NotActive.to_string());
+        }
+        if let Some(entry) = self.virtual_editor.find(&plugin, load, source, &key) {
+            if !entry.matches(editor.into()) {
+                return Err("virtual document source changed".into());
+            }
+            return Ok(VirtualOpen::Existing(entry.buffer));
+        }
+        let command = command
+            .strip_prefix(&format!("plugin.{plugin}."))
+            .ok_or("invalid virtual document command")?
+            .to_owned();
+        self.virtual_documents
+            .start(&plugin, load, source, key)
+            .map_err(|error| error.detail)?;
+        Ok(VirtualOpen::Execute { plugin, command })
+    }
+    pub(in crate::editor::session) fn refresh_virtual(
+        &mut self,
+        buffer: BufferId,
+        editor: &EditorState,
+    ) -> Result<VirtualOpen, String> {
+        let entry = self
+            .virtual_editor
+            .entry_for_buffer(buffer)
+            .ok_or("active buffer is not a virtual document")?;
+        if !entry.matches(editor.into()) {
+            return Err("virtual document source changed".into());
+        }
+        let command = self
+            .plugin_contributions
+            .get(&entry.plugin)
+            .filter(|index| index.generation == entry.load.0)
+            .and_then(|index| {
+                index
+                    .virtual_documents
+                    .iter()
+                    .find(|source| source.id == entry.source)
+            })
+            .ok_or("virtual document source unavailable")?
+            .command
+            .strip_prefix(&format!("plugin.{}.", entry.plugin))
+            .ok_or("invalid virtual document command")?
+            .to_owned();
+        if !self.manager.is_active_generation(&entry.plugin, entry.load) {
+            return Err(crate::extensions::PluginError::NotActive.to_string());
+        }
+        self.virtual_documents
+            .refresh(&entry.plugin, entry.load, entry.document)
+            .map_err(|error| error.detail)?;
+        Ok(VirtualOpen::Execute {
+            plugin: entry.plugin.clone(),
+            command,
+        })
+    }
+    pub(in crate::editor::session) fn close_virtual_buffer(&mut self, buffer: BufferId) {
+        if let Some(entry) = self.virtual_editor.entry_for_buffer(buffer).cloned() {
+            self.virtual_documents
+                .cancel(&entry.plugin, entry.load, entry.document);
+            self.virtual_editor
+                .forget_document(&entry.plugin, entry.load, entry.document);
+        }
+    }
+    fn virtual_publication<'a>(
+        &'a mut self,
+        context: VirtualContext<'_>,
+        draft: crate::editor::EditorDraft,
+        bridge: VirtualDocumentEditorBridge,
+        broker: Option<PluginVirtualDocumentBroker>,
+        descriptions: Option<NativeDescriptions<'_>>,
+    ) -> Result<(VirtualPublication<'a>, EditorWindowCandidate), String> {
+        let before = context.editor.version();
+        let after = draft.version();
+        let catalog = self.plugin_contributions.version();
+        // Only the window owner creates the sealed graph candidate. The caller
+        // never receives a mutable draft detached from its source publication.
+        let transition = context.windows.prepare_editor_transition(
+            draft,
+            &before,
+            catalog.clone(),
+            context.scratch,
+            descriptions,
+        )?;
+        Ok((
+            VirtualPublication {
+                broker: &mut self.virtual_documents,
+                bridge: &mut self.virtual_editor,
+                next_broker: broker,
+                next_bridge: bridge,
+                before,
+                after,
+                catalog,
+            },
+            transition,
+        ))
+    }
+    pub(in crate::editor::session) fn prepare_virtual<'a>(
+        &'a mut self,
+        plugin: &str,
+        load: PluginLoadId,
+        proposal: PluginVirtualDocumentProposal,
+        context: VirtualContext<'_>,
+    ) -> Result<(VirtualPublication<'a>, EditorWindowCandidate), String> {
+        self.virtual_documents
+            .check_proposal(plugin, load, &proposal)
+            .map_err(|error| error.detail)?;
+        context
+            .windows
+            .check_editor_admission(&context.editor.into())?;
+        let mut broker = self.virtual_documents.clone();
+        let snapshot = broker
+            .apply(plugin, load, proposal)
+            .map_err(|error| error.detail)?;
+        let mut draft = context.editor.draft();
+        let mut bridge = self.virtual_editor.clone();
+        bridge
+            .publish(&mut draft, &snapshot)
+            .map_err(|error| format!("virtual document publication rejected: {error:?}"))?;
+        self.virtual_publication(context, draft, bridge, Some(broker), None)
+    }
+    pub(in crate::editor::session) fn prepare_health<'a>(
+        &'a mut self,
+        refresh: bool,
+        commands: usize,
+        context: VirtualContext<'_>,
+    ) -> Result<(VirtualPublication<'a>, EditorWindowCandidate), String> {
+        context
+            .windows
+            .check_editor_admission(&context.editor.into())?;
+        let existing = self.virtual_editor.find(
+            "builtin.health",
+            PluginLoadId(1),
+            "builtin.health.virtual",
+            "health",
+        );
+        let mut draft = context.editor.draft();
+        let mut bridge = self.virtual_editor.clone();
+        if !refresh && let Some(entry) = existing {
+            if !entry.matches(draft.topology()) {
+                return Err("virtual document source changed".into());
+            }
+            draft.show_document(entry.buffer).map_err(str::to_owned)?;
+        } else {
+            let revision = match existing {
+                Some(entry) => entry
+                    .revision
+                    .checked_add(1)
+                    .ok_or("health document revision exhausted")?,
+                None => 1,
+            };
+            let snapshot = PluginVirtualDocumentSnapshot {
+                plugin: "builtin.health".into(),
+                load: PluginLoadId(1),
+                source: "builtin.health.virtual".into(),
+                document: 1,
+                key: "health".into(),
+                title: "Dust health".into(),
+                language: "markdown".into(),
+                text: format!(
+                    "# Dust health\n\n- editor: ready\n- plugins indexed: {}\n- API commands: {commands}\n- persistence schema: {}\n",
+                    self.manager.statuses.len(),
+                    crate::persistence::STATE_VERSION
+                ),
+                revision,
+                closed: false,
+            };
+            bridge
+                .publish(&mut draft, &snapshot)
+                .map_err(|error| format!("health document rejected: {error:?}"))?;
+        }
+        self.virtual_publication(context, draft, bridge, None, None)
+    }
+    pub(in crate::editor::session) fn retire_virtual<'a>(
+        &'a mut self,
+        plugin: &str,
+        load: PluginLoadId,
+        context: VirtualContext<'_>,
+        mut descriptions: NativeDescriptions<'_>,
+    ) -> Result<Option<(VirtualPublication<'a>, EditorWindowCandidate)>, String> {
+        // Retirement revokes requests even if the window graph cannot remove the
+        // retained read-only presentation. It is not publication rollback.
+        self.virtual_documents.remove_generation(plugin, load);
+        if !self.virtual_editor.has_generation(plugin, load) {
+            return Ok(None);
+        }
+        context
+            .windows
+            .check_editor_admission(&context.editor.into())?;
+        let mut draft = context.editor.draft();
+        let mut bridge = self.virtual_editor.clone();
+        bridge.remove_generation(&mut draft, plugin, load)?;
+        descriptions.signature.dashboard_visible |= draft.topology().active_tab().is_none();
+        self.virtual_publication(context, draft, bridge, None, Some(descriptions))
+            .map(Some)
+    }
+    pub(in crate::editor::session) fn retire_provider_generation(
+        &mut self,
+        plugin: &str,
+        load: PluginLoadId,
+    ) -> bool {
+        self.providers.remove_generation(plugin, load);
+        if self
+            .active_picker
+            .is_some_and(|request| !self.providers.presentable(request))
+        {
+            self.active_picker = None;
+            true
+        } else {
+            false
+        }
+    }
+}
+#[cfg(test)]
+impl ExtensionSession {
+    pub(in crate::editor::session) fn fixture_provider_install(
+        &mut self,
+        index: &crate::extensions::PluginContributionIndex,
+    ) -> Result<(), PluginProviderError> {
+        self.providers.install(index)
+    }
+    pub(in crate::editor::session) fn fixture_provider_start(
+        &mut self,
+        start: PluginProviderStart,
+    ) -> Result<u64, PluginProviderError> {
+        self.providers.start(start)
+    }
+    pub(in crate::editor::session) fn fixture_virtual_request(
+        &mut self,
+        index: &crate::extensions::PluginContributionIndex,
+    ) -> crate::extensions::PluginVirtualDocumentRequest {
+        let declaration = &index.virtual_documents[0];
+        let load = PluginLoadId(index.generation);
+        self.virtual_documents.install(index).unwrap();
+        self.virtual_documents
+            .start(&index.owner, load, &declaration.id, "help".into())
+            .unwrap();
+        self.virtual_documents
+            .request_lane()
+            .deliver(&index.owner, load, &declaration.command)
+            .pop()
+            .unwrap()
+    }
+    pub(in crate::editor::session) fn fixture_virtual_publish(
+        &mut self,
+        draft: &mut crate::editor::EditorDraft,
+        snapshot: &PluginVirtualDocumentSnapshot,
+    ) -> Result<BufferId, super::documents::VirtualDocumentEditorError> {
+        self.virtual_editor.publish(draft, snapshot)
+    }
+}

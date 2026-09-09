@@ -197,6 +197,15 @@ impl PluginProviderBroker {
     }
 
     pub fn start(&mut self, request: PluginProviderStart) -> Result<u64, PluginProviderError> {
+        self.reserve_replacing(request, None)
+    }
+    // Reserve replacement metadata without cancelling the displayed request.
+    // The owner cancels either reservation after picker admission, before execution.
+    pub(crate) fn reserve_replacing(
+        &mut self,
+        request: PluginProviderStart,
+        retiring: Option<u64>,
+    ) -> Result<u64, PluginProviderError> {
         let PluginProviderStart {
             plugin,
             load,
@@ -221,9 +230,10 @@ impl PluginProviderBroker {
         let now = crate::clock::monotonic();
         let concurrent = self
             .sessions
-            .values()
-            .filter(|session| {
-                session.plugin == plugin
+            .iter()
+            .filter(|(id, session)| {
+                Some(**id) != retiring
+                    && session.plugin == plugin
                     && session.load == load
                     && session.provider == provider
                     && session.status == PluginProviderSessionStatus::Active
@@ -410,6 +420,33 @@ impl PluginProviderBroker {
         let status = candidate.status;
         self.sessions.insert(chunk.request, candidate);
         Ok(status)
+    }
+
+    pub(crate) fn continuation(&self, request: u64) -> Option<&str> {
+        let session = self.sessions.get(&request)?;
+        (session.status == PluginProviderSessionStatus::Active)
+            .then_some(session.action_command.as_str())
+    }
+    pub(crate) fn presentable(&self, request: u64) -> bool {
+        self.sessions
+            .get(&request)
+            .is_some_and(|session| session.status != PluginProviderSessionStatus::Cancelled)
+    }
+    pub(crate) fn owns_selection(
+        &self,
+        plugin: &str,
+        load: PluginLoadId,
+        request: u64,
+        item: &str,
+        command: &str,
+    ) -> bool {
+        self.sessions.get(&request).is_some_and(|session| {
+            session.plugin == plugin
+                && session.load == load
+                && session.status != PluginProviderSessionStatus::Cancelled
+                && session.action_command == command
+                && session.items.contains_key(item)
+        })
     }
 
     pub fn cancel(&mut self, request: u64) -> bool {

@@ -36,7 +36,9 @@ impl ExtensionSession {
         self.plugin_contributions
             .install(index.clone())
             .map_err(|e| e.to_string())?;
-        self.install_events(&index).map_err(|e| e.to_string())
+        self.install_events(&index).map_err(|e| e.to_string())?;
+        self.providers.install(&index).map_err(|e| e.detail)?;
+        self.virtual_documents.install(&index).map_err(|e| e.detail)
     }
     pub(in crate::editor::session) fn remove_contribution(
         &mut self,

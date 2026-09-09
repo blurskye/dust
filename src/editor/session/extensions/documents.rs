@@ -2,7 +2,7 @@
 
 use crate::{
     editor::text::TextBuffer,
-    editor::{BufferId, EditorDraft, EditorState},
+    editor::{BufferId, EditorDraft},
     extensions::{PluginLoadId, PluginVirtualDocumentSnapshot},
 };
 use std::collections::BTreeMap;
@@ -17,6 +17,14 @@ pub(in crate::editor::session) struct VirtualDocumentEditorEntry {
     pub key: String,
     pub buffer: BufferId,
     pub revision: u64,
+    text: crate::editor::text::TextVersion,
+}
+impl VirtualDocumentEditorEntry {
+    pub(super) fn matches(&self, state: crate::editor::EditorTopology<'_>) -> bool {
+        state.buffers().get(self.buffer).is_some_and(|buffer| buffer.text.source_version() == self.text && matches!(&buffer.origin,
+            crate::editor::BufferOrigin::VirtualReadOnly { owner, generation, document, revision }
+                if owner == &self.plugin && *generation == self.load.0 && *document == self.document && *revision == self.revision))
+    }
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::editor::session) enum VirtualDocumentEditorError {
@@ -37,6 +45,9 @@ impl VirtualDocumentEditorBridge {
     ) -> Result<BufferId, VirtualDocumentEditorError> {
         let key = (snapshot.plugin.clone(), snapshot.load, snapshot.document);
         if let Some(entry) = self.entries.get_mut(&key) {
+            if !entry.matches(state.topology()) {
+                return Err(VirtualDocumentEditorError::GenerationMismatch);
+            }
             if snapshot.revision
                 != entry
                     .revision
@@ -54,6 +65,9 @@ impl VirtualDocumentEditorBridge {
                 return Err(VirtualDocumentEditorError::StaleRevision);
             }
             entry.revision = snapshot.revision;
+            entry.text = state.topology().buffers()[entry.buffer]
+                .text
+                .source_version();
             return Ok(entry.buffer);
         }
         if snapshot.revision != 1
@@ -91,6 +105,7 @@ impl VirtualDocumentEditorBridge {
                 key: snapshot.key.clone(),
                 buffer,
                 revision: 1,
+                text: state.topology().buffers()[buffer].text.source_version(),
             },
         );
         Ok(buffer)
@@ -106,52 +121,42 @@ impl VirtualDocumentEditorBridge {
             .values()
             .find(|e| e.plugin == plugin && e.load == load && e.source == source && e.key == key)
     }
-    pub(in crate::editor::session) fn remove_generation(
-        &mut self,
-        state: &mut EditorState,
+    pub(in crate::editor::session) fn has_generation(
+        &self,
         plugin: &str,
         load: PluginLoadId,
-    ) -> usize {
+    ) -> bool {
+        self.entries
+            .keys()
+            .any(|(owner, generation, _)| owner == plugin && *generation == load)
+    }
+    pub(in crate::editor::session) fn remove_generation(
+        &mut self,
+        state: &mut EditorDraft,
+        plugin: &str,
+        load: PluginLoadId,
+    ) -> Result<usize, String> {
         let keys = self
             .entries
             .keys()
-            .filter(|(p, l, _)| p == plugin && *l == load)
+            .filter(|(owner, generation, _)| owner == plugin && *generation == load)
             .cloned()
             .collect::<Vec<_>>();
-        let mut removed = 0;
+        let count = keys.len();
         for key in keys {
-            if let Some(entry) = self.entries.remove(&key) {
-                let views = state
-                    .views
-                    .iter()
-                    .filter_map(|(id, v)| (v.buffer == entry.buffer).then_some(id))
-                    .collect::<Vec<_>>();
-                for view in views {
-                    let _ = state.close_view(view);
-                }
-                state.remove_buffer(entry.buffer);
-                removed += 1;
+            let entry = self.entries.get(&key).expect("collected virtual source");
+            if !entry.matches(state.topology()) {
+                return Err("virtual document removal source changed".into());
             }
+            state.remove_virtual_document(
+                entry.buffer,
+                &entry.plugin,
+                entry.load.0,
+                entry.document,
+            )?;
+            self.entries.remove(&key);
         }
-        removed
-    }
-    #[allow(
-        dead_code,
-        reason = "session coordinator currently replaces the complete bridge"
-    )]
-    pub(in crate::editor::session) fn reset_runtime(&mut self, state: &mut EditorState) {
-        let entries = std::mem::take(&mut self.entries);
-        for entry in entries.into_values() {
-            let views = state
-                .views
-                .iter()
-                .filter_map(|(id, v)| (v.buffer == entry.buffer).then_some(id))
-                .collect::<Vec<_>>();
-            for view in views {
-                let _ = state.close_view(view);
-            }
-            state.remove_buffer(entry.buffer);
-        }
+        Ok(count)
     }
     pub(in crate::editor::session) fn forget_document(
         &mut self,
@@ -174,8 +179,12 @@ impl VirtualDocumentEditorBridge {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::editor::text::ByteOffset;
+    use super::{
+        PluginLoadId, PluginVirtualDocumentSnapshot, VirtualDocumentEditorBridge,
+        VirtualDocumentEditorError,
+    };
+    use crate::editor::text::{ByteOffset, TextBuffer};
+    use crate::editor::{BufferId, EditorState};
     use std::path::PathBuf;
     fn snap(revision: u64, text: &str) -> PluginVirtualDocumentSnapshot {
         PluginVirtualDocumentSnapshot {
@@ -221,6 +230,13 @@ mod tests {
             Err(VirtualDocumentEditorError::StaleRevision)
         );
         assert_eq!(state.buffers[b].text.to_string(), before);
+        let original = state.buffers[b].text.clone();
+        state.buffers[b].text = TextBuffer::from_text(&before);
+        assert_eq!(
+            publish(&mut bridge, &mut state, &snap(3, "foreign incarnation")),
+            Err(VirtualDocumentEditorError::GenerationMismatch)
+        );
+        state.buffers[b].text = original;
         for _ in 0..256 {
             assert_eq!(
                 bridge
@@ -235,14 +251,21 @@ mod tests {
             state.buffers[b].origin,
             crate::editor::BufferOrigin::VirtualReadOnly { .. }
         ));
+        let before = state.version();
+        let mut draft = state.draft();
         assert_eq!(
-            bridge.remove_generation(&mut state, "demo", PluginLoadId(8)),
+            bridge
+                .remove_generation(&mut draft, "demo", PluginLoadId(8))
+                .unwrap(),
             0
         );
         assert_eq!(
-            bridge.remove_generation(&mut state, "demo", PluginLoadId(7)),
+            bridge
+                .remove_generation(&mut draft, "demo", PluginLoadId(7))
+                .unwrap(),
             1
         );
+        state = draft.accept(&before).unwrap();
         assert!(!state.buffers.contains_key(b));
     }
 }

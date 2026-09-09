@@ -497,7 +497,7 @@ fn delayed_open_preserves_newer_unsaved_canonical_buffer_and_closed_reload_canno
 #[test]
 #[ignore = "explicit startup lifecycle cost probe"]
 fn startup_lifecycle_cost_probe() {
-    use crate::editor::session::dispatch::extensions::windows::PluginWindowHost;
+    use crate::editor::session::dispatch::plugin_windows::PluginWindowHost;
     let mut app = app();
     let root = app.state.workspace_root.clone();
     let state_directory = app.workspace.state_path().parent().unwrap().to_path_buf();

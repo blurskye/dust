@@ -266,7 +266,8 @@ fn copied_production_tree_enforces_migrated_owner_privacy() {
     let positive = r#"
 fn terminal_domain(owner:&mut super::terminal::TerminalSession) {let _=owner.selected();let _=owner.descriptions();}
 fn lsp_domain(owner:&super::lsp::LspSession) {let _=owner.sessions();let _=owner.capabilities();}
-fn extension_domain(owner:&super::extensions::ExtensionSession) {let _=owner.statuses();let _=owner.load_id("demo");}
+fn extension_domain(owner:&super::extensions::ExtensionSession) {let _=owner.statuses();let _=owner.load_id("demo");let _=owner.provider_presentable(1);}
+fn virtual_publication_domain(owner:&mut super::extensions::ExtensionSession,editor:&crate::editor::EditorState,windows:&super::windows::WindowSession) {drop(owner.prepare_health(false,0,super::extensions::VirtualContext{editor,windows,scratch:"scratch"}));}
 fn virtual_request_domain(broker:&mut crate::extensions::PluginVirtualDocumentBroker) {drop(broker.request_lane());}
 fn recovery_domain(owner:&super::recovery::RecoverySession) {let _=owner.records();}
 fn tooling_domain(owner:&super::tooling::ToolingSession) {let _=owner.entries();let _=owner.metadata();}
@@ -700,6 +701,42 @@ fn legitimate_client(editor: &mut crate::editor::EditorState) { editor.workspace
             "lsp_active_runtime",
             "fn bypass(owner:&mut super::lsp::LspSession) {owner.active=None;}",
             "active",
+            "E0616",
+        ),
+        (
+            "extension_providers",
+            "fn bypass(owner:&mut super::extensions::ExtensionSession) {let _=&mut owner.providers;}",
+            "providers",
+            "E0616",
+        ),
+        (
+            "extension_virtual_documents",
+            "fn bypass(owner:&mut super::extensions::ExtensionSession) {let _=&mut owner.virtual_documents;}",
+            "virtual_documents",
+            "E0616",
+        ),
+        (
+            "extension_virtual_editor",
+            "fn bypass(owner:&mut super::extensions::ExtensionSession) {let _=&mut owner.virtual_editor;}",
+            "virtual_editor",
+            "E0616",
+        ),
+        (
+            "extension_active_picker",
+            "fn bypass(owner:&mut super::extensions::ExtensionSession) {owner.active_picker=None;}",
+            "active_picker",
+            "E0616",
+        ),
+        (
+            "virtual_publication_loan",
+            "fn bypass(owner:&mut super::extensions::ExtensionSession,editor:&crate::editor::EditorState,windows:&super::windows::WindowSession) {let stage=owner.prepare_health(false,0,super::extensions::VirtualContext{editor,windows,scratch:\"scratch\"}).unwrap();owner.reset_runtime();drop(stage);}",
+            "owner",
+            "E0499",
+        ),
+        (
+            "virtual_publication_authority",
+            "fn bypass(source:&mut super::extensions::VirtualPublication) {let _=&mut source.bridge;}",
+            "bridge",
             "E0616",
         ),
         (

@@ -362,10 +362,6 @@ impl InteractiveApplication {
         };
         let buffer_id = self.state.views[view_id].buffer;
         let closed_path = self.state.buffers[buffer_id].path.clone();
-        let virtual_entry = self
-            .plugin_virtual_editor
-            .entry_for_buffer(buffer_id)
-            .cloned();
         if self.state.buffers[buffer_id].dirty && !force {
             self.show_error(self.message("dirty_close", &[]));
             return;
@@ -397,15 +393,7 @@ impl InteractiveApplication {
             {
                 self.documents.cancel_request(id);
             }
-            if let Some(entry) = virtual_entry {
-                self.plugin_virtual_documents
-                    .cancel(&entry.plugin, entry.load, entry.document);
-                self.plugin_virtual_editor.forget_document(
-                    &entry.plugin,
-                    entry.load,
-                    entry.document,
-                );
-            }
+            self.extension.close_virtual_buffer(buffer_id);
             let documents = self
                 .language
                 .sessions()
