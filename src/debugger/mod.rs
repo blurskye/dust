@@ -312,6 +312,8 @@ fn run_adapter(
     let initialize_sequence = sequence;
     sequence += 1;
     let mut launched = false;
+    let mut launch_accepted = false;
+    let mut paused = false;
     let mut supports_configuration_done = false;
     let mut thread_id = None;
     let mut stopping = false;
@@ -358,7 +360,7 @@ fn run_adapter(
                 };
                 stop_generation = next;
                 events.actor.generation.store(next, Ordering::Release);
-                pending.clear();
+                pending.retain(|_, (command, _)| is_startup_request(command));
             }
             let (command, arguments) = match control {
                 DapControl::Continue => (
@@ -434,6 +436,7 @@ fn run_adapter(
                 Some("response")
                     if message.get("request_seq").and_then(Value::as_i64)
                         == Some(initialize_sequence)
+                        && message.get("command").and_then(Value::as_str) == Some("initialize")
                         && !launched =>
                 {
                     if message.get("success").and_then(Value::as_bool) != Some(true) {
@@ -467,15 +470,18 @@ fn run_adapter(
                 }
                 Some("response") => {
                     if let Some(request_seq) = message.get("request_seq").and_then(Value::as_i64)
+                        && pending.get(&request_seq).is_some_and(|(command, _)| {
+                            message.get("command").and_then(Value::as_str) == Some(command.as_str())
+                        })
                         && let Some((command, generation)) = pending.remove(&request_seq)
-                        && generation == stop_generation
+                        && (generation == stop_generation || is_startup_request(&command))
                     {
                         if message.get("success").and_then(Value::as_bool) != Some(true) {
                             let message = format!(
                                 "DAP {command} request rejected: {}",
                                 bounded(message.get("message"))
                             );
-                            if command == "launch" || command == "attach" {
+                            if is_startup_request(&command) {
                                 events
                                     .send(DapEvent::Failed {
                                         adapter: adapter.clone(),
@@ -495,12 +501,28 @@ fn run_adapter(
                                 .ok();
                             continue;
                         }
-                        if command == "launch" || command == "attach" {
-                            events
-                                .send(DapEvent::Running {
-                                    adapter: adapter.clone(),
-                                })
-                                .ok();
+                        if is_startup_request(&command) {
+                            launch_accepted = true;
+                            // A launch acknowledgement is not a continued event.
+                            if !paused {
+                                events
+                                    .send(DapEvent::Running {
+                                        adapter: adapter.clone(),
+                                    })
+                                    .ok();
+                            }
+                        } else if matches!(
+                            command.as_str(),
+                            "continue" | "next" | "stepIn" | "stepOut"
+                        ) {
+                            paused = false;
+                            if launch_accepted {
+                                events
+                                    .send(DapEvent::Running {
+                                        adapter: adapter.clone(),
+                                    })
+                                    .ok();
+                            }
                         }
                         if let Some(response) = normalize_response(
                             &command,
@@ -553,7 +575,9 @@ fn run_adapter(
                             };
                             stop_generation = next;
                             events.actor.generation.store(next, Ordering::Release);
-                            pending.retain(|_, (_, generation)| *generation == stop_generation);
+                            paused = true;
+                            // Startup belongs to this actor, not to one stopped context.
+                            pending.retain(|_, (command, _)| is_startup_request(command));
                             thread_id = message.pointer("/body/threadId").and_then(Value::as_i64);
                             let reason = message
                                 .pointer("/body/reason")
@@ -577,12 +601,15 @@ fn run_adapter(
                             };
                             stop_generation = next;
                             events.actor.generation.store(next, Ordering::Release);
-                            pending.clear();
-                            events
-                                .send(DapEvent::Running {
-                                    adapter: adapter.clone(),
-                                })
-                                .ok();
+                            paused = false;
+                            pending.retain(|_, (command, _)| is_startup_request(command));
+                            if launch_accepted {
+                                events
+                                    .send(DapEvent::Running {
+                                        adapter: adapter.clone(),
+                                    })
+                                    .ok();
+                            }
                         }
                         "output" => {
                             let output = message
@@ -689,6 +716,10 @@ fn run_adapter(
     drop(stdin);
     drop(reader);
     drop(writer);
+}
+
+fn is_startup_request(command: &str) -> bool {
+    matches!(command, "launch" | "attach")
 }
 
 fn bounded(value: Option<&Value>) -> String {

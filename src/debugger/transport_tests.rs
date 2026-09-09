@@ -65,6 +65,112 @@ fn wait(mut predicate: impl FnMut() -> bool) {
     }
 }
 #[test]
+fn startup_reply_survives_stop_and_wrong_commands_cannot_consume_requests() {
+    let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
+    for request in ["launch", "attach"] {
+        for success in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let script = root.path().join("ordered.py");
+            let body = r#"
+while True:
+ m=read()
+ if m is None: break
+ if m.get('type')!='request': continue
+ c=m['command']
+ if c in ('launch','attach'):
+  send({'type':'response','request_seq':m['seq'],'command':'wrong-command','success':False})
+  send({'type':'event','event':'stopped','body':{'reason':'entry','threadId':1}})
+  send({'type':'event','event':'output','body':{'output':'before-ack'}})
+  while not pathlib.Path('ack-go').exists(): time.sleep(.002)
+  send({'type':'response','request_seq':m['seq'],'command':c,'success':SUCCESS,'message':'original startup verdict','body':{}})
+  send({'type':'response','request_seq':m['seq'],'command':c,'success':False,'message':'duplicate must be ignored'})
+  send({'type':'event','event':'output','body':{'output':'after-ack'}})
+  continue
+ if c=='initialize':
+  send({'type':'response','request_seq':m['seq'],'command':'launch','success':False,'message':'foreign initialize command'})
+ if c=='scopes':
+  send({'type':'response','request_seq':m['seq'],'command':'evaluate','success':False,'message':'foreign command'})
+ body={'threads':[]} if c=='threads' else {'scopes':[]} if c=='scopes' else {}
+ send({'type':'response','request_seq':m['seq'],'command':c,'success':True,'body':body})
+ if c=='scopes': send({'type':'response','request_seq':m['seq'],'command':c,'success':False,'message':'duplicate scopes'})
+"#;
+            std::fs::write(
+                &script,
+                format!(
+                    "{prefix}\nSUCCESS={}\n{body}",
+                    if success { "True" } else { "False" }
+                ),
+            )
+            .unwrap();
+            let mut service = DapService::new();
+            let mut configuration = launch(root.path(), &script);
+            configuration.request = request.into();
+            service.start_absolute(configuration).unwrap();
+            let mut stopped = false;
+            wait(|| match service.try_event() {
+                Some(DapEvent::Stopped { .. }) => {
+                    stopped = true;
+                    false
+                }
+                Some(DapEvent::Output { output, .. }) => output == "before-ack",
+                Some(DapEvent::Running { .. }) => panic!("running before the launch verdict"),
+                Some(DapEvent::Failed { message, .. }) => {
+                    panic!("wrong command consumed launch: {message}")
+                }
+                _ => false,
+            });
+            assert!(stopped);
+            std::fs::write(root.path().join("ack-go"), "go").unwrap();
+            wait(|| match service.try_event() {
+                Some(DapEvent::Failed { message, .. }) => {
+                    assert!(
+                        !success,
+                        "duplicate or wrong command consumed a request: {message}"
+                    );
+                    assert!(message.contains("original startup verdict"), "{message}");
+                    true
+                }
+                Some(DapEvent::Running { .. }) => {
+                    panic!("launch acknowledgement erased paused state")
+                }
+                Some(DapEvent::Output { output, .. }) if output == "after-ack" => {
+                    assert!(success, "the failed original startup reply was discarded");
+                    true
+                }
+                _ => false,
+            });
+            if success {
+                service.control(DapControl::Scopes { frame_id: 1 }).unwrap();
+                wait(|| match service.try_event() {
+                    Some(DapEvent::Response {
+                        response: DapResponse::Scopes(rows),
+                        ..
+                    }) => {
+                        assert!(rows.is_empty());
+                        true
+                    }
+                    Some(
+                        DapEvent::RequestFailed { message, .. } | DapEvent::Failed { message, .. },
+                    ) => panic!("{message}"),
+                    _ => false,
+                });
+                // A successful continue response suffices; adapters need not emit continued.
+                service.control(DapControl::Continue).unwrap();
+                wait(|| match service.try_event() {
+                    Some(DapEvent::Running { .. }) => true,
+                    Some(
+                        DapEvent::RequestFailed { message, .. } | DapEvent::Failed { message, .. },
+                    ) => panic!("{message}"),
+                    _ => false,
+                });
+            }
+            service.stop().unwrap();
+            wait(|| service.pending() == 0);
+        }
+    }
+}
+
+#[test]
 fn dap_owned_transport_backpressures_results_and_stops_nonreading_adapter() {
     let root = tempfile::tempdir().unwrap();
     let script = root.path().join("adapter.py");
