@@ -522,6 +522,7 @@ search_prompt = "command_line.insert"
 workspace_trust_prompt = "command_line.insert"
 completion = "edit.insert_text"
 picker = "picker.insert"
+theme_picker = "picker.insert"
 terminal = "terminal.send"
 
 [input.paste_commands]
@@ -532,6 +533,7 @@ search_prompt = "command_line.insert"
 workspace_trust_prompt = "command_line.insert"
 completion = "edit.insert_text"
 picker = "picker.insert"
+theme_picker = "picker.insert"
 terminal = "terminal.send"
 
 [input.character_fallback_commands]
@@ -1174,6 +1176,7 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "picker.previous" = "Select previous picker item"
 "picker.accept" = "Accept picker item"
 "picker.cancel" = "Close picker"
+"theme.select" = "Select theme (preview, then apply for this session)"
 "picker.mode.normal" = "Navigate picker results"
 "picker.mode.insert" = "Edit picker query"
 "picker.plugin.open" = "Open plugin picker source"

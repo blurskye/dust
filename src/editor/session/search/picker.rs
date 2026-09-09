@@ -16,6 +16,7 @@ use std::{
 };
 #[derive(Clone, Debug)]
 pub(in crate::editor::session) enum PickerPayload {
+    Theme(crate::editor::session::configuration::ThemeKey),
     WorkspaceSearch(String),
     LspLocation(crate::language::lsp::LspLocation),
     Diagnostic(crate::editor::session::diagnostics::DiagnosticKey),
@@ -166,6 +167,22 @@ impl SearchSession {
         });
         self.picker.generation = generation;
         Ok(epoch)
+    }
+    pub(in crate::editor::session) fn theme_picker_key(
+        &self,
+    ) -> Option<&crate::editor::session::configuration::ThemeKey> {
+        self.picker
+            .interaction
+            .as_ref()?
+            .payloads
+            .values()
+            .find_map(|payload| {
+                if let PickerPayload::Theme(key) = payload {
+                    Some(key)
+                } else {
+                    None
+                }
+            })
     }
     pub(in crate::editor::session) fn selected_picker_payload(&self) -> Option<&PickerPayload> {
         let picker = self.picker.interaction.as_ref()?;

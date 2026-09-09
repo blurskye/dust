@@ -158,6 +158,16 @@ User configuration is loaded transactionally. Invalid reloads retain the previou
 Run `dust --check-config` before restarting after large edits. `:config explain key` shows where a resolved value came from; `:keymap inspect key context` explains a binding.
 
 
+### Select a theme
+
+Use `:theme.select` (or `Space u t` from editor Normal mode). Type to filter, then use Up/Down to preview the selected theme on the actual screen. **Enter applies it for this session only. Escape or Ctrl-C cancels immediately**, restoring the previous session theme. This selection dialog uses the configurable `theme_picker` context, rather than the two-Escape result-picker grammar. A newer accepted configuration reload wins over an older preview or pending discovery.
+
+The list includes the current session theme, bundled Dust, and validated `themes/<name>.toml` files beside the accepted user `config.toml`. The file's declared `name` must match its filename; names use letters, digits, `-` or `_` (up to 96 UTF-8 bytes). Files are regular, non-symlink TOML files of at most 128 KiB, with the existing semantic roles and validated color fallbacks. Discovery examines at most 256 directory entries and loads at most 31 installed files; it reports invalid files and limits instead of silently applying a fallback. `--clean` uses only bundled configuration/themes. No new palettes are bundled in this slice.
+
+Theme selection does not reload the rest of your configuration or restart tools. `:config.explain key=ui.theme` and `:config.explain key=theme.styles.accent.foreground` identify the effective session override. A normal configuration reload replaces the session override. Child terminal programs still control their own output colors.
+
+**No Make default action is implemented yet.** To keep a choice across sessions, explicitly set `theme = "<name>"` in your existing `[ui]` section and use `:config.reload`. Selecting a theme never rewrites configuration files.
+
 ### Toggle the file explorer
 
 Press `<leader> f e` (Space, then `f`, then `e` by default) to open or close the explorer. The same shortcut works while the explorer is focused and from the normal editor when the panel remains visible. A customized leader is respected. Escape still closes the explorer; `l` still expands/collapses the selected directory. The command is `:explorer.panel.toggle`; `:explorer.open` and `:explorer.close` retain their explicit behavior.

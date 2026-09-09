@@ -1,11 +1,60 @@
 use super::*;
 
 impl InteractiveApplication {
+    pub(in crate::editor::session) fn process_theme_results(&mut self) {
+        self.retire_stale_picker();
+        if let Some(rows) = self
+            .configuration
+            .poll_theme_picker(self.search.theme_picker_key())
+        {
+            let previous = self.search.picker_bookmark();
+            self.present_theme_picker(rows);
+            self.search.restore_picker_view(previous, false);
+            self.sync_picker_ui();
+        }
+    }
+    fn present_theme_picker(&mut self, rows: crate::editor::session::configuration::ThemeRows) {
+        let items = rows
+            .items
+            .into_iter()
+            .enumerate()
+            .map(|(index, (key, name, origin))| {
+                (
+                    PickerItem {
+                        id: PickerItemId(format!("theme:{index}")),
+                        label: name,
+                        detail: origin,
+                        source: "theme".into(),
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::Theme(key),
+                )
+            })
+            .collect();
+        self.install_surface_picker_state(
+            PickerSurfaceKind::Generic,
+            "Select theme · session only".into(),
+            items,
+            String::new(),
+            !rows.loading,
+            PickerOrigin::General,
+        );
+        if !rows.diagnostics.is_empty() {
+            self.show_error(rows.diagnostics.join("; "));
+        }
+    }
     pub(in crate::editor::session) fn process_configuration_effect(
         &mut self,
         effect: AppEffect,
     ) -> Result<(), AppEffect> {
         match effect {
+            AppEffect::SelectTheme => {
+                self.close_picker();
+                match self.configuration.begin_theme_picker() {
+                    Ok(rows) => self.present_theme_picker(rows),
+                    Err(error) => self.show_error(error),
+                }
+            }
             AppEffect::ReloadConfiguration => match self.configuration.request_reload() {
                 Ok(()) => {
                     self.notify_message(self.message("config_reload_queued", &[]), false);

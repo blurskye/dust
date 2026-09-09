@@ -1,6 +1,153 @@
 use super::*;
 
 #[test]
+fn theme_picker_previews_cancels_applies_and_never_overwrites_a_newer_reload() {
+    let root = tempdir().unwrap();
+    let saved = tempdir().unwrap();
+    fs::create_dir(root.path().join("themes")).unwrap();
+    let original_file = "# untouched configuration\n";
+    fs::write(root.path().join("config.toml"), original_file).unwrap();
+    let mut amber = crate::config::load_bundled_config().theme;
+    amber.name = "amber".into();
+    amber.styles.accent.foreground = crate::config::ThemeColor::Yellow;
+    fs::write(
+        root.path().join("themes/amber.toml"),
+        toml::to_string(&amber).unwrap(),
+    )
+    .unwrap();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.path = root.path().join("config.toml");
+    let mut app = InteractiveApplication::new(
+        StartupTarget::Dashboard {
+            root: root.path().into(),
+        },
+        loaded.clone(),
+        false,
+        saved.path().into(),
+        false,
+        false,
+        std::sync::Arc::new(crate::clock::SystemClock),
+    )
+    .unwrap();
+    app.window_session.observe_size((100, 30));
+    app.process_effect(AppEffect::NewBuffer);
+    app.handle_configured_key(KeyEvent::character('i'));
+    let view = app.state.active_view.unwrap();
+    assert_eq!(
+        app.state.views[view].mode,
+        crate::editor::EditorMode::Insert
+    );
+    let original_theme = app.configuration.theme().clone();
+    let original_settings = app.configuration.settings().clone();
+    let original_revision = app.configuration.binding_revision();
+    let original_workspace = app.workspace.version();
+    let choose = |app: &mut InteractiveApplication| {
+        app.process_effect(AppEffect::SelectTheme);
+        assert_eq!(app.active_input_context(), "theme_picker");
+        assert!(app.ui.picker.as_ref().unwrap().loading);
+        for key in "amber".chars() {
+            app.handle_configured_key(KeyEvent::character(key));
+        }
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while app.ui.picker.as_ref().unwrap().loading {
+            app.process_theme_results();
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(app.ui.picker.as_ref().unwrap().query, "amber");
+        let rows = &app.ui.picker.as_ref().unwrap().rows;
+        assert!(!rows.is_empty());
+        assert!(rows.iter().all(|row| row.label == "amber"));
+    };
+    choose(&mut app);
+    assert_eq!(app.configuration.theme(), &amber);
+    assert_eq!(app.configuration.settings(), &original_settings);
+    assert_eq!(app.configuration.binding_revision(), original_revision);
+    assert_eq!(app.workspace.version(), original_workspace);
+    assert!(
+        app.configuration
+            .explain("theme.styles.accent.foreground")
+            .unwrap()
+            .source
+            .contains("not saved")
+    );
+    for _ in 0..5 {
+        app.handle_configured_key("backspace".parse().unwrap());
+    }
+    assert_eq!(app.configuration.theme(), &amber); // clearing the query retains the selected row
+    app.handle_configured_key("up".parse().unwrap()); // bundled Dust
+    assert_eq!(app.configuration.theme(), &original_theme);
+    app.handle_configured_key("down".parse().unwrap()); // installed amber
+    assert_eq!(app.configuration.theme(), &amber);
+    let old_key = match app.selected_picker_payload().unwrap() {
+        crate::editor::session::search::PickerPayload::Theme(key) => key.clone(),
+        _ => panic!("theme key"),
+    };
+    app.handle_configured_key("escape".parse().unwrap());
+    assert!(app.ui.picker.is_none());
+    assert_eq!(app.configuration.theme(), &original_theme);
+    assert!(app.configuration.apply_theme(&old_key).is_err());
+    choose(&mut app);
+    // A query with no selection must stop previewing the previously selected row.
+    app.handle_configured_key(KeyEvent::character('z'));
+    assert_eq!(app.configuration.theme(), &original_theme);
+    app.handle_configured_key("backspace".parse().unwrap());
+    assert_eq!(app.configuration.theme(), &amber);
+    app.handle_configured_key("enter".parse().unwrap());
+    assert!(app.ui.picker.is_none());
+    assert_eq!(app.configuration.theme(), &amber);
+    assert_eq!(app.configuration.binding_revision(), original_revision);
+    assert_eq!(app.configuration.settings(), &original_settings);
+    assert_eq!(
+        app.state.views[view].mode,
+        crate::editor::EditorMode::Insert
+    );
+    assert!(
+        app.configuration
+            .explain("ui.theme")
+            .unwrap()
+            .value
+            .contains("amber")
+    );
+    // Opening another picker retires the preview, not the already applied session theme.
+    choose(&mut app);
+    app.open_builtin_picker(PickerKind::Commands);
+    assert_eq!(app.configuration.theme(), &amber);
+    choose(&mut app);
+    loaded.theme.name = "reloaded".into();
+    loaded.config.ui.theme = "reloaded".into();
+    app.apply_configuration_candidate(loaded.clone(), false)
+        .unwrap();
+    app.close_picker();
+    app.process_theme_results();
+    assert_eq!(app.configuration.theme().name, "reloaded");
+    assert!(app.configuration.apply_theme(&old_key).is_err());
+    assert_eq!(
+        fs::read_to_string(root.path().join("config.toml")).unwrap(),
+        original_file
+    );
+    // Cancellation before worker delivery cannot reopen the surface.
+    app.process_effect(AppEffect::SelectTheme);
+    app.handle_configured_key("escape".parse().unwrap());
+    for _ in 0..10 {
+        app.process_theme_results();
+    }
+    assert!(app.ui.picker.is_none());
+    assert_eq!(app.configuration.theme().name, "reloaded");
+    app.process_effect(AppEffect::SelectTheme);
+    assert!(app.ui.picker.as_ref().unwrap().loading);
+    loaded.theme.name = "newest".into();
+    loaded.config.ui.theme = "newest".into();
+    app.apply_configuration_candidate(loaded, false).unwrap();
+    app.process_theme_results();
+    assert!(
+        app.ui.picker.is_none(),
+        "a retired load must not republish its picker"
+    );
+    assert_eq!(app.configuration.theme().name, "newest");
+}
+
+#[test]
 fn configured_notification_timeout_expires_visible_message() {
     let mut app = app();
     {

@@ -724,6 +724,7 @@ pub struct ConfigurationWorkerResult {
 
 pub(super) enum ConfigurationRequest {
     Reload,
+    Themes(ThemeRead),
     ConfigureWatch {
         watch: ConfigWatchConfig,
         theme: String,
@@ -760,6 +761,9 @@ impl ConfigurationWorker {
                         requests.recv().map_err(|_| RecvTimeoutError::Disconnected)
                     };
                     match request {
+                        Ok(ConfigurationRequest::Themes(request)) => {
+                            super::themes::discover(request)
+                        }
                         Ok(ConfigurationRequest::Reload) => {
                             generation = generation.saturating_add(1);
                             let candidate =
@@ -862,6 +866,15 @@ impl ConfigurationWorker {
             receiver,
             thread: Some(thread),
         }
+    }
+
+    pub(crate) fn request_themes(
+        &self,
+        request: ThemeRead,
+    ) -> Result<(), ConfigurationWorkerError> {
+        self.sender
+            .try_send(ConfigurationRequest::Themes(request))
+            .map_err(map_configuration_send_error)
     }
 
     pub fn request_reload(&self) -> Result<(), ConfigurationWorkerError> {
@@ -1060,10 +1073,49 @@ pub(super) fn configuration_fingerprint(theme: &str) -> Vec<SourceFingerprint> {
 
 impl Drop for ConfigurationWorker {
     fn drop(&mut self) {
-        let _ = self.sender.send(ConfigurationRequest::Shutdown);
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+        let _ = self.sender.try_send(ConfigurationRequest::Shutdown);
+        // Configuration filesystem I/O must not add a blocking shutdown join.
+        // Dropping the sender also stops the worker after admitted requests finish.
+        drop(self.thread.take());
+    }
+}
+
+#[cfg(test)]
+mod shutdown_tests {
+    use super::*;
+    #[test]
+    fn dropping_configuration_worker_does_not_wait_for_a_full_queue_or_blocked_worker() {
+        let (sender, requests) = mpsc::sync_channel(4);
+        let (_results, receiver) = mpsc::channel();
+        let (release, gate) = mpsc::channel();
+        let thread = thread::spawn(move || {
+            gate.recv().unwrap();
+            while let Ok(request) = requests.recv() {
+                if matches!(request, ConfigurationRequest::Shutdown) {
+                    break;
+                }
+            }
+        });
+        for _ in 0..4 {
+            assert!(sender.try_send(ConfigurationRequest::Reload).is_ok());
         }
+        let worker = ConfigurationWorker {
+            sender,
+            receiver,
+            thread: Some(thread),
+        };
+        let (retired, retirement) = mpsc::channel();
+        let dropper = thread::spawn(move || {
+            drop(worker);
+            retired.send(()).unwrap();
+        });
+        let nonblocking = retirement.recv_timeout(Duration::from_secs(1)).is_ok();
+        release.send(()).unwrap();
+        dropper.join().unwrap();
+        assert!(
+            nonblocking,
+            "drop waited for a full queue or a gated configuration worker"
+        );
     }
 }
 

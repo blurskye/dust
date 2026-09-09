@@ -64,6 +64,9 @@ impl InteractiveApplication {
                 return;
             }
         };
+        if self.search.theme_picker_key().is_none() {
+            self.configuration.cancel_theme_picker();
+        }
         self.extension.picker_installed(match origin {
             PickerOrigin::PluginProvider(request) => Some(request),
             _ => None,
@@ -468,6 +471,11 @@ impl InteractiveApplication {
     pub(in crate::editor::session) fn sync_picker_ui(&mut self) {
         self.retire_stale_picker();
         self.ui.picker = self.search.picker_projection();
+        let theme = match self.search.selected_picker_payload() {
+            Some(PickerPayload::Theme(key)) => Some(key),
+            _ => None,
+        };
+        self.configuration.preview_theme(theme);
         let context = self.active_input_context();
         if let Some(picker) = &mut self.ui.picker {
             let (mode, commands): (&str, &[(&str, &str)]) =
@@ -479,6 +487,11 @@ impl InteractiveApplication {
                             ("workspace.edit.accept", "apply"),
                             ("workspace.edit.reject", "reject"),
                         ],
+                    )
+                } else if self.search.theme_picker_key().is_some() {
+                    (
+                        "Preview · not saved",
+                        &[("picker.accept", "apply"), ("picker.cancel", "cancel")],
                     )
                 } else if self.input.picker_normal() {
                     (
@@ -701,6 +714,7 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn close_picker(&mut self) {
+        self.configuration.cancel_theme_picker();
         self.debugger_session.dismiss_choices();
         if self.ui.picker.is_some() {
             self.input.capture_changed();
@@ -720,6 +734,19 @@ impl InteractiveApplication {
 
     pub(in crate::editor::session) fn accept_picker(&mut self) {
         self.retire_stale_picker();
+        if let Some(PickerPayload::Theme(key)) = self.search.selected_picker_payload() {
+            match self.configuration.apply_theme(key) {
+                Ok(name) => {
+                    self.close_picker();
+                    self.notify_message(
+                        format!("Theme {name} applied for this session only; default not saved"),
+                        false,
+                    );
+                }
+                Err(error) => self.show_error(error),
+            }
+            return;
+        }
         let payload = self.search.take_picker_payload();
         if let Some(PickerPayload::ProposalFile(index)) = &payload {
             if let Err(error) = self.workspace_edits.toggle(*index) {
@@ -760,6 +787,7 @@ impl InteractiveApplication {
         };
         self.close_picker();
         match payload {
+            Some(PickerPayload::Theme(_)) => {}
             Some(PickerPayload::WorkspaceSearch(_)) => {
                 if let Some(found) = search_match {
                     self.navigate_workspace_search_match(found);

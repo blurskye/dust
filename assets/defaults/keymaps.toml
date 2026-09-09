@@ -2832,6 +2832,49 @@ keys = "ctrl-space"
 command = "lsp.completion.trigger"
 
 [[keymap]]
+id = "builtin.theme-picker.down"
+context = "theme_picker"
+keys = "down"
+command = "picker.next"
+
+[[keymap]]
+id = "builtin.theme-picker.up"
+context = "theme_picker"
+keys = "up"
+command = "picker.previous"
+
+[[keymap]]
+id = "builtin.theme-picker.enter"
+context = "theme_picker"
+keys = "enter"
+command = "picker.accept"
+
+[[keymap]]
+id = "builtin.theme-picker.escape"
+context = "theme_picker"
+keys = "escape"
+command = "picker.cancel"
+
+[[keymap]]
+id = "builtin.theme-picker.ctrl-c"
+context = "theme_picker"
+keys = "ctrl-c"
+command = "picker.cancel"
+
+[[keymap]]
+id = "builtin.theme-picker.backspace"
+context = "theme_picker"
+keys = "backspace"
+command = "picker.backspace"
+
+[[keymap]]
+id = "builtin.editor.normal.theme-select.leader-u-t"
+context = "editor"
+mode = "normal"
+keys = "<leader> u t"
+command = "theme.select"
+
+[[keymap]]
 id = "builtin.picker.surface.picker-next.j"
 context = "picker_normal"
 keys = "j"

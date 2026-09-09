@@ -338,6 +338,9 @@ impl InteractiveApplication {
             return "workspace_edit".into();
         }
         if self.ui.picker.is_some() {
+            if self.search.theme_picker_key().is_some() {
+                return "theme_picker".into();
+            }
             return if self.input.picker_normal() {
                 "picker_normal"
             } else {

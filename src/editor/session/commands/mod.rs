@@ -123,6 +123,7 @@ pub enum AppEffect {
     Grammar(GrammarInput),
     CancelPendingMapping,
     ReloadConfiguration,
+    SelectTheme,
     ExplainConfig(String),
     InspectKeymap {
         id: Option<String>,

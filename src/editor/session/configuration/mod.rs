@@ -46,6 +46,8 @@ pub use compile::{
     reload_keymaps,
 };
 mod contributions;
+mod themes;
+pub(in crate::editor::session) use themes::{ThemeKey, ThemeRows};
 
 fn configured_context(
     contexts: &InputContextRegistry,
@@ -60,6 +62,7 @@ fn configured_context(
 /// Accepted policy and reload admission. No caller receives a mutable policy view.
 pub(super) struct ConfigurationSession {
     accepted: ResolvedConfiguration,
+    themes: themes::Themes,
     stamp: Arc<()>,
     worker: ConfigurationWorker,
     generation: u64,
@@ -120,6 +123,7 @@ impl ConfigurationSession {
         );
         Self {
             accepted,
+            themes: themes::Themes::default(),
             stamp: Arc::new(()),
             worker,
             generation: 0,
@@ -133,7 +137,7 @@ impl ConfigurationSession {
         &self.accepted.dashboard
     }
     pub(super) fn theme(&self) -> &crate::config::ThemeConfig {
-        &self.accepted.theme
+        self.effective_theme()
     }
     pub(super) fn keymaps(&self) -> &ResolvedKeymaps {
         &self.accepted.keymaps
@@ -163,7 +167,8 @@ impl ConfigurationSession {
         self.binding_revision
     }
     pub(super) fn explain(&self, key: &str) -> Option<crate::config::ConfigExplanation> {
-        self.accepted.explain(key)
+        self.explain_theme(key)
+            .or_else(|| self.accepted.explain(key))
     }
     pub(super) fn dashboard_actions(&self) -> Vec<DashboardAction> {
         dashboard_actions(&self.accepted)
@@ -260,6 +265,7 @@ impl ConfigurationSession {
         self.check_stamp(&candidate.stamp)?;
         Self::check_catalog(&candidate.catalog, catalog)?;
         self.accepted = candidate.resolved;
+        self.themes = themes::Themes::default();
         self.stamp = Arc::new(());
         self.binding_revision = self.binding_revision.saturating_add(1);
         Ok(())
@@ -288,6 +294,7 @@ impl ConfigurationSession {
             .validate()
             .expect("valid owned fixture policy");
         self.accepted = candidate;
+        self.themes = themes::Themes::default();
         self.stamp = Arc::new(());
         self.binding_revision = self.binding_revision.saturating_add(1);
     }
