@@ -226,7 +226,8 @@ minimum_height = 10
 border = "single"
 selected_marker = ">"
 row_marker = " "
-source_separator = " · "
+# Optional prefix for the right-aligned source column.
+source_separator = ""
 loading_label = "loading…"
 maximum_preview_bytes = 262144
 

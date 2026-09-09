@@ -1943,6 +1943,75 @@ fn theme_geometry_is_compact_and_bounded_without_resizing_other_pickers() {
 }
 
 #[test]
+fn picker_sources_share_a_right_column_and_do_not_overwrite_labels_or_borders() {
+    use crate::ui::{
+        CellGrid, Frame, PickerRow, PickerSurfaceKind, PickerUiState, Style, window::WindowRect,
+    };
+    let config = crate::config::load_bundled_config().config;
+    for surface in [PickerSurfaceKind::Generic, PickerSurfaceKind::Theme] {
+        for width in [64, 20, 8] {
+            let rect = WindowRect {
+                x: 3,
+                y: 2,
+                width,
+                height: 8,
+            };
+            let picker = PickerUiState {
+                input_hint: String::new(),
+                surface,
+                title: "Choices".into(),
+                query: String::new(),
+                rows: vec![
+                    PickerRow {
+                        id: "one".into(),
+                        label: "Dust".into(),
+                        detail: "Current".into(),
+                        source: "Builtin".into(),
+                    },
+                    PickerRow {
+                        id: "two".into(),
+                        label: "Long 名称 ".repeat(12),
+                        detail: String::new(),
+                        source: "Builtin".into(),
+                    },
+                    PickerRow {
+                        id: "three".into(),
+                        label: "Other".into(),
+                        detail: String::new(),
+                        source: "插件".into(),
+                    },
+                ],
+                selected: Some(1),
+                scroll: 0,
+                loading: false,
+                preview: None,
+            };
+            let mut frame = Frame {
+                grid: CellGrid::new(72, 12),
+                cursor: None,
+            };
+            super::surfaces::render_picker(&mut frame, &picker, &config, rect, None);
+            for row in 5..8 {
+                assert_eq!(frame.grid.get(rect.x + width - 1, row).unwrap().symbol, "│");
+                assert_eq!(frame.grid.get(rect.x + width, row).unwrap().symbol, " ");
+            }
+            if width == 64 {
+                let right = rect.x + width - 2;
+                for (row, style) in [(5, Style::Muted), (6, Style::Selection)] {
+                    assert_eq!(frame.grid.get(right - 7, row).unwrap().symbol, "B");
+                    assert_eq!(frame.grid.get(right - 1, row).unwrap().symbol, "n");
+                    assert_eq!(frame.grid.get(right - 7, row).unwrap().style, style);
+                    assert_eq!(frame.grid.get(right - 8, row).unwrap().symbol, " ");
+                }
+                assert!(frame.grid.row_text(5).contains("Dust  Current"));
+                assert_eq!(frame.grid.get(right - 4, 7).unwrap().symbol, "插");
+                assert_eq!(frame.grid.get(right - 2, 7).unwrap().symbol, "件");
+            }
+        }
+    }
+}
+
+#[test]
 fn generic_picker_is_centered_filtered_presentation_with_configured_markers() {
     let state = EditorState::new(PathBuf::from("/tmp"));
     let ui = UiState {

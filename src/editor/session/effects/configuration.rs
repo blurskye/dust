@@ -26,8 +26,12 @@ impl InteractiveApplication {
                     PickerItem {
                         id: PickerItemId(format!("theme:{index}")),
                         label: name,
-                        detail: origin,
-                        source: String::new(),
+                        detail: if index == 0 {
+                            "Current".into()
+                        } else {
+                            String::new()
+                        },
+                        source: origin,
                         action: PickerAction::None,
                     },
                     PickerPayload::Theme(key),

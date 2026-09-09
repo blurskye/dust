@@ -62,10 +62,10 @@ impl ThemeInteraction {
                             index,
                         },
                         crate::config::theme_display_name(&choice.theme.name),
-                        if index == 0 {
-                            "Current".into()
-                        } else if choice.path.to_string_lossy().starts_with("<bundled:") {
-                            "Bundled".into()
+                        if choice.path.to_string_lossy().starts_with("<bundled:") {
+                            "Builtin".into()
+                        } else if choice.path.to_string_lossy().starts_with("<editor-state:") {
+                            "Saved".into()
                         } else {
                             "Installed".into()
                         },

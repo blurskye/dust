@@ -414,7 +414,7 @@ impl Default for PickerConfig {
             border: BorderStyle::Single,
             selected_marker: ">".into(),
             row_marker: " ".into(),
-            source_separator: " · ".into(),
+            source_separator: String::new(),
             loading_label: "loading…".into(),
             maximum_preview_bytes: 256 * 1024,
         }

@@ -16,6 +16,17 @@ in the user's `themes/` directory; see [the theme guide](user-guide-linux.md#sel
 Native Neovim/Lua themes are not executable Dust plugins. Declarative plugin
 palette contributions and theme-only package installation remain unimplemented.
 
+## Shared UI templates (planned, not a new delivered ABI)
+
+The [shared UI roadmap](plans/product-experience-roadmap.md#64-shared-ui-templates-for-the-app-and-plugins)
+requires the app and plugins to use the same confirmation/input, picker/menu,
+list/tree/table, form and preview/output templates. The next interaction contract
+includes Yes/No/Cancelled results and selected item/action payloads, with exact
+requester/load/target ownership. Reusable templates will own ordinary navigation,
+layout, validation presentation and semantic styling; plugins supply bounded
+content and actions. Current retained/private UI support does not imply that
+this full template or prompt-result API already exists.
+
 ## Lifecycle
 
 1. Dust reads and bounds the manifest from its immutable content-addressed store without reading Component bytes. Every manifest has an explicit contribution schema version and declares namespaced input contexts, typed commands/argument schemas, suggested mappings, key groups, retained/private content types, bounded subscriptions, supported provider metadata, and optional storage quota (empty arrays are valid). A content declaration owns its stable `plugin.<owner>.<content>` ID, title, presenter kind, default and allowed ordinary placements, focusability, `1..=16` instance ceiling, input context, and declared command linkage.

@@ -315,7 +315,19 @@ pub(super) fn render_picker(
         } else {
             format!("{}{}", configured.source_separator, row.source)
         };
-        let text = format!("{} {}{}{}", marker, row.label, detail, source);
+        let text = format!("{} {}{}", marker, row.label, detail);
+        // Every picker uses the same trailing provenance column. Reserve at
+        // most a third of the row so long sources cannot crowd out the label.
+        let source_right = list_right.saturating_sub(1);
+        let source_width = u16::try_from(text_width(&source, config.editor.ambiguous_width))
+            .unwrap_or(u16::MAX)
+            .min(source_right.saturating_sub(content_left) / 3);
+        let source_x = source_right.saturating_sub(source_width);
+        let label_right = if source_width == 0 {
+            list_right
+        } else {
+            source_x.saturating_sub(1)
+        };
         if selected {
             for x in left + 1..list_right {
                 frame.grid.set_cell(x, y, " ", Style::Selection);
@@ -330,8 +342,21 @@ pub(super) fn render_picker(
             } else {
                 Style::Default
             },
-            list_right,
+            label_right,
         );
+        if source_width > 0 {
+            frame.grid.put_text_clipped(
+                source_x,
+                y,
+                &source,
+                if selected {
+                    Style::Selection
+                } else {
+                    Style::Muted
+                },
+                source_right,
+            );
+        }
     }
     if let Some(preview) = preview {
         let (preview_left, preview_fill_left, preview_top) = if let Some(divider) = divider {

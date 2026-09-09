@@ -44,7 +44,10 @@ def main() -> None:
         for label in ["Dust", "Catppuccin Latte", "Catppuccin Frappé", "Catppuccin Macchiato", "Catppuccin Mocha", "Gruvbox Dark", "Nord"]:
             assert label in choices, (label, choices)
         assert sum("Dust" in line and "Current" in line for line in choices.splitlines()) == 1
-        assert "<bundled:" not in choices
+        assert "<bundled:" not in choices and "Bundled" not in choices
+        builtin_rows = [line for line in choices.splitlines() if "Builtin" in line]
+        assert len(builtin_rows) == 8, choices
+        assert {line.index("Builtin") for line in builtin_rows} == {133}, choices
         assert "THEME_PREVIEW_SOURCE_00" in choices and "THEME_PREVIEW_SOURCE_20" in choices
         # Even in a 220x70 terminal the dialog is only 64x12 cells, near the top.
         assert choices.splitlines()[4].index("Dust themes") == 81, choices
@@ -75,6 +78,8 @@ def main() -> None:
         assert code == 0
         assert preview in restored[0], "saved theme was not restored at launch"
         assert "theme-probe" in terminal_screen(restored[1])
+        current_row = next(line for line in terminal_screen(restored[1]).splitlines() if "theme-probe" in line)
+        assert "Current" in current_row and "Saved" in current_row
         assert original in restored[2][len(restored[1]):], "Down did not preview Dust after restart"
         assert preview in restored[3][len(restored[2]):], "Escape did not restore the remembered theme"
         assert json.loads(json.loads(state_path.read_text())["metadata"]["ui.theme.snapshot"]) == saved
