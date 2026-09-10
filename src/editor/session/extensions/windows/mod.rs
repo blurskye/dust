@@ -11,8 +11,8 @@ use crate::{
         PluginUiRequestKind, PluginUiStyle, PluginUiTree, PluginWindowPlacementKind,
     },
     ui::window::{
-        ContentAdapterKind, ContentId, ContentTypeId, DockEdge, ViewId, WindowError, WindowGraph,
-        WindowId, WindowPlacement, WindowRect,
+        ContentAdapterKind, ContentCapabilities, ContentContract, ContentId, ContentTypeId,
+        DockEdge, ViewId, WindowError, WindowGraph, WindowId, WindowPlacement, WindowRect,
     },
     ui::{PluginSurfaceRow, PluginSurfaceUiState, PrivateSurfaceCell, PrivateSurfaceUiState},
 };

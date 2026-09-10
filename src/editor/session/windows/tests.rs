@@ -3,7 +3,7 @@ use crate::{
     config::load_bundled_config,
     ui::{
         NativeSurfaceWindowBinding,
-        window::{ContentAdapterKind, WindowId, WindowPlacement, WindowRect},
+        window::{ContentAdapterKind, ContentContract, WindowId, WindowPlacement, WindowRect},
     },
 };
 
@@ -165,9 +165,9 @@ fn plugin_drafts_cannot_write_editor_resources_foreign_generations_tabs_or_prote
     );
     let kind = ContentTypeId::new("plugin.demo.panel").unwrap();
     assert_eq!(
-        draft.create_content(
+        draft.create_content_with_contract(
             kind.clone(),
-            ContentAdapterKind::DeclarativeUi,
+            ContentContract::adapter_defaults(ContentAdapterKind::DeclarativeUi),
             "foreign".into(),
             false,
             "plugin.other",
@@ -176,9 +176,9 @@ fn plugin_drafts_cannot_write_editor_resources_foreign_generations_tabs_or_prote
         Err(WindowError::InvalidOwner)
     );
     assert_eq!(
-        draft.create_content(
+        draft.create_content_with_contract(
             kind.clone(),
-            ContentAdapterKind::DeclarativeUi,
+            ContentContract::adapter_defaults(ContentAdapterKind::DeclarativeUi),
             "foreign".into(),
             false,
             "plugin.demo",
@@ -188,9 +188,9 @@ fn plugin_drafts_cannot_write_editor_resources_foreign_generations_tabs_or_prote
     );
     assert!(
         draft
-            .create_content(
+            .create_content_with_contract(
                 ContentTypeId::new("builtin.text-buffer").unwrap(),
-                ContentAdapterKind::DeclarativeUi,
+                ContentContract::adapter_defaults(ContentAdapterKind::DeclarativeUi),
                 "reserved".into(),
                 false,
                 "plugin.demo",
@@ -200,9 +200,9 @@ fn plugin_drafts_cannot_write_editor_resources_foreign_generations_tabs_or_prote
     );
     assert!(
         draft
-            .create_content(
+            .create_content_with_contract(
                 kind.clone(),
-                ContentAdapterKind::TextBuffer,
+                ContentContract::adapter_defaults(ContentAdapterKind::TextBuffer),
                 "editor".into(),
                 false,
                 "plugin.demo",
@@ -211,9 +211,9 @@ fn plugin_drafts_cannot_write_editor_resources_foreign_generations_tabs_or_prote
             .is_err()
     );
     let content = draft
-        .create_content(
+        .create_content_with_contract(
             kind,
-            ContentAdapterKind::DeclarativeUi,
+            ContentContract::adapter_defaults(ContentAdapterKind::DeclarativeUi),
             "panel".into(),
             false,
             "plugin.demo",

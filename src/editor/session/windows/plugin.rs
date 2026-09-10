@@ -178,10 +178,10 @@ impl PluginWindowDraft {
         }
         Ok(())
     }
-    pub(in crate::editor::session) fn create_content(
+    pub(in crate::editor::session) fn create_content_with_contract(
         &mut self,
         kind: ContentTypeId,
-        adapter: ContentAdapterKind,
+        contract: crate::ui::window::ContentContract,
         title: String,
         dirty: bool,
         owner: &str,
@@ -190,14 +190,14 @@ impl PluginWindowDraft {
         self.require_owner(owner, generation)?;
         if !kind.as_str().starts_with("plugin.")
             || !matches!(
-                adapter,
+                contract.adapter,
                 ContentAdapterKind::DeclarativeUi | ContentAdapterKind::PrivateCellSurface
             )
         {
             return Err(WindowError::InvalidContentType(kind.as_str().to_owned()));
         }
         self.graph
-            .create_content(kind, adapter, title, dirty, owner, generation)
+            .create_content_with_contract(kind, contract, title, dirty, owner, generation)
     }
     pub(in crate::editor::session) fn create_view(
         &mut self,

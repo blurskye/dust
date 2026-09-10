@@ -144,6 +144,20 @@ impl WindowGraph {
         self.mark_changed()
     }
 
+    pub fn require_stop_resource(&self, content: ContentId) -> Result<(), WindowError> {
+        if self
+            .contents
+            .get(&content)
+            .ok_or(WindowError::UnknownContent)?
+            .capabilities
+            .stop_resource
+        {
+            Ok(())
+        } else {
+            Err(WindowError::Unsupported("stop-resource"))
+        }
+    }
+
     pub fn update_content(
         &mut self,
         content: ContentId,
@@ -575,6 +589,25 @@ impl WindowGraph {
                 || matches!(second_placement, WindowPlacement::Tiled)
             {
                 return Err(WindowError::TiledMutationNotAuthoritative);
+            }
+            let first_view = candidate
+                .windows
+                .get(&first)
+                .ok_or(WindowError::UnknownWindow)?
+                .view;
+            let second_view = candidate
+                .windows
+                .get(&second)
+                .ok_or(WindowError::UnknownWindow)?
+                .view;
+            if !candidate
+                .capabilities_for_view(first_view)?
+                .permits(second_placement)
+                || !candidate
+                    .capabilities_for_view(second_view)?
+                    .permits(first_placement)
+            {
+                return Err(WindowError::Unsupported("placement"));
             }
             candidate
                 .windows

@@ -1294,6 +1294,19 @@ fn generation_owned_retained_window_lifecycle_is_revision_checked() {
     assert!(event.error.is_none(), "{:?}", event.error);
     let handle = event.handle.expect("handle");
     assert_eq!(host.snapshots()[0].rows[0].text, "Hello");
+    let capabilities = graph.content_snapshots()[0].capabilities;
+    assert!(capabilities.focusable);
+    assert!(capabilities.selectable);
+    assert!(capabilities.dock);
+    assert!(capabilities.float);
+    assert!(capabilities.hide);
+    assert!(capabilities.close_view);
+    assert!(!capabilities.editable);
+    assert!(!capabilities.clone_view);
+    assert!(!capabilities.tile);
+    assert!(!capabilities.fullscreen);
+    assert!(!capabilities.stop_resource);
+    assert!(!capabilities.persist_descriptor);
     let graph_after_open = graph.clone();
     let tab = graph.active_tab().expect("tab");
     let mut projection = graph.compositor_snapshot(tab).expect("snapshot").project(

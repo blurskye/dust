@@ -1138,9 +1138,11 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
         )
         .unwrap();
     let custom = draft
-        .create_content(
+        .create_content_with_contract(
             crate::ui::window::ContentTypeId::new("plugin.demo-custom").unwrap(),
-            crate::ui::window::ContentAdapterKind::DeclarativeUi,
+            crate::ui::window::ContentContract::adapter_defaults(
+                crate::ui::window::ContentAdapterKind::DeclarativeUi,
+            ),
             "Custom surface".into(),
             false,
             "plugin.demo",

@@ -1,13 +1,13 @@
 use super::{
-    BTreeMap, BTreeSet, ContentAdapterKind, ContentTypeId, PluginContributionIndex,
-    PluginPresenterKind, PluginPrivateState, PluginRequestedPlacement, PluginSurfaceGeometry,
-    PluginSurfaceUiState, PluginUiError, PluginUiErrorCode, PluginUiEvent, PluginUiInteraction,
-    PluginUiRequest, PluginUiRequestKind, PluginWindowHost, PluginWindowInstance,
-    PrivateSurfaceCell, PrivateSurfaceUiState, WindowGraph, WindowId, WindowPlacement,
-    apply_private_patch, ensure_focused_visible, first_focusable_node, focusable_nodes,
-    graph_placement, instance_revisions, is_focusable_node, map_graph_error, placement_kind,
-    private_declaration, private_style, rect_contains, require_active_window,
-    require_graph_revision, tree_rows, ui_error, validate_private_action,
+    BTreeMap, BTreeSet, ContentAdapterKind, ContentCapabilities, ContentContract, ContentTypeId,
+    PluginContributionIndex, PluginPresenterKind, PluginPrivateState, PluginRequestedPlacement,
+    PluginSurfaceGeometry, PluginSurfaceUiState, PluginUiError, PluginUiErrorCode, PluginUiEvent,
+    PluginUiInteraction, PluginUiRequest, PluginUiRequestKind, PluginWindowHost,
+    PluginWindowInstance, PluginWindowPlacementKind, PrivateSurfaceCell, PrivateSurfaceUiState,
+    WindowGraph, WindowId, WindowPlacement, apply_private_patch, ensure_focused_visible,
+    first_focusable_node, focusable_nodes, graph_placement, instance_revisions, is_focusable_node,
+    map_graph_error, placement_kind, private_declaration, private_style, rect_contains,
+    require_active_window, require_graph_revision, tree_rows, ui_error, validate_private_action,
     validate_private_snapshot, validate_tree,
 };
 
@@ -352,13 +352,35 @@ impl PluginWindowHost {
                 let tab = graph.active_tab().ok_or_else(|| {
                     ui_error(PluginUiErrorCode::CrossTab, "no active workspace tab")
                 })?;
+                let capabilities = ContentCapabilities {
+                    focusable: declaration.focusable,
+                    selectable: true,
+                    editable: false,
+                    clone_view: false,
+                    tile: false,
+                    dock: declaration
+                        .allowed_placements
+                        .contains(&PluginWindowPlacementKind::Docked),
+                    float: declaration
+                        .allowed_placements
+                        .contains(&PluginWindowPlacementKind::Floating),
+                    fullscreen: declaration
+                        .allowed_placements
+                        .contains(&PluginWindowPlacementKind::Fullscreen),
+                    hide: declaration
+                        .allowed_placements
+                        .contains(&PluginWindowPlacementKind::Hidden),
+                    close_view: true,
+                    stop_resource: false,
+                    persist_descriptor: false,
+                };
                 let placement = graph_placement(placement)?;
                 let candidate = &mut *graph;
                 let owner = format!("plugin.{}", index.owner);
                 let content = candidate
-                    .create_content(
+                    .create_content_with_contract(
                         ContentTypeId::new(content_type.clone()).map_err(map_graph_error)?,
-                        adapter,
+                        ContentContract::declared(adapter, capabilities),
                         if title.is_empty() {
                             declaration.title.clone()
                         } else {

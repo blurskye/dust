@@ -373,6 +373,22 @@ impl WindowSession {
             Err("universal compositor projection is missing or stale".into())
         }
     }
+    pub(in crate::editor::session) fn require_native_stop(
+        &self,
+        target: NativeSurfaceTarget,
+    ) -> Result<(), String> {
+        let content = self
+            .core
+            .native
+            .ids_for_target(target)
+            .ok_or("native resource is unavailable")?
+            .content;
+        self.core
+            .graph
+            .require_stop_resource(content)
+            .map_err(|error| error.to_string())
+    }
+
     pub(in crate::editor::session) fn place_native(
         &mut self,
         target: NativeSurfaceTarget,

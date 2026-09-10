@@ -725,6 +725,9 @@ fn content_capabilities_reject_clone_focus_placement_and_close_before_mutation()
             .capabilities
             .stop_resource
     );
+    graph
+        .require_stop_resource(terminal)
+        .expect("terminal declares stop-resource");
     assert_eq!(
         graph.create_view(terminal, "native", 1),
         Err(WindowError::Unsupported("clone-view"))
@@ -760,6 +763,10 @@ fn content_capabilities_reject_clone_focus_placement_and_close_before_mutation()
     let plugin_view = graph
         .create_view(plugin, "plugin", 1)
         .expect("first plugin view");
+    assert_eq!(
+        graph.require_stop_resource(plugin),
+        Err(WindowError::Unsupported("stop-resource"))
+    );
     let before = graph.clone();
     assert_eq!(
         graph.create_view(plugin, "plugin", 1),
@@ -838,9 +845,27 @@ fn content_capabilities_reject_clone_focus_placement_and_close_before_mutation()
     assert_eq!(graph, before);
 
     // The earlier plugin view remains usable; a refused clone did not retire it.
-    graph
-        .open_window(tab, plugin_view, WindowPlacement::Tiled, true, "plugin", 1)
+    let plugin_window = graph
+        .open_window(
+            tab,
+            plugin_view,
+            WindowPlacement::Floating(WindowRect {
+                x: 20,
+                y: 2,
+                width: 12,
+                height: 6,
+            }),
+            true,
+            "plugin",
+            1,
+        )
         .expect("plugin original view");
+    let before = graph.clone();
+    assert_eq!(
+        graph.swap_non_tiled_placements(restricted_window, plugin_window),
+        Err(WindowError::Unsupported("placement"))
+    );
+    assert_eq!(graph, before);
 }
 
 #[test]

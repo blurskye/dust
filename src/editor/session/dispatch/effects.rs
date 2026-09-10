@@ -3551,9 +3551,19 @@ impl InteractiveApplication {
             }
             AppEffect::TerminalYank { line } => self.yank_terminal_text(line),
             AppEffect::TerminalClose => {
-                self.terminal_session.cancel_open();
                 if let Some(id) = self.terminal_session.selected() {
-                    self.retire_terminal(id, true);
+                    match self
+                        .window_session
+                        .require_native_stop(NativeSurfaceTarget::Terminal(id.0))
+                    {
+                        Ok(()) => {
+                            self.terminal_session.cancel_open();
+                            self.retire_terminal(id, true);
+                        }
+                        Err(error) => self.show_error(error),
+                    }
+                } else {
+                    self.terminal_session.cancel_open();
                 }
             }
             effect => return Err(effect),
