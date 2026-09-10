@@ -97,12 +97,32 @@ impl WindowGraph {
         owner: impl Into<String>,
         generation: u64,
     ) -> Result<ContentId, WindowError> {
+        self.create_content_with_contract(
+            content_type,
+            ContentContract::adapter_defaults(adapter),
+            title,
+            dirty,
+            owner,
+            generation,
+        )
+    }
+
+    pub fn create_content_with_contract(
+        &mut self,
+        content_type: ContentTypeId,
+        contract: ContentContract,
+        title: String,
+        dirty: bool,
+        owner: impl Into<String>,
+        generation: u64,
+    ) -> Result<ContentId, WindowError> {
         self.ensure_revision_capacity()?;
         let id = ContentId(increment(&mut self.next_content)?);
         self.register_content(ContentDescriptor {
             id,
             content_type,
-            adapter,
+            adapter: contract.adapter,
+            capabilities: contract.capabilities,
             title,
             dirty,
             owner: owner.into(),
@@ -154,8 +174,14 @@ impl WindowGraph {
         owner: impl Into<String>,
         generation: u64,
     ) -> Result<ViewId, WindowError> {
-        if !self.contents.contains_key(&content) {
-            return Err(WindowError::UnknownContent);
+        let descriptor = self
+            .contents
+            .get(&content)
+            .ok_or(WindowError::UnknownContent)?;
+        if self.views.values().any(|view| view.content == content)
+            && !descriptor.capabilities.clone_view
+        {
+            return Err(WindowError::Unsupported("clone-view"));
         }
         let owner = owner.into();
         validate_owner(&owner, generation)?;
@@ -344,13 +370,17 @@ impl WindowGraph {
         if !self.workspace_tabs.contains_key(&tab) {
             return Err(WindowError::UnknownWorkspaceTab);
         }
-        if !self.views.contains_key(&view) {
-            return Err(WindowError::UnknownView);
+        let capabilities = self.capabilities_for_view(view)?;
+        let placement = placement.validate()?;
+        if !capabilities.permits(placement) {
+            return Err(WindowError::Unsupported("placement"));
+        }
+        if focusable && !capabilities.focusable {
+            return Err(WindowError::Unsupported("focus"));
         }
         if self.windows.values().any(|window| window.view == view) {
             return Err(WindowError::ViewAlreadyHosted);
         }
-        let placement = placement.validate()?;
         validate_owner(&owner, generation)?;
         let id = WindowId(increment(&mut self.next_window)?);
         self.windows.insert(
@@ -409,8 +439,13 @@ impl WindowGraph {
         if !self.workspace_tabs.contains_key(&tab) {
             return Err(WindowError::UnknownWorkspaceTab);
         }
-        if !self.views.contains_key(&view) {
-            return Err(WindowError::UnknownView);
+        let capabilities = self.capabilities_for_view(view)?;
+        let placement = placement.validate()?;
+        if !capabilities.permits(placement) {
+            return Err(WindowError::Unsupported("placement"));
+        }
+        if focusable && !capabilities.focusable {
+            return Err(WindowError::Unsupported("focus"));
         }
         if self
             .windows
@@ -419,7 +454,6 @@ impl WindowGraph {
         {
             return Err(WindowError::ViewAlreadyHosted);
         }
-        let placement = placement.validate()?;
         let (previous_tab, previous_placement) = self
             .windows
             .get(&window)
@@ -478,11 +512,17 @@ impl WindowGraph {
         placement: WindowPlacement,
     ) -> Result<(), WindowError> {
         let placement = placement.validate()?;
-        let (tab, previous_placement) = self
+        let descriptor = self
             .windows
             .get(&window)
-            .map(|descriptor| (descriptor.tab, descriptor.placement))
             .ok_or(WindowError::UnknownWindow)?;
+        if !self
+            .capabilities_for_view(descriptor.view)?
+            .permits(placement)
+        {
+            return Err(WindowError::Unsupported("placement"));
+        }
+        let (tab, previous_placement) = (descriptor.tab, descriptor.placement);
         if matches!(previous_placement, WindowPlacement::Tiled)
             && !matches!(placement, WindowPlacement::Tiled)
             && let Some(workspace_tab) = self.workspace_tabs.get_mut(&tab)
@@ -571,6 +611,9 @@ impl WindowGraph {
             if !descriptor.focusable || descriptor.placement == WindowPlacement::Hidden {
                 return Err(WindowError::NotFocusable);
             }
+            if !candidate.capabilities_for_view(descriptor.view)?.focusable {
+                return Err(WindowError::Unsupported("focus"));
+            }
             candidate.active_tab = Some(descriptor.tab);
             candidate.focused = Some(window);
             Ok(())
@@ -611,6 +654,13 @@ impl WindowGraph {
     }
 
     pub fn close_window(&mut self, window: WindowId) -> Result<(), WindowError> {
+        let descriptor = self
+            .windows
+            .get(&window)
+            .ok_or(WindowError::UnknownWindow)?;
+        if !self.capabilities_for_view(descriptor.view)?.close_view {
+            return Err(WindowError::Unsupported("close-view"));
+        }
         self.checked_mutation(|candidate| candidate.close_window_inner(window))
     }
 
@@ -788,6 +838,18 @@ impl WindowGraph {
                 return Err(WindowError::UnknownContent);
             }
         }
+        for content in self.contents.values() {
+            if !content.capabilities.clone_view
+                && self
+                    .views
+                    .values()
+                    .filter(|view| view.content == content.id)
+                    .nth(1)
+                    .is_some()
+            {
+                return Err(WindowError::Unsupported("clone-view"));
+            }
+        }
         for window in self.windows.values() {
             if !self.workspace_tabs.contains_key(&window.tab) {
                 return Err(WindowError::UnknownWorkspaceTab);
@@ -799,6 +861,13 @@ impl WindowGraph {
                 return Err(WindowError::ViewAlreadyHosted);
             }
             window.placement.validate()?;
+            let capabilities = self.capabilities_for_view(window.view)?;
+            if !capabilities.permits(window.placement) {
+                return Err(WindowError::Unsupported("placement"));
+            }
+            if window.focusable && !capabilities.focusable {
+                return Err(WindowError::Unsupported("focus"));
+            }
         }
         for (tab, descriptor) in &self.workspace_tabs {
             validate_tiled_layout(*tab, descriptor.tiled_root.as_ref(), &self.windows)?;
@@ -904,6 +973,7 @@ impl WindowGraph {
                     id: content.id,
                     content_type: content.content_type.clone(),
                     adapter: content.adapter,
+                    capabilities: content.capabilities,
                     title: content.title.clone(),
                     dirty: content.dirty,
                     active: active_content == Some(content.id),
@@ -917,6 +987,14 @@ impl WindowGraph {
     #[must_use]
     pub fn content(&self, id: ContentId) -> Option<&ContentDescriptor> {
         self.contents.get(&id)
+    }
+
+    fn capabilities_for_view(&self, id: ViewId) -> Result<ContentCapabilities, WindowError> {
+        let view = self.views.get(&id).ok_or(WindowError::UnknownView)?;
+        self.contents
+            .get(&view.content)
+            .map(|content| content.capabilities)
+            .ok_or(WindowError::UnknownContent)
     }
 
     #[must_use]

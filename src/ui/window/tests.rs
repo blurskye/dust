@@ -15,10 +15,14 @@ fn balanced_layout(windows: &[WindowId]) -> TiledLayoutNode {
 
 fn graph_with_content() -> (WindowGraph, ContentId, ViewId, WorkspaceTabId) {
     let mut graph = WindowGraph::default();
+    // Topology tests intentionally need many views of one content. A normal
+    // terminal uses its adapter default and rejects clones.
+    let mut capabilities = ContentCapabilities::for_adapter(ContentAdapterKind::TerminalSession);
+    capabilities.clone_view = true;
     let content = graph
-        .create_content(
+        .create_content_with_contract(
             ContentTypeId::new("builtin.terminal").expect("type"),
-            ContentAdapterKind::TerminalSession,
+            ContentContract::declared(ContentAdapterKind::TerminalSession, capabilities),
             "shell".into(),
             false,
             "builtin",
@@ -692,6 +696,151 @@ fn graph_revision_and_typed_targets_cover_changes_rejection_and_exhaustion() {
     );
     assert_eq!(exhausted, before);
     assert_eq!(exhausted.revision(), None);
+}
+
+#[test]
+fn content_capabilities_reject_clone_focus_placement_and_close_before_mutation() {
+    let mut graph = WindowGraph::default();
+    let tab = graph
+        .create_workspace_tab("native", 1)
+        .expect("workspace tab");
+
+    let terminal = graph
+        .create_content(
+            ContentTypeId::new("terminal.live").expect("type"),
+            ContentAdapterKind::TerminalSession,
+            "terminal".into(),
+            false,
+            "native",
+            1,
+        )
+        .expect("terminal content");
+    graph
+        .create_view(terminal, "native", 1)
+        .expect("authoritative terminal view");
+    assert!(
+        graph
+            .content(terminal)
+            .expect("terminal descriptor")
+            .capabilities
+            .stop_resource
+    );
+    assert_eq!(
+        graph.create_view(terminal, "native", 1),
+        Err(WindowError::Unsupported("clone-view"))
+    );
+
+    let text = graph
+        .create_content(
+            ContentTypeId::new("editor.text").expect("type"),
+            ContentAdapterKind::TextBuffer,
+            "text".into(),
+            false,
+            "native",
+            1,
+        )
+        .expect("text content");
+    graph
+        .create_view(text, "native", 1)
+        .expect("first text view");
+    graph
+        .create_view(text, "native", 1)
+        .expect("text declares clone-view");
+
+    let plugin = graph
+        .create_content(
+            ContentTypeId::new("plugin.panel").expect("type"),
+            ContentAdapterKind::DeclarativeUi,
+            "plugin".into(),
+            false,
+            "plugin",
+            1,
+        )
+        .expect("plugin content");
+    let plugin_view = graph
+        .create_view(plugin, "plugin", 1)
+        .expect("first plugin view");
+    let before = graph.clone();
+    assert_eq!(
+        graph.create_view(plugin, "plugin", 1),
+        Err(WindowError::Unsupported("clone-view"))
+    );
+    assert_eq!(graph, before);
+
+    let mut restricted_capabilities =
+        ContentCapabilities::for_adapter(ContentAdapterKind::DeclarativeUi);
+    restricted_capabilities.focusable = false;
+    restricted_capabilities.float = false;
+    restricted_capabilities.close_view = false;
+    let restricted = graph
+        .create_content_with_contract(
+            ContentTypeId::new("native.restricted").expect("type"),
+            ContentContract::declared(ContentAdapterKind::DeclarativeUi, restricted_capabilities),
+            "restricted".into(),
+            false,
+            "native",
+            1,
+        )
+        .expect("restricted content");
+    assert_eq!(
+        graph
+            .content_snapshots()
+            .into_iter()
+            .find(|snapshot| snapshot.id == restricted)
+            .expect("restricted snapshot")
+            .capabilities,
+        restricted_capabilities
+    );
+    let restricted_view = graph
+        .create_view(restricted, "native", 1)
+        .expect("restricted view");
+    let before = graph.clone();
+    assert_eq!(
+        graph.open_window(
+            tab,
+            restricted_view,
+            WindowPlacement::Hidden,
+            true,
+            "native",
+            1,
+        ),
+        Err(WindowError::Unsupported("focus"))
+    );
+    assert_eq!(graph, before);
+    let restricted_window = graph
+        .open_window(
+            tab,
+            restricted_view,
+            WindowPlacement::Hidden,
+            false,
+            "native",
+            1,
+        )
+        .expect("non-focusable hidden window");
+    let before = graph.clone();
+    assert_eq!(
+        graph.place(
+            restricted_window,
+            WindowPlacement::Floating(WindowRect {
+                x: 1,
+                y: 1,
+                width: 10,
+                height: 4,
+            }),
+        ),
+        Err(WindowError::Unsupported("placement"))
+    );
+    assert_eq!(graph, before);
+    assert_eq!(
+        graph.close_window(restricted_window),
+        Err(WindowError::Unsupported("close-view"))
+    );
+    assert_eq!(graph, before);
+
+    // The earlier plugin view remains usable; a refused clone did not retire it.
+    graph
+        .open_window(tab, plugin_view, WindowPlacement::Tiled, true, "plugin", 1)
+        .expect("plugin original view");
 }
 
 #[test]

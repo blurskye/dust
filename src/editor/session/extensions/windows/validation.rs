@@ -32,11 +32,15 @@ pub(in crate::editor::session) fn ui_error(
 
 pub(in crate::editor::session) fn map_graph_error(error: WindowError) -> PluginUiError {
     let code = match error {
-        WindowError::InvalidPlacement => PluginUiErrorCode::InvalidPlacement,
-        WindowError::NotFocusable => PluginUiErrorCode::HiddenFocus,
-        WindowError::ViewStillHosted | WindowError::ContentStillViewed => {
-            PluginUiErrorCode::CloseOrder
+        WindowError::InvalidPlacement | WindowError::Unsupported("placement") => {
+            PluginUiErrorCode::InvalidPlacement
         }
+        WindowError::NotFocusable | WindowError::Unsupported("focus") => {
+            PluginUiErrorCode::HiddenFocus
+        }
+        WindowError::ViewStillHosted
+        | WindowError::ContentStillViewed
+        | WindowError::Unsupported("close-view") => PluginUiErrorCode::CloseOrder,
         WindowError::TooManyTiledWindows
         | WindowError::TooManyNonTiledWindows
         | WindowError::TooManyOverlayWindows

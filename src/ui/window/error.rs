@@ -32,6 +32,7 @@ pub enum WindowError {
     InvalidOwner,
     InvalidTitle,
     InvalidPlacement,
+    Unsupported(&'static str),
     DuplicateContent,
     UnknownContent,
     UnknownView,
@@ -69,6 +70,9 @@ impl fmt::Display for WindowError {
             Self::InvalidOwner => formatter.write_str("invalid window resource owner"),
             Self::InvalidTitle => formatter.write_str("invalid window content title"),
             Self::InvalidPlacement => formatter.write_str("invalid window placement"),
+            Self::Unsupported(capability) => {
+                write!(formatter, "content does not support {capability}")
+            }
             Self::DuplicateContent => formatter.write_str("duplicate content identity"),
             Self::UnknownContent => formatter.write_str("unknown content identity"),
             Self::UnknownView => formatter.write_str("unknown view identity"),
