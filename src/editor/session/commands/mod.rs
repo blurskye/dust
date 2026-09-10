@@ -16,7 +16,10 @@ use crate::editor::{
     ArgumentSchema, ArgumentType, CommandError, CommandOutcome, CommandRegistry, CommandSpec,
     CommandValue, ContextRequirement, FocusDirection,
 };
-use crate::{editor::input::GrammarInput, ui::PromptKind};
+use crate::{
+    editor::input::GrammarInput,
+    ui::{ConfirmationChoice, PromptKind},
+};
 
 #[derive(Clone, Debug)]
 pub enum AppEffect {
@@ -57,6 +60,8 @@ pub enum AppEffect {
     PromptMove(PromptMove),
     PromptHistory(i8),
     PromptComplete(i8),
+    PromptConfirmationSelect(ConfirmationChoice),
+    PromptConfirmationToggle,
     PromptSubmit,
     PromptCancel,
     NotificationHistory,
@@ -255,7 +260,6 @@ pub enum AppEffect {
     ExplorerRename(String),
     ExplorerRenamePrompt,
     ExplorerDeleteRequest,
-    ExplorerDeleteConfirm(String),
     ExplorerClipboard {
         cut: bool,
     },

@@ -65,6 +65,14 @@ impl InteractiveApplication {
             AppEffect::PromptMove(movement) => self.prompt_move(movement),
             AppEffect::PromptHistory(direction) => self.prompt_history(direction),
             AppEffect::PromptComplete(direction) => self.prompt_complete(direction),
+            AppEffect::PromptConfirmationSelect(choice) => {
+                self.input.select_confirmation(choice);
+                self.project_input_prompt();
+            }
+            AppEffect::PromptConfirmationToggle => {
+                self.input.toggle_confirmation();
+                self.project_input_prompt();
+            }
             AppEffect::PromptSubmit => self.submit_prompt(),
             AppEffect::PromptCancel => self.close_prompt(),
             AppEffect::NotificationHistory => {

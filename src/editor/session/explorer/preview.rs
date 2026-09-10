@@ -36,7 +36,6 @@ impl ExplorerSession {
             })
     }
     pub(super) fn retire_changed_preview_selection(&mut self) {
-        self.retire_changed_confirmation();
         if self
             .preview
             .as_ref()

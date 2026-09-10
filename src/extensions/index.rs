@@ -597,9 +597,15 @@ pub(crate) fn load_component(
         proposals: Vec::new(),
         messages: Vec::new(),
         config: BTreeMap::new(),
+        ui_revision: None,
+        confirmation_available: false,
+        confirmation_result_only: false,
         ui_requests: Vec::new(),
         ui_events: Vec::new(),
         next_ui_token: 1,
+        confirmation_requests: Vec::new(),
+        confirmation_results: Vec::new(),
+        next_confirmation_token: 1,
         host_events: Vec::new(),
         delivered_host_event_ids: BTreeSet::new(),
         host_event_acknowledgements: Vec::new(),
@@ -672,7 +678,10 @@ pub(crate) fn execute_component(
         arguments,
         snapshot,
         config,
+        ui_revision,
+        confirmation_available,
         ui_events,
+        confirmation_results,
         host_events,
         storage_results,
         provider_requests,
@@ -707,6 +716,9 @@ pub(crate) fn execute_component(
             utf8: snapshot.utf8,
         });
         state.config = config;
+        state.ui_revision = ui_revision;
+        state.confirmation_available = confirmation_available;
+        state.confirmation_result_only = !confirmation_results.is_empty();
         state
             .ui_events
             .extend(ui_events.into_iter().take(64).map(|event| {
@@ -733,6 +745,12 @@ pub(crate) fn execute_component(
                 .ui_events
                 .drain(..state.ui_events.len().saturating_sub(64));
         }
+        state.confirmation_results = confirmation_results
+            .into_iter()
+            .take(64)
+            .map(component_confirmation_result)
+            .collect();
+        state.confirmation_requests.clear();
         state.host_events = host_events
             .into_iter()
             .take(64)
@@ -804,6 +822,7 @@ pub(crate) fn execute_component(
     let state = runtime.store.data_mut();
     let messages = std::mem::take(&mut state.messages);
     let ui_requests = std::mem::take(&mut state.ui_requests);
+    let confirmation_requests = std::mem::take(&mut state.confirmation_requests);
     let host_event_acknowledgements = std::mem::take(&mut state.host_event_acknowledgements);
     let storage_requests = std::mem::take(&mut state.storage_requests);
     let provider_chunks = std::mem::take(&mut state.provider_chunks);
@@ -831,6 +850,7 @@ pub(crate) fn execute_component(
         messages,
         proposals,
         ui_requests,
+        confirmation_requests,
         host_event_acknowledgements,
         storage_requests,
         provider_chunks,

@@ -897,11 +897,13 @@ pub(super) fn render_prompt(
     width: u16,
     height: u16,
 ) {
-    let geometry = prompt_geometry(
-        width,
-        height,
-        &config.ui.command_line,
-        prompt.error.is_some() || prompt.help.is_some(),
+    let confirmation_layout = prompt
+        .confirmation
+        .as_ref()
+        .map(|_| super::confirmation_layout(width, height, config, prompt));
+    let geometry = confirmation_layout.as_ref().map_or_else(
+        || super::prompt_geometry_for_state(width, height, config, prompt),
+        |layout| layout.geometry,
     );
     if geometry.width == 0 || geometry.height == 0 {
         return;
@@ -913,6 +915,44 @@ pub(super) fn render_prompt(
         }
     }
     if geometry.height < 3 {
+        if let Some(confirmation) = &prompt.confirmation {
+            if !confirmation_layout
+                .as_ref()
+                .is_some_and(|layout| layout.fully_visible)
+            {
+                frame.grid.put_text_clipped(
+                    geometry.left,
+                    geometry.top,
+                    "Resize to review the full target",
+                    Style::Warning,
+                    right,
+                );
+                frame.cursor = None;
+                return;
+            }
+            frame.grid.put_text_clipped(
+                geometry.left,
+                geometry.top,
+                &confirmation.message,
+                Style::Default,
+                right,
+            );
+            if geometry.height > 1 {
+                frame.grid.put_text_clipped(
+                    geometry.left,
+                    geometry.top.saturating_add(1),
+                    if confirmation.selected == crate::ui::ConfirmationChoice::Yes {
+                        "[ Yes ]  No"
+                    } else {
+                        "Yes  [ No ]"
+                    },
+                    Style::Selection,
+                    right,
+                );
+            }
+            frame.cursor = None;
+            return;
+        }
         let marker_end = frame.grid.put_text_clipped(
             geometry.left,
             geometry.top,
@@ -945,8 +985,17 @@ pub(super) fn render_prompt(
             BorderStyle::Rounded => ('─', '│', '╭', '╮', '╰', '╯'),
             BorderStyle::Single => ('─', '│', '┌', '┐', '└', '┘'),
         };
-    let show_help = prompt.error.is_none() && prompt.help.is_some() && geometry.height >= 4;
-    let bottom_y = geometry.top.saturating_add(if show_help { 3 } else { 2 });
+    let show_help = prompt.confirmation.is_none()
+        && prompt.error.is_none()
+        && prompt.help.is_some()
+        && geometry.height >= 4;
+    let bottom_y = if prompt.confirmation.is_some() {
+        geometry
+            .top
+            .saturating_add(geometry.height.saturating_sub(1))
+    } else {
+        geometry.top.saturating_add(if show_help { 3 } else { 2 })
+    };
     for x in geometry.left..geometry.left.saturating_add(geometry.width) {
         frame
             .grid
@@ -996,7 +1045,13 @@ pub(super) fn render_prompt(
     }
     if config.ui.command_line.show_title && geometry.width > config.ui.command_line.title_min_width
     {
-        let title = format!(" {} ", prompt.kind.title(&config.ui.command_line.text));
+        let title = format!(
+            " {} ",
+            prompt.confirmation.as_ref().map_or_else(
+                || prompt.kind.title(&config.ui.command_line.text),
+                |confirmation| confirmation.title.as_str(),
+            )
+        );
         let title_width =
             u16::try_from(text_width(&title, config.editor.ambiguous_width)).unwrap_or(0);
         let title_x = geometry
@@ -1010,6 +1065,84 @@ pub(super) fn render_prompt(
             Style::Accent,
             right.saturating_sub(1),
         );
+    }
+    if let Some(confirmation) = &prompt.confirmation {
+        let content_left = geometry.left.saturating_add(2);
+        let line_limit = usize::from(geometry.height.saturating_sub(3));
+        let layout = confirmation_layout
+            .as_ref()
+            .expect("confirmation layout was constructed");
+        let fully_visible = layout.fully_visible;
+        for (row, line) in layout.lines.iter().take(line_limit).enumerate() {
+            let y = geometry
+                .top
+                .saturating_add(1)
+                .saturating_add(u16::try_from(row).unwrap_or(u16::MAX));
+            let mut x = content_left;
+            for (unit, unit_width) in &line.units {
+                if x.saturating_add(*unit_width) > right.saturating_sub(1) {
+                    break;
+                }
+                frame.grid.set_cell(x, y, unit, Style::Default);
+                x = x.saturating_add(*unit_width);
+            }
+        }
+        if !fully_visible {
+            frame.grid.put_text_clipped(
+                content_left,
+                bottom_y.saturating_sub(1),
+                "Resize to review the full target",
+                Style::Warning,
+                right.saturating_sub(1),
+            );
+            frame.cursor = None;
+            return;
+        }
+        let yes = "[ Yes ]";
+        let no = "[ No ]";
+        let buttons_width = text_width(yes, config.editor.ambiguous_width)
+            .saturating_add(1)
+            .saturating_add(text_width(no, config.editor.ambiguous_width));
+        let buttons_x = geometry.left.saturating_add(
+            geometry
+                .width
+                .saturating_sub(u16::try_from(buttons_width).unwrap_or(geometry.width))
+                / 2,
+        );
+        let button_y = bottom_y.saturating_sub(1);
+        let no_x = frame.grid.put_text_clipped(
+            buttons_x,
+            button_y,
+            yes,
+            if confirmation.selected == crate::ui::ConfirmationChoice::Yes {
+                Style::Selection
+            } else {
+                Style::Default
+            },
+            right.saturating_sub(1),
+        );
+        frame.grid.put_text_clipped(
+            no_x.saturating_add(1),
+            button_y,
+            no,
+            if confirmation.selected == crate::ui::ConfirmationChoice::No {
+                Style::Selection
+            } else {
+                Style::Default
+            },
+            right.saturating_sub(1),
+        );
+        if !confirmation.hint.is_empty() && geometry.width > 8 {
+            frame.grid.put_text_clipped(
+                geometry.left.saturating_add(2),
+                bottom_y,
+                &format!(" {} ", confirmation.hint),
+                Style::Muted,
+                right.saturating_sub(2),
+            );
+        }
+        frame.cursor = None;
+        return;
     }
     let input_x = geometry
         .left

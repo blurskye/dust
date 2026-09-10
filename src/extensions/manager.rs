@@ -123,12 +123,21 @@ impl PluginInvocationOrigin {
     pub(crate) fn load(&self) -> PluginLoadId {
         self.load
     }
+    pub(crate) fn plugin(&self) -> &str {
+        &self.plugin
+    }
+    pub(crate) fn command(&self) -> &str {
+        &self.command
+    }
 }
 pub(crate) struct PluginExecutionReply {
     execution: PluginExecution,
     origin: Option<PluginInvocationOrigin>,
 }
 impl PluginExecutionReply {
+    pub(crate) fn origin(&self) -> Option<&PluginInvocationOrigin> {
+        self.origin.as_ref()
+    }
     pub(crate) fn into_parts(self) -> (PluginExecution, Option<PluginInvocationOrigin>) {
         (self.execution, self.origin)
     }

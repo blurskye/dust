@@ -12,9 +12,15 @@ pub struct ComponentHostState {
     pub proposals: Vec<(u64, u64, Vec<component_api::dust::plugin::host::Edit>)>,
     pub messages: Vec<String>,
     pub config: BTreeMap<String, String>,
+    pub ui_revision: Option<u64>,
+    pub confirmation_available: bool,
+    pub confirmation_result_only: bool,
     pub ui_requests: Vec<PluginUiRequest>,
     pub ui_events: Vec<component_api::dust::plugin::host::UiEvent>,
     pub next_ui_token: u64,
+    pub confirmation_requests: Vec<PluginConfirmationRequest>,
+    pub confirmation_results: Vec<component_api::dust::plugin::host::ConfirmationResult>,
+    pub next_confirmation_token: u64,
     pub host_events: Vec<component_api::dust::plugin::host::HostEvent>,
     pub delivered_host_event_ids: BTreeSet<u64>,
     pub host_event_acknowledgements: Vec<u64>,
@@ -48,6 +54,9 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         revision: u64,
         edits: Vec<component_api::dust::plugin::host::Edit>,
     ) -> Result<u64, String> {
+        if self.confirmation_result_only {
+            return Err("confirmation result cannot propose edits".into());
+        }
         if !self.capabilities.contains(&PluginCapability::ProposeEdits) {
             return Err("capability denied".into());
         }
@@ -107,10 +116,27 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
             .flatten()
     }
 
+    fn current_ui_revision(&mut self) -> Option<u64> {
+        self.ui_revision
+    }
+
     fn queue_ui_request(
         &mut self,
         request: component_api::dust::plugin::host::UiRequest,
     ) -> Result<u64, component_api::dust::plugin::host::UiError> {
+        if self.confirmation_result_only
+            && !matches!(
+                request,
+                component_api::dust::plugin::host::UiRequest::ReplaceUi(_)
+                    | component_api::dust::plugin::host::UiRequest::ReplacePrivate(_)
+                    | component_api::dust::plugin::host::UiRequest::PatchPrivate(_)
+            )
+        {
+            return Err(component_ui_error(PluginUiError::new(
+                PluginUiErrorCode::InternalRejected,
+                "confirmation result may update existing plugin UI only",
+            )));
+        }
         if self.ui_requests.len() >= 64 {
             return Err(component_ui_error(PluginUiError::new(
                 PluginUiErrorCode::QueueFull,
@@ -132,6 +158,58 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn take_ui_events(&mut self) -> Vec<component_api::dust::plugin::host::UiEvent> {
         std::mem::take(&mut self.ui_events)
+    }
+
+    fn queue_confirmation(
+        &mut self,
+        request: component_api::dust::plugin::host::ConfirmationRequest,
+    ) -> Result<u64, component_api::dust::plugin::host::ConfirmationError> {
+        if !self.confirmation_available || !self.confirmation_requests.is_empty() {
+            return Err(component_confirmation_error(PluginConfirmationError::new(
+                PluginConfirmationErrorCode::QueueFull,
+                "one confirmation may be requested per execution",
+            )));
+        }
+        if request.title.is_empty()
+            || request.title.len() > 128
+            || request.message.is_empty()
+            || request.message.len() > 4_096
+            || request
+                .title
+                .chars()
+                .chain(request.message.chars())
+                .any(|character| character.is_control() && !matches!(character, '\n' | '\t'))
+            || matches!(
+                request.default_answer,
+                component_api::dust::plugin::host::ConfirmationAnswer::Cancelled
+            )
+        {
+            return Err(component_confirmation_error(PluginConfirmationError::new(
+                PluginConfirmationErrorCode::InvalidRequest,
+                "confirmation title, message, or default is invalid",
+            )));
+        }
+        let token = self.next_confirmation_token;
+        self.next_confirmation_token =
+            self.next_confirmation_token.checked_add(1).ok_or_else(|| {
+                component_confirmation_error(PluginConfirmationError::new(
+                    PluginConfirmationErrorCode::Unavailable,
+                    "confirmation token exhausted",
+                ))
+            })?;
+        self.confirmation_requests.push(PluginConfirmationRequest {
+            token,
+            title: request.title,
+            message: request.message,
+            default_answer: internal_confirmation_answer(request.default_answer),
+        });
+        Ok(token)
+    }
+
+    fn take_confirmation_results(
+        &mut self,
+    ) -> Vec<component_api::dust::plugin::host::ConfirmationResult> {
+        std::mem::take(&mut self.confirmation_results)
     }
 
     fn take_host_events(&mut self) -> Vec<component_api::dust::plugin::host::HostEvent> {
@@ -169,6 +247,12 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         &mut self,
         request: component_api::dust::plugin::host::StorageRequest,
     ) -> Result<u64, component_api::dust::plugin::host::StorageError> {
+        if self.confirmation_result_only {
+            return Err(component_storage_error(PluginStorageError::new(
+                PluginStorageErrorCode::Unavailable,
+                "confirmation result cannot use storage",
+            )));
+        }
         if !self.capabilities.contains(&PluginCapability::PluginStorage) {
             return Err(component_storage_error(PluginStorageError::new(
                 PluginStorageErrorCode::Unavailable,
@@ -226,6 +310,12 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         &mut self,
         chunk: component_api::dust::plugin::host::PickerProviderChunk,
     ) -> Result<(), component_api::dust::plugin::host::ProviderError> {
+        if self.confirmation_result_only {
+            return Err(component_provider_error(PluginProviderError::new(
+                PluginProviderErrorCode::Unavailable,
+                "confirmation result cannot publish provider chunks",
+            )));
+        }
         if !self
             .capabilities
             .contains(&PluginCapability::PickerProviders)
@@ -280,6 +370,14 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         &mut self,
         proposal: component_api::dust::plugin::host::VirtualDocumentProposal,
     ) -> Result<(), component_api::dust::plugin::host::VirtualDocumentError> {
+        if self.confirmation_result_only {
+            return Err(component_virtual_document_error(
+                PluginVirtualDocumentError::new(
+                    PluginVirtualDocumentErrorCode::ReadOnly,
+                    "confirmation result cannot publish virtual documents",
+                ),
+            ));
+        }
         if !self
             .capabilities
             .contains(&PluginCapability::VirtualDocuments)
@@ -314,6 +412,61 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
             .map_err(component_virtual_document_error)?;
         self.virtual_document_proposals.push(proposal);
         Ok(())
+    }
+}
+
+pub(super) fn internal_confirmation_answer(
+    answer: component_api::dust::plugin::host::ConfirmationAnswer,
+) -> PluginConfirmationAnswer {
+    use component_api::dust::plugin::host::ConfirmationAnswer as A;
+    match answer {
+        A::Yes => PluginConfirmationAnswer::Yes,
+        A::No => PluginConfirmationAnswer::No,
+        A::Cancelled => PluginConfirmationAnswer::Cancelled,
+    }
+}
+
+pub(super) fn component_confirmation_answer(
+    answer: PluginConfirmationAnswer,
+) -> component_api::dust::plugin::host::ConfirmationAnswer {
+    use component_api::dust::plugin::host::ConfirmationAnswer as A;
+    match answer {
+        PluginConfirmationAnswer::Yes => A::Yes,
+        PluginConfirmationAnswer::No => A::No,
+        PluginConfirmationAnswer::Cancelled => A::Cancelled,
+    }
+}
+
+pub(super) fn component_confirmation_error(
+    error: PluginConfirmationError,
+) -> component_api::dust::plugin::host::ConfirmationError {
+    use component_api::dust::plugin::host::ConfirmationErrorCode as C;
+    component_api::dust::plugin::host::ConfirmationError {
+        code: match error.code {
+            PluginConfirmationErrorCode::QueueFull => C::QueueFull,
+            PluginConfirmationErrorCode::InvalidRequest => C::InvalidRequest,
+            PluginConfirmationErrorCode::GenerationLost => C::GenerationLost,
+            PluginConfirmationErrorCode::SourceRetired => C::SourceRetired,
+            PluginConfirmationErrorCode::Unavailable => C::Unavailable,
+        },
+        detail: error.detail,
+    }
+}
+
+pub(super) fn component_confirmation_result(
+    result: PluginConfirmationResult,
+) -> component_api::dust::plugin::host::ConfirmationResult {
+    use component_api::dust::plugin::host::ConfirmationOutcome as O;
+    component_api::dust::plugin::host::ConfirmationResult {
+        request: result.request,
+        outcome: match result.outcome {
+            PluginConfirmationOutcome::Answered(answer) => {
+                O::Answered(component_confirmation_answer(answer))
+            }
+            PluginConfirmationOutcome::Failed(error) => {
+                O::Failed(component_confirmation_error(error))
+            }
+        },
     }
 }
 

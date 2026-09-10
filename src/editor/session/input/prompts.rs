@@ -1,7 +1,7 @@
 use super::InputSession;
 use crate::{
     editor::{EditorMode, PromptMove, ViewId},
-    ui::{CompletionItem, PromptKind, PromptState},
+    ui::{CompletionItem, ConfirmationChoice, ConfirmationState, PromptKind, PromptState},
 };
 use std::{
     collections::BTreeMap,
@@ -54,6 +54,45 @@ impl InputSession {
         self.prompt = Some(prompt);
         self.history_index = None;
         mode
+    }
+    pub(in crate::editor::session) fn configure_confirmation(
+        &mut self,
+        title: String,
+        message: String,
+        selected: ConfirmationChoice,
+        hint: String,
+    ) -> bool {
+        let Some(prompt) = &mut self.prompt else {
+            return false;
+        };
+        prompt.confirmation = Some(ConfirmationState {
+            title,
+            message,
+            selected,
+            hint,
+        });
+        true
+    }
+    pub(in crate::editor::session) fn select_confirmation(&mut self, selected: ConfirmationChoice) {
+        if let Some(confirmation) = self
+            .prompt
+            .as_mut()
+            .and_then(|prompt| prompt.confirmation.as_mut())
+        {
+            confirmation.selected = selected;
+        }
+    }
+    pub(in crate::editor::session) fn toggle_confirmation(&mut self) {
+        if let Some(confirmation) = self
+            .prompt
+            .as_mut()
+            .and_then(|prompt| prompt.confirmation.as_mut())
+        {
+            confirmation.selected = match confirmation.selected {
+                ConfirmationChoice::Yes => ConfirmationChoice::No,
+                ConfirmationChoice::No => ConfirmationChoice::Yes,
+            };
+        }
     }
     pub(in crate::editor::session) fn close_prompt(
         &mut self,
@@ -169,6 +208,9 @@ impl InputSession {
     }
     pub(in crate::editor::session) fn prompt_insert(&mut self, text: &str) {
         if let Some(prompt) = &mut self.prompt {
+            if prompt.confirmation.is_some() {
+                return;
+            }
             if prompt.kind == PromptKind::ExplorerRename
                 && (prompt.input.len().saturating_add(text.len()) > 4096
                     || text.chars().any(char::is_control))
@@ -188,6 +230,9 @@ impl InputSession {
 
     pub(in crate::editor::session) fn prompt_backspace(&mut self) {
         if let Some(prompt) = &mut self.prompt {
+            if prompt.confirmation.is_some() {
+                return;
+            }
             let before = &prompt.input[..prompt.cursor];
             let previous = before
                 .grapheme_indices(true)
@@ -204,6 +249,13 @@ impl InputSession {
 
     pub(in crate::editor::session) fn prompt_move(&mut self, movement: PromptMove) {
         if let Some(prompt) = &mut self.prompt {
+            if let Some(confirmation) = &mut prompt.confirmation {
+                confirmation.selected = match movement {
+                    PromptMove::Left | PromptMove::Home => ConfirmationChoice::Yes,
+                    PromptMove::Right | PromptMove::End => ConfirmationChoice::No,
+                };
+                return;
+            }
             prompt.cursor = match movement {
                 PromptMove::Home => 0,
                 PromptMove::End => prompt.input.len(),
@@ -233,6 +285,7 @@ impl InputSession {
                 | PromptKind::GitReset
                 | PromptKind::ExplorerDelete
                 | PromptKind::ExplorerRename
+                | PromptKind::PluginConfirmation
         ) {
             return;
         }

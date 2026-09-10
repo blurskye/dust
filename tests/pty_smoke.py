@@ -268,13 +268,115 @@ def assert_restored(output: bytes) -> None:
     assert "\x1b[?2004l" in decoded
 
 
+def confirmation_smoke(binary: pathlib.Path) -> None:
+    def confirmation_message(screen: str) -> str:
+        lines = screen.splitlines()
+        title_row = next(row for row in lines if "Delete this path?" in row)
+        left = title_row.index("┌")
+        right = title_row.rindex("┐")
+        wrapped: list[str] = []
+        for row in lines[lines.index(title_row) + 1 :]:
+            if len(row) <= right or row[left] != "│":
+                break
+            interior = row[left + 2 : right - 1]
+            if "[ Yes ]" in interior or "Resize to review" in interior:
+                break
+            wrapped.append(interior)
+        return "".join(wrapped).rstrip()
+
+    def target_run(choice: bytes) -> tuple[pathlib.Path, bytes, list[bytes]]:
+        directory = tempfile.mkdtemp(prefix="dust-confirmation-")
+        root = pathlib.Path(directory)
+        target = root / "owned  target.txt"
+        target.write_text("owned\n", encoding="utf-8")
+        code, output, snapshots = run(
+            binary,
+            directory,
+            [],
+            [
+                (0.8, b" fe", None),
+                (0.8, b"j", None),
+                (0.2, b"d", None),
+                (0.3, b"", None),
+                (0.2, choice, None),
+                (0.5, b"\x1b", None),
+                (0.2, b"q", None),
+            ],
+        )
+        assert code == 0
+        confirmation = terminal_screen(snapshots[3])
+        assert "Delete this path?" in confirmation
+        assert "[ Yes ]" in confirmation and "[ No ]" in confirmation
+        assert confirmation_message(confirmation) == f'Permanently delete "{target}"?'
+        assert_restored(output)
+        return target, output, snapshots
+
+    no_target, _, no_snapshots = target_run(b"\r")
+    assert no_target.is_file(), "default Enter must choose No"
+    assert "owned  target.t" in terminal_screen(no_snapshots[5])
+    shutil.rmtree(no_target.parent)
+
+    cancelled_target, _, _ = target_run(b"\x1b")
+    assert cancelled_target.is_file(), "Escape must cancel without deleting"
+    shutil.rmtree(cancelled_target.parent)
+
+    yes_target, _, _ = target_run(b"\x1b[D\r")
+    assert not yes_target.exists(), "explicit Yes must delete the original target"
+    shutil.rmtree(yes_target.parent)
+
+    with tempfile.TemporaryDirectory(prefix="dust-confirmation-small-") as directory:
+        root = pathlib.Path(directory)
+        target = root / "small target.txt"
+        target.write_text("owned\n", encoding="utf-8")
+
+        def assert_positive_was_refused() -> None:
+            assert target.is_file(), "hidden positive action must fail closed"
+
+        code, output, snapshots = run(
+            binary,
+            directory,
+            [],
+            [
+                (0.8, b" fe", None),
+                (0.8, b"j", None),
+                (0.2, b"", (4, 100)),
+                (0.3, b"d", None),
+                (0.3, b"\x1b[D\r", None),
+                (0.3, b"", (30, 100)),
+                (0.3, b"\r", None),
+                (0.5, b"\x1b", None),
+                (0.2, b"q", None),
+            ],
+            stage_actions={5: assert_positive_was_refused},
+        )
+        assert code == 0
+        constrained = terminal_screen(snapshots[5], height=4)
+        assert "Resize to review" in constrained
+        assert "[ Yes ]" not in constrained
+        resized = terminal_screen(snapshots[6])
+        assert confirmation_message(resized) == f'Permanently delete "{target}"?'
+        assert "[ Yes ]" in resized and "[ No ]" in resized
+        assert not target.exists(), "Yes must work after the complete target becomes visible"
+        assert_restored(output)
+
+    print("Dust owned confirmation PTY tests passed")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", type=pathlib.Path, default=pathlib.Path("target/debug/dust"))
+    parser.add_argument(
+        "--confirmation-only",
+        action="store_true",
+        help="run only the owned native confirmation PTY qualification",
+    )
     arguments = parser.parse_args()
     binary = arguments.binary.resolve()
     if not binary.is_file():
         raise SystemExit(f"Dust binary does not exist: {binary}; run `cargo build`")
+    if arguments.confirmation_only:
+        confirmation_smoke(binary)
+        return
 
     with tempfile.TemporaryDirectory() as directory:
         code, output, snapshots = run(
@@ -400,6 +502,7 @@ def main() -> None:
                 (0.2, b":commands\r", None),
                 (0.2, b"health", None),
                 (0.2, b"\x1b", None),
+                (0.1, b"\x1b", None),
                 (0.1, b":q\r", None),
             ],
         )
@@ -424,6 +527,7 @@ def main() -> None:
                 (0.8, b":workspace.file.find\r", None),
                 (1.0, b"", None),
                 (0.3, b"\x1b", None),
+                (0.1, b"\x1b", None),
                 (0.2, b":q\r", None),
             ],
         )
@@ -448,6 +552,7 @@ def main() -> None:
                 (0.3, b"needle", None),
                 (1.0, b"", None),
                 (0.3, b"\x1b", None),
+                (0.1, b"\x1b", None),
                 (0.2, b":workspace.replace needle changed\r", None),
                 (0.6, b"\x1b", None),
                 (0.2, b":q\r", None),
@@ -456,7 +561,7 @@ def main() -> None:
         assert code == 0
         direct_screen = terminal_screen(snapshots[1])
         search_screen = terminal_screen(snapshots[2])
-        preview_screen = terminal_screen(snapshots[5])
+        preview_screen = terminal_screen(snapshots[6])
         assert "Grep" in direct_screen and "Command" not in direct_screen
         assert "Grep" in search_screen and "alpha.txt" in search_screen
         assert "1/2" in search_screen and "needle alpha" in search_screen
@@ -650,7 +755,7 @@ while True:
                 (0.2, b"new.txt", None),
                 (0.2, b"\r", None),
                 (0.6, b"r", None),
-                (0.2, b"renamed.txt", None),
+                (0.2, b"\x7f\x7f\x7f\x7f\x7f\x7f\x7frenamed.txt", None),
                 (0.2, b"\r", None),
                 (0.6, b"a", None),
                 (0.2, b"dest/", None),
@@ -661,14 +766,23 @@ while True:
                 (0.2, b"p", None),
                 (0.7, b"j", None),
                 (0.2, b"d", None),
-                (0.3, b"delete", None),
+                (0.3, b"", None),
+                (0.2, b"\r", None),  # safe default No
+                (0.4, b"d", None),
+                (0.2, b"\x1b", None),  # distinct cancellation
+                (0.4, b"d", None),
+                (0.2, b"\x1b[D", None),  # select Yes
                 (0.2, b"\r", None),
                 (0.8, b"\x1b", None),
                 (0.2, b"q", None),
             ],
         )
         assert code == 0
-        assert "Delete this path?" in terminal_screen(snapshots[16])
+        confirmation = terminal_screen(snapshots[16])
+        assert "Delete this path?" in confirmation
+        assert "[ Yes ]" in confirmation and "[ No ]" in confirmation
+        assert "renamed.txt" in confirmation
+        assert "renamed.txt" in terminal_screen(snapshots[17])  # default Enter kept it
         assert (root / "dest" / "renamed.txt").read_text(encoding="utf-8") == ""
         assert not (root / "renamed.txt").exists()
         assert_restored(output)

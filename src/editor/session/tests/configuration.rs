@@ -58,9 +58,26 @@ fn saved_theme_restore_rejects_invalid_data_and_cannot_overwrite_newer_interacti
         .unwrap();
     assert!(app.configuration.poll_theme_restore().is_none());
     assert_eq!(app.configuration.theme(), &original);
-    app.configuration.begin_theme_restore();
-    app.configuration.restore_theme(Some(&snapshot)).unwrap();
-    wait(&mut app).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        app.configuration.begin_theme_restore();
+        match app.configuration.restore_theme(Some(&snapshot)) {
+            Ok(()) => break,
+            Err(error) if error == "configuration reload is already pending" => {
+                assert!(Instant::now() < deadline);
+                thread::sleep(Duration::from_millis(1));
+            }
+            Err(error) => panic!("theme restore admission failed: {error}"),
+        }
+    }
+    loop {
+        if let Some(result) = app.configuration.poll_theme_restore() {
+            result.unwrap();
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(1));
+    }
     assert_eq!(app.configuration.theme(), &saved);
     assert_eq!(
         app.configuration.theme_state().unwrap().as_deref(),
@@ -1034,4 +1051,70 @@ fn prompt_special_keys_are_remappable_from_configuration() {
     assert!(app.ui.prompt.is_some());
     app.handle_configured_key("ctrl-c".parse().expect("configured key"));
     assert!(app.ui.prompt.is_none());
+}
+
+#[test]
+fn confirmation_keys_and_hints_follow_accepted_remaps() {
+    let mut app = app();
+    let mut loaded = crate::config::load_bundled_config().keymaps;
+    loaded.entries.extend([
+        crate::config::KeymapEntry {
+            id: "user.test.confirmation.cancel".into(),
+            context: Some("confirmation_prompt".into()),
+            mode: String::new(),
+            keys: Some("ctrl-c".into()),
+            command: Some("command_line.cancel".into()),
+            arguments: Default::default(),
+            unmap: false,
+            disable: false,
+            pass_through: false,
+        },
+        crate::config::KeymapEntry {
+            id: "user.test.confirmation.yes".into(),
+            context: Some("confirmation_prompt".into()),
+            mode: String::new(),
+            keys: Some("z".into()),
+            command: Some("surface.confirmation.select_yes".into()),
+            arguments: Default::default(),
+            unmap: false,
+            disable: false,
+            pass_through: false,
+        },
+    ]);
+    let (keymaps, diagnostic) = compile_keymaps(
+        &app.commands,
+        &loaded,
+        &app.configuration.settings().input.keymaps,
+    );
+    assert!(diagnostic.is_none());
+    app.configuration.install_bindings(keymaps, false);
+    app.open_confirmation(
+        crate::ui::PromptKind::PluginConfirmation,
+        "Delete?".into(),
+        "target".into(),
+        crate::ui::ConfirmationChoice::No,
+    );
+    assert!(
+        app.input
+            .prompt()
+            .unwrap()
+            .confirmation
+            .as_ref()
+            .unwrap()
+            .hint
+            .contains("ctrl-c")
+    );
+    app.handle_configured_key(KeyEvent::character('z'));
+    assert_eq!(
+        app.input
+            .prompt()
+            .unwrap()
+            .confirmation
+            .as_ref()
+            .unwrap()
+            .selected,
+        crate::ui::ConfirmationChoice::Yes
+    );
+    app.handle_configured_key("ctrl-c".parse().unwrap());
+    assert!(app.input.prompt().is_none());
 }

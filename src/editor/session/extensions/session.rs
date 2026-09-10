@@ -22,8 +22,11 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     path::PathBuf,
 };
+#[path = "confirmations.rs"]
+mod confirmations;
 #[path = "hosting.rs"]
 mod hosting;
+pub(super) use confirmations::ConfirmationPresentation;
 #[path = "integration.rs"]
 mod integration;
 #[path = "windows/mod.rs"]
@@ -31,6 +34,8 @@ mod windows;
 pub(super) use hosting::WindowUpdate;
 pub(super) use integration::{ExtensionUpdate, RegistryUpdate};
 pub(super) use windows::PluginUiInteraction;
+#[cfg(test)]
+pub(in crate::editor::session) use windows::tests::fixture_manifest;
 #[path = "content.rs"]
 mod content;
 #[path = "documents.rs"]
@@ -42,6 +47,10 @@ pub(in crate::editor::session) struct InvocationContext<'a> {
     pub workspace: &'a WorkspaceSession,
     pub configuration: &'a u64,
     pub generation: u64,
+    pub ui_revision: Option<u64>,
+    pub input_capture: std::sync::Arc<()>,
+    pub navigation: super::windows::NavigationStamp,
+    pub interaction_available: bool,
     pub maximum: usize,
 }
 
@@ -52,6 +61,7 @@ pub(super) struct ExtensionSession {
     providers: PluginProviderBroker,
     virtual_documents: PluginVirtualDocumentBroker,
     virtual_editor: documents::VirtualDocumentEditorBridge,
+    confirmations: confirmations::PluginConfirmations,
     active_picker: Option<u64>,
     plugin_contributions: PluginContributionCatalog,
     pending_index_activation: BTreeMap<String, (PluginLoadId, String)>,
@@ -89,6 +99,7 @@ impl ExtensionSession {
             providers: PluginProviderBroker::default(),
             virtual_documents: PluginVirtualDocumentBroker::default(),
             virtual_editor: documents::VirtualDocumentEditorBridge::default(),
+            confirmations: confirmations::PluginConfirmations::default(),
             active_picker: None,
             plugin_contributions: PluginContributionCatalog::default(),
             pending_index_activation: BTreeMap::new(),
@@ -161,37 +172,50 @@ impl ExtensionSession {
         if !self.manager.is_active_generation(plugin, load) {
             return Err(PluginError::NotActive.to_string());
         }
-        let loan = self.edits.prepare(
+        let loan = self.edits.prepare_interactive(
             &mut self.manager,
             (plugin, command),
             context.editor,
             context.workspace,
             context.configuration,
-            context.maximum,
+            (
+                context.maximum,
+                Some(context.input_capture),
+                Some(context.navigation),
+                context.interaction_available,
+            ),
         )?;
+        let origin = loan.origin().clone();
+        let reservation = self.confirmations.reserve(&origin);
+        let confirmation_available = reservation.available();
         let mut virtual_requests: crate::extensions::PluginVirtualRequestLane<'_> =
             self.virtual_documents.request_lane();
         // Real manager/source admission stays borrowed while delivery and snapshot
         // payloads are built and queued. Full/retired refusal leaves queues intact.
-        loan.submit(PluginExecutionRequest {
-            plugin: plugin.into(),
-            command: command.into(),
-            arguments: Vec::new(),
-            snapshot: None,
-            config: BTreeMap::new(),
-            ui_events: self.ui.remove(&(plugin.into(), load)).unwrap_or_default(),
-            host_events: self.events.deliver(plugin, load),
-            storage_results: self
-                .results
-                .remove(&(plugin.into(), load))
-                .unwrap_or_default(),
-            provider_requests: self.providers.requests(plugin, load),
-            virtual_document_requests: virtual_requests.deliver(
-                plugin,
-                load,
-                &format!("plugin.{plugin}.{command}"),
-            ),
-            generation: context.generation,
+        reservation.enqueue(|| {
+            loan.submit(PluginExecutionRequest {
+                plugin: plugin.into(),
+                command: command.into(),
+                arguments: Vec::new(),
+                snapshot: None,
+                config: BTreeMap::new(),
+                ui_revision: context.ui_revision,
+                confirmation_available,
+                ui_events: self.ui.remove(&(plugin.into(), load)).unwrap_or_default(),
+                confirmation_results: Vec::new(),
+                host_events: self.events.deliver(plugin, load),
+                storage_results: self
+                    .results
+                    .remove(&(plugin.into(), load))
+                    .unwrap_or_default(),
+                provider_requests: self.providers.requests(plugin, load),
+                virtual_document_requests: virtual_requests.deliver(
+                    plugin,
+                    load,
+                    &format!("plugin.{plugin}.{command}"),
+                ),
+                generation: context.generation,
+            })
         })
     }
     pub(super) fn receive(
@@ -200,8 +224,94 @@ impl ExtensionSession {
         workspace: &WorkspaceVersion,
         configuration: u64,
     ) -> Result<SourceExecution, String> {
-        self.edits
-            .receive(reply, &self.manager, workspace, configuration)
+        if reply
+            .origin()
+            .is_some_and(|origin| self.confirmations.owns(origin))
+        {
+            let (execution, confirmation_source) =
+                self.confirmations.receive(reply, &self.manager)?;
+            return Ok(SourceExecution {
+                load: confirmation_source.origin().load(),
+                execution,
+                confirmation_source,
+                confirmation_result: true,
+                source_actions_admitted: true,
+                preview: Ok(None),
+            });
+        }
+        let origin = reply.origin().cloned();
+        let received = self
+            .edits
+            .receive(reply, &self.manager, workspace, configuration);
+        if received.is_err()
+            && let Some(origin) = origin
+        {
+            self.confirmations.release_terminal(&origin);
+        }
+        received
+    }
+    pub(super) fn admit_confirmations(
+        &mut self,
+        source: super::plugin_edits::ConfirmationSource,
+        requests: Vec<crate::extensions::PluginConfirmationRequest>,
+    ) -> Result<(), String> {
+        self.confirmations.admit(source, requests, &self.manager)
+    }
+    pub(super) fn next_confirmation(
+        &mut self,
+        editor: &EditorState,
+        workspace: &WorkspaceVersion,
+        configuration: u64,
+        input: &super::input::InputSession,
+        windows: &super::windows::WindowSession,
+    ) -> Option<ConfirmationPresentation> {
+        self.confirmations
+            .activate_next(confirmations::ConfirmationContext {
+                manager: &self.manager,
+                editor,
+                workspace,
+                configuration,
+                input,
+                windows,
+            })
+    }
+    pub(super) fn answer_confirmation(
+        &mut self,
+        answer: crate::extensions::PluginConfirmationAnswer,
+    ) -> bool {
+        self.confirmations.answer(answer)
+    }
+    pub(super) fn dispatch_confirmation_results(
+        &mut self,
+        editor: &EditorState,
+        workspace: &WorkspaceVersion,
+        configuration: u64,
+    ) -> Result<bool, String> {
+        self.confirmations.dispatch(
+            &mut self.manager,
+            editor,
+            workspace,
+            configuration,
+            &mut self.ui,
+        )
+    }
+    pub(super) fn retire_stale_confirmations(
+        &mut self,
+        editor: &EditorState,
+        workspace: &WorkspaceVersion,
+        configuration: u64,
+        input: &super::input::InputSession,
+        windows: &super::windows::WindowSession,
+    ) -> bool {
+        self.confirmations
+            .retire_stale(confirmations::ConfirmationContext {
+                manager: &self.manager,
+                editor,
+                workspace,
+                configuration,
+                input,
+                windows,
+            })
     }
     pub(super) fn owns_edit(&self, key: &OriginKey) -> bool {
         self.edits.owns(key)
@@ -300,14 +410,17 @@ impl ExtensionSession {
         self.events = PluginHostEventQueue::default();
         self.observation = None;
     }
-    pub(super) fn remove_generation(&mut self, plugin: &str, load: PluginLoadId) {
+    pub(super) fn remove_generation(&mut self, plugin: &str, load: PluginLoadId) -> bool {
+        let active_confirmation = self.confirmations.remove_generation(plugin, load);
         self.ui.remove(&(plugin.into(), load));
         self.results.remove(&(plugin.into(), load));
         self.events.remove_generation(plugin, load);
         self.storage.remove_generation(plugin, load);
         self.observation = None;
+        active_confirmation
     }
-    pub(super) fn reset_runtime(&mut self) {
+    pub(super) fn reset_runtime(&mut self) -> bool {
+        let active_confirmation = self.confirmations.reset();
         self.windows.clear_runtime();
         self.providers.reset_runtime();
         self.virtual_documents.reset_runtime();
@@ -325,6 +438,7 @@ impl ExtensionSession {
             self.storage
                 .reset_generation(&index.owner, PluginLoadId(index.generation));
         }
+        active_confirmation
     }
     pub(super) fn queue_storage(&mut self, result: PluginStorageResult) {
         let pending = self
@@ -435,5 +549,8 @@ impl ExtensionSession {
         &self,
     ) -> &BTreeMap<(String, PluginLoadId), Vec<PluginStorageResult>> {
         &self.results
+    }
+    pub(super) fn confirmation_count(&self) -> usize {
+        self.confirmations.pending_count()
     }
 }

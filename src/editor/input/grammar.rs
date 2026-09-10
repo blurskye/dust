@@ -102,6 +102,15 @@ impl ModalResolver {
     }
 
     #[must_use]
+    pub const fn has_pending_grammar(&self) -> bool {
+        self.count.is_some()
+            || self.operator_count.is_some()
+            || self.operator.is_some()
+            || self.register.is_some()
+            || self.pending.is_some()
+    }
+
+    #[must_use]
     pub const fn macro_recording(&self) -> bool {
         self.macro_recording
     }

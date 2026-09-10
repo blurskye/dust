@@ -269,7 +269,15 @@ impl InteractiveApplication {
                 return;
             }
         }
-        self.extension.remove_generation(plugin, load);
+        let removed_active_confirmation = self.extension.remove_generation(plugin, load);
+        if removed_active_confirmation
+            && self
+                .input
+                .prompt()
+                .is_some_and(|prompt| prompt.kind == PromptKind::PluginConfirmation)
+        {
+            self.close_prompt();
+        }
         let terminals = self.terminal_session.descriptions();
         let title = self.message("explorer_title", &[]);
         let descriptions = NativeDescriptions {
@@ -441,6 +449,25 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn process_plugin_events(&mut self) {
+        if self.extension.retire_stale_confirmations(
+            &self.state,
+            &self.workspace.version(),
+            self.configuration.binding_revision(),
+            &self.input,
+            &self.window_session,
+        ) && self
+            .input
+            .prompt()
+            .is_some_and(|prompt| prompt.kind == PromptKind::PluginConfirmation)
+        {
+            self.close_prompt();
+        }
+        let _ = self.extension.dispatch_confirmation_results(
+            &self.state,
+            &self.workspace.version(),
+            self.configuration.binding_revision(),
+        );
+        self.present_next_plugin_confirmation();
         self.retire_plugin_edit_sources();
         let events = match self.extension.poll_owned() {
             Ok(events) => events,
@@ -677,6 +704,12 @@ impl InteractiveApplication {
             }
         }
         self.retire_plugin_edit_sources();
+        let _ = self.extension.dispatch_confirmation_results(
+            &self.state,
+            &self.workspace.version(),
+            self.configuration.binding_revision(),
+        );
+        self.present_next_plugin_confirmation();
     }
 }
 
@@ -717,9 +750,50 @@ impl InteractiveApplication {
                 return;
             }
         };
+        let confirmation_source = source.confirmation_source.clone();
+        let confirmation_result = source.confirmation_result;
+        let source_actions_admitted = source.source_actions_admitted;
         let mut execution = source.execution;
         let load = source.load;
+        let confirmation_requests = std::mem::take(&mut execution.confirmation_requests);
+        if let Err(error) = self
+            .extension
+            .admit_confirmations(confirmation_source, confirmation_requests)
+        {
+            self.show_error(error);
+        }
+        if !source_actions_admitted {
+            execution.messages.clear();
+            execution.ui_requests.clear();
+            execution.host_event_acknowledgements.clear();
+            execution.storage_requests.clear();
+            execution.provider_chunks.clear();
+            execution.virtual_document_proposals.clear();
+        }
         let plugin = execution.plugin.clone();
+        if confirmation_result {
+            let disallowed_ui = execution.ui_requests.iter().any(|request| {
+                !matches!(
+                    request.kind,
+                    crate::extensions::PluginUiRequestKind::ReplaceUi { .. }
+                        | crate::extensions::PluginUiRequestKind::ReplacePrivate { .. }
+                        | crate::extensions::PluginUiRequestKind::PatchPrivate { .. }
+                )
+            });
+            if disallowed_ui
+                || !execution.storage_requests.is_empty()
+                || !execution.provider_chunks.is_empty()
+                || !execution.virtual_document_proposals.is_empty()
+            {
+                execution.ui_requests.clear();
+                execution.storage_requests.clear();
+                execution.provider_chunks.clear();
+                execution.virtual_document_proposals.clear();
+                self.show_error(
+                    "plugin confirmation result may update existing plugin UI only".to_owned(),
+                );
+            }
+        }
         let mut provider_continuations = Vec::new();
         if self.extension.is_active_generation(&plugin, load) {
             self.extension
@@ -1284,7 +1358,15 @@ impl InteractiveApplication {
         match result {
             Ok((state, paths)) => {
                 self.state = state;
-                self.extension.reset_runtime();
+                let retired_confirmation = self.extension.reset_runtime();
+                if retired_confirmation
+                    && self
+                        .input
+                        .prompt()
+                        .is_some_and(|prompt| prompt.kind == PromptKind::PluginConfirmation)
+                {
+                    self.close_prompt();
+                }
                 self.ui.plugin_surfaces.clear();
                 self.ui.private_surfaces.clear();
                 self.set_dashboard_visibility(false);

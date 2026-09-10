@@ -1,6 +1,8 @@
 //! Extension-source facet: invocation snapshots and one-way edit proposal lifetimes.
 //! Other extension runtime/provider ownership has not yet migrated here.
 use super::{
+    input::InputSession,
+    windows::{NavigationStamp, WindowSession},
     workspace::{WorkspaceSession, WorkspaceVersion},
     workspace_edits::OriginKey,
 };
@@ -19,6 +21,7 @@ use crate::{
 use slotmap::Key;
 use std::path::PathBuf;
 
+#[derive(Clone)]
 struct Document {
     id: BufferId,
     path: Option<PathBuf>,
@@ -33,6 +36,9 @@ struct Invocation {
     document: Option<Document>,
     sources: Option<WorkspaceEditSources>,
     maximum: usize,
+    input_capture: Option<std::sync::Arc<()>>,
+    navigation: Option<NavigationStamp>,
+    interaction_available: bool,
 }
 impl Invocation {
     fn current(
@@ -93,6 +99,9 @@ pub(super) struct InvocationLoan<'a> {
     _configuration: &'a u64,
 }
 impl InvocationLoan<'_> {
+    pub(super) fn origin(&self) -> &PluginInvocationOrigin {
+        &self.invocation.origin
+    }
     pub(super) fn submit(self, mut request: PluginExecutionRequest) -> Result<(), String> {
         self.admission.check(&request).map_err(|e| e.to_string())?;
         // Only this source serializes the snapshot attached to its provenance.
@@ -110,9 +119,75 @@ impl InvocationLoan<'_> {
         Ok(())
     }
 }
+#[derive(Clone)]
+pub(super) struct ConfirmationSource {
+    origin: PluginInvocationOrigin,
+    editor: EditorWindowVersion,
+    workspace: WorkspaceVersion,
+    configuration: u64,
+    document: Option<Document>,
+    input_capture: Option<std::sync::Arc<()>>,
+    navigation: Option<NavigationStamp>,
+    interaction_available: bool,
+}
+impl ConfirmationSource {
+    pub(super) fn origin(&self) -> &PluginInvocationOrigin {
+        &self.origin
+    }
+    pub(super) fn manager_current(&self, manager: &PluginManager) -> bool {
+        self.origin.current(manager)
+    }
+    pub(super) fn current(
+        &self,
+        manager: &PluginManager,
+        editor: &EditorState,
+        workspace: &WorkspaceVersion,
+        configuration: u64,
+    ) -> bool {
+        self.manager_current(manager)
+            && &self.workspace == workspace
+            && self.configuration == configuration
+            && self.editor.same_editor(&editor.window_version())
+            && editor.window_version().revision().is_some()
+            && self.document.as_ref().is_none_or(|document| {
+                editor.buffers.get(document.id).is_some_and(|buffer| {
+                    buffer.path == document.path
+                        && buffer.text.source_version() == document.text
+                        && buffer.text.revision() == document.revision
+                })
+            })
+    }
+    pub(super) fn presentation_current(
+        &self,
+        manager: &PluginManager,
+        editor: &EditorState,
+        workspace: &WorkspaceVersion,
+        configuration: u64,
+        input: &InputSession,
+        windows: &WindowSession,
+    ) -> bool {
+        self.interaction_available
+            && self.current(manager, editor, workspace, configuration)
+            && self
+                .document
+                .as_ref()
+                .is_none_or(|document| editor.active_buffer_id() == Some(document.id))
+            && self
+                .input_capture
+                .as_ref()
+                .is_none_or(|capture| input.capture_current(capture))
+            && self.navigation.as_ref().is_none_or(|navigation| {
+                windows.navigation_current(navigation, &editor.window_version(), editor.active_view)
+            })
+    }
+}
+
 pub(super) struct SourceExecution {
     pub execution: PluginExecution,
     pub load: PluginLoadId,
+    pub confirmation_source: ConfirmationSource,
+    pub confirmation_result: bool,
+    pub source_actions_admitted: bool,
     pub preview: Result<Option<OriginKey>, String>,
 }
 pub(super) struct PreparedPluginEdit {
@@ -120,6 +195,7 @@ pub(super) struct PreparedPluginEdit {
     pub draft: WorkspaceEditDraft,
 }
 impl PluginEditSources {
+    #[cfg(test)]
     pub(super) fn prepare<'a>(
         &'a mut self,
         manager: &'a mut PluginManager,
@@ -129,8 +205,32 @@ impl PluginEditSources {
         configuration: &'a u64,
         maximum: usize,
     ) -> Result<InvocationLoan<'a>, String> {
+        self.prepare_interactive(
+            manager,
+            invocation,
+            editor,
+            workspace,
+            configuration,
+            (maximum, None, None, true),
+        )
+    }
+    pub(super) fn prepare_interactive<'a>(
+        &'a mut self,
+        manager: &'a mut PluginManager,
+        invocation: (&str, &str),
+        editor: &'a EditorState,
+        workspace: &'a WorkspaceSession,
+        configuration: &'a u64,
+        interaction: (
+            usize,
+            Option<std::sync::Arc<()>>,
+            Option<NavigationStamp>,
+            bool,
+        ),
+    ) -> Result<InvocationLoan<'a>, String> {
         let (plugin, command) = invocation;
-        if self.closed || self.pending.len() >= 64 || *configuration == u64::MAX || maximum == 0 {
+        let (maximum, input_capture, navigation, interaction_available) = interaction;
+        if self.closed || self.pending.len() >= 128 || *configuration == u64::MAX || maximum == 0 {
             return Err("plugin source admission is closed, full or exhausted".into());
         }
         if editor.window_version().revision().is_none() {
@@ -163,6 +263,9 @@ impl PluginEditSources {
             }),
             sources,
             maximum,
+            input_capture,
+            navigation,
+            interaction_available,
         };
         Ok(InvocationLoan {
             pending: &mut self.pending,
@@ -188,12 +291,28 @@ impl PluginEditSources {
             .position(|p| p.origin.same(&origin))
             .ok_or("plugin invocation retired or result duplicated")?;
         let invocation = self.pending.remove(index);
-        if self.closed || !invocation.current(manager, workspace, configuration) {
-            return Err("plugin invocation load, workspace or configuration retired".into());
+        if self.closed || !invocation.origin.current(manager) {
+            return Err("plugin invocation load retired".into());
         }
         let load = origin.load();
+        let confirmation_source = ConfirmationSource {
+            origin: invocation.origin.clone(),
+            editor: invocation.editor.clone(),
+            workspace: invocation.workspace.clone(),
+            configuration: invocation.configuration,
+            document: invocation.document.clone(),
+            input_capture: invocation.input_capture.clone(),
+            navigation: invocation.navigation.clone(),
+            interaction_available: invocation.interaction_available,
+        };
+        let source_actions_admitted = invocation.current(manager, workspace, configuration);
+        if !source_actions_admitted && execution.confirmation_requests.is_empty() {
+            return Err("plugin invocation workspace or configuration retired".into());
+        }
         let proposals = std::mem::take(&mut execution.proposals);
-        let preview = if proposals.is_empty() {
+        let preview = if !source_actions_admitted {
+            Err("plugin invocation source retired before its reply".into())
+        } else if proposals.is_empty() {
             Ok(None)
         } else if self.ready.is_some() {
             Err("another plugin edit preview is pending".into())
@@ -218,6 +337,9 @@ impl PluginEditSources {
         Ok(SourceExecution {
             execution,
             load,
+            confirmation_source,
+            confirmation_result: false,
+            source_actions_admitted,
             preview,
         })
     }
@@ -329,7 +451,7 @@ impl PluginEditSources {
     ) -> (usize, Option<OriginKey>) {
         let before = self.pending.len();
         self.pending
-            .retain(|p| !self.closed && p.current(manager, workspace, configuration));
+            .retain(|pending| !self.closed && pending.origin.current(manager));
         let key = self
             .ready
             .as_ref()

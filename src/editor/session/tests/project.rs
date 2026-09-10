@@ -387,15 +387,27 @@ fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
         }
     };
     ready_delete(&mut app);
-    app.close_prompt();
+    assert_eq!(
+        app.input
+            .prompt()
+            .unwrap()
+            .confirmation
+            .as_ref()
+            .unwrap()
+            .selected,
+        crate::ui::ConfirmationChoice::No
+    );
+    app.submit_prompt();
     assert!(!app.explorer.mutation_pending());
-    app.confirm_explorer_delete("delete".into());
+    assert!(target.exists(), "default Enter/No must not delete");
+    app.confirm_explorer_delete();
     assert!(target.exists());
     ready_delete(&mut app);
     let original = target.with_extension("original");
     fs::rename(&target, &original).unwrap();
     fs::write(&target, "replacement must survive").unwrap();
-    app.prompt_insert("delete");
+    app.input
+        .select_confirmation(crate::ui::ConfirmationChoice::Yes);
     app.submit_prompt();
     let deadline = Instant::now() + Duration::from_secs(2);
     while app.explorer.mutation_pending() {
@@ -411,7 +423,14 @@ fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
     fs::remove_file(&target).unwrap();
     fs::rename(&original, &target).unwrap();
     ready_delete(&mut app);
-    app.prompt_insert("delete");
+    let root_node = app
+        .explorer
+        .tree()
+        .id_for_path(&app.state.workspace_root)
+        .expect("workspace root node");
+    app.explorer.select(root_node); // the retained operation still targets the original file
+    app.input
+        .select_confirmation(crate::ui::ConfirmationChoice::Yes);
     app.submit_prompt();
     let deadline = Instant::now() + Duration::from_secs(2);
     while Instant::now() < deadline && app.state.buffers[buffer].path.is_some() {

@@ -177,18 +177,6 @@ pub(super) fn register_commands(
         ArgumentSchema::default(),
         |_| AppEffect::ExplorerDeleteRequest,
     )?;
-    register(
-        registry,
-        "explorer.delete.confirm",
-        "Confirm explorer path deletion",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default().field("phrase", ArgumentType::String, true),
-        |invocation| {
-            Ok(AppEffect::ExplorerDeleteConfirm(
-                string_arg(invocation, "phrase")?.into(),
-            ))
-        },
-    )?;
     for (id, title, effect) in [
         (
             "explorer.copy",

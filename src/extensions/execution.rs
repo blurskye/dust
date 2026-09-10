@@ -43,13 +43,72 @@ pub struct PluginExecutionRequest {
     pub arguments: Vec<String>,
     pub snapshot: Option<PluginSnapshot>,
     pub config: BTreeMap<String, String>,
+    pub ui_revision: Option<u64>,
+    pub confirmation_available: bool,
     pub ui_events: Vec<PluginUiEvent>,
+    pub confirmation_results: Vec<PluginConfirmationResult>,
     pub host_events: Vec<PluginHostEventEnvelope>,
     pub storage_results: Vec<PluginStorageResult>,
     pub provider_requests: Vec<PluginPickerRequestEnvelope>,
     pub virtual_document_requests: Vec<PluginVirtualDocumentRequest>,
     pub generation: u64,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PluginConfirmationAnswer {
+    Yes,
+    No,
+    Cancelled,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PluginConfirmationErrorCode {
+    QueueFull,
+    InvalidRequest,
+    GenerationLost,
+    SourceRetired,
+    Unavailable,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PluginConfirmationError {
+    pub code: PluginConfirmationErrorCode,
+    pub detail: String,
+}
+
+impl PluginConfirmationError {
+    pub fn new(code: PluginConfirmationErrorCode, detail: impl std::fmt::Display) -> Self {
+        Self {
+            code,
+            detail: detail
+                .to_string()
+                .chars()
+                .filter(|character| !character.is_control())
+                .take(4_096)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PluginConfirmationRequest {
+    pub token: u64,
+    pub title: String,
+    pub message: String,
+    pub default_answer: PluginConfirmationAnswer,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PluginConfirmationOutcome {
+    Answered(PluginConfirmationAnswer),
+    Failed(PluginConfirmationError),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PluginConfirmationResult {
+    pub request: u64,
+    pub outcome: PluginConfirmationOutcome,
+}
+
 #[derive(Clone, Debug)]
 pub struct PluginEditProposal {
     pub buffer: u64,
@@ -513,6 +572,7 @@ pub struct PluginExecution {
     pub messages: Vec<String>,
     pub proposals: Vec<PluginEditProposal>,
     pub ui_requests: Vec<PluginUiRequest>,
+    pub confirmation_requests: Vec<PluginConfirmationRequest>,
     pub host_event_acknowledgements: Vec<u64>,
     pub storage_requests: Vec<PluginStorageRequest>,
     pub provider_chunks: Vec<PluginPickerChunk>,

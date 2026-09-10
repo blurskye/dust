@@ -23,7 +23,55 @@ impl InteractiveApplication {
         self.project_input_hints();
         self.refresh_completions();
     }
+    pub(super) fn open_confirmation(
+        &mut self,
+        kind: PromptKind,
+        title: String,
+        message: String,
+        selected: crate::ui::ConfirmationChoice,
+    ) {
+        self.open_prompt(kind, String::new());
+        let binding = |command: &str| {
+            self.configuration
+                .keymaps()
+                .binding_for("confirmation_prompt", command)
+        };
+        let selections = [
+            "command_line.move_left",
+            "command_line.move_right",
+            "surface.confirmation.toggle",
+            "surface.confirmation.select_yes",
+            "surface.confirmation.select_no",
+        ]
+        .into_iter()
+        .filter_map(binding)
+        .collect::<Vec<_>>()
+        .join("/");
+        let mut hints = Vec::new();
+        if !selections.is_empty() {
+            hints.push(format!("{selections} select"));
+        }
+        if let Some(key) = binding("command_line.submit") {
+            hints.push(format!("{key} confirm"));
+        }
+        if let Some(key) = binding("command_line.cancel") {
+            hints.push(format!("{key} cancel"));
+        }
+        let hint = hints.join(" · ");
+        self.input
+            .configure_confirmation(title, message, selected, hint);
+        self.project_input_prompt();
+        self.reconcile_editor_windows();
+    }
     pub(super) fn close_prompt(&mut self) {
+        if self
+            .input
+            .prompt()
+            .is_some_and(|prompt| prompt.kind == PromptKind::PluginConfirmation)
+        {
+            self.extension
+                .answer_confirmation(crate::extensions::PluginConfirmationAnswer::Cancelled);
+        }
         self.cancel_explorer_rename_prompt();
         if self
             .input
@@ -40,6 +88,52 @@ impl InteractiveApplication {
         }
         self.restore_input_focus();
         self.project_input_prompt();
+    }
+    pub(super) fn present_next_plugin_confirmation(&mut self) {
+        if self.input.prompt().is_some() {
+            return;
+        }
+        let Some(request) = self.extension.next_confirmation(
+            &self.state,
+            &self.workspace.version(),
+            self.configuration.binding_revision(),
+            &self.input,
+            &self.window_session,
+        ) else {
+            let _ = self.extension.dispatch_confirmation_results(
+                &self.state,
+                &self.workspace.version(),
+                self.configuration.binding_revision(),
+            );
+            return;
+        };
+        let selected = match request.default_answer {
+            crate::extensions::PluginConfirmationAnswer::Yes => crate::ui::ConfirmationChoice::Yes,
+            crate::extensions::PluginConfirmationAnswer::No
+            | crate::extensions::PluginConfirmationAnswer::Cancelled => {
+                crate::ui::ConfirmationChoice::No
+            }
+        };
+        self.open_confirmation(
+            PromptKind::PluginConfirmation,
+            format!("Plugin {} · {}", request.plugin, request.title),
+            request.message,
+            selected,
+        );
+    }
+    pub(super) fn submit_plugin_confirmation(&mut self, selected: crate::ui::ConfirmationChoice) {
+        let answer = match selected {
+            crate::ui::ConfirmationChoice::Yes => crate::extensions::PluginConfirmationAnswer::Yes,
+            crate::ui::ConfirmationChoice::No => crate::extensions::PluginConfirmationAnswer::No,
+        };
+        self.extension.answer_confirmation(answer);
+        self.close_prompt();
+        let _ = self.extension.dispatch_confirmation_results(
+            &self.state,
+            &self.workspace.version(),
+            self.configuration.binding_revision(),
+        );
+        self.present_next_plugin_confirmation();
     }
     pub(super) fn prompt_insert(&mut self, text: &str) {
         self.input.prompt_insert(text);
@@ -108,12 +202,33 @@ impl InteractiveApplication {
         let Some(prompt) = self.input.prompt().cloned() else {
             return;
         };
+        if prompt
+            .confirmation
+            .as_ref()
+            .is_some_and(|confirmation| confirmation.selected == crate::ui::ConfirmationChoice::Yes)
+        {
+            let (width, height) = crate::ui::prompt_surface_dimensions(
+                &self.state,
+                &self.ui,
+                self.window_session.width(),
+                self.window_session.height(),
+            );
+            if !crate::ui::confirmation_fully_visible(
+                width,
+                height,
+                self.configuration.settings(),
+                &prompt,
+            ) {
+                return;
+            }
+        }
         if !matches!(
             prompt.kind,
             PromptKind::WorkspaceTrust
                 | PromptKind::GitReset
                 | PromptKind::ExplorerDelete
                 | PromptKind::ExplorerRename
+                | PromptKind::PluginConfirmation
         ) {
             self.record_prompt_history(prompt.kind, &prompt.input);
         }
@@ -149,8 +264,21 @@ impl InteractiveApplication {
                 self.confirm_reset_selected_git_hunk(prompt.input);
             }
             PromptKind::ExplorerDelete => {
-                self.confirm_explorer_delete(prompt.input);
+                let selected = prompt
+                    .confirmation
+                    .map_or(crate::ui::ConfirmationChoice::No, |state| state.selected);
+                if selected == crate::ui::ConfirmationChoice::Yes {
+                    self.confirm_explorer_delete();
+                }
                 self.close_prompt();
+            }
+            PromptKind::PluginConfirmation => {
+                // The extension owner asynchronously consumes this one-shot result.
+                self.submit_plugin_confirmation(
+                    prompt
+                        .confirmation
+                        .map_or(crate::ui::ConfirmationChoice::No, |state| state.selected),
+                );
             }
             PromptKind::ExplorerRename => self.submit_explorer_rename_prompt(&prompt.input),
             PromptKind::SearchForward | PromptKind::SearchBackward => {

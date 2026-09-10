@@ -1,6 +1,1096 @@
 use super::*;
 
 #[test]
+fn plugin_confirmation_is_typed_one_shot_and_source_owned() {
+    let mut app = app();
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
+    app.extension.fixture_manager(manager);
+
+    let request = |token| crate::extensions::PluginConfirmationRequest {
+        token,
+        title: "Apply plugin state".into(),
+        message: "Change the custom retained view?".into(),
+        default_answer: crate::extensions::PluginConfirmationAnswer::No,
+    };
+    let invoke = |app: &mut InteractiveApplication| {
+        app.process_effect(AppEffect::PluginExecute {
+            plugin: "demo".into(),
+            command: "run".into(),
+        });
+    };
+
+    invoke(&mut app);
+    let initial = fixture.take();
+    fixture.reply_confirmation_request(&initial, request(7));
+    app.process_plugin_events();
+    let prompt = app.input.prompt().expect("plugin confirmation");
+    assert_eq!(prompt.kind, crate::ui::PromptKind::PluginConfirmation);
+    let confirmation = prompt.confirmation.as_ref().expect("typed choice");
+    assert!(confirmation.title.starts_with("Plugin demo ·"));
+    assert_eq!(confirmation.selected, crate::ui::ConfirmationChoice::No);
+
+    app.handle_configured_key("enter".parse().unwrap());
+    assert!(app.input.prompt().is_none());
+    let no = fixture.take();
+    assert!(!no.confirmation_available());
+    assert_eq!(
+        no.confirmation_results(),
+        [crate::extensions::PluginConfirmationResult {
+            request: 7,
+            outcome: crate::extensions::PluginConfirmationOutcome::Answered(
+                crate::extensions::PluginConfirmationAnswer::No,
+            ),
+        }]
+    );
+    let count = app.extension.confirmation_count();
+    app.submit_prompt();
+    assert_eq!(app.extension.confirmation_count(), count);
+    fixture.reply(&no, Vec::new());
+    app.process_plugin_events();
+    assert_eq!(app.extension.confirmation_count(), 0);
+
+    invoke(&mut app);
+    let initial = fixture.take();
+    fixture.reply_confirmation_request(&initial, request(8));
+    app.process_plugin_events();
+    app.handle_configured_key("y".parse().unwrap());
+    assert_eq!(
+        app.input
+            .prompt()
+            .unwrap()
+            .confirmation
+            .as_ref()
+            .unwrap()
+            .selected,
+        crate::ui::ConfirmationChoice::Yes
+    );
+    app.handle_configured_key("n".parse().unwrap());
+    app.handle_configured_key("tab".parse().unwrap());
+    app.handle_configured_key("right".parse().unwrap());
+    app.handle_configured_key("left".parse().unwrap());
+    app.handle_configured_key("enter".parse().unwrap());
+    let yes = fixture.take();
+    assert!(matches!(
+        yes.confirmation_results()[0].outcome,
+        crate::extensions::PluginConfirmationOutcome::Answered(
+            crate::extensions::PluginConfirmationAnswer::Yes
+        )
+    ));
+    fixture.reply(&yes, Vec::new());
+    app.process_plugin_events();
+
+    invoke(&mut app);
+    let initial = fixture.take();
+    fixture.reply_confirmation_request(&initial, request(9));
+    app.process_plugin_events();
+    app.handle_configured_key("escape".parse().unwrap());
+    app.process_plugin_events();
+    let cancelled = fixture.take();
+    assert!(matches!(
+        cancelled.confirmation_results()[0].outcome,
+        crate::extensions::PluginConfirmationOutcome::Answered(
+            crate::extensions::PluginConfirmationAnswer::Cancelled
+        )
+    ));
+    fixture.reply(&cancelled, Vec::new());
+    app.process_plugin_events();
+
+    invoke(&mut app);
+    let initial = fixture.take();
+    fixture.reply_confirmation_request(&initial, request(10));
+    app.process_plugin_events();
+    assert!(app.input.prompt().is_some());
+    let accepted = app.configuration.fixture_snapshot();
+    app.configuration.install_fixture(accepted);
+    app.process_plugin_events();
+    assert!(app.input.prompt().is_none());
+    let retired = fixture.take();
+    assert!(matches!(
+        retired.confirmation_results()[0].outcome,
+        crate::extensions::PluginConfirmationOutcome::Failed(
+            crate::extensions::PluginConfirmationError {
+                code: crate::extensions::PluginConfirmationErrorCode::SourceRetired,
+                ..
+            }
+        )
+    ));
+    fixture.reply(&retired, Vec::new());
+    app.process_plugin_events();
+    assert_eq!(app.extension.confirmation_count(), 0);
+
+    invoke(&mut app);
+    let initial = fixture.take();
+    fixture.reply_confirmation_request(&initial, request(11));
+    app.process_plugin_events();
+    assert!(app.input.prompt().is_some());
+    app.process_effect(AppEffect::PluginDisable("demo".into()));
+    assert!(app.input.prompt().is_none());
+    assert_eq!(app.extension.confirmation_count(), 0);
+}
+
+#[test]
+fn hidden_confirmation_suffix_cannot_be_submitted() {
+    let mut app = app();
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
+    app.extension.fixture_manager(manager);
+    app.process_effect(AppEffect::PluginExecute {
+        plugin: "demo".into(),
+        command: "run".into(),
+    });
+    let invocation = fixture.take();
+    fixture.reply_confirmation_request(
+        &invocation,
+        crate::extensions::PluginConfirmationRequest {
+            token: 40,
+            title: "Review all".into(),
+            message: "target  界/".repeat(400),
+            default_answer: crate::extensions::PluginConfirmationAnswer::No,
+        },
+    );
+    app.process_plugin_events();
+    assert!(app.input.prompt().is_some());
+    app.handle_configured_key("left".parse().unwrap());
+    app.handle_configured_key("enter".parse().unwrap());
+    assert!(app.input.prompt().is_some());
+    assert_eq!(app.extension.confirmation_count(), 1);
+}
+
+#[test]
+fn selected_yes_refuses_one_row_and_one_column_visibility_boundaries() {
+    for (width, height, token) in [(100, 4, 44), (1, 10, 45)] {
+        let mut app = app();
+        app.state.open_text(TextBuffer::from_text("x"), None);
+        app.set_dashboard_visibility(false);
+        app.handle_event(crate::ui::UiEvent::Resize(width, height));
+        app.reconcile_editor_windows();
+        let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
+        app.extension.fixture_manager(manager);
+        app.process_effect(AppEffect::PluginExecute {
+            plugin: "demo".into(),
+            command: "run".into(),
+        });
+        let invocation = fixture.take();
+        fixture.reply_confirmation_request(
+            &invocation,
+            crate::extensions::PluginConfirmationRequest {
+                token,
+                title: "Boundary".into(),
+                message: "/tmp/a".into(),
+                default_answer: crate::extensions::PluginConfirmationAnswer::No,
+            },
+        );
+        app.process_plugin_events();
+        if (width, height) == (100, 4) {
+            let protected = app
+                .compositor_projection()
+                .unwrap()
+                .protected_regions
+                .first()
+                .copied()
+                .expect("protected confirmation bounds");
+            assert_eq!(protected.height, 3);
+            let frame = crate::ui::render(
+                &app.state,
+                &app.ui,
+                app.configuration.settings(),
+                app.configuration.dashboard(),
+                width,
+                height,
+            );
+            let screen = (0..height)
+                .map(|row| frame.grid.row_text(row))
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(!screen.contains("[ Yes ]"));
+        }
+        app.handle_configured_key("left".parse().unwrap());
+        app.handle_configured_key("enter".parse().unwrap());
+        assert!(
+            app.input.prompt().is_some(),
+            "{width}x{height} submitted Yes"
+        );
+        app.handle_configured_key("escape".parse().unwrap());
+        assert!(
+            app.input.prompt().is_none(),
+            "Escape failed at {width}x{height}"
+        );
+    }
+}
+
+#[test]
+fn docked_layout_render_and_protection_share_confirmation_bounds() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("x"), None);
+    app.set_dashboard_visibility(false);
+    app.handle_event(crate::ui::UiEvent::Resize(100, 20));
+    app.process_effect(AppEffect::ExplorerOpen);
+    app.reconcile_editor_windows();
+    assert!(
+        app.compositor_projection().unwrap().workspace_bounds.width < 100,
+        "explorer must consume horizontal workspace"
+    );
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
+    app.extension.fixture_manager(manager);
+    app.process_effect(AppEffect::PluginExecute {
+        plugin: "demo".into(),
+        command: "run".into(),
+    });
+    let invocation = fixture.take();
+    fixture.reply_confirmation_request(
+        &invocation,
+        crate::extensions::PluginConfirmationRequest {
+            token: 46,
+            title: "Docked".into(),
+            message: "/tmp/a".into(),
+            default_answer: crate::extensions::PluginConfirmationAnswer::No,
+        },
+    );
+    app.process_plugin_events();
+    let prompt = app.input.prompt().unwrap();
+    let dimensions = crate::ui::prompt_surface_dimensions(
+        &app.state,
+        &app.ui,
+        app.window_session.width(),
+        app.window_session.height(),
+    );
+    let expected = crate::ui::prompt_geometry_for_state(
+        dimensions.0,
+        dimensions.1,
+        app.configuration.settings(),
+        prompt,
+    );
+    let protected = app
+        .compositor_projection()
+        .unwrap()
+        .protected_regions
+        .first()
+        .copied()
+        .expect("protected prompt");
+    assert_eq!(
+        protected,
+        crate::ui::window::WindowRect {
+            x: expected.left,
+            y: expected.top,
+            width: expected.width,
+            height: expected.height,
+        }
+    );
+    let frame = crate::ui::render(
+        &app.state,
+        &app.ui,
+        app.configuration.settings(),
+        app.configuration.dashboard(),
+        100,
+        20,
+    );
+    assert_eq!(
+        frame.grid.get(expected.left, expected.top).unwrap().style,
+        crate::ui::Style::Border
+    );
+}
+
+#[test]
+fn delayed_confirmation_cannot_replace_a_newer_native_interaction() {
+    let mut app = app();
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(8);
+    app.extension.fixture_manager(manager);
+    app.process_effect(AppEffect::PluginExecute {
+        plugin: "demo".into(),
+        command: "run".into(),
+    });
+    let invocation = fixture.take();
+    app.open_prompt(crate::ui::PromptKind::Command, "newer".into());
+    fixture.reply_confirmation_request(
+        &invocation,
+        crate::extensions::PluginConfirmationRequest {
+            token: 41,
+            title: "Delayed".into(),
+            message: "Must not steal focus".into(),
+            default_answer: crate::extensions::PluginConfirmationAnswer::No,
+        },
+    );
+    app.process_plugin_events();
+    assert_eq!(
+        app.input.prompt().unwrap().kind,
+        crate::ui::PromptKind::Command
+    );
+    assert_eq!(app.input.prompt().unwrap().input, "newer");
+    app.process_plugin_events();
+    let retired = fixture.take();
+    assert!(matches!(
+        retired.confirmation_results()[0].outcome,
+        crate::extensions::PluginConfirmationOutcome::Failed(
+            crate::extensions::PluginConfirmationError {
+                code: crate::extensions::PluginConfirmationErrorCode::SourceRetired,
+                ..
+            }
+        )
+    ));
+}
+
+#[test]
+fn delayed_initial_confirmation_reply_gets_terminal_failure_after_config_reload() {
+    let mut app = app();
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(8);
+    app.extension.fixture_manager(manager);
+    app.process_effect(AppEffect::PluginExecute {
+        plugin: "demo".into(),
+        command: "run".into(),
+    });
+    let invocation = fixture.take();
+    let accepted = app.configuration.fixture_snapshot();
+    app.configuration.install_fixture(accepted);
+    app.process_plugin_events();
+    fixture.reply_confirmation_request(
+        &invocation,
+        crate::extensions::PluginConfirmationRequest {
+            token: 50,
+            title: "Delayed".into(),
+            message: "Original configuration was replaced".into(),
+            default_answer: crate::extensions::PluginConfirmationAnswer::No,
+        },
+    );
+    app.process_plugin_events();
+    assert!(app.input.prompt().is_none());
+    app.process_plugin_events();
+    let retired = fixture.take();
+    assert_eq!(retired.confirmation_results()[0].request, 50);
+    assert!(matches!(
+        retired.confirmation_results()[0].outcome,
+        crate::extensions::PluginConfirmationOutcome::Failed(
+            crate::extensions::PluginConfirmationError {
+                code: crate::extensions::PluginConfirmationErrorCode::SourceRetired,
+                ..
+            }
+        )
+    ));
+}
+
+#[test]
+fn accepted_confirmation_cannot_wait_past_a_newer_prompt_capture() {
+    let mut app = app();
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(8);
+    app.extension.fixture_manager(manager);
+    for _ in 0..2 {
+        app.process_effect(AppEffect::PluginExecute {
+            plugin: "demo".into(),
+            command: "run".into(),
+        });
+    }
+    let first = fixture.take();
+    let second = fixture.take();
+    let request = |token| crate::extensions::PluginConfirmationRequest {
+        token,
+        title: format!("Request {token}"),
+        message: "Do not outlive a newer capture".into(),
+        default_answer: crate::extensions::PluginConfirmationAnswer::No,
+    };
+    fixture.reply_confirmation_request(&first, request(51));
+    app.process_plugin_events();
+    assert_eq!(
+        app.input.prompt().unwrap().kind,
+        crate::ui::PromptKind::PluginConfirmation
+    );
+    fixture.reply_confirmation_request(&second, request(52));
+    app.process_plugin_events();
+    assert_eq!(
+        app.input.prompt().unwrap().kind,
+        crate::ui::PromptKind::PluginConfirmation
+    );
+    app.process_plugin_events();
+    let retired = fixture.take();
+    assert_eq!(retired.confirmation_results()[0].request, 52);
+    assert!(matches!(
+        retired.confirmation_results()[0].outcome,
+        crate::extensions::PluginConfirmationOutcome::Failed(
+            crate::extensions::PluginConfirmationError {
+                code: crate::extensions::PluginConfirmationErrorCode::SourceRetired,
+                ..
+            }
+        )
+    ));
+}
+
+#[test]
+fn tool_menu_blocks_background_and_retires_delayed_confirmation() {
+    for delayed in [false, true] {
+        let mut app = app();
+        let (manager, fixture) = crate::extensions::ExecutionFixture::new(8);
+        app.extension.fixture_manager(manager);
+        let invoke = |app: &mut InteractiveApplication| {
+            app.process_effect(AppEffect::PluginExecute {
+                plugin: "demo".into(),
+                command: "run".into(),
+            });
+        };
+        let invocation = if delayed {
+            invoke(&mut app);
+            let invocation = fixture.take();
+            app.open_tool_menu("lsp".into());
+            invocation
+        } else {
+            app.open_tool_menu("lsp".into());
+            invoke(&mut app);
+            fixture.take()
+        };
+        assert!(app.ui.tool_menu.is_some());
+        fixture.reply_confirmation_request(
+            &invocation,
+            crate::extensions::PluginConfirmationRequest {
+                token: 70 + u64::from(delayed),
+                title: "Background".into(),
+                message: "Must not overlay the tool manager".into(),
+                default_answer: crate::extensions::PluginConfirmationAnswer::No,
+            },
+        );
+        app.process_plugin_events();
+        assert!(app.input.prompt().is_none());
+        assert!(app.ui.tool_menu.is_some());
+        app.process_plugin_events();
+        let retired = fixture.take();
+        assert!(matches!(
+            retired.confirmation_results()[0].outcome,
+            crate::extensions::PluginConfirmationOutcome::Failed(
+                crate::extensions::PluginConfirmationError {
+                    code: crate::extensions::PluginConfirmationErrorCode::SourceRetired,
+                    ..
+                }
+            )
+        ));
+    }
+}
+
+#[test]
+fn pending_key_capture_blocks_background_and_retires_delayed_confirmation() {
+    for delayed in [false, true] {
+        let mut app = app();
+        let (manager, fixture) = crate::extensions::ExecutionFixture::new(8);
+        app.extension.fixture_manager(manager);
+        let invoke = |app: &mut InteractiveApplication| {
+            app.process_effect(AppEffect::PluginExecute {
+                plugin: "demo".into(),
+                command: "run".into(),
+            });
+        };
+        let invocation = if delayed {
+            invoke(&mut app);
+            let invocation = fixture.take();
+            app.handle_configured_key("space".parse().expect("leader"));
+            invocation
+        } else {
+            app.handle_configured_key("space".parse().expect("leader"));
+            invoke(&mut app);
+            fixture.take()
+        };
+        assert!(app.input.mapping_pending());
+        fixture.reply_confirmation_request(
+            &invocation,
+            crate::extensions::PluginConfirmationRequest {
+                token: 72 + u64::from(delayed),
+                title: "Background".into(),
+                message: "Must not consume a pending key gesture".into(),
+                default_answer: crate::extensions::PluginConfirmationAnswer::No,
+            },
+        );
+        app.process_plugin_events();
+        assert!(app.input.prompt().is_none());
+        assert!(app.input.mapping_pending());
+        app.process_plugin_events();
+        let retired = fixture.take();
+        assert!(matches!(
+            retired.confirmation_results()[0].outcome,
+            crate::extensions::PluginConfirmationOutcome::Failed(
+                crate::extensions::PluginConfirmationError {
+                    code: crate::extensions::PluginConfirmationErrorCode::SourceRetired,
+                    ..
+                }
+            )
+        ));
+    }
+}
+
+#[test]
+fn unfinished_modal_grammar_blocks_and_survives_confirmation_rejection() {
+    for keys in [vec!['2'], vec!['d'], vec!['"', 'a'], vec!['r']] {
+        for delayed in [false, true] {
+            let mut app = app();
+            app.state.open_text(TextBuffer::from_text("abc"), None);
+            app.set_dashboard_visibility(false);
+            app.reconcile_editor_windows();
+            let (manager, fixture) = crate::extensions::ExecutionFixture::new(8);
+            app.extension.fixture_manager(manager);
+            let invoke = |app: &mut InteractiveApplication| {
+                app.process_effect(AppEffect::PluginExecute {
+                    plugin: "demo".into(),
+                    command: "run".into(),
+                });
+            };
+            let invocation = if delayed {
+                invoke(&mut app);
+                let invocation = fixture.take();
+                for key in &keys {
+                    app.handle_configured_key(crate::editor::input::KeyEvent::character(*key));
+                }
+                invocation
+            } else {
+                for key in &keys {
+                    app.handle_configured_key(crate::editor::input::KeyEvent::character(*key));
+                }
+                invoke(&mut app);
+                fixture.take()
+            };
+            assert!(
+                app.input.grammar_pending(),
+                "gesture {keys:?} was not pending"
+            );
+            fixture.reply_confirmation_request(
+                &invocation,
+                crate::extensions::PluginConfirmationRequest {
+                    token: 80,
+                    title: "Background".into(),
+                    message: "Must not consume unfinished modal grammar".into(),
+                    default_answer: crate::extensions::PluginConfirmationAnswer::No,
+                },
+            );
+            app.process_plugin_events();
+            assert!(app.input.prompt().is_none());
+            assert!(
+                app.input.grammar_pending(),
+                "confirmation rejection erased gesture {keys:?}"
+            );
+            app.process_plugin_events();
+            let retired = fixture.take();
+            assert!(matches!(
+                retired.confirmation_results()[0].outcome,
+                crate::extensions::PluginConfirmationOutcome::Failed(
+                    crate::extensions::PluginConfirmationError {
+                        code: crate::extensions::PluginConfirmationErrorCode::SourceRetired,
+                        ..
+                    }
+                )
+            ));
+        }
+    }
+}
+
+#[test]
+fn background_confirmation_during_documentation_fails_without_overlay() {
+    let mut app = app();
+    let policy = app.configuration.settings().ui.documentation_popup.clone();
+    app.input.present_documentation(
+        crate::ui::DocumentationPopupKind::Hover,
+        "Hover".into(),
+        "test".into(),
+        None,
+        [(
+            crate::ui::DocumentationMarkupKind::PlainText,
+            "newer".into(),
+        )],
+        &policy,
+    );
+    app.project_input_documentation();
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(8);
+    app.extension.fixture_manager(manager);
+    app.process_effect(AppEffect::PluginExecute {
+        plugin: "demo".into(),
+        command: "run".into(),
+    });
+    let invocation = fixture.take();
+    fixture.reply_confirmation_request(
+        &invocation,
+        crate::extensions::PluginConfirmationRequest {
+            token: 53,
+            title: "Background".into(),
+            message: "Must not overlay documentation".into(),
+            default_answer: crate::extensions::PluginConfirmationAnswer::No,
+        },
+    );
+    app.process_plugin_events();
+    assert!(app.input.prompt().is_none());
+    assert!(app.input.documentation().is_some());
+    app.process_plugin_events();
+    let retired = fixture.take();
+    assert!(matches!(
+        retired.confirmation_results()[0].outcome,
+        crate::extensions::PluginConfirmationOutcome::Failed(
+            crate::extensions::PluginConfirmationError {
+                code: crate::extensions::PluginConfirmationErrorCode::SourceRetired,
+                ..
+            }
+        )
+    ));
+}
+
+#[test]
+fn background_confirmation_during_picker_fails_without_overlay() {
+    let mut app = app();
+    app.install_picker("Newer picker".into(), Vec::new());
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(8);
+    app.extension.fixture_manager(manager);
+    app.process_effect(AppEffect::PluginExecute {
+        plugin: "demo".into(),
+        command: "run".into(),
+    });
+    let invocation = fixture.take();
+    fixture.reply_confirmation_request(
+        &invocation,
+        crate::extensions::PluginConfirmationRequest {
+            token: 54,
+            title: "Background".into(),
+            message: "Must not overlay picker".into(),
+            default_answer: crate::extensions::PluginConfirmationAnswer::No,
+        },
+    );
+    app.process_plugin_events();
+    assert!(app.input.prompt().is_none());
+    assert_eq!(app.ui.picker.as_ref().unwrap().title, "Newer picker");
+    app.process_plugin_events();
+    let retired = fixture.take();
+    assert!(matches!(
+        retired.confirmation_results()[0].outcome,
+        crate::extensions::PluginConfirmationOutcome::Failed(
+            crate::extensions::PluginConfirmationError {
+                code: crate::extensions::PluginConfirmationErrorCode::SourceRetired,
+                ..
+            }
+        )
+    ));
+}
+
+#[test]
+fn confirmation_result_retains_document_a_without_materializing_later_b() {
+    let mut app = app();
+    let a_path = app.state.workspace_root.join("a.txt");
+    let b_path = app.state.workspace_root.join("b.txt");
+    app.state
+        .open_text(TextBuffer::from_text("A"), Some(a_path.clone()));
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(8);
+    app.extension.fixture_manager(manager);
+    app.process_effect(AppEffect::PluginExecute {
+        plugin: "demo".into(),
+        command: "run".into(),
+    });
+    let invocation = fixture.take();
+    assert_eq!(invocation.snapshot().unwrap().utf8, "A");
+    fixture.reply_confirmation_request(
+        &invocation,
+        crate::extensions::PluginConfirmationRequest {
+            token: 42,
+            title: "A".into(),
+            message: "Answer for A".into(),
+            default_answer: crate::extensions::PluginConfirmationAnswer::No,
+        },
+    );
+    app.process_plugin_events();
+    app.state
+        .open_text(TextBuffer::from_text("B"), Some(b_path));
+    app.handle_configured_key("enter".parse().unwrap());
+    let answer = fixture.take();
+    assert!(answer.snapshot().is_none());
+    assert!(matches!(
+        answer.confirmation_results()[0].outcome,
+        crate::extensions::PluginConfirmationOutcome::Answered(
+            crate::extensions::PluginConfirmationAnswer::No
+        )
+    ));
+
+    fixture.reply(&answer, Vec::new());
+    app.process_plugin_events();
+    let active = app.state.active_buffer_id().unwrap();
+    assert_eq!(app.state.buffers[active].text.to_string(), "B");
+}
+
+#[test]
+fn changed_confirmation_document_gets_a_terminal_failure() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("a.txt");
+    let (buffer, _) = app
+        .state
+        .open_text(TextBuffer::from_text("A"), Some(path.clone()));
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(8);
+    app.extension.fixture_manager(manager);
+    app.process_effect(AppEffect::PluginExecute {
+        plugin: "demo".into(),
+        command: "run".into(),
+    });
+    let invocation = fixture.take();
+    fixture.reply_confirmation_request(
+        &invocation,
+        crate::extensions::PluginConfirmationRequest {
+            token: 43,
+            title: "A".into(),
+            message: "Answer for unchanged A".into(),
+            default_answer: crate::extensions::PluginConfirmationAnswer::No,
+        },
+    );
+    app.process_plugin_events();
+    assert!(
+        app.state
+            .replace_buffer_from_disk(buffer, TextBuffer::from_text("changed A"), path,)
+    );
+    app.handle_configured_key("enter".parse().unwrap());
+    let retired = fixture.take();
+    assert!(retired.snapshot().is_none());
+    assert!(matches!(
+        retired.confirmation_results()[0].outcome,
+        crate::extensions::PluginConfirmationOutcome::Failed(
+            crate::extensions::PluginConfirmationError {
+                code: crate::extensions::PluginConfirmationErrorCode::SourceRetired,
+                ..
+            }
+        )
+    ));
+}
+
+#[test]
+fn stale_ordinary_reply_releases_only_its_exact_confirmation_reservation() {
+    let mut app = app();
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(8);
+    app.extension.fixture_manager(manager);
+    for _ in 0..2 {
+        app.process_effect(AppEffect::PluginExecute {
+            plugin: "demo".into(),
+            command: "run".into(),
+        });
+    }
+    let first = fixture.take();
+    let second = fixture.take();
+    assert_eq!(app.extension.confirmation_count(), 2);
+
+    let accepted = app.configuration.fixture_snapshot();
+    app.configuration.install_fixture(accepted);
+    app.process_plugin_events();
+    fixture.reply(&first, Vec::new());
+    app.process_plugin_events();
+    assert_eq!(
+        app.extension.confirmation_count(),
+        1,
+        "only the rejected invocation reservation must be released"
+    );
+
+    app.process_effect(AppEffect::PluginExecute {
+        plugin: "demo".into(),
+        command: "run".into(),
+    });
+    let retry = fixture.take();
+    assert!(retry.confirmation_available());
+    assert_eq!(app.extension.confirmation_count(), 2);
+
+    fixture.reply_confirmation_request(
+        &second,
+        crate::extensions::PluginConfirmationRequest {
+            token: 61,
+            title: "Still reserved".into(),
+            message: "The second invocation retained its exact slot".into(),
+            default_answer: crate::extensions::PluginConfirmationAnswer::No,
+        },
+    );
+    app.process_plugin_events();
+    let retired = fixture.take();
+    assert_eq!(retired.confirmation_results()[0].request, 61);
+    assert!(matches!(
+        retired.confirmation_results()[0].outcome,
+        crate::extensions::PluginConfirmationOutcome::Failed(
+            crate::extensions::PluginConfirmationError {
+                code: crate::extensions::PluginConfirmationErrorCode::SourceRetired,
+                ..
+            }
+        )
+    ));
+}
+
+#[test]
+fn confirmation_capacity_is_reserved_before_the_guest_call() {
+    let mut app = app();
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(128);
+    app.extension.fixture_manager(manager);
+    let mut first = None;
+    for index in 0..64 {
+        app.process_effect(AppEffect::PluginExecute {
+            plugin: "demo".into(),
+            command: "run".into(),
+        });
+        let invocation = fixture.take();
+        assert!(invocation.confirmation_available());
+        if index == 0 {
+            first = Some(invocation);
+        }
+    }
+    assert_eq!(app.extension.confirmation_count(), 64);
+
+    app.process_effect(AppEffect::PluginExecute {
+        plugin: "demo".into(),
+        command: "run".into(),
+    });
+    let full = fixture.take();
+    assert!(!full.confirmation_available());
+    assert_eq!(app.extension.confirmation_count(), 64);
+
+    fixture.reply(&first.unwrap(), Vec::new());
+    fixture.reply(&full, Vec::new());
+    app.process_plugin_events();
+    assert_eq!(app.extension.confirmation_count(), 63);
+    app.process_effect(AppEffect::PluginExecute {
+        plugin: "demo".into(),
+        command: "run".into(),
+    });
+    assert!(fixture.take().confirmation_available());
+}
+
+#[test]
+fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
+    use sha2::{Digest, Sha256};
+    let core = include_bytes!("../../../../tests/fixtures/retained-guest/retained-guest.core.wasm");
+    let component = wit_component::ComponentEncoder::default()
+        .module(core)
+        .expect("fixture metadata")
+        .validate(true)
+        .encode()
+        .expect("component");
+    let store = tempfile::tempdir().expect("plugin store");
+    fs::write(store.path().join("fixture.wasm"), &component).unwrap();
+    let manifest = crate::editor::session::extensions::fixture_manifest(format!(
+        "{:x}",
+        Sha256::digest(&component)
+    ));
+    write_plugin_manifest(store.path(), &manifest);
+
+    let mut app = app_with_plugin_queue(64);
+    app.state.open_text(TextBuffer::from_text("editor"), None);
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let load = app
+        .extension
+        .index_from_store(
+            "demo".into(),
+            store.path().to_path_buf(),
+            PathBuf::from("manifest.toml"),
+            PathBuf::from("fixture.wasm"),
+            app.plugin_limits(),
+        )
+        .expect("index request");
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !app.extension.is_active_generation("demo", load) {
+        app.process_plugin_events();
+        assert!(
+            Instant::now() < deadline,
+            "fixture activation timed out: notification={:?}, statuses={:?}",
+            app.ui.notification,
+            app.extension.statuses()
+        );
+        thread::yield_now();
+    }
+
+    let enqueue_deadline = Instant::now() + Duration::from_secs(15);
+    for expected in 1..=64 {
+        loop {
+            app.process_effect(AppEffect::PluginExecute {
+                plugin: "demo".into(),
+                command: "confirmationprobe".into(),
+            });
+            if app.extension.confirmation_count() == expected {
+                break;
+            }
+            assert!(
+                Instant::now() < enqueue_deadline,
+                "production execution queue did not admit reservation {expected}"
+            );
+            thread::yield_now();
+        }
+    }
+    assert_eq!(app.extension.confirmation_count(), 64);
+
+    // Polling transfers completed reservations into pending/active confirmations while keeping
+    // the aggregate confirmation lane full, and frees the production execution/event queue.
+    let reply_deadline = Instant::now() + Duration::from_secs(15);
+    while app.input.prompt().is_none() {
+        app.process_plugin_events();
+        assert!(
+            !matches!(
+                app.extension.statuses().get("demo"),
+                Some(crate::extensions::PluginStatus::Failed(_))
+            ),
+            "real Component failed before returning a reserved reply: {:?}",
+            app.extension.statuses()
+        );
+        assert!(
+            Instant::now() < reply_deadline,
+            "reserved real reply timed out: count={}, notification={:?}, statuses={:?}",
+            app.extension.confirmation_count(),
+            app.ui.notification,
+            app.extension.statuses()
+        );
+        thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        app.extension.confirmation_count(),
+        64,
+        "aggregate lane must be full immediately before the ordinary probe"
+    );
+    app.process_effect(AppEffect::PluginExecute {
+        plugin: "demo".into(),
+        command: "confirmationprobe".into(),
+    });
+    assert_eq!(
+        app.extension.confirmation_count(),
+        64,
+        "the intended 65th ordinary invocation must receive no reservation"
+    );
+    let full_deadline = Instant::now() + Duration::from_secs(15);
+    while app.ui.notification.as_deref() != Some("confirmationprobe:65:queue-full") {
+        app.process_plugin_events();
+        assert!(
+            app.extension.confirmation_count() <= 64,
+            "aggregate confirmation ownership exceeded its bound"
+        );
+        assert!(
+            Instant::now() < full_deadline,
+            "real Component did not report the exact ordinary probe queue-full: {:?}",
+            app.ui.notification
+        );
+        thread::yield_now();
+    }
+    // Opening the first prompt changes capture. Pending requests may now finish through bounded
+    // SourceRetired result-only callbacks, so ownership can legitimately decline after polling.
+    assert!(app.extension.confirmation_count() <= 64);
+}
+
+#[test]
+fn packaged_real_guest_confirmation_updates_its_custom_view() {
+    use sha2::{Digest, Sha256};
+    let core = include_bytes!("../../../../tests/fixtures/retained-guest/retained-guest.core.wasm");
+    let component = wit_component::ComponentEncoder::default()
+        .module(core)
+        .expect("fixture metadata")
+        .validate(true)
+        .encode()
+        .expect("component");
+    let store = tempfile::tempdir().expect("plugin store");
+    fs::write(store.path().join("fixture.wasm"), &component).unwrap();
+    let manifest = crate::editor::session::extensions::fixture_manifest(format!(
+        "{:x}",
+        Sha256::digest(&component)
+    ));
+    write_plugin_manifest(store.path(), &manifest);
+
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("editor"), None);
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    assert!(app.window_session.graph().revision().is_some());
+    let load = app
+        .extension
+        .index_from_store(
+            "demo".into(),
+            store.path().to_path_buf(),
+            PathBuf::from("manifest.toml"),
+            PathBuf::from("fixture.wasm"),
+            app.plugin_limits(),
+        )
+        .expect("index request");
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !app.extension.is_active_generation("demo", load) {
+        app.process_plugin_events();
+        assert!(Instant::now() < deadline, "fixture activation timed out");
+        thread::yield_now();
+    }
+    app.process_effect(AppEffect::PluginExecute {
+        plugin: "demo".into(),
+        command: "confirmation".into(),
+    });
+    while app.ui.plugin_surfaces.iter().all(|surface| {
+        surface
+            .rows
+            .iter()
+            .all(|row| row.text != "Request confirmation")
+    }) {
+        app.process_plugin_events();
+        assert!(Instant::now() < deadline, "confirmation view timed out");
+        thread::yield_now();
+    }
+    let confirmation_window = app.ui.plugin_surfaces[0].window;
+    let focus = app
+        .window_session
+        .plan_focus(
+            confirmation_window,
+            &app.state.window_version(),
+            app.extension.contributions().version(),
+        )
+        .expect("plan confirmation view focus");
+    app.apply_window_plan(focus)
+        .expect("focus confirmation view");
+    let focused_before_answer = app.window_session.graph().focused();
+    assert_eq!(
+        app.window_session.graph().focused(),
+        Some(confirmation_window)
+    );
+    app.extension
+        .focus_window_row(confirmation_window, 0)
+        .expect("focus confirmation action");
+    let action = app
+        .extension
+        .window_interaction(
+            app.window_session.graph(),
+            crate::editor::session::extensions::PluginUiInteraction::Activate,
+        )
+        .expect("activate retained confirmation action")
+        .expect("confirmation action command");
+    app.invoke_mapped_command(&action);
+    while app.input.prompt().is_none() {
+        app.process_plugin_events();
+        assert!(
+            Instant::now() < deadline,
+            "confirmation request timed out: count={}, notice={:?}",
+            app.extension.confirmation_count(),
+            app.ui.notification
+        );
+        thread::yield_now();
+    }
+    app.handle_configured_key("left".parse().unwrap());
+    app.handle_configured_key("enter".parse().unwrap());
+    assert_eq!(app.window_session.graph().focused(), focused_before_answer);
+    while app
+        .ui
+        .plugin_surfaces
+        .iter()
+        .all(|surface| surface.rows.iter().all(|row| row.text != "Confirmed: Yes"))
+    {
+        app.process_plugin_events();
+        assert!(Instant::now() < deadline, "Yes result timed out");
+        thread::yield_now();
+    }
+
+    for (key, expected) in [
+        ("enter", "Confirmed: No"),
+        ("escape", "Confirmed: Cancelled"),
+    ] {
+        let outcome_deadline = Instant::now() + Duration::from_secs(4);
+        app.apply_retained_ui_interaction(
+            crate::editor::session::extensions::PluginUiInteraction::Activate,
+        );
+        while app.input.prompt().is_none() {
+            app.process_plugin_events();
+            assert!(Instant::now() < outcome_deadline, "later request timed out");
+            thread::yield_now();
+        }
+        app.handle_configured_key(key.parse().unwrap());
+        while app
+            .ui
+            .plugin_surfaces
+            .iter()
+            .all(|surface| surface.rows.iter().all(|row| row.text != expected))
+        {
+            app.process_plugin_events();
+            assert!(
+                Instant::now() < outcome_deadline,
+                "{expected} result timed out"
+            );
+            thread::yield_now();
+        }
+    }
+}
+
+#[test]
 fn retained_plugin_window_projection_is_idle_and_generation_owned() {
     let mut app = app();
     app.state.open_text(TextBuffer::from_text("editor"), None);

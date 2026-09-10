@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Public plugin ABI; see LICENSES/Apache-2.0.txt.
-package dust:plugin@0.1.0;
+package dust:plugin@0.2.0;
 
 interface host {
   record snapshot { buffer: u64, revision: u64, utf8: string }
@@ -166,6 +166,20 @@ interface host {
     error: option<ui-error>,
   }
 
+  enum confirmation-answer { yes, no, cancelled }
+  enum confirmation-error-code { queue-full, invalid-request, generation-lost, source-retired, unavailable }
+  record confirmation-error { code: confirmation-error-code, detail: string }
+  record confirmation-request {
+    title: string,
+    message: string,
+    default-answer: confirmation-answer,
+  }
+  variant confirmation-outcome {
+    answered(confirmation-answer),
+    failed(confirmation-error),
+  }
+  record confirmation-result { request: u64, outcome: confirmation-outcome }
+
   enum host-event-kind {
     workspace-metadata-changed,
     active-surface-changed,
@@ -316,11 +330,18 @@ interface host {
   propose-edits: func(buffer: u64, revision: u64, edits: list<edit>) -> result<u64, string>;
   show-message: func(message: string) -> result<_, string>;
   config-get: func(key: string) -> option<string>;
+  // Immutable admission revision for queued UI proposals; it grants no graph handle.
+  current-ui-revision: func() -> option<u64>;
 
   // These calls only enqueue bounded proposals in the component worker. The
   // application validates and applies them asynchronously after execution.
   queue-ui-request: func(request: ui-request) -> result<u64, ui-error>;
   take-ui-events: func() -> list<ui-event>;
+
+  // Ordinary confirmation is a host-owned interaction, not a permission grant.
+  // A result is delivered once during a later admitted command execution.
+  queue-confirmation: func(request: confirmation-request) -> result<u64, confirmation-error>;
+  take-confirmation-results: func() -> list<confirmation-result>;
 
   // Subscription declarations are accepted before Component bytes. Delivery
   // occurs only in a later command execution; acknowledgement is bounded and

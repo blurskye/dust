@@ -99,6 +99,16 @@ impl InteractiveApplication {
                         .maximum_file_bytes,
                 )
                 .unwrap_or(usize::MAX);
+                let input_capture = self.input.capture_epoch();
+                let interaction_available = self.input.prompt().is_none()
+                    && self.ui.picker.is_none()
+                    && self.ui.tool_menu.is_none()
+                    && self.input.documentation().is_none()
+                    && !self.input.mapping_pending()
+                    && !self.input.grammar_pending();
+                let navigation = self
+                    .window_session
+                    .navigation_stamp(self.state.window_version(), self.state.active_view);
                 let result = self.extension.execute(
                     &plugin,
                     &command,
@@ -107,6 +117,10 @@ impl InteractiveApplication {
                         workspace: &self.workspace,
                         configuration: self.configuration.binding_revision_ref(),
                         generation: self.configuration.generation(),
+                        ui_revision: self.window_session.graph().revision(),
+                        input_capture,
+                        navigation,
+                        interaction_available,
                         maximum,
                     },
                 );

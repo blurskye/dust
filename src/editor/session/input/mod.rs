@@ -141,9 +141,11 @@ impl InputSession {
                 crate::ui::PromptKind::SearchForward | crate::ui::PromptKind::SearchBackward => {
                     "search_prompt"
                 }
-                crate::ui::PromptKind::WorkspaceTrust
-                | crate::ui::PromptKind::GitReset
-                | crate::ui::PromptKind::ExplorerDelete => "workspace_trust_prompt",
+                crate::ui::PromptKind::WorkspaceTrust | crate::ui::PromptKind::GitReset => {
+                    "workspace_trust_prompt"
+                }
+                crate::ui::PromptKind::ExplorerDelete
+                | crate::ui::PromptKind::PluginConfirmation => "confirmation_prompt",
             });
         }
         self.documentation
@@ -179,7 +181,12 @@ impl InputSession {
         mode: EditorMode,
         input: GrammarInput,
     ) -> Result<InputAction, InputError> {
-        self.modal.feed(mode, input)
+        let pending = self.modal.has_pending_grammar();
+        let result = self.modal.feed(mode, input);
+        if !pending && self.modal.has_pending_grammar() {
+            self.capture_changed();
+        }
+        result
     }
 
     pub(super) fn resolve(
@@ -196,6 +203,7 @@ impl InputSession {
         }) {
             self.cancel_mapping();
         }
+        let was_pending = self.pending.is_some();
         let result = bindings.resolve(&mut self.sequence, context, key);
         match result {
             MappingResolution::Pending | MappingResolution::Ambiguous => {
@@ -213,6 +221,9 @@ impl InputSession {
                 });
             }
             _ => self.pending = None,
+        }
+        if !was_pending && self.pending.is_some() {
+            self.capture_changed();
         }
         self.hints = None;
         result
@@ -312,9 +323,11 @@ impl InputSession {
     pub(in crate::editor::session) fn mapping_prefix(&self) -> Option<&str> {
         self.pending.as_ref().map(|pending| pending.prefix.as_str())
     }
-    #[cfg(test)]
     pub(in crate::editor::session) fn mapping_pending(&self) -> bool {
         self.pending.is_some()
+    }
+    pub(in crate::editor::session) fn grammar_pending(&self) -> bool {
+        self.modal.has_pending_grammar()
     }
     #[cfg(test)]
     pub(in crate::editor::session) fn mapping_deadline(&self) -> Option<Instant> {

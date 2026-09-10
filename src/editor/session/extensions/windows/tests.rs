@@ -119,7 +119,9 @@ fn open_request(revision: u64, tree: PluginUiTree) -> PluginUiRequest {
     }
 }
 
-fn fixture_manifest(checksum: String) -> crate::extensions::PluginManifest {
+pub(in crate::editor::session) fn fixture_manifest(
+    checksum: String,
+) -> crate::extensions::PluginManifest {
     let mut indexed = index("demo", 1);
     let contribution = indexed.content_types.remove(0);
     let command = |title: &str| PluginCommandDeclaration {
@@ -134,6 +136,9 @@ fn fixture_manifest(checksum: String) -> crate::extensions::PluginManifest {
         version: "1.0.0".into(),
         component_sha256: checksum,
         capabilities: [
+            crate::extensions::PluginCapability::ReadCurrentBuffer,
+            crate::extensions::PluginCapability::ProposeEdits,
+            crate::extensions::PluginCapability::ShowMessage,
             crate::extensions::PluginCapability::PrivateCells,
             crate::extensions::PluginCapability::EventSubscriptions,
             crate::extensions::PluginCapability::PluginStorage,
@@ -152,6 +157,11 @@ fn fixture_manifest(checksum: String) -> crate::extensions::PluginManifest {
             ("storage".into(), command("Storage")),
             ("provider".into(), command("Provider")),
             ("virtual".into(), command("Virtual document")),
+            ("confirmation".into(), command("Confirmation example")),
+            (
+                "confirmationprobe".into(),
+                command("Confirmation capacity probe"),
+            ),
         ]
         .into_iter()
         .collect(),
@@ -163,6 +173,12 @@ fn fixture_manifest(checksum: String) -> crate::extensions::PluginManifest {
             content_types: vec![
                 PluginContentTypeContribution {
                     command: "plugin.demo.drive".into(),
+                    ..contribution.clone()
+                },
+                PluginContentTypeContribution {
+                    id: "plugin.demo.confirmation-panel".into(),
+                    title: "Confirmation fixture".into(),
+                    command: "plugin.demo.confirmation".into(),
                     ..contribution.clone()
                 },
                 PluginContentTypeContribution {
@@ -495,7 +511,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         include_bytes!("../../../../../tests/fixtures/retained-guest/retained-guest.core.wasm");
     assert_eq!(
         format!("{:x}", Sha256::digest(core)),
-        "2b87dac4f0aa9998ec86d41ee26e1eb329d7cedf09d0a39efacaa88c61b601ec"
+        "3773ae204a9b1fe0436f2252161663562be895aea2392b1b4bd187c43af74416"
     );
     let component = wit_component::ComponentEncoder::default()
         .module(core)
@@ -518,7 +534,17 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     assert_eq!(
         outcome.loaded.activated_commands,
         vec![
-            "drive", "trap", "flood", "spin", "private", "events", "storage", "provider", "virtual"
+            "drive",
+            "trap",
+            "flood",
+            "spin",
+            "private",
+            "events",
+            "storage",
+            "provider",
+            "virtual",
+            "confirmation",
+            "confirmationprobe"
         ]
     );
 
@@ -529,7 +555,10 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             arguments: Vec::new(),
             snapshot: None,
             config: BTreeMap::new(),
+            ui_revision: None,
+            confirmation_available: true,
             ui_events: Vec::new(),
+            confirmation_results: Vec::new(),
             host_events: vec![crate::extensions::PluginHostEventEnvelope {
                 id: 7,
                 sequence: 3,
@@ -554,6 +583,141 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             .contains("events:1:coalesced=2:dropped=1")
     );
 
+    let opened = crate::extensions::execute_component(
+        crate::extensions::PluginExecutionRequest {
+            plugin: "demo".into(),
+            command: "confirmation".into(),
+            arguments: vec!["1".into()],
+            snapshot: None,
+            config: BTreeMap::new(),
+            ui_revision: None,
+            confirmation_available: true,
+            ui_events: Vec::new(),
+            confirmation_results: Vec::new(),
+            host_events: Vec::new(),
+            storage_results: Vec::new(),
+            provider_requests: Vec::new(),
+            virtual_document_requests: Vec::new(),
+            generation: 45,
+        },
+        &mut outcome.runtime,
+    )
+    .expect("guest confirmation view");
+    assert!(opened.confirmation_requests.is_empty());
+    assert_eq!(opened.ui_requests.len(), 1);
+    let confirmation_action = || crate::extensions::PluginUiEvent {
+        token: 1,
+        handle: Some(9),
+        graph_revision: Some(2),
+        tree_revision: Some(1),
+        surface_revision: None,
+        geometry: None,
+        action: Some("plugin.demo.confirmation".into()),
+        error: None,
+    };
+    let requested = crate::extensions::execute_component(
+        crate::extensions::PluginExecutionRequest {
+            plugin: "demo".into(),
+            command: "confirmation".into(),
+            arguments: Vec::new(),
+            snapshot: None,
+            config: BTreeMap::new(),
+            ui_revision: None,
+            confirmation_available: true,
+            ui_events: vec![confirmation_action()],
+            confirmation_results: Vec::new(),
+            host_events: Vec::new(),
+            storage_results: Vec::new(),
+            provider_requests: Vec::new(),
+            virtual_document_requests: Vec::new(),
+            generation: 46,
+        },
+        &mut outcome.runtime,
+    )
+    .expect("guest confirmation request");
+    assert_eq!(requested.confirmation_requests.len(), 1);
+    assert!(requested.ui_requests.is_empty());
+    let confirmation_request = requested.confirmation_requests[0].token;
+    let full = crate::extensions::execute_component(
+        crate::extensions::PluginExecutionRequest {
+            plugin: "demo".into(),
+            command: "confirmation".into(),
+            arguments: vec!["1".into()],
+            snapshot: None,
+            config: BTreeMap::new(),
+            ui_revision: None,
+            confirmation_available: false,
+            ui_events: vec![confirmation_action()],
+            confirmation_results: Vec::new(),
+            host_events: Vec::new(),
+            storage_results: Vec::new(),
+            provider_requests: Vec::new(),
+            virtual_document_requests: Vec::new(),
+            generation: 46,
+        },
+        &mut outcome.runtime,
+    )
+    .expect("real guest observes reserved host capacity pressure");
+    assert_eq!(full.result, "confirmation:ConfirmationErrorCode::QueueFull");
+    assert!(full.confirmation_requests.is_empty());
+    for (answer, label) in [
+        (
+            crate::extensions::PluginConfirmationAnswer::Yes,
+            "Confirmed: Yes",
+        ),
+        (
+            crate::extensions::PluginConfirmationAnswer::No,
+            "Confirmed: No",
+        ),
+        (
+            crate::extensions::PluginConfirmationAnswer::Cancelled,
+            "Confirmed: Cancelled",
+        ),
+    ] {
+        let answered = crate::extensions::execute_component(
+            crate::extensions::PluginExecutionRequest {
+                plugin: "demo".into(),
+                command: "confirmation".into(),
+                arguments: Vec::new(),
+                snapshot: None,
+                config: BTreeMap::new(),
+                ui_revision: None,
+                confirmation_available: false,
+                ui_events: vec![crate::extensions::PluginUiEvent {
+                    token: 1,
+                    handle: Some(9),
+                    graph_revision: Some(2),
+                    tree_revision: Some(1),
+                    surface_revision: None,
+                    geometry: None,
+                    action: None,
+                    error: None,
+                }],
+                confirmation_results: vec![crate::extensions::PluginConfirmationResult {
+                    request: confirmation_request,
+                    outcome: crate::extensions::PluginConfirmationOutcome::Answered(answer),
+                }],
+                host_events: Vec::new(),
+                storage_results: Vec::new(),
+                provider_requests: Vec::new(),
+                virtual_document_requests: Vec::new(),
+                generation: 46,
+            },
+            &mut outcome.runtime,
+        )
+        .expect("guest confirmation result");
+        assert_eq!(answered.result, label);
+        assert!(answered.proposals.is_empty());
+        assert!(answered.storage_requests.is_empty());
+        assert_eq!(answered.ui_requests.len(), 1);
+        let crate::extensions::PluginUiRequestKind::ReplaceUi { tree, .. } =
+            &answered.ui_requests[0].kind
+        else {
+            panic!("guest result must update its retained view");
+        };
+        assert!(tree.nodes.iter().any(|node| node.text == label));
+    }
+
     let mut storage =
         crate::extensions::PluginStorageService::start(store.path().join("plugin-data"), 8);
     storage.install_generation("demo", crate::extensions::PluginLoadId(44));
@@ -571,7 +735,10 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
                 arguments: Vec::new(),
                 snapshot: None,
                 config: BTreeMap::new(),
+                ui_revision: None,
+                confirmation_available: true,
                 ui_events: Vec::new(),
+                confirmation_results: Vec::new(),
                 host_events: Vec::new(),
                 storage_results,
                 provider_requests: Vec::new(),
@@ -642,7 +809,10 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
                 arguments: Vec::new(),
                 snapshot: None,
                 config: BTreeMap::new(),
+                ui_revision: None,
+                confirmation_available: true,
                 ui_events: Vec::new(),
+                confirmation_results: Vec::new(),
                 host_events: Vec::new(),
                 storage_results: Vec::new(),
                 provider_requests: requests,
@@ -683,7 +853,10 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             arguments: Vec::new(),
             snapshot: None,
             config: BTreeMap::new(),
+            ui_revision: None,
+            confirmation_available: true,
             ui_events: Vec::new(),
+            confirmation_results: Vec::new(),
             host_events: Vec::new(),
             storage_results: Vec::new(),
             provider_requests: vec![last_envelope.expect("delivered provider request")],
@@ -732,7 +905,10 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
                 arguments: Vec::new(),
                 snapshot: None,
                 config: BTreeMap::new(),
+                ui_revision: None,
+                confirmation_available: true,
                 ui_events: Vec::new(),
+                confirmation_results: Vec::new(),
                 host_events: Vec::new(),
                 storage_results: Vec::new(),
                 provider_requests: Vec::new(),
@@ -778,7 +954,10 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             arguments: vec![graph.revision().expect("revision").to_string()],
             snapshot: None,
             config: BTreeMap::new(),
+            ui_revision: None,
+            confirmation_available: true,
             ui_events: Vec::new(),
+            confirmation_results: Vec::new(),
             host_events: Vec::new(),
             storage_results: Vec::new(),
             provider_requests: vec![crate::extensions::PluginPickerRequestEnvelope {
@@ -834,7 +1013,10 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             arguments: vec![graph.revision().expect("revision").to_string()],
             snapshot: None,
             config: BTreeMap::new(),
+            ui_revision: None,
+            confirmation_available: true,
             ui_events: Vec::new(),
+            confirmation_results: Vec::new(),
             host_events: Vec::new(),
             storage_results: Vec::new(),
             provider_requests: Vec::new(),
@@ -875,7 +1057,10 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
                 arguments: vec![graph.revision().expect("revision").to_string()],
                 snapshot: None,
                 config: BTreeMap::new(),
+                ui_revision: None,
+                confirmation_available: true,
                 ui_events: events,
+                confirmation_results: Vec::new(),
                 host_events: Vec::new(),
                 storage_results: Vec::new(),
                 provider_requests: Vec::new(),
@@ -914,7 +1099,10 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             arguments: vec![graph.revision().expect("revision").to_string()],
             snapshot: None,
             config: BTreeMap::new(),
+            ui_revision: None,
+            confirmation_available: true,
             ui_events: Vec::new(),
+            confirmation_results: Vec::new(),
             host_events: Vec::new(),
             storage_results: Vec::new(),
             provider_requests: Vec::new(),
@@ -962,7 +1150,10 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             arguments: vec![graph.revision().expect("revision").to_string()],
             snapshot: None,
             config: BTreeMap::new(),
+            ui_revision: None,
+            confirmation_available: true,
             ui_events: vec![open_event, geometry_event],
+            confirmation_results: Vec::new(),
             host_events: Vec::new(),
             storage_results: Vec::new(),
             provider_requests: Vec::new(),
@@ -992,7 +1183,10 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             arguments: vec![graph.revision().expect("revision").to_string()],
             snapshot: None,
             config: BTreeMap::new(),
+            ui_revision: None,
+            confirmation_available: true,
             ui_events: vec![replace_event],
+            confirmation_results: Vec::new(),
             host_events: Vec::new(),
             storage_results: Vec::new(),
             provider_requests: Vec::new(),
@@ -1029,7 +1223,10 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             arguments: vec![graph.revision().expect("revision").to_string()],
             snapshot: None,
             config: BTreeMap::new(),
+            ui_revision: None,
+            confirmation_available: true,
             ui_events: vec![patch_event, action_event],
+            confirmation_results: Vec::new(),
             host_events: Vec::new(),
             storage_results: Vec::new(),
             provider_requests: Vec::new(),
@@ -1061,7 +1258,10 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             arguments: vec![graph.revision().expect("revision").to_string()],
             snapshot: None,
             config: BTreeMap::new(),
+            ui_revision: None,
+            confirmation_available: true,
             ui_events: events,
+            confirmation_results: Vec::new(),
             host_events: Vec::new(),
             storage_results: Vec::new(),
             provider_requests: Vec::new(),

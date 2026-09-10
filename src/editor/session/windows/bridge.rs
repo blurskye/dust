@@ -317,7 +317,7 @@ pub(in crate::editor::session) struct NativeSurfaceSignature {
     pub dashboard_visible: bool,
     pub picker_rect: Option<crate::ui::window::WindowRect>,
     pub picker_surface: Option<PickerSurfaceKind>,
-    pub protected_prompt_height: u8,
+    pub protected_prompt_height: u16,
     pub configuration_generation: u64,
 }
 
@@ -400,6 +400,13 @@ impl NativeSurfaceBridge {
         self.terminals.retain(|_, ids| live_ids(*ids, graph));
 
         let previous_tab = self.workspace_tab;
+        let retained_plugin_focus = graph.focused().filter(|window| {
+            graph.window(*window).is_some_and(|descriptor| {
+                descriptor.owner.starts_with("plugin.")
+                    && descriptor.focusable
+                    && descriptor.placement != WindowPlacement::Hidden
+            })
+        });
         let retained_tab = self.workspace_tab.filter(|tab| {
             graph.workspace_tab(*tab).is_some_and(|descriptor| {
                 signature.editor_tab.is_some() || descriptor.owner == owner
@@ -617,6 +624,16 @@ impl NativeSurfaceBridge {
             && let Some(dashboard) = dashboard
         {
             graph.focus(dashboard.window)?;
+        }
+        if signature.picker_rect.is_none()
+            && !signature.terminal_focused
+            && !signature.explorer_focused
+            && let Some(plugin) = retained_plugin_focus
+            && graph
+                .window(plugin)
+                .is_some_and(|descriptor| descriptor.tab == tab)
+        {
+            graph.focus(plugin)?;
         }
         if signature.editor_tab == Some(tab) {
             self.workspace_tab = Some(tab);

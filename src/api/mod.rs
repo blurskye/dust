@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, path::Path};
 pub const COMMAND_API_VERSION: u32 = 1;
-pub const WIT_API_VERSION: &str = "0.1.0";
+pub const WIT_API_VERSION: &str = "0.2.0";
 pub const CONFIG_SCHEMA_VERSION: u32 = 1;
 pub const PERSISTENCE_SCHEMA_VERSION: u32 = crate::persistence::STATE_VERSION;
 pub const PACKAGE_LOCK_SCHEMA_VERSION: u32 = 1;
@@ -137,6 +137,10 @@ pub fn manifest() -> Result<ApiManifest, String> {
             (
                 "plugin_ui".into(),
                 "retained-and-private-cells-queued-typed-v1".into(),
+            ),
+            (
+                "shared_confirmation".into(),
+                "native-plugin-queued-yes-no-cancelled-v1".into(),
             ),
             (
                 "plugin_events".into(),

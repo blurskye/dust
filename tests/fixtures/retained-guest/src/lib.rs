@@ -2,7 +2,8 @@
 wit_bindgen::generate!({ path: "wit", world: "editor-plugin" });
 
 use dust::plugin::host::{
-    self, CheckedWindowRequest, OpenWindowRequest, PatchPrivateRequest, PlaceWindowRequest,
+    self, CheckedWindowRequest, ConfirmationAnswer, ConfirmationOutcome, ConfirmationRequest,
+    OpenWindowRequest, PatchPrivateRequest, PlaceWindowRequest,
     PrivateCell, PrivateCursor, PrivateHitRegion, PrivatePatch, PrivateRect, PrivateSnapshot,
     PickerProviderChunk, PickerProviderItem, PrivateStyle, ProviderTerminal,
     ProviderTerminalKind, ReplacePrivateRequest, ReplaceUiRequest, StorageCasRequest,
@@ -21,6 +22,9 @@ static STORAGE_PHASE: AtomicU8 = AtomicU8::new(0);
 static STORAGE_REVISION: AtomicU64 = AtomicU64::new(0);
 static PROVIDER_PHASE: AtomicU8 = AtomicU8::new(0);
 static VIRTUAL_PHASE: AtomicU8 = AtomicU8::new(0);
+static CONFIRMATION_HANDLE: AtomicU64 = AtomicU64::new(0);
+static CONFIRMATION_REVISION: AtomicU64 = AtomicU64::new(1);
+static CONFIRMATION_PROBE_ORDINAL: AtomicU64 = AtomicU64::new(0);
 
 struct GuestComponent;
 
@@ -36,11 +40,15 @@ impl Guest for GuestComponent {
             "storage".into(),
             "provider".into(),
             "virtual".into(),
+            "confirmation".into(),
+            "confirmationprobe".into(),
         ])
     }
 
     fn execute_command(command: String, arguments: Vec<String>) -> Result<String, String> {
-        let graph = arguments.first().and_then(|value| value.parse().ok()).unwrap_or(1);
+        let graph = host::current_ui_revision()
+            .or_else(|| arguments.first().and_then(|value| value.parse().ok()))
+            .unwrap_or(1);
         if command == "trap" {
             let _ = host::queue_ui_request(&open_retained(graph, "Trap", "trap"));
             let _ = host::queue_storage_request(&StorageRequest::CompareAndSet(
@@ -108,6 +116,30 @@ impl Guest for GuestComponent {
         if command == "virtual" {
             return drive_virtual_document();
         }
+        if command == "confirmation" {
+            return drive_confirmation(graph);
+        }
+        if command == "confirmationprobe" {
+            let results = host::take_confirmation_results();
+            if !results.is_empty() {
+                return Ok(format!("confirmationprobe:result-only:{}", results.len()));
+            }
+            let ordinal = CONFIRMATION_PROBE_ORDINAL.fetch_add(1, Ordering::SeqCst) + 1;
+            let outcome = match host::queue_confirmation(&ConfirmationRequest {
+                title: "Probe confirmation capacity".into(),
+                message: "This request qualifies aggregate host admission".into(),
+                default_answer: ConfirmationAnswer::No,
+            }) {
+                Ok(_) => "accepted",
+                Err(error) => match error.code {
+                    host::ConfirmationErrorCode::QueueFull => "queue-full",
+                    _ => "other-error",
+                },
+            };
+            let marker = format!("confirmationprobe:{ordinal}:{outcome}");
+            host::show_message(&marker)?;
+            return Ok(marker);
+        }
         if command == "events" {
             let events = host::take_host_events();
             let ids = events.iter().map(|event| event.id).collect::<Vec<_>>();
@@ -154,6 +186,73 @@ impl Guest for GuestComponent {
         host::queue_ui_request(&request).map_err(|error| format!("ui:{:?}", error.code))?;
         PHASE.store(phase.saturating_add(1), Ordering::SeqCst);
         Ok(format!("phase:{phase}"))
+    }
+}
+
+fn drive_confirmation(graph: u64) -> Result<String, String> {
+    let results = host::take_confirmation_results();
+    if let Some(result) = results.last() {
+        let label = match &result.outcome {
+            ConfirmationOutcome::Answered(ConfirmationAnswer::Yes) => "Confirmed: Yes",
+            ConfirmationOutcome::Answered(ConfirmationAnswer::No) => "Confirmed: No",
+            ConfirmationOutcome::Answered(ConfirmationAnswer::Cancelled) => "Confirmed: Cancelled",
+            ConfirmationOutcome::Failed(error) => return Ok(format!("confirmation:{:?}", error.code)),
+        };
+        let events = host::take_ui_events();
+        let event = events.iter().rev().find(|event| event.handle.is_some());
+        let handle = event
+            .and_then(|event| event.handle)
+            .unwrap_or_else(|| CONFIRMATION_HANDLE.load(Ordering::SeqCst));
+        let revision = event
+            .and_then(|event| event.tree_revision)
+            .unwrap_or_else(|| CONFIRMATION_REVISION.load(Ordering::SeqCst));
+        if host::propose_edits(1, 1, &[]).is_ok() {
+            return Err("confirmation result accepted edit proposal".into());
+        }
+        if host::queue_ui_request(&open_confirmation_view(graph)).is_ok() {
+            return Err("confirmation result accepted new window".into());
+        }
+        if host::queue_ui_request(&UiRequest::FocusWindow(CheckedWindowRequest {
+            handle,
+            expected_graph_revision: graph,
+        }))
+        .is_ok()
+        {
+            return Err("confirmation result accepted focus".into());
+        }
+        if host::queue_storage_request(&StorageRequest::PrefixList(StorageListRequest {
+            prefix: String::new(),
+            maximum: 1,
+        }))
+        .is_ok()
+        {
+            return Err("confirmation result accepted storage".into());
+        }
+        host::queue_ui_request(&UiRequest::ReplaceUi(ReplaceUiRequest {
+            handle,
+            expected_tree_revision: revision,
+            tree: confirmation_tree(revision + 1, label),
+        }))
+        .map_err(|error| format!("confirmation-ui:{:?}", error.code))?;
+        return Ok(label.into());
+    }
+    let events = host::take_ui_events();
+    if let Some(event) = events.iter().rev().find(|event| event.handle.is_some()) {
+        CONFIRMATION_HANDLE.store(event.handle.unwrap_or(0), Ordering::SeqCst);
+        CONFIRMATION_REVISION.store(event.tree_revision.unwrap_or(1), Ordering::SeqCst);
+    } else {
+        host::queue_ui_request(&open_confirmation_view(graph))
+            .map_err(|error| format!("confirmation-ui:{:?}", error.code))?;
+        return Ok("confirmation:view-opened".into());
+    }
+    let request = host::queue_confirmation(&ConfirmationRequest {
+        title: "Run custom action?".into(),
+        message: "Update the plugin-owned view with the selected result?".into(),
+        default_answer: ConfirmationAnswer::No,
+    });
+    match request {
+        Ok(request) => Ok(format!("confirmation:requested:{request}")),
+        Err(error) => Ok(format!("confirmation:{:?}", error.code)),
     }
 }
 
@@ -346,6 +445,27 @@ fn drive_private(graph: u64) -> Result<String, String> {
     host::queue_ui_request(&request).map_err(|error| format!("ui:{:?}", error.code))?;
     PRIVATE_PHASE.store(phase.saturating_add(1), Ordering::SeqCst);
     Ok(format!("private:{phase}:action={action_seen}"))
+}
+
+fn open_confirmation_view(graph: u64) -> UiRequest {
+    UiRequest::OpenWindow(OpenWindowRequest {
+        expected_graph_revision: graph,
+        content_type: "plugin.demo.confirmation-panel".into(),
+        title: "Confirmation example".into(),
+        placement: WindowPlacement::Floating,
+        x: 2,
+        y: 2,
+        width: 30,
+        height: 8,
+        size: 8,
+        tree: Some(confirmation_tree(1, "Request confirmation")),
+    })
+}
+
+fn confirmation_tree(revision: u64, text: &str) -> UiTree {
+    let mut tree = tree(revision, text);
+    tree.nodes[1].action = Some("plugin.demo.confirmation".into());
+    tree
 }
 
 fn open_retained(graph: u64, title: &str, text: &str) -> UiRequest {

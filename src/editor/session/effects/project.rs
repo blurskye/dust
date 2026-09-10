@@ -68,7 +68,6 @@ impl InteractiveApplication {
             AppEffect::ExplorerRename(target) => self.rename_explorer_path(target),
             AppEffect::ExplorerRenamePrompt => self.open_explorer_rename_prompt(),
             AppEffect::ExplorerDeleteRequest => self.request_explorer_delete(),
-            AppEffect::ExplorerDeleteConfirm(phrase) => self.confirm_explorer_delete(phrase),
             AppEffect::ExplorerClipboard { cut } => self.set_explorer_clipboard(cut),
             AppEffect::ExplorerPaste => self.paste_explorer_clipboard(),
             AppEffect::ExplorerYankPath => self.yank_explorer_path(),
@@ -785,9 +784,8 @@ impl InteractiveApplication {
             self.show_error(error);
         }
     }
-    pub(in crate::editor::session) fn confirm_explorer_delete(&mut self, phrase: String) {
+    pub(in crate::editor::session) fn confirm_explorer_delete(&mut self) {
         match self.explorer.confirm_delete(
-            &phrase,
             self.workspace.version(),
             self.configuration.binding_revision(),
             &self.state.window_version(),

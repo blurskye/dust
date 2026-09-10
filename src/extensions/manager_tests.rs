@@ -95,9 +95,15 @@ fn component_host_queues_declared_ui_requests_without_graph_authority() {
         proposals: Vec::new(),
         messages: Vec::new(),
         config: BTreeMap::new(),
+        ui_revision: None,
+        confirmation_available: true,
+        confirmation_result_only: false,
         ui_requests: Vec::new(),
         ui_events: Vec::new(),
         next_ui_token: 1,
+        confirmation_requests: Vec::new(),
+        confirmation_results: Vec::new(),
+        next_confirmation_token: 1,
         host_events: Vec::new(),
         delivered_host_event_ids: BTreeSet::new(),
         host_event_acknowledgements: Vec::new(),
@@ -150,6 +156,70 @@ fn component_host_queues_declared_ui_requests_without_graph_authority() {
 }
 
 #[test]
+fn component_confirmation_request_is_typed_bounded_and_single_per_execution() {
+    use component_api::dust::plugin::host::{
+        ConfirmationAnswer, ConfirmationErrorCode, ConfirmationRequest, Host,
+    };
+    let mut host = ComponentHostState {
+        limits: wasmtime::StoreLimitsBuilder::new().build(),
+        capabilities: BTreeSet::new(),
+        declared_content_types: BTreeSet::new(),
+        snapshot: None,
+        proposals: Vec::new(),
+        messages: Vec::new(),
+        config: BTreeMap::new(),
+        ui_revision: None,
+        confirmation_available: true,
+        confirmation_result_only: false,
+        ui_requests: Vec::new(),
+        ui_events: Vec::new(),
+        next_ui_token: 1,
+        confirmation_requests: Vec::new(),
+        confirmation_results: Vec::new(),
+        next_confirmation_token: 1,
+        host_events: Vec::new(),
+        delivered_host_event_ids: BTreeSet::new(),
+        host_event_acknowledgements: Vec::new(),
+        storage_policy: None,
+        storage_requests: Vec::new(),
+        storage_results: Vec::new(),
+        next_storage_token: 1,
+        provider_requests: Vec::new(),
+        delivered_provider_requests: BTreeSet::new(),
+        provider_chunks: Vec::new(),
+        virtual_document_requests: Vec::new(),
+        delivered_virtual_document_requests: BTreeSet::new(),
+        virtual_document_proposals: Vec::new(),
+    };
+    let request = || ConfirmationRequest {
+        title: "Continue?".into(),
+        message: "A bounded ordinary question".into(),
+        default_answer: ConfirmationAnswer::No,
+    };
+    assert_eq!(host.queue_confirmation(request()).unwrap(), 1);
+    assert_eq!(
+        host.queue_confirmation(request()).unwrap_err().code,
+        ConfirmationErrorCode::QueueFull
+    );
+    host.confirmation_requests.clear();
+    host.confirmation_available = false;
+    assert_eq!(
+        host.queue_confirmation(request()).unwrap_err().code,
+        ConfirmationErrorCode::QueueFull
+    );
+    host.confirmation_available = true;
+    let invalid = ConfirmationRequest {
+        title: String::new(),
+        message: "message".into(),
+        default_answer: ConfirmationAnswer::Cancelled,
+    };
+    assert_eq!(
+        host.queue_confirmation(invalid).unwrap_err().code,
+        ConfirmationErrorCode::InvalidRequest
+    );
+}
+
+#[test]
 fn component_storage_queue_is_capability_key_and_count_bounded() {
     use component_api::dust::plugin::host::{Host, StorageRequest};
     let policy = PluginStorageContribution {
@@ -170,12 +240,18 @@ fn component_storage_queue_is_capability_key_and_count_bounded() {
         proposals: Vec::new(),
         messages: Vec::new(),
         config: BTreeMap::new(),
+        ui_revision: None,
         ui_requests: Vec::new(),
         ui_events: Vec::new(),
         next_ui_token: 1,
+        confirmation_requests: Vec::new(),
+        confirmation_results: Vec::new(),
+        next_confirmation_token: 1,
         host_events: Vec::new(),
         delivered_host_event_ids: BTreeSet::new(),
         host_event_acknowledgements: Vec::new(),
+        confirmation_available: true,
+        confirmation_result_only: false,
         storage_policy: Some(policy),
         storage_requests: Vec::new(),
         storage_results: Vec::new(),
@@ -819,6 +895,12 @@ impl CapturedExecution {
             .unwrap()
             .same(other.origin.as_ref().unwrap())
     }
+    pub(crate) fn confirmation_results(&self) -> &[PluginConfirmationResult] {
+        &self.request.confirmation_results
+    }
+    pub(crate) fn confirmation_available(&self) -> bool {
+        self.request.confirmation_available
+    }
 }
 impl ExecutionFixture {
     pub(crate) fn new(capacity: usize) -> (PluginManager, Self) {
@@ -865,6 +947,33 @@ impl ExecutionFixture {
                     messages: Vec::new(),
                     proposals,
                     ui_requests: Vec::new(),
+                    confirmation_requests: Vec::new(),
+                    host_event_acknowledgements: Vec::new(),
+                    storage_requests: Vec::new(),
+                    provider_chunks: Vec::new(),
+                    virtual_document_proposals: Vec::new(),
+                },
+            })
+            .unwrap();
+    }
+    pub(crate) fn reply_confirmation_request(
+        &self,
+        captured: &CapturedExecution,
+        request: PluginConfirmationRequest,
+    ) {
+        self.events
+            .try_send(WorkerEvent::Executed {
+                load: captured.load,
+                origin: captured.origin.clone(),
+                execution: PluginExecution {
+                    plugin: captured.request.plugin.clone(),
+                    command: captured.request.command.clone(),
+                    generation: captured.request.generation,
+                    result: String::new(),
+                    messages: Vec::new(),
+                    proposals: Vec::new(),
+                    ui_requests: Vec::new(),
+                    confirmation_requests: vec![request],
                     host_event_acknowledgements: Vec::new(),
                     storage_requests: Vec::new(),
                     provider_chunks: Vec::new(),
@@ -891,7 +1000,10 @@ pub(crate) fn empty_execution_request() -> PluginExecutionRequest {
         arguments: Vec::new(),
         snapshot: None,
         config: BTreeMap::new(),
+        ui_revision: None,
+        confirmation_available: true,
         ui_events: Vec::new(),
+        confirmation_results: Vec::new(),
         host_events: Vec::new(),
         storage_results: Vec::new(),
         provider_requests: Vec::new(),

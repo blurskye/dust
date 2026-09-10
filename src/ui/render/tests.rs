@@ -364,6 +364,144 @@ fn workspace_trust_prompt_is_one_centered_confirmation_panel() {
 }
 
 #[test]
+fn ordinary_confirmation_wraps_unicode_and_uses_safe_default_geometry() {
+    let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
+    let loaded = crate::config::load_bundled_config();
+    let mut prompt = PromptState::new(PromptKind::ExplorerDelete);
+    prompt.confirmation = Some(crate::ui::ConfirmationState {
+        title: "Delete this path?".into(),
+        message: "Permanently  delete `長い/界界界界界界/target.rs`?".into(),
+        selected: crate::ui::ConfirmationChoice::No,
+        hint: "Left/Right select · Enter confirm · Escape cancel".into(),
+    });
+    let geometry = crate::ui::prompt_geometry_for_state(30, 12, &loaded.config, &prompt);
+    assert!(geometry.height > 4, "message must wrap in narrow geometry");
+    let frame = render(
+        &state,
+        &UiState {
+            dashboard: true,
+            prompt: Some(prompt),
+            ..UiState::default()
+        },
+        &loaded.config,
+        &loaded.dashboard,
+        30,
+        12,
+    );
+    let rows = (geometry.top..geometry.top + geometry.height)
+        .map(|row| frame.grid.row_text(row))
+        .collect::<Vec<_>>();
+    assert!(rows.iter().any(|row| row.contains("Permanently  delete")));
+    assert!(rows.iter().any(|row| row.contains("[ Yes ]")));
+    assert!(rows.iter().any(|row| row.contains("[ No ]")));
+    let button_y = geometry.top + geometry.height - 2;
+    let no_x = frame.grid.row_text(button_y).find("[ No ]").unwrap() as u16;
+    assert_eq!(
+        frame.grid.get(no_x, button_y).expect("selected No").style,
+        crate::ui::Style::Selection
+    );
+    assert!(frame.cursor.is_none());
+}
+
+#[test]
+fn confirmation_visibility_uses_render_workspace_and_button_width() {
+    let mut state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
+    state.open_text(crate::editor::text::TextBuffer::from_text("x"), None);
+    let loaded = crate::config::load_bundled_config();
+    let mut prompt = PromptState::new(PromptKind::PluginConfirmation);
+    prompt.confirmation = Some(crate::ui::ConfirmationState {
+        title: "Boundary".into(),
+        message: "/tmp/a".into(),
+        selected: crate::ui::ConfirmationChoice::Yes,
+        hint: "Enter confirm".into(),
+    });
+    assert!(crate::ui::confirmation_fully_visible(
+        100,
+        4,
+        &loaded.config,
+        &prompt
+    ));
+    let ui = UiState {
+        dashboard: false,
+        editor_window_layout: Some(editor_layout(&state)),
+        prompt: Some(prompt.clone()),
+        ..UiState::default()
+    };
+    let bounds = (100, 3);
+    assert!(!crate::ui::confirmation_fully_visible(
+        bounds.0,
+        bounds.1,
+        &loaded.config,
+        &prompt
+    ));
+    assert!(!crate::ui::confirmation_fully_visible(
+        1,
+        10,
+        &loaded.config,
+        &prompt
+    ));
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 100, 3);
+    let screen = (0..3)
+        .map(|row| frame.grid.row_text(row))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(screen.contains("Resize to review"));
+    assert!(!screen.contains("[ Yes ]"));
+}
+
+#[test]
+fn confirmation_fails_closed_when_the_full_target_cannot_be_shown() {
+    let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
+    let loaded = crate::config::load_bundled_config();
+    let mut prompt = PromptState::new(PromptKind::ExplorerDelete);
+    prompt.confirmation = Some(crate::ui::ConfirmationState {
+        title: "Delete this path?".into(),
+        message: format!("target/{}", "界  ".repeat(80)),
+        selected: crate::ui::ConfirmationChoice::Yes,
+        hint: "Enter confirm".into(),
+    });
+    assert!(!crate::ui::confirmation_fully_visible(
+        20,
+        6,
+        &loaded.config,
+        &prompt
+    ));
+    let geometry = crate::ui::prompt_geometry_for_state(20, 6, &loaded.config, &prompt);
+    assert_eq!(geometry.height, 6);
+    let frame = render(
+        &state,
+        &UiState {
+            dashboard: true,
+            prompt: Some(prompt),
+            ..UiState::default()
+        },
+        &loaded.config,
+        &loaded.dashboard,
+        20,
+        6,
+    );
+    let screen = (0..6)
+        .map(|row| frame.grid.row_text(row))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(screen.contains("Resize"), "{screen:?}");
+    assert!(!screen.contains("[ Yes ]"));
+    assert!(!screen.contains("[ No ]"));
+
+    let mut tall = PromptState::new(PromptKind::PluginConfirmation);
+    tall.confirmation = Some(crate::ui::ConfirmationState {
+        title: "Tall".into(),
+        message: (0..400).map(|_| "target\n").collect(),
+        selected: crate::ui::ConfirmationChoice::No,
+        hint: String::new(),
+    });
+    assert_eq!(
+        crate::ui::prompt_geometry_for_state(20, 300, &loaded.config, &tall).height,
+        300
+    );
+}
+
+#[test]
 fn prompt_clears_and_clips_the_editor_layer_beneath_its_box() {
     let mut state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
     state.open_text(

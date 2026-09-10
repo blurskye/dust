@@ -44,6 +44,7 @@ impl InteractiveApplication {
         self.cancel_pending_mapping();
         self.input.cancel_pending();
         self.close_prompt();
+        self.input.capture_changed();
         // `:lsp` is normally opened from a source buffer. Put the matching
         // server under the cursor so Enter and runtime selection act on the
         // server the user is actually editing, not an alphabetically earlier

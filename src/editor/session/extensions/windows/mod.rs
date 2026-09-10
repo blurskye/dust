@@ -91,4 +91,4 @@ pub(in crate::editor::session) enum PluginUiInteraction {
     Activate,
 }
 #[cfg(test)]
-mod tests;
+pub(in crate::editor::session) mod tests;

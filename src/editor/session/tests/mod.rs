@@ -88,11 +88,22 @@ fn nix_lsp_launch_runs_the_processed_upstream_artifact_without_nix_evaluation() 
 }
 
 fn app() -> InteractiveApplication {
+    app_with_optional_plugin_queue(None)
+}
+
+fn app_with_plugin_queue(plugin_queue_capacity: usize) -> InteractiveApplication {
+    app_with_optional_plugin_queue(Some(plugin_queue_capacity))
+}
+
+fn app_with_optional_plugin_queue(plugin_queue_capacity: Option<usize>) -> InteractiveApplication {
     let root = tempdir().expect("tempdir").keep();
     let startup = StartupTarget::Dashboard { root: root.clone() };
     let mut loaded = crate::config::load_bundled_config();
     // Keep queue pressure in integration fixtures; defaults otherwise come from production.
     loaded.config.runtime.vfs_queue_capacity = 2;
+    if let Some(plugin_queue_capacity) = plugin_queue_capacity {
+        loaded.config.plugins.queue_capacity = plugin_queue_capacity;
+    }
     let mut app = InteractiveApplication::new(
         startup,
         loaded,

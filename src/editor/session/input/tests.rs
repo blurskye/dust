@@ -35,6 +35,42 @@ fn prompt_edits_preserve_grapheme_boundaries_and_history_policy() {
 }
 
 #[test]
+fn confirmation_choice_is_typed_and_does_not_accept_text() {
+    let mut input = InputSession::new(10);
+    input.open_prompt(PromptKind::ExplorerDelete, String::new(), None);
+    assert!(input.configure_confirmation(
+        "Delete?".into(),
+        "target".into(),
+        crate::ui::ConfirmationChoice::No,
+        String::new(),
+    ));
+    input.prompt_insert("yes");
+    assert!(input.prompt().unwrap().input.is_empty());
+    input.prompt_move(PromptMove::Left);
+    assert_eq!(
+        input
+            .prompt()
+            .unwrap()
+            .confirmation
+            .as_ref()
+            .unwrap()
+            .selected,
+        crate::ui::ConfirmationChoice::Yes
+    );
+    input.toggle_confirmation();
+    assert_eq!(
+        input
+            .prompt()
+            .unwrap()
+            .confirmation
+            .as_ref()
+            .unwrap()
+            .selected,
+        crate::ui::ConfirmationChoice::No
+    );
+}
+
+#[test]
 fn closed_reopened_and_reconfigured_prompt_rejects_the_old_directory_reply() {
     let mut policy = load_bundled_config().config;
     policy.input.completion_select_first = true;

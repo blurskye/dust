@@ -1,10 +1,10 @@
-# Dust Component Plugin SDK 0.1
+# Dust Component Plugin SDK 0.2
 
 The public WIT ABI and this SDK contract are licensed Apache-2.0; see
 [`LICENSES/Apache-2.0.txt`](../LICENSES/Apache-2.0.txt). Dust editor implementation code remains
 GPL-3.0-or-later.
 
-The authoritative ABI is [`wit/dust-plugin.wit`](../wit/dust-plugin.wit), package `dust:plugin@0.1.0`, world `editor-plugin`. Third-party editor plugins must be WebAssembly Components implementing that world. Core Wasm modules, WASI applications, native libraries, and subprocess shims are not plugins.
+The authoritative ABI is [`wit/dust-plugin.wit`](../wit/dust-plugin.wit), package `dust:plugin@0.2.0`, world `editor-plugin`. Third-party editor plugins must be WebAssembly Components implementing that world. Core Wasm modules, WASI applications, native libraries, and subprocess shims are not plugins. This is an intentional pre-release ABI break: 0.1 Components must be rebuilt against the 0.2 WIT. The same pre-release slice removes the native `explorer.delete.confirm` command and its `ExplorerDeleteConfirm` application effect; deletion now submits the typed shared confirmation directly, so integrations must not dispatch that removed phrase-era surface.
 
 ## Theme support
 
@@ -16,16 +16,33 @@ in the user's `themes/` directory; see [the theme guide](user-guide-linux.md#sel
 Native Neovim/Lua themes are not executable Dust plugins. Declarative plugin
 palette contributions and theme-only package installation remain unimplemented.
 
-## Shared UI templates (planned, not a new delivered ABI)
+## Shared confirmation (delivered first template)
 
-The [shared UI roadmap](plans/product-experience-roadmap.md#64-shared-ui-templates-for-the-app-and-plugins)
-requires the app and plugins to use the same confirmation/input, picker/menu,
-list/tree/table, form and preview/output templates. The next interaction contract
-includes Yes/No/Cancelled results and selected item/action payloads, with exact
-requester/load/target ownership. Reusable templates will own ordinary navigation,
-layout, validation presentation and semantic styling; plugins supply bounded
-content and actions. Current retained/private UI support does not imply that
-this full template or prompt-result API already exists.
+`queue-confirmation` requests one ordinary host-owned dialog with a bounded title,
+wrapped message and a Yes/No default. `take-confirmation-results` returns exactly one
+later `Yes`, `No`, `Cancelled`, or typed failure outcome during an admitted execution
+of the requesting command. Destructive requests should default to `No`. Global capacity
+is reserved before the guest call; when all 64 interaction/result slots are occupied,
+`queue-confirmation` returns `queue-full` and creates no token. A request is bound to
+its original document incarnation, editor, workspace, configuration, input capture,
+navigation, invocation, plugin and load. A still-live guest receives terminal
+`source-retired` if those original sources change; a dead/replaced load is discarded
+without delivery to its replacement. The continuation receives no current-buffer
+snapshot and may only replace/patch an existing view from the same plugin load: edit,
+filesystem, storage, provider, virtual-document, new-interaction and focus/window
+requests are refused by host calls before a token or proposal is accepted. The full whitespace-preserving message must fit before buttons
+or submission are available. The host visibly prefixes plugin provenance and plugins
+cannot use protected trust/reset UI.
+
+The host also exposes the current immutable UI admission revision needed by queued
+retained-window proposals. The maintained retained guest uses a real two-step flow:
+its first command opens a custom retained button view, activating that button invokes
+the confirmation command, and the result-only execution replaces the same view with
+distinct Yes/No/Cancelled state. A separate probe exercises typed `queue-full` against
+the actually saturated aggregate host lane.
+This delivers only the confirmation template. Input, richer picker payloads,
+list/tree/table, form and preview/output templates remain planned; retained/private
+UI remains available for custom compositions and behavior.
 
 ## Lifecycle
 
@@ -84,6 +101,7 @@ Capabilities are deny-by-default and checked on every host call:
 - `event-subscriptions`: requires one or more static namespaced subscriptions. The delivered kinds are `workspace-metadata-changed`, `active-surface-changed`, `buffer-summary-changed`, and `plugin-surface-changed`; queue/rate maxima and mandatory coalescing are accepted before Component bytes.
 - `picker-providers`: permits only statically declared `picker-source` requests under the declaration's concurrency/item/byte/deadline policy. Other provider kinds remain statically reserved but runtime-unsupported.
 - `plugin-storage`: requires one static quota declaration and permits only queued logical-key storage calls. It grants no path, namespace, general filesystem, secret, or cross-plugin access.
+- `current-ui-revision`: returns only the current immutable revision needed to source-check a queued UI proposal; it exposes no graph handle, geometry or mutation authority.
 - `queue-ui-request`: enqueues at most 64 retained-window proposals during one component execution. It never mutates the graph in the component worker. A trapped/failed execution publishes none of its queued proposals. The application later checks the exact active load/checksum/catalog generation, expected graph or tree revision, declared content/placement/instance policy, active workspace tab, graph ceilings, close order, and protected compositor boundary before clone-validate-commit.
 - `take-ui-events`: drains bounded asynchronous results on a later execution. Events expose only an opaque generation-bound lifecycle handle plus accepted revisions; they never expose Rust references or raw graph authority. UI failures carry a stable `ui-error-code` (`queue-full`, stale graph/tree/handle, foreign generation, undeclared content/action, disallowed placement, hidden focus, cross-tab, instance/graph ceiling, invalid tree/placement, close order, generation loss, wrong presenter, stale surface/dimensions, invalid local bounds/grapheme/style/cursor/hit region, overlap/split-wide, patch ceiling, or internal rejection) plus a sanitized detail capped at 4 KiB. Guests branch on the code, not detail text.
 

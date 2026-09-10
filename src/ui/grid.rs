@@ -237,11 +237,19 @@ impl CellGrid {
         usize::from(y) * usize::from(self.width) + usize::from(x)
     }
 
-    fn display_width(&self, text: &str) -> usize {
+    pub(crate) fn display_width(&self, text: &str) -> usize {
         if self.ambiguous_wide {
             UnicodeWidthStr::width_cjk(text)
         } else {
             UnicodeWidthStr::width(text)
+        }
+    }
+
+    pub(crate) fn confirmation_grapheme(&self, grapheme: &str) -> String {
+        if grapheme == "\t" {
+            "\\t".into()
+        } else {
+            self.sanitize_grapheme(grapheme)
         }
     }
 

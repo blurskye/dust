@@ -1173,6 +1173,53 @@ context = "workspace_trust_prompt"
 keys = "end"
 command = "command_line.move_end"
 
+# Shared ordinary confirmation. Strong trust/reset prompts keep the phrase context above.
+[[keymap]]
+id = "builtin.confirmation-prompt.surface.command-line-cancel.escape"
+context = "confirmation_prompt"
+keys = "escape"
+command = "command_line.cancel"
+[[keymap]]
+id = "builtin.confirmation-prompt.surface.command-line-submit.enter"
+context = "confirmation_prompt"
+keys = "enter"
+command = "command_line.submit"
+[[keymap]]
+id = "builtin.confirmation-prompt.surface.command-line-move-left.left"
+context = "confirmation_prompt"
+keys = "left"
+command = "command_line.move_left"
+[[keymap]]
+id = "builtin.confirmation-prompt.surface.command-line-move-right.right"
+context = "confirmation_prompt"
+keys = "right"
+command = "command_line.move_right"
+[[keymap]]
+id = "builtin.confirmation-prompt.surface.confirmation-toggle.tab"
+context = "confirmation_prompt"
+keys = "tab"
+command = "surface.confirmation.toggle"
+[[keymap]]
+id = "builtin.confirmation-prompt.surface.confirmation-yes.y"
+context = "confirmation_prompt"
+keys = "y"
+command = "surface.confirmation.select_yes"
+[[keymap]]
+id = "builtin.confirmation-prompt.surface.confirmation-yes.upper-y"
+context = "confirmation_prompt"
+keys = "Y"
+command = "surface.confirmation.select_yes"
+[[keymap]]
+id = "builtin.confirmation-prompt.surface.confirmation-no.n"
+context = "confirmation_prompt"
+keys = "n"
+command = "surface.confirmation.select_no"
+[[keymap]]
+id = "builtin.confirmation-prompt.surface.confirmation-no.upper-n"
+context = "confirmation_prompt"
+keys = "N"
+command = "surface.confirmation.select_no"
+
 # Operator-pending counts and explicit register selection remain configurable.
 [[keymap]]
 id = "builtin.editor.operator-pending.input-zero.key-0"

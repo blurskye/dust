@@ -60,10 +60,21 @@ impl InteractiveApplication {
                 .as_ref()
                 .filter(|_| picker_rect.is_some())
                 .map(|picker| picker.surface),
-            protected_prompt_height: self
-                .input
-                .prompt()
-                .map_or(0, |prompt| if prompt.error.is_some() { 4 } else { 3 }),
+            protected_prompt_height: self.input.prompt().map_or(0, |prompt| {
+                let (width, height) = crate::ui::prompt_surface_dimensions(
+                    &self.state,
+                    &self.ui,
+                    self.window_session.width(),
+                    self.window_session.height(),
+                );
+                crate::ui::prompt_geometry_for_state(
+                    width,
+                    height,
+                    self.configuration.settings(),
+                    prompt,
+                )
+                .height
+            }),
             configuration_generation: self.configuration.generation(),
         }
     }
@@ -157,11 +168,15 @@ impl InteractiveApplication {
                         preliminary.workspace_bounds.height,
                     );
                     let protected = self.input.prompt().map(|prompt| {
-                        let geometry = prompt_geometry(
+                        let prompt_height = preliminary
+                            .workspace_bounds
+                            .height
+                            .saturating_sub(top.saturating_add(bottom));
+                        let geometry = crate::ui::prompt_geometry_for_state(
                             self.window_session.width(),
-                            preliminary.workspace_bounds.height,
-                            &self.configuration.settings().ui.command_line,
-                            prompt.error.is_some() || prompt.help.is_some(),
+                            prompt_height,
+                            self.configuration.settings(),
+                            prompt,
                         );
                         WindowRect {
                             x: geometry.left,

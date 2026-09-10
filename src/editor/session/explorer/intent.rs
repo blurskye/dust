@@ -523,7 +523,6 @@ impl ExplorerSession {
     }
     pub(in crate::editor::session) fn confirm_delete(
         &mut self,
-        phrase: &str,
         scope: WorkspaceVersion,
         configuration: u64,
         editor: &EditorWindowVersion,
@@ -534,9 +533,6 @@ impl ExplorerSession {
             .ok_or("explorer delete request is stale")?;
         if !intent.confirmation || !self.mutation_current(intent, &scope, configuration, editor) {
             return Err("explorer delete request is stale".into());
-        }
-        if phrase.trim() != "delete" {
-            return Err("explorer delete confirmation did not match".into());
         }
         let mut intent = self.mutation.take().expect("checked confirmation");
         let Phase::Ready(prepared) = intent.phase else {
@@ -565,18 +561,6 @@ impl ExplorerSession {
                 self.mutation = None;
                 Err(error)
             }
-        }
-    }
-    pub(super) fn retire_changed_confirmation(&mut self) {
-        if let Some(intent) = &mut self.mutation
-            && intent.confirmation
-            && !matches!(intent.phase, Phase::Applying(_) | Phase::AdmittingApply)
-            && self
-                .tree
-                .selected_node()
-                .is_none_or(|node| intent.operation.source() != Some(node.path.as_path()))
-        {
-            intent.invalid = true;
         }
     }
     pub(in crate::editor::session) fn cancel_confirmation(&mut self) -> Option<RequestId> {

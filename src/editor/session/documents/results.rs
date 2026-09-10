@@ -439,11 +439,18 @@ impl InteractiveApplication {
         };
         match update {
             MutationUpdate::Confirmation(path) => {
-                self.open_prompt(PromptKind::ExplorerDelete, String::new());
-                self.prompt_help(format!(
-                    "Permanently deletes `{}`. Type `delete`.",
-                    path.display()
-                ));
+                self.open_confirmation(
+                    PromptKind::ExplorerDelete,
+                    self.configuration
+                        .settings()
+                        .ui
+                        .command_line
+                        .text
+                        .explorer_delete_title
+                        .clone(),
+                    explorer_delete_message(&path),
+                    crate::ui::ConfirmationChoice::No,
+                );
             }
             MutationUpdate::Apply(prepared) => {
                 if self
@@ -595,4 +602,23 @@ impl InteractiveApplication {
             self.show_error(notice);
         }
     }
+}
+
+fn explorer_delete_message(path: &std::path::Path) -> String {
+    format!("Permanently delete {path:?}?")
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn explorer_delete_message_uses_truthful_path_debug_escaping() {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt, path::PathBuf};
+    assert_eq!(
+        explorer_delete_message(std::path::Path::new("a  界\n\\b")),
+        "Permanently delete \"a  界\\n\\\\b\"?"
+    );
+    let raw = PathBuf::from(OsString::from_vec(b"raw-\xff".to_vec()));
+    assert_eq!(
+        explorer_delete_message(&raw),
+        "Permanently delete \"raw-\\xFF\"?"
+    );
 }

@@ -56,6 +56,7 @@ pub enum PromptKind {
     GitReset,
     ExplorerDelete,
     ExplorerRename,
+    PluginConfirmation,
 }
 
 impl PromptKind {
@@ -69,6 +70,7 @@ impl PromptKind {
             Self::GitReset => &text.git_reset_title,
             Self::ExplorerDelete => &text.explorer_delete_title,
             Self::ExplorerRename => &text.explorer_rename_title,
+            Self::PluginConfirmation => "Plugin confirmation",
         }
     }
 
@@ -82,6 +84,7 @@ impl PromptKind {
             Self::GitReset => &text.git_reset_marker,
             Self::ExplorerDelete => &text.explorer_delete_marker,
             Self::ExplorerRename => &text.explorer_rename_marker,
+            Self::PluginConfirmation => "",
         }
     }
 }
@@ -92,9 +95,24 @@ pub struct CompletionItem {
     pub detail: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConfirmationChoice {
+    Yes,
+    No,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfirmationState {
+    pub title: String,
+    pub message: String,
+    pub selected: ConfirmationChoice,
+    pub hint: String,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PromptState {
     pub kind: PromptKind,
+    pub confirmation: Option<ConfirmationState>,
     pub input: String,
     pub cursor: usize,
     pub help: Option<String>,
@@ -108,6 +126,7 @@ impl PromptState {
     pub fn new(kind: PromptKind) -> Self {
         Self {
             kind,
+            confirmation: None,
             input: String::new(),
             cursor: 0,
             help: None,
@@ -688,6 +707,134 @@ pub fn prompt_geometry(
     }
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct ConfirmationLine {
+    pub units: Vec<(String, u16)>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ConfirmationLayout {
+    pub geometry: PromptGeometry,
+    pub lines: Vec<ConfirmationLine>,
+    pub fully_visible: bool,
+}
+
+fn confirmation_lines(text: &str, width: u16, config: &Config) -> (Vec<ConfirmationLine>, bool) {
+    let policy = CellGrid::new_with_policy(
+        0,
+        0,
+        &config.editor.control_character_replacement,
+        &config.editor.zero_width_replacement,
+        config.editor.ambiguous_width == AmbiguousWidth::Wide,
+    );
+    let mut lines = Vec::new();
+    let mut units = Vec::new();
+    let mut used = 0u16;
+    let mut oversized = false;
+    for grapheme in text.graphemes(true) {
+        if grapheme == "\n" {
+            lines.push(ConfirmationLine {
+                units: std::mem::take(&mut units),
+            });
+            used = 0;
+            continue;
+        }
+        let projected = policy.confirmation_grapheme(grapheme);
+        let unit_width = u16::try_from(policy.display_width(&projected).clamp(1, 2)).unwrap_or(1);
+        if unit_width > width {
+            oversized = true;
+        }
+        if !units.is_empty() && used.saturating_add(unit_width) > width {
+            lines.push(ConfirmationLine {
+                units: std::mem::take(&mut units),
+            });
+            used = 0;
+        }
+        units.push((projected, unit_width));
+        used = used.saturating_add(unit_width);
+    }
+    lines.push(ConfirmationLine { units });
+    (lines, oversized)
+}
+
+#[must_use]
+pub(crate) fn confirmation_layout(
+    terminal_width: u16,
+    terminal_height: u16,
+    config: &Config,
+    prompt: &PromptState,
+) -> ConfirmationLayout {
+    let mut geometry = prompt_geometry(
+        terminal_width,
+        terminal_height,
+        &config.ui.command_line,
+        prompt.error.is_some() || prompt.help.is_some(),
+    );
+    let Some(confirmation) = &prompt.confirmation else {
+        return ConfirmationLayout {
+            geometry,
+            lines: Vec::new(),
+            fully_visible: true,
+        };
+    };
+    let content_width = geometry.width.saturating_sub(4);
+    let (lines, oversized) = confirmation_lines(&confirmation.message, content_width, config);
+    let desired_height = u16::try_from(lines.len())
+        .unwrap_or(u16::MAX)
+        .saturating_add(3);
+    geometry.height = desired_height.min(terminal_height.max(1));
+    geometry.top = config
+        .ui
+        .command_line
+        .top_rows
+        .min(terminal_height.saturating_sub(geometry.height));
+    let buttons_width = u16::try_from(text_width("[ Yes ] [ No ]", config.editor.ambiguous_width))
+        .unwrap_or(u16::MAX);
+    let fully_visible = !oversized
+        && geometry.width >= buttons_width.saturating_add(4)
+        && desired_height <= terminal_height
+        && geometry.height >= 4;
+    ConfirmationLayout {
+        geometry,
+        lines,
+        fully_visible,
+    }
+}
+
+#[must_use]
+pub fn prompt_geometry_for_state(
+    terminal_width: u16,
+    terminal_height: u16,
+    config: &Config,
+    prompt: &PromptState,
+) -> PromptGeometry {
+    confirmation_layout(terminal_width, terminal_height, config, prompt).geometry
+}
+
+#[must_use]
+pub fn confirmation_fully_visible(
+    terminal_width: u16,
+    terminal_height: u16,
+    config: &Config,
+    prompt: &PromptState,
+) -> bool {
+    confirmation_layout(terminal_width, terminal_height, config, prompt).fully_visible
+}
+
+#[must_use]
+pub fn prompt_surface_dimensions(
+    state: &EditorState,
+    ui: &UiState,
+    terminal_width: u16,
+    terminal_height: u16,
+) -> (u16, u16) {
+    let height = active_compositor(state, ui, terminal_width, terminal_height)
+        .map_or(terminal_height, |compositor| {
+            compositor.projection.tiled_bounds.height
+        });
+    (terminal_width, height)
+}
+
 #[must_use]
 pub fn editor_workspace_insets(
     state: &EditorState,
@@ -959,7 +1106,10 @@ pub fn render(
         );
     }
     if let Some(prompt) = &ui.prompt {
-        render_prompt(&mut frame, prompt, config, width, workspace_height);
+        let prompt_height = compositor.map_or(height, |compositor| {
+            compositor.projection.tiled_bounds.height
+        });
+        render_prompt(&mut frame, prompt, config, width, prompt_height);
     }
     frame
 }

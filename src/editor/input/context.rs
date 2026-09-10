@@ -9,6 +9,7 @@ const BUILTIN_SURFACES: &[&str] = &[
     "command_prompt",
     "search_prompt",
     "workspace_trust_prompt",
+    "confirmation_prompt",
     "completion",
     "documentation",
     "picker",

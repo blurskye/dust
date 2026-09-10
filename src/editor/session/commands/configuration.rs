@@ -300,6 +300,32 @@ pub(super) fn register_commands(
             move |_| effect.clone(),
         )?;
     }
+    for (id, title, effect) in [
+        (
+            "surface.confirmation.select_yes",
+            "Select Yes",
+            AppEffect::PromptConfirmationSelect(crate::ui::ConfirmationChoice::Yes),
+        ),
+        (
+            "surface.confirmation.select_no",
+            "Select No",
+            AppEffect::PromptConfirmationSelect(crate::ui::ConfirmationChoice::No),
+        ),
+        (
+            "surface.confirmation.toggle",
+            "Toggle confirmation choice",
+            AppEffect::PromptConfirmationToggle,
+        ),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::Application,
+            ArgumentSchema::default(),
+            move |_| effect.clone(),
+        )?;
+    }
     register_grammar_commands(registry)?;
     Ok(())
 }
