@@ -47,9 +47,9 @@ impl InteractiveApplication {
             || self.search.pending()
             || self.workspace_edits.preparing()
             || self.workspace_edits.proposal().is_some()
-            || !self.pending_vfs.is_empty()
+            || self.documents.legacy_pending()
             || self.workspace.persist_pending()
-            || self.execution_validation.is_some()
+            || self.workspace.validation_pending()
             || self.documents.has_startup_work()
             || self.documents.file_work_pending();
         busy.then(|| self.message("workspace_root_service_blocker", &[]))

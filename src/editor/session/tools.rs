@@ -95,7 +95,7 @@ impl InteractiveApplication {
                 },
                 RegistryUpdate::ValidateArtifact => {
                     self.defer_trusted_execution(DeferredExecution::PrepareRegistryArtifact);
-                    if self.execution_validation.is_none() {
+                    if !self.workspace.validation_pending() {
                         self.extension.discard_artifact();
                     }
                 }

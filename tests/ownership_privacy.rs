@@ -1091,7 +1091,7 @@ fn legitimate_client(editor: &mut crate::editor::EditorState) { editor.workspace
         ),
         (
             "plugin_invocation_loan",
-            r#"fn bypass(source:&mut super::plugin_edits::PluginEditSources, manager:&mut crate::extensions::PluginManager, editor:&crate::editor::EditorState, workspace:&super::workspace::WorkspaceSession, request:crate::extensions::PluginExecutionRequest) { let loan=source.prepare(manager,("demo","run"),editor,workspace,&1,1024).unwrap(); manager.disable("demo").unwrap(); let _=loan.submit(request); }"#,
+            r#"fn bypass(source:&mut super::plugin_edits::PluginEditSources, manager:&mut crate::extensions::PluginManager, editor:&crate::editor::EditorState, workspace:&super::workspace::WorkspaceSession, request:crate::extensions::PluginExecutionRequest) { let loan=source.prepare_interactive(manager,("demo","run"),editor,workspace,&1,(1024,None,None,true)).unwrap(); manager.disable("demo").unwrap(); let _=loan.submit(request); }"#,
             "manager",
             "E0499",
         ),

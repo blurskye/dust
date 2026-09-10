@@ -24,6 +24,9 @@ enum Pending {
         path: PathBuf,
         buffer: Option<(BufferId, BufferRevision)>,
     },
+    CrashDelete {
+        path: PathBuf,
+    },
 }
 
 pub(super) enum RecoveryUpdate {
@@ -31,6 +34,7 @@ pub(super) enum RecoveryUpdate {
     Error(String),
     Pruned(usize),
     Discarded,
+    CrashCleared,
 }
 
 pub(super) struct RecoverySession {
@@ -182,6 +186,15 @@ impl RecoverySession {
             }
         }
     }
+    pub(super) fn clear_crash(
+        &mut self,
+        path: PathBuf,
+        mut io: RecoveryIo<'_>,
+    ) -> Result<(), String> {
+        let id = io.delete(&path).map_err(|error| error.to_string())?;
+        self.pending.insert(id, Pending::CrashDelete { path });
+        Ok(())
+    }
     pub(super) fn discard_latest(&mut self, mut io: RecoveryIo<'_>) -> Result<bool, String> {
         let Some((path, _)) = self.records.last() else {
             return Ok(false);
@@ -223,7 +236,8 @@ impl RecoverySession {
             (Pending::Discovery, VfsResult::RecoveryDiscovered { .. })
             | (Pending::Cleanup, VfsResult::RecoveryCleaned { .. }) => true,
             (Pending::Write { path, .. }, VfsResult::RecoveryWritten { path: actual, .. })
-            | (Pending::Delete { path, .. }, VfsResult::Deleted { path: actual, .. }) => {
+            | (Pending::Delete { path, .. }, VfsResult::Deleted { path: actual, .. })
+            | (Pending::CrashDelete { path }, VfsResult::Deleted { path: actual, .. }) => {
                 path == actual
             }
             _ => false,
@@ -284,6 +298,10 @@ impl RecoverySession {
                     }
                     RecoveryUpdate::Error(error.to_string())
                 }
+            },
+            (Pending::CrashDelete { .. }, VfsResult::Deleted { result, .. }) => match result {
+                Ok(()) => RecoveryUpdate::CrashCleared,
+                Err(error) => RecoveryUpdate::Error(error.to_string()),
             },
             (Pending::Delete { path, buffer }, VfsResult::Deleted { result, .. }) => match result {
                 Err(error) => RecoveryUpdate::Error(error.to_string()),

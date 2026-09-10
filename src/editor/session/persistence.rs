@@ -28,6 +28,8 @@ pub(in crate::editor::session) struct PersistenceSession {
     save_expected: bool,
     saved_on_exit: bool,
     exit_request: Option<PersistenceId>,
+    navigation_reads:
+        std::collections::HashMap<crate::files::RequestId, crate::persistence::PersistedLocation>,
 }
 impl PersistenceSession {
     pub(in crate::editor::session) fn new(worker: PersistenceService, path: PathBuf) -> Self {
@@ -48,7 +50,27 @@ impl PersistenceSession {
             save_expected: false,
             saved_on_exit: false,
             exit_request: None,
+            navigation_reads: Default::default(),
         }
+    }
+    pub(in crate::editor::session) fn register_navigation_read(
+        &mut self,
+        id: crate::files::RequestId,
+        location: crate::persistence::PersistedLocation,
+    ) {
+        self.navigation_reads.insert(id, location);
+    }
+    pub(in crate::editor::session) fn take_navigation_read(
+        &mut self,
+        id: crate::files::RequestId,
+    ) -> Option<crate::persistence::PersistedLocation> {
+        self.navigation_reads.remove(&id)
+    }
+    pub(in crate::editor::session) fn retire_document_request(
+        &mut self,
+        id: crate::files::RequestId,
+    ) {
+        self.navigation_reads.remove(&id);
     }
     pub(in crate::editor::session) fn request_save(&mut self) {
         if !self.closing {

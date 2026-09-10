@@ -16,7 +16,7 @@ fn first_frame_renders_before_startup_file_is_queued_and_vfs_then_opens_it() {
         24,
     );
     assert_eq!(frame.grid.width(), 80);
-    assert!(app.pending_vfs.is_empty());
+    assert_eq!(app.documents.legacy_count(), 0);
     assert!(app.state.buffers.is_empty());
 
     app.queue_startup_reads();

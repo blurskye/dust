@@ -38,6 +38,9 @@ pub(in crate::editor::session) struct SearchSession {
     intent: Option<Intent>,
     live: bool,
     query: String,
+    matcher_navigation: std::collections::HashMap<crate::files::RequestId, MatcherSource>,
+    workspace_navigation:
+        std::collections::HashMap<crate::files::RequestId, std::ops::Range<usize>>,
 }
 pub(in crate::editor::session) enum Intent {
     Find,
@@ -49,6 +52,39 @@ pub(in crate::editor::session) enum SearchUpdate {
     Failed(String),
 }
 impl SearchSession {
+    pub(in crate::editor::session) fn register_matcher_navigation(
+        &mut self,
+        id: crate::files::RequestId,
+        source: MatcherSource,
+    ) {
+        self.matcher_navigation.insert(id, source);
+    }
+    pub(in crate::editor::session) fn take_matcher_navigation(
+        &mut self,
+        id: crate::files::RequestId,
+    ) -> Option<MatcherSource> {
+        self.matcher_navigation.remove(&id)
+    }
+    pub(in crate::editor::session) fn register_workspace_navigation(
+        &mut self,
+        id: crate::files::RequestId,
+        range: std::ops::Range<usize>,
+    ) {
+        self.workspace_navigation.insert(id, range);
+    }
+    pub(in crate::editor::session) fn take_workspace_navigation(
+        &mut self,
+        id: crate::files::RequestId,
+    ) -> Option<std::ops::Range<usize>> {
+        self.workspace_navigation.remove(&id)
+    }
+    pub(in crate::editor::session) fn retire_document_request(
+        &mut self,
+        id: crate::files::RequestId,
+    ) {
+        self.matcher_navigation.remove(&id);
+        self.workspace_navigation.remove(&id);
+    }
     pub(in crate::editor::session) fn live(&self) -> bool {
         self.live
     }

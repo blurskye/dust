@@ -71,6 +71,32 @@ fn assert_absent(relative: &str, forbidden: &[&str]) {
 }
 
 #[test]
+fn interactive_coordinator_has_only_bounded_owner_references() {
+    let source = module_source("src/editor/session/dispatch/mod.rs");
+    let body = source
+        .split_once("struct InteractiveApplication {")
+        .expect("interactive coordinator")
+        .1
+        .split_once("\n}")
+        .expect("interactive coordinator body")
+        .0;
+    let fields = body
+        .lines()
+        .filter(|line| {
+            line.strip_prefix("    ")
+                .is_some_and(|line| !line.starts_with(' ') && line.contains(':'))
+        })
+        .count();
+    assert!(fields <= 26, "interactive coordinator owns {fields} fields");
+    for forbidden in ["pending_vfs", "execution_validation"] {
+        assert!(
+            !body.contains(forbidden),
+            "interactive coordinator retains `{forbidden}`"
+        );
+    }
+}
+
+#[test]
 fn module_dependency_direction_matches_the_architecture_spec() {
     assert_absent(
         "src/editor/text",

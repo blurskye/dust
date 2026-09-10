@@ -189,7 +189,7 @@ fn write_plugin_manifest(root: &std::path::Path, manifest: &crate::extensions::P
 
 fn wait_vfs(app: &mut InteractiveApplication) {
     let deadline = Instant::now() + Duration::from_secs(2);
-    while !app.pending_vfs.is_empty() || app.documents.has_work() {
+    while app.documents.has_work() {
         app.queue_startup_reads();
         app.process_vfs_results();
         assert!(Instant::now() < deadline, "VFS completion timed out");

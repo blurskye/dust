@@ -21,7 +21,7 @@ use crate::{
 };
 pub(in crate::editor::session) use prompts::PromptCompletionKey;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     time::{Duration, Instant},
 };
 
@@ -62,9 +62,29 @@ pub(super) struct InputSession {
     last_macro: Option<char>,
     replay_depth: usize,
     replay_steps: usize,
+    completion_reads: HashMap<crate::files::RequestId, PromptCompletionKey>,
 }
 
 impl InputSession {
+    pub(in crate::editor::session) fn register_completion_read(
+        &mut self,
+        id: crate::files::RequestId,
+        key: PromptCompletionKey,
+    ) {
+        self.completion_reads.insert(id, key);
+    }
+    pub(in crate::editor::session) fn take_completion_read(
+        &mut self,
+        id: crate::files::RequestId,
+    ) -> Option<PromptCompletionKey> {
+        self.completion_reads.remove(&id)
+    }
+    pub(in crate::editor::session) fn retire_document_request(
+        &mut self,
+        id: crate::files::RequestId,
+    ) {
+        self.completion_reads.remove(&id);
+    }
     pub(in crate::editor::session) fn begin_picker(&mut self) {
         self.picker_normal = false;
         self.cancel_pending();
@@ -113,6 +133,7 @@ impl InputSession {
             last_macro: None,
             replay_depth: 0,
             replay_steps: 0,
+            completion_reads: HashMap::new(),
         }
     }
     pub(in crate::editor::session) fn hold_focus(

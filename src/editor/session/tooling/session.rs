@@ -20,12 +20,51 @@ pub(super) struct ToolingSession {
     version_service: ToolVersionService,
     version_pending: BTreeSet<String>,
     versions: BTreeMap<String, Result<String, String>>,
+    validation: Option<(
+        crate::editor::session::workspace::ValidationId,
+        String,
+        Option<LspRuntimeSource>,
+    )>,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::editor::session) enum LspRuntimeSource {
     Path,
     Managed,
     Nix,
+}
+
+impl ToolingSession {
+    pub(super) fn defer_validation(
+        &mut self,
+        id: crate::editor::session::workspace::ValidationId,
+        tool: String,
+        source: Option<LspRuntimeSource>,
+    ) {
+        debug_assert!(self.validation.is_none());
+        self.validation = Some((id, tool, source));
+    }
+    pub(super) fn take_validation(
+        &mut self,
+        id: crate::editor::session::workspace::ValidationId,
+    ) -> Option<crate::editor::session::DeferredExecution> {
+        let matches = self
+            .validation
+            .as_ref()
+            .is_some_and(|(expected, ..)| *expected == id);
+        matches.then(|| {
+            let (_, id, source) = self.validation.take().expect("matched tooling validation");
+            crate::editor::session::DeferredExecution::InstallTool { id, source }
+        })
+    }
+    #[cfg(test)]
+    pub(super) fn validation(&self) -> Option<crate::editor::session::DeferredExecution> {
+        self.validation.as_ref().map(|(_, id, source)| {
+            crate::editor::session::DeferredExecution::InstallTool {
+                id: id.clone(),
+                source: *source,
+            }
+        })
+    }
 }
 
 impl LspRuntimeSource {
@@ -135,6 +174,7 @@ impl ToolingSession {
             version_service: ToolVersionService::start(),
             version_pending: BTreeSet::new(),
             versions: BTreeMap::new(),
+            validation: None,
         }
     }
     pub(super) fn entries(&self) -> &[ToolEntry] {

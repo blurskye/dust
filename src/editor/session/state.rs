@@ -1,52 +1,5 @@
 use super::*;
 
-#[derive(Clone, Debug)]
-pub(in crate::editor::session) enum DeferredExecution {
-    InstallTool {
-        id: String,
-        source: Option<LspRuntimeSource>,
-    },
-    StartLsp(Option<String>),
-    RestartLsp(String),
-    StartDebug(crate::editor::session::debugger::DebugIntent),
-    InstallRegistry {
-        publisher: String,
-        name: String,
-        version: String,
-    },
-    PrepareRegistryArtifact,
-    InstallPackage {
-        package_manifest: PathBuf,
-        plugin_manifest: PathBuf,
-        component: PathBuf,
-        update: bool,
-    },
-    RunTask(String),
-    OpenTerminal(crate::editor::session::terminal::TerminalIntent),
-    OpenDapTerminal {
-        intent: crate::editor::session::terminal::TerminalIntent,
-        reply: crate::debugger::DapTerminalReply,
-    },
-    RunTest {
-        name: String,
-        matcher: crate::config::ProblemMatcherConfig,
-    },
-    RunLinter {
-        name: String,
-        matcher: crate::config::ProblemMatcherConfig,
-    },
-    RunFormatter {
-        name: String,
-        source: crate::editor::session::tasks::FormatterSource,
-    },
-}
-
-#[derive(Clone, Debug)]
-pub(in crate::editor::session) struct PendingExecutionValidation {
-    pub(in crate::editor::session) action: DeferredExecution,
-    pub(in crate::editor::session) id: super::super::workspace::ValidationId,
-}
-
 pub(in crate::editor::session) fn compose_workspace_file_items(
     items: Vec<(PickerItem, PickerPayload)>,
 ) -> Result<Vec<(PickerItem, PickerPayload)>, crate::workspace::search_workflow::SearchWorkflowError>
@@ -208,25 +161,4 @@ pub(in crate::editor::session) fn compose_command_picker_items(
         .into_iter()
         .filter_map(|id| by_id.remove(&id))
         .collect())
-}
-
-#[derive(Clone, Debug)]
-pub(in crate::editor::session) enum PendingVfs {
-    LspNavigation {
-        range: crate::language::lsp::LspRange,
-        encoding: PositionEncoding,
-    },
-    PersistedNavigation {
-        location: PersistedLocation,
-    },
-    MatcherNavigation {
-        source: MatcherSource,
-    },
-    WorkspaceSearchNavigation {
-        range: std::ops::Range<usize>,
-    },
-    Completion {
-        key: crate::editor::session::input::PromptCompletionKey,
-    },
-    CrashDelete,
 }

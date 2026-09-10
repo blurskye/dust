@@ -26,6 +26,47 @@ mod windows;
 mod workspace;
 mod workspace_edits;
 
+#[derive(Clone, Debug)]
+pub(in crate::editor::session) enum DeferredExecution {
+    InstallTool {
+        id: String,
+        source: Option<tooling::LspRuntimeSource>,
+    },
+    StartLsp(Option<String>),
+    RestartLsp(String),
+    StartDebug(debugger::DebugIntent),
+    InstallRegistry {
+        publisher: String,
+        name: String,
+        version: String,
+    },
+    PrepareRegistryArtifact,
+    InstallPackage {
+        package_manifest: std::path::PathBuf,
+        plugin_manifest: std::path::PathBuf,
+        component: std::path::PathBuf,
+        update: bool,
+    },
+    RunTask(String),
+    OpenTerminal(terminal::TerminalIntent),
+    OpenDapTerminal {
+        intent: terminal::TerminalIntent,
+        reply: crate::debugger::DapTerminalReply,
+    },
+    RunTest {
+        name: String,
+        matcher: crate::config::ProblemMatcherConfig,
+    },
+    RunLinter {
+        name: String,
+        matcher: crate::config::ProblemMatcherConfig,
+    },
+    RunFormatter {
+        name: String,
+        source: tasks::FormatterSource,
+    },
+}
+
 pub use configuration::{
     ConfigurationSources, KeymapInspection, ResolvedConfiguration, ResolvedKeymaps,
     compile_keymaps, compile_keymaps_with_plugin_catalog, compile_keymaps_with_plugin_index,

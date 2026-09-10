@@ -73,11 +73,12 @@ pub use commands::{
 };
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
+use super::DeferredExecution;
 use super::workspace::WorkspacePreflightEvent as ExecutionPreflightEvent;
 use crate::config::LoadedConfig;
 use crate::debugger::{DapControl, DapEvent, DapResponse, DapSourceBreakpoint};
@@ -94,8 +95,8 @@ use crate::editor::{
 };
 use crate::extensions::{PluginEvent, PluginLimits, PluginLoadId, PluginStatus};
 use crate::files::{
-    ExplorerMutation, ExplorerWatchService, RequestId, ResourceIntentKind, VfsError, VfsResult,
-    VfsWorker, WorkspaceFilePolicy, WorkspaceSearchMatch, WorkspaceSearchPolicy,
+    ExplorerMutation, ExplorerWatchService, ResourceIntentKind, VfsError, VfsResult, VfsWorker,
+    WorkspaceFilePolicy, WorkspaceSearchMatch, WorkspaceSearchPolicy,
 };
 use crate::language::lsp::{
     LspDocument, LspEvent, LspFeature, LspFeatureResult, LspMarkupContent, LspMarkupKind,
@@ -156,7 +157,6 @@ struct InteractiveApplication {
     ui: UiState,
     documents: DocumentSession,
     search: super::search::SearchSession,
-    pending_vfs: HashMap<RequestId, PendingVfs>,
     should_quit: bool,
     window_session: WindowSession,
     tooling: super::tooling::ToolingSession,
@@ -166,7 +166,6 @@ struct InteractiveApplication {
     recovery: super::recovery::RecoverySession,
     next_transaction: u64,
     git: super::git::GitSession,
-    execution_validation: Option<PendingExecutionValidation>,
     explorer: super::explorer::ExplorerSession,
     syntax: SyntaxSession,
     persistence: super::persistence::PersistenceSession,
@@ -495,7 +494,6 @@ impl InteractiveApplication {
             },
             documents,
             search: super::search::SearchSession::default(),
-            pending_vfs: HashMap::new(),
             should_quit: false,
             window_session: WindowSession::new(dashboard_visible, terminal_panel_height),
             tooling,
@@ -504,7 +502,6 @@ impl InteractiveApplication {
             recovery: super::recovery::RecoverySession::new(state_directory.join("recovery")),
             next_transaction: 1_000_000,
             git: super::git::GitSession::default(),
-            execution_validation: None,
             explorer: super::explorer::ExplorerSession::new(explorer_watch),
             syntax: SyntaxSession::new(syntax_queue_capacity),
             persistence: super::persistence::PersistenceSession::new(

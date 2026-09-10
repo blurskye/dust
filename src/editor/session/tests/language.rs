@@ -34,7 +34,7 @@ fn installed_language_server_autostarts_after_workspace_trust_is_exact() {
     });
 
     app.sync_lsp_document();
-    assert!(app.execution_validation.is_none());
+    assert!(app.language.validation().is_none());
     assert!(!app.ui.notification_error);
 
     prepare_trust_identity(&mut app);
@@ -44,7 +44,7 @@ fn installed_language_server_autostarts_after_workspace_trust_is_exact() {
     app.reconcile_workspace_trust();
     app.sync_lsp_document();
     assert!(matches!(
-        app.execution_validation.as_ref().map(|pending| &pending.action),
+        app.language.validation().as_ref(),
         Some(super::DeferredExecution::StartLsp(Some(server)))
             if server == "automatic-rust"
     ));
@@ -1023,7 +1023,7 @@ fn enter_installs_a_missing_managed_lsp_instead_of_trying_to_start_it() {
     app.reconcile_workspace_trust();
     app.activate_selected_tool();
     assert!(matches!(
-        app.execution_validation.as_ref().map(|pending| &pending.action),
+        app.tooling.validation().as_ref(),
         Some(super::DeferredExecution::InstallTool {
             id,
             source: Some(LspRuntimeSource::Managed | LspRuntimeSource::Nix),

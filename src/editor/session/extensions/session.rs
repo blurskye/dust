@@ -56,6 +56,20 @@ pub(in crate::editor::session) struct InvocationContext<'a> {
 
 type BufferObservation = (u64, u64, usize, usize, usize, u8);
 pub(in crate::editor::session) type HostObservation = (u64, String, Option<BufferObservation>, u64);
+enum ValidationIntent {
+    InstallRegistry {
+        publisher: String,
+        name: String,
+        version: String,
+    },
+    PrepareRegistryArtifact,
+    InstallPackage {
+        package_manifest: PathBuf,
+        plugin_manifest: PathBuf,
+        component: PathBuf,
+        update: bool,
+    },
+}
 pub(super) struct ExtensionSession {
     windows: windows::PluginWindowHost,
     providers: PluginProviderBroker,
@@ -86,8 +100,90 @@ pub(super) struct ExtensionSession {
     observation: Option<HostObservation>,
     storage: PluginStorageService,
     results: BTreeMap<(String, PluginLoadId), Vec<PluginStorageResult>>,
+    validation: Option<(super::workspace::ValidationId, ValidationIntent)>,
 }
 impl ExtensionSession {
+    pub(super) fn defer_registry_validation(
+        &mut self,
+        id: super::workspace::ValidationId,
+        publisher: String,
+        name: String,
+        version: String,
+    ) {
+        debug_assert!(self.validation.is_none());
+        self.validation = Some((
+            id,
+            ValidationIntent::InstallRegistry {
+                publisher,
+                name,
+                version,
+            },
+        ));
+    }
+    pub(super) fn defer_artifact_validation(&mut self, id: super::workspace::ValidationId) {
+        debug_assert!(self.validation.is_none());
+        self.validation = Some((id, ValidationIntent::PrepareRegistryArtifact));
+    }
+    pub(super) fn defer_package_validation(
+        &mut self,
+        id: super::workspace::ValidationId,
+        package_manifest: PathBuf,
+        plugin_manifest: PathBuf,
+        component: PathBuf,
+        update: bool,
+    ) {
+        debug_assert!(self.validation.is_none());
+        self.validation = Some((
+            id,
+            ValidationIntent::InstallPackage {
+                package_manifest,
+                plugin_manifest,
+                component,
+                update,
+            },
+        ));
+    }
+    pub(super) fn take_validation(
+        &mut self,
+        id: super::workspace::ValidationId,
+    ) -> Option<crate::editor::session::DeferredExecution> {
+        let matches = self
+            .validation
+            .as_ref()
+            .is_some_and(|(expected, _)| *expected == id);
+        matches.then(|| {
+            match self
+                .validation
+                .take()
+                .expect("matched extension validation")
+                .1
+            {
+                ValidationIntent::InstallRegistry {
+                    publisher,
+                    name,
+                    version,
+                } => crate::editor::session::DeferredExecution::InstallRegistry {
+                    publisher,
+                    name,
+                    version,
+                },
+                ValidationIntent::PrepareRegistryArtifact => {
+                    crate::editor::session::DeferredExecution::PrepareRegistryArtifact
+                }
+                ValidationIntent::InstallPackage {
+                    package_manifest,
+                    plugin_manifest,
+                    component,
+                    update,
+                } => crate::editor::session::DeferredExecution::InstallPackage {
+                    package_manifest,
+                    plugin_manifest,
+                    component,
+                    update,
+                },
+            }
+        })
+    }
     pub(super) fn new(
         root: PathBuf,
         capacity: usize,
@@ -124,6 +220,7 @@ impl ExtensionSession {
             observation: None,
             storage: PluginStorageService::start(root, capacity),
             results: BTreeMap::new(),
+            validation: None,
         }
     }
     pub(super) fn statuses(&self) -> &BTreeMap<String, PluginStatus> {

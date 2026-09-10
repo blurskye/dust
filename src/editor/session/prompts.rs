@@ -182,8 +182,7 @@ impl InteractiveApplication {
                 .documents
                 .list_directory(request.directory, request.limit)
             {
-                self.pending_vfs
-                    .insert(id, PendingVfs::Completion { key: request.key });
+                self.input.register_completion_read(id, request.key);
             }
         }
         self.project_input_prompt();

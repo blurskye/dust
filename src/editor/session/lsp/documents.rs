@@ -77,7 +77,7 @@ impl InteractiveApplication {
             enabled: self.configuration.settings().lsp.enabled,
             auto_start: self.configuration.settings().lsp.auto_start,
             nix_workspace_fallback: self.configuration.settings().lsp.nix_workspace_fallback,
-            execution_busy: self.execution_validation.is_some(),
+            execution_busy: self.workspace.validation_pending(),
             launchable_server,
         };
         if let Some(server) =

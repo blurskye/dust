@@ -612,14 +612,14 @@ fn virtual_read_only_origin_never_queues_save_reload_or_recovery_io() {
         document: 9,
         revision: 1,
     };
-    let before = app.pending_vfs.len();
+    let before = app.documents.legacy_count();
     app.start_save(
         false,
         Some(app.state.workspace_root.join("forbidden")),
         false,
     );
     app.start_reload(true);
-    assert_eq!(app.pending_vfs.len(), before);
+    assert_eq!(app.documents.legacy_count(), before);
     app.state.buffers[buffer].dirty = true;
     {
         let mut fixture = app.configuration.fixture_snapshot();
@@ -881,7 +881,7 @@ fn disabled_recovery_policy_schedules_no_work() {
     app.invoke_insert_text("X".into());
     app.schedule_recovery_work();
     assert!(app.recovery.scheduled().is_empty());
-    assert!(app.pending_vfs.is_empty());
+    assert_eq!(app.documents.legacy_count(), 0);
 }
 
 #[test]

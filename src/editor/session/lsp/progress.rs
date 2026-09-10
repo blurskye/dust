@@ -311,7 +311,7 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn restart_lsp_if_due(&mut self) {
-        if self.execution_validation.is_some() {
+        if self.workspace.validation_pending() {
             return;
         }
         if let Some(key) = self.language.restart_due(Instant::now()) {

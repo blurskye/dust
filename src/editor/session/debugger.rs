@@ -84,8 +84,33 @@ pub(super) struct DebugSession {
     choices: Option<Choices>,
     event_source: Option<DapContext>,
     source: Option<Source>,
+    validation: Option<(
+        super::workspace::ValidationId,
+        crate::editor::session::debugger::DebugIntent,
+    )>,
 }
 impl DebugSession {
+    pub(super) fn defer_validation(
+        &mut self,
+        id: super::workspace::ValidationId,
+        intent: DebugIntent,
+    ) {
+        debug_assert!(self.validation.is_none());
+        self.validation = Some((id, intent));
+    }
+    pub(super) fn take_validation(
+        &mut self,
+        id: super::workspace::ValidationId,
+    ) -> Option<crate::editor::session::DeferredExecution> {
+        let matches = self
+            .validation
+            .as_ref()
+            .is_some_and(|(expected, _)| *expected == id);
+        matches.then(|| {
+            let (_, intent) = self.validation.take().expect("matched debugger validation");
+            crate::editor::session::DeferredExecution::StartDebug(intent)
+        })
+    }
     pub(in crate::editor::session) fn new(policy: &DebugConfig, scope: WorkspaceVersion) -> Self {
         Self {
             service: DapService::new(),
@@ -102,6 +127,7 @@ impl DebugSession {
             choices: None,
             event_source: None,
             source: None,
+            validation: None,
         }
     }
     pub(in crate::editor::session) fn refresh(

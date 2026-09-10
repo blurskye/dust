@@ -453,6 +453,9 @@ impl WorkspaceSession {
             }
         }
     }
+    pub(in crate::editor::session) fn validation_pending(&self) -> bool {
+        self.validation.is_some()
+    }
     pub(in crate::editor::session) fn begin_validation(
         &mut self,
     ) -> Result<ValidationId, WorkspaceFailure> {
@@ -733,9 +736,6 @@ impl WorkspaceSession {
     }
     pub(in crate::editor::session) fn seen(&self, identity: &RootIdentity) -> bool {
         self.store.is_seen(identity)
-    }
-    pub(in crate::editor::session) fn validation_pending(&self) -> bool {
-        self.validation.is_some()
     }
 }
 

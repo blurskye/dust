@@ -688,7 +688,62 @@ impl InteractiveApplication {
     ) {
         match self.workspace.begin_validation() {
             Ok(id) => {
-                self.execution_validation = Some(PendingExecutionValidation { id, action });
+                match action {
+                    DeferredExecution::InstallTool { id: tool, source } => {
+                        self.tooling.defer_validation(id, tool, source)
+                    }
+                    DeferredExecution::StartLsp(server) => {
+                        self.language.defer_start_validation(id, server)
+                    }
+                    DeferredExecution::RestartLsp(server) => {
+                        self.language.defer_restart_validation(id, server)
+                    }
+                    DeferredExecution::StartDebug(intent) => {
+                        self.debugger_session.defer_validation(id, intent)
+                    }
+                    DeferredExecution::InstallRegistry {
+                        publisher,
+                        name,
+                        version,
+                    } => self
+                        .extension
+                        .defer_registry_validation(id, publisher, name, version),
+                    DeferredExecution::PrepareRegistryArtifact => {
+                        self.extension.defer_artifact_validation(id)
+                    }
+                    DeferredExecution::InstallPackage {
+                        package_manifest,
+                        plugin_manifest,
+                        component,
+                        update,
+                    } => self.extension.defer_package_validation(
+                        id,
+                        package_manifest,
+                        plugin_manifest,
+                        component,
+                        update,
+                    ),
+                    DeferredExecution::RunTask(name) => {
+                        self.tasks.defer_validation(id, name, AdapterContext::Plain)
+                    }
+                    DeferredExecution::OpenTerminal(intent) => {
+                        self.terminal_session.defer_validation(id, intent, None)
+                    }
+                    DeferredExecution::OpenDapTerminal { intent, reply } => self
+                        .terminal_session
+                        .defer_validation(id, intent, Some(reply)),
+                    DeferredExecution::RunTest { name, matcher } => {
+                        self.tasks
+                            .defer_validation(id, name, AdapterContext::Test { matcher })
+                    }
+                    DeferredExecution::RunLinter { name, matcher } => {
+                        self.tasks
+                            .defer_validation(id, name, AdapterContext::Linter { matcher })
+                    }
+                    DeferredExecution::RunFormatter { name, source } => self
+                        .tasks
+                        .defer_validation(id, name, AdapterContext::Formatter { source }),
+                }
                 self.notify_message(self.message("workspace_execution_validating", &[]), false);
             }
             Err(e) => self.show_workspace_failure(e),
@@ -699,17 +754,17 @@ impl InteractiveApplication {
         id: crate::editor::session::workspace::ValidationId,
         permit: Option<crate::editor::session::workspace::ExecutionPermit>,
     ) {
-        if !self
-            .execution_validation
-            .as_ref()
-            .is_some_and(|p| p.id == id)
-        {
+        let Some(action) = self
+            .tooling
+            .take_validation(id)
+            .or_else(|| self.language.take_validation(id))
+            .or_else(|| self.debugger_session.take_validation(id))
+            .or_else(|| self.extension.take_validation(id))
+            .or_else(|| self.tasks.take_validation(id))
+            .or_else(|| self.terminal_session.take_validation(id))
+        else {
             return;
-        }
-        let pending = self
-            .execution_validation
-            .take()
-            .expect("matched validation");
+        };
         let Some(permit) = permit else {
             self.show_error(self.message(
                 "workspace_execution_validation_failed",
@@ -722,8 +777,7 @@ impl InteractiveApplication {
             return;
         }
         self.clear_notice();
-        let authorization = if let Some(admission) = ExecutionAdmission::for_action(&pending.action)
-        {
+        let authorization = if let Some(admission) = ExecutionAdmission::for_action(&action) {
             Some(ExecutionAuthorization {
                 admission,
                 id,
@@ -736,7 +790,7 @@ impl InteractiveApplication {
             }
             None
         };
-        match pending.action {
+        match action {
             DeferredExecution::InstallTool { id, source } => {
                 self.install_tool_authorized(&id, source, authorization)
             }

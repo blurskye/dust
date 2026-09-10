@@ -397,11 +397,11 @@ impl InteractiveApplication {
             }
             AppEffect::CrashClear => {
                 let path = crate::config::user_state_directory().join("last-crash.json");
-                match self.documents.delete(path) {
-                    Ok(id) => {
-                        self.pending_vfs.insert(id, PendingVfs::CrashDelete);
-                    }
-                    Err(error) => self.show_error(error),
+                if let Err(error) = self
+                    .recovery
+                    .clear_crash(path, self.documents.recovery_io())
+                {
+                    self.show_error(error);
                 }
             }
             effect => return Err(effect),

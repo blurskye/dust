@@ -122,6 +122,10 @@ pub(in crate::editor::session) struct LspRuntimeState {
     pub desired_running: bool,
     pub activate_on_restart: bool,
 }
+enum ValidationIntent {
+    Start(Option<String>),
+    Restart(String),
+}
 #[derive(Default)]
 pub(super) struct LspSession {
     projection: projection::Projection,
@@ -133,10 +137,87 @@ pub(super) struct LspSession {
     synced: HashMap<(String, BufferId), TextVersion>,
     autostart: Option<LspAutostartObservation>,
     errors: BTreeMap<String, String>,
+    navigation_reads: HashMap<
+        crate::files::RequestId,
+        (
+            crate::language::lsp::LspRange,
+            crate::editor::text::PositionEncoding,
+        ),
+    >,
+    validation: Option<(
+        crate::editor::session::workspace::ValidationId,
+        ValidationIntent,
+    )>,
     #[cfg(test)]
     fixture_capabilities: Option<LspCapabilities>,
 }
 impl LspSession {
+    pub(super) fn defer_start_validation(
+        &mut self,
+        id: crate::editor::session::workspace::ValidationId,
+        server: Option<String>,
+    ) {
+        debug_assert!(self.validation.is_none());
+        self.validation = Some((id, ValidationIntent::Start(server)));
+    }
+    pub(super) fn defer_restart_validation(
+        &mut self,
+        id: crate::editor::session::workspace::ValidationId,
+        server: String,
+    ) {
+        debug_assert!(self.validation.is_none());
+        self.validation = Some((id, ValidationIntent::Restart(server)));
+    }
+    pub(super) fn take_validation(
+        &mut self,
+        id: crate::editor::session::workspace::ValidationId,
+    ) -> Option<crate::editor::session::DeferredExecution> {
+        let matches = self
+            .validation
+            .as_ref()
+            .is_some_and(|(expected, _)| *expected == id);
+        matches.then(
+            || match self.validation.take().expect("matched LSP validation").1 {
+                ValidationIntent::Start(server) => {
+                    crate::editor::session::DeferredExecution::StartLsp(server)
+                }
+                ValidationIntent::Restart(server) => {
+                    crate::editor::session::DeferredExecution::RestartLsp(server)
+                }
+            },
+        )
+    }
+    #[cfg(test)]
+    pub(super) fn validation(&self) -> Option<crate::editor::session::DeferredExecution> {
+        self.validation.as_ref().map(|(_, intent)| match intent {
+            ValidationIntent::Start(server) => {
+                crate::editor::session::DeferredExecution::StartLsp(server.clone())
+            }
+            ValidationIntent::Restart(server) => {
+                crate::editor::session::DeferredExecution::RestartLsp(server.clone())
+            }
+        })
+    }
+    pub(super) fn register_navigation_read(
+        &mut self,
+        id: crate::files::RequestId,
+        range: crate::language::lsp::LspRange,
+        encoding: crate::editor::text::PositionEncoding,
+    ) {
+        self.navigation_reads.insert(id, (range, encoding));
+    }
+    pub(super) fn take_navigation_read(
+        &mut self,
+        id: crate::files::RequestId,
+    ) -> Option<(
+        crate::language::lsp::LspRange,
+        crate::editor::text::PositionEncoding,
+    )> {
+        self.navigation_reads.remove(&id)
+    }
+    pub(super) fn retire_document_request(&mut self, id: crate::files::RequestId) {
+        self.navigation_reads.remove(&id);
+    }
     pub(super) fn running_servers(&self) -> Vec<String> {
         self.service.running_servers()
     }

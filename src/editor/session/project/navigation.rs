@@ -26,10 +26,7 @@ impl InteractiveApplication {
             .collect();
         match self.documents.read_scoped(found.canonical_path, roots) {
             Ok(id) => {
-                self.pending_vfs.insert(
-                    id,
-                    PendingVfs::WorkspaceSearchNavigation { range: found.range },
-                );
+                self.search.register_workspace_navigation(id, found.range);
             }
             Err(error) => self.show_error(error),
         }
@@ -94,13 +91,8 @@ impl InteractiveApplication {
                 .collect();
             match self.documents.read_scoped(path, roots) {
                 Ok(id) => {
-                    self.pending_vfs.insert(
-                        id,
-                        PendingVfs::LspNavigation {
-                            range: location.range.clone(),
-                            encoding,
-                        },
-                    );
+                    self.language
+                        .register_navigation_read(id, location.range.clone(), encoding);
                     self.notify_message(self.message("opening_file", &[]), false);
                 }
                 Err(error) => self.show_error(error),
@@ -176,8 +168,7 @@ impl InteractiveApplication {
             .collect();
         match self.documents.read_scoped(source.path.clone(), roots) {
             Ok(id) => {
-                self.pending_vfs
-                    .insert(id, PendingVfs::MatcherNavigation { source });
+                self.search.register_matcher_navigation(id, source);
             }
             Err(error) => self.show_error(error),
         }
@@ -212,8 +203,7 @@ impl InteractiveApplication {
             .collect();
         match self.documents.read_scoped(location.path.clone(), roots) {
             Ok(id) => {
-                self.pending_vfs
-                    .insert(id, PendingVfs::PersistedNavigation { location });
+                self.persistence.register_navigation_read(id, location);
             }
             Err(error) => self.show_error(error),
         }

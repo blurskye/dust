@@ -74,6 +74,11 @@ pub(super) struct TerminalSession {
     epoch: Arc<()>,
     policy: TerminalsConfig,
     retired: HashSet<PtyId>,
+    validation: Option<(
+        super::workspace::ValidationId,
+        TerminalIntent,
+        Option<crate::debugger::DapTerminalReply>,
+    )>,
     closed: bool,
 }
 impl TerminalSession {
@@ -90,8 +95,36 @@ impl TerminalSession {
             epoch: Arc::new(()),
             policy: policy.clone(),
             retired: HashSet::new(),
+            validation: None,
             closed: false,
         }
+    }
+    pub(super) fn defer_validation(
+        &mut self,
+        id: super::workspace::ValidationId,
+        intent: TerminalIntent,
+        reply: Option<crate::debugger::DapTerminalReply>,
+    ) {
+        debug_assert!(self.validation.is_none());
+        self.validation = Some((id, intent, reply));
+    }
+    pub(super) fn take_validation(
+        &mut self,
+        id: super::workspace::ValidationId,
+    ) -> Option<crate::editor::session::DeferredExecution> {
+        let matches = self
+            .validation
+            .as_ref()
+            .is_some_and(|(expected, ..)| *expected == id);
+        matches.then(|| {
+            let (_, intent, reply) = self.validation.take().expect("matched terminal validation");
+            match reply {
+                Some(reply) => {
+                    crate::editor::session::DeferredExecution::OpenDapTerminal { intent, reply }
+                }
+                None => crate::editor::session::DeferredExecution::OpenTerminal(intent),
+            }
+        })
     }
     pub(in crate::editor::session) fn selected(&self) -> Option<PtyId> {
         self.selected

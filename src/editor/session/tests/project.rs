@@ -836,7 +836,7 @@ fn explorer_watch_batches_reload_through_directory_service_and_preserve_identity
     assert!(app.explorer.tree().id_for_path(&kept).is_none());
     assert_eq!(app.explorer.tree().selected_id(), Some(directory_id));
     let reconciles = app.explorer.watch_reconciles();
-    let pending = app.pending_vfs.len();
+    let pending = app.documents.legacy_count();
     for _ in 0..256 {
         app.reconcile_editor_windows();
         let _ = render(
@@ -849,7 +849,7 @@ fn explorer_watch_batches_reload_through_directory_service_and_preserve_identity
         );
     }
     assert_eq!(app.explorer.watch_reconciles(), reconciles);
-    assert_eq!(app.pending_vfs.len(), pending);
+    assert_eq!(app.documents.legacy_count(), pending);
     app.explorer.select(directory_id);
     app.explorer.toggle_loaded(directory_id);
     app.sync_explorer_ui();
@@ -1119,7 +1119,7 @@ fn stale_async_root_add_and_pending_service_removal_are_rejected() {
 
 pub(super) fn wait_execution_validation(app: &mut InteractiveApplication) {
     let deadline = Instant::now() + Duration::from_secs(2);
-    while app.execution_validation.is_some() {
+    while app.workspace.validation_pending() {
         app.process_trust_events();
         assert!(Instant::now() < deadline, "execution validation timed out");
         thread::yield_now();
@@ -1224,7 +1224,8 @@ fn protected_action_resumes_once_after_successful_identity_revalidation() {
         crate::workspace::WorkspaceTrust::Trusted
     );
     assert!(!app.workspace.validation_pending());
-    assert!(app.execution_validation.is_none());
+    assert!(app.tooling.validation().is_none());
+    assert!(app.language.validation().is_none());
 }
 
 fn wait_workspace_search(app: &mut InteractiveApplication) {
@@ -1895,7 +1896,7 @@ fn save_as_reload_close_and_external_change_protection_work() {
     );
 
     app.start_reload(false);
-    assert!(app.pending_vfs.is_empty());
+    assert_eq!(app.documents.legacy_count(), 0);
     app.start_reload(true);
     wait_vfs(&mut app);
     assert_eq!(app.state.buffers[buffer].text.to_string(), "external");

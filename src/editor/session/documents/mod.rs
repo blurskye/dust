@@ -428,6 +428,21 @@ impl DocumentSession {
         self.closing = true;
         self.startup.clear();
     }
+    pub(in crate::editor::session) fn pending_count(&self) -> usize {
+        self.pending_files
+            .len()
+            .saturating_add(self.pending_legacy.len())
+            .saturating_add(self.pending_workspace.len())
+            .saturating_add(self.pending_tasks.len())
+            .saturating_add(self.pending_startup.len())
+    }
+    pub(in crate::editor::session) fn legacy_pending(&self) -> bool {
+        !self.pending_legacy.is_empty()
+    }
+    #[cfg(test)]
+    pub(in crate::editor::session) fn legacy_count(&self) -> usize {
+        self.pending_legacy.len()
+    }
     pub(in crate::editor::session) fn has_work(&self) -> bool {
         !self.pending_files.is_empty()
             || !self.pending_legacy.is_empty()
@@ -633,16 +648,6 @@ impl DocumentSession {
             pending: &mut self.pending_legacy,
             remaining,
         }
-    }
-
-    pub(in crate::editor::session) fn delete(
-        &mut self,
-        path: PathBuf,
-    ) -> Result<RequestId, VfsError> {
-        self.check_admission()?;
-        let id = self.vfs.delete(path)?;
-        self.pending_legacy.insert(id);
-        Ok(id)
     }
 }
 

@@ -158,8 +158,8 @@ impl InteractiveApplication {
                 lsp_sessions: self.language.sessions().len(),
                 dap_running: self.debugger_session.is_running(),
                 pending_effects: self
-                    .pending_vfs
-                    .len()
+                    .documents
+                    .pending_count()
                     .saturating_add(self.pending_preflight_count())
                     .saturating_add(self.tasks.linter_count()),
                 plugins_failed: self

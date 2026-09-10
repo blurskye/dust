@@ -1,6 +1,13 @@
 use super::*;
 use std::ops::ControlFlow::{Break, Continue};
 
+enum NavigationRead {
+    Matcher(MatcherSource),
+    Persisted(PersistedLocation),
+    Lsp(crate::language::lsp::LspRange, PositionEncoding),
+    WorkspaceSearch(std::ops::Range<usize>),
+}
+
 impl InteractiveApplication {
     pub(in crate::editor::session) fn schedule_recovery_work(&mut self) {
         self.recovery.schedule(
@@ -59,7 +66,10 @@ impl InteractiveApplication {
                     task_reads,
                 })) => {
                     for id in requests {
-                        self.pending_vfs.remove(&id);
+                        self.input.retire_document_request(id);
+                        self.search.retire_document_request(id);
+                        self.language.retire_document_request(id);
+                        self.persistence.retire_document_request(id);
                     }
                     self.recovery.stopped();
                     self.search.clear_preview();
@@ -147,6 +157,9 @@ impl InteractiveApplication {
                         RecoveryUpdate::Discarded => {
                             self.notify_message(self.message("recovery_discarded", &[]), false)
                         }
+                        RecoveryUpdate::CrashCleared => {
+                            self.notify_message(self.message("crash_cleared", &[]), false)
+                        }
                     }
                     continue;
                 }
@@ -158,15 +171,10 @@ impl InteractiveApplication {
                 | VfsResult::RecoveryWritten { .. } => {
                     self.show_error(self.message("unexpected_completion", &[]))
                 }
-                VfsResult::Deleted { id, result, .. } => {
-                    match (self.pending_vfs.remove(&id), result) {
-                        (Some(PendingVfs::CrashDelete), Ok(())) => {
-                            self.notify_message(self.message("crash_cleared", &[]), false)
-                        }
-                        (_, Err(error)) => self.show_error(error),
-                        _ => self.show_error(self.message("unexpected_completion", &[])),
-                    }
-                }
+                VfsResult::Deleted { result, .. } => match result {
+                    Err(error) => self.show_error(error),
+                    Ok(()) => self.show_error(self.message("unexpected_completion", &[])),
+                },
                 VfsResult::ExplorerMutated { .. } => {
                     self.show_error("unowned explorer mutation result")
                 }
@@ -174,7 +182,6 @@ impl InteractiveApplication {
                 | VfsResult::ResourceResolved { .. }
                 | VfsResult::CreateTarget { .. } => self.show_error("unowned workspace I/O result"),
                 VfsResult::Read { id, path, result } => {
-                    let pending = self.pending_vfs.remove(&id);
                     if self.search.accept_preview(
                         id,
                         &result,
@@ -193,11 +200,30 @@ impl InteractiveApplication {
                         self.sync_explorer_ui();
                         continue;
                     }
+                    let pending = self
+                        .search
+                        .take_matcher_navigation(id)
+                        .map(NavigationRead::Matcher)
+                        .or_else(|| {
+                            self.persistence
+                                .take_navigation_read(id)
+                                .map(NavigationRead::Persisted)
+                        })
+                        .or_else(|| {
+                            self.language
+                                .take_navigation_read(id)
+                                .map(|(range, encoding)| NavigationRead::Lsp(range, encoding))
+                        })
+                        .or_else(|| {
+                            self.search
+                                .take_workspace_navigation(id)
+                                .map(NavigationRead::WorkspaceSearch)
+                        });
                     match result.map_err(InteractiveError::from).and_then(|bytes| {
                         TextBuffer::from_bytes(&bytes).map_err(InteractiveError::from)
                     }) {
                         Ok(text) => match pending {
-                            Some(PendingVfs::MatcherNavigation { source }) => {
+                            Some(NavigationRead::Matcher(source)) => {
                                 let (buffer, view) = self.state.open_text(text, Some(path.clone()));
                                 let start = self.state.buffers[buffer]
                                     .text
@@ -222,7 +248,7 @@ impl InteractiveApplication {
                                 self.set_dashboard_visibility(false);
                                 self.ensure_cursor_visible();
                             }
-                            Some(PendingVfs::PersistedNavigation { location }) => {
+                            Some(NavigationRead::Persisted(location)) => {
                                 let (buffer, view) = self.state.open_text(text, Some(path.clone()));
                                 let length = self.state.buffers[buffer].text.len_bytes();
                                 let cursor = ByteOffset(location.byte.min(length));
@@ -247,7 +273,7 @@ impl InteractiveApplication {
                                 self.set_dashboard_visibility(false);
                                 self.ensure_cursor_visible();
                             }
-                            Some(PendingVfs::LspNavigation { range, encoding }) => {
+                            Some(NavigationRead::Lsp(range, encoding)) => {
                                 let (buffer, view) = self.state.open_text(text, Some(path.clone()));
                                 let position = self.state.buffers.get(buffer).and_then(|buffer| {
                                     PositionCodec::new(&buffer.text)
@@ -278,7 +304,7 @@ impl InteractiveApplication {
                                 self.set_dashboard_visibility(false);
                                 self.ensure_cursor_visible();
                             }
-                            Some(PendingVfs::WorkspaceSearchNavigation { range }) => {
+                            Some(NavigationRead::WorkspaceSearch(range)) => {
                                 let start = ByteOffset(range.start);
                                 let end = ByteOffset(range.end);
                                 if text.validate_offset(start).is_err()
@@ -313,9 +339,9 @@ impl InteractiveApplication {
                     path: _,
                     result,
                 } => {
-                    let pending = self.pending_vfs.remove(&id);
+                    let pending = self.input.take_completion_read(id);
                     match (pending, result) {
-                        (Some(PendingVfs::Completion { key }), Ok(paths)) => {
+                        (Some(key), Ok(paths)) => {
                             self.input.accept_prompt_paths(
                                 &key,
                                 paths,
@@ -324,7 +350,7 @@ impl InteractiveApplication {
                             );
                             self.project_input_prompt();
                         }
-                        (Some(PendingVfs::Completion { .. }), Err(_)) => {}
+                        (Some(_), Err(_)) => {}
                         (_, Err(error)) => self.show_error(error),
                         _ => self.show_error(self.message("unexpected_completion", &[])),
                     }
