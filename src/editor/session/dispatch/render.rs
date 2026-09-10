@@ -800,3 +800,438 @@ impl InteractiveApplication {
         );
     }
 }
+
+use super::*;
+
+impl InteractiveApplication {
+    pub(super) fn set_mode(&mut self, mode: EditorMode) {
+        if let Some(view) = self.state.active_view {
+            self.set_specific_mode(view, mode);
+        }
+    }
+
+    pub(super) fn set_specific_mode(&mut self, view: ViewId, mode: EditorMode) {
+        let transaction = EditorTransaction::new(self.transaction_id())
+            .with_precondition(Precondition::ViewExists(view))
+            .with_operation(EditorOperation::SetMode { view, mode })
+            .with_undo_policy(UndoPolicy::Ignore);
+        if let Err(error) = self.state.apply_transaction(&transaction) {
+            self.show_error(error);
+        }
+    }
+
+    pub(super) fn ensure_cursor_visible(&mut self) {
+        self.reconcile_editor_windows();
+        let Some(view_id) = self.state.active_view else {
+            return;
+        };
+        let view = &self.state.views[view_id];
+        let buffer = &self.state.buffers[view.buffer];
+        let line = buffer.text.byte_to_line(view.cursor).unwrap_or(0);
+        let Some(workspace) = self.workspace_bounds() else {
+            return;
+        };
+        let content_width = workspace.width;
+        let Some(viewport) = active_pane_viewport(
+            &self.state,
+            &self.ui,
+            self.configuration.settings(),
+            content_width,
+            self.workspace_render_height(),
+        ) else {
+            return;
+        };
+        if viewport.view != view_id {
+            return;
+        }
+        let body_height = usize::from(
+            viewport
+                .height
+                .saturating_sub(u16::from(
+                    self.configuration.settings().ui.status_line.enabled,
+                ))
+                .max(1),
+        );
+        let vertical_margin = usize::from(
+            self.configuration
+                .settings()
+                .editor
+                .viewport
+                .vertical_margin,
+        )
+        .min(body_height.saturating_sub(1) / 2);
+        let available = editor_state_content_width(
+            &self.state,
+            &buffer.text,
+            &self.configuration.settings().editor,
+            viewport.width,
+        );
+        let wrap_enabled = available > 0
+            && self.configuration.settings().editor.wrap
+            && !(self.ui.large_file_buffers.contains(&view.buffer)
+                && self.configuration.settings().editor.large_file.disable_wrap);
+        let visual_rows = VisualRowModel::new_for_state(
+            &self.state,
+            &buffer.text,
+            view_id,
+            &self.ui,
+            self.configuration.settings(),
+            viewport.width,
+            wrap_enabled,
+        );
+        let start_anchor = visual_rows.normalize(VisualRowAnchor {
+            line: view.scroll_line,
+            wrap_row: view.scroll_wrap_row,
+        });
+        let cursor_anchor = visual_rows.cursor_anchor(view.cursor);
+        let first_anchor = match visual_rows.screen_row(start_anchor, cursor_anchor, body_height) {
+            Some(row) if row < vertical_margin => {
+                visual_rows.backward(cursor_anchor, vertical_margin)
+            }
+            Some(row) if row >= body_height.saturating_sub(vertical_margin) => visual_rows
+                .backward(
+                    cursor_anchor,
+                    body_height
+                        .saturating_sub(vertical_margin)
+                        .saturating_sub(1),
+                ),
+            Some(_) => start_anchor,
+            None if cursor_anchor < start_anchor => {
+                visual_rows.backward(cursor_anchor, vertical_margin)
+            }
+            None => visual_rows.backward(
+                cursor_anchor,
+                body_height
+                    .saturating_sub(vertical_margin)
+                    .saturating_sub(1),
+            ),
+        };
+        let first = first_anchor.line;
+        let first_wrap_row = if wrap_enabled {
+            first_anchor.wrap_row
+        } else {
+            0
+        };
+        let first_column = if wrap_enabled || available == 0 {
+            0
+        } else {
+            let line_start = buffer.text.line_to_byte(line).unwrap_or(ByteOffset(0));
+            let prefix = buffer
+                .text
+                .slice(ByteRange::new(line_start, view.cursor).expect("cursor line range"))
+                .unwrap_or_default();
+            let cursor_column = configured_text_width(
+                &prefix,
+                self.configuration.settings().editor.tab_width,
+                self.configuration.settings().editor.ambiguous_width,
+            );
+            let margin = usize::from(
+                self.configuration
+                    .settings()
+                    .editor
+                    .viewport
+                    .horizontal_margin,
+            )
+            .min(available.saturating_sub(1));
+            let target = if cursor_column < view.scroll_column.saturating_add(margin) {
+                cursor_column.saturating_sub(margin)
+            } else if cursor_column
+                >= view
+                    .scroll_column
+                    .saturating_add(available.saturating_sub(margin))
+            {
+                cursor_column.saturating_sub(available.saturating_sub(margin).saturating_sub(1))
+            } else {
+                view.scroll_column
+            };
+            let line_text = buffer.text.line(line).unwrap_or_default();
+            let line_text = line_text.strip_suffix('\n').unwrap_or(&line_text);
+            let snapped = snap_display_column(
+                line_text,
+                target,
+                self.configuration.settings().editor.tab_width,
+                self.configuration.settings().editor.ambiguous_width,
+            );
+            if cursor_column.saturating_sub(snapped) < available {
+                snapped
+            } else {
+                snap_display_column_forward(
+                    line_text,
+                    cursor_column.saturating_add(1).saturating_sub(available),
+                    self.configuration.settings().editor.tab_width,
+                    self.configuration.settings().editor.ambiguous_width,
+                )
+            }
+        };
+        if first == view.scroll_line
+            && first_wrap_row == view.scroll_wrap_row
+            && first_column == view.scroll_column
+        {
+            return;
+        }
+        let transaction = EditorTransaction::new(self.transaction_id())
+            .with_operation(EditorOperation::SetScroll {
+                view: view_id,
+                first_line: first,
+            })
+            .with_operation(EditorOperation::SetScrollWrapRow {
+                view: view_id,
+                first_wrap_row,
+            })
+            .with_operation(EditorOperation::SetScrollColumn {
+                view: view_id,
+                first_column,
+            })
+            .with_undo_policy(UndoPolicy::Ignore);
+        if let Err(error) = self.state.apply_transaction(&transaction) {
+            self.show_error(error);
+        }
+    }
+
+    pub(super) fn transaction_id(&mut self) -> TransactionId {
+        let id = TransactionId(self.next_transaction);
+        self.next_transaction = self.next_transaction.saturating_add(1);
+        id
+    }
+
+    pub(super) fn message(&self, key: &str, replacements: &[(&str, String)]) -> String {
+        let mut message = self
+            .configuration
+            .settings()
+            .messages
+            .get(key)
+            .expect("resolved configuration validates required messages")
+            .clone();
+        for (name, value) in replacements {
+            message = message.replace(&format!("{{{name}}}"), value);
+        }
+        message
+    }
+
+    pub(super) fn show_error(&mut self, error: impl std::fmt::Display) {
+        self.notify_message(error.to_string(), true);
+    }
+}
+
+impl InteractiveApplication {
+    pub(super) fn native_surface_signature(
+        &self,
+        editor: &EditorWindowBridge,
+    ) -> NativeSurfaceSignature {
+        let explorer_size = self
+            .ui
+            .explorer
+            .as_ref()
+            .and_then(|_| {
+                explorer_panel_width(self.configuration.settings(), self.window_session.width())
+            })
+            .map_or(1, |width| width.saturating_add(1));
+        let terminal_size = self
+            .displayed_terminal()
+            .and_then(|_| {
+                terminal_panel_geometry(
+                    self.configuration.settings(),
+                    self.window_session.height(),
+                    self.window_session.terminal_height(),
+                )
+            })
+            .map_or(1, |geometry| geometry.height);
+        let picker_rect = self.ui.picker.as_ref().and_then(|picker| {
+            crate::ui::geometry::picker_window_geometry(
+                picker,
+                self.configuration.settings(),
+                WindowRect {
+                    x: 0,
+                    y: 0,
+                    width: self.window_session.width(),
+                    height: self.window_session.height(),
+                },
+            )
+        });
+        NativeSurfaceSignature {
+            editor_tab: editor.active_tab(&(&self.state).into()),
+            editor_window: editor.focused_window(&(&self.state).into()),
+            explorer_visible: self.ui.explorer.is_some(),
+            explorer_focused: self.ui.explorer.is_some() && self.window_session.explorer_focused(),
+            explorer_size,
+            active_terminal: self.displayed_terminal().map(|id| id.0),
+            terminal_focused: self.displayed_terminal().is_some_and(|id| {
+                self.window_session.focused_terminal() == Some(id.0)
+                    && self.window_session.native_ids().terminal_placement(id.0)
+                        != Some(WindowPlacement::Hidden)
+            }),
+            terminal_size,
+            terminal_set_revision: self.terminal_session.revision(),
+            terminal_width: self.window_session.width(),
+            terminal_height: self.window_session.height(),
+            dashboard_visible: self.window_session.dashboard_visible()
+                || self.state.active_view.is_none(),
+            picker_rect,
+            picker_surface: self
+                .ui
+                .picker
+                .as_ref()
+                .filter(|_| picker_rect.is_some())
+                .map(|picker| picker.surface),
+            protected_prompt_height: self.input.prompt().map_or(0, |prompt| {
+                let (width, height) = crate::ui::prompt_surface_dimensions(
+                    &self.state,
+                    &self.ui,
+                    self.window_session.width(),
+                    self.window_session.height(),
+                );
+                crate::ui::prompt_geometry_for_state(
+                    width,
+                    height,
+                    self.configuration.settings(),
+                    prompt,
+                )
+                .height
+            }),
+            configuration_generation: self.configuration.generation(),
+        }
+    }
+
+    pub(super) fn reconcile_editor_windows(&mut self) {
+        let scratch_label = &self.configuration.settings().ui.buffer_line.scratch_label;
+        let editor_current = self
+            .window_session
+            .editor_ids()
+            .is_current(&(&self.state).into(), scratch_label);
+        let signature = self.native_surface_signature(self.window_session.editor_ids());
+        if editor_current
+            && self.window_session.native_ids().is_current(signature)
+            && self.window_session.graph().revision() == self.ui.window_graph_revision
+            && self
+                .window_session
+                .content_current(self.configuration.generation())
+            && self.compositor_projection().is_some()
+        {
+            return;
+        }
+        let result = if editor_current && self.window_session.native_ids().is_current(signature) {
+            Ok(())
+        } else {
+            let terminals = self.terminal_session.descriptions();
+            self.window_session
+                .prepare_reconcile(
+                    &(&self.state).into(),
+                    scratch_label,
+                    NativeDescriptions {
+                        signature: self.native_surface_signature(self.window_session.editor_ids()),
+                        explorer_title: &self.message("explorer_title", &[]),
+                        dashboard_title: &self.configuration.dashboard().identity,
+                        picker_title: self
+                            .ui
+                            .picker
+                            .as_ref()
+                            .map_or("Picker", |picker| &picker.title),
+                        terminals: &terminals,
+                    },
+                )
+                .and_then(|candidate| {
+                    self.window_session
+                        .accept_current(candidate, &self.state.window_version())
+                })
+        };
+        match result {
+            Ok(()) => {
+                self.project_window_content_tabs();
+                let graph = self.window_session.graph();
+                let bridge = self.window_session.editor_ids();
+                let surfaces = self.window_session.native_ids();
+                self.ui.editor_window_layout = self.state.window_revision().and_then(|revision| {
+                    bridge
+                        .active_layout(&(&self.state).into(), graph)
+                        .map(|active| EditorWindowLayoutState {
+                            source_revision: revision,
+                            layout: active.layout,
+                            bindings: active
+                                .bindings
+                                .into_iter()
+                                .map(|binding| UiEditorWindowBinding {
+                                    window: binding.window,
+                                    pane: binding.pane,
+                                    view: binding.view,
+                                })
+                                .collect(),
+                        })
+                });
+                self.ui.window_graph_revision = graph.revision();
+                let projection = self.state.window_revision().and_then(|revision| {
+                    let graph_revision = graph.revision()?;
+                    let tab = bridge
+                        .active_tab(&(&self.state).into())
+                        .or_else(|| surfaces.workspace_tab())?;
+                    let snapshot = graph.compositor_snapshot(tab)?;
+                    let preliminary = snapshot.project(
+                        WindowRect {
+                            x: 0,
+                            y: 0,
+                            width: self.window_session.width(),
+                            height: self.window_session.height(),
+                        },
+                        self.configuration.settings().ui.panes.minimum_width,
+                        self.configuration.settings().ui.panes.minimum_height,
+                    );
+                    let (top, bottom) = editor_workspace_insets(
+                        &self.state,
+                        &self.ui,
+                        self.configuration.settings(),
+                        preliminary.workspace_bounds.height,
+                    );
+                    let protected = self.input.prompt().map(|prompt| {
+                        let prompt_height = preliminary
+                            .workspace_bounds
+                            .height
+                            .saturating_sub(top.saturating_add(bottom));
+                        let geometry = crate::ui::prompt_geometry_for_state(
+                            self.window_session.width(),
+                            prompt_height,
+                            self.configuration.settings(),
+                            prompt,
+                        );
+                        WindowRect {
+                            x: geometry.left,
+                            y: geometry.top,
+                            width: geometry.width,
+                            height: geometry.height,
+                        }
+                    });
+                    Some(ProjectionRequest {
+                        tab,
+                        source_revision: revision,
+                        graph_revision,
+                        bounds: preliminary.bounds,
+                        minimum_size: (
+                            self.configuration.settings().ui.panes.minimum_width,
+                            self.configuration.settings().ui.panes.minimum_height,
+                        ),
+                        insets: (top, bottom),
+                        protected,
+                        surfaces: NativeSurfaceWindowBinding {
+                            explorer: surfaces.explorer().map(|ids| ids.window),
+                            terminal: self.displayed_terminal().and_then(|id| {
+                                surfaces.terminal(id.0).map(|ids| (id.0, ids.window))
+                            }),
+                            dashboard: surfaces.dashboard().map(|ids| ids.window),
+                            picker: surfaces.picker().map(|ids| ids.window),
+                        },
+                    })
+                });
+                if let Some(projection) = projection {
+                    self.window_session.project(projection);
+                }
+                self.project_window_geometry();
+                self.sync_explorer_ui();
+                self.sync_plugin_window_ui();
+            }
+            Err(error) => self.notices.record(
+                LogLevel::Error,
+                "windows",
+                "window-reconciliation-rejected",
+                BTreeMap::from([("error".into(), error.to_string())]),
+            ),
+        }
+    }
+}

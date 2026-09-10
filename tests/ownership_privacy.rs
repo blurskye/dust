@@ -242,11 +242,14 @@ fn copied_production_tree_enforces_migrated_owner_privacy() {
     let original = fs::read_to_string(&module).unwrap();
     let dispatch = tree.join("src/editor/session/dispatch/mod.rs");
     let original_dispatch = fs::read_to_string(&dispatch).unwrap();
+    let effects = tree.join("src/editor/session/dispatch/effects.rs");
+    let original_effects = fs::read_to_string(&effects).unwrap();
     let install = |body: &str| {
         fs::write(&module, &original).unwrap();
         fs::write(&dispatch, &original_dispatch).unwrap();
+        fs::write(&effects, &original_effects).unwrap();
         if body.contains("ExecutionAuthorization") {
-            fs::write(&dispatch,format!("{original_dispatch}\n#[allow(dead_code)] mod ownership_probe {{ use super::{{ExecutionAuthorization,ExecutionAdmission}}; {body} }}\n")).unwrap();
+            fs::write(&dispatch,format!("{original_dispatch}\n#[allow(dead_code)] mod ownership_probe {{ use super::effects::{{ExecutionAuthorization,ExecutionAdmission}}; {body} }}\n")).unwrap();
         } else {
             fs::write(
                 &module,
@@ -1269,6 +1272,7 @@ fn legitimate_client(editor: &mut crate::editor::EditorState) { editor.workspace
     for (batch, cases) in fields.chunks(8).enumerate() {
         let mut root_source = original.clone();
         let mut dispatch_source = original_dispatch.clone();
+        let effects_source = original_effects.clone();
         let mut spans = Vec::new();
         for (index, &&(name, body, field, code)) in cases.iter().enumerate() {
             let authorization = body.contains("ExecutionAuthorization");
@@ -1276,7 +1280,7 @@ fn legitimate_client(editor: &mut crate::editor::EditorState) { editor.workspace
                 (
                     &mut dispatch_source,
                     "src/editor/session/dispatch/mod.rs",
-                    "use super::{ExecutionAuthorization,ExecutionAdmission};",
+                    "use super::effects::{ExecutionAuthorization,ExecutionAdmission};",
                 )
             } else {
                 (&mut root_source, "src/editor/session/mod.rs", "")
@@ -1290,6 +1294,7 @@ fn legitimate_client(editor: &mut crate::editor::EditorState) { editor.workspace
         }
         fs::write(&module, root_source).unwrap();
         fs::write(&dispatch, dispatch_source).unwrap();
+        fs::write(&effects, effects_source).unwrap();
         let (success, errors, diagnostic) =
             check_complete_tree(tree, &target, &format!("field_batch_{batch}"), deadline);
         assert!(!success, "field privacy batch compiled: {batch}");

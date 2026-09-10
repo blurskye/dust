@@ -1,24 +1,6 @@
 use super::*;
 use crate::editor::session::extensions::{VirtualContext, VirtualOpen, VirtualPublication};
 
-#[path = "../effects/configuration.rs"]
-mod configuration;
-#[path = "../effects/core.rs"]
-mod core;
-pub(super) use core::{ExecutionAdmission, ExecutionAuthorization};
-#[path = "../effects/debugger.rs"]
-mod debugger;
-#[path = "../effects/extensions.rs"]
-mod extensions;
-#[path = "../effects/language.rs"]
-mod language;
-#[path = "../effects/misc.rs"]
-mod misc;
-#[path = "../effects/project.rs"]
-mod project;
-#[path = "../effects/terminal.rs"]
-mod terminal;
-
 impl InteractiveApplication {
     pub(super) fn process_effect(&mut self, effect: AppEffect) {
         let effect = match self.process_core_effect(effect) {
@@ -1382,5 +1364,9567 @@ impl InteractiveApplication {
     pub(super) fn record_recent_file(&mut self, path: PathBuf) {
         self.persistence
             .record_recent(path, self.configuration.settings().persistence.recent_files);
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn process_theme_results(&mut self) {
+        if let Some(Err(error)) = self.configuration.poll_theme_restore() {
+            self.show_error(error);
+        }
+        self.retire_stale_picker();
+        if let Some(rows) = self
+            .configuration
+            .poll_theme_picker(self.search.theme_picker_key())
+        {
+            let previous = self.search.picker_bookmark();
+            self.present_theme_picker(rows);
+            self.search.restore_picker_view(previous, false);
+            self.sync_picker_ui();
+        }
+    }
+    fn present_theme_picker(&mut self, rows: crate::editor::session::configuration::ThemeRows) {
+        let items = rows
+            .items
+            .into_iter()
+            .enumerate()
+            .map(|(index, (key, name, origin))| {
+                (
+                    PickerItem {
+                        id: PickerItemId(format!("theme:{index}")),
+                        label: name,
+                        detail: if index == 0 {
+                            "Current".into()
+                        } else {
+                            String::new()
+                        },
+                        source: origin,
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::Theme(key),
+                )
+            })
+            .collect();
+        self.install_surface_picker_state(
+            PickerSurfaceKind::Theme,
+            "Dust themes".into(),
+            items,
+            String::new(),
+            !rows.loading,
+            PickerOrigin::General,
+        );
+        if !rows.diagnostics.is_empty() {
+            self.show_error(rows.diagnostics.join("; "));
+        }
+    }
+    pub(in crate::editor::session) fn process_configuration_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::SelectTheme => {
+                self.close_picker();
+                match self.configuration.begin_theme_picker() {
+                    Ok(rows) => self.present_theme_picker(rows),
+                    Err(error) => self.show_error(error),
+                }
+            }
+            AppEffect::ReloadConfiguration => match self.configuration.request_reload() {
+                Ok(()) => {
+                    self.notify_message(self.message("config_reload_queued", &[]), false);
+                }
+                Err(error) => self.show_error(error),
+            },
+            AppEffect::ExplainConfig(key) => {
+                if let Some(explanation) = self.configuration.explain(&key) {
+                    self.notify_message(
+                        self.message(
+                            "config_explanation",
+                            &[
+                                ("key", explanation.key),
+                                ("value", explanation.value),
+                                ("source", explanation.source),
+                            ],
+                        ),
+                        false,
+                    );
+                } else {
+                    self.show_error(self.message("unknown_config_key", &[("key", key)]));
+                }
+            }
+            AppEffect::InspectKeymap {
+                id,
+                context,
+                key,
+                command,
+            } => {
+                let context = context.unwrap_or_else(|| self.active_input_context());
+                let inspection = id
+                    .as_deref()
+                    .and_then(|id| self.configuration.keymaps().inspect_id(id))
+                    .or_else(|| {
+                        key.as_deref().and_then(|keys| {
+                            self.configuration.keymaps().inspect_key(&context, keys)
+                        })
+                    })
+                    .or_else(|| {
+                        command.as_deref().and_then(|command| {
+                            self.configuration.keymaps().inspect(&context, command)
+                        })
+                    });
+                if let Some(inspection) = inspection {
+                    self.notify_message(
+                        self.message(
+                            "keymap_inspection",
+                            &[
+                                ("id", inspection.id),
+                                ("context", inspection.context),
+                                ("source_keys", inspection.source_keys),
+                                ("keys", inspection.keys),
+                                ("operation", inspection.operation.as_str().into()),
+                                ("command", inspection.command.unwrap_or_default()),
+                                ("arguments", format!("{:?}", inspection.arguments)),
+                                ("source", inspection.source),
+                            ],
+                        ),
+                        false,
+                    );
+                } else if id.is_none() && command.is_none() && key.is_none() {
+                    let count = self
+                        .configuration
+                        .keymaps()
+                        .reverse
+                        .keys()
+                        .filter(|(mapped_context, _)| mapped_context == &context)
+                        .count();
+                    self.notify_message(
+                        self.message(
+                            "keymap_context_summary",
+                            &[("context", context), ("count", count.to_string())],
+                        ),
+                        false,
+                    );
+                } else {
+                    self.show_error(self.message("no_keymap_binding", &[("context", context)]));
+                }
+            }
+            AppEffect::ShowKeymapConflicts => {
+                if self.configuration.keymaps().conflicts.is_empty() {
+                    self.notify_message(self.message("no_keymap_conflicts", &[]), false);
+                } else {
+                    self.show_error(self.configuration.keymaps().conflicts.join("; "));
+                }
+            }
+            AppEffect::RecoveryInspect => {
+                self.notify_message(
+                    self.message(
+                        "recovery_summary",
+                        &[("count", self.recovery.records().len().to_string())],
+                    ),
+                    false,
+                );
+            }
+            AppEffect::RecoveryRecoverLatest => {
+                if let Some((_, record)) = self.recovery.records().last() {
+                    self.state
+                        .open_text(TextBuffer::from_text(&record.content), None);
+                    self.set_dashboard_visibility(false);
+                    self.notify_message(self.message("recovery_opened", &[]), false);
+                } else {
+                    self.show_error(self.message("recovery_none", &[]));
+                }
+            }
+            AppEffect::RecoveryDiscardLatest => {
+                match self.recovery.discard_latest(self.documents.recovery_io()) {
+                    Ok(true) => {}
+                    Ok(false) => self.show_error(self.message("recovery_none", &[])),
+                    Err(error) => self.show_error(error),
+                }
+            }
+            AppEffect::SessionSave => {
+                self.save_persistence();
+                self.notify_message(self.message("session_save_queued", &[]), false);
+            }
+            AppEffect::SessionLoad => {
+                self.load_persistence();
+                self.notify_message(self.message("session_load_queued", &[]), false);
+            }
+            AppEffect::HistoryClear => {
+                self.input.clear_history();
+                self.notify_message(self.message("history_cleared", &[]), false);
+            }
+            AppEffect::LargeFileSet(mode) => {
+                let Some(buffer) = self
+                    .state
+                    .active_view
+                    .and_then(|view| self.state.views.get(view).map(|view| view.buffer))
+                else {
+                    return Ok(());
+                };
+                let mode = match mode.as_str() {
+                    "auto" => LargeFileOverride::Auto,
+                    "on" => LargeFileOverride::On,
+                    "off" => LargeFileOverride::Off,
+                    _ => {
+                        self.show_error(self.message("large_file_invalid", &[]));
+                        return Ok(());
+                    }
+                };
+                self.documents.set_large_file_mode(
+                    buffer,
+                    self.state.buffers[buffer].path.as_deref(),
+                    mode,
+                );
+                self.process_large_file_modes();
+                self.notify_message(
+                    self.message(
+                        "large_file_changed",
+                        &[("mode", mode_name_large(mode).into())],
+                    ),
+                    false,
+                );
+            }
+            AppEffect::LargeFileStatus => {
+                let Some(buffer) = self
+                    .state
+                    .active_view
+                    .and_then(|view| self.state.views.get(view).map(|view| view.buffer))
+                else {
+                    return Ok(());
+                };
+                let configured = self.documents.configured_mode(buffer);
+                let effective = if self.effective_large_file(buffer) {
+                    "on"
+                } else {
+                    "off"
+                };
+                self.notify_message(
+                    self.message(
+                        "large_file_status",
+                        &[
+                            ("mode", mode_name_large(configured).into()),
+                            ("effective", effective.into()),
+                        ],
+                    ),
+                    false,
+                );
+            }
+            AppEffect::SyntaxFoldToggle => {
+                if let Some(view) = self.state.active_view {
+                    let line = self.state.views.get(view).and_then(|view| {
+                        self.state.buffers[view.buffer]
+                            .text
+                            .byte_to_line(view.cursor)
+                            .ok()
+                    });
+                    if let Some(fold) = self.ui.syntax_folds.iter_mut().find(|fold| {
+                        fold.view == view
+                            && line.is_some_and(|line| {
+                                line >= fold.start_line && line <= fold.end_line
+                            })
+                    }) {
+                        fold.collapsed = !fold.collapsed;
+                    }
+                }
+            }
+            AppEffect::SyntaxIndentLine => self.apply_syntax_indent_line(),
+            AppEffect::SyntaxStatus => {
+                let active = self.state.active_buffer_id();
+                let active_language = active
+                    .and_then(|buffer| self.state.buffers.get(buffer))
+                    .and_then(|buffer| buffer.path.as_deref())
+                    .and_then(language_for_path);
+                let items = builtin_languages()
+                    .enumerate()
+                    .map(|(index, info)| {
+                        let state = if Some(info.language) == active_language {
+                            if let Some(buffer) = active {
+                                if let Some(error) = self.syntax.failure(buffer) {
+                                    self.message(
+                                        "syntax_state_failed",
+                                        &[("error", error.to_owned())],
+                                    )
+                                } else if self.syntax.result(buffer).is_some_and(|result| {
+                                    self.state.buffers.get(buffer).is_some_and(|state| {
+                                        state.text.revision().0 == result.revision
+                                    }) && result.language == info.language
+                                }) {
+                                    self.message(
+                                        if self
+                                            .syntax
+                                            .result(buffer)
+                                            .is_some_and(|result| result.truncated)
+                                        {
+                                            "syntax_state_active_truncated"
+                                        } else {
+                                            "syntax_state_active"
+                                        },
+                                        &[],
+                                    )
+                                } else {
+                                    self.message("syntax_state_pending", &[])
+                                }
+                            } else {
+                                self.message("syntax_state_available", &[])
+                            }
+                        } else {
+                            self.message("syntax_state_available", &[])
+                        };
+                        (
+                            PickerItem {
+                                id: PickerItemId(format!("syntax:{index}:{}", info.id)),
+                                label: self.syntax_language_label(info.language),
+                                detail: self.message(
+                                    "syntax_capabilities",
+                                    &[
+                                        (
+                                            "highlights",
+                                            self.syntax_support_label(info.capabilities.highlights),
+                                        ),
+                                        (
+                                            "folds",
+                                            self.syntax_support_label(info.capabilities.folds),
+                                        ),
+                                        (
+                                            "indents",
+                                            self.syntax_support_label(info.capabilities.indents),
+                                        ),
+                                        ("state", state),
+                                    ],
+                                ),
+                                source: self.message("syntax_builtin_source", &[]),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::Command(String::new()),
+                        )
+                    })
+                    .collect();
+                self.install_picker(self.message("syntax_status_title", &[]), items);
+            }
+            AppEffect::TestRun(name) => {
+                let Some(task) = self.configuration.settings().tasks.get(&name) else {
+                    self.show_error(self.message("task_unknown", &[("name", name)]));
+                    return Ok(());
+                };
+                let Some(matcher) = task.matcher.clone() else {
+                    self.show_error(self.message("test_matcher_missing", &[]));
+                    return Ok(());
+                };
+                self.defer_trusted_execution(DeferredExecution::RunTest { name, matcher });
+            }
+            AppEffect::TestStop(name) => self.stop_task(&name),
+            AppEffect::TestList(name) => self.show_test_picker(&name),
+            AppEffect::TaskList => self.show_task_picker(),
+            AppEffect::TaskRestart(name) => {
+                self.stop_task(&name);
+                self.defer_trusted_execution(DeferredExecution::RunTask(name));
+            }
+            AppEffect::LintRun(name) => {
+                let Some(task) = self.configuration.settings().tasks.get(&name) else {
+                    self.show_error(self.message("task_unknown", &[("name", name)]));
+                    return Ok(());
+                };
+                let Some(matcher) = task.matcher.clone() else {
+                    self.show_error(self.message("linter_matcher_missing", &[]));
+                    return Ok(());
+                };
+                self.defer_trusted_execution(DeferredExecution::RunLinter { name, matcher });
+            }
+            AppEffect::LintClear(name) => {
+                if let Ok(owner) = DiagnosticOwner::new(format!("task:{name}")) {
+                    self.diagnostics.clear_owner(&owner);
+                    self.sync_ui_diagnostics();
+                }
+            }
+            AppEffect::FormatRun(name) => {
+                let Some(view_id) = self.state.active_view else {
+                    return Ok(());
+                };
+                let Some(view) = self.state.views.get(view_id) else {
+                    return Ok(());
+                };
+                let buffer = view.buffer;
+                match crate::editor::session::tasks::FormatterSource::capture(&self.state, buffer) {
+                    Ok(source) => self
+                        .defer_trusted_execution(DeferredExecution::RunFormatter { name, source }),
+                    Err(error) => self.show_error(error),
+                }
+            }
+            AppEffect::TaskRun(name) => {
+                self.defer_trusted_execution(DeferredExecution::RunTask(name))
+            }
+            AppEffect::TaskStop(name) => self.stop_task(&name),
+            AppEffect::TaskOutput(name) => self.show_output_picker(&name),
+            AppEffect::CrashInspect => {
+                let path = crate::config::user_state_directory().join("last-crash.json");
+                self.notify_message(
+                    self.message("crash_location", &[("path", path.display().to_string())]),
+                    path.is_file(),
+                );
+            }
+            AppEffect::CrashClear => {
+                let path = crate::config::user_state_directory().join("last-crash.json");
+                if let Err(error) = self
+                    .recovery
+                    .clear_crash(path, self.documents.recovery_io())
+                {
+                    self.show_error(error);
+                }
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn process_debugger_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
+        self.debugger_session.refresh(
+            &self.configuration.settings().debug,
+            self.workspace.version(),
+        );
+        match effect {
+            AppEffect::DapStart(program) => self.start_dap(None, program),
+            AppEffect::DapConfigurationStart(name) => self.start_dap_configuration(&name),
+            AppEffect::DapWatchAdd(expression) => self.debugger_session.add_watch(expression),
+            AppEffect::DapWatchRemove(expression) => {
+                self.debugger_session.remove_watch(&expression)
+            }
+            AppEffect::DapWatchList => self.open_dap_picker(
+                "watches",
+                self.debugger_session
+                    .watches()
+                    .iter()
+                    .cloned()
+                    .map(|expression| {
+                        (
+                            expression.clone(),
+                            String::new(),
+                            DapControl::Evaluate {
+                                expression,
+                                frame_id: None,
+                                context: "watch".into(),
+                            },
+                        )
+                    })
+                    .collect(),
+            ),
+            AppEffect::DapStop => {
+                if let Err(error) = self.debugger_session.stop() {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::DapContinue => {
+                if let Err(error) = self.debugger_session.control(DapControl::Continue) {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::DapPause => {
+                if let Err(error) = self.debugger_session.control(DapControl::Pause) {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::DapNext => {
+                if let Err(error) = self.debugger_session.control(DapControl::Next) {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::DapStepIn => {
+                if let Err(error) = self.debugger_session.control(DapControl::StepIn) {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::DapStepOut => {
+                if let Err(error) = self.debugger_session.control(DapControl::StepOut) {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::DapConsole => {
+                let items = self
+                    .debugger_session
+                    .console()
+                    .enumerate()
+                    .map(|(index, (adapter, line))| {
+                        (
+                            PickerItem {
+                                id: PickerItemId(format!("dap-console:{index}")),
+                                label: line.clone(),
+                                detail: String::new(),
+                                source: adapter.clone(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::Command(String::new()),
+                        )
+                    })
+                    .collect();
+                self.install_picker(self.message("dap_console_title", &[]), items);
+            }
+            AppEffect::DapSessions => {
+                let adapter = self
+                    .debugger_session
+                    .active_adapter()
+                    .unwrap_or("none")
+                    .to_owned();
+                let configuration = self
+                    .debugger_session
+                    .configuration()
+                    .map(str::to_owned)
+                    .unwrap_or_default();
+                let items = vec![(
+                    PickerItem {
+                        id: PickerItemId("dap-session:active".into()),
+                        label: adapter,
+                        detail: configuration,
+                        source: if self.debugger_session.is_running() {
+                            self.message("dap_session_running", &[])
+                        } else {
+                            self.message("dap_session_stopped", &[])
+                        },
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::Command(String::new()),
+                )];
+                self.install_picker(self.message("dap_sessions_title", &[]), items);
+            }
+            AppEffect::DapThreads => {
+                if let Err(error) = self.debugger_session.control(DapControl::Threads) {
+                    self.show_error(error)
+                }
+            }
+            AppEffect::DapStack(thread) => {
+                if let Err(error) = self.debugger_session.control(DapControl::StackTrace {
+                    thread_id: thread,
+                    start: 0,
+                    levels: 256,
+                }) {
+                    self.show_error(error)
+                }
+            }
+            AppEffect::DapScopes(frame) => {
+                if let Err(error) = self
+                    .debugger_session
+                    .control(DapControl::Scopes { frame_id: frame })
+                {
+                    self.show_error(error)
+                }
+            }
+            AppEffect::DapVariables(reference) => {
+                if let Err(error) = self.debugger_session.control(DapControl::Variables {
+                    reference,
+                    start: 0,
+                    count: 1000,
+                }) {
+                    self.show_error(error)
+                }
+            }
+            AppEffect::DapEvaluate(expression) => {
+                if let Err(error) = self.debugger_session.control(DapControl::Evaluate {
+                    expression,
+                    frame_id: None,
+                    context: "repl".into(),
+                }) {
+                    self.show_error(error)
+                }
+            }
+            AppEffect::DapRestart => {
+                if let Some(name) = self.debugger_session.configuration().map(str::to_owned) {
+                    let _ = self.debugger_session.stop();
+                    self.start_dap_configuration(&name)
+                } else {
+                    self.show_error(self.message("dap_no_configuration", &[]));
+                }
+            }
+            AppEffect::DapBreakpointConfigure {
+                condition,
+                hit_condition,
+                log_message,
+            } => {
+                let Some(view) = self.state.active_view else {
+                    return Ok(());
+                };
+                let buffer = &self.state.buffers[self.state.views[view].buffer];
+                let Some(path) = buffer.path.clone() else {
+                    return Ok(());
+                };
+                let Ok(line) = buffer
+                    .text
+                    .byte_to_line(self.state.views[view].cursor)
+                    .map(|line| line as u64 + 1)
+                else {
+                    return Ok(());
+                };
+                if let Err(error) = self.debugger_session.breakpoint(
+                    DapSourceBreakpoint {
+                        path,
+                        line,
+                        column: None,
+                        condition,
+                        hit_condition,
+                        log_message,
+                    },
+                    false,
+                ) {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::DapBreakpointToggle => {
+                let Some(view) = self.state.active_view else {
+                    return Ok(());
+                };
+                let buffer = &self.state.buffers[self.state.views[view].buffer];
+                let Some(path) = buffer.path.clone() else {
+                    return Ok(());
+                };
+                let Ok(line) = buffer
+                    .text
+                    .byte_to_line(self.state.views[view].cursor)
+                    .map(|line| line as u64 + 1)
+                else {
+                    return Ok(());
+                };
+                match self.debugger_session.breakpoint(
+                    DapSourceBreakpoint {
+                        path: path.clone(),
+                        line,
+                        column: None,
+                        condition: None,
+                        hit_condition: None,
+                        log_message: None,
+                    },
+                    true,
+                ) {
+                    Ok(removed) => self.notify_message(
+                        self.message(
+                            "dap_breakpoint_status",
+                            &[
+                                (
+                                    "state",
+                                    if removed {
+                                        "removed".into()
+                                    } else {
+                                        "added".into()
+                                    },
+                                ),
+                                ("path", path.display().to_string()),
+                                ("line", line.to_string()),
+                            ],
+                        ),
+                        false,
+                    ),
+                    Err(error) => self.show_error(error),
+                }
+            }
+
+            AppEffect::DapStatus => {
+                self.notify_message(
+                    self.message(
+                        "dap_status",
+                        &[(
+                            "adapter",
+                            self.debugger_session
+                                .active_adapter()
+                                .unwrap_or("none")
+                                .to_owned(),
+                        )],
+                    ),
+                    false,
+                );
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn process_extensions_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::PluginValidate => self.load_configured_plugins(),
+            AppEffect::PluginList => {
+                let items = self
+                    .extension
+                    .statuses()
+                    .iter()
+                    .take(4096)
+                    .enumerate()
+                    .map(|(index, (id, status))| {
+                        (
+                            PickerItem {
+                                id: PickerItemId(format!("plugin:{index}:{id}")),
+                                label: id.clone(),
+                                detail: format!("{status:?}"),
+                                source: String::new(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::Command(String::new()),
+                        )
+                    })
+                    .collect();
+                self.install_picker(self.message("plugin_picker_title", &[]), items);
+            }
+            AppEffect::PluginDisable(id) => {
+                let load = self.extension.load_id(&id);
+                if let Err(error) = self.extension.disable(&id) {
+                    self.show_error(error)
+                } else {
+                    if let Some(load) = load {
+                        self.remove_plugin_contribution_generation(&id, load);
+                    }
+                    self.commands.unregister_plugin(&id);
+                    self.notify_message(self.message("plugin_disabled", &[("id", id)]), false);
+                }
+            }
+            AppEffect::PluginPickerOpen { provider, query } => {
+                self.open_plugin_picker(provider, query)
+            }
+            AppEffect::VirtualDocumentOpen { source, key } => {
+                let result = self.extension.open_virtual(&source, key, &self.state);
+                self.route_virtual_open(result);
+            }
+            kind @ (AppEffect::HealthVirtualOpen | AppEffect::HealthVirtualRefresh) => {
+                let result = self
+                    .extension
+                    .prepare_health(
+                        matches!(kind, AppEffect::HealthVirtualRefresh),
+                        self.commands.specs().count(),
+                        VirtualContext {
+                            editor: &self.state,
+                            windows: &self.window_session,
+                            scratch: &self.configuration.settings().ui.buffer_line.scratch_label,
+                        },
+                    )
+                    .and_then(|staged| {
+                        Self::accept_virtual_publication(&mut self.window_session, staged)
+                    });
+                match result {
+                    Ok(state) => {
+                        self.state = state;
+                        self.set_dashboard_visibility(false);
+                        self.reconcile_editor_windows();
+                    }
+                    Err(error) => self.show_error(error),
+                }
+            }
+            AppEffect::VirtualDocumentRefresh => {
+                let result = self
+                    .state
+                    .active_buffer_id()
+                    .ok_or_else(|| "no active virtual document".to_owned())
+                    .and_then(|buffer| self.extension.refresh_virtual(buffer, &self.state));
+                self.route_virtual_open(result);
+            }
+            AppEffect::PluginExecute { plugin, command } => {
+                let Some(load) = self.extension.load_id(&plugin) else {
+                    self.show_error(crate::extensions::PluginError::NotActive);
+                    return Ok(());
+                };
+                if !self.extension.is_active_generation(&plugin, load) {
+                    self.show_error(crate::extensions::PluginError::NotActive);
+                    return Ok(());
+                }
+                self.refresh_plugin_host_events();
+                self.retire_plugin_edit_sources();
+                let maximum = usize::try_from(
+                    self.configuration
+                        .settings()
+                        .workspace
+                        .search
+                        .maximum_file_bytes,
+                )
+                .unwrap_or(usize::MAX);
+                let input_capture = self.input.capture_epoch();
+                let interaction_available = self.input.prompt().is_none()
+                    && self.ui.picker.is_none()
+                    && self.ui.tool_menu.is_none()
+                    && self.input.documentation().is_none()
+                    && !self.input.mapping_pending()
+                    && !self.input.grammar_pending();
+                let navigation = self
+                    .window_session
+                    .navigation_stamp(self.state.window_version(), self.state.active_view);
+                let result = self.extension.execute(
+                    &plugin,
+                    &command,
+                    crate::editor::session::extensions::InvocationContext {
+                        editor: &self.state,
+                        workspace: &self.workspace,
+                        configuration: self.configuration.binding_revision_ref(),
+                        generation: self.configuration.generation(),
+                        ui_revision: self.window_session.graph().revision(),
+                        input_capture,
+                        navigation,
+                        interaction_available,
+                        maximum,
+                    },
+                );
+                if let Err(error) = result {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::PackageInstall {
+                package_manifest,
+                plugin_manifest,
+                component,
+                update,
+            } => {
+                if self.workspace.safe_mode() {
+                    self.show_error(self.message("safe_mode_blocked", &[]));
+                } else {
+                    self.defer_trusted_execution(DeferredExecution::InstallPackage {
+                        package_manifest,
+                        plugin_manifest,
+                        component,
+                        update,
+                    });
+                }
+            }
+            AppEffect::PackageRegistrySearch(query) => {
+                self.request_registry(RegistryRequest::Search { query }, false)
+            }
+            AppEffect::PackageRegistryShow {
+                publisher,
+                name,
+                version,
+            } => self.request_registry(
+                RegistryRequest::Show {
+                    publisher,
+                    name,
+                    version,
+                },
+                false,
+            ),
+            AppEffect::PackageRegistryInstall {
+                publisher,
+                name,
+                version,
+            } => {
+                if self.workspace.safe_mode() {
+                    self.show_error(self.message("safe_mode_blocked", &[]))
+                } else {
+                    self.defer_trusted_execution(DeferredExecution::InstallRegistry {
+                        publisher,
+                        name,
+                        version,
+                    })
+                }
+            }
+            AppEffect::PackageList => {
+                if let Err(error) = self.extension.request_package(PackageOperation::List) {
+                    self.show_error(error)
+                }
+            }
+            AppEffect::PackageVerify => {
+                if let Err(error) = self.extension.request_package(PackageOperation::Verify) {
+                    self.show_error(error)
+                }
+            }
+            AppEffect::PackageRollback => {
+                if let Err(error) = self.extension.request_package(PackageOperation::Rollback) {
+                    self.show_error(error)
+                }
+            }
+            AppEffect::PackageRemove(name) => {
+                if let Err(error) = self
+                    .extension
+                    .request_package(PackageOperation::Remove(name))
+                {
+                    self.show_error(error)
+                }
+            }
+            AppEffect::PackageGarbageCollect => {
+                if let Err(error) = self
+                    .extension
+                    .request_package(PackageOperation::GarbageCollect { maximum: 256 })
+                {
+                    self.show_error(error)
+                }
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn show_lsp_logs(&mut self) {
+        let previous = if self.search.picker_surface() == PickerSurfaceKind::Logs {
+            self.search.picker_bookmark()
+        } else {
+            None
+        };
+        let normal = previous.is_some() && self.input.picker_normal();
+        let follow_tail = previous.is_none() || self.search.picker_follows_tail();
+        let items = self
+            .language
+            .logs()
+            .iter()
+            .enumerate()
+            .map(|(index, line)| {
+                (
+                    PickerItem {
+                        id: PickerItemId(format!("lsp-log:{index}")),
+                        label: line.clone(),
+                        detail: String::new(),
+                        source: "lsp".into(),
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::Command(String::new()),
+                )
+            })
+            .collect();
+        self.install_surface_picker(
+            PickerSurfaceKind::Logs,
+            self.message("lsp_logs", &[("logs", String::new())]),
+            items,
+        );
+        self.search.restore_picker_view(previous, follow_tail);
+        self.input.set_picker_normal(normal);
+        self.sync_picker_ui();
+    }
+
+    pub(in crate::editor::session) fn process_language_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::OpenToolMenu(category) => self.open_tool_menu(category),
+            AppEffect::CloseToolMenu => self.close_tool_menu(),
+            AppEffect::MoveToolMenu(direction) => self.move_tool_menu(direction),
+            AppEffect::CycleToolCategory(direction) => self.cycle_tool_category(direction),
+            AppEffect::RefreshTools => self.refresh_tools(),
+            AppEffect::ActivateTool => self.activate_selected_tool(),
+            AppEffect::InstallSelectedTool => self.install_selected_tool(),
+            AppEffect::UninstallSelectedTool => self.uninstall_selected_tool(),
+            AppEffect::StopSelectedLsp => self.stop_selected_lsp(),
+            AppEffect::RestartSelectedLsp => self.restart_selected_lsp(),
+            AppEffect::ToggleToolRuntime => self.toggle_selected_lsp_runtime(),
+            AppEffect::LspStart => {
+                if let Some(key) = self.language.active().cloned() {
+                    self.language.request_start(&key, None);
+                }
+                self.start_lsp(None);
+            }
+            AppEffect::LspStop => {
+                if let Some(server) = self.language.active().cloned() {
+                    self.language.request_stop(&server);
+                    if let Err(error) = self.language.stop(&server) {
+                        self.show_error(error)
+                    }
+                    self.clear_lsp_progress(&server);
+                    self.language.remove(&server);
+                    self.clear_lsp_session_state();
+                }
+            }
+            AppEffect::LspRestart => {
+                if let Some(server) = self.language.active().cloned() {
+                    self.language.request_start(&server, Some(Instant::now()));
+                    let _ = self.language.stop(&server);
+                    self.clear_lsp_progress(&server);
+                } else {
+                    self.start_lsp(None);
+                }
+            }
+            AppEffect::LspStatus => {
+                let mut servers = self
+                    .language
+                    .running_servers()
+                    .iter()
+                    .map(|server| self.lsp_server_label(server))
+                    .collect::<Vec<_>>();
+                servers.sort();
+                servers.dedup();
+                self.notify_message(
+                    self.message(
+                        "lsp_status",
+                        &[(
+                            "servers",
+                            if servers.is_empty() {
+                                "none".into()
+                            } else {
+                                servers.join(", ")
+                            },
+                        )],
+                    ),
+                    false,
+                );
+                if let Some(server) = self.language.active().map(String::as_str) {
+                    let _ = self.language.health(server);
+                }
+            }
+            AppEffect::LspAttach => {
+                if let Some(server) = self.language.active().cloned() {
+                    if let Some((buffer, document)) = self.active_lsp_document() {
+                        let source = self.state.buffers[buffer].text.source_version();
+                        if let Err(error) =
+                            self.language
+                                .sync_owned(&server, document, (buffer, source))
+                        {
+                            self.show_error(error);
+                        }
+                    }
+                } else {
+                    self.start_lsp(None);
+                }
+            }
+            AppEffect::LspDetach => {
+                if let (Some(server), Some((buffer, document))) =
+                    (self.language.active().cloned(), self.active_lsp_document())
+                {
+                    let uri = document.uri();
+                    let _ = self.language.close(&server, uri.clone());
+                    self.language.detach(&server, buffer);
+                    if let Ok(owner) = DiagnosticOwner::new(format!("lsp.{server}")) {
+                        self.diagnostics.clear_owner_uri(&owner, &uri);
+                    }
+                    self.sync_ui_diagnostics();
+                }
+            }
+            AppEffect::LspSessions => self.show_lsp_sessions(),
+            AppEffect::LspSessionSelect(key) => self.select_lsp_session(&key),
+            AppEffect::LspLogs => self.show_lsp_logs(),
+            AppEffect::LspInlayHintsToggle => {
+                let enabled = self.configuration.toggle_inlay_hints();
+                self.schedule_lsp_inlay_refresh(true);
+                self.notify_message(
+                    format!(
+                        "inlay hints {}",
+                        if enabled { "enabled" } else { "disabled" }
+                    ),
+                    false,
+                );
+            }
+            AppEffect::LspRequest(feature) => self.request_lsp(feature),
+            AppEffect::LspDocumentationScroll(direction) => {
+                self.reconcile_editor_windows();
+                let policy = &self.configuration.settings().ui.documentation_popup;
+                self.input.scroll_documentation(
+                    direction,
+                    policy.scroll_step,
+                    self.window_session.content().documentation_rows.max(1),
+                );
+                self.project_input_documentation();
+            }
+            AppEffect::LspDocumentationClose => self.close_documentation(),
+            AppEffect::LspCompletionDocumentationOpen => self.open_lsp_completion_documentation(),
+            AppEffect::LspCompletionMove(direction) => self.move_lsp_completion(direction),
+            AppEffect::DiagnosticNavigate { direction, filter } => {
+                self.navigate_diagnostic(direction, filter)
+            }
+            AppEffect::LspCompletionAccept => self.accept_lsp_completion(),
+            AppEffect::LspCompletionCancel => {
+                let generation = self.language.generation();
+                if let Some(server) = self.language.active().map(String::as_str) {
+                    let _ = self.language.cancel(server, generation);
+                }
+                self.language.clear_completion();
+                self.ui.language_completion = None;
+            }
+            AppEffect::SnippetNavigate(direction) => self.navigate_snippet(direction),
+            AppEffect::SnippetCancel => {
+                self.input.clear_snippet();
+                if let Some(view) = self.state.active_view {
+                    self.state.views[view].selection = None;
+                    self.state.mark_editor_changed();
+                }
+            }
+            AppEffect::LspFoldToggle => {
+                if let Some(view) = self.state.active_view {
+                    let line = self.state.views.get(view).and_then(|view| {
+                        self.state.buffers[view.buffer]
+                            .text
+                            .byte_to_line(view.cursor)
+                            .ok()
+                    });
+                    if let Some(fold) = self.ui.lsp_folds.iter_mut().find(|fold| {
+                        fold.view == view
+                            && line.is_some_and(|line| {
+                                line >= fold.start_line && line <= fold.end_line
+                            })
+                    }) {
+                        fold.collapsed = !fold.collapsed;
+                    }
+                }
+            }
+            AppEffect::LspSelectionExpand => {
+                if let (Some(view), Some(range)) = (
+                    self.state.active_view,
+                    self.language
+                        .selection_ranges()
+                        .iter()
+                        .filter(|range| {
+                            range.contains(self.state.views[self.state.active_view.unwrap()].cursor)
+                        })
+                        .min_by_key(|range| range.len())
+                        .copied(),
+                ) {
+                    let transaction = EditorTransaction::new(self.transaction_id()).with_operation(
+                        EditorOperation::SetSelection {
+                            view,
+                            selection: Some(crate::editor::Selection {
+                                anchor: range.start,
+                                head: range.end,
+                                kind: crate::editor::SelectionKind::Character,
+                            }),
+                        },
+                    );
+                    if let Err(error) = self.state.apply_transaction(&transaction) {
+                        self.show_error(error)
+                    }
+                }
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn process_misc_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::MarkSet(name) => {
+                if let Some(location) = self.current_persisted_location() {
+                    self.persistence.set_mark(
+                        name,
+                        location,
+                        self.configuration.settings().persistence.marks,
+                    );
+                }
+            }
+
+            AppEffect::SafeModeStatus => {
+                self.notify_message(
+                    self.message(
+                        "safe_mode_status",
+                        &[(
+                            "state",
+                            if self.workspace.safe_mode() {
+                                "active".into()
+                            } else {
+                                "inactive".into()
+                            },
+                        )],
+                    ),
+                    false,
+                );
+            }
+            AppEffect::ShowHealth => {
+                self.notify_message(
+                    self.message(
+                        "healthy",
+                        &[
+                            ("buffers", self.state.buffers.len().to_string()),
+                            ("workspace", self.state.workspace_root.display().to_string()),
+                            ("terminal", self.notices.terminal_capabilities().to_owned()),
+                            ("jobs", self.tasks.running_count().to_string()),
+                            ("ptys", self.terminal_session.running_count().to_string()),
+                            ("preflights", self.pending_preflight_count().to_string()),
+                            ("tasks", self.tasks.status_count().to_string()),
+                            ("plugins", self.extension.statuses().len().to_string()),
+                            (
+                                "plugin_failures",
+                                self.extension
+                                    .statuses()
+                                    .values()
+                                    .filter(|status| {
+                                        matches!(status, crate::extensions::PluginStatus::Failed(_))
+                                    })
+                                    .count()
+                                    .to_string(),
+                            ),
+                            ("packages", self.extension.pending_packages().to_string()),
+                            ("lsp", self.language.sessions().len().to_string()),
+                            ("persistence", self.persistence.pending().to_string()),
+                            ("safe", self.workspace.safe_mode().to_string()),
+                            ("dap", self.debugger_session.is_running().to_string()),
+                        ],
+                    ),
+                    false,
+                );
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn process_project_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::WorkspaceTrust => self.request_workspace_trust(),
+            AppEffect::WorkspaceTrustConfirm(phrase) => {
+                self.confirm_workspace_trust(phrase);
+            }
+            AppEffect::WorkspaceUntrust => self.revoke_workspace_trust(),
+            AppEffect::WorkspaceStatus => {
+                let state = if self.workspace.trust() == WorkspaceTrust::Trusted {
+                    self.message("workspace_trust_trusted", &[])
+                } else {
+                    self.message("workspace_trust_untrusted", &[])
+                };
+                self.notify_message(
+                    self.message("workspace_trust_status", &[("state", state)]),
+                    false,
+                );
+            }
+            AppEffect::ExplorerPanelToggle => {
+                return self.process_project_effect(if self.ui.explorer.is_some() {
+                    AppEffect::ExplorerClose
+                } else {
+                    AppEffect::ExplorerOpen
+                });
+            }
+            AppEffect::ExplorerOpen => self.open_explorer(),
+            AppEffect::ExplorerClose => {
+                if self
+                    .input
+                    .prompt()
+                    .is_some_and(|p| p.kind == PromptKind::ExplorerRename)
+                {
+                    self.close_prompt();
+                }
+                self.ui.explorer = None;
+                self.set_explorer_focus(false);
+                self.reconcile_explorer_watch();
+                self.ensure_cursor_visible();
+            }
+            AppEffect::ExplorerMove(delta) => {
+                self.move_explorer_selection(isize::from(delta));
+            }
+            AppEffect::ExplorerPage(direction) => self.page_explorer_selection(direction),
+            AppEffect::ExplorerParent => self.explorer_collapse_or_parent(),
+            AppEffect::ExplorerChild => {
+                self.explorer.select_first_child();
+                self.sync_explorer_ui();
+            }
+            AppEffect::ExplorerToggle => self.explorer_toggle(),
+            AppEffect::ExplorerRefresh => self.refresh_explorer(),
+            AppEffect::ExplorerFollow => self.follow_active_file_in_explorer(),
+            AppEffect::ExplorerToggleHidden => {
+                self.explorer.toggle_hidden();
+                self.refresh_explorer();
+            }
+            AppEffect::ExplorerToggleIgnored => {
+                self.explorer.toggle_ignored();
+                self.refresh_explorer();
+            }
+            AppEffect::ExplorerFileOpen { split } => self.explorer_open_file(split),
+            AppEffect::ExplorerCreate(path) => self.create_explorer_path(path),
+            AppEffect::ExplorerRename(target) => self.rename_explorer_path(target),
+            AppEffect::ExplorerRenamePrompt => self.open_explorer_rename_prompt(),
+            AppEffect::ExplorerDeleteRequest => self.request_explorer_delete(),
+            AppEffect::ExplorerClipboard { cut } => self.set_explorer_clipboard(cut),
+            AppEffect::ExplorerPaste => self.paste_explorer_clipboard(),
+            AppEffect::ExplorerYankPath => self.yank_explorer_path(),
+            AppEffect::ExplorerMouseSelect => self.explorer_mouse_select(),
+            AppEffect::WorkspaceRootAdd(path) => self.add_workspace_root(path),
+            AppEffect::WorkspaceRootActivate(id) => {
+                self.activate_workspace_root(crate::workspace::RootId(id));
+            }
+            AppEffect::WorkspaceRootRemove(id) => {
+                self.remove_workspace_root(crate::workspace::RootId(id));
+            }
+            AppEffect::WorkspaceRootStatus => {
+                if let Some(root) = self
+                    .workspace
+                    .active_root()
+                    .and_then(|id| self.workspace.roots().iter().find(|root| root.id == id))
+                {
+                    self.notify_message(
+                        self.message(
+                            "workspace_root_status",
+                            &[
+                                ("id", root.id.0.to_string()),
+                                ("path", root.identity.canonical_path.display().to_string()),
+                            ],
+                        ),
+                        false,
+                    );
+                }
+            }
+            AppEffect::WorkspaceSearchPrompt => self.open_live_workspace_search(),
+            AppEffect::WorkspaceSearch(query) => self.start_workspace_search(query, None),
+            AppEffect::WorkspaceSearchCancel => {
+                self.search.cancel_grep();
+                self.notify_message(self.message("workspace_search_cancelled", &[]), false);
+            }
+            AppEffect::WorkspaceReplace { query, replacement } => {
+                self.start_workspace_search(query, Some(replacement));
+            }
+            AppEffect::OpenPicker(kind) => self.open_builtin_picker(kind),
+            AppEffect::PickerInsert(text) => self.picker_insert(&text),
+            AppEffect::PickerBackspace => self.picker_backspace(),
+            AppEffect::PickerMove(direction) => self.picker_move(direction),
+            AppEffect::PickerAccept => self.accept_picker(),
+            AppEffect::PickerCancel => self.close_picker(),
+            AppEffect::PickerNormal | AppEffect::PickerInsertMode => {
+                if self.search.picker().is_some() && self.search.workspace_picker().is_none() {
+                    self.input
+                        .set_picker_normal(matches!(effect, AppEffect::PickerNormal));
+                    self.sync_picker_ui();
+                }
+            }
+            AppEffect::WorkspaceEditToggle => {
+                self.retire_stale_picker();
+                let selected = self
+                    .selected_picker_payload()
+                    .and_then(|payload| match payload {
+                        PickerPayload::ProposalFile(index) => Some(*index),
+                        _ => None,
+                    });
+                if let Some(index) = selected
+                    && self.workspace_edits.toggle(index).is_ok()
+                {
+                    self.show_workspace_proposal();
+                }
+            }
+            AppEffect::WorkspaceEditAccept => self.accept_workspace_proposal(),
+            AppEffect::WorkspaceEditReject => self.reject_workspace_proposal(),
+            AppEffect::WorkspaceResourceApply => loop {
+                let result = match self.workspace_edits.prepare_resource(
+                    &self.workspace,
+                    self.configuration.binding_revision_ref(),
+                    &self.state,
+                ) {
+                    Ok(Some(permit)) => self.documents.submit_workspace_resource(permit),
+                    Ok(None) => break,
+                    Err(error) => {
+                        self.show_error(error);
+                        break;
+                    }
+                };
+                if let Err(error) = result {
+                    self.show_error(error);
+                    break;
+                }
+            },
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}
+
+use crate::editor::session::search::{Intent, SearchUpdate};
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn open_live_workspace_search(&mut self) {
+        self.close_picker();
+        self.search.open_live();
+        self.install_surface_picker_state(
+            PickerSurfaceKind::Generic,
+            self.message("workspace_search_title", &[]),
+            Vec::new(),
+            String::new(),
+            true,
+            PickerOrigin::Grep,
+        );
+    }
+    pub(in crate::editor::session) fn restart_live_workspace_search(&mut self, query: String) {
+        self.search.set_query(query.clone());
+        if query.is_empty() {
+            self.install_surface_picker_state(
+                PickerSurfaceKind::Generic,
+                self.message("workspace_search_title", &[]),
+                Vec::new(),
+                query,
+                true,
+                PickerOrigin::Grep,
+            );
+        } else {
+            self.start_workspace_search(query, None);
+        }
+    }
+    pub(in crate::editor::session) fn start_workspace_file_picker(&mut self) {
+        self.close_picker();
+        let configured = &self.configuration.settings().workspace.search;
+        let root_revision = self.workspace.root_revision();
+        let policy = WorkspaceFilePolicy {
+            roots: self
+                .workspace
+                .roots()
+                .iter()
+                .map(|r| r.identity.canonical_path.clone())
+                .collect(),
+            root_revision,
+            include_hidden: configured.include_hidden,
+            include_ignored: configured.include_ignored,
+            maximum_files: configured.maximum_files,
+            maximum_path_bytes: 16 * 1024 * 1024,
+            batch_size: configured.batch_size,
+            event_queue_capacity: configured.event_queue_capacity,
+        };
+        match self.search.start_files(
+            policy,
+            self.workspace.version(),
+            self.configuration.binding_revision(),
+        ) {
+            Ok(()) => self.install_surface_picker_state(
+                PickerSurfaceKind::Generic,
+                "Files".into(),
+                Vec::new(),
+                String::new(),
+                false,
+                PickerOrigin::Files,
+            ),
+            Err(error) => self.show_error(error),
+        }
+    }
+    pub(in crate::editor::session) fn process_workspace_file_events(&mut self) {
+        let Some(result) = self.search.poll_files(
+            self.workspace.version(),
+            self.configuration.binding_revision(),
+        ) else {
+            return;
+        };
+        let entries = match result {
+            Ok(entries) => entries,
+            Err(error) => {
+                self.close_picker();
+                self.show_error(error);
+                return;
+            }
+        };
+        let multi_root = self.workspace.roots().len() > 1;
+        let items = entries
+            .into_iter()
+            .map(|entry| {
+                (
+                    PickerItem {
+                        id: PickerItemId(entry.id),
+                        label: entry.relative_path.display().to_string(),
+                        detail: String::new(),
+                        source: if multi_root {
+                            entry.root.file_name().map_or_else(String::new, |name| {
+                                name.to_string_lossy().into_owned()
+                            })
+                        } else {
+                            String::new()
+                        },
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::MatcherSource(MatcherSource {
+                        path: entry.canonical_path,
+                        line: 0,
+                        column: 0,
+                    }),
+                )
+            })
+            .collect();
+        match compose_workspace_file_items(items) {
+            Ok(items) => self.install_surface_picker_state(
+                PickerSurfaceKind::Generic,
+                "Files".into(),
+                items,
+                String::new(),
+                !self.search.files_pending(),
+                PickerOrigin::Files,
+            ),
+            Err(error) => self.show_error(error.to_string()),
+        }
+    }
+    pub(in crate::editor::session) fn start_workspace_search(
+        &mut self,
+        query: String,
+        replacement: Option<String>,
+    ) {
+        let configured = &self.configuration.settings().workspace.search;
+        let policy = WorkspaceSearchPolicy {
+            roots: self
+                .workspace
+                .roots()
+                .iter()
+                .map(|root| root.identity.canonical_path.clone())
+                .collect(),
+            query,
+            regex: configured.regex,
+            smart_case: configured.smart_case,
+            whole_word: configured.whole_word,
+            include_globs: configured.include_globs.clone(),
+            exclude_globs: configured.exclude_globs.clone(),
+            include_hidden: configured.include_hidden,
+            include_ignored: configured.include_ignored,
+            maximum_files: configured.maximum_files,
+            maximum_results: configured.maximum_results,
+            maximum_file_bytes: configured.maximum_file_bytes,
+            maximum_total_bytes: configured.maximum_total_bytes,
+            maximum_preview_bytes: configured.maximum_preview_bytes,
+            batch_size: configured.batch_size,
+            event_queue_capacity: configured.event_queue_capacity,
+        };
+        match self.search.start(
+            policy,
+            self.workspace.version(),
+            self.configuration.binding_revision(),
+            replacement,
+        ) {
+            Ok(()) => {
+                if self.search.live() {
+                    self.install_surface_picker_state(
+                        PickerSurfaceKind::Generic,
+                        self.message("workspace_search_title", &[]),
+                        Vec::new(),
+                        self.search.query().into(),
+                        false,
+                        PickerOrigin::Grep,
+                    );
+                    self.clear_notice();
+                } else {
+                    self.close_picker();
+                    self.notify_message(self.message("workspace_search_started", &[]), false);
+                }
+            }
+            Err(error) => {
+                self.show_error(self.message("workspace_search_failed", &[("diagnostic", error)]))
+            }
+        }
+    }
+    pub(in crate::editor::session) fn process_workspace_search_events(&mut self) {
+        for update in self.search.poll(
+            self.workspace.version(),
+            self.configuration.binding_revision(),
+        ) {
+            match update {
+                SearchUpdate::Batch => {
+                    if self.search.live() {
+                        self.open_workspace_search_picker();
+                    }
+                }
+                SearchUpdate::Failed(error) => {
+                    self.close_picker();
+                    self.show_error(
+                        self.message("workspace_search_failed", &[("diagnostic", error)]),
+                    );
+                }
+                SearchUpdate::Complete {
+                    intent: Intent::Find,
+                    files,
+                } => {
+                    if self.search.live() || !self.search.matches().is_empty() {
+                        self.open_workspace_search_picker();
+                        if self.search.live() {
+                            self.clear_notice();
+                        } else {
+                            self.notify_message(
+                                self.message(
+                                    "workspace_search_complete",
+                                    &[
+                                        ("count", self.search.matches().len().to_string()),
+                                        ("files", files.to_string()),
+                                    ],
+                                ),
+                                false,
+                            );
+                        }
+                    } else {
+                        self.show_error(self.message("workspace_search_empty", &[]));
+                    }
+                }
+                SearchUpdate::Complete {
+                    intent: Intent::Replace(replacement),
+                    ..
+                } => {
+                    if self.search.matches().is_empty() {
+                        self.show_error(self.message("workspace_search_empty", &[]));
+                    } else {
+                        self.begin_workspace_search_replacement(replacement);
+                    }
+                }
+            }
+        }
+    }
+    pub(in crate::editor::session) fn open_workspace_search_picker(&mut self) {
+        let Some(order) = self
+            .search
+            .workflow()
+            .and_then(|broker| broker.ordered_items())
+        else {
+            self.show_error("workspace search workflow projection is unavailable");
+            return;
+        };
+        let matches = self
+            .search
+            .matches()
+            .iter()
+            .map(|found| (found.id.as_str(), found))
+            .collect::<BTreeMap<_, _>>();
+        let multi_root = self.workspace.roots().len() > 1;
+        let items = order
+            .into_iter()
+            .filter_map(|item| matches.get(item.stable_key.as_str()).copied())
+            .map(|found| {
+                let item = PickerItem {
+                    id: PickerItemId(found.id.clone()),
+                    label: self.message(
+                        "workspace_search_row",
+                        &[
+                            ("path", found.relative_path.display().to_string()),
+                            ("line", found.line.saturating_add(1).to_string()),
+                            ("column", found.column.saturating_add(1).to_string()),
+                        ],
+                    ),
+                    detail: found.line_text.trim().to_owned(),
+                    source: if multi_root {
+                        found
+                            .root
+                            .file_name()
+                            .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+                    } else {
+                        String::new()
+                    },
+                    action: PickerAction::None,
+                };
+                (item, PickerPayload::WorkspaceSearch(found.id.clone()))
+            })
+            .collect();
+        if self.search.live() {
+            self.install_surface_picker_state(
+                PickerSurfaceKind::Generic,
+                self.message("workspace_search_title", &[]),
+                items,
+                self.search.query().into(),
+                !self.search.pending(),
+                PickerOrigin::Grep,
+            );
+        } else {
+            self.install_surface_picker_state(
+                PickerSurfaceKind::Generic,
+                self.message("workspace_search_title", &[]),
+                items,
+                String::new(),
+                true,
+                PickerOrigin::Grep,
+            );
+        }
+    }
+    pub(in crate::editor::session) fn begin_workspace_search_replacement(
+        &mut self,
+        replacement: String,
+    ) {
+        if self.workspace_edits.preparing() || self.workspace_edits.proposal().is_some() {
+            self.show_error(self.message("workspace_edit_busy", &[]));
+            return;
+        }
+        let mut grouped = BTreeMap::<PathBuf, (Vec<u8>, Vec<TextEdit>)>::new();
+        for found in self.search.matches() {
+            let entry = grouped
+                .entry(found.canonical_path.clone())
+                .or_insert_with(|| (found.snapshot.to_vec(), Vec::new()));
+            if entry.0.as_slice() != found.snapshot.as_ref() {
+                self.show_error(self.message("workspace_search_stale_result", &[]));
+                return;
+            }
+            let Ok(range) =
+                ByteRange::new(ByteOffset(found.range.start), ByteOffset(found.range.end))
+            else {
+                self.show_error(self.message("workspace_search_stale_result", &[]));
+                return;
+            };
+            entry.1.push(TextEdit::new(range, replacement.clone()));
+        }
+        let mut snapshots = Vec::with_capacity(grouped.len());
+        let mut drafts = Vec::with_capacity(grouped.len());
+        for (path, (searched_bytes, edits)) in grouped {
+            let revision = if let Some((_, buffer)) = self
+                .state
+                .buffers
+                .iter()
+                .find(|(_, buffer)| buffer.path.as_ref() == Some(&path))
+            {
+                if buffer.text.to_bytes() != searched_bytes {
+                    self.show_error(self.message("workspace_search_stale_result", &[]));
+                    return;
+                }
+                Some(buffer.text.revision())
+            } else {
+                None
+            };
+            snapshots.push(FileSnapshot {
+                canonical_path: path.clone(),
+                revision,
+                bytes: searched_bytes,
+            });
+            drafts.push(WorkspaceEditDraft {
+                canonical_path: path,
+                expected_revision: revision,
+                edits,
+            });
+        }
+        let id = match self.state.workspace_edit_sources().and_then(|source| {
+            self.workspace_edits.begin(
+                self.workspace.version(),
+                self.configuration.binding_revision(),
+                source,
+            )
+        }) {
+            Ok(id) => id,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        match self.workspace_edits.build(
+            crate::editor::session::workspace_edits::PreparedEdits {
+                ticket: id,
+                label: self.message("workspace_replace_label", &[]),
+                drafts,
+                snapshots,
+                resources: Vec::new(),
+            },
+            self.workspace.edit_scope(),
+            &self.workspace.version(),
+            self.configuration.binding_revision(),
+        ) {
+            Ok(()) => {
+                self.show_workspace_proposal();
+            }
+            Err(error) => {
+                self.workspace_edits.reject();
+                self.show_error(self.message("workspace_edit_failed", &[("diagnostic", error)]));
+            }
+        }
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn explorer_open_file(&mut self, split: bool) {
+        if self
+            .explorer
+            .tree()
+            .selected_node()
+            .is_some_and(|node| matches!(node.kind, ExplorerKind::Root | ExplorerKind::Directory))
+        {
+            self.explorer_toggle();
+            return;
+        }
+        if let Err(error) = self.documents.check_admission() {
+            self.show_error(error);
+            return;
+        }
+        let request = self.explorer.prepare_open(
+            split,
+            (
+                self.workspace.version(),
+                self.configuration.binding_revision(),
+            ),
+            self.state.window_version(),
+            self.workspace.roots(),
+        );
+        let (retired, request) = match request {
+            Ok(request) => request,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        if let Some(id) = retired {
+            self.documents.cancel_request(id);
+        }
+        match self.documents.open_explorer(request.path, request.roots) {
+            Ok(id) => {
+                self.set_explorer_focus(false);
+                // Finish the requested focus change before capturing its async
+                // navigation guard; a redraw must not look like new navigation.
+                self.reconcile_editor_windows();
+                let navigation = self
+                    .window_session
+                    .navigation_stamp(self.state.window_version(), self.state.active_view);
+                if !self.explorer.admit_open(request.ticket, id, navigation) {
+                    self.documents.cancel_request(id);
+                }
+            }
+            Err(error) => {
+                self.explorer.fail_open(request.ticket);
+                self.show_error(error);
+            }
+        }
+    }
+    pub(in crate::editor::session) fn cancel_explorer_confirmation(&mut self) {
+        if let Some(id) = self.explorer.cancel_confirmation() {
+            self.documents.cancel_request(id);
+        }
+    }
+    pub(in crate::editor::session) fn retire_stale_explorer_intents(&mut self) {
+        let (ids, may_write) = self.explorer.retire_stale_intents(
+            self.workspace.version(),
+            self.configuration.binding_revision(),
+            &self.state.window_version(),
+        );
+        let mut all_cancelled = true;
+        for id in ids {
+            all_cancelled &= self.documents.cancel_request(id);
+        }
+        if may_write && !all_cancelled {
+            self.notify_message(
+                "explorer source changed; a running filesystem write may still finish".into(),
+                true,
+            );
+        }
+        if self
+            .input
+            .prompt()
+            .is_some_and(|p| p.kind == PromptKind::ExplorerRename)
+            && !self.explorer.rename_current(
+                &self.workspace.version(),
+                self.configuration.binding_revision(),
+                &self.state.window_version(),
+            )
+        {
+            self.close_prompt();
+        }
+        if !self.explorer.confirmation_pending()
+            && self
+                .input
+                .prompt()
+                .is_some_and(|p| p.kind == PromptKind::ExplorerDelete)
+        {
+            self.close_prompt();
+        }
+    }
+    pub(in crate::editor::session) fn retire_explorer_intents(&mut self) {
+        let (ids, may_write) = self.explorer.retire_intents();
+        let mut all_cancelled = true;
+        for id in ids {
+            all_cancelled &= self.documents.cancel_request(id);
+        }
+        if may_write && !all_cancelled {
+            self.notify_message(
+                "explorer operation retired; a running filesystem write may still finish".into(),
+                true,
+            );
+        }
+    }
+    fn queue_explorer_mutation(
+        &mut self,
+        operation: Result<ExplorerMutation, String>,
+        confirmation: bool,
+        rename_prompt: bool,
+    ) -> Result<(), String> {
+        let operation = operation?;
+        if self.explorer.mutation_pending() {
+            return Err("an explorer operation is already pending".into());
+        }
+        self.documents
+            .check_admission()
+            .map_err(|error| error.to_string())?;
+        let change = match &operation {
+            ExplorerMutation::Rename { source, .. } | ExplorerMutation::Delete { path: source } => {
+                Some(self.state.capture_path_change(source)?)
+            }
+            _ => None,
+        };
+        let context = crate::editor::session::explorer::MutationContext {
+            workspace: self.workspace.version(),
+            configuration: self.configuration.binding_revision(),
+            editor: self.state.window_version(),
+            change,
+        };
+        let request = self.explorer.prepare_mutation(
+            operation,
+            context,
+            self.workspace.roots(),
+            self.configuration
+                .settings()
+                .workspace
+                .search
+                .maximum_file_bytes,
+            confirmation,
+        )?;
+        let result = if rename_prompt {
+            let source = self.explorer.submitted_rename_source();
+            let target = request
+                .operation
+                .target()
+                .expect("validated rename target")
+                .into();
+            self.documents.prepare_explorer_rename(source, target)
+        } else {
+            self.documents
+                .prepare_explorer(request.operation, request.roots, request.maximum)
+        }
+        .map_err(|e| e.to_string());
+        let id = result.as_ref().ok().copied();
+        if let Err(error) = self.explorer.admit_mutation(request.ticket, result) {
+            if let Some(id) = id {
+                self.documents.cancel_request(id);
+            }
+            return Err(error);
+        }
+        self.notify_message("checking explorer operation…".into(), false);
+        Ok(())
+    }
+    pub(in crate::editor::session) fn create_explorer_path(&mut self, input: String) {
+        if let Err(error) = self.queue_explorer_mutation(self.explorer.create(&input), false, false)
+        {
+            self.show_error(error);
+        }
+    }
+    pub(in crate::editor::session) fn rename_explorer_path(&mut self, target: String) {
+        if let Err(error) =
+            self.queue_explorer_mutation(self.explorer.rename(&target), false, false)
+        {
+            self.show_error(error);
+        }
+    }
+    pub(in crate::editor::session) fn open_explorer_rename_prompt(&mut self) {
+        self.close_prompt();
+        let request = match self.explorer.begin_rename(
+            self.workspace.version(),
+            self.configuration.binding_revision(),
+            self.state.window_version(),
+            self.workspace.roots(),
+        ) {
+            Ok(request) => request,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        let result = self.explorer.rename_inspection().and_then(|inspection| {
+            let id = self
+                .documents
+                .inspect_explorer_rename(
+                    request.path,
+                    request.roots,
+                    self.configuration
+                        .settings()
+                        .workspace
+                        .search
+                        .maximum_file_bytes,
+                )
+                .map_err(|error| error.to_string())?;
+            inspection.register(id);
+            Ok(())
+        });
+        if let Err(error) = result {
+            self.explorer.cancel_rename();
+            self.show_error(error);
+            return;
+        }
+        self.open_prompt(PromptKind::ExplorerRename, request.initial);
+        self.prompt_help(format!(
+            "Relative to `{}`. Checking source… Enter renames; Esc cancels.",
+            request.root.display()
+        ));
+    }
+    pub(in crate::editor::session) fn submit_explorer_rename_prompt(&mut self, value: &str) {
+        let operation = self.explorer.rename_value(
+            value,
+            self.workspace.version(),
+            self.configuration.binding_revision(),
+            &self.state.window_version(),
+        );
+        if let Err(error) = self.queue_explorer_mutation(operation, false, true) {
+            self.prompt_error(error);
+        } else {
+            self.prompt_help("Checking rename target… Esc cancels before application.".into());
+        }
+    }
+    pub(in crate::editor::session) fn cancel_explorer_rename_prompt(&mut self) {
+        for id in self.explorer.cancel_rename() {
+            self.documents.cancel_request(id);
+        }
+    }
+    pub(in crate::editor::session) fn request_explorer_delete(&mut self) {
+        self.close_prompt();
+        if let Err(error) = self.queue_explorer_mutation(self.explorer.delete(), true, false) {
+            self.show_error(error);
+        }
+    }
+    pub(in crate::editor::session) fn confirm_explorer_delete(&mut self) {
+        match self.explorer.confirm_delete(
+            self.workspace.version(),
+            self.configuration.binding_revision(),
+            &self.state.window_version(),
+        ) {
+            Ok(prepared) => self.apply_prepared_explorer(prepared),
+            Err(error) => self.show_error(error),
+        }
+    }
+    pub(in crate::editor::session) fn apply_prepared_explorer(
+        &mut self,
+        prepared: crate::files::PreparedExplorerMutation,
+    ) {
+        let result = self
+            .documents
+            .apply_explorer(prepared)
+            .map_err(|e| e.to_string());
+        let id = result.as_ref().ok().copied();
+        if let Err(error) = self.explorer.admit_apply(result) {
+            if let Some(id) = id {
+                self.documents.cancel_request(id);
+            }
+            self.show_error(error);
+        }
+    }
+    pub(in crate::editor::session) fn set_explorer_clipboard(&mut self, cut: bool) {
+        match self.explorer.clipboard(cut, self.workspace.version()) {
+            Ok(message) => self.notify_message(message, false),
+            Err(error) => self.show_error(error),
+        }
+    }
+    pub(in crate::editor::session) fn paste_explorer_clipboard(&mut self) {
+        if let Err(error) = self.queue_explorer_mutation(
+            self.explorer.paste(&self.workspace.version()),
+            false,
+            false,
+        ) {
+            self.show_error(error);
+        }
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn process_terminal_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::TerminalOpen(profile) => {
+                let profile = profile.unwrap_or_else(|| {
+                    self.configuration
+                        .settings()
+                        .terminals
+                        .default_profile
+                        .clone()
+                });
+                self.request_terminal_open(&profile, None);
+            }
+            AppEffect::TerminalToggle => {
+                if self.window_session.terminal_focused() {
+                    self.place_active_terminal(WindowPlacement::Hidden);
+                } else if let Some(id) = self.terminal_session.selected() {
+                    if self.terminal_window_rect().is_none()
+                        && let Err(error) =
+                            self.show_native_window(NativeSurfaceTarget::Terminal(id.0))
+                    {
+                        self.show_error(error);
+                        return Ok(());
+                    }
+                    self.set_terminal_focus(true);
+                    self.resize_active_terminal_to_panel();
+                    self.sync_terminal_panel();
+                } else {
+                    let profile = self
+                        .configuration
+                        .settings()
+                        .terminals
+                        .default_profile
+                        .clone();
+                    self.request_terminal_open(&profile, None);
+                }
+            }
+            AppEffect::TerminalList => {
+                let items = self
+                    .terminal_session
+                    .choices()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (key, label, detail))| {
+                        (
+                            PickerItem {
+                                id: PickerItemId(format!("terminal:{index}")),
+                                label,
+                                detail,
+                                source: "terminal".into(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::Terminal(key),
+                        )
+                    })
+                    .collect();
+                self.install_picker("Terminals".into(), items);
+            }
+            AppEffect::TerminalFocus(id) => {
+                let id = PtyId(id);
+                if self.terminal_session.contains(id) {
+                    self.terminal_session.select(id);
+                    self.set_terminal_focus(true);
+                    self.resize_active_terminal_to_panel();
+                    self.sync_terminal_panel();
+                } else {
+                    self.show_error(self.message("terminal_missing", &[]));
+                }
+            }
+            AppEffect::TerminalFocusActive => {
+                if self.terminal_session.selected().is_some() {
+                    self.set_terminal_focus(true);
+                    self.resize_active_terminal_to_panel();
+                    self.sync_terminal_panel();
+                } else {
+                    self.show_error(self.message("terminal_missing", &[]));
+                }
+            }
+            AppEffect::TerminalCycle(direction) => {
+                let focused = self.window_session.terminal_focused();
+                if !self.terminal_session.cycle(i64::from(direction)) {
+                    self.show_error(self.message("terminal_missing", &[]));
+                } else {
+                    if focused {
+                        self.set_terminal_focus(true);
+                    }
+                    self.resize_active_terminal_to_panel();
+                    self.sync_terminal_panel();
+                }
+            }
+            AppEffect::TerminalResize(rows) => {
+                if self.terminal_session.selected().is_none() {
+                    self.show_error(self.message("terminal_missing", &[]));
+                } else {
+                    let result = if self.compositor_projection().is_none() {
+                        Err("universal compositor projection is missing or stale".into())
+                    } else {
+                        self.window_session.resize_terminal(
+                            self.terminal_session.selected().unwrap().0,
+                            rows,
+                            &self.configuration.settings().ui.terminal_panel,
+                        )
+                    };
+                    if let Err(error) = result {
+                        self.show_error(error);
+                    }
+                    self.resize_active_terminal_to_panel();
+                    self.sync_terminal_panel();
+                    self.sync_explorer_ui();
+                    self.ensure_cursor_visible();
+                }
+            }
+            AppEffect::TerminalDock { edge, size } => {
+                let edge = match edge.as_str() {
+                    "left" => DockEdge::Left,
+                    "right" => DockEdge::Right,
+                    "top" => DockEdge::Top,
+                    "bottom" => DockEdge::Bottom,
+                    _ => {
+                        self.show_error("terminal dock edge must be left, right, top, or bottom");
+                        return Ok(());
+                    }
+                };
+                self.place_active_terminal(WindowPlacement::Docked { edge, size });
+            }
+            AppEffect::TerminalFloat {
+                x,
+                y,
+                width,
+                height,
+            } => self.place_active_terminal(WindowPlacement::Floating(WindowRect {
+                x,
+                y,
+                width,
+                height,
+            })),
+            AppEffect::TerminalFullscreen => {
+                self.place_active_terminal(WindowPlacement::Fullscreen)
+            }
+            AppEffect::TerminalHide => self.place_active_terminal(WindowPlacement::Hidden),
+            AppEffect::TerminalUnfocus => {
+                self.set_terminal_focus(false);
+                self.sync_terminal_panel();
+                self.ensure_cursor_visible();
+            }
+            AppEffect::TerminalSend(text) => {
+                if let Some(id) = self.terminal_session.selected() {
+                    if let Err(error) =
+                        self.terminal_session
+                            .send(id, TerminalInput::Text(&text), &self.workspace)
+                    {
+                        self.show_error(error);
+                    }
+                }
+            }
+            AppEffect::TerminalModeNormal => self.enter_terminal_normal_mode(),
+            AppEffect::TerminalModeInput => self.enter_terminal_input_mode(),
+            AppEffect::TerminalNormalMove(motion) => {
+                self.move_terminal_normal_cursor(&motion);
+            }
+            AppEffect::TerminalVisualStart(linewise) => {
+                self.start_terminal_visual(linewise);
+            }
+            AppEffect::TerminalYank { line } => self.yank_terminal_text(line),
+            AppEffect::TerminalClose => {
+                self.terminal_session.cancel_open();
+                if let Some(id) = self.terminal_session.selected() {
+                    self.retire_terminal(id, true);
+                }
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}
+
+impl InteractiveApplication {
+    pub(super) fn process_grammar_input(&mut self, input: crate::editor::input::GrammarInput) {
+        let mode = self
+            .state
+            .active_view
+            .and_then(|view| self.state.views.get(view))
+            .map_or(EditorMode::Normal, |view| view.mode);
+        match self.input.feed(mode, input) {
+            Ok(InputAction::Invoke(invocation)) => self.invoke_mapped(invocation),
+            Ok(InputAction::Pending) => {
+                if self.input.effective_mode(mode) == EditorMode::OperatorPending
+                    && mode != EditorMode::OperatorPending
+                {
+                    self.set_mode(EditorMode::OperatorPending);
+                }
+            }
+            Ok(InputAction::Cancelled) => {
+                if mode == EditorMode::OperatorPending {
+                    self.set_mode(EditorMode::Normal);
+                }
+            }
+            Ok(InputAction::Text(text)) => {
+                let context = self.active_input_context();
+                if let Some(command_id) = self
+                    .configuration
+                    .settings()
+                    .input
+                    .text_commands
+                    .get(&context)
+                    .cloned()
+                {
+                    self.invoke_text_command(&command_id, text);
+                }
+            }
+            Ok(InputAction::Unmapped) => {}
+            Err(error) => self.show_error(error),
+        }
+    }
+
+    pub(super) fn normalized_visual_repeat(
+        &self,
+        invocation: &CommandInvocation,
+    ) -> Option<CommandInvocation> {
+        let view = self
+            .state
+            .views
+            .get(invocation.target.view.or(self.state.active_view)?)?;
+        self.input.normalized_visual_repeat(
+            invocation,
+            &self.state.buffers.get(view.buffer)?.text,
+            view.selection?,
+            DisplayWidthPolicy {
+                tab_width: self.state.policy.tab_width,
+                ambiguous_wide: self.state.policy.ambiguous_width_wide,
+            },
+        )
+    }
+
+    pub(super) fn repeat_last_change(&mut self) {
+        let limit = self.configuration.settings().runtime.repeat_step_limit;
+        match self.input.repeat_plan(limit) {
+            Ok(invocations) => {
+                for invocation in invocations {
+                    self.invoke(invocation);
+                }
+            }
+            Err(super::super::input::ReplayError::NoChange) => {
+                self.show_error(self.message("no_previous_change", &[]));
+            }
+            Err(_) => {
+                self.show_error(self.message("repeat_step_limit", &[("limit", limit.to_string())]))
+            }
+        }
+    }
+
+    pub(super) fn replay_macro(&mut self, requested: char) {
+        let Ok(register) = self.input.macro_register(requested) else {
+            self.show_error(self.message("no_previous_macro", &[]));
+            return;
+        };
+        let Some(invocations) = self.state.registers.get_macro(register).map(<[_]>::to_vec) else {
+            self.show_error(self.message("empty_macro", &[("register", register.to_string())]));
+            return;
+        };
+        if self
+            .input
+            .begin_macro_replay(
+                register,
+                self.configuration.settings().runtime.macro_recursion_limit,
+            )
+            .is_err()
+        {
+            self.show_error(
+                self.message(
+                    "macro_recursion_limit",
+                    &[(
+                        "limit",
+                        self.configuration
+                            .settings()
+                            .runtime
+                            .macro_recursion_limit
+                            .to_string(),
+                    )],
+                ),
+            );
+            return;
+        }
+        for invocation in invocations {
+            let Ok(invocation) = self.input.macro_step(
+                invocation,
+                self.configuration.settings().runtime.macro_step_limit,
+            ) else {
+                self.show_error(
+                    self.message(
+                        "macro_step_limit",
+                        &[(
+                            "limit",
+                            self.configuration
+                                .settings()
+                                .runtime
+                                .macro_step_limit
+                                .to_string(),
+                        )],
+                    ),
+                );
+                break;
+            };
+            self.invoke(invocation);
+        }
+        self.input.finish_macro_replay();
+    }
+
+    pub(super) fn search_word_under_cursor(&mut self, forward: bool) {
+        let Some(view_id) = self.state.active_view else {
+            return;
+        };
+        let view = &self.state.views[view_id];
+        let source = self.state.buffers[view.buffer].text.to_string();
+        let cursor = view.cursor.get();
+        let Some(character) = source[cursor..].chars().next() else {
+            self.show_error(self.message("cursor_not_word", &[]));
+            return;
+        };
+        if !(character.is_alphanumeric() || character == '_') {
+            self.show_error(self.message("cursor_not_word", &[]));
+            return;
+        }
+        let start = source[..cursor]
+            .char_indices()
+            .rev()
+            .take_while(|(_, character)| character.is_alphanumeric() || *character == '_')
+            .last()
+            .map_or(cursor, |(index, _)| index);
+        let end = source[cursor..]
+            .char_indices()
+            .find(|(_, character)| !(character.is_alphanumeric() || *character == '_'))
+            .map_or(source.len(), |(relative, _)| cursor + relative);
+        self.ui.search_query = Some(source[start..end].to_owned());
+        self.input.remember_search(forward);
+        self.perform_search(forward);
+    }
+
+    pub(super) fn apply_authoritative_editor_transaction(
+        &mut self,
+        transaction: &EditorTransaction,
+    ) -> Result<(), String> {
+        self.commit_editor_transaction(transaction, None)
+    }
+    pub(super) fn apply_window_plan(
+        &mut self,
+        plan: super::super::windows::WindowPlan,
+    ) -> Result<(), String> {
+        self.window_session.check_plan(
+            &plan,
+            &self.state.window_version(),
+            &self.extension.contributions().version(),
+        )?;
+        if plan.operations().is_empty() {
+            self.window_session.accept_native_plan(
+                plan,
+                &self.state.window_version(),
+                &self.extension.contributions().version(),
+            )?;
+            if let Some(id) = self
+                .window_session
+                .focused_terminal()
+                .map(PtyId)
+                .filter(|id| self.terminal_session.contains(*id))
+            {
+                self.terminal_session.select(id);
+            }
+            self.project_window_activation();
+            self.reconcile_editor_windows();
+            return Ok(());
+        }
+        let transaction = plan
+            .operations()
+            .iter()
+            .cloned()
+            .fold(
+                EditorTransaction::new(self.transaction_id()),
+                |transaction, operation| transaction.with_operation(operation),
+            )
+            .with_undo_policy(UndoPolicy::Ignore);
+        self.commit_editor_transaction(&transaction, Some(plan))
+    }
+    fn commit_editor_transaction(
+        &mut self,
+        transaction: &EditorTransaction,
+        plan: Option<super::super::windows::WindowPlan>,
+    ) -> Result<(), String> {
+        if let Some(plan) = &plan {
+            self.window_session.check_plan(
+                plan,
+                &self.state.window_version(),
+                &self.extension.contributions().version(),
+            )?;
+        }
+        self.window_session
+            .check_editor_admission(&(&self.state).into())?;
+        let candidate = self
+            .state
+            .prepare_transaction(transaction)
+            .map_err(|error| error.to_string())?;
+        self.commit_editor_draft(candidate, plan, false)
+    }
+    pub(super) fn commit_editor_draft(
+        &mut self,
+        candidate: crate::editor::EditorDraft,
+        plan: Option<super::super::windows::WindowPlan>,
+        activate_document: bool,
+    ) -> Result<(), String> {
+        self.window_session
+            .check_editor_admission(&(&self.state).into())?;
+        let current = self.state.version();
+        candidate.check_current(&current)?;
+        if !activate_document
+            && plan.is_none()
+            && candidate.window_version() == self.state.window_version()
+        {
+            self.state = candidate.accept(&current)?;
+            return Ok(());
+        }
+
+        let terminals = self.terminal_session.descriptions();
+        let mut signature = self.native_surface_signature(self.window_session.editor_ids());
+        signature.dashboard_visible =
+            self.window_session.dashboard_visible() || candidate.topology().active_tab().is_none();
+        let title = self.message("explorer_title", &[]);
+        let descriptions = NativeDescriptions {
+            signature,
+            explorer_title: &title,
+            dashboard_title: &self.configuration.dashboard().identity,
+            picker_title: self
+                .ui
+                .picker
+                .as_ref()
+                .map_or("Picker", |picker| &picker.title),
+            terminals: &terminals,
+        };
+        let catalog = self.extension.contributions().version();
+        let transition = if let Some(plan) = plan {
+            self.window_session.prepare_editor_plan(
+                plan,
+                (&current, &catalog),
+                candidate,
+                &self.configuration.settings().ui.buffer_line.scratch_label,
+                descriptions,
+            )?
+        } else if activate_document {
+            self.window_session.prepare_document_transition(
+                candidate,
+                &current,
+                catalog.clone(),
+                &self.configuration.settings().ui.buffer_line.scratch_label,
+                descriptions,
+            )?
+        } else {
+            self.window_session.prepare_editor_transition(
+                candidate,
+                &current,
+                catalog.clone(),
+                &self.configuration.settings().ui.buffer_line.scratch_label,
+                Some(descriptions),
+            )?
+        };
+        self.state = self
+            .window_session
+            .accept_editor_transition(transition, &current, &catalog)?;
+        self.reconcile_editor_windows();
+        Ok(())
+    }
+
+    pub(super) fn focus_surface(&mut self, direction: FocusDirection) {
+        self.reconcile_editor_windows();
+        let direction = match direction {
+            FocusDirection::Left => SpatialDirection::Left,
+            FocusDirection::Down => SpatialDirection::Down,
+            FocusDirection::Up => SpatialDirection::Up,
+            FocusDirection::Right => SpatialDirection::Right,
+        };
+        let Some(target) = self.window_session.spatial_target(direction) else {
+            return;
+        };
+        let result = self
+            .window_session
+            .plan_focus(
+                target,
+                &self.state.window_version(),
+                self.extension.contributions().version(),
+            )
+            .and_then(|plan| self.apply_window_plan(plan));
+        if let Err(error) = result {
+            self.show_error(error);
+            return;
+        }
+        self.cancel_pending_mapping();
+        self.input.cancel_pending();
+        self.ensure_cursor_visible();
+        self.sync_terminal_panel();
+    }
+
+    pub(super) fn apply_layout_action(&mut self, action: LayoutAction) {
+        self.reconcile_editor_windows();
+        let plan = match self.window_session.plan_layout(
+            action,
+            &(&self.state).into(),
+            self.configuration.settings(),
+            self.extension.contributions().version(),
+        ) {
+            Ok(plan) => plan,
+            Err(super::super::windows::LayoutPlanError::Dirty) => {
+                self.show_error(self.message("dirty_close", &[]));
+                return;
+            }
+            Err(super::super::windows::LayoutPlanError::Rejected(error)) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        if let Err(error) = self.apply_window_plan(plan) {
+            self.show_error(error);
+        } else {
+            self.cancel_pending_mapping();
+            self.input.cancel_pending();
+            self.ensure_cursor_visible();
+        }
+    }
+
+    pub(super) fn apply_retained_ui_interaction(&mut self, interaction: PluginUiInteraction) {
+        match self
+            .extension
+            .window_interaction(self.window_session.graph(), interaction)
+        {
+            Ok(action) => {
+                self.ui.plugin_surfaces = self.extension.window_snapshots();
+                if let Some(action) = action {
+                    self.invoke_mapped_command(&action);
+                }
+            }
+            Err(error) => self.show_error(error.detail),
+        }
+    }
+
+    pub(super) fn select_retained_ui_at_mouse(&mut self) {
+        let Some((column, row)) = self.input.mouse_position() else {
+            return;
+        };
+        let Some(projection) = self.compositor_projection() else {
+            return;
+        };
+        let Some(window) = projection.hit_test(column, row) else {
+            return;
+        };
+        let Some(rect) = projection.window(window).map(|projected| projected.rect) else {
+            return;
+        };
+        if let Err(error) = self
+            .extension
+            .focus_window_row(window, usize::from(row.saturating_sub(rect.y)))
+        {
+            self.show_error(error.detail);
+            return;
+        }
+        self.ui.plugin_surfaces = self.extension.window_snapshots();
+    }
+
+    pub(super) fn activate_private_surface_action(&mut self, at_mouse: bool) {
+        let Some(projection) = self.compositor_projection() else {
+            return;
+        };
+        let target = if at_mouse {
+            self.input.mouse_position().and_then(|(x, y)| {
+                projection.hit_test(x, y).and_then(|window| {
+                    projection.window(window).map(|projected| {
+                        (
+                            window,
+                            x.saturating_sub(projected.rect.x),
+                            y.saturating_sub(projected.rect.y),
+                        )
+                    })
+                })
+            })
+        } else {
+            self.window_session.graph().focused().and_then(|window| {
+                self.ui
+                    .private_surfaces
+                    .iter()
+                    .find(|surface| surface.window == window)
+                    .and_then(|surface| surface.cursor.map(|(x, y)| (window, x, y)))
+            })
+        };
+        let Some((window, x, y)) = target else { return };
+        match self.extension.private_action(window, x, y) {
+            Ok(Some(action)) => self.invoke_mapped_command(&action),
+            Ok(None) => {}
+            Err(error) => self.show_error(error),
+        }
+    }
+
+    pub(super) fn mouse_pane_geometry(
+        &self,
+    ) -> Option<(crate::editor::PaneId, u16, u16, u16, u16)> {
+        let (global_column, global_row) = self.input.mouse_position()?;
+        let workspace = self.workspace_bounds()?;
+        if !rect_contains_point(workspace, global_column, global_row) {
+            return None;
+        }
+        let content_width = workspace.width;
+        let local_column = global_column.saturating_sub(workspace.x);
+        let local_row = global_row.saturating_sub(workspace.y);
+        pane_viewports(
+            &self.state,
+            &self.ui,
+            self.configuration.settings(),
+            content_width,
+            self.workspace_render_height(),
+        )
+        .into_iter()
+        .find(|viewport| {
+            local_column >= viewport.x
+                && local_column < viewport.x.saturating_add(viewport.width)
+                && local_row >= viewport.y
+                && local_row < viewport.y.saturating_add(viewport.height)
+        })
+        .map(|viewport| {
+            (
+                viewport.pane,
+                local_column.saturating_sub(viewport.x),
+                local_row.saturating_sub(viewport.y),
+                viewport.width,
+                viewport.height,
+            )
+        })
+    }
+
+    pub(super) fn focus_mouse_pane(&mut self) {
+        self.reconcile_editor_windows();
+        let Some((pane, ..)) = self.mouse_pane_geometry() else {
+            return;
+        };
+        let transaction = EditorTransaction::new(self.transaction_id())
+            .with_operation(EditorOperation::FocusPaneId { pane })
+            .with_undo_policy(UndoPolicy::Ignore);
+        if let Err(error) = self.apply_authoritative_editor_transaction(&transaction) {
+            self.show_error(error);
+        } else {
+            self.ensure_cursor_visible();
+        }
+    }
+
+    pub(super) fn apply_mouse_cursor(&mut self, extend_selection: bool) {
+        self.reconcile_editor_windows();
+        let Some((pane_id, column, row, pane_width, pane_height)) = self.mouse_pane_geometry()
+        else {
+            return;
+        };
+        let Some(view_id) = self.state.panes.get(pane_id).map(|pane| pane.view) else {
+            return;
+        };
+        let view = &self.state.views[view_id];
+        let buffer_id = view.buffer;
+        let buffer = &self.state.buffers[buffer_id];
+        let body_height = pane_height.saturating_sub(u16::from(
+            self.configuration.settings().ui.status_line.enabled,
+        ));
+        if row >= body_height {
+            return;
+        }
+        let gutter = editor_state_gutter_width(
+            &self.state,
+            &buffer.text,
+            &self.configuration.settings().editor,
+            pane_width,
+        );
+        let available = editor_state_content_width(
+            &self.state,
+            &buffer.text,
+            &self.configuration.settings().editor,
+            pane_width,
+        );
+        if available == 0 {
+            return;
+        }
+        let wrap_enabled = self.configuration.settings().editor.wrap
+            && !(self.ui.large_file_buffers.contains(&buffer_id)
+                && self.configuration.settings().editor.large_file.disable_wrap);
+        let visual_rows = VisualRowModel::new_for_state(
+            &self.state,
+            &buffer.text,
+            view_id,
+            &self.ui,
+            self.configuration.settings(),
+            pane_width,
+            wrap_enabled,
+        );
+        let source = self.state.version();
+        let transaction_id = TransactionId(self.next_transaction);
+        let plan = self.input.mouse_plan(
+            crate::editor::session::input::MouseDocument {
+                editor: &source,
+                view_id,
+                pane_id,
+                view,
+                text: &buffer.text,
+            },
+            crate::editor::session::input::MouseGeometry {
+                column,
+                row,
+                body_height,
+                gutter,
+                wrap: wrap_enabled,
+                rows: &visual_rows,
+                inlays: &self.ui.lsp_inlay_hints,
+            },
+            &self.configuration.settings().editor,
+            transaction_id,
+            extend_selection,
+        );
+        let Some(plan) = plan else {
+            return;
+        };
+        self.transaction_id();
+        let transaction = match self.input.mouse_transaction(&plan, &self.state.version()) {
+            Ok(transaction) => transaction,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        if let Err(error) = self.apply_authoritative_editor_transaction(transaction) {
+            self.show_error(error);
+        } else {
+            let source = self.state.window_version();
+            let current = self.state.active_view.and_then(|id| {
+                self.state.views.get(id).and_then(|view| {
+                    self.state
+                        .buffers
+                        .get(view.buffer)
+                        .map(|buffer| (id, view.buffer, buffer.text.revision()))
+                })
+            });
+            self.input.accept_mouse_plan(plan, &source, current);
+            self.ensure_cursor_visible();
+        }
+    }
+
+    pub(super) fn scroll_view(&mut self, kind: &str, count: u64) {
+        self.reconcile_editor_windows();
+        let Some(view_id) = self.state.active_view else {
+            return;
+        };
+        let view = &self.state.views[view_id];
+        let buffer = &self.state.buffers[view.buffer];
+        let Some(workspace) = self.workspace_bounds() else {
+            return;
+        };
+        let content_width = workspace.width;
+        let Some(viewport) = active_pane_viewport(
+            &self.state,
+            &self.ui,
+            self.configuration.settings(),
+            content_width,
+            self.workspace_render_height(),
+        )
+        .filter(|viewport| viewport.view == view_id) else {
+            return;
+        };
+        let body = usize::from(
+            viewport
+                .height
+                .saturating_sub(u16::from(
+                    self.configuration.settings().ui.status_line.enabled,
+                ))
+                .max(1),
+        );
+        let percent = if kind.starts_with("half_") {
+            self.configuration.settings().editor.half_page_percent
+        } else {
+            self.configuration.settings().editor.full_page_percent
+        };
+        let amount = body.saturating_mul(usize::from(percent)) / 100;
+        let amount = amount
+            .max(1)
+            .saturating_mul(usize::try_from(count).unwrap_or(usize::MAX));
+        let available = editor_state_content_width(
+            &self.state,
+            &buffer.text,
+            &self.configuration.settings().editor,
+            viewport.width,
+        );
+        let wrap_enabled = available > 0
+            && self.configuration.settings().editor.wrap
+            && !(self.ui.large_file_buffers.contains(&view.buffer)
+                && self.configuration.settings().editor.large_file.disable_wrap);
+        let visual_rows = VisualRowModel::new_for_state(
+            &self.state,
+            &buffer.text,
+            view_id,
+            &self.ui,
+            self.configuration.settings(),
+            viewport.width,
+            wrap_enabled,
+        );
+        let old_start_anchor = visual_rows.normalize(VisualRowAnchor {
+            line: view.scroll_line,
+            wrap_row: view.scroll_wrap_row,
+        });
+        let first_anchor = if kind.ends_with("up") {
+            visual_rows.backward(old_start_anchor, amount)
+        } else {
+            visual_rows.forward(old_start_anchor, amount)
+        };
+        let cursor_anchor = visual_rows.cursor_anchor(view.cursor);
+        let last_anchor = visual_rows.forward(first_anchor, body.saturating_sub(1));
+        let target_anchor = cursor_anchor.clamp(first_anchor, last_anchor);
+        let current_line = buffer.text.byte_to_line(view.cursor).unwrap_or(0);
+        let old_line_start = buffer
+            .text
+            .line_to_byte(current_line)
+            .unwrap_or(ByteOffset(0));
+        let old_prefix = buffer
+            .text
+            .slice(ByteRange::new(old_line_start, view.cursor).expect("cursor line range"))
+            .unwrap_or_default();
+        let current_column = configured_text_width(
+            &old_prefix,
+            self.configuration.settings().editor.tab_width,
+            self.configuration.settings().editor.ambiguous_width,
+        );
+        let target_line = target_anchor.line;
+        let target_start = buffer
+            .text
+            .line_to_byte(target_line)
+            .unwrap_or(ByteOffset(0));
+        let target_byte = if wrap_enabled {
+            let current_cell = visual_rows.cursor_projection(view.cursor).1;
+            visual_rows.byte_at_cell(target_anchor, current_cell)
+        } else {
+            let target_text = buffer.text.line(target_line).unwrap_or_default();
+            let target_content = target_text.strip_suffix('\n').unwrap_or(&target_text);
+            let mut display_column = 0_usize;
+            let mut target_byte = 0_usize;
+            for (relative, grapheme) in target_content.grapheme_indices(true) {
+                let width = if grapheme == "\t" {
+                    self.configuration.settings().editor.tab_width
+                        - (display_column % self.configuration.settings().editor.tab_width)
+                } else {
+                    configured_grapheme_width(
+                        grapheme,
+                        self.configuration.settings().editor.ambiguous_width,
+                    )
+                };
+                if display_column.saturating_add(width) > current_column {
+                    target_byte = relative;
+                    break;
+                }
+                display_column = display_column.saturating_add(width);
+                target_byte = relative.saturating_add(grapheme.len());
+            }
+            target_byte
+        };
+        let target = ByteOffset(target_start.get().saturating_add(target_byte));
+        let transaction = EditorTransaction::new(self.transaction_id())
+            .with_operation(EditorOperation::SetScroll {
+                view: view_id,
+                first_line: first_anchor.line,
+            })
+            .with_operation(EditorOperation::SetScrollWrapRow {
+                view: view_id,
+                first_wrap_row: if wrap_enabled {
+                    first_anchor.wrap_row
+                } else {
+                    0
+                },
+            })
+            .with_operation(EditorOperation::SetCursor {
+                view: view_id,
+                position: target,
+            })
+            .with_undo_policy(UndoPolicy::Ignore);
+        if let Err(error) = self.state.apply_transaction(&transaction) {
+            self.show_error(error);
+        } else {
+            self.ensure_cursor_visible();
+        }
+    }
+}
+
+impl InteractiveApplication {
+    pub(super) fn open_prompt(&mut self, kind: PromptKind, initial: String) {
+        if kind != PromptKind::ExplorerRename {
+            self.cancel_explorer_rename_prompt();
+        }
+        if kind != PromptKind::ExplorerDelete {
+            self.cancel_explorer_confirmation();
+        }
+        self.reconcile_editor_windows();
+        self.input.hold_focus(self.window_session.capture_focus());
+        let active = self.state.active_view.map(|view| {
+            (
+                self.state.window_version(),
+                view,
+                self.state.views[view].mode,
+            )
+        });
+        if let Some(mode) = self.input.open_prompt(kind, initial, active) {
+            self.set_mode(mode);
+        }
+        self.project_input_hints();
+        self.refresh_completions();
+    }
+    pub(super) fn open_confirmation(
+        &mut self,
+        kind: PromptKind,
+        title: String,
+        message: String,
+        selected: crate::ui::ConfirmationChoice,
+    ) {
+        self.open_prompt(kind, String::new());
+        let binding = |command: &str| {
+            self.configuration
+                .keymaps()
+                .binding_for("confirmation_prompt", command)
+        };
+        let selections = [
+            "command_line.move_left",
+            "command_line.move_right",
+            "surface.confirmation.toggle",
+            "surface.confirmation.select_yes",
+            "surface.confirmation.select_no",
+        ]
+        .into_iter()
+        .filter_map(binding)
+        .collect::<Vec<_>>()
+        .join("/");
+        let mut hints = Vec::new();
+        if !selections.is_empty() {
+            hints.push(format!("{selections} select"));
+        }
+        if let Some(key) = binding("command_line.submit") {
+            hints.push(format!("{key} confirm"));
+        }
+        if let Some(key) = binding("command_line.cancel") {
+            hints.push(format!("{key} cancel"));
+        }
+        let hint = hints.join(" · ");
+        self.input
+            .configure_confirmation(title, message, selected, hint);
+        self.project_input_prompt();
+        self.reconcile_editor_windows();
+    }
+    pub(super) fn close_prompt(&mut self) {
+        if self
+            .input
+            .prompt()
+            .is_some_and(|prompt| prompt.kind == PromptKind::PluginConfirmation)
+        {
+            self.extension
+                .answer_confirmation(crate::extensions::PluginConfirmationAnswer::Cancelled);
+        }
+        self.cancel_explorer_rename_prompt();
+        if self
+            .input
+            .prompt()
+            .is_some_and(|prompt| prompt.kind == PromptKind::WorkspaceTrust)
+        {
+            self.workspace.cancel_confirmation();
+        }
+        self.cancel_explorer_confirmation();
+        if let Some((view, mode)) = self.input.close_prompt(&self.state.window_version()) {
+            if self.state.views.contains_key(view) {
+                self.set_specific_mode(view, mode);
+            }
+        }
+        self.restore_input_focus();
+        self.project_input_prompt();
+    }
+    pub(super) fn present_next_plugin_confirmation(&mut self) {
+        if self.input.prompt().is_some() {
+            return;
+        }
+        let Some(request) = self.extension.next_confirmation(
+            &self.state,
+            &self.workspace.version(),
+            self.configuration.binding_revision(),
+            &self.input,
+            &self.window_session,
+        ) else {
+            let _ = self.extension.dispatch_confirmation_results(
+                &self.state,
+                &self.workspace.version(),
+                self.configuration.binding_revision(),
+            );
+            return;
+        };
+        let selected = match request.default_answer {
+            crate::extensions::PluginConfirmationAnswer::Yes => crate::ui::ConfirmationChoice::Yes,
+            crate::extensions::PluginConfirmationAnswer::No
+            | crate::extensions::PluginConfirmationAnswer::Cancelled => {
+                crate::ui::ConfirmationChoice::No
+            }
+        };
+        self.open_confirmation(
+            PromptKind::PluginConfirmation,
+            format!("Plugin {} · {}", request.plugin, request.title),
+            request.message,
+            selected,
+        );
+    }
+    pub(super) fn submit_plugin_confirmation(&mut self, selected: crate::ui::ConfirmationChoice) {
+        let answer = match selected {
+            crate::ui::ConfirmationChoice::Yes => crate::extensions::PluginConfirmationAnswer::Yes,
+            crate::ui::ConfirmationChoice::No => crate::extensions::PluginConfirmationAnswer::No,
+        };
+        self.extension.answer_confirmation(answer);
+        self.close_prompt();
+        let _ = self.extension.dispatch_confirmation_results(
+            &self.state,
+            &self.workspace.version(),
+            self.configuration.binding_revision(),
+        );
+        self.present_next_plugin_confirmation();
+    }
+    pub(super) fn prompt_insert(&mut self, text: &str) {
+        self.input.prompt_insert(text);
+        self.refresh_completions();
+    }
+    pub(super) fn prompt_backspace(&mut self) {
+        self.input.prompt_backspace();
+        self.refresh_completions();
+    }
+    pub(super) fn prompt_move(&mut self, movement: PromptMove) {
+        self.input.prompt_move(movement);
+        self.project_input_prompt();
+    }
+    pub(super) fn prompt_history(&mut self, direction: i8) {
+        self.input
+            .prompt_history(direction, self.configuration.settings());
+        self.refresh_completions();
+    }
+    pub(super) fn prompt_complete(&mut self, direction: i8) {
+        self.input
+            .prompt_complete(direction, self.configuration.settings());
+        self.project_input_prompt();
+    }
+    pub(super) fn accept_completion(&mut self) -> bool {
+        let accepted = self.input.accept_completion(self.configuration.settings());
+        if accepted {
+            self.refresh_completions();
+        }
+        accepted
+    }
+    pub(super) fn record_prompt_history(&mut self, kind: PromptKind, input: &str) {
+        self.input
+            .record_prompt_history(kind, input, self.configuration.settings());
+    }
+    pub(super) fn refresh_completions(&mut self) {
+        if let Some(request) = self.input.refresh_completions(
+            self.configuration.settings(),
+            &self.state.workspace_root,
+            self.state
+                .buffers
+                .values()
+                .filter_map(|buffer| buffer.path.as_deref()),
+            self.commands.specs().map(|spec| spec.id.as_str()),
+        ) {
+            if let Ok(id) = self
+                .documents
+                .list_directory(request.directory, request.limit)
+            {
+                self.input.register_completion_read(id, request.key);
+            }
+        }
+        self.project_input_prompt();
+    }
+
+    pub(super) fn submit_prompt(&mut self) {
+        if self
+            .configuration
+            .settings()
+            .input
+            .completion_accept_on_submit
+            && self.accept_completion()
+        {
+            return;
+        }
+        let Some(prompt) = self.input.prompt().cloned() else {
+            return;
+        };
+        if prompt
+            .confirmation
+            .as_ref()
+            .is_some_and(|confirmation| confirmation.selected == crate::ui::ConfirmationChoice::Yes)
+        {
+            let (width, height) = crate::ui::prompt_surface_dimensions(
+                &self.state,
+                &self.ui,
+                self.window_session.width(),
+                self.window_session.height(),
+            );
+            if !crate::ui::confirmation_fully_visible(
+                width,
+                height,
+                self.configuration.settings(),
+                &prompt,
+            ) {
+                return;
+            }
+        }
+        if !matches!(
+            prompt.kind,
+            PromptKind::WorkspaceTrust
+                | PromptKind::GitReset
+                | PromptKind::ExplorerDelete
+                | PromptKind::ExplorerRename
+                | PromptKind::PluginConfirmation
+        ) {
+            self.record_prompt_history(prompt.kind, &prompt.input);
+        }
+        match prompt.kind {
+            PromptKind::Command => match parse_ex(
+                &prompt.input,
+                &self.configuration.settings().input.command_aliases,
+            ) {
+                Ok(invocation) => {
+                    self.close_prompt();
+                    self.invoke(invocation);
+                }
+                Err(error) => {
+                    self.prompt_error(error.to_string());
+                }
+            },
+            PromptKind::WorkspaceTrust => match CommandInvocation::new(
+                "workspace.trust.confirm",
+                InvocationSource::CommandLine,
+            ) {
+                Ok(invocation) => {
+                    let invocation =
+                        invocation.with_argument("phrase", CommandValue::String(prompt.input));
+                    self.invoke(invocation);
+                    self.close_prompt();
+                }
+                Err(error) => {
+                    self.prompt_error(error.to_string());
+                }
+            },
+            PromptKind::GitReset => {
+                self.close_prompt();
+                self.confirm_reset_selected_git_hunk(prompt.input);
+            }
+            PromptKind::ExplorerDelete => {
+                let selected = prompt
+                    .confirmation
+                    .map_or(crate::ui::ConfirmationChoice::No, |state| state.selected);
+                if selected == crate::ui::ConfirmationChoice::Yes {
+                    self.confirm_explorer_delete();
+                }
+                self.close_prompt();
+            }
+            PromptKind::PluginConfirmation => {
+                // The extension owner asynchronously consumes this one-shot result.
+                self.submit_plugin_confirmation(
+                    prompt
+                        .confirmation
+                        .map_or(crate::ui::ConfirmationChoice::No, |state| state.selected),
+                );
+            }
+            PromptKind::ExplorerRename => self.submit_explorer_rename_prompt(&prompt.input),
+            PromptKind::SearchForward | PromptKind::SearchBackward => {
+                if prompt.input.is_empty() {
+                    let message = self.message("search_empty", &[]);
+                    self.prompt_error(message);
+                    return;
+                }
+                if self.state.active_view.is_none() {
+                    let message = self.message("search_no_buffer", &[]);
+                    self.prompt_error(message);
+                    return;
+                }
+                if self.configuration.settings().search.regex {
+                    let source = self
+                        .state
+                        .active_buffer_id()
+                        .and_then(|buffer| self.state.buffers.get(buffer))
+                        .map(|buffer| buffer.text.to_string())
+                        .unwrap_or_default();
+                    if let Err(error) = crate::editor::input::search_matches(
+                        &source,
+                        &prompt.input,
+                        self.configuration.settings().search.smart_case,
+                        true,
+                    ) {
+                        self.prompt_error(error.to_string());
+                        return;
+                    }
+                }
+                let forward = prompt.kind == PromptKind::SearchForward;
+                self.ui.search_query = Some(prompt.input);
+                self.input.remember_search(forward);
+                self.close_prompt();
+                self.perform_search(forward);
+            }
+        }
+    }
+
+    pub(super) fn perform_search(&mut self, forward: bool) {
+        let Some(query) = self.ui.search_query.clone() else {
+            self.show_error(self.message("no_previous_search", &[]));
+            return;
+        };
+        let Some(view_id) = self.state.active_view else {
+            return;
+        };
+        let view = &self.state.views[view_id];
+        let buffer_id = view.buffer;
+        let cursor_offset = view.cursor;
+        let buffer = &self.state.buffers[buffer_id];
+        let revision = buffer.text.revision();
+        let source = buffer.text.to_string();
+        let matches = match crate::editor::input::search_matches(
+            &source,
+            &query,
+            self.configuration.settings().search.smart_case,
+            self.configuration.settings().search.regex,
+        ) {
+            Ok(matches) => matches,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        let wrap = self.configuration.settings().search.wrap;
+        let cursor = cursor_offset.get().min(source.len());
+        let target = if forward {
+            let start = if cursor < source.len() {
+                crate::editor::text::next_grapheme_boundary(&buffer.text, cursor_offset).get()
+            } else {
+                cursor
+            };
+            matches
+                .iter()
+                .find(|matched| matched.start >= start)
+                .or_else(|| wrap.then(|| matches.first()).flatten())
+                .map(|matched| matched.start)
+        } else {
+            matches
+                .iter()
+                .rev()
+                .find(|matched| matched.start < cursor)
+                .or_else(|| wrap.then(|| matches.last()).flatten())
+                .map(|matched| matched.start)
+        };
+        let Some(target) = target else {
+            self.show_error(self.message("pattern_not_found", &[("query", query)]));
+            return;
+        };
+        let transaction = EditorTransaction::new(self.transaction_id())
+            .with_precondition(Precondition::BufferRevision {
+                buffer: buffer_id,
+                revision,
+            })
+            .with_operation(EditorOperation::SetCursor {
+                view: view_id,
+                position: ByteOffset(target),
+            })
+            .with_undo_policy(UndoPolicy::Ignore);
+        if let Err(error) = self.state.apply_transaction(&transaction) {
+            self.show_error(error);
+        } else {
+            self.ensure_cursor_visible();
+        }
+    }
+}
+
+impl InteractiveApplication {
+    pub(super) fn start_dap_configuration(&mut self, name: &str) {
+        match self.debugger_session.request_debug(
+            (Some(name), None),
+            None,
+            None,
+            (
+                &self.configuration.settings().debug,
+                &self.configuration.settings().terminals,
+                self.configuration.binding_revision(),
+            ),
+            &self.workspace,
+            self.tooling.entries(),
+        ) {
+            Ok(intent) => self.defer_trusted_execution(DeferredExecution::StartDebug(intent)),
+            Err(error) => self.show_error(error),
+        }
+    }
+    pub(super) fn start_dap(&mut self, requested: Option<String>, program: Option<PathBuf>) {
+        let document = self
+            .state
+            .active_buffer_id()
+            .and_then(|id| self.state.buffers.get(id))
+            .and_then(|buffer| buffer.path.as_deref())
+            .and_then(|path| language_id_for_path(path).map(|language| (path, language)));
+        let Some(document) = document else {
+            self.show_error(self.message("dap_no_buffer", &[]));
+            return;
+        };
+        match self.debugger_session.request_debug(
+            (None, requested.as_deref()),
+            program,
+            Some(document),
+            (
+                &self.configuration.settings().debug,
+                &self.configuration.settings().terminals,
+                self.configuration.binding_revision(),
+            ),
+            &self.workspace,
+            self.tooling.entries(),
+        ) {
+            Ok(intent) => self.defer_trusted_execution(DeferredExecution::StartDebug(intent)),
+            Err(error) => self.show_error(error),
+        }
+    }
+    pub(super) fn authorize_debug_launch(
+        &mut self,
+        intent: crate::editor::session::debugger::DebugIntent,
+        authorization: Option<ExecutionAuthorization>,
+    ) {
+        let Some(permit) = authorization.and_then(|a| a.debug_permit(&self.workspace, &intent))
+        else {
+            self.show_error("debug launch requires its original authorization");
+            return;
+        };
+        if let Err(error) = self
+            .debugger_session
+            .authorize_debug(intent, permit, &self.workspace)
+        {
+            self.show_error(error);
+            return;
+        }
+        self.advance_debug_launch();
+    }
+    pub(super) fn advance_debug_launch(&mut self) {
+        match self.debugger_session.advance_debug(
+            self.workspace
+                .execution_lane(crate::editor::session::workspace::DiscoveryKind::Debugger),
+            &self.configuration.settings().debug,
+            self.configuration.binding_revision(),
+            self.tooling.entries(),
+        ) {
+            Ok(Some(name)) => {
+                self.notify_message(self.message("dap_started", &[("adapter", name)]), false)
+            }
+            Ok(None) => {}
+            Err(error) => self.show_error(error),
+        }
+    }
+    pub(super) fn process_dap_project_root(&mut self) {
+        if let Some(result) = self
+            .workspace
+            .project_result(crate::editor::session::workspace::DiscoveryKind::Debugger)
+        {
+            if let Err(error) = self.debugger_session.debug_root_result(result) {
+                let _ = self.debugger_session.stop();
+                self.show_error(error);
+            }
+        }
+        self.advance_debug_launch();
+    }
+    pub(super) fn process_dap_events(&mut self) {
+        for error in self.debugger_session.reply_failures() {
+            self.show_error(error);
+        }
+        self.debugger_session.refresh(
+            &self.configuration.settings().debug,
+            self.workspace.version(),
+        );
+        for _ in 0..256 {
+            let Some(event) = self.debugger_session.try_event() else {
+                break;
+            };
+            match event {
+                DapEvent::Starting { .. } => {}
+                DapEvent::RequestFailed { message, .. } => self.show_error(message),
+                DapEvent::Running { adapter } => {
+                    self.notify_message(
+                        self.message("dap_running", &[("adapter", adapter)]),
+                        false,
+                    );
+                }
+                DapEvent::Stopped {
+                    adapter, reason, ..
+                } => {
+                    self.notify_message(
+                        self.message("dap_stopped", &[("adapter", adapter), ("reason", reason)]),
+                        false,
+                    );
+                }
+                DapEvent::Output { adapter, output } => {
+                    self.notify_message(
+                        self.message(
+                            "dap_output",
+                            &[("adapter", adapter), ("output", output.replace('\n', " "))],
+                        ),
+                        false,
+                    );
+                }
+                DapEvent::Response { response, .. } => match self
+                    .debugger_session
+                    .response(response)
+                {
+                    crate::editor::session::debugger::DebugResponse::Retired => {}
+                    crate::editor::session::debugger::DebugResponse::Picker { kind, rows } => {
+                        self.install_debug_rows(kind, rows)
+                    }
+                    crate::editor::session::debugger::DebugResponse::Result(response) => {
+                        match response {
+                            DapResponse::Evaluate(value) => {
+                                self.notify_message(
+                                    self.message(
+                                        "dap_evaluate_result",
+                                        &[("name", value.name), ("value", value.value)],
+                                    ),
+                                    false,
+                                );
+                            }
+                            DapResponse::Breakpoints(rows) => {
+                                self.notify_message(
+                                    self.message(
+                                        "dap_breakpoints_synced",
+                                        &[("count", rows.len().to_string())],
+                                    ),
+                                    false,
+                                );
+                            }
+                            DapResponse::Threads(_)
+                            | DapResponse::Stack(_)
+                            | DapResponse::Scopes(_)
+                            | DapResponse::Variables(_) => {
+                                unreachable!("owner converts response rows")
+                            }
+                            DapResponse::Source {
+                                name,
+                                content,
+                                mime_type,
+                            } => {
+                                let Some(target) = self.debugger_session.take_source() else {
+                                    continue;
+                                };
+                                if !self.window_session.navigation_current(
+                                    &target.navigation,
+                                    &self.state.window_version(),
+                                    self.state.active_view,
+                                ) || !self.input.capture_current(&target.capture)
+                                {
+                                    continue;
+                                }
+                                let mut draft = self.state.draft();
+                                draft.open_virtual_read_only(
+                                    TextBuffer::from_text(&content),
+                                    "dap".into(),
+                                    0,
+                                    0,
+                                    0,
+                                );
+                                if let Err(error) = self.commit_editor_draft(draft, None, false) {
+                                    self.show_error(error);
+                                    continue;
+                                }
+                                self.notify_message(
+                                    self.message(
+                                        "dap_source_loaded",
+                                        &[("name", name), ("mime", mime_type.unwrap_or_default())],
+                                    ),
+                                    false,
+                                );
+                            }
+                        }
+                    }
+                },
+                DapEvent::Terminated { adapter } => {
+                    let _ = self.debugger_session.stop();
+                    self.notify_message(
+                        self.message(
+                            "dap_stopped",
+                            &[("adapter", adapter), ("reason", "terminated".into())],
+                        ),
+                        false,
+                    );
+                }
+                DapEvent::RunInTerminal {
+                    reply,
+                    cwd,
+                    arguments,
+                    environment,
+                    ..
+                } => {
+                    let reply = reply.claim();
+                    let profile = match self.debugger_session.terminal_request(
+                        &cwd,
+                        &arguments,
+                        &environment,
+                        &self.configuration.settings().terminals,
+                    ) {
+                        Ok(profile) => profile.to_owned(),
+                        Err(error) => {
+                            let _ = reply.respond(false, Some(error));
+                            continue;
+                        }
+                    };
+                    if !reply.current() {
+                        continue;
+                    }
+                    self.request_terminal_open(&profile, Some(reply));
+                }
+                DapEvent::Failed { adapter, message } => {
+                    let _ = self.debugger_session.stop();
+                    self.show_error(self.message(
+                        "dap_failed",
+                        &[("adapter", adapter), ("diagnostic", message)],
+                    ));
+                }
+            }
+        }
+    }
+}
+
+impl InteractiveApplication {
+    pub(super) fn stop_task(&mut self, name: &str) {
+        match self.tasks.stop(name) {
+            Ok(Some(source)) => {
+                self.diagnostics.clear_source(&source);
+                self.sync_ui_diagnostics();
+            }
+            Ok(None) => {}
+            Err(error) => self.show_error(error),
+        }
+    }
+
+    pub(super) fn start_task_after_validation(
+        &mut self,
+        name: &str,
+        authorization: Option<super::effects::ExecutionAuthorization>,
+    ) {
+        self.start_task_plan(name, AdapterContext::Plain, authorization);
+    }
+
+    pub(super) fn start_task_plan(
+        &mut self,
+        name: &str,
+        adapter: AdapterContext,
+        authorization: Option<super::effects::ExecutionAuthorization>,
+    ) {
+        let kind = match &adapter {
+            AdapterContext::Plain => crate::config::TaskKind::Task,
+            AdapterContext::Formatter { .. } => crate::config::TaskKind::Formatter,
+            AdapterContext::Linter { .. } => crate::config::TaskKind::Linter,
+            AdapterContext::Test { .. } => crate::config::TaskKind::Test,
+        };
+        let Some(permit) = authorization
+            .and_then(|authorization| authorization.task_permit(&self.workspace, name, kind))
+        else {
+            self.show_error("task launch requires its requesting execution authorization");
+            return;
+        };
+        match self.tasks.plan(
+            name,
+            &adapter,
+            self.configuration.settings(),
+            &self.workspace,
+            self.configuration.binding_revision(),
+            permit,
+        ) {
+            Ok(()) => {}
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        if let Ok(owner) = DiagnosticOwner::new(format!("task:{name}")) {
+            self.diagnostics.clear_owner(&owner);
+            self.sync_ui_diagnostics();
+        }
+        self.start_task_step(name.into());
+    }
+    pub(super) fn start_task_step(&mut self, requested: String) {
+        let (step, _) = match self.tasks.step(
+            &requested,
+            &self.workspace,
+            self.configuration.binding_revision(),
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        if let Err(error) = self.tasks.queue_preflight(
+            step,
+            self.workspace
+                .execution_lane(crate::editor::session::workspace::DiscoveryKind::Language),
+        ) {
+            self.show_error(error);
+        }
+    }
+
+    pub(super) fn apply_formatter_result(&mut self, task: &RunningTask) {
+        let transaction = self.transaction_id();
+        match self.tasks.formatter_transaction(
+            task,
+            &self.state,
+            &self.workspace,
+            self.configuration.binding_revision(),
+            transaction,
+        ) {
+            Ok(Some(transaction)) => match self
+                .state
+                .prepare_transaction(&transaction)
+                .map_err(|e| e.to_string())
+                .and_then(|draft| self.commit_editor_draft(draft, None, false))
+            {
+                Ok(()) => self.notify_message(self.message("formatter_applied", &[]), false),
+                Err(error) => self.show_error(error),
+            },
+            Ok(None) => {}
+            Err(error) => self.show_error(error),
+        }
+    }
+
+    pub(super) fn drain_linter_sources(&mut self) {
+        self.tasks.retire_linter_sources(
+            &self.state,
+            &self.workspace,
+            self.configuration.binding_revision(),
+            &self.diagnostics,
+        );
+        for key in self.tasks.linter_cancellations() {
+            if let Some(cancel) = self.documents.cancel_linter_read(&key) {
+                self.tasks.linter_cancelled(cancel);
+            }
+        }
+        for _ in 0..64 {
+            let Some(loan) = self.tasks.linter_read(
+                &self.state,
+                &self.workspace,
+                self.configuration.binding_revision_ref(),
+                &self.diagnostics,
+            ) else {
+                break;
+            };
+            // Full capacity preserves the unread path for retry. Permanent failure retires
+            // only this build; already-admitted reads stay owned until a proven terminal.
+            if !matches!(self.documents.submit_linter_read(loan), Ok(true)) {
+                break;
+            }
+        }
+        while let Some(update) = self.tasks.next_linter_update(
+            &self.state,
+            &self.workspace,
+            self.configuration.binding_revision(),
+            &self.diagnostics,
+        ) {
+            match update {
+                crate::editor::session::tasks::LinterUpdate::Publish { producer, batches } => {
+                    if let Err(error) =
+                        self.diagnostics
+                            .replace_source(&producer, batches, &self.state)
+                    {
+                        self.show_error(error);
+                    }
+                    self.sync_ui_diagnostics();
+                }
+                crate::editor::session::tasks::LinterUpdate::Failed(error) => {
+                    self.show_error(error)
+                }
+            }
+        }
+    }
+
+    pub(super) fn show_task_picker(&mut self) {
+        let items = self
+            .tasks
+            .task_items()
+            .into_iter()
+            .map(|item| (item, PickerPayload::Command(String::new())))
+            .collect();
+        self.install_picker(self.message("picker_tasks_title", &[]), items);
+    }
+
+    pub(super) fn show_output_picker(&mut self, name: &str) {
+        let previous = if self.tasks.active_output() == Some(name)
+            && self.search.picker_surface() == PickerSurfaceKind::Output
+        {
+            self.search.picker_bookmark()
+        } else {
+            None
+        };
+        let normal = previous.is_some() && self.input.picker_normal();
+        let follow_tail = previous.is_none() || self.search.picker_follows_tail();
+        self.tasks.select_output(Some(name));
+        let items = self
+            .tasks
+            .output_items(name)
+            .into_iter()
+            .map(|item| (item, PickerPayload::Command(String::new())))
+            .collect();
+        self.install_surface_picker(
+            PickerSurfaceKind::Output,
+            self.message("picker_output_title", &[("name", name.into())]),
+            items,
+        );
+        self.search.restore_picker_view(previous, follow_tail);
+        self.input.set_picker_normal(normal);
+        self.sync_picker_ui();
+    }
+
+    pub(super) fn show_test_picker(&mut self, name: &str) {
+        let items = self
+            .tasks
+            .test_items(name)
+            .into_iter()
+            .map(|(item, key)| (item, PickerPayload::TaskTest(key)))
+            .collect();
+        self.install_picker(
+            self.message("picker_tests_title", &[("name", name.into())]),
+            items,
+        );
+    }
+
+    pub(super) fn process_job_events(&mut self) {
+        self.drain_job_events(None);
+    }
+    pub(super) fn drain_job_events(&mut self, deadline: Option<Instant>) {
+        for _ in 0..256 {
+            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                break;
+            }
+            let Some(update) = self
+                .tasks
+                .next_update(&self.workspace, self.configuration.binding_revision())
+            else {
+                break;
+            };
+            match update {
+                crate::editor::session::tasks::TaskUpdate::Output => {
+                    if let Some(name) = self.tasks.active_output().map(str::to_owned)
+                        && self.search.picker_surface() == PickerSurfaceKind::Output
+                    {
+                        self.show_output_picker(&name);
+                    }
+                }
+                crate::editor::session::tasks::TaskUpdate::Finished {
+                    task,
+                    code,
+                    truncated,
+                    next,
+                } => {
+                    if !self.tasks.current(
+                        &task,
+                        &self.workspace,
+                        self.configuration.binding_revision(),
+                    ) {
+                        continue;
+                    }
+                    if next {
+                        self.start_task_step(task.requested().clone());
+                    } else {
+                        if code == Some(0) && !truncated {
+                            self.apply_formatter_result(&task);
+                        } else if truncated
+                            && matches!(task.adapter(), AdapterContext::Formatter { .. })
+                        {
+                            self.show_error(self.message("formatter_truncated", &[]));
+                        }
+                        if !matches!(
+                            task.adapter(),
+                            AdapterContext::Formatter { .. } | AdapterContext::Linter { .. }
+                        ) || code != Some(0)
+                        {
+                            self.notify_message(
+                                self.message(
+                                    "task_exited",
+                                    &[
+                                        ("name", task.name().clone()),
+                                        (
+                                            "code",
+                                            code.map_or_else(|| "signal".into(), |v| v.to_string()),
+                                        ),
+                                    ],
+                                ),
+                                code != Some(0),
+                            );
+                        }
+                        if truncated && matches!(task.adapter(), AdapterContext::Linter { .. }) {
+                            self.show_error("linter output truncated; diagnostics not published");
+                        }
+                        if code == Some(0)
+                            && !truncated
+                            && matches!(task.adapter(), AdapterContext::Linter { .. })
+                        {
+                            if let Err(error) = self.tasks.begin_linter(
+                                *task,
+                                &self.state,
+                                &self.workspace,
+                                self.configuration.binding_revision(),
+                                &self.diagnostics,
+                                (
+                                    self.configuration.settings().workspace.maximum_diagnostics,
+                                    self.configuration
+                                        .settings()
+                                        .workspace
+                                        .search
+                                        .maximum_file_bytes,
+                                ),
+                            ) {
+                                self.show_error(error);
+                            }
+                        }
+                    }
+                }
+                crate::editor::session::tasks::TaskUpdate::Failed { source, message } => {
+                    if let Some(source) = source {
+                        self.diagnostics.clear_source(&source);
+                        self.sync_ui_diagnostics();
+                    }
+                    self.show_error(message);
+                }
+            }
+        }
+        if deadline.is_none_or(|deadline| Instant::now() < deadline) {
+            self.drain_linter_sources();
+        }
+    }
+}
+
+// Remaining editor/window routing; terminal data and algorithms live in the owner.
+use super::{InteractiveApplication, PtyId, RegisterShape, RegisterValue};
+impl InteractiveApplication {
+    fn terminal_command_target(&self) -> Option<PtyId> {
+        self.keyboard_terminal()
+            .or(self.terminal_session.selected())
+    }
+    pub(super) fn reject_terminal_responses(&mut self, reason: &str) {
+        self.debugger_session.reject_terminals(reason);
+    }
+
+    pub(super) fn retire_terminal(&mut self, id: PtyId, _request_close: bool) {
+        let focused = self.window_session.focused_terminal() == Some(id.0);
+        self.terminal_session.close(id);
+        if let Some(reply) = self.debugger_session.take_terminal(&id) {
+            let _ = reply.respond(
+                false,
+                Some("terminal closed before startup response".into()),
+            );
+        }
+        if focused {
+            self.set_terminal_focus(self.terminal_session.selected().is_some());
+        }
+        self.resize_active_terminal_to_panel();
+        self.sync_terminal_panel();
+        self.sync_explorer_ui();
+        self.ensure_cursor_visible();
+    }
+    pub(super) fn enter_terminal_normal_mode(&mut self) {
+        if let Some(id) = self.terminal_command_target() {
+            self.terminal_session.enter_terminal_normal_mode(id);
+        }
+        self.cancel_pending_mapping();
+        self.sync_terminal_panel();
+    }
+    pub(super) fn enter_terminal_input_mode(&mut self) {
+        if let Some(id) = self.terminal_command_target() {
+            self.terminal_session.enter_terminal_input_mode(id);
+        }
+        self.cancel_pending_mapping();
+        self.sync_terminal_panel();
+    }
+    pub(super) fn move_terminal_normal_cursor(&mut self, motion: &str) {
+        let Some(id) = self.terminal_command_target() else {
+            return;
+        };
+        if let Err(error) = self
+            .terminal_session
+            .move_terminal_normal_cursor(id, motion)
+        {
+            self.show_error(error);
+        }
+        self.sync_terminal_panel();
+    }
+    pub(super) fn start_terminal_visual(&mut self, linewise: bool) {
+        if let Some(id) = self.terminal_command_target() {
+            self.terminal_session.start_terminal_visual(id, linewise);
+        }
+        self.sync_terminal_panel();
+    }
+    pub(super) fn yank_terminal_text(&mut self, line: bool) {
+        let Some(id) = self.terminal_command_target() else {
+            return;
+        };
+        let Some((text, linewise)) = self.terminal_session.yank_terminal_text(id, line) else {
+            return;
+        };
+        self.state.registers.set(
+            '"',
+            RegisterValue {
+                text,
+                shape: if linewise {
+                    RegisterShape::Line
+                } else {
+                    RegisterShape::Character
+                },
+            },
+            self.state.policy.registers_enabled,
+            self.state.policy.mirror_named_to_unnamed,
+        );
+        self.state.mark_editor_changed();
+        self.notify_message(self.message("terminal_yanked", &[]), false);
+        self.sync_terminal_panel();
+    }
+    pub(super) fn sync_terminal_panel(&mut self) {
+        self.ui.terminal_panel = self.terminal_session.projection(
+            self.window_session.focused_terminal(),
+            self.window_session.terminal_height(),
+        );
+        if self.ui.terminal_panel.is_none() {
+            self.set_terminal_focus(false);
+        }
+        self.reconcile_editor_windows();
+    }
+}
+
+impl InteractiveApplication {
+    pub(super) fn request_terminal_open(
+        &mut self,
+        profile: &str,
+        reply: Option<crate::debugger::DapTerminalReply>,
+    ) {
+        if reply.as_ref().is_some_and(|r| !r.current()) {
+            self.show_error("requesting debugger retired");
+            return;
+        }
+        match self.terminal_session.request_open(
+            profile,
+            &self.workspace,
+            self.window_session
+                .navigation_stamp(self.state.window_version(), self.state.active_view),
+            self.input.capture_epoch(),
+        ) {
+            Ok(intent) => self.defer_trusted_execution(if let Some(reply) = reply {
+                DeferredExecution::OpenDapTerminal { intent, reply }
+            } else {
+                DeferredExecution::OpenTerminal(intent)
+            }),
+            Err(error) => {
+                if let Some(reply) = reply {
+                    let _ = reply.respond(false, Some(error.clone()));
+                }
+                self.show_error(error);
+            }
+        }
+    }
+
+    pub(super) fn open_terminal_after_validation_with_response(
+        &mut self,
+        intent: super::super::terminal::TerminalIntent,
+        reply: Option<crate::debugger::DapTerminalReply>,
+        authorization: Option<ExecutionAuthorization>,
+    ) {
+        if reply.as_ref().is_some_and(|r| !r.current()) {
+            self.show_error("requesting debugger retired before terminal admission");
+            return;
+        }
+        let Some(permit) = authorization.and_then(|a| a.terminal_permit(&self.workspace, &intent))
+        else {
+            self.show_error("terminal launch requires its original authorization");
+            return;
+        };
+        match self
+            .terminal_session
+            .prepare(intent, permit, &self.workspace)
+        {
+            Ok(open) => {
+                let id = self
+                    .terminal_session
+                    .resolve(&open.key)
+                    .expect("new terminal");
+                match self.terminal_session.queue_preflight(
+                    open.key.clone(),
+                    open.request,
+                    self.workspace
+                        .execution_lane(crate::editor::session::workspace::DiscoveryKind::Language),
+                ) {
+                    Ok(()) => {
+                        if let Some(reply) = reply {
+                            self.debugger_session.register_terminal(id, reply);
+                        }
+                        if self.window_session.navigation_current(
+                            &open.navigation,
+                            &self.state.window_version(),
+                            self.state.active_view,
+                        ) && self.input.capture_current(&open.capture)
+                            && self.input.capture_context().is_none()
+                            && self.ui.picker.is_none()
+                            && self.ui.tool_menu.is_none()
+                        {
+                            self.terminal_session.select(id);
+                            self.set_terminal_focus(true);
+                        }
+                        self.resize_active_terminal_to_panel();
+                        self.sync_terminal_panel();
+                        self.sync_explorer_ui();
+                        self.ensure_cursor_visible();
+                    }
+                    Err(error) => {
+                        self.terminal_session.reject(&open.key);
+                        if let Some(reply) = reply {
+                            let _ = reply.respond(false, Some(error.to_string()));
+                        }
+                        self.show_error(error);
+                    }
+                }
+            }
+            Err(error) => {
+                if let Some(reply) = reply {
+                    let _ = reply.respond(false, Some(error.clone()));
+                }
+                self.show_error(error);
+            }
+        }
+    }
+
+    pub(in crate::editor::session) fn pending_preflight_count(&self) -> usize {
+        self.tasks.preflight_count()
+            + self.terminal_session.preflight_count()
+            + self.language.preflight_count()
+    }
+    pub(super) fn process_execution_preflight(&mut self) {
+        let events = self.workspace.preflight_events();
+        for event in events {
+            match event {
+                ExecutionPreflightEvent::Ready(ready) => {
+                    if self
+                        .debugger_session
+                        .owns_debug_preflight(ready.result().id)
+                    {
+                        let id = ready.result().id;
+                        if let Err(error) = self.debugger_session.debug_preflight(ready) {
+                            self.debugger_session.fail_debug_preflight(id);
+                            self.show_error(error);
+                        }
+                        self.advance_debug_launch();
+                        continue;
+                    }
+                    if self.language.owns_preflight(ready.result().id) {
+                        match self.language.finish_preflight(
+                            ready,
+                            &self.state,
+                            &self.workspace,
+                            self.configuration.binding_revision(),
+                            &self.configuration.settings().lsp,
+                        ) {
+                            Ok(Some(key)) => {
+                                for prefix in ["lsp.", "lsp-pull:"] {
+                                    if let Some(producer) =
+                                        self.language.diagnostic_producer(&key, prefix)
+                                    {
+                                        self.diagnostics.activate(producer);
+                                    }
+                                }
+                                self.sync_ui_diagnostics();
+                            }
+                            Ok(None) => {}
+                            Err(error) => self.show_error(error),
+                        }
+                        continue;
+                    }
+                    let result = ready.result();
+                    let id = result.id;
+                    if result.root_revision != self.workspace.root_revision()
+                        || self
+                            .workspace
+                            .authorize_execution(ExecutionSource::ProjectLocal)
+                            .is_err()
+                    {
+                        if let Some(step) = self.tasks.take_preflight(id) {
+                            self.tasks.reject_step(&step);
+                        }
+                        if let Some(key) = self.terminal_session.take_preflight(id) {
+                            if let Some(id) = self.terminal_session.resolve(&key) {
+                                if let Some(reply) = self.debugger_session.take_terminal(&id) {
+                                    let _ = reply
+                                        .respond(false, Some("terminal workspace retired".into()));
+                                }
+                            }
+                            self.terminal_session.reject(&key);
+                            self.sync_terminal_panel();
+                        }
+                        continue;
+                    }
+                    if let Some(step) = self.tasks.take_preflight(id) {
+                        match self.tasks.launch(
+                            step,
+                            ready,
+                            &self.configuration.settings().processes,
+                            &self.state,
+                            &self.workspace,
+                            self.configuration.binding_revision(),
+                        ) {
+                            Ok(source) => {
+                                if let Some(source) = source {
+                                    self.diagnostics.activate(source);
+                                    self.sync_ui_diagnostics();
+                                }
+                            }
+                            Err(error) => self.show_error(error),
+                        }
+                        continue;
+                    }
+                    if let Some(key) = self.terminal_session.take_preflight(id) {
+                        let id = self.terminal_session.resolve(&key);
+                        if id.is_some_and(|id| !self.debugger_session.terminal_current(&id)) {
+                            self.terminal_session.reject(&key);
+                            if let Some(id) = id {
+                                self.debugger_session.take_terminal(&id);
+                            }
+                            continue;
+                        }
+                        if let Err(error) =
+                            self.terminal_session
+                                .launch(key.clone(), ready, &self.workspace)
+                        {
+                            self.terminal_session.reject(&key);
+                            if let Some(reply) =
+                                id.and_then(|id| self.debugger_session.take_terminal(&id))
+                            {
+                                let _ = reply.respond(false, Some(error.clone()));
+                            }
+                            self.show_error(error);
+                        }
+                        self.sync_terminal_panel();
+                        continue;
+                    }
+                }
+                ExecutionPreflightEvent::Failed {
+                    id,
+                    root_revision,
+                    message,
+                } => {
+                    if self.debugger_session.owns_debug_preflight(id) {
+                        self.debugger_session.fail_debug_preflight(id);
+                        self.show_error(message);
+                        continue;
+                    }
+                    if self.language.fail_preflight(id) {
+                        self.show_error(message);
+                        continue;
+                    }
+                    let mut owned = false;
+                    if let Some(step) = self.tasks.take_preflight(id) {
+                        self.tasks.reject_step(&step);
+                        owned = true;
+                    }
+                    if let Some(key) = self.terminal_session.take_preflight(id) {
+                        if let Some(id) = self.terminal_session.resolve(&key) {
+                            if let Some(reply) = self.debugger_session.take_terminal(&id) {
+                                let _ = reply.respond(false, Some(message.clone()));
+                            }
+                        }
+                        self.terminal_session.reject(&key);
+                        self.sync_terminal_panel();
+                        owned = true;
+                    }
+                    if owned && root_revision == self.workspace.root_revision() {
+                        self.show_error(message)
+                    }
+                }
+            }
+        }
+    }
+
+    pub(super) fn process_pty_events(&mut self) {
+        let updates = self.terminal_session.drain(&self.workspace);
+        if updates.is_empty() {
+            return;
+        }
+        for update in updates {
+            match update {
+                TerminalUpdate::Started(id) => {
+                    if let Some(reply) = self.debugger_session.take_terminal(&id) {
+                        if let Err(error) = reply.respond(true, None) {
+                            self.show_error(error);
+                        }
+                    }
+                }
+                TerminalUpdate::Failed(id, message) => {
+                    if let Some(reply) = self.debugger_session.take_terminal(&id) {
+                        let _ = reply.respond(false, Some(message.clone()));
+                    }
+                    self.show_error(message);
+                }
+                TerminalUpdate::Closed(id) => {
+                    if let Some(reply) = self.debugger_session.take_terminal(&id) {
+                        let _ = reply.respond(false, Some("terminal source retired".into()));
+                    }
+                    if self.window_session.focused_terminal() == Some(id.0) {
+                        self.set_terminal_focus(false);
+                    }
+                }
+                TerminalUpdate::Changed => {}
+            }
+        }
+        self.sync_terminal_panel();
+        self.resize_active_terminal_to_panel();
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn lsp_completion_detail(
+        item: &crate::language::lsp::LspCompletionItem,
+        server: &str,
+    ) -> String {
+        let kind = match item.kind {
+            Some(1) => "Text",
+            Some(2) => "Method",
+            Some(3) => "Function",
+            Some(4) => "Constructor",
+            Some(5) => "Field",
+            Some(6) => "Variable",
+            Some(7) => "Class",
+            Some(8) => "Interface",
+            Some(9) => "Module",
+            Some(10) => "Property",
+            Some(11) => "Unit",
+            Some(12) => "Value",
+            Some(13) => "Enum",
+            Some(14) => "Keyword",
+            Some(15) => "Snippet",
+            Some(16) => "Color",
+            Some(17) => "File",
+            Some(18) => "Reference",
+            Some(19) => "Folder",
+            Some(20) => "Enum member",
+            Some(21) => "Constant",
+            Some(22) => "Struct",
+            Some(23) => "Event",
+            Some(24) => "Operator",
+            Some(25) => "Type parameter",
+            _ => "Item",
+        };
+        [kind, item.detail.as_str(), server]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ")
+    }
+
+    pub(in crate::editor::session) fn refresh_lsp_completion_documentation(&mut self) {
+        let Some(selected) = self
+            .ui
+            .language_completion
+            .as_ref()
+            .map(|completion| completion.selected)
+        else {
+            return;
+        };
+        if self
+            .language
+            .completion_items()
+            .get(selected)
+            .is_some_and(|item| item.documentation.is_some())
+        {
+            self.open_lsp_completion_documentation();
+        } else if self
+            .input
+            .documentation()
+            .is_some_and(|popup| popup.kind == DocumentationPopupKind::Completion)
+        {
+            self.close_documentation();
+        }
+    }
+
+    pub(in crate::editor::session) fn move_lsp_completion(&mut self, direction: i8) {
+        let rows = usize::from(
+            self.configuration
+                .settings()
+                .ui
+                .command_line
+                .completion_max_rows
+                .max(1),
+        );
+        if let Some((selected, scroll)) = self.language.move_completion(direction, rows)
+            && let Some(completion) = self.ui.language_completion.as_mut()
+        {
+            completion.selected = selected;
+            completion.scroll = scroll;
+        }
+        self.refresh_lsp_completion_documentation();
+    }
+
+    pub(in crate::editor::session) fn accept_lsp_completion(&mut self) {
+        let Some(completion) = &self.ui.language_completion else {
+            return;
+        };
+        let Some(item) = self
+            .language
+            .completion_items()
+            .get(completion.selected)
+            .cloned()
+        else {
+            return;
+        };
+        let Some((buffer_id, document)) = self.active_lsp_document() else {
+            return;
+        };
+        if !item.resolved
+            && self
+                .language
+                .capabilities()
+                .is_some_and(|capabilities| capabilities.completion_resolve)
+            && item.resolve_item.is_some()
+        {
+            let offset = self
+                .state
+                .active_view
+                .map_or(ByteOffset(0), |view| self.state.views[view].cursor);
+            if let Err(error) =
+                self.language
+                    .resolve_completion(completion.selected, document, offset)
+            {
+                self.show_error(error);
+            }
+            return;
+        }
+        let encoding = self
+            .language
+            .capabilities()
+            .map_or(PositionEncoding::Utf16, |capabilities| {
+                capabilities.position_encoding
+            });
+        let snippet = item.snippet;
+        let session_allowed = item.additional_edits.is_empty();
+        let edit = item.text_edit.unwrap_or_else(|| {
+            let offset = self
+                .state
+                .active_view
+                .map_or(ByteOffset(0), |view| self.state.views[view].cursor);
+            let buffer = TextBuffer::from_text(&document.text);
+            let (line, character) = PositionCodec::new(&buffer)
+                .byte_to_lsp(offset, encoding)
+                .unwrap_or((0, 0));
+            crate::language::lsp::LspTextEdit {
+                range: crate::language::lsp::LspRange {
+                    start: crate::language::lsp::LspPosition { line, character },
+                    end: crate::language::lsp::LspPosition { line, character },
+                },
+                new_text: item.insert_text,
+            }
+        });
+        let mut edit = edit;
+        let mut tabstops = Vec::new();
+        if snippet {
+            match crate::language::lsp::parse_snippet(&edit.new_text, 1024 * 1024) {
+                Ok(parsed) => {
+                    edit.new_text = parsed.text;
+                    tabstops = parsed.tabstops;
+                }
+                Err(error) => {
+                    self.show_error(error);
+                    return;
+                }
+            }
+        }
+        let insertion_start = TextBuffer::from_text(&document.text);
+        let insertion_start = PositionCodec::new(&insertion_start)
+            .lsp_to_byte(edit.range.start.line, edit.range.start.character, encoding)
+            .ok();
+        let mut edits = vec![edit];
+        edits.extend(item.additional_edits);
+        let workspace_edit = LspWorkspaceEdit {
+            resources: Vec::new(),
+            documents: vec![crate::language::lsp::LspDocumentEdit {
+                uri: document.uri(),
+                version: Some(document.version),
+                edits,
+            }],
+        };
+        if let Err(error) = self.apply_lsp_workspace_edit(workspace_edit) {
+            self.show_error(error);
+        } else if session_allowed
+            && let Some(start) = insertion_start
+            && !tabstops.is_empty()
+        {
+            let source = self.state.window_version();
+            self.input.install_snippet(
+                crate::editor::session::input::SnippetDocument {
+                    editor: &source,
+                    buffer: buffer_id,
+                    text: &self.state.buffers[buffer_id].text,
+                    view: self.state.active_view,
+                },
+                start,
+                tabstops
+                    .into_iter()
+                    .map(|stop| (stop.index, stop.start, stop.end)),
+            );
+            self.select_snippet_current();
+        }
+        self.language.clear_completion();
+        self.ui.language_completion = None;
+    }
+
+    pub(in crate::editor::session) fn select_snippet_current(&mut self) {
+        let source = self.state.window_version();
+        let document = self.input.snippet_buffer().and_then(|id| {
+            self.state.buffers.get(id).map(|buffer| {
+                crate::editor::session::input::SnippetDocument {
+                    editor: &source,
+                    buffer: id,
+                    text: &buffer.text,
+                    view: self.state.active_view.filter(|view| {
+                        self.state
+                            .views
+                            .get(*view)
+                            .is_some_and(|view| view.buffer == id)
+                    }),
+                }
+            })
+        });
+        let Some(operations) = self.input.snippet_selection(document) else {
+            return;
+        };
+        let mut transaction =
+            EditorTransaction::new(self.transaction_id()).with_undo_policy(UndoPolicy::Ignore);
+        transaction.operations.extend(operations);
+        if let Err(error) = self.state.apply_transaction(&transaction) {
+            self.show_error(error);
+        } else {
+            self.ensure_cursor_visible();
+        }
+    }
+    pub(in crate::editor::session) fn navigate_snippet(&mut self, direction: i8) {
+        self.input.navigate_snippet(direction);
+        self.select_snippet_current();
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn lsp_position_encoding(&self) -> PositionEncoding {
+        self.language
+            .capabilities()
+            .map_or(PositionEncoding::Utf16, |c| c.position_encoding)
+    }
+
+    pub(in crate::editor::session) fn clear_git_status(&mut self) {
+        self.git.clear();
+        self.ui.git_signs.clear();
+    }
+
+    pub(in crate::editor::session) fn reconcile_git_signs(&mut self) {
+        if self.git.status().is_none()
+            && self
+                .state
+                .active_buffer_id()
+                .and_then(|id| self.state.buffers[id].path.as_ref())
+                .is_some()
+        {
+            self.start_git_status_refresh_silent();
+        }
+        if self.git.reconcile_signs(
+            &self.state,
+            self.workspace.root_revision(),
+            self.configuration.settings().editor.git_signs.enabled,
+        ) {
+            self.ui.git_signs.clear();
+        }
+    }
+
+    pub(in crate::editor::session) fn process_git_sign_events(&mut self) {
+        if let Some(signs) = self.git.poll_signs(
+            &self.state,
+            self.workspace.root_revision(),
+            self.configuration.settings().editor.git_signs.enabled,
+        ) {
+            self.ui.git_signs = signs;
+        }
+    }
+
+    pub(in crate::editor::session) fn start_git_hunks(&mut self) {
+        self.start_git_hunks_with_action(None);
+    }
+    pub(in crate::editor::session) fn start_git_hunks_with_action(&mut self, action: Option<i8>) {
+        let path = self
+            .state
+            .active_buffer_id()
+            .and_then(|id| self.state.buffers[id].path.as_deref());
+        if let Err(error) = self
+            .git
+            .start_hunks(path, self.workspace.root_revision(), action)
+        {
+            self.show_error(error);
+        }
+    }
+    pub(in crate::editor::session) fn process_git_hunk_events(&mut self) {
+        match self.git.poll_hunks() {
+            Ok(Some(ready)) => {
+                if let Some(action) = ready.action {
+                    if action == 0 {
+                        self.preview_selected_git_hunk();
+                    } else {
+                        self.navigate_git_hunk(action);
+                    }
+                    return;
+                }
+                let Some(snapshot) = self.git.hunks() else {
+                    return;
+                };
+                let items = snapshot
+                    .hunks
+                    .iter()
+                    .map(|hunk| {
+                        (
+                            PickerItem {
+                                id: PickerItemId(format!("git-hunk:{}", hunk.id.0)),
+                                label: hunk.header.trim().to_owned(),
+                                detail: format!(
+                                    "-{},{} +{},{}",
+                                    hunk.old_start, hunk.old_lines, hunk.new_start, hunk.new_lines
+                                ),
+                                source: "git-hunk".into(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::GitHunk {
+                                path: ready.path.clone(),
+                                status_revision: snapshot.status_revision,
+                                repository: snapshot.repository_id,
+                                hunk: hunk.id,
+                                new_line: hunk.new_start.saturating_sub(1) as usize,
+                            },
+                        )
+                    })
+                    .collect();
+                self.install_picker("Git hunks".into(), items);
+            }
+            Ok(None) => {}
+            Err(error) => self.show_error(error),
+        }
+    }
+    pub(in crate::editor::session) fn navigate_git_hunk(&mut self, direction: i8) {
+        if self.git.hunks().is_none() {
+            self.start_git_hunks_with_action(Some(direction.signum()));
+            return;
+        }
+        let line = self
+            .state
+            .active_view
+            .and_then(|id| {
+                let view = &self.state.views[id];
+                self.state.buffers[view.buffer]
+                    .text
+                    .byte_to_line(view.cursor)
+                    .ok()
+            })
+            .unwrap_or(0) as u32
+            + 1;
+        match self.git.navigate(direction, line) {
+            Ok((path, line)) => self.navigate_matcher_source(MatcherSource {
+                path,
+                line,
+                column: 0,
+            }),
+            Err(error) => self.show_error(error),
+        }
+    }
+    pub(in crate::editor::session) fn preview_selected_git_hunk(&mut self) {
+        if self.git.hunks().is_none() {
+            self.start_git_hunks_with_action(Some(0));
+            return;
+        }
+        match self.git.preview() {
+            Ok((header, text)) => self.present_documentation_popup(
+                DocumentationPopupKind::Git,
+                header,
+                "Git".into(),
+                None,
+                vec![LspMarkupContent {
+                    kind: LspMarkupKind::PlainText,
+                    value: text,
+                }],
+            ),
+            Err(error) => self.show_error(error),
+        }
+    }
+    pub(in crate::editor::session) fn request_reset_selected_git_hunk(&mut self) {
+        if self.workspace.trust() != WorkspaceTrust::Trusted {
+            self.show_error("Git reset requires a trusted workspace");
+            return;
+        }
+        if !self.git.has_selection() {
+            self.show_error("select a current Git hunk first");
+            return;
+        }
+        self.open_prompt(PromptKind::GitReset, String::new());
+        self.prompt_help("Discards worktree changes. Type `reset this hunk`.".into());
+    }
+    pub(in crate::editor::session) fn confirm_reset_selected_git_hunk(&mut self, phrase: String) {
+        if phrase != "reset this hunk" {
+            self.show_error("Git hunk reset confirmation did not match");
+            return;
+        }
+        if let Err(error) = self.git.mutate(
+            true,
+            self.workspace.trust() == WorkspaceTrust::Trusted,
+            self.workspace.root_revision(),
+        ) {
+            self.show_error(error);
+        }
+    }
+    pub(in crate::editor::session) fn stage_selected_git_hunk(&mut self) {
+        if let Err(error) = self.git.mutate(
+            false,
+            self.workspace.trust() == WorkspaceTrust::Trusted,
+            self.workspace.root_revision(),
+        ) {
+            self.show_error(error);
+        }
+    }
+    pub(in crate::editor::session) fn process_git_mutation_events(&mut self) {
+        match self.git.poll_mutation() {
+            Ok(Some(reset)) => {
+                self.ui.git_signs.clear();
+                self.start_git_status_refresh();
+                self.notify_message(
+                    if reset {
+                        "Git hunk reset"
+                    } else {
+                        "Git hunk staged"
+                    }
+                    .into(),
+                    false,
+                );
+            }
+            Ok(None) => {}
+            Err(error) => self.show_error(error),
+        }
+    }
+    pub(in crate::editor::session) fn start_git_status_refresh(&mut self) {
+        self.start_git_status_refresh_with_feedback(true);
+    }
+    pub(in crate::editor::session) fn start_git_status_refresh_silent(&mut self) {
+        let root = self
+            .workspace
+            .active_root()
+            .and_then(|id| self.workspace.roots().iter().find(|r| r.id == id))
+            .map(|r| r.identity.canonical_path.as_path());
+        if self.git.needs_status(self.workspace.root_revision(), root) {
+            self.start_git_status_refresh_with_feedback(false);
+        }
+    }
+    pub(in crate::editor::session) fn start_git_status_refresh_with_feedback(
+        &mut self,
+        report_errors: bool,
+    ) {
+        let root = self
+            .workspace
+            .active_root()
+            .and_then(|id| self.workspace.roots().iter().find(|r| r.id == id))
+            .map(|r| r.identity.canonical_path.as_path());
+        self.ui.git_signs.clear();
+        if let Err(error) = self
+            .git
+            .refresh(root, self.workspace.root_revision(), report_errors)
+        {
+            self.show_error(error);
+        }
+    }
+    pub(in crate::editor::session) fn process_git_status_events(&mut self) {
+        match self.git.poll_status(self.workspace.root_revision()) {
+            Ok(false) => return,
+            Ok(true) => {}
+            Err(error) => self.show_error(error),
+        }
+        if self.git.status().is_none() {
+            self.ui.git_signs.clear();
+        }
+        if self.ui.explorer.is_some() {
+            self.sync_explorer_ui();
+        }
+    }
+    pub(in crate::editor::session) fn open_git_status_picker(&mut self) {
+        let root = self
+            .workspace
+            .active_root()
+            .and_then(|id| self.workspace.roots().iter().find(|r| r.id == id))
+            .map(|r| &r.identity.canonical_path);
+        let Some(snapshot) = self.git.status().filter(|s| {
+            s.root_revision == self.workspace.root_revision() && root == Some(&s.scope_root)
+        }) else {
+            self.show_error("Git status is unavailable; refresh first");
+            return;
+        };
+        let items = snapshot
+            .entries
+            .iter()
+            .map(|entry| {
+                (
+                    PickerItem {
+                        id: PickerItemId(format!("git:{}", entry.relative_path.display())),
+                        label: entry.relative_path.display().to_string(),
+                        detail: format!("{:?}", entry.status),
+                        source: "git".into(),
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::MatcherSource(MatcherSource {
+                        path: snapshot.scope_root.join(&entry.relative_path),
+                        line: 0,
+                        column: 0,
+                    }),
+                )
+            })
+            .collect();
+        self.install_picker("Git status".into(), items);
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn navigate_workspace_search_match(
+        &mut self,
+        found: WorkspaceSearchMatch,
+    ) {
+        if self
+            .state
+            .buffers
+            .iter()
+            .any(|(_, buffer)| buffer.path.as_ref() == Some(&found.canonical_path))
+        {
+            if let Ok(range) =
+                ByteRange::new(ByteOffset(found.range.start), ByteOffset(found.range.end))
+            {
+                self.navigate_byte_location(&file_uri(&found.canonical_path), range);
+            }
+            return;
+        }
+        let roots = self
+            .workspace
+            .roots()
+            .iter()
+            .map(|root| root.identity.canonical_path.clone())
+            .collect();
+        match self.documents.read_scoped(found.canonical_path, roots) {
+            Ok(id) => {
+                self.search.register_workspace_navigation(id, found.range);
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+
+    pub(in crate::editor::session) fn navigate_byte_location(
+        &mut self,
+        uri: &str,
+        range: ByteRange,
+    ) {
+        let Some(path) = path_from_file_uri(uri) else {
+            return;
+        };
+        let Some((buffer, _)) = self
+            .state
+            .buffers
+            .iter()
+            .find(|(_, buffer)| buffer.path.as_ref() == Some(&path))
+        else {
+            return;
+        };
+        let transaction = self.transaction_id();
+        match self
+            .state
+            .prepare_document_location(buffer, range.start, transaction)
+            .and_then(|draft| self.commit_editor_draft(draft, None, false))
+        {
+            Ok(()) => self.ensure_cursor_visible(),
+            Err(error) => self.show_error(error),
+        }
+    }
+
+    pub(in crate::editor::session) fn navigate_lsp_location(
+        &mut self,
+        location: &crate::language::lsp::LspLocation,
+    ) {
+        let Some(path) = path_from_file_uri(&location.uri) else {
+            self.show_error(self.message("lsp_invalid_uri", &[("uri", location.uri.clone())]));
+            return;
+        };
+        if let Err(error) = self.workspace.require_path(&path) {
+            self.show_error(error);
+            return;
+        }
+        let encoding = self
+            .language
+            .capabilities()
+            .map_or(PositionEncoding::Utf16, |capabilities| {
+                capabilities.position_encoding
+            });
+        let Some((buffer_id, buffer)) = self
+            .state
+            .buffers
+            .iter()
+            .find(|(_, buffer)| buffer.path.as_ref() == Some(&path))
+        else {
+            let roots = self
+                .workspace
+                .roots()
+                .iter()
+                .map(|root| root.identity.canonical_path.clone())
+                .collect();
+            match self.documents.read_scoped(path, roots) {
+                Ok(id) => {
+                    self.language
+                        .register_navigation_read(id, location.range.clone(), encoding);
+                    self.notify_message(self.message("opening_file", &[]), false);
+                }
+                Err(error) => self.show_error(error),
+            }
+            return;
+        };
+        let Ok(position) = PositionCodec::new(&buffer.text).lsp_to_byte(
+            location.range.start.line,
+            location.range.start.character,
+            encoding,
+        ) else {
+            self.show_error(self.message("lsp_invalid_position", &[]));
+            return;
+        };
+        if let Ok(view) = self.state.show_buffer(buffer_id) {
+            let transaction = EditorTransaction::new(self.transaction_id())
+                .with_precondition(Precondition::ViewDisplays {
+                    view,
+                    buffer: buffer_id,
+                })
+                .with_operation(EditorOperation::SetCursor { view, position })
+                .with_undo_policy(UndoPolicy::Ignore);
+            if let Err(error) = self.state.apply_transaction(&transaction) {
+                self.show_error(error);
+            } else {
+                self.ensure_cursor_visible();
+            }
+        }
+    }
+
+    pub(in crate::editor::session) fn current_persisted_location(
+        &self,
+    ) -> Option<PersistedLocation> {
+        let view = self.state.views.get(self.state.active_view?)?;
+        let buffer = self.state.buffers.get(view.buffer)?;
+        Some(PersistedLocation {
+            path: buffer.path.clone()?,
+            byte: view.cursor.get(),
+            anchor: view
+                .selection
+                .map_or(view.cursor.get(), |selection| selection.anchor.get()),
+            scroll_line: view.scroll_line,
+            scroll_column: view.scroll_column,
+        })
+    }
+
+    pub(in crate::editor::session) fn push_change_location(&mut self) {
+        if let Some(location) = self.current_persisted_location() {
+            self.persistence.record_location(
+                location,
+                true,
+                self.configuration.settings().persistence.changes,
+            );
+        }
+    }
+
+    pub(in crate::editor::session) fn navigate_matcher_source(&mut self, source: MatcherSource) {
+        if !source.path.is_absolute()
+            || !self
+                .workspace
+                .roots()
+                .iter()
+                .any(|root| source.path.starts_with(&root.identity.canonical_path))
+        {
+            self.show_error(self.message("navigation_outside_workspace", &[]));
+            return;
+        }
+        let roots = self
+            .workspace
+            .roots()
+            .iter()
+            .map(|root| root.identity.canonical_path.clone())
+            .collect();
+        match self.documents.read_scoped(source.path.clone(), roots) {
+            Ok(id) => {
+                self.search.register_matcher_navigation(id, source);
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+
+    pub(in crate::editor::session) fn navigate_persisted_location(
+        &mut self,
+        location: PersistedLocation,
+    ) {
+        if !location.path.is_absolute()
+            || !self
+                .workspace
+                .roots()
+                .iter()
+                .any(|root| location.path.starts_with(&root.identity.canonical_path))
+        {
+            self.show_error(self.message("navigation_outside_workspace", &[]));
+            return;
+        }
+        if let Some(current) = self.current_persisted_location() {
+            self.persistence.record_location(
+                current,
+                false,
+                self.configuration.settings().persistence.jumps,
+            );
+        }
+        let roots = self
+            .workspace
+            .roots()
+            .iter()
+            .map(|root| root.identity.canonical_path.clone())
+            .collect();
+        match self.documents.read_scoped(location.path.clone(), roots) {
+            Ok(id) => {
+                self.persistence.register_navigation_read(id, location);
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+
+    pub(in crate::editor::session) fn navigate_diagnostic(
+        &mut self,
+        direction: i8,
+        filter: DiagnosticFilter,
+    ) {
+        let Some(view_id) = self.state.active_view else {
+            return;
+        };
+        let view = &self.state.views[view_id];
+        let buffer_id = view.buffer;
+        let cursor = view.cursor;
+        let Some(path) = self.state.buffers[buffer_id].path.clone() else {
+            return;
+        };
+        let uri = crate::language::lsp::file_uri(&path);
+        self.diagnostics.retire_documents(&self.state);
+        let Some(key) = self
+            .diagnostics
+            .adjacent(&uri, cursor, direction, filter.severities())
+        else {
+            self.show_error(self.message("diagnostic_none", &[]));
+            return;
+        };
+        let Some(target) = self.diagnostics.resolve(&key, &self.state) else {
+            self.sync_ui_diagnostics();
+            return;
+        };
+        let position = target.range.start;
+        let transaction = EditorTransaction::new(self.transaction_id())
+            .with_precondition(Precondition::ViewDisplays {
+                view: view_id,
+                buffer: buffer_id,
+            })
+            .with_operation(EditorOperation::SetCursor {
+                view: view_id,
+                position,
+            })
+            .with_undo_policy(UndoPolicy::Ignore);
+        let result = self
+            .state
+            .prepare_transaction(&transaction)
+            .map_err(|e| e.to_string())
+            .and_then(|draft| self.commit_editor_draft(draft, None, false));
+        if let Err(error) = result {
+            self.show_error(error);
+        } else {
+            self.diagnostics
+                .expand(key, filter.severities(), &self.state);
+            self.sync_ui_diagnostics();
+            self.clear_notice();
+            self.ensure_cursor_visible();
+        }
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn install_picker(
+        &mut self,
+        title: String,
+        items: Vec<(PickerItem, PickerPayload)>,
+    ) {
+        self.install_surface_picker(PickerSurfaceKind::Generic, title, items);
+    }
+
+    pub(in crate::editor::session) fn install_surface_picker(
+        &mut self,
+        surface: PickerSurfaceKind,
+        title: String,
+        items: Vec<(PickerItem, PickerPayload)>,
+    ) {
+        self.install_surface_picker_state(
+            surface,
+            title,
+            items,
+            String::new(),
+            true,
+            PickerOrigin::General,
+        );
+    }
+
+    pub(in crate::editor::session) fn install_surface_picker_state(
+        &mut self,
+        surface: PickerSurfaceKind,
+        title: String,
+        items: Vec<(PickerItem, PickerPayload)>,
+        query: String,
+        complete: bool,
+        origin: PickerOrigin,
+    ) {
+        if let PickerOrigin::PluginProvider(request) = origin
+            && !self.extension.provider_presentable(request)
+        {
+            self.show_error("plugin picker source retired");
+            return;
+        }
+        let retired_preview = self
+            .search
+            .workspace_picker()
+            .filter(|id| !matches!(origin, PickerOrigin::WorkspaceEdit(current) if current == *id));
+        let previous_epoch = self.search.picker_epoch().cloned();
+        let epoch = match self.search.install_picker(
+            PickerContent {
+                surface,
+                origin,
+                title,
+                items,
+                query,
+                complete,
+            },
+            self.configuration.settings().workspace.maximum_picker_items,
+            self.workspace.version(),
+            self.configuration.binding_revision(),
+        ) {
+            Ok(epoch) => epoch,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        if self.search.theme_picker_key().is_none() {
+            self.configuration.cancel_theme_picker();
+        }
+        self.extension.picker_installed(match origin {
+            PickerOrigin::PluginProvider(request) => Some(request),
+            _ => None,
+        });
+        if !previous_epoch.is_some_and(|epoch| self.search.owns_picker_epoch(&epoch)) {
+            self.input.begin_picker();
+        }
+        // A refused replacement must not destroy the still-valid old preview.
+        if let Some(id) = retired_preview {
+            self.retire_workspace_picker(id);
+        }
+        self.language
+            .retain_actions(self.search.picker_code_actions(&epoch));
+        self.input.cancel_prompt_completions();
+        self.clear_picker_preview();
+        self.sync_picker_ui();
+    }
+
+    pub(in crate::editor::session) fn retire_stale_picker(&mut self) {
+        if self.search.picker_is_stale(
+            self.workspace.version(),
+            self.configuration.binding_revision(),
+        ) {
+            self.close_picker();
+        }
+    }
+
+    pub(in crate::editor::session) fn selected_picker_payload(&self) -> Option<&PickerPayload> {
+        self.search.selected_picker_payload()
+    }
+
+    pub(in crate::editor::session) fn open_lsp_locations_picker(
+        &mut self,
+        server: &str,
+        locations: Vec<crate::language::lsp::LspLocation>,
+    ) {
+        let server = self.lsp_server_label(server);
+        let items = locations
+            .into_iter()
+            .enumerate()
+            .map(|(index, location)| {
+                let path = path_from_file_uri(&location.uri)
+                    .map_or_else(|| location.uri.clone(), |path| path.display().to_string());
+                let id = PickerItemId(format!("location:{index}:{}", location.uri));
+                (
+                    PickerItem {
+                        id,
+                        label: path,
+                        detail: format!(
+                            "{}:{}",
+                            location.range.start.line + 1,
+                            location.range.start.character + 1
+                        ),
+                        source: server.clone(),
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::LspLocation(location),
+                )
+            })
+            .collect();
+        self.install_picker(self.message("picker_references_title", &[]), items);
+    }
+
+    pub(in crate::editor::session) fn open_lsp_symbols_picker(
+        &mut self,
+        server: &str,
+        symbols: Vec<crate::language::lsp::LspSymbol>,
+    ) {
+        let server = self.lsp_server_label(server);
+        let items = symbols
+            .into_iter()
+            .enumerate()
+            .map(|(index, symbol)| {
+                let id = PickerItemId(format!("symbol:{index}:{}", symbol.name));
+                let payload = symbol.location.map_or_else(
+                    || PickerPayload::Command(String::new()),
+                    PickerPayload::LspLocation,
+                );
+                (
+                    PickerItem {
+                        id,
+                        label: symbol.name,
+                        detail: symbol.kind.map_or_else(String::new, |kind| {
+                            self.message("picker_symbol_kind", &[("kind", kind.to_string())])
+                        }),
+                        source: server.clone(),
+                        action: PickerAction::None,
+                    },
+                    payload,
+                )
+            })
+            .collect();
+        self.install_picker(self.message("picker_symbols_title", &[]), items);
+    }
+
+    pub(in crate::editor::session) fn open_lsp_code_actions_picker(
+        &mut self,
+        server: &str,
+        actions: Vec<crate::language::lsp::LspCodeAction>,
+        context: Option<crate::language::lsp::EditContext>,
+    ) {
+        let choices = match self.language.install_actions(
+            actions,
+            context,
+            self.configuration.settings().workspace.maximum_picker_items,
+        ) {
+            Ok(choices) => choices,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        let server = self.lsp_server_label(server);
+        let items = choices
+            .into_iter()
+            .enumerate()
+            .map(|(index, choice)| {
+                (
+                    PickerItem {
+                        id: PickerItemId(format!("code-action:{index}:{}", choice.title)),
+                        label: choice.title,
+                        detail: choice.detail,
+                        source: server.clone(),
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::CodeAction(choice.key),
+                )
+            })
+            .collect();
+        self.install_picker(self.message("picker_code_actions_title", &[]), items);
+    }
+
+    pub(in crate::editor::session) fn open_dap_picker(
+        &mut self,
+        kind: &str,
+        rows: Vec<(String, String, DapControl)>,
+    ) {
+        let rows = self.debugger_session.controls(rows);
+        self.install_debug_rows(kind, rows);
+    }
+    pub(in crate::editor::session) fn install_debug_rows(
+        &mut self,
+        kind: &str,
+        rows: Vec<crate::editor::session::debugger::DebugRow>,
+    ) {
+        let items = rows
+            .into_iter()
+            .enumerate()
+            .map(|(index, row)| {
+                (
+                    PickerItem {
+                        id: PickerItemId(format!("dap:{kind}:{index}")),
+                        label: row.label,
+                        detail: row.detail,
+                        source: "dap".into(),
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::Debug(row.key),
+                )
+            })
+            .collect();
+        self.install_surface_picker(
+            PickerSurfaceKind::Debug,
+            self.message("dap_picker_title", &[("kind", kind.into())]),
+            items,
+        );
+    }
+
+    pub(in crate::editor::session) fn open_builtin_picker(&mut self, kind: PickerKind) {
+        match kind {
+            PickerKind::Diagnostics => {
+                let items = self
+                    .diagnostics
+                    .choices()
+                    .enumerate()
+                    .map(|(index, (key, problem, validity))| {
+                        let id = PickerItemId(format!("diagnostic:{index}:{}", problem.uri));
+                        let path = path_from_file_uri(&problem.uri)
+                            .map_or_else(|| problem.uri.clone(), |path| path.display().to_string());
+                        (
+                            PickerItem {
+                                id,
+                                label: problem.message.clone(),
+                                detail: format!("{path} · {}", validity.label()),
+                                source: problem.source.clone(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::Diagnostic(key),
+                        )
+                    })
+                    .collect();
+                self.install_surface_picker(
+                    PickerSurfaceKind::Problems,
+                    self.message("picker_diagnostics_title", &[]),
+                    items,
+                );
+            }
+            PickerKind::Buffers => {
+                let items = self
+                    .state
+                    .buffers
+                    .iter()
+                    .enumerate()
+                    .map(|(index, (buffer, state))| {
+                        let id = PickerItemId(format!("buffer:{index}"));
+                        (
+                            PickerItem {
+                                id,
+                                label: state.path.as_ref().map_or_else(
+                                    || {
+                                        self.configuration
+                                            .settings()
+                                            .ui
+                                            .status_line
+                                            .scratch_label
+                                            .clone()
+                                    },
+                                    |path| path.display().to_string(),
+                                ),
+                                detail: if state.dirty {
+                                    self.configuration
+                                        .settings()
+                                        .ui
+                                        .status_line
+                                        .dirty_marker
+                                        .clone()
+                                } else {
+                                    String::new()
+                                },
+                                source: String::new(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::Buffer(buffer),
+                        )
+                    })
+                    .collect();
+                self.install_picker(self.message("picker_buffers_title", &[]), items);
+            }
+            PickerKind::Roots => {
+                let active = self.workspace.active_root();
+                let trusted = self.workspace.trust() == WorkspaceTrust::Trusted;
+                let items = self
+                    .workspace
+                    .roots()
+                    .iter()
+                    .map(|root| {
+                        let state = if active == Some(root.id) {
+                            self.message("workspace_root_active", &[])
+                        } else {
+                            self.message("workspace_root_inactive", &[])
+                        };
+                        let trust = if trusted {
+                            self.message("workspace_trust_trusted", &[])
+                        } else {
+                            self.message("workspace_trust_untrusted", &[])
+                        };
+                        (
+                            PickerItem {
+                                id: PickerItemId(format!("workspace-root:{}", root.id.0)),
+                                label: self.message(
+                                    "workspace_root_row",
+                                    &[
+                                        ("id", root.id.0.to_string()),
+                                        ("name", root.name.clone()),
+                                        ("state", state),
+                                        ("trust", trust),
+                                    ],
+                                ),
+                                detail: root.identity.canonical_path.display().to_string(),
+                                source: String::new(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::WorkspaceRoot(root.id),
+                        )
+                    })
+                    .collect();
+                self.install_picker(self.message("workspace_root_picker_title", &[]), items);
+            }
+            PickerKind::Recents => {
+                let items = self
+                    .persistence
+                    .recent_files()
+                    .iter()
+                    .cloned()
+                    .enumerate()
+                    .map(|(index, path)| {
+                        let location = PersistedLocation {
+                            path: path.clone(),
+                            byte: 0,
+                            anchor: 0,
+                            scroll_line: 0,
+                            scroll_column: 0,
+                        };
+                        (
+                            PickerItem {
+                                id: PickerItemId(format!("recent:{index}")),
+                                label: path.display().to_string(),
+                                detail: String::new(),
+                                source: self.message("navigation_recent_source", &[]),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::PersistedLocation(location),
+                        )
+                    })
+                    .collect();
+                self.install_picker(self.message("navigation_recents_title", &[]), items);
+            }
+            PickerKind::Marks => {
+                let items = self
+                    .persistence
+                    .marks()
+                    .iter()
+                    .cloned()
+                    .enumerate()
+                    .map(|(index, mark)| {
+                        (
+                            PickerItem {
+                                id: PickerItemId(format!("mark:{index}:{}", mark.name)),
+                                label: mark.name,
+                                detail: format!(
+                                    "{}:{}",
+                                    mark.location.path.display(),
+                                    mark.location.byte
+                                ),
+                                source: self.message("navigation_mark_source", &[]),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::PersistedLocation(mark.location),
+                        )
+                    })
+                    .collect();
+                self.install_picker(self.message("navigation_marks_title", &[]), items);
+            }
+            PickerKind::Jumps | PickerKind::Changes => {
+                let (source, title, rows) = if matches!(kind, PickerKind::Jumps) {
+                    (
+                        self.message("navigation_jump_source", &[]),
+                        self.message("navigation_jumps_title", &[]),
+                        self.persistence.jumps().to_vec(),
+                    )
+                } else {
+                    (
+                        self.message("navigation_change_source", &[]),
+                        self.message("navigation_changes_title", &[]),
+                        self.persistence.changes().to_vec(),
+                    )
+                };
+                let items = rows
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, location)| {
+                        (
+                            PickerItem {
+                                id: PickerItemId(format!("navigation:{index}")),
+                                label: location.path.display().to_string(),
+                                detail: location.byte.to_string(),
+                                source: source.clone(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::PersistedLocation(location),
+                        )
+                    })
+                    .collect();
+                self.install_picker(title, items);
+            }
+            PickerKind::Commands => {
+                let items = self
+                    .commands
+                    .specs()
+                    .enumerate()
+                    .map(|(index, spec)| {
+                        let command = spec.id.as_str().to_owned();
+                        let id = PickerItemId(format!("command:{index}:{command}"));
+                        (
+                            PickerItem {
+                                id,
+                                label: command.clone(),
+                                detail: self
+                                    .configuration
+                                    .settings()
+                                    .command_labels
+                                    .get(&command)
+                                    .cloned()
+                                    .unwrap_or_default(),
+                                source: String::new(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::Command(command),
+                        )
+                    })
+                    .collect();
+                match compose_command_picker_items(items) {
+                    Ok(items) => {
+                        self.install_picker(self.message("picker_commands_title", &[]), items)
+                    }
+                    Err(error) => self.show_error(error.to_string()),
+                }
+            }
+        }
+    }
+
+    pub(in crate::editor::session) fn sync_picker_ui(&mut self) {
+        self.retire_stale_picker();
+        self.ui.picker = self.search.picker_projection();
+        let theme = match self.search.selected_picker_payload() {
+            Some(PickerPayload::Theme(key)) => Some(key),
+            _ => None,
+        };
+        self.configuration.preview_theme(theme);
+        let context = self.active_input_context();
+        let theme_picker = self.search.theme_picker_key().is_some();
+        if let Some(picker) = &mut self.ui.picker {
+            let (mode, commands): (&str, &[(&str, &str)]) =
+                if self.search.workspace_picker().is_some() {
+                    (
+                        "Review",
+                        &[
+                            ("workspace.edit.toggle", "toggle"),
+                            ("workspace.edit.accept", "apply"),
+                            ("workspace.edit.reject", "reject"),
+                        ],
+                    )
+                } else if theme_picker {
+                    ("", &[("picker.cancel", "cancel")])
+                } else if self.input.picker_normal() {
+                    (
+                        "Normal",
+                        &[
+                            ("picker.mode.insert", "edit"),
+                            ("picker.accept", "accept"),
+                            ("picker.cancel", "close"),
+                        ],
+                    )
+                } else {
+                    (
+                        "Insert",
+                        &[
+                            ("picker.mode.normal", "normal"),
+                            ("picker.accept", "accept"),
+                            ("picker.cancel", "close"),
+                        ],
+                    )
+                };
+            let hints = commands
+                .iter()
+                .filter_map(|(command, action)| {
+                    self.configuration
+                        .keymaps()
+                        .inspect_key(&context, "escape")
+                        .filter(|binding| {
+                            *command == "picker.cancel"
+                                && binding.command.as_deref() == Some(*command)
+                        })
+                        .or_else(|| self.configuration.keymaps().inspect(&context, command))
+                        .map(|binding| {
+                            if theme_picker {
+                                let key = if binding.keys == "escape" {
+                                    "Escape"
+                                } else {
+                                    &binding.keys
+                                };
+                                format!("Press {key} to {action}")
+                            } else {
+                                format!("{} {action}", binding.keys)
+                            }
+                        })
+                })
+                .collect::<Vec<_>>()
+                .join(" · ");
+            picker.input_hint = if mode.is_empty() {
+                hints
+            } else {
+                format!("{mode} · {hints}")
+            };
+        }
+        self.sync_picker_preview();
+        if let Some(picker) = &mut self.ui.picker {
+            picker.preview.clone_from(self.search.preview());
+        }
+        self.refresh_window_content();
+    }
+
+    pub(in crate::editor::session) fn picker_insert(&mut self, text: &str) {
+        self.retire_stale_picker();
+        let query = self.search.picker_insert(text);
+        self.sync_picker_ui();
+        if self.search.live()
+            && let Some(query) = query
+        {
+            self.restart_live_workspace_search(query);
+        }
+    }
+
+    pub(in crate::editor::session) fn picker_backspace(&mut self) {
+        self.retire_stale_picker();
+        let query = self.search.picker_backspace();
+        self.sync_picker_ui();
+        if self.search.live()
+            && let Some(query) = query
+        {
+            self.restart_live_workspace_search(query);
+        }
+    }
+
+    pub(in crate::editor::session) fn picker_move(&mut self, direction: i8) {
+        self.retire_stale_picker();
+        self.search.picker_move(
+            direction,
+            self.configuration.settings().workspace.picker_wrap,
+        );
+        self.sync_picker_ui();
+    }
+
+    fn clear_picker_preview(&mut self) {
+        if let Some(id) = self.search.clear_preview() {
+            self.documents.cancel_request(id);
+        }
+    }
+    fn sync_picker_preview(&mut self) {
+        let Some((label, payload)) = self
+            .search
+            .picker()
+            .and_then(PickerState::selected_item)
+            .and_then(|item| {
+                self.selected_picker_payload()
+                    .cloned()
+                    .map(|payload| (item.label.clone(), payload))
+            })
+        else {
+            self.clear_picker_preview();
+            return;
+        };
+        let payload = if let PickerPayload::TaskTest(key) = payload {
+            let Some((path, line, column)) = self.tasks.resolve_test(&key) else {
+                self.clear_picker_preview();
+                return;
+            };
+            PickerPayload::MatcherSource(MatcherSource { path, line, column })
+        } else {
+            payload
+        };
+        match payload {
+            PickerPayload::WorkspaceSearch(key) => {
+                if let Some(id) = self.search.preview_match(
+                    &key,
+                    self.configuration
+                        .settings()
+                        .ui
+                        .picker
+                        .maximum_preview_bytes,
+                ) {
+                    self.documents.cancel_request(id);
+                }
+            }
+            PickerPayload::MatcherSource(source) => {
+                let (retired, ticket) = self.search.prepare_preview(
+                    source.path.clone(),
+                    label,
+                    self.configuration
+                        .settings()
+                        .ui
+                        .picker
+                        .loading_label
+                        .clone(),
+                    self.workspace.version(),
+                    self.configuration.binding_revision(),
+                );
+                if let Some(id) = retired {
+                    self.documents.cancel_request(id);
+                }
+                let Some(ticket) = ticket else {
+                    return;
+                };
+                let roots = self
+                    .workspace
+                    .roots()
+                    .iter()
+                    .map(|root| root.identity.canonical_path.clone())
+                    .collect();
+                let maximum = self
+                    .configuration
+                    .settings()
+                    .ui
+                    .picker
+                    .maximum_preview_bytes;
+                match self
+                    .documents
+                    .read_scoped_bounded(source.path, roots, maximum as u64)
+                {
+                    Ok(id) => {
+                        if !self.search.admit_preview(ticket, id, maximum) {
+                            self.documents.cancel_request(id);
+                        }
+                    }
+                    Err(error) => self.search.preview_failed(ticket, error.to_string()),
+                }
+            }
+            _ => self.clear_picker_preview(),
+        }
+    }
+    pub(in crate::editor::session) fn open_plugin_picker(
+        &mut self,
+        provider: String,
+        query: String,
+    ) {
+        let buffer_revision = self
+            .state
+            .active_buffer_id()
+            .and_then(|buffer| self.state.buffers.get(buffer))
+            .map(|buffer| buffer.text.revision().0);
+        let invocation = match self.extension.start_provider(
+            &provider,
+            query,
+            (self.workspace.root_revision(), buffer_revision),
+        ) {
+            Ok(invocation) => invocation,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        self.install_surface_picker_state(
+            PickerSurfaceKind::Generic,
+            format!("Plugin · {provider}"),
+            Vec::new(),
+            String::new(),
+            true,
+            PickerOrigin::PluginProvider(invocation.request),
+        );
+        if self.extension.provider_visible(invocation.request) {
+            self.process_effect(AppEffect::PluginExecute {
+                plugin: invocation.plugin,
+                command: invocation.command,
+            });
+        } else {
+            self.extension
+                .discard_unpresented_provider(invocation.request);
+        }
+    }
+
+    pub(in crate::editor::session) fn present_plugin_picker(&mut self, request: u64) {
+        if !self.extension.provider_visible(request) {
+            return;
+        }
+        let Some(projection) = self.extension.provider_projection(request) else {
+            return;
+        };
+        let items = match compose_plugin_picker_items(&projection) {
+            Ok(items) => items,
+            Err(error) => {
+                self.show_error(error.to_string());
+                return;
+            }
+        };
+        self.install_surface_picker_state(
+            PickerSurfaceKind::Generic,
+            format!("Plugin · {}", projection.provider),
+            items,
+            String::new(),
+            true,
+            PickerOrigin::PluginProvider(request),
+        );
+    }
+
+    pub(in crate::editor::session) fn close_picker(&mut self) {
+        self.configuration.cancel_theme_picker();
+        self.debugger_session.dismiss_choices();
+        if self.ui.picker.is_some() {
+            self.input.capture_changed();
+        }
+        if let Some(id) = self.search.workspace_picker() {
+            self.retire_workspace_picker(id);
+        }
+        self.language.clear_actions();
+        if let Some(id) = self.search.close_picker() {
+            self.documents.cancel_request(id);
+        }
+        self.extension.picker_installed(None);
+        self.tasks.select_output(None);
+        self.ui.picker = None;
+        self.refresh_window_content();
+    }
+
+    pub(in crate::editor::session) fn accept_picker(&mut self) {
+        self.retire_stale_picker();
+        if let Some(PickerPayload::Theme(key)) = self.search.selected_picker_payload() {
+            match self.configuration.apply_theme(key) {
+                Ok(name) => {
+                    self.close_picker();
+                    let saving = self.configuration.settings().persistence.enabled
+                        && self.configuration.settings().persistence.save_on_exit;
+                    if saving {
+                        self.persistence.request_save();
+                    }
+                    self.notify_message(
+                        format!(
+                            "Theme {} applied; {}",
+                            crate::config::theme_display_name(&name),
+                            if saving {
+                                "editor-state save requested"
+                            } else {
+                                "state saving is disabled"
+                            }
+                        ),
+                        false,
+                    );
+                }
+                Err(error) => self.show_error(error),
+            }
+            return;
+        }
+        let payload = self.search.take_picker_payload();
+        if let Some(PickerPayload::ProposalFile(index)) = &payload {
+            if let Err(error) = self.workspace_edits.toggle(*index) {
+                self.show_error(error);
+            }
+            self.show_workspace_proposal();
+            return;
+        }
+        // Retain only the accepted source match before close retires live search data.
+        let search_match = match &payload {
+            Some(PickerPayload::WorkspaceSearch(id)) => self
+                .search
+                .matches()
+                .iter()
+                .find(|found| &found.id == id)
+                .cloned(),
+            _ => None,
+        };
+        let code_action = match &payload {
+            Some(PickerPayload::CodeAction(key)) => Some(self.language.take_action(key)),
+            _ => None,
+        };
+        let debug_selection = match &payload {
+            Some(PickerPayload::Debug(key)) => Some(self.debugger_session.take_selection(key)),
+            _ => None,
+        };
+        let provider_selection = match &payload {
+            Some(PickerPayload::PluginProviderItem {
+                plugin,
+                load,
+                request,
+                item,
+                action_command,
+            }) => self
+                .extension
+                .provider_selection(plugin, *load, *request, item, action_command),
+            _ => None,
+        };
+        self.close_picker();
+        match payload {
+            Some(PickerPayload::Theme(_)) => {}
+            Some(PickerPayload::WorkspaceSearch(_)) => {
+                if let Some(found) = search_match {
+                    self.navigate_workspace_search_match(found);
+                }
+            }
+            Some(PickerPayload::LspLocation(location)) => self.navigate_lsp_location(&location),
+            Some(PickerPayload::Diagnostic(key)) => {
+                if let Some(row) = self.diagnostics.resolve(&key, &self.state) {
+                    let (uri, range) = (row.uri.clone(), row.range);
+                    self.navigate_byte_location(&uri, range);
+                } else {
+                    self.show_error("diagnostic source retired");
+                }
+            }
+            Some(PickerPayload::CodeAction(_)) => {
+                let (action, context) = match code_action.expect("selected code action") {
+                    Ok(action) => action,
+                    Err(error) => {
+                        self.show_error(error);
+                        return;
+                    }
+                };
+                if let Some(edit) = action.edit {
+                    self.begin_workspace_proposal_owned(
+                        action.title,
+                        edit,
+                        None,
+                        self.lsp_position_encoding(),
+                        context,
+                    );
+                }
+            }
+            Some(PickerPayload::Buffer(buffer)) => {
+                if let Err(error) = self.state.show_buffer(buffer) {
+                    self.show_error(error);
+                }
+            }
+            Some(PickerPayload::WorkspaceRoot(root)) => self.activate_workspace_root(root),
+            Some(PickerPayload::Terminal(key)) => {
+                if let Some(id) = self.terminal_session.resolve(&key) {
+                    self.terminal_session.select(id);
+                    self.set_terminal_focus(true);
+                    self.resize_active_terminal_to_panel();
+                    self.sync_terminal_panel();
+                } else {
+                    self.show_error(self.message("terminal_missing", &[]));
+                }
+            }
+            Some(PickerPayload::LspSession(key)) => self.select_lsp_session(&key),
+            Some(PickerPayload::Debug(_)) => {
+                self.debugger_session.refresh(
+                    &self.configuration.settings().debug,
+                    self.workspace.version(),
+                );
+                let target = crate::editor::session::debugger::SourceTarget {
+                    navigation: self
+                        .window_session
+                        .navigation_stamp(self.state.window_version(), self.state.active_view),
+                    capture: self.input.capture_epoch(),
+                };
+                match debug_selection
+                    .expect("debug selection routed")
+                    .and_then(|selection| self.debugger_session.activate(selection, target))
+                {
+                    Ok(Some(location)) => self.navigate_matcher_source(MatcherSource {
+                        path: location.path,
+                        line: location.line.saturating_sub(1) as usize,
+                        column: location.column.saturating_sub(1) as usize,
+                    }),
+                    Ok(None) => {}
+                    Err(error) => self.show_error(error),
+                }
+            }
+            Some(PickerPayload::GitHunk {
+                path,
+                status_revision,
+                repository,
+                hunk,
+                new_line,
+            }) => {
+                if self.git.select(
+                    status_revision,
+                    repository,
+                    self.workspace.root_revision(),
+                    &path,
+                    hunk,
+                ) {
+                    self.navigate_matcher_source(MatcherSource {
+                        path,
+                        line: new_line,
+                        column: 0,
+                    })
+                } else {
+                    self.show_error("Git hunk is stale")
+                }
+            }
+            Some(PickerPayload::TaskTest(key)) => {
+                if let Some((path, line, column)) = self.tasks.resolve_test(&key) {
+                    self.navigate_matcher_source(MatcherSource { path, line, column });
+                } else {
+                    self.show_error("test result source retired");
+                }
+            }
+            Some(PickerPayload::MatcherSource(source)) => self.navigate_matcher_source(source),
+            Some(PickerPayload::PersistedLocation(location)) => {
+                self.navigate_persisted_location(location)
+            }
+            Some(PickerPayload::RegistrySummary(summary)) => self.request_registry(
+                RegistryRequest::Show {
+                    publisher: summary.publisher,
+                    name: summary.name,
+                    version: summary.version,
+                },
+                false,
+            ),
+            Some(PickerPayload::RegistryMetadata(metadata)) => {
+                self.request_registry(RegistryRequest::Fetch { metadata }, true)
+            }
+            Some(PickerPayload::Command(command)) if !command.is_empty() => {
+                if let Ok(invocation) = CommandInvocation::new(&command, InvocationSource::Picker) {
+                    self.invoke(invocation);
+                }
+            }
+            Some(PickerPayload::PluginProviderItem { plugin, .. }) => {
+                if let Some(command) = provider_selection {
+                    self.process_effect(AppEffect::PluginExecute { plugin, command });
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn add_workspace_root(&mut self, path: PathBuf) {
+        let requested_path = if path.is_absolute() {
+            path
+        } else {
+            self.state.workspace_root.join(path)
+        };
+        match self.workspace.add_root_request(requested_path) {
+            Ok(()) => self.notify_message(self.message("workspace_root_loading", &[]), false),
+            Err(e) => self.show_workspace_failure(e),
+        }
+    }
+
+    pub(in crate::editor::session) fn root_removal_blocker(
+        &self,
+        root: crate::workspace::RootId,
+    ) -> Option<String> {
+        let root = self
+            .workspace
+            .roots()
+            .iter()
+            .find(|candidate| candidate.id == root)?;
+        if self.state.buffers.values().any(|buffer| {
+            buffer.dirty
+                && buffer
+                    .path
+                    .as_ref()
+                    .is_some_and(|path| path.starts_with(&root.identity.canonical_path))
+        }) {
+            return Some(self.message("workspace_root_dirty_blocker", &[]));
+        }
+        let busy = self.workspace.root_operation_pending()
+            || self.language.active().is_some()
+            || self
+                .language
+                .sessions()
+                .values()
+                .any(|state| state.restart_due.is_some())
+            || self.debugger_session.is_running()
+            || self
+                .tooling
+                .entries()
+                .iter()
+                .any(|tool| matches!(tool.status, ToolStatus::Installing { .. }))
+            || self.search.pending()
+            || self.workspace_edits.preparing()
+            || self.workspace_edits.proposal().is_some()
+            || self.documents.legacy_pending()
+            || self.workspace.persist_pending()
+            || self.workspace.validation_pending()
+            || self.documents.has_startup_work()
+            || self.documents.file_work_pending();
+        busy.then(|| self.message("workspace_root_service_blocker", &[]))
+    }
+
+    pub(in crate::editor::session) fn invalidate_root_scoped_operations(&mut self) {
+        self.documents.retire_startup();
+        self.documents.retire_workspace(&self.workspace.version());
+        self.clear_git_status();
+        self.terminal_session.reset();
+        self.reject_terminal_responses("workspace changed");
+        self.set_terminal_focus(false);
+        self.ui.terminal_panel = None;
+        let roots = self
+            .workspace
+            .roots()
+            .iter()
+            .map(|root| root.id)
+            .collect::<HashSet<_>>();
+        let stale = self
+            .language
+            .sessions()
+            .iter()
+            .filter_map(|(key, state)| (!roots.contains(&state.root)).then_some(key.clone()))
+            .collect::<Vec<_>>();
+        let removed_lsp = !stale.is_empty();
+        for key in stale {
+            let _ = self.language.stop(&key);
+            self.clear_lsp_progress(&key);
+            self.clear_lsp_server_ownership(&key);
+            self.language.remove(&key);
+            self.language.forget_synced(&key);
+            if self.language.active().map(String::as_str) == Some(&key) {
+                self.language.clear_active();
+
+                self.clear_lsp_ui_projection();
+            }
+        }
+        if removed_lsp {
+            self.sync_ui_diagnostics();
+        }
+        self.language.retire_launches();
+        for (plugin, load) in self.extension.retire_packages() {
+            self.remove_plugin_contribution_generation(&plugin, load);
+        }
+        self.debugger_session.reset();
+        self.input.clear_snippet();
+        for name in self.tasks.names() {
+            if let Ok(owner) = DiagnosticOwner::new(format!("task:{name}")) {
+                self.diagnostics.clear_owner(&owner);
+            }
+        }
+        self.tasks.retire_workspace();
+        self.clear_git_status();
+        self.search.cancel();
+        if self.workspace_edits.preparing() || self.workspace_edits.proposal().is_some() {
+            self.reject_workspace_proposal();
+        }
+        self.retire_workspace_resources("workspace changed");
+        self.retire_plugin_edit_sources();
+        self.retire_explorer_intents();
+        self.clear_explorer_preview();
+        self.explorer
+            .reset_roots(self.workspace.roots(), self.workspace.root_revision());
+        self.ui.explorer = None;
+        self.set_explorer_focus(false);
+        self.reconcile_explorer_watch();
+        self.close_picker();
+        self.ensure_cursor_visible();
+    }
+
+    pub(in crate::editor::session) fn remove_workspace_root(
+        &mut self,
+        id: crate::workspace::RootId,
+    ) {
+        if let Some(blocker) = self.root_removal_blocker(id) {
+            self.show_error(blocker);
+            return;
+        }
+        match self.workspace.remove_root(id) {
+            Ok(root) => {
+                self.invalidate_root_scoped_operations();
+                self.notify_message(
+                    self.message(
+                        "workspace_root_removed",
+                        &[("path", root.identity.canonical_path.display().to_string())],
+                    ),
+                    false,
+                );
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+
+    pub(in crate::editor::session) fn activate_workspace_root(
+        &mut self,
+        id: crate::workspace::RootId,
+    ) {
+        let before = self.workspace.version();
+        match self.workspace.set_active_root(id) {
+            Ok(()) => {
+                if before != self.workspace.version() {
+                    self.documents.retire_startup();
+                }
+                self.documents.retire_workspace(&self.workspace.version());
+                self.clear_git_status();
+                let path = self
+                    .workspace
+                    .roots()
+                    .iter()
+                    .find(|root| root.id == id)
+                    .map(|root| root.identity.canonical_path.display().to_string())
+                    .unwrap_or_default();
+                self.notify_message(
+                    self.message("workspace_root_activated", &[("path", path)]),
+                    false,
+                );
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn nix_workspace_available_for(
+        &self,
+        definition: &ToolDefinition,
+    ) -> bool {
+        self.tooling.nix_workspace_available_for(
+            definition,
+            self.configuration.settings().lsp.nix_workspace_fallback,
+        )
+    }
+
+    pub(in crate::editor::session) fn selected_lsp_runtime_source(
+        &self,
+        definition: &ToolDefinition,
+    ) -> LspRuntimeSource {
+        self.tooling.selected_lsp_runtime_source(
+            definition,
+            self.configuration.settings().lsp.nix_workspace_fallback,
+        )
+    }
+
+    pub(in crate::editor::session) fn selected_managed_definition(
+        &self,
+        definition: &ToolDefinition,
+    ) -> ToolDefinition {
+        self.tooling.selected_managed_definition(definition)
+    }
+
+    pub(in crate::editor::session) fn managed_variant_installed(
+        &self,
+        base: &ToolDefinition,
+        variant: &ToolDefinition,
+    ) -> bool {
+        self.tooling.managed_variant_installed(base, variant)
+    }
+
+    pub(in crate::editor::session) fn selected_managed_executable(
+        &self,
+        definition: &ToolDefinition,
+    ) -> Option<PathBuf> {
+        self.tooling.selected_managed_executable(definition)
+    }
+
+    pub(in crate::editor::session) fn selected_lsp_runtime_available(
+        &self,
+        definition: &ToolDefinition,
+    ) -> bool {
+        self.tooling.selected_lsp_runtime_available(
+            definition,
+            self.configuration.settings().lsp.nix_workspace_fallback,
+        )
+    }
+
+    pub(in crate::editor::session) fn tool_version_key(
+        definition: &ToolDefinition,
+        source: LspRuntimeSource,
+        executable: Option<&PathBuf>,
+    ) -> String {
+        crate::editor::session::tooling::ToolingSession::tool_version_key(
+            definition, source, executable,
+        )
+    }
+
+    pub(in crate::editor::session) fn rust_analyzer_is_rustup_proxy(path: &Path) -> bool {
+        crate::editor::session::tooling::ToolingSession::rust_analyzer_is_rustup_proxy(path)
+    }
+
+    pub(in crate::editor::session) fn unavailable_rust_analyzer_message() -> String {
+        crate::editor::session::tooling::ToolingSession::unavailable_rust_analyzer_message()
+    }
+
+    pub(in crate::editor::session) fn rust_analyzer_path_version(
+        version: &str,
+        rustup_bundled: bool,
+    ) -> (String, String) {
+        crate::editor::session::tooling::ToolingSession::rust_analyzer_path_version(
+            version,
+            rustup_bundled,
+        )
+    }
+
+    pub(in crate::editor::session) fn observed_tool_version(
+        &self,
+        definition: &ToolDefinition,
+        source: LspRuntimeSource,
+        executable: Option<&PathBuf>,
+    ) -> (String, Option<String>) {
+        self.tooling
+            .observed_tool_version(definition, source, executable)
+    }
+
+    pub(in crate::editor::session) fn queue_tool_version_probe(
+        &mut self,
+        definition: &ToolDefinition,
+        source: LspRuntimeSource,
+        executable: PathBuf,
+    ) {
+        self.tooling
+            .queue_tool_version_probe(definition, source, executable)
+    }
+
+    pub(in crate::editor::session) fn queue_tool_version_probes(&mut self, category: &str) {
+        self.tooling.queue_tool_version_probes(category)
+    }
+}
+
+impl InteractiveApplication {
+    fn tool_menu_height(&self) -> u16 {
+        let configured = &self.configuration.settings().ui.tool_manager;
+        let height =
+            (u32::from(self.window_session.height()) * u32::from(configured.height_percent) / 100)
+                .try_into()
+                .unwrap_or(self.window_session.height());
+        height
+            .max(configured.minimum_height.min(self.window_session.height()))
+            .min(self.window_session.height())
+    }
+
+    fn tool_menu_list_visible_rows(&self) -> usize {
+        // Rendering reserves the border, up to two wrapped help rows, tabs,
+        // heading, separator, and ten detail rows. Using the two-help-row
+        // bound keeps navigation safe when the help text wraps after resize.
+        usize::from(self.tool_menu_height().saturating_sub(18)).max(1)
+    }
+
+    fn tool_runtime_picker_visible_rows(&self) -> usize {
+        let option_count = self
+            .ui
+            .tool_menu
+            .as_ref()
+            .and_then(|menu| menu.runtime_picker.as_ref())
+            .map_or(1, |picker| picker.options.len());
+        let compact_height = u16::try_from(option_count)
+            .unwrap_or(u16::MAX)
+            .saturating_mul(2)
+            .saturating_add(11)
+            .max(self.configuration.settings().ui.tool_manager.minimum_height);
+        usize::from(
+            self.tool_menu_height()
+                .min(compact_height)
+                .saturating_sub(9)
+                / 2,
+        )
+        .max(1)
+    }
+
+    pub(in crate::editor::session) fn open_tool_menu(&mut self, category: String) {
+        self.cancel_pending_mapping();
+        self.input.cancel_pending();
+        self.close_prompt();
+        self.input.capture_changed();
+        // `:lsp` is normally opened from a source buffer. Put the matching
+        // server under the cursor so Enter and runtime selection act on the
+        // server the user is actually editing, not an alphabetically earlier
+        // unrelated adapter.
+        let selected = (category == "lsp")
+            .then(|| {
+                self.active_lsp_document()
+                    .map(|(_, document)| document.language_id)
+            })
+            .flatten()
+            .and_then(|language| {
+                self.tooling
+                    .entries()
+                    .iter()
+                    .find(|entry| {
+                        entry.definition.kind == ToolKind::Lsp
+                            && entry.definition.automatically_supports_language(&language)
+                            && matches!(entry.status, ToolStatus::Installed(_))
+                    })
+                    .or_else(|| {
+                        self.tooling.entries().iter().find(|entry| {
+                            entry.definition.kind == ToolKind::Lsp
+                                && entry.definition.automatically_supports_language(&language)
+                        })
+                    })
+                    .map(|entry| entry.definition.id.clone())
+            });
+        self.queue_tool_version_probes(&category);
+        self.rebuild_tool_menu(&category, selected.as_deref());
+    }
+
+    pub(in crate::editor::session) fn lsp_menu_lifecycle(&self, id: &str) -> (String, Vec<String>) {
+        let running_servers = self.language.running_servers();
+        let mut running = 0usize;
+        let mut starting = false;
+        let mut backoff = false;
+        let mut failed = false;
+        let mut sessions = self
+            .language
+            .sessions()
+            .iter()
+            .filter(|(_, session)| session.server_id == id)
+            .map(|(key, session)| {
+                let state = if session.capabilities.is_some() {
+                    running = running.saturating_add(1);
+                    "running"
+                } else if session.circuit_open {
+                    failed = true;
+                    "failed"
+                } else if session.restart_due.is_some() {
+                    backoff = true;
+                    "backoff"
+                } else if running_servers.contains(key) {
+                    starting = true;
+                    "starting"
+                } else {
+                    "stopped"
+                };
+                format!("{} ({state})", session.root_path.display())
+            })
+            .collect::<Vec<_>>();
+        sessions.sort();
+        starting = starting || self.language.launch_pending(id);
+        let lifecycle = if running > 0 {
+            if running == 1 {
+                "running".into()
+            } else {
+                format!("running ×{running}")
+            }
+        } else if starting {
+            "starting".into()
+        } else if backoff {
+            "backoff".into()
+        } else if failed || self.language.errors().contains_key(id) {
+            "failed".into()
+        } else {
+            "stopped".into()
+        };
+        (lifecycle, sessions)
+    }
+
+    pub(in crate::editor::session) fn runtime_options_for(
+        &self,
+        definition: &ToolDefinition,
+    ) -> Vec<ToolRuntimeOption> {
+        let nixos_host = is_nixos_host();
+        let selected_source = self.selected_lsp_runtime_source(definition);
+        let selected_managed = self.selected_managed_definition(definition);
+        let path = discover_executable(&definition.executable);
+        let managed_path = managed_tool_executable(definition);
+        let nix_available = self.nix_workspace_available_for(definition);
+        let nix_profile_installed = nix_lsp_profile_installed(definition);
+        let (path_version, path_error) =
+            self.observed_tool_version(definition, LspRuntimeSource::Path, path.as_ref());
+        let path_version_reported = path_error.is_none()
+            && !matches!(
+                path_version.as_str(),
+                "probing…" | "detecting…" | "version unavailable" | "probe failed"
+            );
+        let rustup_bundled = definition.id == "rust-analyzer"
+            && path
+                .as_deref()
+                .is_some_and(Self::rust_analyzer_is_rustup_proxy);
+        let rustup_installable = rustup_bundled
+            && path_error.is_some()
+            && path
+                .as_ref()
+                .is_some_and(|proxy| proxy.with_file_name("rustup").is_file());
+        let path_usable = path.is_some() && path_error.is_none();
+        let (path_display_version, path_release) = if rustup_bundled {
+            if path_version_reported {
+                Self::rust_analyzer_path_version(&path_version, true)
+            } else {
+                ("rustup bundled".into(), "toolchain build".into())
+            }
+        } else if definition.id == "rust-analyzer" && path_version_reported {
+            Self::rust_analyzer_path_version(&path_version, false)
+        } else {
+            (
+                path_version.clone(),
+                if path_version_reported {
+                    "detected PATH build".into()
+                } else {
+                    "—".into()
+                },
+            )
+        };
+        let mut options = vec![ToolRuntimeOption {
+            source: LspRuntimeSource::Path.key().into(),
+            version_pin: None,
+            label: LspRuntimeSource::Path.label().into(),
+            version: if path.is_some() {
+                path_display_version
+            } else {
+                "—".into()
+            },
+            release: if path.is_some() {
+                path_release
+            } else {
+                "—".into()
+            },
+            location: path.as_ref().map_or_else(
+                || "not installed on PATH".into(),
+                |path| path.display().to_string(),
+            ),
+            status: if path.is_none() {
+                "not installed"
+            } else if path_error.is_some() {
+                "unavailable"
+            } else if selected_source == LspRuntimeSource::Path {
+                "in use"
+            } else {
+                "available"
+            }
+            .into(),
+            note: if path.is_none() {
+                "No external executable is installed on PATH; Dust cannot install or uninstall PATH-owned software."
+                    .into()
+            } else if rustup_installable {
+                "The rustup proxy has no rust-analyzer component for the active toolchain; press i to install it with rustup."
+                    .into()
+            } else if path_version == "version unavailable" {
+                "Installed on PATH; this compatibility entry has no qualified version command."
+                    .into()
+            } else {
+                path_error.unwrap_or_else(|| {
+                    if definition.id == "rust-analyzer" {
+                        if rustup_bundled {
+                            format!(
+                                "The PATH executable is a rustup proxy reporting `{path_version}`. VERSION identifies it as rustup bundled; BUILD / RELEASE shows its reported date."
+                            )
+                        } else {
+                            format!(
+                                "The PATH executable reports `{path_version}`. VERSION shows its executable version and BUILD / RELEASE shows its reported date."
+                            )
+                        }
+                    } else {
+                        format!(
+                            "The external PATH executable reports `{path_version}`; Dust can select it but never replaces or removes it."
+                        )
+                    }
+                })
+            },
+            selected: selected_source == LspRuntimeSource::Path,
+            installed: path_usable,
+            installable: rustup_installable,
+            uninstallable: false,
+        }];
+
+        if lsp_runtime_source_allowed_on_host(LspRuntimeSource::Managed, nixos_host) {
+            for variant in definition.managed_versions() {
+                let version = variant.version.clone().unwrap_or_else(|| "unknown".into());
+                let installed = self.managed_variant_installed(definition, &variant);
+                let (observed_version, probe_error) = if installed {
+                    {
+                        self.observed_tool_version(
+                            &variant,
+                            LspRuntimeSource::Managed,
+                            managed_path.as_ref(),
+                        )
+                    }
+                } else {
+                    (String::new(), None)
+                };
+                options.push(ToolRuntimeOption {
+                source: LspRuntimeSource::Managed.key().into(),
+                version_pin: Some(version.clone()),
+                label: LspRuntimeSource::Managed.label().into(),
+                version: version.clone(),
+                release: variant.release.clone().unwrap_or_else(|| "catalog build".into()),
+                location: if installed {
+                    managed_path.as_ref().map_or_else(
+                        || "installed path unavailable".into(),
+                        |path| path.display().to_string(),
+                    )
+                } else {
+                    "not installed".into()
+                },
+                status: if installed && selected_source == LspRuntimeSource::Managed
+                    && selected_managed.version.as_deref() == Some(version.as_str())
+                {
+                    "in use"
+                } else if installed {
+                    "installed copy"
+                } else if selected_source == LspRuntimeSource::Managed
+                    && selected_managed.version.as_deref() == Some(version.as_str())
+                {
+                    "selected, not installed"
+                } else {
+                    "available to install"
+                }
+                .into(),
+                note: probe_error.unwrap_or_else(|| {
+                    if installed && !observed_version.is_empty() && observed_version != "probing…" {
+                        format!(
+                            "{} {version} is an installed Dust download; the executable reports {observed_version}.",
+                            definition.name
+                        )
+                    } else if installed {
+                        format!(
+                            "{} {version} is installed as a separate Dust-owned copy.",
+                            definition.name
+                        )
+                    } else if managed_path.is_some() {
+                        format!(
+                            "{} {version} is available; i replaces the other Dust-download version only. PATH is untouched.",
+                            definition.name
+                        )
+                    } else {
+                        format!(
+                            "{} {version} is available as a verified Dust download; press i to install it.",
+                            definition.name
+                        )
+                    }
+                }),
+                selected: selected_source == LspRuntimeSource::Managed
+                    && selected_managed.version.as_deref() == Some(version.as_str()),
+                installed,
+                installable: variant.install.is_some(),
+                uninstallable: installed,
+            });
+            }
+
+            if definition.managed_versions().is_empty() {
+                options.push(ToolRuntimeOption {
+                    source: LspRuntimeSource::Managed.key().into(),
+                    version_pin: None,
+                    label: LspRuntimeSource::Managed.label().into(),
+                    version: "none".into(),
+                    release: "none".into(),
+                    location: "no Dust download available".into(),
+                    status: "unavailable".into(),
+                    note: "No portable managed artifact is published for this server.".into(),
+                    selected: selected_source == LspRuntimeSource::Managed,
+                    installed: false,
+                    installable: false,
+                    uninstallable: false,
+                });
+            }
+        }
+
+        if lsp_runtime_source_allowed_on_host(LspRuntimeSource::Nix, nixos_host) {
+            for variant in definition.managed_versions() {
+                let version = variant.version.clone().unwrap_or_else(|| "unknown".into());
+                let installed =
+                    nix_profile_installed && self.managed_variant_installed(definition, &variant);
+                let (observed_version, probe_error) = if installed {
+                    {
+                        self.observed_tool_version(
+                            &variant,
+                            LspRuntimeSource::Nix,
+                            managed_path.as_ref(),
+                        )
+                    }
+                } else {
+                    (String::new(), None)
+                };
+                options.push(ToolRuntimeOption {
+                    source: LspRuntimeSource::Nix.key().into(),
+                    version_pin: Some(version.clone()),
+                    label: LspRuntimeSource::Nix.label().into(),
+                    version: version.clone(),
+                    release: variant.release.clone().unwrap_or_else(|| "catalog build".into()),
+                    location: if installed {
+                        managed_path.as_ref().map_or_else(
+                            || "installed artifact path unavailable".into(),
+                            |path| {
+                                format!(
+                                    "{} · compatibility {}",
+                                    path.display(),
+                                    nix_lsp_workspace_root()
+                                        .join("profiles")
+                                        .join(&definition.id)
+                                        .display()
+                                )
+                            },
+                        )
+                    } else {
+                        "not installed".into()
+                    },
+                    status: if installed
+                        && selected_source == LspRuntimeSource::Nix
+                        && selected_managed.version.as_deref() == Some(version.as_str())
+                    {
+                        "in use"
+                    } else if installed {
+                        "installed copy"
+                    } else if nix_available
+                        && selected_source == LspRuntimeSource::Nix
+                        && selected_managed.version.as_deref() == Some(version.as_str())
+                    {
+                        "selected, not installed"
+                    } else if nix_available {
+                        "available to install"
+                    } else {
+                        "unavailable"
+                    }
+                    .into(),
+                    note: probe_error.unwrap_or_else(|| {
+                        if installed && !observed_version.is_empty() && observed_version != "probing…" {
+                            format!(
+                                "Verified upstream {} {version} runs through Dust's private Nix compatibility environment and reports {observed_version}.",
+                                definition.name
+                            )
+                        } else {
+                            format!(
+                                "The same checksum-pinned upstream {} {version} is processed by Dust's private Nix runtime at snapshot {}.",
+                                definition.name,
+                                &NIX_LSP_NIXPKGS_REVISION[..8]
+                            )
+                        }
+                    }),
+                    selected: selected_source == LspRuntimeSource::Nix
+                        && selected_managed.version.as_deref() == Some(version.as_str()),
+                    installed,
+                    installable: nix_available && variant.install.is_some(),
+                    uninstallable: installed,
+                });
+            }
+        }
+        options
+    }
+
+    pub(in crate::editor::session) fn rebuild_tool_menu(
+        &mut self,
+        category: &str,
+        selected_id: Option<&str>,
+    ) {
+        let nixos_host = is_nixos_host();
+        let configured = self.configuration.settings().ui.tool_manager.clone();
+        let previous_picker = self.ui.tool_menu.as_ref().and_then(|menu| {
+            menu.runtime_picker.as_ref().map(|picker| {
+                (
+                    picker.server_id.clone(),
+                    picker
+                        .options
+                        .get(picker.selected)
+                        .map(|option| (option.source.clone(), option.version_pin.clone())),
+                    picker.scroll,
+                )
+            })
+        });
+        let previous_scroll = self
+            .ui
+            .tool_menu
+            .as_ref()
+            .filter(|menu| menu.category == category)
+            .map_or(0, |menu| menu.scroll);
+        let category = if configured.categories.contains_key(category) {
+            category.to_owned()
+        } else {
+            "all".into()
+        };
+        let active_language = self
+            .active_lsp_document()
+            .map(|(_, document)| document.language_id);
+        let mut entries = self
+            .tooling
+            .entries()
+            .iter()
+            .filter(|entry| category == "all" || tool_kind_key(entry.definition.kind) == category)
+            .filter(|entry| {
+                entry.definition.kind != ToolKind::Lsp
+                    || discover_executable(&entry.definition.executable).is_some()
+                    || managed_tool_executable(&entry.definition).is_some()
+                    || !entry.definition.managed_versions().is_empty()
+                    || !self.lsp_menu_lifecycle(&entry.definition.id).1.is_empty()
+            })
+            .collect::<Vec<_>>();
+        // Stable ordering is deliberate: installation, runtime selection, and
+        // lifecycle changes must never make the focused row jump elsewhere.
+        entries.sort_by_key(|entry| entry.definition.name.to_lowercase());
+        let rows = entries
+            .into_iter()
+            .map(|entry| {
+                let definition = &entry.definition;
+                let is_lsp = definition.kind == ToolKind::Lsp;
+                let source = if is_lsp {
+                    self.selected_lsp_runtime_source(definition)
+                } else if discover_executable(&definition.executable).is_some() {
+                    LspRuntimeSource::Path
+                } else {
+                    LspRuntimeSource::Managed
+                };
+                let path = discover_executable(&definition.executable);
+                let managed_definition = if is_lsp {
+                    self.selected_managed_definition(definition)
+                } else {
+                    definition.clone()
+                };
+                let managed = if is_lsp {
+                    self.selected_managed_executable(definition)
+                } else {
+                    managed_tool_executable(definition)
+                };
+                let source_executable = match source {
+                    LspRuntimeSource::Path => path.as_ref(),
+                    LspRuntimeSource::Managed | LspRuntimeSource::Nix => managed.as_ref(),
+                };
+                let observed_definition = if matches!(
+                    source,
+                    LspRuntimeSource::Managed | LspRuntimeSource::Nix
+                ) {
+                    &managed_definition
+                } else {
+                    definition
+                };
+                let (reported_version, probe_error) =
+                    self.observed_tool_version(observed_definition, source, source_executable);
+                let rustup_bundled = source == LspRuntimeSource::Path
+                    && definition.id == "rust-analyzer"
+                    && path
+                        .as_deref()
+                        .is_some_and(Self::rust_analyzer_is_rustup_proxy);
+                let path_version_reported = probe_error.is_none()
+                    && !matches!(
+                        reported_version.as_str(),
+                        "probing…" | "detecting…" | "version unavailable" | "probe failed"
+                    );
+                let path_presentation = (source == LspRuntimeSource::Path
+                    && definition.id == "rust-analyzer"
+                    && (rustup_bundled || path_version_reported))
+                    .then(|| {
+                        Self::rust_analyzer_path_version(&reported_version, rustup_bundled)
+                    });
+                let mut version = match source {
+                    LspRuntimeSource::Path => path_presentation
+                        .as_ref()
+                        .map_or_else(|| reported_version.clone(), |(version, _)| version.clone()),
+                    LspRuntimeSource::Managed => managed_definition
+                        .version
+                        .clone()
+                        .unwrap_or_else(|| reported_version.clone()),
+                    LspRuntimeSource::Nix => managed_definition
+                        .version
+                        .clone()
+                        .unwrap_or_else(|| reported_version.clone()),
+                };
+                let mut release = match source {
+                    LspRuntimeSource::Path => path_presentation.map_or_else(
+                        || {
+                            if path_version_reported {
+                                "reported by executable".into()
+                            } else {
+                                "—".into()
+                            }
+                        },
+                        |(_, release)| release,
+                    ),
+                    LspRuntimeSource::Managed => managed_definition
+                        .release
+                        .clone()
+                        .unwrap_or_else(|| "catalog build".into()),
+                    LspRuntimeSource::Nix => managed_definition
+                        .release
+                        .clone()
+                        .unwrap_or_else(|| "catalog build".into()),
+                };
+                let (mut lifecycle, sessions) = if is_lsp {
+                    self.lsp_menu_lifecycle(&definition.id)
+                } else {
+                    ("idle".into(), Vec::new())
+                };
+                if let ToolStatus::Installing {
+                    phase,
+                    completed,
+                    total,
+                } = &entry.status
+                {
+                    lifecycle = tool_install_progress_label(phase, *completed, *total);
+                }
+                let source_installed = match source {
+                    LspRuntimeSource::Path => path.is_some(),
+                    LspRuntimeSource::Managed => managed.is_some(),
+                    LspRuntimeSource::Nix => {
+                        nix_lsp_profile_installed(definition)
+                            && self.managed_variant_installed(definition, &managed_definition)
+                    },
+                };
+                if source == LspRuntimeSource::Path
+                    && probe_error.is_some()
+                    && lifecycle == "stopped"
+                {
+                    lifecycle = "unavailable".into();
+                }
+                let runtime = if source_installed {
+                    source.label().into()
+                } else {
+                    match source {
+                        LspRuntimeSource::Path => {
+                            version = "—".into();
+                            release = "—".into();
+                            if lifecycle == "stopped" {
+                                lifecycle = "not installed".into();
+                            }
+                            "Not installed".into()
+                        }
+                        LspRuntimeSource::Managed | LspRuntimeSource::Nix => {
+                            if lifecycle == "stopped" {
+                                lifecycle = "not installed".into();
+                            }
+                            source.label().into()
+                        }
+                    }
+                };
+                let executable = match source {
+                    LspRuntimeSource::Path => path.as_ref().map_or_else(
+                        || "not installed on PATH".into(),
+                        |path| path.display().to_string(),
+                    ),
+                    LspRuntimeSource::Managed => managed.as_ref().map_or_else(
+                        || "not installed in Dust state".into(),
+                        |path| path.display().to_string(),
+                    ),
+                    LspRuntimeSource::Nix => managed.as_ref().map_or_else(
+                        || "verified upstream artifact is not installed".into(),
+                        |path| {
+                            format!(
+                                "{} · Nix compatibility {}",
+                                path.display(),
+                                nix_lsp_workspace_root()
+                                    .join("profiles")
+                                    .join(&definition.id)
+                                    .display()
+                            )
+                        },
+                    ),
+                };
+                let installed_managed_version = managed_tool_installed_version(definition)
+                    .map(|installed| {
+                        definition
+                            .managed_version(&installed)
+                            .and_then(|version| version.version)
+                            .unwrap_or(installed)
+                    })
+                    .or_else(|| {
+                        managed_tool_executable(definition).and_then(|_| definition.version.clone())
+                    });
+                let managed_status = if is_lsp && nixos_host {
+                    String::new()
+                } else {
+                    installed_managed_version.map_or_else(
+                        || {
+                            format!(
+                                "{} · selected · not installed · {} available version(s)",
+                                managed_definition
+                                    .version
+                                    .as_deref()
+                                    .unwrap_or("version unknown"),
+                                definition.managed_versions().len()
+                            )
+                        },
+                        |version| {
+                            format!(
+                                "{version} · installed copy · {} available version(s)",
+                                definition.managed_versions().len()
+                            )
+                        },
+                    )
+                };
+                let nix_status = if !is_lsp || !nixos_host {
+                    String::new()
+                } else if !self.nix_workspace_available_for(definition) {
+                    "unavailable on this host".into()
+                } else {
+                    format!(
+                        "{} · release {} · {} · compatibility {}",
+                        managed_definition.version.as_deref().unwrap_or("unknown"),
+                        managed_definition.release.as_deref().unwrap_or("catalog"),
+                        if nix_lsp_profile_installed(definition)
+                            && self.managed_variant_installed(definition, &managed_definition)
+                        {
+                            "installed upstream artifact"
+                        } else {
+                            "not installed"
+                        },
+                        &NIX_LSP_NIXPKGS_REVISION[..8]
+                    )
+                };
+                let note = self.language.errors()
+                    .get(&definition.id)
+                    .cloned()
+                    .or(probe_error)
+                    .or_else(|| match &entry.status {
+                        ToolStatus::Failed(error) | ToolStatus::Unavailable(error) => {
+                            Some(error.clone())
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| match source {
+                        LspRuntimeSource::Path
+                            if path.is_some() && reported_version == "version unavailable" =>
+                        {
+                            "Installed on PATH; this compatibility entry has no qualified version command."
+                                .into()
+                        }
+                        LspRuntimeSource::Path if path.is_some() => {
+                            "PATH has priority; Dust will not modify or uninstall this executable."
+                                .into()
+                        }
+                        LspRuntimeSource::Path => {
+                            "Not installed. This compatibility entry appears only when an external executable or Dust installer is available."
+                                .into()
+                        }
+                        LspRuntimeSource::Managed if managed.is_some() => format!(
+                            "Dust download {} is ACTIVE; u removes this private copy.",
+                            managed_definition.version.as_deref().unwrap_or("unknown")
+                        ),
+                        LspRuntimeSource::Managed => format!(
+                            "Dust download {} is ACTIVE but not installed; press i.",
+                            managed_definition.version.as_deref().unwrap_or("unknown")
+                        ),
+                        LspRuntimeSource::Nix
+                            if nix_lsp_profile_installed(definition)
+                                && self.managed_variant_installed(
+                                    definition,
+                                    &managed_definition,
+                                ) =>
+                        {
+                            "The verified upstream artifact is ACTIVE through Dust's private Nix compatibility environment.".into()
+                        }
+                        LspRuntimeSource::Nix => {
+                            "The Dust via Nix artifact is ACTIVE but not installed; press i."
+                                .into()
+                        }
+                    });
+                ToolMenuRow {
+                    id: definition.id.clone(),
+                    name: definition.name.clone(),
+                    kind: configured
+                        .categories
+                        .get(tool_kind_key(definition.kind))
+                        .cloned()
+                        .unwrap_or_else(|| definition.kind.label().into()),
+                    languages: definition.languages.join(&configured.language_separator),
+                    version,
+                    release,
+                    runtime,
+                    lifecycle,
+                    executable,
+                    note,
+                    sessions,
+                    managed_status,
+                    nix_status,
+                    installed: source_installed,
+                    can_start: source_installed
+                        && (!is_lsp
+                            || active_language.as_ref().is_none_or(|language| {
+                                definition.supports_language(language)
+                            })),
+                    can_install: if is_lsp && nixos_host {
+                        self.nix_workspace_available_for(definition)
+                    } else {
+                        !definition.managed_versions().is_empty()
+                    },
+                    can_uninstall: if is_lsp && nixos_host {
+                        nix_lsp_profile_installed(definition)
+                            && self.managed_variant_installed(definition, &managed_definition)
+                    } else {
+                        managed.is_some()
+                    },
+                }
+            })
+            .collect::<Vec<_>>();
+        let selected = selected_id
+            .and_then(|id| rows.iter().position(|row| row.id == id))
+            .or_else(|| {
+                self.ui
+                    .tool_menu
+                    .as_ref()
+                    .and_then(|menu| menu.rows.get(menu.selected))
+                    .and_then(|previous| rows.iter().position(|row| row.id == previous.id))
+            })
+            .unwrap_or(0)
+            .min(rows.len().saturating_sub(1));
+        let runtime_picker = previous_picker.and_then(|(server_id, focused, scroll)| {
+            let definition = self
+                .tooling
+                .entries()
+                .iter()
+                .find(|entry| {
+                    entry.definition.id == server_id && entry.definition.kind == ToolKind::Lsp
+                })
+                .map(|entry| entry.definition.clone())?;
+            let options = self.runtime_options_for(&definition);
+            let selected = focused
+                .and_then(|(source, version_pin)| {
+                    options.iter().position(|option| {
+                        option.source == source && option.version_pin == version_pin
+                    })
+                })
+                .unwrap_or_else(|| {
+                    options
+                        .iter()
+                        .position(|option| option.selected)
+                        .unwrap_or(0)
+                });
+            Some(ToolRuntimePickerState {
+                server_id,
+                selected,
+                scroll: scroll.min(options.len().saturating_sub(1)),
+                options,
+            })
+        });
+        let visible_rows = self.tool_menu_list_visible_rows();
+        let mut scroll = previous_scroll.min(rows.len().saturating_sub(1));
+        if selected < scroll {
+            scroll = selected;
+        } else if selected >= scroll.saturating_add(visible_rows) {
+            scroll = selected.saturating_add(1).saturating_sub(visible_rows);
+        }
+        self.ui.tool_menu = Some(ToolMenuState {
+            category,
+            selected,
+            scroll,
+            rows,
+            runtime_picker,
+        });
+    }
+
+    pub(in crate::editor::session) fn move_tool_menu(&mut self, direction: i8) {
+        let list_visible = self.tool_menu_list_visible_rows();
+        let picker_visible = self.tool_runtime_picker_visible_rows();
+        let Some(menu) = &mut self.ui.tool_menu else {
+            return;
+        };
+        if let Some(picker) = &mut menu.runtime_picker {
+            if picker.options.is_empty() {
+                return;
+            }
+            picker.selected = if direction < 0 {
+                picker.selected.saturating_sub(1)
+            } else {
+                picker
+                    .selected
+                    .saturating_add(1)
+                    .min(picker.options.len() - 1)
+            };
+            let visible = picker_visible;
+            if picker.selected < picker.scroll {
+                picker.scroll = picker.selected;
+            } else if picker.selected >= picker.scroll.saturating_add(visible) {
+                picker.scroll = picker.selected.saturating_add(1).saturating_sub(visible);
+            }
+            return;
+        }
+        if menu.rows.is_empty() {
+            return;
+        }
+        menu.selected = if direction < 0 {
+            menu.selected.saturating_sub(1)
+        } else {
+            menu.selected.saturating_add(1).min(menu.rows.len() - 1)
+        };
+        let visible = list_visible;
+        if menu.selected < menu.scroll {
+            menu.scroll = menu.selected;
+        } else if menu.selected >= menu.scroll.saturating_add(visible) {
+            menu.scroll = menu.selected.saturating_add(1).saturating_sub(visible);
+        }
+    }
+
+    pub(in crate::editor::session) fn cycle_tool_category(&mut self, direction: i8) {
+        let Some(menu) = &self.ui.tool_menu else {
+            return;
+        };
+        if menu.runtime_picker.is_some() {
+            return;
+        }
+        let order = &self.configuration.settings().ui.tool_manager.category_order;
+        let current = order
+            .iter()
+            .position(|category| category == &menu.category)
+            .unwrap_or(0);
+        let next = if direction < 0 {
+            if current == 0 {
+                order.len() - 1
+            } else {
+                current - 1
+            }
+        } else {
+            (current + 1) % order.len()
+        };
+        let category = order[next].clone();
+        self.rebuild_tool_menu(&category, None);
+    }
+
+    pub(in crate::editor::session) fn selected_tool_id(&self) -> Option<String> {
+        let menu = self.ui.tool_menu.as_ref()?;
+        menu.runtime_picker
+            .as_ref()
+            .map(|picker| picker.server_id.clone())
+            .or_else(|| menu.rows.get(menu.selected).map(|row| row.id.clone()))
+    }
+
+    pub(in crate::editor::session) fn focused_runtime_source(
+        &self,
+        definition: &ToolDefinition,
+    ) -> LspRuntimeSource {
+        self.ui
+            .tool_menu
+            .as_ref()
+            .and_then(|menu| menu.runtime_picker.as_ref())
+            .filter(|picker| picker.server_id == definition.id)
+            .and_then(|picker| picker.options.get(picker.selected))
+            .and_then(|option| match option.source.as_str() {
+                "path" => Some(LspRuntimeSource::Path),
+                "managed" => Some(LspRuntimeSource::Managed),
+                "nix" => Some(LspRuntimeSource::Nix),
+                _ => None,
+            })
+            .unwrap_or_else(|| self.selected_lsp_runtime_source(definition))
+    }
+
+    pub(in crate::editor::session) fn focused_managed_version(
+        &self,
+        definition: &ToolDefinition,
+    ) -> Option<String> {
+        self.ui
+            .tool_menu
+            .as_ref()
+            .and_then(|menu| menu.runtime_picker.as_ref())
+            .filter(|picker| picker.server_id == definition.id)
+            .and_then(|picker| picker.options.get(picker.selected))
+            .filter(|option| {
+                matches!(
+                    option.source.as_str(),
+                    source if source == LspRuntimeSource::Managed.key()
+                        || source == LspRuntimeSource::Nix.key()
+                )
+            })
+            .and_then(|option| option.version_pin.clone())
+            .or_else(|| self.selected_managed_definition(definition).version)
+    }
+
+    pub(in crate::editor::session) fn toggle_selected_lsp_runtime(&mut self) {
+        let Some(id) = self.selected_tool_id() else {
+            return;
+        };
+        let Some(definition) = self
+            .tooling
+            .entries()
+            .iter()
+            .find(|entry| entry.definition.id == id)
+            .map(|entry| entry.definition.clone())
+        else {
+            return;
+        };
+        if definition.kind != ToolKind::Lsp {
+            self.show_error("runtime selection is available only for language servers");
+            return;
+        }
+        let options = self.runtime_options_for(&definition);
+        let selected = options
+            .iter()
+            .position(|option| option.selected)
+            .unwrap_or(0);
+        if let Some(menu) = &mut self.ui.tool_menu {
+            menu.runtime_picker = Some(ToolRuntimePickerState {
+                server_id: id,
+                selected,
+                scroll: selected.saturating_sub(2),
+                options,
+            });
+        }
+    }
+
+    pub(in crate::editor::session) fn accept_selected_lsp_runtime(&mut self) {
+        let Some((id, source, version_pin, installed, installable)) =
+            self.ui.tool_menu.as_ref().and_then(|menu| {
+                let picker = menu.runtime_picker.as_ref()?;
+                let option = picker.options.get(picker.selected)?;
+                Some((
+                    picker.server_id.clone(),
+                    option.source.clone(),
+                    option.version_pin.clone(),
+                    option.installed,
+                    option.installable,
+                ))
+            })
+        else {
+            return;
+        };
+        let source = match source.as_str() {
+            "path" => LspRuntimeSource::Path,
+            "managed" => LspRuntimeSource::Managed,
+            "nix" => LspRuntimeSource::Nix,
+            _ => return,
+        };
+        if !installed && !installable {
+            self.show_error("this runtime is not installed or installable on the current host");
+            return;
+        }
+        if let Err(error) = self.tooling.select_runtime(&id, source, version_pin) {
+            self.show_error(error);
+            return;
+        }
+        self.stop_lsp_sessions_for_server(&id);
+        self.language.reset_autostart();
+        if let Some(menu) = &mut self.ui.tool_menu {
+            menu.runtime_picker = None;
+        }
+        let category = self
+            .ui
+            .tool_menu
+            .as_ref()
+            .map_or_else(|| "lsp".into(), |menu| menu.category.clone());
+        if !installed && installable {
+            self.rebuild_tool_menu(&category, Some(&id));
+            self.install_tool_by_id(&id, Some(source));
+            return;
+        }
+        self.notify_message(
+            match source {
+                LspRuntimeSource::Managed => format!(
+                    "{id} ACTIVE build: Dust download {}",
+                    self.tooling
+                        .managed_version(&id)
+                        .map(String::as_str)
+                        .unwrap_or("unknown")
+                ),
+                _ => format!("{id} ACTIVE installation: {}", source.label()),
+            },
+            false,
+        );
+        self.rebuild_tool_menu(&category, Some(&id));
+    }
+
+    pub(in crate::editor::session) fn close_tool_menu(&mut self) {
+        let Some(menu) = &mut self.ui.tool_menu else {
+            return;
+        };
+        if menu.runtime_picker.take().is_some() {
+            let category = menu.category.clone();
+            let selected = menu.rows.get(menu.selected).map(|row| row.id.clone());
+            self.rebuild_tool_menu(&category, selected.as_deref());
+        } else {
+            self.ui.tool_menu = None;
+        }
+    }
+
+    pub(in crate::editor::session) fn stop_lsp_sessions_for_server(&mut self, id: &str) {
+        let sessions = self
+            .language
+            .sessions()
+            .iter()
+            .filter_map(|(key, session)| (session.server_id == id).then_some(key.clone()))
+            .collect::<Vec<_>>();
+        for key in sessions {
+            self.language.request_stop(&key);
+            let _ = self.language.stop(&key);
+            self.clear_lsp_progress(&key);
+            self.clear_lsp_server_ownership(&key);
+            self.language.remove(&key);
+            self.language.forget_synced(&key);
+            if self.language.active().map(String::as_str) == Some(&key) {
+                self.clear_lsp_session_state();
+            }
+        }
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn refresh_tools(&mut self) {
+        let category = self
+            .ui
+            .tool_menu
+            .as_ref()
+            .map_or_else(|| "all".into(), |menu| menu.category.clone());
+        let selected = self.selected_tool_id();
+        self.tooling.refresh();
+        self.queue_tool_version_probes(&category);
+        self.rebuild_tool_menu(&category, selected.as_deref());
+    }
+
+    pub(in crate::editor::session) fn process_tool_version_results(&mut self) {
+        let (changed, unavailable_rustup) = self.tooling.poll_versions();
+        if changed {
+            self.language.reset_autostart();
+            let category = self.ui.tool_menu.as_ref().map(|menu| menu.category.clone());
+            let selected = self.selected_tool_id();
+            if let Some(category) = category {
+                self.rebuild_tool_menu(&category, selected.as_deref());
+            }
+        }
+        if unavailable_rustup {
+            self.show_error(Self::unavailable_rust_analyzer_message());
+        }
+    }
+
+    pub(in crate::editor::session) fn activate_selected_tool(&mut self) {
+        if self
+            .ui
+            .tool_menu
+            .as_ref()
+            .is_some_and(|menu| menu.runtime_picker.is_some())
+        {
+            self.accept_selected_lsp_runtime();
+            return;
+        }
+        let Some(id) = self.selected_tool_id() else {
+            return;
+        };
+        self.activate_tool_by_id(&id);
+    }
+
+    pub(in crate::editor::session) fn activate_tool_by_id(&mut self, id: &str) {
+        let Some(index) = self
+            .tooling
+            .entries()
+            .iter()
+            .position(|entry| entry.definition.id == id)
+        else {
+            return;
+        };
+        let definition = self.tooling.entries()[index].definition.clone();
+        let path_available = matches!(
+            self.tooling.entries()[index].status,
+            ToolStatus::Installed(_)
+        );
+        if definition.kind == ToolKind::Lsp {
+            if self.selected_lsp_runtime_available(&definition) {
+                if let Some((_, document)) = self.active_lsp_document()
+                    && !definition.supports_language(&document.language_id)
+                {
+                    self.notify_message(
+                        format!(
+                            "{} is installed. Open a supported file to start it.",
+                            definition.name
+                        ),
+                        false,
+                    );
+                } else {
+                    self.start_lsp(Some(id.into()));
+                }
+            } else if definition.managed_versions().is_empty() {
+                self.show_error(format!(
+                    "{} is not installed and Dust has no installer for it",
+                    definition.name
+                ));
+            } else {
+                let source = self.selected_lsp_runtime_source(&definition);
+                if source == LspRuntimeSource::Path
+                    && definition.id == "rust-analyzer"
+                    && let Some(path) = discover_executable(&definition.executable)
+                    && Self::rust_analyzer_is_rustup_proxy(&path)
+                {
+                    let key = Self::tool_version_key(&definition, source, Some(&path));
+                    if matches!(self.tooling.version(&key), Some(Err(_))) {
+                        self.show_error(Self::unavailable_rust_analyzer_message());
+                        return;
+                    }
+                }
+                self.install_tool_by_id(id, Some(source));
+            }
+            return;
+        }
+        if path_available {
+            match definition.kind {
+                ToolKind::Lsp => unreachable!("handled before installed-tool dispatch"),
+                ToolKind::Dap => self.start_dap(Some(id.into()), None),
+                ToolKind::Formatter | ToolKind::Linter => {
+                    self.notify_message(
+                        self.message(
+                            "tool_install_succeeded",
+                            &[("tool", definition.name.clone())],
+                        ),
+                        false,
+                    );
+                }
+            }
+            return;
+        }
+        if let ToolStatus::Unavailable(diagnostic) = &self.tooling.entries()[index].status {
+            self.show_error(diagnostic.clone());
+            return;
+        }
+        self.install_tool_by_id(id, None);
+    }
+
+    pub(in crate::editor::session) fn install_selected_tool(&mut self) {
+        let Some(id) = self.selected_tool_id() else {
+            return;
+        };
+        let focused = self
+            .tooling
+            .entries()
+            .iter()
+            .find(|entry| entry.definition.id == id)
+            .filter(|entry| entry.definition.kind == ToolKind::Lsp)
+            .map(|entry| {
+                (
+                    self.focused_runtime_source(&entry.definition),
+                    self.focused_managed_version(&entry.definition),
+                )
+            });
+        let source = focused.as_ref().map(|(source, _)| *source);
+        if let Some((source, Some(version))) = focused
+            && matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix)
+        {
+            if let Err(error) = self.tooling.select_version(&id, version) {
+                self.show_error(error);
+                return;
+            }
+        }
+        self.install_tool_by_id(&id, source);
+    }
+
+    pub(in crate::editor::session) fn install_tool_by_id(
+        &mut self,
+        id: &str,
+        source: Option<LspRuntimeSource>,
+    ) {
+        self.install_tool_authorized(id, source, None);
+    }
+    pub(in crate::editor::session) fn install_tool_authorized(
+        &mut self,
+        id: &str,
+        source: Option<LspRuntimeSource>,
+        authorization: Option<ExecutionAuthorization>,
+    ) {
+        let Some(index) = self
+            .tooling
+            .entries()
+            .iter()
+            .position(|entry| entry.definition.id == id)
+        else {
+            return;
+        };
+        let base_definition = self.tooling.entries()[index].definition.clone();
+        let source = source.unwrap_or(LspRuntimeSource::Managed);
+        if base_definition.kind == ToolKind::Lsp
+            && !lsp_runtime_source_allowed_on_host(source, is_nixos_host())
+        {
+            self.show_error(if is_nixos_host() {
+                "NixOS language servers are installed only through Dust's private Nix compatibility runtime"
+            } else {
+                "non-NixOS language servers are installed only as verified Dust downloads"
+            });
+            return;
+        }
+        let definition = if base_definition.kind == ToolKind::Lsp
+            && matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix)
+        {
+            self.selected_managed_definition(&base_definition)
+        } else {
+            base_definition
+        };
+        let rustup_install = if definition.id == "rust-analyzer" && source == LspRuntimeSource::Path
+        {
+            discover_executable(&definition.executable).and_then(|proxy| {
+                if !Self::rust_analyzer_is_rustup_proxy(&proxy) {
+                    return None;
+                }
+                let key = Self::tool_version_key(&definition, source, Some(&proxy));
+                let rustup = proxy.with_file_name("rustup");
+                (matches!(self.tooling.version(&key), Some(Err(_))) && rustup.is_file())
+                    .then_some((rustup, proxy))
+            })
+        } else {
+            None
+        };
+        if definition.kind == ToolKind::Lsp {
+            match source {
+                LspRuntimeSource::Path if rustup_install.is_none() => {
+                    if discover_executable(&definition.executable).is_some() {
+                        self.notify_message(format!(
+                            "{} is already installed on PATH; Dust leaves external software unchanged",
+                            definition.name
+                        ), false);
+                    } else {
+                        self.show_error(format!(
+                            "{} is not installed and has no Dust-managed build",
+                            definition.name
+                        ));
+                    }
+                    return;
+                }
+                LspRuntimeSource::Path => {}
+                LspRuntimeSource::Managed
+                    if self.managed_variant_installed(
+                        &self.tooling.entries()[index].definition,
+                        &definition,
+                    ) =>
+                {
+                    self.notify_message(
+                        format!(
+                            "{} {} is already installed",
+                            definition.name,
+                            definition.version.as_deref().unwrap_or("unknown")
+                        ),
+                        false,
+                    );
+                    return;
+                }
+                LspRuntimeSource::Nix
+                    if nix_lsp_profile_installed(&definition)
+                        && self.managed_variant_installed(
+                            &self.tooling.entries()[index].definition,
+                            &definition,
+                        ) =>
+                {
+                    self.notify_message(format!(
+                        "{} {} is already installed through Dust's Nix compatibility environment",
+                        definition.name,
+                        definition.version.as_deref().unwrap_or("unknown")
+                    ), false);
+                    return;
+                }
+                LspRuntimeSource::Managed | LspRuntimeSource::Nix => {}
+            }
+        }
+        if !authorization.is_some_and(|permit| {
+            permit.consume(
+                &self.workspace,
+                ExecutionAdmission::Tool(
+                    id.into(),
+                    (definition.kind == ToolKind::Lsp).then_some(source),
+                ),
+            )
+        }) {
+            self.defer_trusted_execution(DeferredExecution::InstallTool {
+                id: id.into(),
+                source: (definition.kind == ToolKind::Lsp).then_some(source),
+            });
+            return;
+        }
+        if let Err(error) = self
+            .workspace
+            .authorize_execution(ExecutionSource::ProjectLocal)
+        {
+            self.show_error(error);
+            return;
+        }
+        let operation = if let Some((rustup, proxy)) = rustup_install {
+            let Some(cwd) = self.workspace.active_root().and_then(|root| {
+                self.workspace
+                    .roots()
+                    .iter()
+                    .find(|candidate| candidate.id == root)
+                    .map(|root| root.identity.canonical_path.clone())
+            }) else {
+                self.show_error("rustup installation requires an active workspace root");
+                return;
+            };
+            self.tooling.install(ToolInstall::Rustup {
+                definition: definition.clone(),
+                rustup,
+                proxy,
+                cwd,
+            })
+        } else if definition.kind == ToolKind::Lsp && source == LspRuntimeSource::Nix {
+            let Some(nix) = discover_executable("nix") else {
+                self.show_error("Dust via Nix is unavailable: nix was not found");
+                return;
+            };
+            if !self.nix_workspace_available_for(&definition) {
+                self.show_error("no verified upstream artifact or Dust Nix runtime is available for this language server");
+                return;
+            }
+            self.tooling
+                .install(ToolInstall::Nix(definition.clone(), nix))
+        } else {
+            if let ToolStatus::Unavailable(diagnostic) = &self.tooling.entries()[index].status {
+                self.show_error(diagnostic.clone());
+                return;
+            }
+            if definition.install.is_none() {
+                self.show_error(self.message("tool_no_installer", &[("tool", definition.name)]));
+                return;
+            }
+            self.tooling
+                .install(ToolInstall::Managed(definition.clone()))
+        };
+        match operation {
+            Ok(()) => {
+                self.notify_message(
+                    format!(
+                        "installing {} {} {}…",
+                        definition.name,
+                        source.label(),
+                        if source == LspRuntimeSource::Path {
+                            "component"
+                        } else if matches!(
+                            source,
+                            LspRuntimeSource::Managed | LspRuntimeSource::Nix
+                        ) {
+                            definition.version.as_deref().unwrap_or("unknown")
+                        } else {
+                            "runtime"
+                        }
+                    ),
+                    false,
+                );
+                let category = self
+                    .ui
+                    .tool_menu
+                    .as_ref()
+                    .map_or("all", |menu| &menu.category)
+                    .to_owned();
+                self.rebuild_tool_menu(&category, Some(id));
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+
+    pub(in crate::editor::session) fn uninstall_selected_tool(&mut self) {
+        let Some(id) = self.selected_tool_id() else {
+            return;
+        };
+        let Some(index) = self
+            .tooling
+            .entries()
+            .iter()
+            .position(|entry| entry.definition.id == id)
+        else {
+            return;
+        };
+        let base_definition = self.tooling.entries()[index].definition.clone();
+        let source = if base_definition.kind == ToolKind::Lsp {
+            self.focused_runtime_source(&base_definition)
+        } else {
+            LspRuntimeSource::Managed
+        };
+        if base_definition.kind == ToolKind::Lsp
+            && !lsp_runtime_source_allowed_on_host(source, is_nixos_host())
+        {
+            self.show_error("that installation mechanism is not used on this host");
+            return;
+        }
+        let definition = if base_definition.kind == ToolKind::Lsp
+            && matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix)
+        {
+            self.focused_managed_version(&base_definition)
+                .as_deref()
+                .and_then(|version| base_definition.managed_version(version))
+                .unwrap_or_else(|| base_definition.clone())
+        } else {
+            base_definition.clone()
+        };
+        let operation =
+            match source {
+                LspRuntimeSource::Path => {
+                    self.notify_message(
+                    "This server is owned by PATH, not Dust; remove it with its package manager"
+                        .into(), false);
+                    return;
+                }
+                LspRuntimeSource::Managed => {
+                    if !self.managed_variant_installed(&base_definition, &definition) {
+                        self.show_error(format!(
+                            "Dust-download version {} is not installed",
+                            definition.version.as_deref().unwrap_or("unknown")
+                        ));
+                        return;
+                    }
+                    self.stop_lsp_sessions_for_server(&id);
+                    self.tooling
+                        .install(ToolInstall::Uninstall(definition.clone(), false))
+                }
+                LspRuntimeSource::Nix => {
+                    if !nix_lsp_profile_installed(&definition)
+                        || !self.managed_variant_installed(&base_definition, &definition)
+                    {
+                        self.show_error(format!(
+                            "Dust via Nix version {} is not installed",
+                            definition.version.as_deref().unwrap_or("unknown")
+                        ));
+                        return;
+                    }
+                    self.stop_lsp_sessions_for_server(&id);
+                    self.tooling
+                        .install(ToolInstall::Uninstall(definition.clone(), true))
+                }
+            };
+        match operation {
+            Ok(()) => {
+                self.notify_message(
+                    format!(
+                        "uninstalling {} {} runtime…",
+                        definition.name,
+                        source.label()
+                    ),
+                    false,
+                );
+                let category = self
+                    .ui
+                    .tool_menu
+                    .as_ref()
+                    .map_or("all", |menu| &menu.category)
+                    .to_owned();
+                self.rebuild_tool_menu(&category, Some(&id));
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+
+    pub(in crate::editor::session) fn stop_selected_lsp(&mut self) {
+        let Some(id) = self.selected_tool_id() else {
+            return;
+        };
+        self.stop_lsp_sessions_for_server(&id);
+        let category = self
+            .ui
+            .tool_menu
+            .as_ref()
+            .map_or_else(|| "lsp".into(), |menu| menu.category.clone());
+        self.rebuild_tool_menu(&category, Some(&id));
+    }
+
+    pub(in crate::editor::session) fn restart_selected_lsp(&mut self) {
+        let Some(id) = self.selected_tool_id() else {
+            return;
+        };
+        self.stop_lsp_sessions_for_server(&id);
+        self.start_lsp(Some(id.clone()));
+        let category = self
+            .ui
+            .tool_menu
+            .as_ref()
+            .map_or_else(|| "lsp".into(), |menu| menu.category.clone());
+        self.rebuild_tool_menu(&category, Some(&id));
+    }
+
+    pub(in crate::editor::session) fn process_tool_progress(&mut self) {
+        let changed = self.tooling.poll_progress();
+        if let (Some(id), Some(menu)) = (changed, &self.ui.tool_menu) {
+            self.rebuild_tool_menu(&menu.category.clone(), Some(&id));
+        }
+    }
+
+    pub(in crate::editor::session) fn process_tool_results(&mut self) {
+        while let Some((name, result)) = self.tooling.poll_install() {
+            if let Err(diagnostic) = result.result {
+                self.show_error(format!(
+                    "{} {} failed: {diagnostic}",
+                    match result.operation {
+                        ToolOperation::InstallManaged
+                        | ToolOperation::InstallRustup
+                        | ToolOperation::InstallNix => "installing",
+                        ToolOperation::UninstallManaged | ToolOperation::UninstallNix => {
+                            "uninstalling"
+                        }
+                    },
+                    name
+                ));
+            } else {
+                self.notify_message(
+                    match result.operation {
+                        ToolOperation::InstallRustup => {
+                            format!("installed {name} in the active rustup toolchain")
+                        }
+                        ToolOperation::InstallManaged => {
+                            format!("installed {name} Dust download runtime")
+                        }
+                        ToolOperation::InstallNix => {
+                            format!("installed {name} Dust via Nix runtime")
+                        }
+                        ToolOperation::UninstallManaged => {
+                            format!("uninstalled {name} Dust download runtime")
+                        }
+                        ToolOperation::UninstallNix => {
+                            format!("uninstalled {name} Dust via Nix runtime")
+                        }
+                    },
+                    false,
+                );
+                self.language.clear_error(&result.id);
+            }
+            self.language.reset_autostart();
+            if let Some(menu) = &self.ui.tool_menu {
+                let category = menu.category.clone();
+                self.queue_tool_version_probes(&category);
+                self.rebuild_tool_menu(&category, Some(&result.id));
+            }
+        }
+    }
+}
+
+pub(in crate::editor::session) fn tool_install_progress_label(
+    phase: &str,
+    completed: u64,
+    total: Option<u64>,
+) -> String {
+    let bytes = |value: u64| {
+        if value >= 1024 * 1024 {
+            format!("{:.1} MiB", value as f64 / (1024.0 * 1024.0))
+        } else {
+            format!("{} KiB", value / 1024)
+        }
+    };
+    match total.filter(|total| *total > 0) {
+        Some(total) => format!(
+            "{phase} {} / {} ({}%)",
+            bytes(completed),
+            bytes(total),
+            completed.saturating_mul(100).min(total.saturating_mul(100)) / total
+        ),
+        None => phase.into(),
+    }
+}
+
+impl InteractiveApplication {
+    pub(super) fn install_package_after_validation(
+        &mut self,
+        package_manifest: PathBuf,
+        plugin_manifest: PathBuf,
+        component: PathBuf,
+        update: bool,
+    ) {
+        let root = self.state.workspace_root.clone();
+        let absolute = |path: PathBuf| {
+            if path.is_absolute() {
+                path
+            } else {
+                root.join(path)
+            }
+        };
+        let operation = PackageOperation::Install {
+            package_manifest: absolute(package_manifest),
+            plugin_manifest: absolute(plugin_manifest),
+            component: absolute(component),
+            roots: self
+                .workspace
+                .roots()
+                .iter()
+                .map(|root| root.identity.canonical_path.clone())
+                .collect(),
+            limits: self.plugin_limits(),
+            update,
+        };
+        if let Err(error) = self.extension.request_package(operation) {
+            self.show_error(error)
+        }
+    }
+
+    pub(super) fn request_registry(&mut self, request: RegistryRequest, install: bool) {
+        if let Err(error) = self.extension.request_registry(request, install) {
+            self.show_error(error);
+        }
+    }
+    pub(super) fn process_registry_events(&mut self) {
+        use crate::editor::session::extensions::RegistryUpdate;
+        for update in self.extension.poll_registry() {
+            match update {
+                RegistryUpdate::Present(result) => match *result {
+                    RegistryResult::Search(result) => {
+                        let items = result
+                            .packages
+                            .into_iter()
+                            .enumerate()
+                            .map(|(index, package)| {
+                                (
+                                    PickerItem {
+                                        id: PickerItemId(format!(
+                                            "registry:{index}:{}/{}",
+                                            package.publisher, package.name
+                                        )),
+                                        label: format!("{}/{}", package.publisher, package.name),
+                                        detail: format!(
+                                            "{}{}",
+                                            package.version,
+                                            if package.yanked { " · yanked" } else { "" }
+                                        ),
+                                        source: package.description.clone(),
+                                        action: PickerAction::None,
+                                    },
+                                    PickerPayload::RegistrySummary(package),
+                                )
+                            })
+                            .collect();
+                        self.install_picker(
+                            self.message("package_registry_search_title", &[]),
+                            items,
+                        );
+                    }
+                    RegistryResult::Show(metadata) => {
+                        let label = format!("{}/{}", metadata.publisher, metadata.name);
+                        let detail = format!("{} · {}", metadata.version, metadata.artifact_sha256);
+                        self.install_picker(
+                            self.message("package_registry_show_title", &[]),
+                            vec![(
+                                PickerItem {
+                                    id: PickerItemId(format!("registry-show:{label}")),
+                                    label,
+                                    detail,
+                                    source: metadata.artifact_path.clone(),
+                                    action: PickerAction::None,
+                                },
+                                PickerPayload::RegistryMetadata(Box::new(metadata)),
+                            )],
+                        );
+                    }
+                    RegistryResult::Artifact { .. } => self.show_error("unowned registry artifact"),
+                },
+                RegistryUpdate::ValidateArtifact => {
+                    self.defer_trusted_execution(DeferredExecution::PrepareRegistryArtifact);
+                    if !self.workspace.validation_pending() {
+                        self.extension.discard_artifact();
+                    }
+                }
+                RegistryUpdate::Error(error) => self
+                    .show_error(self.message("package_registry_failed", &[("diagnostic", error)])),
+            }
+        }
+    }
+    pub(super) fn process_package_events(&mut self) {
+        let updates = self.extension.poll_packages(self.plugin_limits());
+        self.apply_extension_updates(updates);
+    }
+    pub(in crate::editor::session) fn apply_extension_updates(
+        &mut self,
+        updates: Vec<crate::editor::session::extensions::ExtensionUpdate>,
+    ) {
+        use crate::editor::session::extensions::ExtensionUpdate;
+        for update in updates {
+            match update {
+                ExtensionUpdate::Remove(plugin, load) => {
+                    self.remove_plugin_contribution_generation(&plugin, load)
+                }
+                ExtensionUpdate::Error(error) => self.show_error(error),
+                ExtensionUpdate::Conflict(plugin) => {
+                    self.show_error(self.message("package_plugin_conflict", &[("plugin", plugin)]))
+                }
+                ExtensionUpdate::Message(key, arguments) => {
+                    self.notify_message(self.message(key, &arguments), false)
+                }
+                ExtensionUpdate::Lock(lock) => {
+                    let items = lock
+                        .packages
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, package)| {
+                            (
+                                PickerItem {
+                                    id: PickerItemId(format!("package:{index}:{}", package.name)),
+                                    label: package.name,
+                                    detail: package.version,
+                                    source: "package".into(),
+                                    action: PickerAction::None,
+                                },
+                                PickerPayload::Command(String::new()),
+                            )
+                        })
+                        .collect();
+                    self.install_picker(self.message("package_picker_title", &[]), items);
+                }
+                ExtensionUpdate::Failed { operation, error } => {
+                    self.notices.record(
+                        LogLevel::Error,
+                        "packages",
+                        "operation-failed",
+                        BTreeMap::from([
+                            ("operation".into(), operation.clone()),
+                            ("error".into(), error.clone()),
+                        ]),
+                    );
+                    self.show_error(self.message(
+                        "package_operation_failed",
+                        &[("operation", operation), ("diagnostic", error)],
+                    ));
+                }
+            }
+        }
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn sync_lsp_status_ui(&mut self) {
+        let running = self.language.running_servers();
+        self.ui.lsp_server = self
+            .language
+            .active()
+            .and_then(|server| {
+                self.language
+                    .sessions()
+                    .get(server)
+                    .map(|session| (server, session))
+            })
+            .map(|(server, session)| {
+                if session.capabilities.is_some() {
+                    session.server_id.clone()
+                } else if session.circuit_open {
+                    format!("failed {}", session.server_id)
+                } else if session.restart_due.is_some() {
+                    format!("backoff {}", session.server_id)
+                } else if running.contains(server) {
+                    format!("starting {}", session.server_id)
+                } else {
+                    format!("stopped {}", session.server_id)
+                }
+            });
+        let refresh = self.ui.tool_menu.as_ref().is_some_and(|menu| {
+            menu.rows.iter().any(|row| {
+                self.tooling
+                    .entries()
+                    .iter()
+                    .find(|entry| {
+                        entry.definition.id == row.id && entry.definition.kind == ToolKind::Lsp
+                    })
+                    .is_some_and(|entry| {
+                        !matches!(entry.status, ToolStatus::Installing { .. })
+                            && self.lsp_menu_lifecycle(&row.id).0 != row.lifecycle
+                    })
+            })
+        });
+        if refresh {
+            let category = self
+                .ui
+                .tool_menu
+                .as_ref()
+                .map_or_else(|| "lsp".into(), |menu| menu.category.clone());
+            let selected = self.selected_tool_id();
+            self.rebuild_tool_menu(&category, selected.as_deref());
+        }
+    }
+
+    pub(in crate::editor::session) fn reconcile_lsp_autostart(
+        &mut self,
+        buffer: crate::editor::BufferId,
+        document: &LspDocument,
+        matching_session: bool,
+    ) {
+        let launchable_server = self
+            .tooling
+            .entries()
+            .iter()
+            .find(|entry| {
+                entry.definition.kind == ToolKind::Lsp
+                    && entry
+                        .definition
+                        .automatically_supports_language(&document.language_id)
+                    && self.selected_lsp_runtime_available(&entry.definition)
+            })
+            .map(|entry| entry.definition.id.clone());
+        let observation = LspAutostartObservation {
+            buffer,
+            path: document.path.clone(),
+            language: document.language_id.clone(),
+            root_revision: self.workspace.root_revision(),
+            trust: self.workspace.trust(),
+            enabled: self.configuration.settings().lsp.enabled,
+            auto_start: self.configuration.settings().lsp.auto_start,
+            nix_workspace_fallback: self.configuration.settings().lsp.nix_workspace_fallback,
+            execution_busy: self.workspace.validation_pending(),
+            launchable_server,
+        };
+        if let Some(server) =
+            self.language
+                .observe(observation, matching_session, self.workspace.safe_mode())
+        {
+            self.start_lsp(Some(server));
+        }
+    }
+
+    pub(in crate::editor::session) fn sync_lsp_document(&mut self) {
+        let Some(buffer) = self.state.active_buffer_id() else {
+            self.language.reset_autostart();
+            return;
+        };
+        let Some((_, document)) = self.active_lsp_document() else {
+            let stale = self
+                .language
+                .sessions()
+                .iter()
+                .filter_map(|(key, state)| {
+                    state
+                        .documents
+                        .get(&buffer)
+                        .map(|document| (key.clone(), document.uri()))
+                })
+                .collect::<Vec<_>>();
+            self.detach_lsp_documents(buffer, stale);
+            self.clear_lsp_ui_projection();
+            self.language.clear_active();
+
+            self.language.reset_autostart();
+            return;
+        };
+        let revision = self.state.buffers[buffer].text.source_version();
+        let mut sessions = Vec::new();
+        let mut detach = Vec::new();
+        for (key, state) in self.language.sessions() {
+            // A lexical `starts_with` check would let a session for an outer
+            // project absorb a nested, independently resolved project. Only
+            // the asynchronous resolver may attach a new document to a server.
+            let owns = state.documents.contains_key(&buffer);
+            let supports = state.definition.supports_language(&document.language_id);
+            if owns && supports {
+                sessions.push(key.clone());
+                if let Some(previous) = state.documents.get(&buffer)
+                    && (previous.path != document.path
+                        || previous.language_id != document.language_id)
+                {
+                    detach.push((key.clone(), previous.uri()));
+                }
+            } else if let Some(previous) = state.documents.get(&buffer) {
+                detach.push((key.clone(), previous.uri()));
+            }
+        }
+        sessions.sort();
+        if sessions.is_empty() {
+            self.language.clear_active();
+
+            self.clear_lsp_ui_projection();
+        }
+        if !sessions.is_empty()
+            && !sessions
+                .iter()
+                .any(|key| self.language.active() == Some(key))
+        {
+            self.select_lsp_session(&sessions[0]);
+        }
+        self.detach_lsp_documents(buffer, detach);
+        let completion_open = self.ui.language_completion.is_some()
+            && self.language.projection().is_some_and(|owner| {
+                owner.buffer == buffer
+                    && Some(owner.view) == self.state.active_view
+                    && self.language.active() == Some(&owner.server)
+                    && owner.uri == document.uri()
+            });
+        self.refresh_lsp_projection_owner();
+        let mut changed = false;
+        for server in &sessions {
+            if self.language.synced(server, buffer, &revision) {
+                continue;
+            }
+            if self
+                .language
+                .sync_owned(server, document.clone(), (buffer, revision.clone()))
+                .is_ok()
+            {
+                changed = true;
+            }
+        }
+        if changed
+            && !(self.configuration.settings().lsp.inlay_hint_level
+                == crate::config::InlayHintLevel::Max
+                && self.ui.lsp_inlay_hints.is_empty()
+                && self.language.inlay_pending())
+        {
+            self.schedule_lsp_inlay_refresh(false);
+        }
+        self.reconcile_lsp_autostart(buffer, &document, !sessions.is_empty());
+        if changed
+            && completion_open
+            && self
+                .language
+                .active()
+                .is_some_and(|active| sessions.contains(active))
+        {
+            self.request_lsp(LspFeature::Completion);
+        }
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn active_lsp_document(
+        &self,
+    ) -> Option<(crate::editor::BufferId, LspDocument)> {
+        let buffer_id = self.state.active_buffer_id()?;
+        let buffer = self.state.buffers.get(buffer_id)?;
+        let path = buffer.path.clone()?;
+        let language_id = language_id_for_path(&path)?.to_owned();
+        Some((
+            buffer_id,
+            LspDocument {
+                path,
+                language_id,
+                version: buffer.text.revision().0,
+                text: buffer.text.to_string(),
+            },
+        ))
+    }
+
+    pub(in crate::editor::session) fn start_lsp(&mut self, requested: Option<String>) {
+        self.start_lsp_authorized(requested, None);
+    }
+    pub(in crate::editor::session) fn start_lsp_authorized(
+        &mut self,
+        requested: Option<String>,
+        authorization: Option<ExecutionAuthorization>,
+    ) {
+        if !self.configuration.settings().lsp.enabled {
+            self.show_error(self.message("lsp_disabled", &[]));
+            return;
+        }
+        let Some((buffer, document)) = self.active_lsp_document() else {
+            self.show_error(self.message("lsp_no_buffer", &[]));
+            return;
+        };
+        let entry = if let Some(id) = requested.as_ref() {
+            let entry =
+                self.tooling.entries().iter().find(|entry| {
+                    entry.definition.id == *id && entry.definition.kind == ToolKind::Lsp
+                });
+            if !entry.is_some_and(|entry| entry.definition.supports_language(&document.language_id))
+            {
+                self.show_error(format!(
+                    "language server `{id}` does not support {}",
+                    document.language_id
+                ));
+                return;
+            }
+            entry
+        } else {
+            self.tooling
+                .entries()
+                .iter()
+                .find(|entry| {
+                    entry.definition.kind == ToolKind::Lsp
+                        && entry
+                            .definition
+                            .automatically_supports_language(&document.language_id)
+                        && matches!(entry.status, ToolStatus::Installed(_))
+                })
+                .or_else(|| {
+                    self.tooling.entries().iter().find(|entry| {
+                        entry.definition.kind == ToolKind::Lsp
+                            && entry
+                                .definition
+                                .automatically_supports_language(&document.language_id)
+                    })
+                })
+        };
+        let Some(entry) = entry else {
+            self.show_error(self.message("lsp_no_server", &[]));
+            return;
+        };
+        let base_definition = entry.definition.clone();
+        let source = self.selected_lsp_runtime_source(&base_definition);
+        let definition = if matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix) {
+            self.selected_managed_definition(&base_definition)
+        } else {
+            base_definition.clone()
+        };
+        let launch_source = match source {
+            LspRuntimeSource::Path => {
+                let Some(executable) = discover_executable(&definition.executable) else {
+                    self.show_error(format!(
+                        "{} is not available on PATH; press p to choose another runtime",
+                        definition.name
+                    ));
+                    return;
+                };
+                if definition.id == "rust-analyzer"
+                    && Self::rust_analyzer_is_rustup_proxy(&executable)
+                {
+                    let key = Self::tool_version_key(
+                        &definition,
+                        LspRuntimeSource::Path,
+                        Some(&executable),
+                    );
+                    match self.tooling.version(&key) {
+                        Some(Ok(_)) => {}
+                        Some(Err(_)) => {
+                            self.show_error(Self::unavailable_rust_analyzer_message());
+                            return;
+                        }
+                        None => {
+                            self.queue_tool_version_probe(
+                                &definition,
+                                LspRuntimeSource::Path,
+                                executable,
+                            );
+                            self.notify_message(
+                                "checking rust-analyzer in the active rustup toolchain…".into(),
+                                false,
+                            );
+                            return;
+                        }
+                    }
+                }
+                LspLaunchSource::Direct {
+                    executable,
+                    managed: false,
+                }
+            }
+            LspRuntimeSource::Managed => {
+                let Some(executable) = self.selected_managed_executable(&base_definition) else {
+                    self.show_error(format!(
+                        "{} Dust-download version {} is not installed; press i to install it",
+                        definition.name,
+                        definition.version.as_deref().unwrap_or("unknown")
+                    ));
+                    return;
+                };
+                LspLaunchSource::Direct {
+                    executable,
+                    managed: true,
+                }
+            }
+            LspRuntimeSource::Nix => {
+                let Some(shell) = nix_workspace_shell_for_host(
+                    &definition,
+                    self.configuration.settings().lsp.nix_workspace_fallback,
+                    is_nixos_host(),
+                ) else {
+                    self.show_error("Dust via Nix is unavailable on this host");
+                    return;
+                };
+                if !nix_lsp_profile_installed(&definition) {
+                    self.show_error("Dust via Nix is not installed; press i to install it");
+                    return;
+                }
+                let Some(executable) = self.selected_managed_executable(&base_definition) else {
+                    self.show_error(format!(
+                        "{} Dust via Nix version {} is not installed; press i",
+                        definition.name,
+                        definition.version.as_deref().unwrap_or("unknown")
+                    ));
+                    return;
+                };
+                if let Err(error) = nix_lsp_launch_environment(&definition) {
+                    self.show_error(error);
+                    return;
+                }
+                LspLaunchSource::NixWorkspace {
+                    nix: executable,
+                    shell: shell.into(),
+                }
+            }
+        };
+        self.language.clear_error(&definition.id);
+        let Ok(root_id) = self.workspace.require_path(&document.path) else {
+            self.show_error(self.message("lsp_no_buffer", &[]));
+            return;
+        };
+        let Some(root_path) = self
+            .workspace
+            .roots()
+            .iter()
+            .find(|root| root.id == root_id)
+            .map(|root| root.identity.canonical_path.clone())
+        else {
+            return;
+        };
+        if !authorization.is_some_and(|permit| {
+            permit.consume(
+                &self.workspace,
+                ExecutionAdmission::Lsp(definition.id.clone()),
+            )
+        }) {
+            self.defer_trusted_execution(DeferredExecution::StartLsp(Some(definition.id.clone())));
+            return;
+        }
+        if let Err(error) = self.workspace.authorize_execution(
+            if matches!(launch_source, LspLaunchSource::NixWorkspace { .. }) {
+                ExecutionSource::ProjectLocal
+            } else {
+                ExecutionSource::SystemTool
+            },
+        ) {
+            self.show_error(error);
+            return;
+        }
+        let context = crate::editor::session::lsp::LaunchContext {
+            editor: &self.state,
+            workspace: self.workspace.version(),
+            configuration: self.configuration.binding_revision(),
+        };
+        if let Err(error) = self.language.discover_launch(
+            PendingLspProjectRoot {
+                definition,
+                launch_source,
+                root_id,
+                workspace_root: root_path,
+                buffer,
+                document,
+            },
+            context,
+            self.workspace
+                .execution_lane(crate::editor::session::workspace::DiscoveryKind::Language),
+        ) {
+            self.show_error(error);
+        }
+    }
+    pub(in crate::editor::session) fn process_lsp_project_root(&mut self) {
+        let Some(result) = self
+            .workspace
+            .project_result(crate::editor::session::workspace::DiscoveryKind::Language)
+        else {
+            return;
+        };
+        let context = crate::editor::session::lsp::LaunchContext {
+            editor: &self.state,
+            workspace: self.workspace.version(),
+            configuration: self.configuration.binding_revision(),
+        };
+        if let Err(error) = self.language.accept_project_root(
+            result,
+            context,
+            self.workspace
+                .execution_lane(crate::editor::session::workspace::DiscoveryKind::Language),
+        ) {
+            self.show_error(error);
+        }
+    }
+    pub(in crate::editor::session) fn process_nix_lsp_workspace(&mut self) {
+        let context = crate::editor::session::lsp::LaunchContext {
+            editor: &self.state,
+            workspace: self.workspace.version(),
+            configuration: self.configuration.binding_revision(),
+        };
+        if let Err(error) = self.language.poll_nix_launch(
+            context,
+            self.workspace
+                .execution_lane(crate::editor::session::workspace::DiscoveryKind::Language),
+        ) {
+            self.show_error(error);
+        }
+    }
+    pub(in crate::editor::session) fn queue_lsp_preflight(&mut self, pending: LspLaunchRequest) {
+        let context = crate::editor::session::lsp::LaunchContext {
+            editor: &self.state,
+            workspace: self.workspace.version(),
+            configuration: self.configuration.binding_revision(),
+        };
+        if let Err(error) = self.language.queue_launch(
+            pending,
+            context,
+            self.workspace
+                .execution_lane(crate::editor::session::workspace::DiscoveryKind::Language),
+        ) {
+            self.show_error(error);
+        }
+    }
+
+    pub(in crate::editor::session) fn restart_lsp_session(&mut self, key: String) {
+        self.restart_lsp_authorized(key, None);
+    }
+    pub(in crate::editor::session) fn restart_lsp_authorized(
+        &mut self,
+        key: String,
+        authorization: Option<ExecutionAuthorization>,
+    ) {
+        let Some(state) = self.language.sessions().get(&key) else {
+            return;
+        };
+        if state.circuit_open || !state.desired_running {
+            return;
+        }
+        if !authorization.is_some_and(|permit| {
+            permit.consume(&self.workspace, ExecutionAdmission::Restart(key.clone()))
+        }) {
+            self.defer_trusted_execution(DeferredExecution::RestartLsp(key));
+            return;
+        }
+        let Some((&buffer, document)) = state.documents.iter().next() else {
+            return;
+        };
+        let (definition, launch, root, root_path, document) = (
+            state.definition.clone(),
+            state.launch.clone(),
+            state.root,
+            state.root_path.clone(),
+            document.clone(),
+        );
+        self.queue_lsp_preflight(LspLaunchRequest {
+            session_key: key,
+            definition,
+            launch,
+            root_id: root,
+            project_root: root_path,
+            buffer,
+            document,
+            restart: true,
+        });
+    }
+
+    pub(in crate::editor::session) fn select_lsp_session(&mut self, key: &str) {
+        if self.language.select(key) {
+            self.ui.lsp_inlay_hints.clear();
+            self.schedule_lsp_inlay_refresh(true);
+        }
+    }
+
+    pub(in crate::editor::session) fn show_lsp_sessions(&mut self) {
+        let active = self.language.active().map(String::as_str);
+        let items = self
+            .language
+            .sessions()
+            .iter()
+            .map(|(key, session)| {
+                (
+                    PickerItem {
+                        id: PickerItemId(format!("lsp-session:{key}")),
+                        label: session.server_id.clone(),
+                        detail: format!(
+                            "root #{}{} · {} · restarts {}",
+                            session.root.0,
+                            if active == Some(key) {
+                                " · active"
+                            } else {
+                                ""
+                            },
+                            if session.circuit_open {
+                                "circuit-open"
+                            } else if session.restart_due.is_some() {
+                                "backoff"
+                            } else if session.desired_running {
+                                "running"
+                            } else {
+                                "stopped"
+                            },
+                            session.restart_count
+                        ),
+                        source: key.clone(),
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::LspSession(key.clone()),
+                )
+            })
+            .collect();
+        self.install_picker(self.message("picker_lsp_sessions_title", &[]), items);
+    }
+
+    pub(in crate::editor::session) fn clear_lsp_server_ownership(&mut self, server: &str) {
+        self.language.forget_synced(server);
+        self.language.retire_projection_server(server);
+    }
+
+    pub(in crate::editor::session) fn detach_lsp_documents(
+        &mut self,
+        buffer: crate::editor::BufferId,
+        documents: Vec<(String, String)>,
+    ) {
+        let detached = !documents.is_empty();
+        for (server, uri) in documents {
+            let _ = self.language.close(&server, uri.clone());
+            self.language.invalidate_document(&server, buffer);
+            self.language.retire_projection_document(&server, &uri);
+            for prefix in ["lsp.", "lsp-pull:"] {
+                if let Ok(owner) = DiagnosticOwner::new(format!("{prefix}{server}")) {
+                    self.diagnostics.clear_owner_uri(&owner, &uri);
+                }
+            }
+            self.language.detach(&server, buffer);
+        }
+        if detached {
+            self.sync_ui_diagnostics();
+            if self.state.active_buffer_id() == Some(buffer) {
+                self.clear_lsp_ui_projection();
+            }
+        }
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn process_core_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::Quit { force } => {
+                if !force && self.state.buffers.iter().any(|(_, buffer)| buffer.dirty) {
+                    self.show_error(self.message("unsaved_quit", &[]));
+                } else {
+                    if force {
+                        self.queue_dirty_recovery_before_exit();
+                    }
+                    self.should_quit = true;
+                }
+            }
+            AppEffect::Save {
+                quit_after,
+                path,
+                force,
+            } => self.start_save(quit_after, path, force),
+            AppEffect::OpenPath(path) => self.start_open(path),
+            AppEffect::Reload { force } => self.start_reload(force),
+            AppEffect::CloseBuffer { force } => self.close_active_buffer(force),
+            AppEffect::CycleBuffer(offset) => match self.state.cycle_buffer(
+                offset,
+                self.configuration.settings().editor.buffer_navigation_wrap,
+            ) {
+                Ok(_) => {
+                    self.set_dashboard_visibility(false);
+                }
+                Err(error) => self.show_error(error),
+            },
+            AppEffect::ToggleBufferPin => self.toggle_active_buffer_pin(),
+            AppEffect::MoveBufferLine(direction) => self.move_active_buffer_line(direction),
+            AppEffect::NewBuffer => {
+                self.state.open_text(TextBuffer::from_text(""), None);
+                self.set_dashboard_visibility(false);
+                self.notify_message(self.message("new_scratch", &[]), false);
+            }
+            AppEffect::OpenWorkspaceFilePicker => self.start_workspace_file_picker(),
+            AppEffect::GitStatusRefresh => self.start_git_status_refresh(),
+            AppEffect::GitStatusOpen => self.open_git_status_picker(),
+            AppEffect::GitHunksOpen => self.start_git_hunks(),
+            AppEffect::GitHunkNavigate(direction) => self.navigate_git_hunk(direction),
+            AppEffect::GitHunkPreview => self.preview_selected_git_hunk(),
+            AppEffect::GitHunkStage => self.stage_selected_git_hunk(),
+            AppEffect::GitHunkReset => self.request_reset_selected_git_hunk(),
+            AppEffect::OpenFilePrompt => {
+                let alias = self
+                    .configuration
+                    .settings()
+                    .input
+                    .command_aliases
+                    .iter()
+                    .find(|(_, command)| command.as_str() == "file.open")
+                    .map_or("file.open", |(alias, _)| alias.as_str());
+                self.open_prompt(PromptKind::Command, format!("{alias} "));
+            }
+            AppEffect::OpenPrompt { kind, initial } => self.open_prompt(kind, initial),
+            AppEffect::PromptInsert(text) => self.prompt_insert(&text),
+            AppEffect::PromptBackspace => self.prompt_backspace(),
+            AppEffect::PromptMove(movement) => self.prompt_move(movement),
+            AppEffect::PromptHistory(direction) => self.prompt_history(direction),
+            AppEffect::PromptComplete(direction) => self.prompt_complete(direction),
+            AppEffect::PromptConfirmationSelect(choice) => {
+                self.input.select_confirmation(choice);
+                self.project_input_prompt();
+            }
+            AppEffect::PromptConfirmationToggle => {
+                self.input.toggle_confirmation();
+                self.project_input_prompt();
+            }
+            AppEffect::PromptSubmit => self.submit_prompt(),
+            AppEffect::PromptCancel => self.close_prompt(),
+            AppEffect::NotificationHistory => {
+                let items = self
+                    .notices
+                    .history()
+                    .rev()
+                    .enumerate()
+                    .map(|(index, (error, message))| {
+                        (
+                            PickerItem {
+                                id: PickerItemId(format!("notification:{index}")),
+                                label: message.clone(),
+                                detail: if *error {
+                                    "error".into()
+                                } else {
+                                    "info".into()
+                                },
+                                source: "application".into(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::Command(String::new()),
+                        )
+                    })
+                    .collect();
+                self.install_picker("Notifications".into(), items);
+            }
+            AppEffect::NotificationDismiss => {
+                self.clear_notice();
+            }
+            AppEffect::SearchRepeat { reverse } => {
+                let forward = self.input.search_direction(reverse);
+                self.perform_search(forward);
+            }
+            AppEffect::SearchWord { forward } => self.search_word_under_cursor(forward),
+            AppEffect::Scroll {
+                kind,
+                count,
+                at_mouse,
+            } => {
+                if at_mouse {
+                    self.focus_mouse_pane();
+                }
+                self.scroll_view(&kind, count);
+            }
+            AppEffect::PlaceMouseCursor => self.apply_mouse_cursor(false),
+            AppEffect::ExtendMouseSelection => self.apply_mouse_cursor(true),
+            AppEffect::Layout(action) => self.apply_layout_action(action),
+            AppEffect::SurfaceFocus(direction) => self.focus_surface(direction),
+            AppEffect::RetainedUiFocus(delta) => {
+                self.apply_retained_ui_interaction(PluginUiInteraction::Focus(delta));
+            }
+            AppEffect::RetainedUiScroll(delta) => {
+                self.apply_retained_ui_interaction(PluginUiInteraction::Scroll(delta));
+            }
+            AppEffect::RetainedUiActivate => {
+                self.apply_retained_ui_interaction(PluginUiInteraction::Activate);
+            }
+            AppEffect::RetainedUiMouseSelect => self.select_retained_ui_at_mouse(),
+            AppEffect::PrivateUiActivate { at_mouse } => {
+                self.activate_private_surface_action(at_mouse);
+            }
+            AppEffect::WindowDock { target, edge, size } => {
+                let edge = match edge.as_str() {
+                    "left" => DockEdge::Left,
+                    "right" => DockEdge::Right,
+                    "top" => DockEdge::Top,
+                    "bottom" => DockEdge::Bottom,
+                    _ => {
+                        self.show_error("window dock edge must be left, right, top, or bottom");
+                        return Ok(());
+                    }
+                };
+                let result = self
+                    .resolve_native_window_target(&target)
+                    .and_then(|target| {
+                        self.apply_native_window_placement(
+                            target,
+                            WindowPlacement::Docked { edge, size },
+                        )
+                    });
+                if let Err(error) = result {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowFloat {
+                target,
+                x,
+                y,
+                width,
+                height,
+            } => {
+                let result = self
+                    .resolve_native_window_target(&target)
+                    .and_then(|target| {
+                        self.apply_native_window_placement(
+                            target,
+                            WindowPlacement::Floating(WindowRect {
+                                x,
+                                y,
+                                width,
+                                height,
+                            }),
+                        )
+                    });
+                if let Err(error) = result {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowFullscreen(target) => {
+                let result = self
+                    .resolve_native_window_target(&target)
+                    .and_then(|target| {
+                        self.apply_native_window_placement(target, WindowPlacement::Fullscreen)
+                    });
+                if let Err(error) = result {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowHide(target) => {
+                let result = self
+                    .resolve_native_window_target(&target)
+                    .and_then(|target| {
+                        self.apply_native_window_placement(target, WindowPlacement::Hidden)
+                    });
+                if let Err(error) = result {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowShow(target) => {
+                let result = self
+                    .resolve_native_window_target(&target)
+                    .and_then(|target| self.show_native_window(target));
+                if let Err(error) = result {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowClose(target) => {
+                if let Err(error) = self.close_graph_window(&target) {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowResize { target, amount } => {
+                if let Err(error) = self.resize_graph_window(&target, amount) {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowResizeDirectional(direction) => {
+                if let Err(error) = self.resize_focused_window(direction) {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowMove { target, x, y } => {
+                let result = self
+                    .resolve_native_window_target(&target)
+                    .and_then(|target| self.move_native_window(target, x, y));
+                if let Err(error) = result {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowSwap { first, second } => {
+                if let Err(error) = self.swap_graph_windows(&first, &second) {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::RepeatLast => self.repeat_last_change(),
+            AppEffect::MacroRecordStart(register) => {
+                self.input.start_macro_recording(register);
+                self.notify_message(
+                    self.message("macro_recording", &[("register", register.to_string())]),
+                    false,
+                );
+            }
+            AppEffect::MacroRecordStop => {
+                if let Some((register, invocations)) = self.input.finish_macro_recording() {
+                    self.state.registers.set_macro(register, invocations);
+                    self.state.mark_editor_changed();
+                    self.notify_message(
+                        self.message("macro_recorded", &[("register", register.to_string())]),
+                        false,
+                    );
+                } else {
+                    self.show_error(self.message("no_macro_recording", &[]));
+                }
+            }
+            AppEffect::MacroReplay { register, count } => {
+                self.input.begin_macro_batch();
+                for _ in 0..count {
+                    self.replay_macro(register);
+                    if self.ui.notification_error {
+                        break;
+                    }
+                }
+            }
+            AppEffect::Grammar(input) => self.process_grammar_input(input),
+            AppEffect::CancelPendingMapping => self.cancel_pending_mapping(),
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}
+
+impl InteractiveApplication {
+    fn document_view(
+        id: crate::editor::BufferId,
+        buffer: &crate::editor::Buffer,
+    ) -> crate::editor::session::documents::DocumentView<'_> {
+        crate::editor::session::documents::DocumentView {
+            id,
+            path: buffer.path.as_deref(),
+            text: &buffer.text,
+            persisted: buffer.persisted_bytes(),
+            dirty: buffer.dirty,
+            virtual_read_only: buffer.is_virtual_read_only(),
+        }
+    }
+    pub(in crate::editor::session) fn show_document_failure(
+        &mut self,
+        failure: crate::editor::session::documents::DocumentFailure,
+    ) {
+        match failure {
+            crate::editor::session::documents::DocumentFailure::Policy(key) => {
+                self.show_error(self.message(key, &[]))
+            }
+            crate::editor::session::documents::DocumentFailure::Error(e) => self.show_error(e),
+        }
+    }
+    pub(in crate::editor::session) fn start_open(&mut self, path: PathBuf) {
+        match self.documents.request_open(
+            path,
+            &self.state.workspace_root,
+            &self.state.window_version(),
+            self.workspace.version(),
+            self.window_session
+                .navigation_stamp(self.state.window_version(), self.state.active_view),
+        ) {
+            Ok(()) => self.notify_message(self.message("opening_file", &[]), false),
+            Err(e) => self.show_document_failure(e),
+        }
+    }
+    pub(in crate::editor::session) fn start_reload(&mut self, force: bool) {
+        let view = self.state.active_buffer_id().and_then(|id| {
+            self.state
+                .buffers
+                .get(id)
+                .map(|b| Self::document_view(id, b))
+        });
+        match self.documents.request_reload(
+            view,
+            force,
+            &self.state.window_version(),
+            self.workspace.version(),
+        ) {
+            Ok(()) => self.notify_message(self.message("reloading", &[]), false),
+            Err(e) => self.show_document_failure(e),
+        }
+    }
+    pub(in crate::editor::session) fn start_save(
+        &mut self,
+        quit_after: bool,
+        requested_path: Option<PathBuf>,
+        force: bool,
+    ) {
+        let view = self.state.active_buffer_id().and_then(|id| {
+            self.state
+                .buffers
+                .get(id)
+                .map(|b| Self::document_view(id, b))
+        });
+        let request = crate::editor::session::documents::SaveRequest {
+            editor: &self.state.window_version(),
+            workspace: self.workspace.version(),
+            base: &self.state.workspace_root,
+            path: requested_path,
+            policy: &self.configuration.settings().editor,
+            force,
+            quit: quit_after,
+            other_open_paths: self
+                .state
+                .buffers
+                .iter()
+                .filter(|(id, _)| Some(*id) != self.state.active_buffer_id())
+                .filter_map(|(_, b)| b.path.clone())
+                .collect(),
+        };
+        match self.documents.request_save(view, request) {
+            Ok(()) => self.notify_message(self.message("saving", &[]), false),
+            Err(e) => self.show_document_failure(e),
+        }
+    }
+    pub(in crate::editor::session) fn close_active_buffer(&mut self, force: bool) {
+        let Some(view_id) = self.state.active_view else {
+            self.set_dashboard_visibility(true);
+            return;
+        };
+        let buffer_id = self.state.views[view_id].buffer;
+        let closed_path = self.state.buffers[buffer_id].path.clone();
+        if self.state.buffers[buffer_id].dirty && !force {
+            self.show_error(self.message("dirty_close", &[]));
+            return;
+        }
+        if let Err(error) = self
+            .window_session
+            .check_editor_admission(&(&self.state).into())
+        {
+            self.show_error(error);
+            return;
+        }
+        let mut candidate = self.state.draft();
+        let removed = match candidate.close_document(view_id, buffer_id) {
+            Ok(removed) => removed,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        if let Err(error) = self.commit_editor_draft(candidate, None, false) {
+            self.show_error(error);
+            return;
+        }
+        if removed {
+            self.documents
+                .retire_buffer(buffer_id, closed_path.as_deref());
+            if let Some(path) = &closed_path
+                && let Some(id) = self.explorer.retire_buffer_path(path)
+            {
+                self.documents.cancel_request(id);
+            }
+            self.extension.close_virtual_buffer(buffer_id);
+            let documents = self
+                .language
+                .sessions()
+                .iter()
+                .filter_map(|(server, state)| {
+                    state
+                        .documents
+                        .get(&buffer_id)
+                        .map(|document| (server.clone(), document.uri()))
+                })
+                .collect::<Vec<_>>();
+            self.detach_lsp_documents(buffer_id, documents);
+        }
+        self.set_dashboard_visibility(self.state.active_view.is_none());
+        if !self.window_session.dashboard_visible() {
+            self.sync_lsp_document();
+        } else {
+            self.language.clear_active();
+
+            self.clear_lsp_ui_projection();
+        }
+        self.notify_message(
+            if self.window_session.dashboard_visible() {
+                self.message("returned_dashboard", &[])
+            } else {
+                self.message("buffer_closed", &[])
+            },
+            false,
+        );
+    }
+}
+
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn process_file_reply(
+        &mut self,
+        reply: crate::editor::session::documents::FileReply,
+    ) {
+        use crate::editor::session::documents::DocumentChange;
+        if let Err(error) = self
+            .window_session
+            .check_editor_admission(&(&self.state).into())
+        {
+            self.show_error(error);
+            return;
+        }
+        if let Err(error) = reply.check_save_destination(
+            self.state
+                .buffers
+                .iter()
+                .filter_map(|(id, b)| b.path.as_deref().map(|path| (id, path))),
+        ) {
+            self.show_document_failure(error);
+            return;
+        }
+        let current = self.state.version();
+        let view = reply.target().and_then(|id| {
+            self.state
+                .buffers
+                .get(id)
+                .map(|b| Self::document_view(id, b))
+        });
+        let change = match self
+            .documents
+            .prepare_file(reply, &current, &self.workspace.version(), view)
+            .and_then(|plan| plan.into_change(&current))
+        {
+            Ok(change) => change,
+            Err(e) => {
+                self.show_document_failure(e);
+                return;
+            }
+        };
+        let mut candidate = self.state.draft();
+        match change {
+            DocumentChange::Open {
+                text,
+                path,
+                navigation,
+                activate,
+            } => {
+                let activate = activate
+                    && self.window_session.navigation_current(
+                        &navigation,
+                        &self.state.window_version(),
+                        self.state.active_view,
+                    );
+                if activate {
+                    candidate.open_document(text, path.clone());
+                } else {
+                    candidate.load_document(text, path.clone());
+                }
+                if let Err(e) = self.commit_editor_draft(candidate, None, activate) {
+                    self.show_error(e);
+                    return;
+                }
+                self.record_recent_file(path.clone());
+                self.notify_message(
+                    self.message("opened", &[("path", path.display().to_string())]),
+                    false,
+                );
+            }
+            DocumentChange::Reload { buffer, text, path } => {
+                if !candidate.reload_document(buffer, text, path.clone()) {
+                    self.show_error(self.message("reload_closed", &[]));
+                    return;
+                }
+                if let Err(e) = self.commit_editor_draft(candidate, None, false) {
+                    self.show_error(e);
+                    return;
+                }
+                self.notify_message(
+                    self.message("reloaded_file", &[("path", path.display().to_string())]),
+                    false,
+                );
+            }
+            DocumentChange::Saved {
+                buffer,
+                text,
+                revision,
+                bytes,
+                target: path,
+                quit: quit_after,
+            } => {
+                if !candidate.save_document(buffer, &text, revision, bytes, path.clone()) {
+                    return;
+                }
+                if let Err(e) = self.commit_editor_draft(candidate, None, false) {
+                    self.show_error(e);
+                    return;
+                }
+                let buffer_state = &self.state.buffers[buffer];
+                let still_dirty = buffer_state.dirty;
+                let lsp_document = buffer_state.path.clone().and_then(|path| {
+                    Some(LspDocument {
+                        language_id: language_id_for_path(&path)?.into(),
+                        path,
+                        version: buffer_state.text.revision().0,
+                        text: buffer_state.text.to_string(),
+                    })
+                });
+                self.notify_message(
+                    if still_dirty {
+                        self.message(
+                            "saved_dirty",
+                            &[
+                                ("revision", revision.0.to_string()),
+                                ("path", path.display().to_string()),
+                            ],
+                        )
+                    } else {
+                        self.message("saved", &[("path", path.display().to_string())])
+                    },
+                    false,
+                );
+                if let Some(server) = self.language.active().map(String::as_str)
+                    && let Some(document) = lsp_document
+                {
+                    let _ = self.language.save(server, document);
+                    // An older save snapshot must not leave the worker's document
+                    // identity behind the current editor incarnation/content.
+                    self.language.invalidate_active_document(buffer);
+                }
+                if self.ui.explorer.is_some() {
+                    self.start_git_status_refresh_with_feedback(false);
+                }
+                if quit_after && !still_dirty {
+                    if self
+                        .state
+                        .buffers
+                        .iter()
+                        .any(|(_, candidate)| candidate.dirty)
+                    {
+                        self.show_error(self.message("saved_others_dirty", &[]));
+                    } else {
+                        self.should_quit = true;
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Eq, PartialEq)]
+pub(in crate::editor::session) enum ExecutionAdmission {
+    Tool(String, Option<LspRuntimeSource>),
+    Lsp(String),
+    Restart(String),
+    Debug(crate::editor::session::debugger::DebugIntent),
+    Task(String, crate::config::TaskKind),
+    Terminal(crate::editor::session::terminal::TerminalIntent),
+}
+impl ExecutionAdmission {
+    fn for_action(action: &DeferredExecution) -> Option<Self> {
+        Some(match action {
+            DeferredExecution::InstallTool { id, source } => Self::Tool(id.clone(), *source),
+            DeferredExecution::StartLsp(Some(id)) => Self::Lsp(id.clone()),
+            DeferredExecution::RestartLsp(id) => Self::Restart(id.clone()),
+            DeferredExecution::StartDebug(intent) => Self::Debug(intent.clone()),
+            DeferredExecution::OpenTerminal(intent)
+            | DeferredExecution::OpenDapTerminal { intent, .. } => Self::Terminal(intent.clone()),
+            DeferredExecution::RunTask(name) => {
+                Self::Task(name.clone(), crate::config::TaskKind::Task)
+            }
+            DeferredExecution::RunTest { name, .. } => {
+                Self::Task(name.clone(), crate::config::TaskKind::Test)
+            }
+            DeferredExecution::RunLinter { name, .. } => {
+                Self::Task(name.clone(), crate::config::TaskKind::Linter)
+            }
+            DeferredExecution::RunFormatter { name, .. } => {
+                Self::Task(name.clone(), crate::config::TaskKind::Formatter)
+            }
+            _ => return None,
+        })
+    }
+}
+pub(in crate::editor::session) struct ExecutionAuthorization {
+    admission: ExecutionAdmission,
+    id: crate::editor::session::workspace::ValidationId,
+    permit: crate::editor::session::workspace::ExecutionPermit,
+}
+impl ExecutionAuthorization {
+    pub(in crate::editor::session) fn debug_permit(
+        self,
+        workspace: &crate::editor::session::workspace::WorkspaceSession,
+        intent: &crate::editor::session::debugger::DebugIntent,
+    ) -> Option<crate::editor::session::workspace::DebugPermit> {
+        if self.admission != ExecutionAdmission::Debug(intent.clone()) {
+            return None;
+        }
+        workspace.debug_permit(self.permit, self.id, intent.nonce())
+    }
+    pub(in crate::editor::session) fn terminal_permit(
+        self,
+        workspace: &crate::editor::session::workspace::WorkspaceSession,
+        intent: &crate::editor::session::terminal::TerminalIntent,
+    ) -> Option<crate::editor::session::workspace::TerminalPermit> {
+        if self.admission != ExecutionAdmission::Terminal(intent.clone()) {
+            return None;
+        }
+        workspace.terminal_permit(
+            self.permit,
+            self.id,
+            intent.profile().into(),
+            intent.nonce(),
+        )
+    }
+
+    pub(in crate::editor::session) fn task_permit(
+        self,
+        workspace: &crate::editor::session::workspace::WorkspaceSession,
+        name: &str,
+        kind: crate::config::TaskKind,
+    ) -> Option<crate::editor::session::workspace::TaskPermit> {
+        if self.admission != ExecutionAdmission::Task(name.into(), kind) {
+            return None;
+        }
+        workspace.task_permit(self.permit, self.id, name.into(), kind)
+    }
+
+    pub(in crate::editor::session) fn consume(
+        self,
+        workspace: &crate::editor::session::workspace::WorkspaceSession,
+        requested: ExecutionAdmission,
+    ) -> bool {
+        self.admission == requested && workspace.consume_permit(self.permit, self.id)
+    }
+}
+use crate::editor::session::workspace::{WorkspaceFailure, WorkspaceUpdate};
+impl InteractiveApplication {
+    pub(in crate::editor::session) fn show_workspace_failure(&mut self, failure: WorkspaceFailure) {
+        let message = match failure {
+            WorkspaceFailure::Message(key) => self.message(key, &[]),
+            WorkspaceFailure::Diagnostic(key, diagnostic) => {
+                self.message(key, &[("diagnostic", diagnostic)])
+            }
+            WorkspaceFailure::Plain(message) => message,
+        };
+        self.show_error(message);
+    }
+    pub(in crate::editor::session) fn defer_trusted_execution(
+        &mut self,
+        action: DeferredExecution,
+    ) {
+        match self.workspace.begin_validation() {
+            Ok(id) => {
+                match action {
+                    DeferredExecution::InstallTool { id: tool, source } => {
+                        self.tooling.defer_validation(id, tool, source)
+                    }
+                    DeferredExecution::StartLsp(server) => {
+                        self.language.defer_start_validation(id, server)
+                    }
+                    DeferredExecution::RestartLsp(server) => {
+                        self.language.defer_restart_validation(id, server)
+                    }
+                    DeferredExecution::StartDebug(intent) => {
+                        self.debugger_session.defer_validation(id, intent)
+                    }
+                    DeferredExecution::InstallRegistry {
+                        publisher,
+                        name,
+                        version,
+                    } => self
+                        .extension
+                        .defer_registry_validation(id, publisher, name, version),
+                    DeferredExecution::PrepareRegistryArtifact => {
+                        self.extension.defer_artifact_validation(id)
+                    }
+                    DeferredExecution::InstallPackage {
+                        package_manifest,
+                        plugin_manifest,
+                        component,
+                        update,
+                    } => self.extension.defer_package_validation(
+                        id,
+                        package_manifest,
+                        plugin_manifest,
+                        component,
+                        update,
+                    ),
+                    DeferredExecution::RunTask(name) => {
+                        self.tasks.defer_validation(id, name, AdapterContext::Plain)
+                    }
+                    DeferredExecution::OpenTerminal(intent) => {
+                        self.terminal_session.defer_validation(id, intent, None)
+                    }
+                    DeferredExecution::OpenDapTerminal { intent, reply } => self
+                        .terminal_session
+                        .defer_validation(id, intent, Some(reply)),
+                    DeferredExecution::RunTest { name, matcher } => {
+                        self.tasks
+                            .defer_validation(id, name, AdapterContext::Test { matcher })
+                    }
+                    DeferredExecution::RunLinter { name, matcher } => {
+                        self.tasks
+                            .defer_validation(id, name, AdapterContext::Linter { matcher })
+                    }
+                    DeferredExecution::RunFormatter { name, source } => self
+                        .tasks
+                        .defer_validation(id, name, AdapterContext::Formatter { source }),
+                }
+                self.notify_message(self.message("workspace_execution_validating", &[]), false);
+            }
+            Err(e) => self.show_workspace_failure(e),
+        }
+    }
+    fn finish_execution_validation(
+        &mut self,
+        id: crate::editor::session::workspace::ValidationId,
+        permit: Option<crate::editor::session::workspace::ExecutionPermit>,
+    ) {
+        let Some(action) = self
+            .tooling
+            .take_validation(id)
+            .or_else(|| self.language.take_validation(id))
+            .or_else(|| self.debugger_session.take_validation(id))
+            .or_else(|| self.extension.take_validation(id))
+            .or_else(|| self.tasks.take_validation(id))
+            .or_else(|| self.terminal_session.take_validation(id))
+        else {
+            return;
+        };
+        let Some(permit) = permit else {
+            self.show_error(self.message(
+                "workspace_execution_validation_failed",
+                &[("diagnostic", "workspace root identity changed".into())],
+            ));
+            return;
+        };
+        if !self.workspace.permit_current(&permit, id) {
+            self.show_error("workspace execution permit is stale");
+            return;
+        }
+        self.clear_notice();
+        let authorization = if let Some(admission) = ExecutionAdmission::for_action(&action) {
+            Some(ExecutionAuthorization {
+                admission,
+                id,
+                permit,
+            })
+        } else {
+            if !self.workspace.consume_permit(permit, id) {
+                self.show_error("workspace execution permit is stale");
+                return;
+            }
+            None
+        };
+        match action {
+            DeferredExecution::InstallTool { id, source } => {
+                self.install_tool_authorized(&id, source, authorization)
+            }
+            DeferredExecution::StartLsp(requested) => {
+                self.start_lsp_authorized(requested, authorization)
+            }
+            DeferredExecution::RestartLsp(key) => self.restart_lsp_authorized(key, authorization),
+            DeferredExecution::StartDebug(intent) => {
+                self.authorize_debug_launch(intent, authorization)
+            }
+            DeferredExecution::InstallRegistry {
+                publisher,
+                name,
+                version,
+            } => self.request_registry(
+                RegistryRequest::Show {
+                    publisher,
+                    name,
+                    version,
+                },
+                true,
+            ),
+            DeferredExecution::PrepareRegistryArtifact => {
+                if let Err(error) = self.extension.prepare_artifact(self.plugin_limits()) {
+                    self.show_error(error);
+                }
+            }
+
+            DeferredExecution::InstallPackage {
+                package_manifest,
+                plugin_manifest,
+                component,
+                update,
+            } => self.install_package_after_validation(
+                package_manifest,
+                plugin_manifest,
+                component,
+                update,
+            ),
+            DeferredExecution::RunTask(name) => {
+                self.start_task_after_validation(&name, authorization)
+            }
+            DeferredExecution::OpenTerminal(intent) => {
+                self.open_terminal_after_validation_with_response(intent, None, authorization)
+            }
+            DeferredExecution::OpenDapTerminal { intent, reply } => self
+                .open_terminal_after_validation_with_response(intent, Some(reply), authorization),
+            DeferredExecution::RunTest { name, matcher } => {
+                self.start_task_plan(&name, AdapterContext::Test { matcher }, authorization)
+            }
+            DeferredExecution::RunLinter { name, matcher } => {
+                self.start_task_plan(&name, AdapterContext::Linter { matcher }, authorization)
+            }
+            DeferredExecution::RunFormatter { name, source } => {
+                self.start_task_plan(&name, AdapterContext::Formatter { source }, authorization)
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::editor::session) fn reconcile_workspace_trust(&mut self) {
+        self.workspace.reconcile_trust();
+    }
+    pub(in crate::editor::session) fn process_trust_events(&mut self) {
+        let before = self.workspace.version();
+        let updates = self.workspace.poll();
+        if before != self.workspace.version() {
+            self.documents.retire_workspace(&self.workspace.version());
+        }
+        for event in updates {
+            match event {
+                WorkspaceUpdate::Failure(e) => self.show_workspace_failure(e),
+                WorkspaceUpdate::Message(key) => self.notify_message(self.message(key, &[]), false),
+                WorkspaceUpdate::ScopeInvalidated => self.documents.retire_startup(),
+                WorkspaceUpdate::RootAdded(path) => {
+                    self.invalidate_root_scoped_operations();
+                    self.notify_message(
+                        self.message(
+                            "workspace_root_added",
+                            &[("path", path.display().to_string())],
+                        ),
+                        false,
+                    );
+                }
+                WorkspaceUpdate::Validated { id, permit } => {
+                    self.finish_execution_validation(id, permit)
+                }
+            }
+        }
+    }
+    pub(in crate::editor::session) fn maybe_prompt_for_unseen_workspace(&mut self) {
+        if self.workspace.should_prompt(
+            self.input.prompt().is_some()
+                || self.ui.picker.is_some()
+                || self.ui.tool_menu.is_some(),
+        ) {
+            self.request_workspace_trust();
+        }
+    }
+    pub(in crate::editor::session) fn request_workspace_trust(&mut self) {
+        if self.input.prompt().is_some() {
+            return;
+        }
+        match self.workspace.request_confirmation() {
+            Ok(()) => {
+                self.open_prompt(PromptKind::WorkspaceTrust, String::new());
+                self.clear_notice();
+                self.prompt_help(
+                    self.message(
+                        "workspace_trust_confirmation",
+                        &[(
+                            "phrase",
+                            self.configuration
+                                .settings()
+                                .workspace
+                                .trust_confirmation_phrase
+                                .clone(),
+                        )],
+                    ),
+                );
+            }
+            Err(e) => self.show_workspace_failure(e),
+        }
+    }
+    pub(in crate::editor::session) fn confirm_workspace_trust(&mut self, phrase: String) {
+        match self.workspace.confirm(
+            &phrase,
+            &self
+                .configuration
+                .settings()
+                .workspace
+                .trust_confirmation_phrase,
+        ) {
+            Ok(()) => self.notify_message(self.message("workspace_trust_saving", &[]), false),
+            Err(e) => self.show_workspace_failure(e),
+        }
+    }
+    pub(in crate::editor::session) fn revoke_workspace_trust(&mut self) {
+        match self.workspace.revoke() {
+            Ok(()) => self.notify_message(self.message("workspace_trust_saving", &[]), false),
+            Err(e) => self.show_workspace_failure(e),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::session::workspace::{ExecutionPermit, ValidationId, WorkspaceSession};
+    fn permit(owner: &mut WorkspaceSession) -> (ValidationId, ExecutionPermit) {
+        let id = owner
+            .begin_validation()
+            .unwrap_or_else(|_| panic!("validation"));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            for event in owner.poll() {
+                if let WorkspaceUpdate::Validated {
+                    id: actual,
+                    permit: Some(permit),
+                } = event
+                {
+                    assert_eq!(id, actual);
+                    return (id, permit);
+                }
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    #[test]
+    fn explicit_authorizations_are_consumed_by_exact_arguments_and_current_workspace_only() {
+        let root = tempfile::tempdir().unwrap();
+        let identity = RootIdentity::capture(root.path()).unwrap();
+        let state =
+            WorkspaceState::new(WorkspaceId(1), [("root".into(), identity.clone())]).unwrap();
+        let mut owner =
+            WorkspaceSession::new(state, root.path().join("trust.toml"), 2, false, false, 2);
+        owner
+            .fixture_identity(crate::workspace::RootId(1), identity.clone())
+            .unwrap();
+        owner.fixture_trust_identity(identity);
+        owner.reconcile_trust();
+        let (id, permit) = permit(&mut owner);
+        let rejected = ExecutionAuthorization {
+            admission: ExecutionAdmission::Lsp("one".into()),
+            id,
+            permit,
+        };
+        assert!(!rejected.consume(&owner, ExecutionAdmission::Lsp("two".into())));
+        let (id, token) = self::permit(&mut owner);
+        let valid = ExecutionAuthorization {
+            admission: ExecutionAdmission::Lsp("one".into()),
+            id,
+            permit: token,
+        };
+        assert!(valid.consume(&owner, ExecutionAdmission::Lsp("one".into())));
+        let (id, token) = self::permit(&mut owner);
+        let stale = ExecutionAuthorization {
+            admission: ExecutionAdmission::Restart("one".into()),
+            id,
+            permit: token,
+        };
+        owner.fixture_safe_mode(true);
+        assert!(!stale.consume(&owner, ExecutionAdmission::Restart("one".into())));
     }
 }

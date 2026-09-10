@@ -94,6 +94,33 @@ fn interactive_coordinator_has_only_bounded_owner_references() {
             "interactive coordinator retains `{forbidden}`"
         );
     }
+
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let session = root.join("src/editor/session");
+    let allowed = [
+        "src/editor/session/dispatch/mod.rs",
+        "src/editor/session/dispatch/startup.rs",
+        "src/editor/session/dispatch/events.rs",
+        "src/editor/session/dispatch/effects.rs",
+        "src/editor/session/dispatch/render.rs",
+        "src/editor/session/dispatch/shutdown.rs",
+    ];
+    for relative in allowed {
+        assert!(root.join(relative).is_file(), "missing `{relative}`");
+    }
+    let mut sources = Vec::new();
+    rust_sources(&session, &mut sources);
+    for path in sources {
+        let source = fs::read_to_string(&path).expect("read session source");
+        if source.contains("impl InteractiveApplication") {
+            let relative = path.strip_prefix(&root).expect("repository source");
+            assert!(
+                allowed.iter().any(|allowed| relative == Path::new(allowed)),
+                "{} implements the application outside dispatch composition",
+                relative.display()
+            );
+        }
+    }
 }
 
 #[test]
@@ -240,7 +267,7 @@ fn editor_geometry_is_projected_from_the_universal_window_snapshot() {
 #[test]
 fn logical_keys_are_not_dispatched_by_effect_or_render_owners() {
     for relative in [
-        "src/editor/session/effects",
+        "src/editor/session/dispatch/effects.rs",
         "src/ui/render",
         "src/editor/input/grammar.rs",
     ] {

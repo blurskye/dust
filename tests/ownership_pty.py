@@ -18,6 +18,7 @@ def main() -> None:
                 (1.5, b":application.safe_mode.status\r", None),
                 (0.6, b":application.notifications.open\r", None),
                 (0.6, b"\x1b", None),
+                (0.3, b"\x1b", None),
                 (0.3, b"q", None),
             ],
         )
@@ -35,6 +36,7 @@ def main() -> None:
             [
                 (1.5, b":syntax.status\r", None),
                 (0.6, b"\x1b", None),
+                (0.3, b"\x1b", None),
                 (0.3, b":q\r", None),
             ],
         )
@@ -65,6 +67,7 @@ def main() -> None:
                 (0.8, b"f", None),
                 (0.25, b"b", None),
                 (0.3, b"\x1b", None),
+                (0.3, b"\x1b", None),
                 (0.2, b":config.reload\r", None),
                 (0.8, b":q\r", None),
             ],
@@ -75,7 +78,7 @@ def main() -> None:
         assert "space" in terminal_screen(snapshots[1])
         assert "space f" in terminal_screen(snapshots[2])
         assert "Buffers" in terminal_screen(snapshots[3])
-        assert "OWNER_CONFIG_ACCEPTED" in terminal_screen(snapshots[5])
+        assert "OWNER_CONFIG_ACCEPTED" in terminal_screen(snapshots[6])
         assert_restored(output)
     with tempfile.TemporaryDirectory(prefix="dust-owner-replay-") as directory:
         source = pathlib.Path(directory) / "replay.txt"
