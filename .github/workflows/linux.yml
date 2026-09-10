@@ -10,6 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Specification integrity
+        run: |
+          python3 scripts/check-specs.py
+          python3 tests/spec_docs.py
       - uses: dtolnay/rust-toolchain@stable
       - run: scripts/qualify-linux.sh implementation
   tests:

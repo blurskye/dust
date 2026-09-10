@@ -1,6 +1,8 @@
+> **Current-interface reference, not the target specification.** This document describes the implemented interface at baseline `0a9c551`. Future requirements and their delivery status live in [specs/README.md](specs/README.md).
+
 # Dust on Linux
 
-This guide covers everyday editing. For implementation limits and qualification evidence, see [`progress/linux-phase-status.md`](progress/linux-phase-status.md).
+This guide covers everyday editing. For current scope and qualification limits, see [delivery status](specs/delivery.md); [older Linux receipts](progress/linux-phase-status.md) are historical evidence.
 
 ## Start
 
@@ -84,7 +86,7 @@ Pickers open in **Insert** mode: every letter (including `j` and `k`) types into
 
 Controls are configurable in the `picker` (Insert) and `picker_normal` contexts. The existing `j`/`k` mapping IDs now belong to `picker_normal`; the existing Insert-context Escape mapping invokes `picker.mode.normal`. `picker.cancel` remains the direct-close command. Workspace-edit review is deliberately separate: its existing toggle/apply/reject controls are not query editing.
 
-`Space f r` opens checked workspace replacement. The full parity inventory and missing Telescope sources are tracked in [`plans/neovim-feature-matrix.md`](plans/neovim-feature-matrix.md).
+`Space f r` opens checked workspace replacement. Remaining search/provider workflows are tracked in [delivery status](specs/delivery.md). The comparison stack is LazyVim with Snacks/blink, not assumed Telescope.
 
 ## Diagnostics and LSP
 

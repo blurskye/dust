@@ -1,3 +1,5 @@
+> **Current-interface reference, not the target specification.** This document describes the implemented interface at baseline `0a9c551`. Future requirements and their delivery status live in [specs/README.md](specs/README.md).
+
 # Linux release, installation, and rollback
 
 Dust's release owner produces a deterministic USTAR stream compressed as `.tar.zst` with a pinned zstd crate/version, level 19, one stream, and checksum enabled. Entries are sorted, timestamps/UIDs/GIDs are zero, permissions are fixed, and symlinks and traversal names are rejected. The archive contains `bin/dust`, bundled assets, `Cargo.lock`, the canonical release manifest, provenance metadata, and a CycloneDX dependency inventory derived from the exact lockfile.
