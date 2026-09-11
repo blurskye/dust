@@ -1661,6 +1661,16 @@ fn generic_native_window_operations_are_revision_checked_atomic_and_identity_pre
     );
     app.terminal_session.select(PtyId(7));
     app.sync_terminal_panel();
+    assert_eq!(
+        app.window_session
+            .graph()
+            .content_snapshots()
+            .into_iter()
+            .find(|content| content.content_type.as_str() == "builtin.terminal")
+            .expect("terminal content")
+            .lifecycle,
+        crate::ui::window::ContentLifecycle::Running
+    );
     let explorer = app
         .window_session
         .native_ids()

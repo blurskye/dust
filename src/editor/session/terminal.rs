@@ -4,7 +4,10 @@ use super::workspace::{ExecutionReady, TerminalPermit, WorkspaceSession, Workspa
 use crate::{
     config::{TerminalProfileConfig, TerminalsConfig},
     process::{ExecutionPreflightRequest, PtyEvent, PtyId, PtyPolicy, PtyRequest, PtyService},
-    ui::{PtyScreen, TerminalPanelMode, TerminalPanelState, TerminalTabState},
+    ui::{
+        PtyScreen, TerminalPanelMode, TerminalPanelState, TerminalTabState,
+        window::ContentLifecycle,
+    },
 };
 pub(in crate::editor::session) use input::TerminalInput;
 use input::{clamp_terminal_cursor, keep_terminal_cursor_visible};
@@ -155,13 +158,22 @@ impl TerminalSession {
     pub(in crate::editor::session) fn resolve(&self, key: &TerminalKey) -> Option<PtyId> {
         (Arc::ptr_eq(&key.owner, &self.owner) && self.contains(key.id)).then_some(key.id)
     }
-    pub(in crate::editor::session) fn descriptions(&self) -> Vec<(u64, String)> {
+    pub(in crate::editor::session) fn descriptions(&self) -> Vec<(u64, String, ContentLifecycle)> {
         let mut rows = self
             .tabs
             .iter()
-            .map(|(id, t)| (id.0, t.profile.clone()))
+            .map(|(id, terminal)| {
+                let lifecycle = match terminal.phase() {
+                    crate::ui::TerminalPhase::Preflight => ContentLifecycle::Preflight,
+                    crate::ui::TerminalPhase::Starting => ContentLifecycle::Starting,
+                    crate::ui::TerminalPhase::Running => ContentLifecycle::Running,
+                    crate::ui::TerminalPhase::Exited => ContentLifecycle::Exited,
+                    crate::ui::TerminalPhase::Failed => ContentLifecycle::Failed,
+                };
+                (id.0, terminal.profile.clone(), lifecycle)
+            })
             .collect::<Vec<_>>();
-        rows.sort_unstable_by_key(|(id, _)| *id);
+        rows.sort_unstable_by_key(|(id, ..)| *id);
         rows
     }
     pub(in crate::editor::session) fn choices(&self) -> Vec<(TerminalKey, String, String)> {
@@ -209,7 +221,7 @@ impl TerminalSession {
         }
         let current = self
             .selected
-            .and_then(|id| ids.iter().position(|(i, _)| *i == id.0))
+            .and_then(|id| ids.iter().position(|(i, ..)| *i == id.0))
             .unwrap_or(0);
         let next = if direction < 0 {
             current.checked_sub(1).unwrap_or(ids.len() - 1)

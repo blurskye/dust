@@ -718,6 +718,33 @@ fn content_capabilities_reject_clone_focus_placement_and_close_before_mutation()
     graph
         .create_view(terminal, "native", 1)
         .expect("authoritative terminal view");
+    assert_eq!(
+        graph
+            .content(terminal)
+            .expect("terminal descriptor")
+            .lifecycle,
+        ContentLifecycle::Starting
+    );
+    let before_lifecycle = graph.revision();
+    graph
+        .update_content_lifecycle(
+            terminal,
+            "terminal".into(),
+            false,
+            ContentLifecycle::Running,
+        )
+        .expect("terminal lifecycle update");
+    assert_ne!(graph.revision(), before_lifecycle);
+    let running_revision = graph.revision();
+    graph
+        .update_content_lifecycle(
+            terminal,
+            "terminal".into(),
+            false,
+            ContentLifecycle::Running,
+        )
+        .expect("unchanged terminal lifecycle");
+    assert_eq!(graph.revision(), running_revision);
     assert!(
         graph
             .content(terminal)

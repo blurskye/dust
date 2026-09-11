@@ -1,7 +1,10 @@
 use super::*;
-use crate::extensions::{
-    PluginActivationBehavior, PluginCommandContext, PluginCommandDeclaration,
-    PluginContentTypeContribution, PluginPresenterKind, PluginPrivateCellPolicy,
+use crate::{
+    extensions::{
+        PluginActivationBehavior, PluginCommandContext, PluginCommandDeclaration,
+        PluginContentTypeContribution, PluginPresenterKind, PluginPrivateCellPolicy,
+    },
+    ui::window::ContentLifecycle,
 };
 
 fn index(owner: &str, generation: u64) -> PluginContributionIndex {
@@ -1294,7 +1297,9 @@ fn generation_owned_retained_window_lifecycle_is_revision_checked() {
     assert!(event.error.is_none(), "{:?}", event.error);
     let handle = event.handle.expect("handle");
     assert_eq!(host.snapshots()[0].rows[0].text, "Hello");
-    let capabilities = graph.content_snapshots()[0].capabilities;
+    let content = &graph.content_snapshots()[0];
+    assert_eq!(content.lifecycle, ContentLifecycle::Ready);
+    let capabilities = content.capabilities;
     assert!(capabilities.focusable);
     assert!(capabilities.selectable);
     assert!(capabilities.dock);

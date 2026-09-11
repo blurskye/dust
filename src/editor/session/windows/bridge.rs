@@ -8,9 +8,9 @@ use crate::{
     editor::{BufferId, LayoutNode, PaneId, TabId, ViewId as EditorViewId},
     ui::PickerSurfaceKind,
     ui::window::{
-        ContentAdapterKind, ContentId, ContentTypeId, TileAxis, TiledLayoutNode,
-        TiledLayoutSnapshot, ViewId, WindowError, WindowGraph, WindowId, WindowPlacement,
-        WorkspaceTabId,
+        ContentAdapterKind, ContentContract, ContentId, ContentLifecycle, ContentTypeId, TileAxis,
+        TiledLayoutNode, TiledLayoutSnapshot, ViewId, WindowError, WindowGraph, WindowId,
+        WindowPlacement, WorkspaceTabId,
     },
 };
 
@@ -373,7 +373,7 @@ impl NativeSurfaceBridge {
         explorer_title: &str,
         dashboard_title: &str,
         picker_title: &str,
-        terminals: &[(u64, String)],
+        terminals: &[(u64, String, ContentLifecycle)],
     ) -> Result<(), WindowError> {
         let owner = "builtin.surfaces";
         let generation = 1;
@@ -547,7 +547,7 @@ impl NativeSurfaceBridge {
 
         let live = terminals
             .iter()
-            .map(|(id, _)| *id)
+            .map(|(id, ..)| *id)
             .collect::<std::collections::BTreeSet<_>>();
         let stale = self
             .terminals
@@ -562,7 +562,7 @@ impl NativeSurfaceBridge {
             self.terminal_placements.remove(&id);
             self.terminal_restore_placements.remove(&id);
         }
-        for (id, profile) in terminals {
+        for (id, profile, lifecycle) in terminals {
             let placement = if signature.active_terminal == Some(*id) {
                 self.terminal_placements
                     .get(id)
@@ -577,12 +577,13 @@ impl NativeSurfaceBridge {
                 WindowPlacement::Hidden
             };
             if let Some(ids) = self.terminals.get(id).copied() {
-                graph.update_content(ids.content, profile.clone(), false)?;
+                graph.update_content_lifecycle(ids.content, profile.clone(), false, *lifecycle)?;
                 graph.rehost(ids.window, tab, ids.view, placement, true)?;
             } else {
-                let content = graph.create_content(
+                let content = graph.create_content_with_contract(
                     ContentTypeId::new("builtin.terminal")?,
-                    ContentAdapterKind::TerminalSession,
+                    ContentContract::adapter_defaults(ContentAdapterKind::TerminalSession)
+                        .with_lifecycle(*lifecycle),
                     profile.clone(),
                     false,
                     owner,

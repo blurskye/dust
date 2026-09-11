@@ -4,7 +4,7 @@ use super::{
     EditorWindowCandidate, NativeSurfaceSignature, NativeSurfaceTarget, WindowCandidate,
     WindowSession,
 };
-use crate::ui::window::{WindowGraph, WindowId, WindowPlacement};
+use crate::ui::window::{ContentLifecycle, WindowGraph, WindowId, WindowPlacement};
 use crate::{
     editor::FocusDirection,
     ui::window::{DockEdge, WindowRect},
@@ -16,7 +16,7 @@ pub(in crate::editor::session) struct NativeDescriptions<'a> {
     pub explorer_title: &'a str,
     pub dashboard_title: &'a str,
     pub picker_title: &'a str,
-    pub terminals: &'a [(u64, String)],
+    pub terminals: &'a [(u64, String, ContentLifecycle)],
 }
 
 impl WindowCandidate {

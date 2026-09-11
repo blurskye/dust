@@ -1,9 +1,20 @@
 use super::*;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ContentLifecycle {
+    Ready,
+    Preflight,
+    Starting,
+    Running,
+    Exited,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ContentContract {
     pub adapter: ContentAdapterKind,
     pub capabilities: ContentCapabilities,
+    pub lifecycle: ContentLifecycle,
 }
 
 impl ContentContract {
@@ -12,15 +23,26 @@ impl ContentContract {
         Self {
             adapter,
             capabilities: ContentCapabilities::for_adapter(adapter),
+            lifecycle: match adapter {
+                ContentAdapterKind::TerminalSession | ContentAdapterKind::ExternalTui => {
+                    ContentLifecycle::Starting
+                }
+                _ => ContentLifecycle::Ready,
+            },
         }
     }
 
     #[must_use]
     pub const fn declared(adapter: ContentAdapterKind, capabilities: ContentCapabilities) -> Self {
-        Self {
-            adapter,
-            capabilities,
-        }
+        let mut contract = Self::adapter_defaults(adapter);
+        contract.capabilities = capabilities;
+        contract
+    }
+
+    #[must_use]
+    pub const fn with_lifecycle(mut self, lifecycle: ContentLifecycle) -> Self {
+        self.lifecycle = lifecycle;
+        self
     }
 }
 
@@ -121,6 +143,7 @@ pub struct ContentDescriptor {
     pub content_type: ContentTypeId,
     pub adapter: ContentAdapterKind,
     pub capabilities: ContentCapabilities,
+    pub lifecycle: ContentLifecycle,
     pub title: String,
     pub dirty: bool,
     pub owner: String,
@@ -160,6 +183,7 @@ pub struct ContentSnapshot {
     pub content_type: ContentTypeId,
     pub adapter: ContentAdapterKind,
     pub capabilities: ContentCapabilities,
+    pub lifecycle: ContentLifecycle,
     pub title: String,
     pub dirty: bool,
     pub active: bool,

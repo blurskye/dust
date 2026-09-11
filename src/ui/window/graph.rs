@@ -123,6 +123,7 @@ impl WindowGraph {
             content_type,
             adapter: contract.adapter,
             capabilities: contract.capabilities,
+            lifecycle: contract.lifecycle,
             title,
             dirty,
             owner: owner.into(),
@@ -164,12 +165,27 @@ impl WindowGraph {
         title: String,
         dirty: bool,
     ) -> Result<(), WindowError> {
+        let lifecycle = self
+            .contents
+            .get(&content)
+            .ok_or(WindowError::UnknownContent)?
+            .lifecycle;
+        self.update_content_lifecycle(content, title, dirty, lifecycle)
+    }
+
+    pub fn update_content_lifecycle(
+        &mut self,
+        content: ContentId,
+        title: String,
+        dirty: bool,
+        lifecycle: ContentLifecycle,
+    ) -> Result<(), WindowError> {
         validate_title(&title)?;
         let current = self
             .contents
             .get(&content)
             .ok_or(WindowError::UnknownContent)?;
-        if current.title == title && current.dirty == dirty {
+        if current.title == title && current.dirty == dirty && current.lifecycle == lifecycle {
             return Ok(());
         }
         self.ensure_revision_capacity()?;
@@ -179,6 +195,7 @@ impl WindowGraph {
             .ok_or(WindowError::UnknownContent)?;
         descriptor.title = title;
         descriptor.dirty = dirty;
+        descriptor.lifecycle = lifecycle;
         self.mark_changed()
     }
 
@@ -1007,6 +1024,7 @@ impl WindowGraph {
                     content_type: content.content_type.clone(),
                     adapter: content.adapter,
                     capabilities: content.capabilities,
+                    lifecycle: content.lifecycle,
                     title: content.title.clone(),
                     dirty: content.dirty,
                     active: active_content == Some(content.id),
