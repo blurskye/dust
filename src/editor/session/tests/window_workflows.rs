@@ -26,6 +26,7 @@ fn universal_window_switcher_focuses_an_exact_window_across_editor_tabs() {
     session.new_buffer();
     session.reconcile_windows();
     let original = session.focused_window().expect("first editor window");
+    let original_identity = session.window_identity(original);
     let original_tab = session.active_tab().expect("first editor tab");
     session.new_tab();
     assert_ne!(session.active_tab(), Some(original_tab));
@@ -46,6 +47,7 @@ fn universal_window_switcher_focuses_an_exact_window_across_editor_tabs() {
     session.key("enter");
     assert_eq!(session.active_tab(), Some(original_tab));
     assert_eq!(session.focused_window(), Some(original));
+    assert_eq!(session.window_identity(original), original_identity);
 }
 
 #[test]
@@ -128,6 +130,72 @@ fn universal_window_clone_publishes_independent_explorer_views_over_shared_tree_
     assert_eq!(primary_after, Some(primary_selection));
     assert_ne!(clone_after, primary_after);
     let _frame = session.frame();
+}
+
+#[test]
+fn cloned_explorer_rehosts_and_restores_without_replacing_shared_or_view_identity() {
+    use crate::ui::window::{DockEdge, WindowPlacement, WindowRect};
+
+    let mut session = TestSession::new(crate::config::load_bundled_config());
+    session.new_buffer();
+    session.explorer_fixture();
+    session.float_explorer();
+    session.clone_explorer();
+    let before = session.explorer_content_ids();
+    let primary_window = session.explorer_window(1);
+    let clone_window = session.explorer_window(2);
+    let first_tab = session.active_window_tab();
+    session.new_tab();
+    let second_tab = session.active_window_tab();
+    assert_ne!(second_tab, first_tab);
+    assert_eq!(session.explorer_content_ids(), before);
+    assert_eq!(session.window_tab(primary_window), second_tab);
+    assert_eq!(session.window_tab(clone_window), second_tab);
+
+    for placement in [
+        WindowPlacement::Docked {
+            edge: DockEdge::Right,
+            size: 17,
+        },
+        WindowPlacement::Floating(WindowRect {
+            x: 9,
+            y: 4,
+            width: 33,
+            height: 9,
+        }),
+        WindowPlacement::Fullscreen,
+        WindowPlacement::Hidden,
+    ] {
+        session
+            .place_window(clone_window, placement)
+            .expect("source-owned Explorer placement");
+        assert_eq!(session.window_placement(clone_window), placement);
+        assert_eq!(session.explorer_content_ids(), before);
+    }
+    session
+        .show_window(clone_window)
+        .expect("show exact cloned Explorer view");
+    assert_eq!(
+        session.window_placement(clone_window),
+        WindowPlacement::Fullscreen
+    );
+    assert_eq!(session.explorer_content_ids(), before);
+    session
+        .place_window(clone_window, WindowPlacement::Tiled)
+        .expect("tile exact cloned Explorer view");
+    assert_eq!(
+        session.window_placement(clone_window),
+        WindowPlacement::Tiled
+    );
+    session.reconcile_windows();
+    assert_eq!(
+        session.window_placement(clone_window),
+        WindowPlacement::Tiled
+    );
+    assert_eq!(session.explorer_content_ids(), before);
+    session.close_explorer_view(2).expect("close cloned view");
+    assert_eq!(session.explorer_content_ids().len(), 1);
+    assert_eq!(session.explorer_content_ids()[0].1, before[0].1);
 }
 
 #[test]
@@ -708,6 +776,12 @@ fn production_02_retained_and_private_clone_refusals_do_not_touch_host_tokens_or
         let before = session.plugin_clone_state();
         session.clone_plugin_window(target.clone());
         assert_eq!(session.plugin_clone_state(), before);
+        session.attempt_host_plugin_window_operations(&target);
+        assert_eq!(
+            session.plugin_clone_state(),
+            before,
+            "production 0.2 host commands cannot bypass plugin-owned mutation authority"
+        );
 
         session.remove_catalog_load("demo", 77);
         let unloaded = session.plugin_clone_state();

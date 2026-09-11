@@ -78,21 +78,78 @@ fn tree(tree: wire::Tree) -> Result<PluginUiTree, wire::Failure> {
     })
 }
 
-fn placement(placement: wire::Placement) -> Result<PluginRequestedPlacement, wire::Failure> {
+enum TargetPlacement {
+    Ordinary(PluginRequestedPlacement),
+    Tiled(wire::Tile),
+}
+
+fn placement(placement: wire::Placement) -> Result<TargetPlacement, wire::Failure> {
     match placement {
-        wire::Placement::Floating(rect) if rect.width > 0 && rect.height > 0 => {
-            Ok(PluginRequestedPlacement::Floating {
+        wire::Placement::Docked(dock) if dock.size > 0 => {
+            Ok(TargetPlacement::Ordinary(match dock.edge {
+                wire::Edge::Left => PluginRequestedPlacement::DockedLeft { size: dock.size },
+                wire::Edge::Right => PluginRequestedPlacement::DockedRight { size: dock.size },
+                wire::Edge::Top => PluginRequestedPlacement::DockedTop { size: dock.size },
+                wire::Edge::Bottom => PluginRequestedPlacement::DockedBottom { size: dock.size },
+            }))
+        }
+        wire::Placement::Floating(rect) if rect.width > 0 && rect.height > 0 => Ok(
+            TargetPlacement::Ordinary(PluginRequestedPlacement::Floating {
                 x: rect.x,
                 y: rect.y,
                 width: rect.width,
                 height: rect.height,
-            })
+            }),
+        ),
+        wire::Placement::Fullscreen => Ok(TargetPlacement::Ordinary(
+            PluginRequestedPlacement::Fullscreen,
+        )),
+        wire::Placement::Hidden => Ok(TargetPlacement::Ordinary(PluginRequestedPlacement::Hidden)),
+        wire::Placement::Tiled(tile) if (1..=999).contains(&tile.ratio) => {
+            Ok(TargetPlacement::Tiled(tile))
         }
         _ => Err(failure(
-            wire::ErrorCode::Unsupported,
-            "target placement is not implemented in this lane",
+            wire::ErrorCode::InvalidArgument,
+            "target placement dimensions are invalid",
         )),
     }
+}
+
+fn placement_admitted(
+    admission: &TargetAdmission,
+    declaration: &crate::extensions::PluginContentTypeContribution,
+    placement: &TargetPlacement,
+) -> bool {
+    match placement {
+        TargetPlacement::Ordinary(placement) => declaration
+            .allowed_placements
+            .contains(&placement_kind(*placement)),
+        TargetPlacement::Tiled(_) => admission.can_tile(&declaration.id),
+    }
+}
+
+fn ordinary_placement(placement: &TargetPlacement) -> Result<WindowPlacement, wire::Failure> {
+    match placement {
+        TargetPlacement::Ordinary(placement) => graph_placement(*placement).map_err(map_error),
+        TargetPlacement::Tiled(_) => Ok(WindowPlacement::Tiled),
+    }
+}
+
+fn tile_parameters(
+    placement: &TargetPlacement,
+) -> Option<(Option<WindowId>, crate::ui::window::TileAxis, bool, u16)> {
+    let TargetPlacement::Tiled(tile) = placement else {
+        return None;
+    };
+    Some((
+        tile.neighbor.map(WindowId),
+        match tile.axis {
+            wire::Axis::Horizontal => crate::ui::window::TileAxis::Horizontal,
+            wire::Axis::Vertical => crate::ui::window::TileAxis::Vertical,
+        },
+        tile.after,
+        tile.ratio,
+    ))
 }
 
 fn style(role: wire::Role) -> PluginUiStyle {
@@ -126,6 +183,15 @@ impl PluginWindowHost {
                 self.open_target03(graph, admission, staged.invocation, open)
             }
             wire::UiRequest::Cells(update) => self.cells_target03(graph, admission, update),
+            wire::UiRequest::Place(request) => {
+                self.place_target03(graph, admission, staged.invocation, request)
+            }
+            wire::UiRequest::Focus(request) => {
+                self.focus_target03(graph, admission, staged.invocation, request)
+            }
+            wire::UiRequest::Close(request) => {
+                self.close_target03(graph, admission, staged.invocation, request)
+            }
             _ => Err(failure(
                 wire::ErrorCode::Unsupported,
                 "target UI request is not implemented in this lane",
@@ -177,10 +243,7 @@ impl PluginWindowHost {
                 )
             })?;
         let requested_placement = placement(open.placement)?;
-        if !declaration
-            .allowed_placements
-            .contains(&placement_kind(requested_placement))
-        {
+        if !placement_admitted(admission, declaration, &requested_placement) {
             return Err(failure(
                 wire::ErrorCode::PermissionDenied,
                 "target placement is not declared",
@@ -267,7 +330,7 @@ impl PluginWindowHost {
                     selectable: true,
                     editable: false,
                     clone_view: admission.can_clone(&declaration.id),
-                    tile: false,
+                    tile: admission.can_tile(&declaration.id),
                     dock: declaration
                         .allowed_placements
                         .contains(&PluginWindowPlacementKind::Docked),
@@ -303,16 +366,27 @@ impl PluginWindowHost {
         let view = draft
             .create_view(content, &owner, index.generation)
             .map_err(|error| failure(wire::ErrorCode::LimitExceeded, error))?;
-        let window = draft
-            .open_window(
-                crate::ui::window::WorkspaceTabId(open.tab),
-                view,
-                graph_placement(requested_placement).map_err(map_error)?,
-                declaration.focusable,
-                &owner,
-                index.generation,
-            )
-            .map_err(|error| failure(wire::ErrorCode::LimitExceeded, error))?;
+        let window =
+            if let Some((neighbor, axis, after, ratio)) = tile_parameters(&requested_placement) {
+                draft.open_tiled_window(
+                    crate::ui::window::WorkspaceTabId(open.tab),
+                    view,
+                    declaration.focusable,
+                    &owner,
+                    index.generation,
+                    (neighbor, axis, after, ratio),
+                )
+            } else {
+                draft.open_window(
+                    crate::ui::window::WorkspaceTabId(open.tab),
+                    view,
+                    ordinary_placement(&requested_placement)?,
+                    declaration.focusable,
+                    &owner,
+                    index.generation,
+                )
+            }
+            .map_err(|error| map_error(map_graph_error(error)))?;
         draft
             .validate()
             .map_err(|error| failure(wire::ErrorCode::ProtocolFailure, error))?;
@@ -349,6 +423,212 @@ impl PluginWindowHost {
                 .revision()
                 .ok_or_else(|| failure(wire::ErrorCode::Exhausted, "graph revision exhausted"))?,
             view_revision,
+        })
+    }
+
+    fn target03_instance(
+        &self,
+        graph: &WindowGraph,
+        admission: &TargetAdmission,
+        ui: &wire::UiContext,
+    ) -> Result<(u64, PluginWindowInstance), wire::Failure> {
+        let index = &admission.index;
+        let (handle, instance) = self
+            .instances
+            .iter()
+            .find(|(_, instance)| {
+                instance.plugin == index.owner
+                    && instance.load == index.generation
+                    && instance.checksum == index.checksum
+                    && instance.content.0 == ui.content
+                    && instance.view.0 == ui.view
+                    && instance.window.0 == ui.window
+            })
+            .ok_or_else(|| failure(wire::ErrorCode::ForeignHandle, "target window is foreign"))?;
+        let window = graph
+            .window(instance.window)
+            .ok_or_else(|| failure(wire::ErrorCode::Closed, "target window is closed"))?;
+        let view = graph
+            .view(instance.view)
+            .ok_or_else(|| failure(wire::ErrorCode::Closed, "target view is closed"))?;
+        if window.view != instance.view
+            || window.tab.0 != ui.tab
+            || view.content != instance.content
+            || graph.revision() != Some(ui.graph_revision)
+        {
+            return Err(failure(
+                wire::ErrorCode::StaleSource,
+                "target window source is stale",
+            ));
+        }
+        Ok((*handle, instance.clone()))
+    }
+
+    fn place_target03(
+        &mut self,
+        graph: &mut WindowGraph,
+        admission: &TargetAdmission,
+        invocation: wire::Invocation,
+        request: wire::Place,
+    ) -> Result<wire::UiReceipt, wire::Failure> {
+        let ui = invocation.ui.ok_or_else(|| {
+            failure(
+                wire::ErrorCode::StaleSource,
+                "target placement has no UI source",
+            )
+        })?;
+        if request.window != ui.window
+            || request.graph_revision != ui.graph_revision
+            || request.tab != ui.tab
+            || graph.active_tab().map(|tab| tab.0) != Some(request.tab)
+        {
+            return Err(failure(
+                wire::ErrorCode::StaleSource,
+                "target placement request does not match its exact source",
+            ));
+        }
+        let (_, instance) = self.target03_instance(graph, admission, &ui)?;
+        let requested = placement(request.placement)?;
+        let declaration = admission
+            .index
+            .content_types
+            .iter()
+            .find(|content| content.id == instance.content_type)
+            .ok_or_else(|| failure(wire::ErrorCode::Closed, "target declaration is retired"))?;
+        if !placement_admitted(admission, declaration, &requested) {
+            return Err(failure(
+                wire::ErrorCode::PermissionDenied,
+                "target placement is not declared",
+            ));
+        }
+        let mut windows =
+            crate::editor::session::windows::WindowSession::from_test_graph(graph.clone());
+        let mut draft =
+            windows.begin_plugin_fixture(&admission.index.owner, admission.index.generation);
+        if let Some((neighbor, axis, after, ratio)) = tile_parameters(&requested) {
+            draft
+                .tile(instance.window, (neighbor, axis, after, ratio))
+                .map_err(|error| map_error(map_graph_error(error)))?;
+        } else {
+            draft
+                .place(instance.window, ordinary_placement(&requested)?)
+                .map_err(|error| map_error(map_graph_error(error)))?;
+        }
+        draft
+            .validate()
+            .map_err(|error| failure(wire::ErrorCode::ProtocolFailure, error))?;
+        windows
+            .commit_plugin_fixture(draft)
+            .map_err(|error| failure(wire::ErrorCode::StaleSource, error))?;
+        *graph = windows.graph().clone();
+        Ok(wire::UiReceipt {
+            content: instance.content.0,
+            view: instance.view.0,
+            window: instance.window.0,
+            graph_revision: graph
+                .revision()
+                .ok_or_else(|| failure(wire::ErrorCode::Exhausted, "graph revision exhausted"))?,
+            view_revision: instance.tree.as_ref().map_or(0, |tree| tree.revision),
+        })
+    }
+
+    fn focus_target03(
+        &mut self,
+        graph: &mut WindowGraph,
+        admission: &TargetAdmission,
+        invocation: wire::Invocation,
+        request: wire::Focus,
+    ) -> Result<wire::UiReceipt, wire::Failure> {
+        let ui = invocation.ui.ok_or_else(|| {
+            failure(
+                wire::ErrorCode::StaleSource,
+                "target focus has no UI source",
+            )
+        })?;
+        if request.window != ui.window || request.graph_revision != ui.graph_revision {
+            return Err(failure(
+                wire::ErrorCode::StaleSource,
+                "target focus request does not match its exact source",
+            ));
+        }
+        let (_, instance) = self.target03_instance(graph, admission, &ui)?;
+        let mut windows =
+            crate::editor::session::windows::WindowSession::from_test_graph(graph.clone());
+        let mut draft =
+            windows.begin_plugin_fixture(&admission.index.owner, admission.index.generation);
+        draft
+            .focus(instance.window)
+            .map_err(|error| map_error(map_graph_error(error)))?;
+        windows
+            .commit_plugin_fixture(draft)
+            .map_err(|error| failure(wire::ErrorCode::StaleSource, error))?;
+        *graph = windows.graph().clone();
+        Ok(wire::UiReceipt {
+            content: instance.content.0,
+            view: instance.view.0,
+            window: instance.window.0,
+            graph_revision: graph
+                .revision()
+                .ok_or_else(|| failure(wire::ErrorCode::Exhausted, "graph revision exhausted"))?,
+            view_revision: instance.tree.as_ref().map_or(0, |tree| tree.revision),
+        })
+    }
+
+    fn close_target03(
+        &mut self,
+        graph: &mut WindowGraph,
+        admission: &TargetAdmission,
+        invocation: wire::Invocation,
+        request: wire::CloseView,
+    ) -> Result<wire::UiReceipt, wire::Failure> {
+        let ui = invocation.ui.ok_or_else(|| {
+            failure(
+                wire::ErrorCode::StaleSource,
+                "target close has no UI source",
+            )
+        })?;
+        if request.view != ui.view || request.graph_revision != ui.graph_revision {
+            return Err(failure(
+                wire::ErrorCode::StaleSource,
+                "target close request does not match its exact source",
+            ));
+        }
+        let (handle, instance) = self.target03_instance(graph, admission, &ui)?;
+        let mut windows =
+            crate::editor::session::windows::WindowSession::from_test_graph(graph.clone());
+        let mut draft =
+            windows.begin_plugin_fixture(&admission.index.owner, admission.index.generation);
+        draft
+            .close_window(instance.window)
+            .and_then(|_| draft.remove_view(instance.view))
+            .map_err(|error| map_error(map_graph_error(error)))?;
+        if draft
+            .read()
+            .content_snapshots()
+            .into_iter()
+            .find(|content| content.id == instance.content)
+            .is_some_and(|content| content.view_count == 0)
+        {
+            draft
+                .remove_content(instance.content)
+                .map_err(|error| map_error(map_graph_error(error)))?;
+        }
+        draft
+            .validate()
+            .map_err(|error| failure(wire::ErrorCode::ProtocolFailure, error))?;
+        windows
+            .commit_plugin_fixture(draft)
+            .map_err(|error| failure(wire::ErrorCode::StaleSource, error))?;
+        self.instances.remove(&handle);
+        *graph = windows.graph().clone();
+        Ok(wire::UiReceipt {
+            content: instance.content.0,
+            view: instance.view.0,
+            window: instance.window.0,
+            graph_revision: graph
+                .revision()
+                .ok_or_else(|| failure(wire::ErrorCode::Exhausted, "graph revision exhausted"))?,
+            view_revision: instance.tree.as_ref().map_or(0, |tree| tree.revision),
         })
     }
 

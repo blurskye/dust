@@ -311,7 +311,7 @@ impl CompositorSnapshot {
                 let WindowPlacement::Floating(requested) = window.placement else {
                     continue;
                 };
-                if let Some(rect) = intersect_rect(requested, bounds) {
+                if let Some(rect) = project_float(requested, remaining) {
                     push_compositor_window(
                         &mut output,
                         *window,

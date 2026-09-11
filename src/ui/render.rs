@@ -24,7 +24,10 @@ pub use visual_rows::{
     VisualRowAnchor, VisualRowModel, editor_content_width, editor_gutter_width,
     editor_line_number_digits, editor_state_content_width, editor_state_gutter_width,
 };
-pub use workspace::{PaneViewport, active_pane_viewport, pane_viewports};
+pub use workspace::{
+    PaneViewport, active_editor_pane_viewport, active_pane_viewport, editor_pane_viewport_at,
+    pane_viewports,
+};
 
 use std::{collections::BTreeMap, path::Path, time::Instant};
 
@@ -929,7 +932,9 @@ pub fn render(
     }
     let terminal_geometry = compositor.and_then(|compositor| {
         let (_, window) = compositor.surfaces.terminal?;
-        terminal_geometry_from_rect(compositor.projection.window(window)?.rect)
+        let projected = compositor.projection.window(window)?;
+        (projected.layer != crate::ui::window::CompositorLayer::Floating)
+            .then(|| terminal_geometry_from_rect(projected.rect))?
     });
     let workspace = compositor.map(|compositor| compositor.projection.workspace_bounds);
     let workspace_height = workspace.map_or(height, |bounds| bounds.height);
@@ -938,6 +943,7 @@ pub fn render(
         compositor
             .projection
             .window(window)
+            .filter(|window| window.layer != crate::ui::window::CompositorLayer::Floating)
             .map(|window| window.rect)
     });
     let dashboard_rect = compositor.and_then(|compositor| {
@@ -978,6 +984,7 @@ pub fn render(
         width,
         height,
     );
+    render_non_tiled_editor_windows(&mut workspace_frame, state, ui, config);
     let cloned_explorer_focused = ui.explorer_views.iter().any(|view| view.focused);
     if let (Some(rect), Some(explorer)) = (explorer_rect, &ui.explorer) {
         render_explorer_window(
@@ -998,7 +1005,11 @@ pub fn render(
                 .map_or((u16::MAX, view.view), |window| (window.z_index, view.view))
         });
         for view in explorer_views {
-            if let Some(window) = compositor.projection.window(view.window) {
+            if let Some(window) = compositor
+                .projection
+                .window(view.window)
+                .filter(|window| window.layer != crate::ui::window::CompositorLayer::Floating)
+            {
                 render_explorer_window(
                     &mut workspace_frame,
                     &view.content,
@@ -1016,9 +1027,6 @@ pub fn render(
         } else {
             workspace_frame
         };
-    if let Some(tool_menu) = &ui.tool_menu {
-        render_tool_menu(&mut frame, tool_menu, config, width, workspace_height);
-    }
     if let Some(compositor) = compositor {
         let mut plugin_surfaces = ui
             .plugin_surfaces
@@ -1027,6 +1035,9 @@ pub fn render(
                 compositor
                     .projection
                     .window(surface.window)
+                    .filter(|projected| {
+                        projected.layer != crate::ui::window::CompositorLayer::Floating
+                    })
                     .map(|projected| {
                         (
                             projected.z_index,
@@ -1040,6 +1051,9 @@ pub fn render(
                 compositor
                     .projection
                     .window(surface.window)
+                    .filter(|projected| {
+                        projected.layer != crate::ui::window::CompositorLayer::Floating
+                    })
                     .map(|projected| {
                         (
                             projected.z_index,
@@ -1061,6 +1075,79 @@ pub fn render(
                 }
             }
         }
+
+        // Floating ordinary windows can overlap across content kinds. Paint
+        // that layer in the compositor's exact z-order rather than allowing
+        // adapter-specific render passes to decide stacking.
+        for projected in compositor
+            .projection
+            .windows
+            .iter()
+            .filter(|window| window.layer == crate::ui::window::CompositorLayer::Floating)
+        {
+            if render_non_tiled_editor_window(&mut frame, state, ui, config, projected) {
+                continue;
+            }
+            if compositor.surfaces.explorer == Some(projected.window) {
+                if let Some(explorer) = &ui.explorer {
+                    render_explorer_window(
+                        &mut frame,
+                        explorer,
+                        ui,
+                        config,
+                        projected.rect,
+                        ui.explorer_focused && !cloned_explorer_focused,
+                    );
+                }
+                continue;
+            }
+            if let Some(view) = ui
+                .explorer_views
+                .iter()
+                .find(|view| view.window == projected.window)
+            {
+                render_explorer_window(
+                    &mut frame,
+                    &view.content,
+                    ui,
+                    config,
+                    projected.rect,
+                    view.focused,
+                );
+                continue;
+            }
+            if compositor
+                .surfaces
+                .terminal
+                .is_some_and(|(_, window)| window == projected.window)
+            {
+                if let (Some(terminal), Some(geometry)) = (
+                    &ui.terminal_panel,
+                    terminal_geometry_from_rect(projected.rect),
+                ) {
+                    frame = dock_terminal_panel(frame, terminal, geometry, config, width, height);
+                }
+                continue;
+            }
+            if let Some(surface) = ui
+                .plugin_surfaces
+                .iter()
+                .find(|surface| surface.window == projected.window)
+            {
+                render_plugin_surface(&mut frame, surface, projected.rect);
+                continue;
+            }
+            if let Some(surface) = ui
+                .private_surfaces
+                .iter()
+                .find(|surface| surface.window == projected.window)
+            {
+                render_private_surface(&mut frame, surface, projected.rect);
+            }
+        }
+    }
+    if let Some(tool_menu) = &ui.tool_menu {
+        render_tool_menu(&mut frame, tool_menu, config, width, workspace_height);
     }
     if let Some(picker) = &ui.picker
         && let Some(rect) = compositor.and_then(|compositor| {
@@ -1074,16 +1161,15 @@ pub fn render(
         render_picker(&mut frame, picker, config, rect, ui.surface_content.picker);
     }
     if let Some(completion) = &ui.language_completion
-        && let Some(bounds) = content_bounds
-        && let Some(pane) = active_pane_viewport(state, ui, config, bounds.width, bounds.height)
+        && let Some(pane) = active_editor_pane_viewport(state, ui)
     {
         render_language_completion(
             &mut frame,
             completion,
             config,
             WindowRect {
-                x: bounds.x.saturating_add(pane.x),
-                y: bounds.y.saturating_add(pane.y),
+                x: pane.x,
+                y: pane.y,
                 width: pane.width,
                 height: pane.height,
             },

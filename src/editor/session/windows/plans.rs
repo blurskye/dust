@@ -31,6 +31,12 @@ pub(in crate::editor::session) struct WindowPlan {
     catalog: PluginCatalogVersion,
     operations: Vec<EditorOperation>,
     target: Option<WindowId>,
+    target_source: Option<(
+        WindowId,
+        WindowViewId,
+        ContentId,
+        crate::ui::window::WorkspaceTabId,
+    )>,
     clone_source: Option<(WindowId, WindowViewId, ContentId)>,
     focus_editor: bool,
     hide_dashboard: bool,
@@ -105,6 +111,7 @@ impl WindowSession {
             catalog,
             operations: Vec::new(),
             target: None,
+            target_source: None,
             clone_source: None,
             focus_editor: false,
             hide_dashboard: false,
@@ -124,6 +131,22 @@ impl WindowSession {
             || &plan.catalog != catalog
         {
             return Err("window plan owner, editor or catalog source is stale".into());
+        }
+        if let Some((window, view, content, tab)) = plan.target_source
+            && (self
+                .core
+                .graph
+                .window(window)
+                .map(|descriptor| (descriptor.view, descriptor.tab))
+                != Some((view, tab))
+                || self
+                    .core
+                    .graph
+                    .view(view)
+                    .map(|descriptor| descriptor.content)
+                    != Some(content))
+        {
+            return Err("window target identity is stale".into());
         }
         if let Some((window, view, content)) = plan.clone_source
             && (self
@@ -168,6 +191,14 @@ impl WindowSession {
                 .push(EditorOperation::FocusTabId { tab: editor_tab });
         }
         plan.target = Some(window);
+        let view = descriptor.view;
+        let content = self
+            .core
+            .graph
+            .view(view)
+            .ok_or("focus target view is closed")?
+            .content;
+        plan.target_source = Some((window, view, content, descriptor.tab));
         if let Some(pane) = self.core.editor.pane_for_window(window) {
             plan.operations.push(EditorOperation::FocusPaneId { pane });
             plan.focus_editor = true;
@@ -259,6 +290,26 @@ impl WindowSession {
             descriptions.signature.dashboard_visible = source.active_tab().is_none();
         }
         let mut candidate = self.prepare_reconcile(&source, scratch, descriptions)?;
+        if let Some(native) = plan.native {
+            match native {
+                commands::NativeAction::PlaceEditor(pane, window, placement) => {
+                    candidate
+                        .core
+                        .editor
+                        .place_editor(&mut candidate.core.graph, pane, window, placement)
+                        .map_err(|error| error.to_string())?;
+                    candidate
+                        .core
+                        .editor
+                        .rebuild_tiled_layout(&source, &mut candidate.core.graph)
+                        .map_err(|error| error.to_string())?;
+                    if candidate.core.graph.focused().is_none() {
+                        candidate.dashboard = Some(true);
+                    }
+                }
+                _ => return Err("editor transition carries an invalid window action".into()),
+            }
+        }
         if let Some(target) = plan.target
             && candidate.core.graph.focused() != Some(target)
         {
@@ -353,31 +404,5 @@ impl WindowSession {
         self.graph()
             .resolve_target(&target)
             .map_err(|error| TargetError::Rejected(error.to_string()))
-    }
-
-    pub(in crate::editor::session) fn resolve_native_target(
-        &self,
-        target: &str,
-        selected_terminal: Option<u64>,
-    ) -> Result<NativeSurfaceTarget, TargetError> {
-        let window = self.resolve_graph_target(target, selected_terminal)?;
-        self.native_ids().target_for_window(window).ok_or_else(|| {
-            let adapter = self
-                .graph()
-                .window(window)
-                .and_then(|window| self.graph().view(window.view))
-                .and_then(|view| self.graph().content(view.content))
-                .map_or("unknown", |content| match content.adapter {
-                    crate::ui::window::ContentAdapterKind::TextBuffer => "editor-tiled",
-                    crate::ui::window::ContentAdapterKind::TerminalSession => "terminal",
-                    crate::ui::window::ContentAdapterKind::VirtualDocument => "virtual-document",
-                    crate::ui::window::ContentAdapterKind::DeclarativeUi => "declarative-ui",
-                    crate::ui::window::ContentAdapterKind::PrivateCellSurface => "private-cell",
-                    crate::ui::window::ContentAdapterKind::ExternalTui => "external-tui",
-                });
-            TargetError::Rejected(format!(
-                "window adapter `{adapter}` has no mutable lifecycle hook"
-            ))
-        })
     }
 }

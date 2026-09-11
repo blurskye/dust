@@ -276,7 +276,7 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
                         let view = graph
                             .create_view(content, "external-tui-test", 1)
                             .expect("authoritative external TUI view");
-                        graph
+                        let window = graph
                             .open_window(
                                 tab,
                                 view,
@@ -326,6 +326,47 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
                             screen_before
                         );
                         assert_eq!(ptys.pending(), 1);
+
+                        for placement in [
+                            WindowPlacement::Tiled,
+                            WindowPlacement::Docked {
+                                edge: dust::ui::window::DockEdge::Right,
+                                size: 12,
+                            },
+                            WindowPlacement::Fullscreen,
+                            WindowPlacement::Hidden,
+                            WindowPlacement::Floating(WindowRect {
+                                x: 3,
+                                y: 2,
+                                width: 50,
+                                height: 10,
+                            }),
+                        ] {
+                            graph
+                                .place(window, placement)
+                                .expect("move live external TUI view");
+                            assert_eq!(
+                                graph.window(window).expect("same live window").placement,
+                                placement
+                            );
+                            assert_eq!(graph.view(view).expect("same live view").content, content);
+                            assert_eq!(ptys.pending(), 1, "moving the view never restarts its PTY");
+                            assert_eq!(
+                                (
+                                    screen.cursor(),
+                                    screen.alternate_active(),
+                                    screen.application_cursor(),
+                                    screen.bracketed_paste(),
+                                ),
+                                (
+                                    screen_before.1,
+                                    screen_before.3,
+                                    screen_before.4,
+                                    screen_before.5,
+                                ),
+                                "window movement does not replace the live screen"
+                            );
+                        }
 
                         ptys.resize(id, 50, 10).unwrap();
                         screen.resize(50, 10);

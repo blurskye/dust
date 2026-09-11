@@ -12,8 +12,10 @@ observes exact `ui-result` and dimensions callbacks, and publishes fresh cells
 for every private view. Hostile commands exercise oversized retained/private
 payloads, wrong/stale private identities, out-of-bounds and wide-overflow cells,
 result-only authority refusal, and execution/callback rollback after an accepted
-queue call. It also calls one deliberately unimplemented import so
-the host's typed `unsupported` rejection is exercised by actual guest code.
+queue call. It also drives checked move, tile, dock, fullscreen, hide, focus and
+close-view requests through the exact live Component source, and calls one
+deliberately unimplemented import so the host's typed `unsupported` rejection
+is exercised by actual guest code.
 
 Rebuild with the installed stable toolchain and checked lockfile:
 
@@ -26,4 +28,4 @@ sha256sum target03-clone-guest.core.wasm
 ```
 
 Expected SHA-256:
-`f1646ee4732859e290144913dd171205c285c495233af97b9011f6dd16ea7bcf`.
+`9d1caf84261a71dc3123cea6bcd652e6a92105dd74b9995486c47a34d319d545`.

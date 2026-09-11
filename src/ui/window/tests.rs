@@ -495,12 +495,12 @@ fn compositor_projects_docks_tiles_floats_fullscreen_and_overlays_deterministica
         }
     );
     assert_eq!(
-        projection.window(floating).expect("float clipped").rect,
+        projection.window(floating).expect("float projected").rect,
         WindowRect {
-            x: 95,
-            y: 28,
-            width: 5,
-            height: 2,
+            x: 80,
+            y: 14,
+            width: 20,
+            height: 10,
         }
     );
     assert_eq!(
@@ -696,6 +696,144 @@ fn graph_revision_and_typed_targets_cover_changes_rejection_and_exhaustion() {
     );
     assert_eq!(exhausted, before);
     assert_eq!(exhausted.revision(), None);
+}
+
+#[test]
+fn checked_tiled_insertion_honors_neighbor_axis_order_ratio_and_rejects_atomically() {
+    let mut graph = WindowGraph::default();
+    let tab = graph.create_workspace_tab("native", 1).unwrap();
+    let content = graph
+        .create_content(
+            ContentTypeId::new("builtin.text-buffer").unwrap(),
+            ContentAdapterKind::TextBuffer,
+            "text".into(),
+            false,
+            "native",
+            1,
+        )
+        .unwrap();
+    let first_view = graph.create_view(content, "native", 1).unwrap();
+    let first = graph
+        .open_window(tab, first_view, WindowPlacement::Tiled, true, "native", 1)
+        .unwrap();
+    let second_view = graph.create_view(content, "native", 1).unwrap();
+    let second = graph
+        .open_window(
+            tab,
+            second_view,
+            WindowPlacement::Floating(WindowRect {
+                x: 1,
+                y: 1,
+                width: 10,
+                height: 4,
+            }),
+            true,
+            "native",
+            1,
+        )
+        .unwrap();
+    graph
+        .tile(second, Some(first), TileAxis::Horizontal, false, 300)
+        .unwrap();
+    assert_eq!(
+        graph.workspace_tab(tab).unwrap().tiled_root,
+        Some(TiledLayoutNode::Split {
+            axis: TileAxis::Horizontal,
+            ratio: 300,
+            first: Box::new(TiledLayoutNode::Window(second)),
+            second: Box::new(TiledLayoutNode::Window(first)),
+        })
+    );
+    let before = graph.clone();
+    assert_eq!(
+        graph.tile(second, Some(first), TileAxis::Vertical, true, 0),
+        Err(WindowError::InvalidPlacement)
+    );
+    assert_eq!(graph, before);
+    let foreign_tab = graph.create_workspace_tab("native", 1).unwrap();
+    let foreign_view = graph.create_view(content, "native", 1).unwrap();
+    let foreign = graph
+        .open_window(
+            foreign_tab,
+            foreign_view,
+            WindowPlacement::Tiled,
+            true,
+            "native",
+            1,
+        )
+        .unwrap();
+    let before = graph.clone();
+    assert_eq!(
+        graph.tile(second, Some(foreign), TileAxis::Vertical, true, 500),
+        Err(WindowError::WindowNotInTiledLayout)
+    );
+    assert_eq!(graph, before);
+}
+
+#[test]
+fn workspace_tabs_restore_exact_remembered_focus_and_retire_ineligible_memories() {
+    let mut graph = WindowGraph::default();
+    let first_tab = graph.create_workspace_tab("native", 1).unwrap();
+    let content = graph
+        .create_content(
+            ContentTypeId::new("builtin.text-buffer").unwrap(),
+            ContentAdapterKind::TextBuffer,
+            "text".into(),
+            false,
+            "native",
+            1,
+        )
+        .unwrap();
+    let first_view = graph.create_view(content, "native", 1).unwrap();
+    let first = graph
+        .open_window(
+            first_tab,
+            first_view,
+            WindowPlacement::Tiled,
+            true,
+            "native",
+            1,
+        )
+        .unwrap();
+    let second_view = graph.create_view(content, "native", 1).unwrap();
+    let second = graph
+        .open_window(
+            first_tab,
+            second_view,
+            WindowPlacement::Tiled,
+            true,
+            "native",
+            1,
+        )
+        .unwrap();
+    graph.focus(first).unwrap();
+
+    let second_tab = graph.create_workspace_tab("native", 1).unwrap();
+    let third_view = graph.create_view(content, "native", 1).unwrap();
+    let third = graph
+        .open_window(
+            second_tab,
+            third_view,
+            WindowPlacement::Tiled,
+            true,
+            "native",
+            1,
+        )
+        .unwrap();
+    assert_eq!(graph.focused(), Some(third));
+    graph.set_active_tab(first_tab).unwrap();
+    assert_eq!(graph.focused(), Some(first));
+    graph.set_active_tab(second_tab).unwrap();
+    assert_eq!(graph.focused(), Some(third));
+
+    graph.set_active_tab(first_tab).unwrap();
+    graph.place(first, WindowPlacement::Hidden).unwrap();
+    assert_eq!(graph.focused(), Some(second));
+    graph.place(first, WindowPlacement::Tiled).unwrap();
+    graph.set_active_tab(second_tab).unwrap();
+    graph.set_active_tab(first_tab).unwrap();
+    assert_eq!(graph.focused(), Some(second));
+    graph.validate().unwrap();
 }
 
 #[test]

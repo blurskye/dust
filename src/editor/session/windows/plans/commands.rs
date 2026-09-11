@@ -8,6 +8,9 @@ use crate::editor::FocusDirection;
 pub(in crate::editor::session) enum WindowCommand<'a> {
     Clone(&'a str, crate::editor::Axis, u16),
     CloneExplorer(&'a str, u64, u64, crate::editor::Axis),
+    Place(&'a str, WindowPlacement),
+    Show(&'a str),
+    Move(&'a str, u16, u16),
     Resize(&'a str, i16),
     Direction(FocusDirection, Option<NativeSurfaceTarget>),
     Close(&'a str),
@@ -33,10 +36,21 @@ impl From<TargetError> for CommandError {
         Self::Target(e)
     }
 }
+#[derive(Clone, Copy)]
 pub(super) enum NativeAction {
     None,
     CloneExplorer(NativeSurfaceTarget, u64, crate::editor::Axis),
     Place(NativeSurfaceTarget, WindowPlacement),
+    PlaceEditor(
+        crate::editor::PaneId,
+        crate::ui::window::WindowId,
+        WindowPlacement,
+    ),
+    ShowEditor(crate::editor::PaneId, crate::ui::window::WindowId),
+    SwapEditors(
+        (crate::editor::PaneId, crate::ui::window::WindowId),
+        (crate::editor::PaneId, crate::ui::window::WindowId),
+    ),
     Close(NativeSurfaceTarget),
     Swap(NativeSurfaceTarget, NativeSurfaceTarget),
 }
@@ -64,6 +78,21 @@ impl WindowSession {
             self.core.editor.pane_for_window(window).ok_or_else(|| {
                 CommandError::Rejected("window adapter has no authoritative editor hook".into())
             })
+        };
+        let bind_target = |plan: &mut WindowPlan, window| -> Result<(), CommandError> {
+            let descriptor = self
+                .core
+                .graph
+                .window(window)
+                .ok_or_else(|| CommandError::Rejected("window target is stale".into()))?;
+            let content = self
+                .core
+                .graph
+                .view(descriptor.view)
+                .ok_or_else(|| CommandError::Rejected("window target view is stale".into()))?
+                .content;
+            plan.target_source = Some((window, descriptor.view, content, descriptor.tab));
+            Ok(())
         };
         match command {
             WindowCommand::Clone(name, axis, ratio) => {
@@ -123,20 +152,170 @@ impl WindowSession {
                 plan.clone_source = Some((window, ids.view, ids.content));
                 plan.native = Some(NativeAction::CloneExplorer(native, destination, axis));
             }
+            WindowCommand::Place(name, placement) => {
+                let window = target(name)?;
+                bind_target(&mut plan, window)?;
+                if let Some(native) = self.core.native.target_for_window(window) {
+                    plan.native = Some(NativeAction::Place(native, placement));
+                } else {
+                    let target_pane = pane(window)?;
+                    if placement == WindowPlacement::Hidden
+                        && self.core.graph.focused() == Some(window)
+                    {
+                        fn panes(
+                            node: &crate::editor::LayoutNode,
+                            output: &mut Vec<crate::editor::PaneId>,
+                        ) {
+                            match node {
+                                crate::editor::LayoutNode::Pane(pane) => output.push(*pane),
+                                crate::editor::LayoutNode::Split { first, second, .. } => {
+                                    panes(first, output);
+                                    panes(second, output);
+                                }
+                            }
+                        }
+                        let tab = source
+                            .active_tab()
+                            .and_then(|tab| source.tabs().get(tab))
+                            .ok_or_else(|| {
+                                CommandError::Rejected("active editor tab is stale".into())
+                            })?;
+                        let mut ordered = Vec::new();
+                        panes(&tab.root, &mut ordered);
+                        let index = ordered
+                            .iter()
+                            .position(|pane| *pane == target_pane)
+                            .ok_or_else(|| {
+                                CommandError::Rejected("editor pane is absent from its tab".into())
+                            })?;
+                        let fallback = ordered[index + 1..]
+                            .iter()
+                            .chain(ordered[..index].iter().rev())
+                            .copied()
+                            .find(|candidate| {
+                                self.core
+                                    .editor
+                                    .window_for(*candidate)
+                                    .and_then(|window| self.core.graph.window(window))
+                                    .is_some_and(|window| {
+                                        window.focusable
+                                            && window.placement != WindowPlacement::Hidden
+                                    })
+                            });
+                        if let Some(fallback) = fallback {
+                            plan.operations
+                                .push(EditorOperation::FocusPaneId { pane: fallback });
+                        }
+                    }
+                    plan.native = Some(NativeAction::PlaceEditor(target_pane, window, placement));
+                }
+            }
+            WindowCommand::Show(name) => {
+                let window = target(name)?;
+                bind_target(&mut plan, window)?;
+                if self
+                    .core
+                    .graph
+                    .window(window)
+                    .is_none_or(|descriptor| descriptor.placement != WindowPlacement::Hidden)
+                {
+                    return Err(CommandError::Rejected("window is not hidden".into()));
+                }
+                if let Some(native) = self.core.native.target_for_window(window) {
+                    let placement =
+                        self.core
+                            .native
+                            .placement_for_target(native)
+                            .ok_or_else(|| {
+                                CommandError::Rejected(
+                                    "native window has no restorable placement".into(),
+                                )
+                            })?;
+                    plan.native = Some(NativeAction::Place(native, placement));
+                } else {
+                    plan.native = Some(NativeAction::ShowEditor(pane(window)?, window));
+                }
+            }
+            WindowCommand::Move(name, x, y) => {
+                let window = target(name)?;
+                bind_target(&mut plan, window)?;
+                let WindowPlacement::Floating(mut placement) = self
+                    .core
+                    .graph
+                    .window(window)
+                    .ok_or_else(|| CommandError::Rejected("window target is stale".into()))?
+                    .placement
+                else {
+                    return Err(CommandError::Rejected(
+                        "only floating ordinary windows can be moved".into(),
+                    ));
+                };
+                placement.x = x;
+                placement.y = y;
+                if let Some(native) = self.core.native.target_for_window(window) {
+                    plan.native = Some(NativeAction::Place(
+                        native,
+                        WindowPlacement::Floating(placement),
+                    ));
+                } else {
+                    plan.native = Some(NativeAction::PlaceEditor(
+                        pane(window)?,
+                        window,
+                        WindowPlacement::Floating(placement),
+                    ));
+                }
+            }
             WindowCommand::Resize(name, amount) => {
                 let window = target(name)?;
+                bind_target(&mut plan, window)?;
                 if let Some(native) = self.core.native.target_for_window(window) {
                     plan.native = Some(NativeAction::Place(
                         native,
                         self.resized_native_placement(native, amount)?,
                     ));
                 } else {
-                    plan.operations = vec![
-                        EditorOperation::FocusPaneId {
-                            pane: pane(window)?,
-                        },
-                        EditorOperation::ResizePane { delta: amount },
-                    ];
+                    let pane = pane(window)?;
+                    match self
+                        .core
+                        .graph
+                        .window(window)
+                        .ok_or_else(|| CommandError::Rejected("window target is stale".into()))?
+                        .placement
+                    {
+                        WindowPlacement::Tiled => {
+                            plan.operations = vec![
+                                EditorOperation::FocusPaneId { pane },
+                                EditorOperation::ResizePane { delta: amount },
+                            ];
+                        }
+                        WindowPlacement::Docked { edge, size } => {
+                            plan.native = Some(NativeAction::PlaceEditor(
+                                pane,
+                                window,
+                                WindowPlacement::Docked {
+                                    edge,
+                                    size: size.saturating_add_signed(amount).max(1),
+                                },
+                            ));
+                        }
+                        WindowPlacement::Floating(mut rect) => {
+                            rect.width = rect.width.saturating_add_signed(amount).max(1);
+                            rect.height = rect.height.saturating_add_signed(amount).max(1);
+                            plan.native = Some(NativeAction::PlaceEditor(
+                                pane,
+                                window,
+                                WindowPlacement::Floating(rect),
+                            ));
+                        }
+                        WindowPlacement::Fullscreen
+                        | WindowPlacement::Hidden
+                        | WindowPlacement::Overlay(_) => {
+                            return Err(CommandError::Rejected(
+                                "only tiled, docked, or floating editor windows can be resized"
+                                    .into(),
+                            ));
+                        }
+                    }
                 }
             }
             WindowCommand::Direction(direction, explicit) => {
@@ -163,21 +342,100 @@ impl WindowSession {
                         .map_or(NativeAction::None, |p| NativeAction::Place(native, p)),
                     );
                 } else {
-                    let (axis, grow) = match direction {
-                        FocusDirection::Left => (crate::editor::Axis::Horizontal, false),
-                        FocusDirection::Right => (crate::editor::Axis::Horizontal, true),
-                        FocusDirection::Up => (crate::editor::Axis::Vertical, true),
-                        FocusDirection::Down => (crate::editor::Axis::Vertical, false),
-                    };
+                    let window = self
+                        .core
+                        .graph
+                        .focused()
+                        .ok_or_else(|| CommandError::Rejected("no focused window".into()))?;
+                    bind_target(&mut plan, window)?;
+                    let pane = pane(window)?;
+                    let placement = self
+                        .core
+                        .graph
+                        .window(window)
+                        .ok_or_else(|| CommandError::Rejected("focused window is stale".into()))?
+                        .placement;
                     let step = i16::try_from(policy.pane_step).unwrap_or(i16::MAX);
-                    plan.operations.push(EditorOperation::ResizePaneOnAxis {
-                        axis,
-                        delta: if grow { step } else { -step },
-                    });
+                    match placement {
+                        WindowPlacement::Tiled => {
+                            let (axis, grow) = match direction {
+                                FocusDirection::Left => (crate::editor::Axis::Horizontal, false),
+                                FocusDirection::Right => (crate::editor::Axis::Horizontal, true),
+                                FocusDirection::Up => (crate::editor::Axis::Vertical, true),
+                                FocusDirection::Down => (crate::editor::Axis::Vertical, false),
+                            };
+                            plan.operations.push(EditorOperation::ResizePaneOnAxis {
+                                axis,
+                                delta: if grow { step } else { -step },
+                            });
+                        }
+                        WindowPlacement::Docked { edge, size } => {
+                            let grow = match (edge, direction) {
+                                (crate::ui::window::DockEdge::Bottom, FocusDirection::Up)
+                                | (crate::ui::window::DockEdge::Top, FocusDirection::Down)
+                                | (crate::ui::window::DockEdge::Left, FocusDirection::Right)
+                                | (crate::ui::window::DockEdge::Right, FocusDirection::Left) => {
+                                    true
+                                }
+                                (crate::ui::window::DockEdge::Bottom, FocusDirection::Down)
+                                | (crate::ui::window::DockEdge::Top, FocusDirection::Up)
+                                | (crate::ui::window::DockEdge::Left, FocusDirection::Left)
+                                | (crate::ui::window::DockEdge::Right, FocusDirection::Right) => {
+                                    false
+                                }
+                                _ => return Ok(plan),
+                            };
+                            plan.native = Some(NativeAction::PlaceEditor(
+                                pane,
+                                window,
+                                WindowPlacement::Docked {
+                                    edge,
+                                    size: size
+                                        .saturating_add_signed(if grow { step } else { -step })
+                                        .max(1),
+                                },
+                            ));
+                        }
+                        WindowPlacement::Floating(mut rect) => {
+                            match direction {
+                                FocusDirection::Left => {
+                                    rect.width = rect
+                                        .width
+                                        .saturating_sub(u16::try_from(step).unwrap_or(u16::MAX))
+                                        .max(1)
+                                }
+                                FocusDirection::Right => {
+                                    rect.width = rect.width.saturating_add_signed(step).max(1)
+                                }
+                                FocusDirection::Up => {
+                                    rect.height = rect.height.saturating_add_signed(step).max(1)
+                                }
+                                FocusDirection::Down => {
+                                    rect.height = rect
+                                        .height
+                                        .saturating_sub(u16::try_from(step).unwrap_or(u16::MAX))
+                                        .max(1)
+                                }
+                            }
+                            plan.native = Some(NativeAction::PlaceEditor(
+                                pane,
+                                window,
+                                WindowPlacement::Floating(rect),
+                            ));
+                        }
+                        WindowPlacement::Fullscreen
+                        | WindowPlacement::Hidden
+                        | WindowPlacement::Overlay(_) => {
+                            return Err(CommandError::Rejected(
+                                "focused window cannot be directionally resized".into(),
+                            ));
+                        }
+                    }
                 }
             }
             WindowCommand::Close(name) => {
                 let window = target(name)?;
+                bind_target(&mut plan, window)?;
                 if let Some(native) = self.core.native.target_for_window(window) {
                     if native == NativeSurfaceTarget::Explorer
                         && self.core.native.explorer_view_count() > 1
@@ -211,6 +469,9 @@ impl WindowSession {
             }
             WindowCommand::Swap(first, second) => {
                 let (first, second) = (target(first)?, target(second)?);
+                if first == second {
+                    bind_target(&mut plan, first)?;
+                }
                 plan.native = if first == second {
                     Some(NativeAction::None)
                 } else {
@@ -220,11 +481,42 @@ impl WindowSession {
                     ) {
                         (Some(a), Some(b)) => Some(NativeAction::Swap(a, b)),
                         (None, None) => {
-                            plan.operations.push(EditorOperation::SwapPanes {
-                                first: pane(first)?,
-                                second: pane(second)?,
-                            });
-                            None
+                            let first_pane = pane(first)?;
+                            let second_pane = pane(second)?;
+                            let first_placement = self
+                                .core
+                                .graph
+                                .window(first)
+                                .ok_or_else(|| {
+                                    CommandError::Rejected("first window is stale".into())
+                                })?
+                                .placement;
+                            let second_placement = self
+                                .core
+                                .graph
+                                .window(second)
+                                .ok_or_else(|| {
+                                    CommandError::Rejected("second window is stale".into())
+                                })?
+                                .placement;
+                            match (first_placement, second_placement) {
+                                (WindowPlacement::Tiled, WindowPlacement::Tiled) => {
+                                    plan.operations.push(EditorOperation::SwapPanes {
+                                        first: first_pane,
+                                        second: second_pane,
+                                    });
+                                    None
+                                }
+                                (WindowPlacement::Tiled, _) | (_, WindowPlacement::Tiled) => {
+                                    return Err(CommandError::Rejected(
+                                        "cannot swap tiled and non-tiled editor windows".into(),
+                                    ));
+                                }
+                                _ => Some(NativeAction::SwapEditors(
+                                    (first_pane, first),
+                                    (second_pane, second),
+                                )),
+                            }
                         }
                         _ => {
                             return Err(CommandError::Rejected(
@@ -260,7 +552,39 @@ impl WindowSession {
                 return Ok(CommandEffect::ClonedExplorer(view));
             }
             NativeAction::Place(target, placement) => self.place_native(target, placement)?,
+            NativeAction::PlaceEditor(pane, window, placement) => {
+                let mut candidate = self.candidate()?;
+                candidate
+                    .core
+                    .editor
+                    .place_editor(&mut candidate.core.graph, pane, window, placement)
+                    .map_err(|error| error.to_string())?;
+                candidate.core.editor.invalidate_layout();
+                if candidate.core.graph.focused().is_none() {
+                    candidate.dashboard = Some(true);
+                }
+                self.commit(candidate)?;
+            }
+            NativeAction::ShowEditor(pane, window) => {
+                let mut candidate = self.candidate()?;
+                candidate
+                    .core
+                    .editor
+                    .show_editor(&mut candidate.core.graph, pane, window)
+                    .map_err(|error| error.to_string())?;
+                candidate.core.editor.invalidate_layout();
+                self.commit(candidate)?;
+            }
             NativeAction::Swap(a, b) => self.swap_native(a, b)?,
+            NativeAction::SwapEditors(first, second) => {
+                let mut candidate = self.candidate()?;
+                candidate
+                    .core
+                    .editor
+                    .swap_editors(&mut candidate.core.graph, first, second)
+                    .map_err(|error| error.to_string())?;
+                self.commit(candidate)?;
+            }
             NativeAction::Close(NativeSurfaceTarget::Terminal(id)) => {
                 return Ok(CommandEffect::CloseTerminal(id));
             }

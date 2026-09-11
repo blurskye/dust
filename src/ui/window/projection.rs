@@ -281,6 +281,28 @@ pub(super) fn project_dock(
     }
 }
 
+pub(super) fn project_float(requested: WindowRect, bounds: WindowRect) -> Option<WindowRect> {
+    if bounds.width == 0 || bounds.height == 0 {
+        return None;
+    }
+    let width = requested.width.min(bounds.width);
+    let height = requested.height.min(bounds.height);
+    Some(WindowRect {
+        x: requested.x.clamp(
+            bounds.x,
+            bounds.x.saturating_add(bounds.width.saturating_sub(width)),
+        ),
+        y: requested.y.clamp(
+            bounds.y,
+            bounds
+                .y
+                .saturating_add(bounds.height.saturating_sub(height)),
+        ),
+        width,
+        height,
+    })
+}
+
 pub(super) fn intersect_rect(requested: WindowRect, bounds: WindowRect) -> Option<WindowRect> {
     let left = requested.x.max(bounds.x);
     let top = requested.y.max(bounds.y);

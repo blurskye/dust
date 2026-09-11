@@ -1,10 +1,11 @@
 target_api = "0.3.0"
 clone_view = ["plugin.demo.panel", "plugin.demo.private"]
+tile_view = ["plugin.demo.panel", "plugin.demo.private"]
 
 [plugin]
 id = "demo"
 version = "0.0.0"
-component_sha256 = "f1646ee4732859e290144913dd171205c285c495233af97b9011f6dd16ea7bcf"
+component_sha256 = "9d1caf84261a71dc3123cea6bcd652e6a92105dd74b9995486c47a34d319d545"
 capabilities = ["private_cells"]
 
 [plugin.commands.open]
@@ -24,6 +25,41 @@ activation = "active_only"
 
 [plugin.commands.cloneprivate]
 title = "Clone private"
+context = "application"
+activation = "active_only"
+
+[plugin.commands.move]
+title = "Move retained"
+context = "application"
+activation = "active_only"
+
+[plugin.commands.tile]
+title = "Tile retained"
+context = "application"
+activation = "active_only"
+
+[plugin.commands.dock]
+title = "Dock retained"
+context = "application"
+activation = "active_only"
+
+[plugin.commands.fullscreen]
+title = "Fullscreen retained"
+context = "application"
+activation = "active_only"
+
+[plugin.commands.hide]
+title = "Hide retained"
+context = "application"
+activation = "active_only"
+
+[plugin.commands.focus]
+title = "Focus retained"
+context = "application"
+activation = "active_only"
+
+[plugin.commands.close]
+title = "Close retained"
 context = "application"
 activation = "active_only"
 
@@ -100,7 +136,7 @@ id = "plugin.demo.panel"
 title = "Target retained"
 presenter = "retained_declarative"
 default_placement = "floating"
-allowed_placements = ["floating"]
+allowed_placements = ["floating", "docked", "fullscreen", "hidden"]
 focusable = true
 maximum_instances = 4
 context = "dashboard"
@@ -111,7 +147,7 @@ id = "plugin.demo.private"
 title = "Target private"
 presenter = "private_cells"
 default_placement = "floating"
-allowed_placements = ["floating"]
+allowed_placements = ["floating", "docked", "fullscreen", "hidden"]
 focusable = true
 maximum_instances = 10
 context = "dashboard"

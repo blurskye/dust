@@ -24,6 +24,7 @@ use api::dust::plugin::host as wire;
 struct TargetManifest {
     target_api: String,
     clone_view: Vec<String>,
+    tile_view: Vec<String>,
     plugin: super::PluginManifest,
 }
 
@@ -31,6 +32,7 @@ struct TargetManifest {
 pub(crate) struct TargetAdmission {
     pub index: super::PluginContributionIndex,
     clone_view: BTreeSet<String>,
+    tile_view: BTreeSet<String>,
     activation: Arc<()>,
 }
 
@@ -47,6 +49,7 @@ impl TargetAdmission {
         )
         .map_err(|error| error.to_string())?;
         let clone_view = manifest.clone_view.iter().cloned().collect::<BTreeSet<_>>();
+        let tile_view = manifest.tile_view.iter().cloned().collect::<BTreeSet<_>>();
         let declared = index
             .content_types
             .iter()
@@ -60,15 +63,28 @@ impl TargetAdmission {
         {
             return Err("target clone_view is empty, duplicated, or undeclared".into());
         }
+        if tile_view.is_empty()
+            || tile_view.len() != manifest.tile_view.len()
+            || tile_view
+                .iter()
+                .any(|content| !declared.contains(content.as_str()))
+        {
+            return Err("target tile_view is empty, duplicated, or undeclared".into());
+        }
         Ok(Self {
             index,
             clone_view,
+            tile_view,
             activation: Arc::new(()),
         })
     }
 
     pub(crate) fn can_clone(&self, content_type: &str) -> bool {
         self.clone_view.contains(content_type)
+    }
+
+    pub(crate) fn can_tile(&self, content_type: &str) -> bool {
+        self.tile_view.contains(content_type)
     }
 
     pub(crate) fn without_clone(&self, content_type: &str) -> Self {
@@ -333,6 +349,71 @@ impl wire::Host for HostState {
                     return Err(failure(
                         wire::ErrorCode::InvalidArgument,
                         "target open-view does not match its admitted source or declaration",
+                        false,
+                    ));
+                }
+            }
+            wire::UiRequest::Place(place) => {
+                let ui = invocation.ui.as_ref().ok_or_else(|| {
+                    failure(
+                        wire::ErrorCode::StaleSource,
+                        "target placement has no admitted UI source",
+                        false,
+                    )
+                })?;
+                let placement_valid = match &place.placement {
+                    wire::Placement::Tiled(tile) => (1..=999).contains(&tile.ratio),
+                    wire::Placement::Docked(dock) => dock.size > 0,
+                    wire::Placement::Floating(rect) => rect.width > 0 && rect.height > 0,
+                    wire::Placement::Fullscreen | wire::Placement::Hidden => true,
+                };
+                if invocation.kind != wire::ExecutionKind::Command
+                    || place.window != ui.window
+                    || place.graph_revision != ui.graph_revision
+                    || place.tab != ui.tab
+                    || !placement_valid
+                {
+                    return Err(failure(
+                        wire::ErrorCode::InvalidArgument,
+                        "target placement does not match its admitted source",
+                        false,
+                    ));
+                }
+            }
+            wire::UiRequest::Focus(focus) => {
+                let ui = invocation.ui.as_ref().ok_or_else(|| {
+                    failure(
+                        wire::ErrorCode::StaleSource,
+                        "target focus has no admitted UI source",
+                        false,
+                    )
+                })?;
+                if invocation.kind != wire::ExecutionKind::Command
+                    || focus.window != ui.window
+                    || focus.graph_revision != ui.graph_revision
+                {
+                    return Err(failure(
+                        wire::ErrorCode::InvalidArgument,
+                        "target focus does not match its admitted source",
+                        false,
+                    ));
+                }
+            }
+            wire::UiRequest::Close(close) => {
+                let ui = invocation.ui.as_ref().ok_or_else(|| {
+                    failure(
+                        wire::ErrorCode::StaleSource,
+                        "target close has no admitted UI source",
+                        false,
+                    )
+                })?;
+                if invocation.kind != wire::ExecutionKind::Command
+                    || close.view != ui.view
+                    || close.graph_revision != ui.graph_revision
+                {
+                    return Err(failure(
+                        wire::ErrorCode::InvalidArgument,
+                        "target close does not match its admitted source",
                         false,
                     ));
                 }

@@ -41,6 +41,7 @@ pub(in crate::editor::session) struct EditorWindowBridge {
     views: HashMap<EditorViewId, ViewId>,
     panes: HashMap<PaneId, WindowId>,
     desired_placements: HashMap<PaneId, WindowPlacement>,
+    restore_placements: HashMap<PaneId, WindowPlacement>,
     tabs: HashMap<TabId, WorkspaceTabId>,
     source: Option<crate::editor::EditorWindowVersion>,
     scratch_label: Option<String>,
@@ -133,7 +134,11 @@ impl EditorWindowBridge {
         for (tab_id, tab) in state.tabs() {
             let universal_tab = self.tabs[&tab_id];
             for pane_id in editor_panes(&tab.root) {
-                let placement = WindowPlacement::Tiled;
+                let placement = self
+                    .desired_placements
+                    .get(&pane_id)
+                    .copied()
+                    .unwrap_or(WindowPlacement::Tiled);
                 let pane = state
                     .panes()
                     .get(pane_id)
@@ -161,10 +166,13 @@ impl EditorWindowBridge {
 
         self.desired_placements
             .retain(|pane, _| state.panes().contains_key(*pane));
+        self.restore_placements
+            .retain(|pane, _| state.panes().contains_key(*pane));
         for (tab_id, tab) in state.tabs() {
             let universal_tab = self.tabs[&tab_id];
-            let root = editor_tiled_layout(&tab.root, &self.panes)?;
-            graph.set_tiled_layout(universal_tab, Some(root))?;
+            let editor = editor_tiled_layout(&tab.root, &self.panes, &self.desired_placements)?;
+            let root = mixed_tiled_layout(graph, universal_tab, editor, &self.panes);
+            graph.set_tiled_layout(universal_tab, root)?;
         }
 
         let stale_views = self
@@ -214,6 +222,9 @@ impl EditorWindowBridge {
         if let Some(active_tab) = state.active_tab()
             && let Some(tab) = state.tabs().get(active_tab)
             && let Some(window) = self.panes.get(&tab.focused).copied()
+            && graph
+                .window(window)
+                .is_some_and(|descriptor| descriptor.placement != WindowPlacement::Hidden)
         {
             graph.focus(window)?;
         }
@@ -270,10 +281,21 @@ impl EditorWindowBridge {
         }
 
         self.desired_placements.clear();
-        for (pane, _, placement) in planned {
+        self.restore_placements.clear();
+        for (pane, window, placement) in planned {
             if placement != WindowPlacement::Tiled {
                 self.desired_placements.insert(pane, placement);
+                if placement != WindowPlacement::Hidden {
+                    self.restore_placements.insert(pane, placement);
+                }
             }
+            graph.place(window, placement)?;
+        }
+        for (tab_id, tab) in state.tabs() {
+            let universal_tab = self.tabs[&tab_id];
+            let editor = editor_tiled_layout(&tab.root, &self.panes, &self.desired_placements)?;
+            let root = mixed_tiled_layout(graph, universal_tab, editor, &self.panes);
+            graph.set_tiled_layout(universal_tab, root)?;
         }
         graph.validate()
     }
@@ -285,6 +307,115 @@ impl EditorWindowBridge {
         self.desired_placements.get(&pane).copied()
     }
 
+    pub(super) fn place_editor(
+        &mut self,
+        graph: &mut WindowGraph,
+        pane: PaneId,
+        expected_window: WindowId,
+        placement: WindowPlacement,
+    ) -> Result<(), WindowError> {
+        if self.panes.get(&pane).copied() != Some(expected_window) {
+            return Err(WindowError::UnknownWindow);
+        }
+        let current = graph
+            .window(expected_window)
+            .ok_or(WindowError::UnknownWindow)?
+            .placement;
+        if placement == WindowPlacement::Hidden && current != WindowPlacement::Hidden {
+            self.restore_placements.insert(pane, current);
+        }
+        if placement == WindowPlacement::Tiled {
+            self.desired_placements.remove(&pane);
+        } else {
+            self.desired_placements.insert(pane, placement);
+            if placement != WindowPlacement::Hidden {
+                self.restore_placements.insert(pane, placement);
+            }
+        }
+        graph.place(expected_window, placement)
+    }
+
+    pub(super) fn invalidate_layout(&mut self) {
+        // `WindowGraph::place` can only append a returning tile and does not
+        // own its original split ratio. Reconciliation rebuilds the filtered
+        // topology from the editor-owned logical layout.
+        self.source = None;
+    }
+
+    pub(super) fn rebuild_tiled_layout(
+        &self,
+        state: &EditorTopology<'_>,
+        graph: &mut WindowGraph,
+    ) -> Result<(), WindowError> {
+        for (tab_id, tab) in state.tabs() {
+            let universal_tab = self
+                .tabs
+                .get(&tab_id)
+                .copied()
+                .ok_or(WindowError::UnknownWorkspaceTab)?;
+            let editor = editor_tiled_layout(&tab.root, &self.panes, &self.desired_placements)?;
+            let root = mixed_tiled_layout(graph, universal_tab, editor, &self.panes);
+            graph.set_tiled_layout(universal_tab, root)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn swap_editors(
+        &mut self,
+        graph: &mut WindowGraph,
+        first: (PaneId, WindowId),
+        second: (PaneId, WindowId),
+    ) -> Result<(), WindowError> {
+        if self.panes.get(&first.0).copied() != Some(first.1)
+            || self.panes.get(&second.0).copied() != Some(second.1)
+        {
+            return Err(WindowError::UnknownWindow);
+        }
+        let first_placement = graph
+            .window(first.1)
+            .ok_or(WindowError::UnknownWindow)?
+            .placement;
+        let second_placement = graph
+            .window(second.1)
+            .ok_or(WindowError::UnknownWindow)?
+            .placement;
+        graph.swap_non_tiled_placements(first.1, second.1)?;
+        for (pane, previous, placement) in [
+            (first.0, first_placement, second_placement),
+            (second.0, second_placement, first_placement),
+        ] {
+            self.desired_placements.insert(pane, placement);
+            if placement == WindowPlacement::Hidden {
+                if previous != WindowPlacement::Hidden {
+                    self.restore_placements.insert(pane, previous);
+                }
+            } else {
+                self.restore_placements.insert(pane, placement);
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn show_editor(
+        &mut self,
+        graph: &mut WindowGraph,
+        pane: PaneId,
+        expected_window: WindowId,
+    ) -> Result<(), WindowError> {
+        if graph
+            .window(expected_window)
+            .is_none_or(|window| window.placement != WindowPlacement::Hidden)
+        {
+            return Err(WindowError::UnknownWindow);
+        }
+        let placement = self
+            .restore_placements
+            .get(&pane)
+            .copied()
+            .unwrap_or(WindowPlacement::Tiled);
+        self.place_editor(graph, pane, expected_window, placement)
+    }
+
     pub(in crate::editor::session) fn active_layout(
         &self,
         state: &EditorTopology<'_>,
@@ -292,8 +423,15 @@ impl EditorWindowBridge {
     ) -> Option<ActiveEditorWindowLayout> {
         let editor_tab = state.active_tab()?;
         let tab = self.tabs.get(&editor_tab).copied()?;
-        let layout = graph.tiled_layout_snapshot(tab)?;
         let editor = state.tabs().get(editor_tab)?;
+        let layout = TiledLayoutSnapshot {
+            root: editor_logical_layout(&editor.root, &self.panes).ok()?,
+            focused: graph.focused().filter(|window| {
+                graph
+                    .window(*window)
+                    .is_some_and(|descriptor| descriptor.tab == tab)
+            }),
+        };
         let bindings = editor_panes(&editor.root)
             .into_iter()
             .filter_map(|pane| {
@@ -421,6 +559,7 @@ pub(in crate::editor::session) struct NativeSurfaceBridge {
     explorer_placement: Option<WindowPlacement>,
     explorer_restore_placement: Option<WindowPlacement>,
     explorer_view_placements: BTreeMap<u64, WindowPlacement>,
+    explorer_view_restore_placements: BTreeMap<u64, WindowPlacement>,
     explorer_closed: bool,
     dashboard_placement: Option<WindowPlacement>,
     dashboard_restore_placement: Option<WindowPlacement>,
@@ -501,6 +640,7 @@ impl NativeSurfaceBridge {
             graph.remove_view(ids.view)?;
             self.explorer_views.remove(&view);
             self.explorer_view_placements.remove(&view);
+            self.explorer_view_restore_placements.remove(&view);
         }
         self.dashboard = self.dashboard.filter(|ids| live_ids(*ids, graph));
         self.pickers.retain(|_, ids| live_ids(*ids, graph));
@@ -598,6 +738,8 @@ impl NativeSurfaceBridge {
                         },
                     );
                     self.explorer_view_placements.insert(view, placement);
+                    self.explorer_view_restore_placements
+                        .insert(view, placement);
                 }
             }
         }
@@ -768,7 +910,11 @@ impl NativeSurfaceBridge {
             if let Some(ids) = ids {
                 graph.focus(ids.window)?;
             }
-        } else if let Some(editor) = signature.editor_window {
+        } else if let Some(editor) = signature.editor_window
+            && graph
+                .window(editor)
+                .is_some_and(|window| window.placement != WindowPlacement::Hidden)
+        {
             graph.focus(editor)?;
         } else if signature.dashboard_visible
             && let Some(dashboard) = dashboard
@@ -944,6 +1090,16 @@ impl NativeSurfaceBridge {
                     .get(&view)
                     .copied()
                     .ok_or(WindowError::UnknownWindow)?;
+                if placement == WindowPlacement::Hidden {
+                    if let Some(current) = self.explorer_view_placements.get(&view).copied()
+                        && current != WindowPlacement::Hidden
+                    {
+                        self.explorer_view_restore_placements.insert(view, current);
+                    }
+                } else {
+                    self.explorer_view_restore_placements
+                        .insert(view, placement);
+                }
                 self.explorer_view_placements.insert(view, placement);
                 ids
             }
@@ -986,7 +1142,7 @@ impl NativeSurfaceBridge {
                 self.explorer_restore_placement.unwrap_or(explorer_fallback)
             }
             NativeSurfaceTarget::ExplorerView(view) => self
-                .explorer_view_placements
+                .explorer_view_restore_placements
                 .get(&view)
                 .copied()
                 .unwrap_or(explorer_fallback),
@@ -1055,6 +1211,7 @@ impl NativeSurfaceBridge {
             NativeSurfaceTarget::ExplorerView(view) => {
                 self.explorer_views.remove(&view);
                 self.explorer_view_placements.remove(&view);
+                self.explorer_view_restore_placements.remove(&view);
             }
             NativeSurfaceTarget::Terminal(id) => {
                 self.terminals.remove(&id);
@@ -1278,6 +1435,8 @@ impl NativeSurfaceBridge {
         let explorer_placement = self.explorer_placement;
         let explorer_restore_placement = self.explorer_restore_placement;
         let explorer_view_placements = std::mem::take(&mut self.explorer_view_placements);
+        let explorer_view_restore_placements =
+            std::mem::take(&mut self.explorer_view_restore_placements);
         let explorer_closed = self.explorer_closed;
         let terminal_default_placement = self.terminal_default_placement;
         *self = Self {
@@ -1285,6 +1444,7 @@ impl NativeSurfaceBridge {
             explorer_placement,
             explorer_restore_placement,
             explorer_view_placements,
+            explorer_view_restore_placements,
             explorer_closed,
             terminal_default_placement,
             ..Self::default()
@@ -1293,7 +1453,57 @@ impl NativeSurfaceBridge {
     }
 }
 
-fn editor_tiled_layout(
+fn mixed_tiled_layout(
+    graph: &WindowGraph,
+    tab: WorkspaceTabId,
+    editor: Option<TiledLayoutNode>,
+    editor_windows: &HashMap<PaneId, WindowId>,
+) -> Option<TiledLayoutNode> {
+    let mut foreign = graph
+        .workspace_tab(tab)
+        .and_then(|tab| tab.tiled_root.clone());
+    for window in editor_windows.values() {
+        foreign = foreign.and_then(|root| remove_layout_window(root, *window));
+    }
+    match (editor, foreign) {
+        (Some(editor), Some(foreign)) => Some(TiledLayoutNode::Split {
+            axis: TileAxis::Horizontal,
+            ratio: 500,
+            first: Box::new(editor),
+            second: Box::new(foreign),
+        }),
+        (Some(only), None) | (None, Some(only)) => Some(only),
+        (None, None) => None,
+    }
+}
+
+fn remove_layout_window(node: TiledLayoutNode, target: WindowId) -> Option<TiledLayoutNode> {
+    match node {
+        TiledLayoutNode::Window(window) => {
+            (window != target).then_some(TiledLayoutNode::Window(window))
+        }
+        TiledLayoutNode::Split {
+            axis,
+            ratio,
+            first,
+            second,
+        } => match (
+            remove_layout_window(*first, target),
+            remove_layout_window(*second, target),
+        ) {
+            (Some(first), Some(second)) => Some(TiledLayoutNode::Split {
+                axis,
+                ratio,
+                first: Box::new(first),
+                second: Box::new(second),
+            }),
+            (Some(only), None) | (None, Some(only)) => Some(only),
+            (None, None) => None,
+        },
+    }
+}
+
+fn editor_logical_layout(
     node: &LayoutNode,
     windows: &HashMap<PaneId, WindowId>,
 ) -> Result<TiledLayoutNode, WindowError> {
@@ -1314,10 +1524,55 @@ fn editor_tiled_layout(
                 crate::editor::Axis::Vertical => TileAxis::Vertical,
             },
             ratio: *ratio,
-            first: Box::new(editor_tiled_layout(first, windows)?),
-            second: Box::new(editor_tiled_layout(second, windows)?),
+            first: Box::new(editor_logical_layout(first, windows)?),
+            second: Box::new(editor_logical_layout(second, windows)?),
         }),
     }
+}
+
+fn editor_tiled_layout(
+    node: &LayoutNode,
+    windows: &HashMap<PaneId, WindowId>,
+    desired: &HashMap<PaneId, WindowPlacement>,
+) -> Result<Option<TiledLayoutNode>, WindowError> {
+    Ok(match node {
+        LayoutNode::Pane(pane) => {
+            if desired
+                .get(pane)
+                .is_some_and(|placement| *placement != WindowPlacement::Tiled)
+            {
+                None
+            } else {
+                Some(TiledLayoutNode::Window(
+                    windows
+                        .get(pane)
+                        .copied()
+                        .ok_or(WindowError::UnknownWindow)?,
+                ))
+            }
+        }
+        LayoutNode::Split {
+            axis,
+            ratio,
+            first,
+            second,
+        } => match (
+            editor_tiled_layout(first, windows, desired)?,
+            editor_tiled_layout(second, windows, desired)?,
+        ) {
+            (Some(first), Some(second)) => Some(TiledLayoutNode::Split {
+                axis: match axis {
+                    crate::editor::Axis::Horizontal => TileAxis::Horizontal,
+                    crate::editor::Axis::Vertical => TileAxis::Vertical,
+                },
+                ratio: *ratio,
+                first: Box::new(first),
+                second: Box::new(second),
+            }),
+            (Some(only), None) | (None, Some(only)) => Some(only),
+            (None, None) => None,
+        },
+    })
 }
 
 fn editor_panes(node: &LayoutNode) -> Vec<PaneId> {

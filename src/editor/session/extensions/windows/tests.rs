@@ -1310,7 +1310,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     );
     assert_eq!(
         format!("{:x}", Sha256::digest(core)),
-        "f1646ee4732859e290144913dd171205c285c495233af97b9011f6dd16ea7bcf"
+        "9d1caf84261a71dc3123cea6bcd652e6a92105dd74b9995486c47a34d319d545"
     );
     assert_eq!(
         include_str!("../../../../../docs/specs/api-next.wit"),
@@ -1333,6 +1333,16 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
         )
         .is_err()
     );
+    assert!(
+        TargetAdmission::parse(
+            &manifest_source.replace(
+                "tile_view = [\"plugin.demo.panel\", \"plugin.demo.private\"]",
+                "tile_view = [\"plugin.demo.panel\", \"plugin.demo.panel\"]",
+            ),
+            9,
+        )
+        .is_err()
+    );
     let mut catalogue = crate::extensions::PluginContributionCatalog::default();
     catalogue
         .install(admission.index.clone())
@@ -1344,7 +1354,13 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
             "callbackopen".to_owned(),
             "clone".to_owned(),
             "cloneprivate".to_owned(),
+            "close".to_owned(),
+            "dock".to_owned(),
             "failafterqueue".to_owned(),
+            "focus".to_owned(),
+            "fullscreen".to_owned(),
+            "hide".to_owned(),
+            "move".to_owned(),
             "open".to_owned(),
             "openprivate".to_owned(),
             "openprivatefail".to_owned(),
@@ -1356,6 +1372,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
             "openprivatewide".to_owned(),
             "openprivatewrongview".to_owned(),
             "oversized".to_owned(),
+            "tile".to_owned(),
             "trapafterqueue".to_owned(),
             "unsupported".to_owned(),
         ]
@@ -1627,6 +1644,166 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     );
     assert!(runtime.take_notices().is_empty());
 
+    macro_rules! apply_component_window_operation {
+        ($id:expr, $command:expr, $source:expr) => {{
+            let source = $source;
+            runtime
+                .execute(
+                    invocation(
+                        $id,
+                        $command,
+                        &graph,
+                        crate::ui::window::ContentId(source.content),
+                        crate::ui::window::ViewId(source.view),
+                        crate::ui::window::WindowId(source.window),
+                    ),
+                    &catalogue,
+                )
+                .unwrap_or_else(|error| panic!("actual Component {} staging: {error}", $command));
+            let mut requests = runtime.take_requests();
+            assert_eq!(requests.len(), 1, "one {} request", $command);
+            let token = requests[0].token;
+            let receipt = host
+                .process_target03(&mut graph, &catalogue, &admission, requests.remove(0))
+                .unwrap_or_else(|error| {
+                    panic!("actual Component {} publication: {error:?}", $command)
+                });
+            runtime
+                .handle_events(vec![callback($id + 100, token, Ok(receipt))], &catalogue)
+                .unwrap_or_else(|error| panic!("actual Component {} callback: {error}", $command));
+            runtime.take_notices();
+            receipt
+        }};
+    }
+    let moved = apply_component_window_operation!(6, "move", clone);
+    assert_eq!(
+        graph
+            .window(crate::ui::window::WindowId(clone.window))
+            .expect("moved target window")
+            .placement,
+        WindowPlacement::Floating(WindowRect {
+            x: 9,
+            y: 5,
+            width: 36,
+            height: 11,
+        })
+    );
+    let tiled = apply_component_window_operation!(7, "tile", moved);
+    assert_eq!(tiled.content, original.content);
+    assert_eq!(
+        graph
+            .window(crate::ui::window::WindowId(clone.window))
+            .expect("tiled target window")
+            .placement,
+        WindowPlacement::Tiled
+    );
+    let docked = apply_component_window_operation!(8, "dock", tiled);
+    assert_eq!(
+        graph
+            .window(crate::ui::window::WindowId(clone.window))
+            .expect("docked target window")
+            .placement,
+        WindowPlacement::Docked {
+            edge: crate::ui::window::DockEdge::Right,
+            size: 19,
+        }
+    );
+    let fullscreen = apply_component_window_operation!(9, "fullscreen", docked);
+    assert_eq!(
+        graph
+            .window(crate::ui::window::WindowId(clone.window))
+            .expect("fullscreen target window")
+            .placement,
+        WindowPlacement::Fullscreen
+    );
+    let hidden = apply_component_window_operation!(10, "hide", fullscreen);
+    assert_eq!(
+        graph
+            .window(crate::ui::window::WindowId(clone.window))
+            .expect("hidden target window")
+            .placement,
+        WindowPlacement::Hidden
+    );
+    runtime
+        .execute(
+            invocation(
+                11,
+                "focus",
+                &graph,
+                crate::ui::window::ContentId(hidden.content),
+                crate::ui::window::ViewId(hidden.view),
+                crate::ui::window::WindowId(hidden.window),
+            ),
+            &catalogue,
+        )
+        .expect("hidden focus request is staged by the actual Component");
+    let mut hidden_focus = runtime.take_requests();
+    let hidden_focus_token = hidden_focus[0].token;
+    let hidden_graph = graph.clone();
+    let hidden_host = host.clone();
+    let hidden_error = host
+        .process_target03(&mut graph, &catalogue, &admission, hidden_focus.remove(0))
+        .expect_err("hidden target cannot receive focus");
+    assert_eq!(hidden_error.code, wire::ErrorCode::InvalidArgument);
+    assert_eq!(graph, hidden_graph);
+    assert_eq!(host, hidden_host);
+    assert!(
+        runtime
+            .handle_events(
+                vec![callback(111, hidden_focus_token, Err(hidden_error))],
+                &catalogue,
+            )
+            .is_err()
+    );
+    let shown = apply_component_window_operation!(12, "move", hidden);
+    let focused = apply_component_window_operation!(13, "focus", shown);
+    assert_eq!(
+        graph.focused(),
+        Some(crate::ui::window::WindowId(clone.window))
+    );
+    let other_tab = graph
+        .create_workspace_tab("builtin.cross-tab", 1)
+        .expect("cross-tab switch target");
+    graph.set_active_tab(other_tab).expect("switch away");
+    assert_ne!(graph.active_tab(), Some(tab));
+    graph
+        .focus(crate::ui::window::WindowId(focused.window))
+        .expect("host switcher returns to exact retained target");
+    assert_eq!(graph.active_tab(), Some(tab));
+    assert_eq!(
+        graph
+            .window(crate::ui::window::WindowId(focused.window))
+            .expect("same cross-tab retained window")
+            .view
+            .0,
+        focused.view
+    );
+    graph
+        .remove_workspace_tab(other_tab)
+        .expect("retire empty cross-tab fixture");
+    let close_source = apply_component_window_operation!(14, "clone", focused);
+    assert_ne!(close_source.window, clone.window);
+    let closed = apply_component_window_operation!(15, "close", close_source);
+    assert_eq!(closed.window, close_source.window);
+    assert!(
+        graph
+            .window(crate::ui::window::WindowId(close_source.window))
+            .is_none()
+    );
+    assert!(
+        graph
+            .window(crate::ui::window::WindowId(clone.window))
+            .is_some()
+    );
+    assert_eq!(
+        graph
+            .content(crate::ui::window::ContentId(original.content))
+            .expect("original shared content survives clone close")
+            .id
+            .0,
+        original.content
+    );
+
     runtime
         .execute(
             invocation(
@@ -1880,6 +2057,116 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
             .contains("stale, duplicated")
     );
     assert!(runtime.take_requests().is_empty());
+
+    let private_moved = apply_component_window_operation!(120, "move", private_original);
+    assert_eq!(private_moved.content, private_original.content);
+    assert_eq!(private_moved.view, private_original.view);
+    assert_eq!(private_moved.window, private_original.window);
+    assert_eq!(
+        graph
+            .window(crate::ui::window::WindowId(private_moved.window))
+            .expect("moved private window")
+            .placement,
+        WindowPlacement::Floating(WindowRect {
+            x: 9,
+            y: 5,
+            width: 36,
+            height: 11,
+        })
+    );
+    let private_tiled = apply_component_window_operation!(121, "tile", private_moved);
+    assert_eq!(
+        graph
+            .window(crate::ui::window::WindowId(private_tiled.window))
+            .expect("tiled private window")
+            .placement,
+        WindowPlacement::Tiled
+    );
+    let private_docked = apply_component_window_operation!(122, "dock", private_tiled);
+    assert!(matches!(
+        graph
+            .window(crate::ui::window::WindowId(private_docked.window))
+            .expect("docked private window")
+            .placement,
+        WindowPlacement::Docked { .. }
+    ));
+    let private_fullscreen = apply_component_window_operation!(123, "fullscreen", private_docked);
+    assert_eq!(
+        graph
+            .window(crate::ui::window::WindowId(private_fullscreen.window))
+            .expect("fullscreen private window")
+            .placement,
+        WindowPlacement::Fullscreen
+    );
+    let private_hidden = apply_component_window_operation!(124, "hide", private_fullscreen);
+    assert_eq!(
+        graph
+            .window(crate::ui::window::WindowId(private_hidden.window))
+            .expect("hidden private window")
+            .placement,
+        WindowPlacement::Hidden
+    );
+    let private_shown = apply_component_window_operation!(125, "move", private_hidden);
+    let private_focused = apply_component_window_operation!(126, "focus", private_shown);
+    assert_eq!(
+        graph.focused().map(|window| window.0),
+        Some(private_focused.window)
+    );
+    let private_other_tab = graph
+        .create_workspace_tab("builtin.private-cross-tab", 1)
+        .expect("private cross-tab switch target");
+    graph
+        .set_active_tab(private_other_tab)
+        .expect("switch away from private view");
+    graph
+        .focus(crate::ui::window::WindowId(private_focused.window))
+        .expect("host switcher returns to exact private target");
+    assert_eq!(graph.active_tab(), Some(tab));
+    assert_eq!(
+        graph
+            .window(crate::ui::window::WindowId(private_focused.window))
+            .expect("same cross-tab private window")
+            .view
+            .0,
+        private_focused.view
+    );
+    graph
+        .remove_workspace_tab(private_other_tab)
+        .expect("retire empty private cross-tab fixture");
+    let projection = graph
+        .compositor_snapshot(tab)
+        .expect("moved private graph snapshot")
+        .project(
+            WindowRect {
+                x: 0,
+                y: 0,
+                width: 80,
+                height: 24,
+            },
+            1,
+            1,
+        );
+    let moved_dimensions = host
+        .target03_dimensions(&projection, &catalogue, &admission, 127)
+        .expect("moved private dimensions");
+    assert_eq!(moved_dimensions.len(), 1);
+    runtime
+        .handle_events(moved_dimensions, &catalogue)
+        .expect("moved private dimensions callback");
+    runtime.take_notices();
+    let mut moved_cells = runtime.take_requests();
+    assert_eq!(moved_cells.len(), 1);
+    let moved_cells_token = moved_cells[0].token;
+    let moved_cells_receipt = host
+        .process_target03(&mut graph, &catalogue, &admission, moved_cells.remove(0))
+        .expect("moved private cells");
+    runtime
+        .handle_events(
+            vec![callback(128, moved_cells_token, Ok(moved_cells_receipt))],
+            &catalogue,
+        )
+        .expect("moved private cells receipt");
+    runtime.take_notices();
 
     let denied_private_admission = admission.without_clone("plugin.demo.private");
     let mut denied_private =
@@ -2752,6 +3039,28 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
         .content_for_window(other_snapshot.window)
         .expect("unrelated graph content")
         .clone();
+
+    let closed_private_clone = apply_component_window_operation!(165, "close", private_clone);
+    assert_eq!(closed_private_clone.content, private_original.content);
+    assert!(
+        graph
+            .window(crate::ui::window::WindowId(private_clone.window))
+            .is_none()
+    );
+    assert!(
+        graph
+            .content(crate::ui::window::ContentId(private_original.content))
+            .is_some(),
+        "shared private content survives until its last view closes"
+    );
+    let closed_private_original = apply_component_window_operation!(166, "close", private_focused);
+    assert_eq!(closed_private_original.content, private_original.content);
+    assert!(
+        graph
+            .content(crate::ui::window::ContentId(private_original.content))
+            .is_none()
+    );
+    assert!(host.private_snapshots(&graph).is_empty());
 
     runtime
         .execute(

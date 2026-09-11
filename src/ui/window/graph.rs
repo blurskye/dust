@@ -13,6 +13,7 @@ pub struct WindowGraph {
     pub(super) workspace_tabs: BTreeMap<WorkspaceTabId, WorkspaceTabDescriptor>,
     pub(super) active_tab: Option<WorkspaceTabId>,
     pub(super) focused: Option<WindowId>,
+    pub(super) remembered_focus: BTreeMap<WorkspaceTabId, WindowId>,
     pub(super) revision: u64,
 }
 
@@ -35,6 +36,7 @@ impl Clone for WindowGraph {
             workspace_tabs: self.workspace_tabs.clone(),
             active_tab: self.active_tab,
             focused: self.focused,
+            remembered_focus: self.remembered_focus.clone(),
             revision: self.revision,
         }
     }
@@ -82,6 +84,7 @@ impl WindowGraph {
             && self.workspace_tabs == other.workspace_tabs
             && self.active_tab == other.active_tab
             && self.focused == other.focused
+            && self.remembered_focus == other.remembered_focus
     }
 
     #[cfg(test)]
@@ -554,6 +557,92 @@ impl WindowGraph {
         Ok(())
     }
 
+    pub fn tile(
+        &mut self,
+        window: WindowId,
+        neighbor: Option<WindowId>,
+        axis: TileAxis,
+        after: bool,
+        ratio: u16,
+    ) -> Result<(), WindowError> {
+        self.checked_mutation(|candidate| {
+            if !(1..=999).contains(&ratio) || neighbor == Some(window) {
+                return Err(WindowError::InvalidPlacement);
+            }
+            let descriptor = candidate
+                .windows
+                .get(&window)
+                .ok_or(WindowError::UnknownWindow)?;
+            if !candidate.capabilities_for_view(descriptor.view)?.tile {
+                return Err(WindowError::Unsupported("placement"));
+            }
+            let tab = descriptor.tab;
+            if let Some(neighbor) = neighbor {
+                let neighbor_descriptor = candidate
+                    .windows
+                    .get(&neighbor)
+                    .ok_or(WindowError::UnknownWindow)?;
+                if neighbor_descriptor.tab != tab
+                    || neighbor_descriptor.placement != WindowPlacement::Tiled
+                {
+                    return Err(WindowError::WindowNotInTiledLayout);
+                }
+            }
+            let workspace = candidate
+                .workspace_tabs
+                .get_mut(&tab)
+                .ok_or(WindowError::UnknownWorkspaceTab)?;
+            workspace.tiled_root = workspace
+                .tiled_root
+                .take()
+                .and_then(|root| remove_tiled_window(root, window));
+            candidate
+                .windows
+                .get_mut(&window)
+                .ok_or(WindowError::UnknownWindow)?
+                .placement = WindowPlacement::Tiled;
+            workspace.tiled_root = if let Some(neighbor) = neighbor {
+                let mut root = workspace
+                    .tiled_root
+                    .take()
+                    .ok_or(WindowError::MissingTiledLayout)?;
+                let (first, second) = if after {
+                    (neighbor, window)
+                } else {
+                    (window, neighbor)
+                };
+                if !replace_tiled_leaf(
+                    &mut root,
+                    neighbor,
+                    TiledLayoutNode::Split {
+                        axis,
+                        ratio,
+                        first: Box::new(TiledLayoutNode::Window(first)),
+                        second: Box::new(TiledLayoutNode::Window(second)),
+                    },
+                ) {
+                    return Err(WindowError::WindowNotInTiledLayout);
+                }
+                Some(root)
+            } else {
+                workspace.tiled_root.take().map_or_else(
+                    || Some(TiledLayoutNode::Window(window)),
+                    |root| {
+                        let added = TiledLayoutNode::Window(window);
+                        let (first, second) = if after { (root, added) } else { (added, root) };
+                        Some(TiledLayoutNode::Split {
+                            axis,
+                            ratio,
+                            first: Box::new(first),
+                            second: Box::new(second),
+                        })
+                    },
+                )
+            };
+            Ok(())
+        })
+    }
+
     pub fn place(
         &mut self,
         window: WindowId,
@@ -722,14 +811,21 @@ impl WindowGraph {
                 .is_none_or(|window| window.tab != tab)
             {
                 candidate.focused = candidate
-                    .windows
-                    .values()
-                    .find(|window| {
-                        window.tab == tab
-                            && window.focusable
-                            && window.placement != WindowPlacement::Hidden
-                    })
-                    .map(|window| window.id);
+                    .remembered_focus
+                    .get(&tab)
+                    .copied()
+                    .filter(|remembered| candidate.eligible_focus(*remembered, tab))
+                    .or_else(|| {
+                        candidate
+                            .windows
+                            .values()
+                            .find(|window| {
+                                window.tab == tab
+                                    && window.focusable
+                                    && window.placement != WindowPlacement::Hidden
+                            })
+                            .map(|window| window.id)
+                    });
             }
             Ok(())
         })
@@ -904,6 +1000,7 @@ impl WindowGraph {
     ) -> Result<T, WindowError> {
         let mut candidate = self.clone();
         let output = mutation(&mut candidate)?;
+        candidate.synchronize_focus_memory();
         candidate.validate()?;
         if !candidate.same_source_state(self) {
             candidate.ensure_revision_capacity()?;
@@ -987,6 +1084,11 @@ impl WindowGraph {
         {
             return Err(WindowError::UnknownWorkspaceTab);
         }
+        for (tab, remembered) in &self.remembered_focus {
+            if !self.eligible_focus(*remembered, *tab) {
+                return Err(WindowError::NotFocusable);
+            }
+        }
         if let Some(focused) = self.focused {
             let window = self
                 .windows
@@ -997,6 +1099,9 @@ impl WindowGraph {
             }
             if self.active_tab != Some(window.tab) {
                 return Err(WindowError::FocusOutsideActiveTab);
+            }
+            if self.remembered_focus.get(&window.tab) != Some(&focused) {
+                return Err(WindowError::NotFocusable);
             }
         }
         Ok(())
@@ -1130,15 +1235,50 @@ impl WindowGraph {
         )
     }
 
+    fn eligible_focus(&self, window: WindowId, tab: WorkspaceTabId) -> bool {
+        self.windows.get(&window).is_some_and(|window| {
+            window.tab == tab && window.focusable && window.placement != WindowPlacement::Hidden
+        })
+    }
+
+    fn synchronize_focus_memory(&mut self) {
+        let windows = &self.windows;
+        self.remembered_focus.retain(|tab, remembered| {
+            windows.get(remembered).is_some_and(|window| {
+                window.tab == *tab
+                    && window.focusable
+                    && window.placement != WindowPlacement::Hidden
+            })
+        });
+        if let Some(focused) = self.focused
+            && let Some(window) = self.windows.get(&focused)
+            && window.focusable
+            && window.placement != WindowPlacement::Hidden
+        {
+            self.remembered_focus.insert(window.tab, focused);
+        }
+    }
+
     fn select_focus_fallback(&mut self) {
         if self.focused.is_some() {
             return;
         }
-        let candidate = self
-            .windows
-            .values()
-            .filter(|window| window.focusable && window.placement != WindowPlacement::Hidden)
-            .find(|window| self.active_tab == Some(window.tab))
+        let remembered = self.active_tab.and_then(|tab| {
+            self.remembered_focus
+                .get(&tab)
+                .copied()
+                .filter(|window| self.eligible_focus(*window, tab))
+        });
+        let candidate = remembered
+            .and_then(|window| self.windows.get(&window))
+            .or_else(|| {
+                self.windows
+                    .values()
+                    .filter(|window| {
+                        window.focusable && window.placement != WindowPlacement::Hidden
+                    })
+                    .find(|window| self.active_tab == Some(window.tab))
+            })
             .or_else(|| {
                 self.windows
                     .values()
@@ -1147,6 +1287,27 @@ impl WindowGraph {
         if let Some(window) = candidate {
             self.active_tab = Some(window.tab);
             self.focused = Some(window.id);
+        }
+    }
+}
+
+fn replace_tiled_leaf(
+    node: &mut TiledLayoutNode,
+    target: WindowId,
+    replacement: TiledLayoutNode,
+) -> bool {
+    match node {
+        TiledLayoutNode::Window(window) if *window == target => {
+            *node = replacement;
+            true
+        }
+        TiledLayoutNode::Window(_) => false,
+        TiledLayoutNode::Split { first, second, .. } => {
+            if tiled_contains(first, target) {
+                replace_tiled_leaf(first, target, replacement)
+            } else {
+                replace_tiled_leaf(second, target, replacement)
+            }
         }
     }
 }

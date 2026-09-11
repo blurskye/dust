@@ -243,8 +243,8 @@ fn editor_geometry_is_projected_from_the_universal_window_snapshot() {
     assert!(!bridge.contains("editor_window_signature"));
 
     let session = module_source("src/editor/session");
-    assert!(session.contains("pane_viewports("));
-    assert!(session.contains("active_pane_viewport("));
+    assert!(session.contains("editor_pane_viewport_at("));
+    assert!(session.contains("active_editor_pane_viewport("));
     assert!(session.contains("self.terminal_window_rect()"));
     assert!(session.contains("self.window_session.content().explorer"));
     assert!(session.contains("apply_authoritative_editor_transaction"));

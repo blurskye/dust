@@ -1841,6 +1841,430 @@ fn editor_layout_commands_commit_state_bridge_and_graph_as_one_authoritative_tra
 }
 
 #[test]
+fn text_and_virtual_windows_project_input_and_preserve_identity_across_ordinary_placements() {
+    let mut app = app();
+    app.window_session.observe_size((80, 24));
+    app.state.open_text(
+        TextBuffer::from_text("floating editor contents"),
+        Some(PathBuf::from("/workspace/floating.rs")),
+    );
+    app.set_dashboard_visibility(false);
+    let tab = app.state.active_tab.expect("editor tab");
+    let source_pane = app.state.tabs[tab].focused;
+    let source_view = app.state.panes[source_pane].view;
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(
+        crate::editor::Axis::Horizontal,
+    )));
+    let source_window = app
+        .window_session
+        .editor_ids()
+        .window_for(source_pane)
+        .expect("source window");
+    let source_content = app
+        .window_session
+        .graph()
+        .content_for_window(source_window)
+        .expect("source content")
+        .id;
+
+    app.process_effect(AppEffect::WindowFloat {
+        target: format!("window:{}", source_window.0),
+        x: 7,
+        y: 4,
+        width: 31,
+        height: 9,
+    });
+    let floating = app
+        .compositor_projection()
+        .and_then(|projection| projection.window(source_window))
+        .expect("floating editor projection");
+    assert_eq!(floating.layer, crate::ui::window::CompositorLayer::Floating);
+    assert_eq!(
+        floating.rect,
+        WindowRect {
+            x: 7,
+            y: 4,
+            width: 31,
+            height: 9,
+        }
+    );
+    let frame = crate::ui::render(
+        &app.state,
+        &app.ui,
+        app.configuration.settings(),
+        app.configuration.dashboard(),
+        80,
+        24,
+    );
+    assert!(
+        (4..13).any(|row| (7..38).any(|column| {
+            frame
+                .grid
+                .get(column, row)
+                .is_some_and(|cell| cell.symbol == "f")
+        })),
+        "floating editor content is painted in its projected rectangle"
+    );
+    app.input.observe_mouse(12, 5);
+    app.focus_mouse_pane();
+    assert_eq!(app.state.tabs[tab].focused, source_pane);
+    assert_eq!(app.state.active_view, Some(source_view));
+
+    app.process_effect(AppEffect::WindowMove {
+        target: format!("window:{}", source_window.0),
+        x: 11,
+        y: 6,
+    });
+    app.process_effect(AppEffect::WindowResize {
+        target: format!("window:{}", source_window.0),
+        amount: 3,
+    });
+    let moved_source = WindowPlacement::Floating(WindowRect {
+        x: 11,
+        y: 6,
+        width: 34,
+        height: 12,
+    });
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(source_window)
+            .expect("moved editor")
+            .placement,
+        moved_source
+    );
+    let other_pane = app
+        .state
+        .panes
+        .keys()
+        .find(|pane| *pane != source_pane)
+        .expect("other pane");
+    let other_window = app
+        .window_session
+        .editor_ids()
+        .window_for(other_pane)
+        .expect("other editor window");
+    let other_placement = WindowPlacement::Floating(WindowRect {
+        x: 48,
+        y: 2,
+        width: 25,
+        height: 7,
+    });
+    app.place_graph_window(&format!("window:{}", other_window.0), other_placement)
+        .expect("float second editor");
+    app.swap_graph_windows(
+        &format!("window:{}", source_window.0),
+        &format!("window:{}", other_window.0),
+    )
+    .expect("swap non-tiled editor placements");
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(source_window)
+            .expect("swapped source")
+            .placement,
+        other_placement
+    );
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(other_window)
+            .expect("swapped other")
+            .placement,
+        moved_source
+    );
+
+    for placement in [
+        WindowPlacement::Docked {
+            edge: DockEdge::Right,
+            size: 18,
+        },
+        WindowPlacement::Fullscreen,
+        WindowPlacement::Hidden,
+    ] {
+        app.place_graph_window(&format!("window:{}", source_window.0), placement)
+            .expect("supported editor placement");
+        assert_eq!(
+            app.window_session
+                .graph()
+                .window(source_window)
+                .expect("same editor window")
+                .placement,
+            placement
+        );
+        assert_eq!(
+            app.window_session
+                .graph()
+                .content_for_window(source_window)
+                .expect("same content")
+                .id,
+            source_content
+        );
+        assert_eq!(
+            app.window_session.editor_ids().window_for(source_pane),
+            Some(source_window)
+        );
+        if placement == WindowPlacement::Hidden {
+            assert_ne!(app.state.tabs[tab].focused, source_pane);
+            assert_eq!(
+                app.window_session.graph().focused(),
+                app.window_session
+                    .editor_ids()
+                    .window_for(app.state.tabs[tab].focused)
+            );
+        }
+    }
+    app.show_graph_window(&format!("window:{}", source_window.0))
+        .expect("show hidden editor");
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(source_window)
+            .expect("restored editor")
+            .placement,
+        WindowPlacement::Fullscreen
+    );
+    app.place_graph_window(
+        &format!("window:{}", source_window.0),
+        WindowPlacement::Tiled,
+    )
+    .expect("return editor to exact logical tile");
+    assert!(
+        app.window_session
+            .graph()
+            .tiled_layout_snapshot(app.window_session.graph().active_tab().expect("active tab"))
+            .expect("restored tiled layout")
+            .project(
+                WindowRect {
+                    x: 0,
+                    y: 0,
+                    width: 80,
+                    height: 24,
+                },
+                1,
+                1,
+            )
+            .windows
+            .iter()
+            .any(|window| window.window == source_window)
+    );
+    app.close_graph_window(&format!("window:{}", other_window.0))
+        .expect("close exact non-tiled editor view");
+    assert!(app.window_session.graph().window(other_window).is_none());
+    assert_eq!(
+        app.window_session
+            .graph()
+            .content_for_window(source_window)
+            .expect("shared text content survives view close")
+            .id,
+        source_content
+    );
+
+    let mut virtual_app = super::app();
+    virtual_app.process_effect(AppEffect::HealthVirtualOpen);
+    virtual_app.reconcile_editor_windows();
+    let virtual_window = virtual_app
+        .window_session
+        .graph()
+        .focused()
+        .expect("virtual window");
+    let virtual_content = virtual_app
+        .window_session
+        .graph()
+        .content_for_window(virtual_window)
+        .expect("virtual content")
+        .clone();
+    assert_eq!(
+        virtual_content.adapter,
+        crate::ui::window::ContentAdapterKind::VirtualDocument
+    );
+    virtual_app
+        .place_graph_window(
+            &format!("window:{}", virtual_window.0),
+            WindowPlacement::Floating(WindowRect {
+                x: 4,
+                y: 3,
+                width: 40,
+                height: 10,
+            }),
+        )
+        .expect("float virtual document");
+    virtual_app
+        .move_graph_window(&format!("window:{}", virtual_window.0), 6, 5)
+        .expect("move virtual document");
+    virtual_app
+        .resize_graph_window(&format!("window:{}", virtual_window.0), 2)
+        .expect("resize virtual document");
+    for placement in [
+        WindowPlacement::Docked {
+            edge: DockEdge::Left,
+            size: 16,
+        },
+        WindowPlacement::Fullscreen,
+        WindowPlacement::Hidden,
+    ] {
+        virtual_app
+            .place_graph_window(&format!("window:{}", virtual_window.0), placement)
+            .expect("place virtual document");
+        assert_eq!(
+            virtual_app
+                .window_session
+                .graph()
+                .window(virtual_window)
+                .expect("same virtual window")
+                .placement,
+            placement
+        );
+    }
+    virtual_app
+        .show_graph_window(&format!("window:{}", virtual_window.0))
+        .expect("show virtual document");
+    virtual_app
+        .place_graph_window(
+            &format!("window:{}", virtual_window.0),
+            WindowPlacement::Tiled,
+        )
+        .expect("tile virtual document");
+    assert_eq!(
+        virtual_app
+            .window_session
+            .graph()
+            .content_for_window(virtual_window)
+            .expect("same virtual content")
+            .id,
+        virtual_content.id
+    );
+    let virtual_pane = virtual_app
+        .window_session
+        .editor_ids()
+        .pane_for_window(virtual_window)
+        .expect("virtual pane");
+    virtual_app
+        .clone_graph_window(
+            &format!("window:{}", virtual_window.0),
+            crate::editor::Axis::Horizontal,
+        )
+        .expect("clone virtual view for close qualification");
+    let virtual_clone = virtual_app
+        .window_session
+        .graph()
+        .focused()
+        .expect("virtual clone window");
+    assert_ne!(virtual_clone, virtual_window);
+    virtual_app
+        .place_graph_window(
+            &format!("window:{}", virtual_clone.0),
+            WindowPlacement::Floating(WindowRect {
+                x: 8,
+                y: 4,
+                width: 30,
+                height: 8,
+            }),
+        )
+        .expect("float virtual clone");
+    virtual_app
+        .close_graph_window(&format!("window:{}", virtual_clone.0))
+        .expect("close exact virtual view");
+    assert!(
+        virtual_app
+            .window_session
+            .graph()
+            .window(virtual_clone)
+            .is_none()
+    );
+    assert_eq!(
+        virtual_app
+            .window_session
+            .editor_ids()
+            .window_for(virtual_pane),
+        Some(virtual_window)
+    );
+    assert_eq!(virtual_app.state.buffers.len(), 1);
+}
+
+#[test]
+fn overlapping_mixed_floats_paint_and_focus_in_compositor_z_order() {
+    let mut app = app();
+    app.window_session.observe_size((80, 24));
+    app.state
+        .open_text(TextBuffer::from_text("TOP_EDITOR"), None);
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    app.open_explorer();
+    app.process_effect(AppEffect::WindowFloat {
+        target: "explorer".into(),
+        x: 4,
+        y: 3,
+        width: 35,
+        height: 10,
+    });
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(
+        crate::editor::Axis::Horizontal,
+    )));
+    let pane = app.state.tabs[app.state.active_tab.expect("tab")].focused;
+    let editor = app
+        .window_session
+        .editor_ids()
+        .window_for(pane)
+        .expect("later editor window");
+    app.process_effect(AppEffect::WindowFloat {
+        target: format!("window:{}", editor.0),
+        x: 4,
+        y: 3,
+        width: 35,
+        height: 10,
+    });
+    let projection = app.compositor_projection().expect("mixed projection");
+    let explorer = app
+        .window_session
+        .native_ids()
+        .explorer()
+        .expect("explorer window")
+        .window;
+    assert!(
+        projection
+            .window(editor)
+            .expect("editor projection")
+            .z_index
+            > projection
+                .window(explorer)
+                .expect("explorer projection")
+                .z_index
+    );
+    let frame = crate::ui::render(
+        &app.state,
+        &app.ui,
+        app.configuration.settings(),
+        app.configuration.dashboard(),
+        80,
+        24,
+    );
+    let painted = (3..13)
+        .map(|row| {
+            (4..39)
+                .filter_map(|column| frame.grid.get(column, row))
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(painted.contains("TOP_EDITOR"), "{painted}");
+    app.input.observe_mouse(10, 4);
+    app.focus_mouse_pane();
+    assert_eq!(
+        app.state.tabs[app.state.active_tab.expect("tab")].focused,
+        pane
+    );
+    assert_eq!(app.window_session.graph().focused(), Some(editor));
+    assert_eq!(app.active_input_context(), "editor.normal");
+    app.handle_configured_key("i".parse::<KeyEvent>().expect("insert mode"));
+    app.handle_configured_key("x".parse::<KeyEvent>().expect("insert text"));
+    let view = app.state.panes[pane].view;
+    let buffer = app.state.views[view].buffer;
+    assert!(app.state.buffers[buffer].text.to_string().starts_with('x'));
+}
+
+#[test]
 fn editor_window_swap_rejects_mixed_and_cross_tab_targets_atomically() {
     let mut app = app();
     app.state.open_text(TextBuffer::from_text("editor"), None);
@@ -2764,6 +3188,99 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
         Some(terminal_ids)
     );
     assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (60, 10));
+    app.place_graph_window("terminal", WindowPlacement::Tiled)
+        .expect("tile live terminal view");
+    assert_eq!(
+        app.window_session.native_ids().terminal(1),
+        Some(terminal_ids)
+    );
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(terminal_ids.window)
+            .expect("tiled terminal")
+            .placement,
+        WindowPlacement::Tiled
+    );
+    app.reconcile_editor_windows();
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(terminal_ids.window)
+            .expect("tiled terminal survives editor reconciliation")
+            .placement,
+        WindowPlacement::Tiled
+    );
+    app.place_graph_window(
+        "terminal",
+        WindowPlacement::Docked {
+            edge: DockEdge::Bottom,
+            size: 12,
+        },
+    )
+    .expect("redock same terminal view");
+    assert_eq!(
+        app.window_session.native_ids().terminal(1),
+        Some(terminal_ids)
+    );
+    let first_editor_tab = app.state.active_tab.expect("first editor tab");
+    let terminal_two_ids = app
+        .window_session
+        .native_ids()
+        .terminal(2)
+        .expect("second terminal resources");
+    let terminal_state_before_rehost = (
+        app.terminal_session.fixture_dimensions(PtyId(1)),
+        app.terminal_session.fixture_lines(PtyId(1)),
+    );
+    app.process_effect(crate::editor::AppEffect::Layout(
+        crate::editor::LayoutAction::NewTab,
+    ));
+    let rehosted_tab = app
+        .window_session
+        .graph()
+        .active_tab()
+        .expect("new graph tab");
+    assert_eq!(
+        app.window_session.native_ids().terminal(1),
+        Some(terminal_ids)
+    );
+    assert_eq!(
+        app.window_session.native_ids().terminal(2),
+        Some(terminal_two_ids)
+    );
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(terminal_ids.window)
+            .expect("rehosted terminal window")
+            .tab,
+        rehosted_tab
+    );
+    assert_eq!(
+        (
+            app.terminal_session.fixture_dimensions(PtyId(1)),
+            app.terminal_session.fixture_lines(PtyId(1)),
+        ),
+        terminal_state_before_rehost,
+        "cross-tab rehosting preserves the terminal owner state"
+    );
+    app.process_effect(crate::editor::AppEffect::Layout(
+        crate::editor::LayoutAction::FocusTab(-1),
+    ));
+    assert_eq!(app.state.active_tab, Some(first_editor_tab));
+    assert_eq!(
+        app.window_session.native_ids().terminal(1),
+        Some(terminal_ids)
+    );
+    assert_ne!(
+        app.window_session
+            .graph()
+            .window(terminal_ids.window)
+            .expect("terminal rehosted back")
+            .tab,
+        rehosted_tab
+    );
     app.process_effect(crate::editor::AppEffect::TerminalFocus(2));
     app.process_effect(crate::editor::AppEffect::TerminalFloat {
         x: 9,
@@ -3318,10 +3835,30 @@ fn semantic_content_restore_uses_fresh_ids_and_preserves_unclamped_desired_place
     assert!(new_window.0 > old_window.0);
     assert!(new_view.0 > old_view.0);
     assert!(new_content.0 > old_content.0);
-    // Desired placement is retained independently from the currently
-    // projected effective placement.
-    assert_eq!(new_descriptor.placement, WindowPlacement::Tiled);
+    // The graph retains the unclamped desire while the compositor publishes a
+    // bounded effective rectangle for rendering and input.
+    assert_eq!(
+        new_descriptor.placement,
+        WindowPlacement::Floating(WindowRect {
+            x: 90,
+            y: 30,
+            width: 73,
+            height: 19,
+        })
+    );
     app.reconcile_editor_windows();
+    assert_eq!(
+        app.compositor_projection()
+            .and_then(|projection| projection.window(new_window))
+            .expect("clamped restored editor projection")
+            .rect,
+        WindowRect {
+            x: 7,
+            y: 5,
+            width: 73,
+            height: 19,
+        }
+    );
     assert_eq!(
         app.capture_session()
             .expect("recaptured")

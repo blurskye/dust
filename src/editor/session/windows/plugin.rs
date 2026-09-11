@@ -237,6 +237,44 @@ impl PluginWindowDraft {
         self.graph
             .open_window(tab, view, placement, focusable, owner, generation)
     }
+    #[cfg(test)]
+    pub(in crate::editor::session) fn open_tiled_window(
+        &mut self,
+        tab: WorkspaceTabId,
+        view: ViewId,
+        focusable: bool,
+        owner: &str,
+        generation: u64,
+        insertion: (Option<WindowId>, crate::ui::window::TileAxis, bool, u16),
+    ) -> Result<WindowId, WindowError> {
+        self.require_owner(owner, generation)?;
+        if self.graph.active_tab() != Some(tab) {
+            return Err(WindowError::WindowOutsideActiveTab);
+        }
+        let existing = self.graph.view(view).ok_or(WindowError::UnknownView)?;
+        self.require_owner(&existing.owner, existing.generation)?;
+        let window = self.graph.open_window(
+            tab,
+            view,
+            WindowPlacement::Tiled,
+            focusable,
+            owner,
+            generation,
+        )?;
+        self.graph
+            .tile(window, insertion.0, insertion.1, insertion.2, insertion.3)?;
+        Ok(window)
+    }
+    #[cfg(test)]
+    pub(in crate::editor::session) fn tile(
+        &mut self,
+        window: WindowId,
+        insertion: (Option<WindowId>, crate::ui::window::TileAxis, bool, u16),
+    ) -> Result<(), WindowError> {
+        self.require_window(window)?;
+        self.graph
+            .tile(window, insertion.0, insertion.1, insertion.2, insertion.3)
+    }
     pub(in crate::editor::session) fn place(
         &mut self,
         window: WindowId,

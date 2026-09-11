@@ -106,6 +106,29 @@ impl TestSession {
     pub(super) fn graph_revision(&self) -> u64 {
         self.application.window_session.graph().revision().unwrap()
     }
+    pub(super) fn window_identity(
+        &self,
+        window: crate::ui::window::WindowId,
+    ) -> (
+        crate::ui::window::WindowId,
+        crate::ui::window::ViewId,
+        crate::ui::window::ContentId,
+    ) {
+        let descriptor = self
+            .application
+            .window_session
+            .graph()
+            .window(window)
+            .expect("fixture window");
+        let content = self
+            .application
+            .window_session
+            .graph()
+            .view(descriptor.view)
+            .expect("fixture view")
+            .content;
+        (window, descriptor.view, content)
+    }
     pub(super) fn install_plugin_fixture(
         &mut self,
         index: crate::extensions::PluginContributionIndex,
@@ -146,6 +169,38 @@ impl TestSession {
                 target,
                 axis: crate::editor::Axis::Vertical,
             });
+    }
+    pub(super) fn attempt_host_plugin_window_operations(&mut self, target: &str) {
+        use crate::editor::AppEffect;
+        for effect in [
+            AppEffect::WindowDock {
+                target: target.into(),
+                edge: "left".into(),
+                size: 10,
+            },
+            AppEffect::WindowFloat {
+                target: target.into(),
+                x: 2,
+                y: 2,
+                width: 20,
+                height: 6,
+            },
+            AppEffect::WindowFullscreen(target.into()),
+            AppEffect::WindowHide(target.into()),
+            AppEffect::WindowShow(target.into()),
+            AppEffect::WindowMove {
+                target: target.into(),
+                x: 4,
+                y: 4,
+            },
+            AppEffect::WindowResize {
+                target: target.into(),
+                amount: 2,
+            },
+            AppEffect::WindowClose(target.into()),
+        ] {
+            self.application.process_effect(effect);
+        }
     }
     pub(super) fn plugin_clone_state(&self) -> PluginCloneState {
         PluginCloneState {
@@ -384,6 +439,58 @@ impl TestSession {
                 height: 8,
             });
         self.application.reconcile_editor_windows();
+    }
+    pub(super) fn explorer_window(&self, view: u64) -> crate::ui::window::WindowId {
+        self.application
+            .window_session
+            .native_ids()
+            .explorer_view(view)
+            .expect("explorer fixture view")
+            .window
+    }
+    pub(super) fn window_tab(
+        &self,
+        window: crate::ui::window::WindowId,
+    ) -> crate::ui::window::WorkspaceTabId {
+        self.application
+            .window_session
+            .graph()
+            .window(window)
+            .expect("fixture window")
+            .tab
+    }
+    pub(super) fn active_window_tab(&self) -> crate::ui::window::WorkspaceTabId {
+        self.application
+            .window_session
+            .graph()
+            .active_tab()
+            .expect("active fixture window tab")
+    }
+    pub(super) fn window_placement(
+        &self,
+        window: crate::ui::window::WindowId,
+    ) -> crate::ui::window::WindowPlacement {
+        self.application
+            .window_session
+            .graph()
+            .window(window)
+            .expect("fixture window")
+            .placement
+    }
+    pub(super) fn place_window(
+        &mut self,
+        window: crate::ui::window::WindowId,
+        placement: crate::ui::window::WindowPlacement,
+    ) -> Result<(), String> {
+        self.application
+            .place_graph_window(&format!("window:{}", window.0), placement)
+    }
+    pub(super) fn show_window(
+        &mut self,
+        window: crate::ui::window::WindowId,
+    ) -> Result<(), String> {
+        self.application
+            .show_graph_window(&format!("window:{}", window.0))
     }
     pub(super) fn page_explorer(&mut self, direction: isize) {
         self.application.page_explorer_selection(direction);

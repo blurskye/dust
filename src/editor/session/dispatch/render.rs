@@ -232,6 +232,7 @@ impl InteractiveApplication {
             .map(|window| window.rect)
     }
 
+    #[cfg(test)]
     pub(super) fn workspace_render_height(&self) -> u16 {
         self.workspace_bounds()
             .map_or(self.window_session.height(), |bounds| bounds.height)
@@ -259,14 +260,6 @@ impl InteractiveApplication {
         }
     }
 
-    pub(super) fn resolve_native_window_target(
-        &self,
-        target: &str,
-    ) -> Result<NativeSurfaceTarget, String> {
-        self.window_session
-            .resolve_native_target(target, self.terminal_session.selected().map(|id| id.0))
-            .map_err(|error| self.window_target_error(error))
-    }
     pub(super) fn window_target_error(
         &self,
         error: crate::editor::session::windows::TargetError,
@@ -412,6 +405,36 @@ impl InteractiveApplication {
         Ok(())
     }
 
+    pub(super) fn place_graph_window(
+        &mut self,
+        target: &str,
+        placement: WindowPlacement,
+    ) -> Result<(), String> {
+        let selected = self.terminal_session.selected().map(|id| id.0);
+        let window = self
+            .window_session
+            .resolve_graph_target(target, selected)
+            .map_err(|error| self.window_target_error(error))?;
+        if let Some(native) = self.window_session.native_ids().target_for_window(window) {
+            self.apply_native_window_placement(native, placement)
+        } else {
+            self.run_window_command(WindowCommand::Place(target, placement))
+        }
+    }
+
+    pub(super) fn show_graph_window(&mut self, target: &str) -> Result<(), String> {
+        let selected = self.terminal_session.selected().map(|id| id.0);
+        let window = self
+            .window_session
+            .resolve_graph_target(target, selected)
+            .map_err(|error| self.window_target_error(error))?;
+        if let Some(native) = self.window_session.native_ids().target_for_window(window) {
+            self.show_native_window(native)
+        } else {
+            self.run_window_command(WindowCommand::Show(target))
+        }
+    }
+
     pub(super) fn resize_graph_window(&mut self, target: &str, amount: i16) -> Result<(), String> {
         self.run_window_command(WindowCommand::Resize(target, amount))
     }
@@ -437,18 +460,22 @@ impl InteractiveApplication {
         self.run_window_command(WindowCommand::Close(target))
     }
 
-    pub(super) fn move_native_window(
-        &mut self,
-        target: NativeSurfaceTarget,
-        x: u16,
-        y: u16,
-    ) -> Result<(), String> {
-        let WindowPlacement::Floating(mut rect) = self.current_native_placement(target)? else {
-            return Err("only floating ordinary windows can be moved".into());
-        };
-        rect.x = x;
-        rect.y = y;
-        self.apply_native_window_placement(target, WindowPlacement::Floating(rect))
+    pub(super) fn move_graph_window(&mut self, target: &str, x: u16, y: u16) -> Result<(), String> {
+        let selected = self.terminal_session.selected().map(|id| id.0);
+        let window = self
+            .window_session
+            .resolve_graph_target(target, selected)
+            .map_err(|error| self.window_target_error(error))?;
+        if let Some(native) = self.window_session.native_ids().target_for_window(window) {
+            let WindowPlacement::Floating(mut rect) = self.current_native_placement(native)? else {
+                return Err("only floating ordinary windows can be moved".into());
+            };
+            rect.x = x;
+            rect.y = y;
+            self.apply_native_window_placement(native, WindowPlacement::Floating(rect))
+        } else {
+            self.run_window_command(WindowCommand::Move(target, x, y))
+        }
     }
 
     pub(super) fn swap_graph_windows(&mut self, first: &str, second: &str) -> Result<(), String> {
@@ -976,17 +1003,7 @@ impl InteractiveApplication {
         let view = &self.state.views[view_id];
         let buffer = &self.state.buffers[view.buffer];
         let line = buffer.text.byte_to_line(view.cursor).unwrap_or(0);
-        let Some(workspace) = self.workspace_bounds() else {
-            return;
-        };
-        let content_width = workspace.width;
-        let Some(viewport) = active_pane_viewport(
-            &self.state,
-            &self.ui,
-            self.configuration.settings(),
-            content_width,
-            self.workspace_render_height(),
-        ) else {
+        let Some(viewport) = active_editor_pane_viewport(&self.state, &self.ui) else {
             return;
         };
         if viewport.view != view_id {

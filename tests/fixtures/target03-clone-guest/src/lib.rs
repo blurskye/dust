@@ -7,8 +7,9 @@ use std::{
 };
 
 use dust::plugin::host::{
-    self, Cell, CellUpdate, EventValue, ExecutionKind, Node, NodeKind, Notice, OpenView, Placement,
-    Rect, Role, Severity, SnapshotRequest, Tree, UiRequest,
+    self, Cell, CellUpdate, CloseView, Dock, Edge, EventValue, ExecutionKind, Focus, Node,
+    NodeKind, Notice, OpenView, Place, Placement, Rect, Role, Severity, SnapshotRequest, Tree,
+    UiRequest,
 };
 
 #[derive(Clone, Copy)]
@@ -72,6 +73,13 @@ impl Guest for GuestComponent {
             "clone".into(),
             "openprivate".into(),
             "cloneprivate".into(),
+            "move".into(),
+            "tile".into(),
+            "dock".into(),
+            "fullscreen".into(),
+            "hide".into(),
+            "focus".into(),
+            "close".into(),
             "unsupported".into(),
             "oversized".into(),
             "failafterqueue".into(),
@@ -93,6 +101,50 @@ impl Guest for GuestComponent {
             return Err(failure("expected command invocation"));
         }
         let ui = invocation.ui.ok_or_else(|| failure("missing UI context"))?;
+        let placement = match invocation.command.as_str() {
+            "tile" => Some(Placement::Tiled(host::Tile {
+                neighbor: None,
+                axis: host::Axis::Horizontal,
+                after: true,
+                ratio: 500,
+            })),
+            "move" => Some(Placement::Floating(Rect {
+                x: 9,
+                y: 5,
+                width: 36,
+                height: 11,
+            })),
+            "dock" => Some(Placement::Docked(Dock {
+                edge: Edge::Right,
+                size: 19,
+            })),
+            "fullscreen" => Some(Placement::Fullscreen),
+            "hide" => Some(Placement::Hidden),
+            _ => None,
+        };
+        if let Some(placement) = placement {
+            host::queue_ui(&UiRequest::Place(Place {
+                window: ui.window,
+                graph_revision: ui.graph_revision,
+                tab: ui.tab,
+                placement,
+            }))?;
+            return Ok(());
+        }
+        if invocation.command == "focus" {
+            host::queue_ui(&UiRequest::Focus(Focus {
+                window: ui.window,
+                graph_revision: ui.graph_revision,
+            }))?;
+            return Ok(());
+        }
+        if invocation.command == "close" {
+            host::queue_ui(&UiRequest::Close(CloseView {
+                view: ui.view,
+                graph_revision: ui.graph_revision,
+            }))?;
+            return Ok(());
+        }
         if invocation.command == "oversized" {
             let mut oversized = tree("oversized");
             oversized.nodes.extend((2..=257).map(|id| Node {

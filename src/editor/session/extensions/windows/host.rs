@@ -493,8 +493,18 @@ impl PluginWindowHost {
                 candidate
                     .close_window(instance.window)
                     .and_then(|_| candidate.remove_view(instance.view))
-                    .and_then(|_| candidate.remove_content(instance.content))
                     .map_err(map_graph_error)?;
+                if candidate
+                    .read()
+                    .content_snapshots()
+                    .into_iter()
+                    .find(|content| content.id == instance.content)
+                    .is_some_and(|content| content.view_count == 0)
+                {
+                    candidate
+                        .remove_content(instance.content)
+                        .map_err(map_graph_error)?;
+                }
                 candidate.validate().map_err(map_graph_error)?;
                 self.instances.remove(&handle);
                 Ok(revisions)

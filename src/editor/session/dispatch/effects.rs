@@ -4052,32 +4052,11 @@ impl InteractiveApplication {
         &self,
     ) -> Option<(crate::editor::PaneId, u16, u16, u16, u16)> {
         let (global_column, global_row) = self.input.mouse_position()?;
-        let workspace = self.workspace_bounds()?;
-        if !rect_contains_point(workspace, global_column, global_row) {
-            return None;
-        }
-        let content_width = workspace.width;
-        let local_column = global_column.saturating_sub(workspace.x);
-        let local_row = global_row.saturating_sub(workspace.y);
-        pane_viewports(
-            &self.state,
-            &self.ui,
-            self.configuration.settings(),
-            content_width,
-            self.workspace_render_height(),
-        )
-        .into_iter()
-        .find(|viewport| {
-            local_column >= viewport.x
-                && local_column < viewport.x.saturating_add(viewport.width)
-                && local_row >= viewport.y
-                && local_row < viewport.y.saturating_add(viewport.height)
-        })
-        .map(|viewport| {
+        editor_pane_viewport_at(&self.state, &self.ui, global_column, global_row).map(|viewport| {
             (
                 viewport.pane,
-                local_column.saturating_sub(viewport.x),
-                local_row.saturating_sub(viewport.y),
+                global_column.saturating_sub(viewport.x),
+                global_row.saturating_sub(viewport.y),
                 viewport.width,
                 viewport.height,
             )
@@ -4089,10 +4068,18 @@ impl InteractiveApplication {
         let Some((pane, ..)) = self.mouse_pane_geometry() else {
             return;
         };
-        let transaction = EditorTransaction::new(self.transaction_id())
-            .with_operation(EditorOperation::FocusPaneId { pane })
-            .with_undo_policy(UndoPolicy::Ignore);
-        if let Err(error) = self.apply_authoritative_editor_transaction(&transaction) {
+        let Some(window) = self.window_session.editor_ids().window_for(pane) else {
+            return;
+        };
+        let result = self
+            .window_session
+            .plan_focus(
+                window,
+                &self.state.window_version(),
+                self.extension.contributions().version(),
+            )
+            .and_then(|plan| self.apply_window_plan(plan));
+        if let Err(error) = result {
             self.show_error(error);
         } else {
             self.ensure_cursor_visible();
@@ -4202,18 +4189,9 @@ impl InteractiveApplication {
         };
         let view = &self.state.views[view_id];
         let buffer = &self.state.buffers[view.buffer];
-        let Some(workspace) = self.workspace_bounds() else {
-            return;
-        };
-        let content_width = workspace.width;
-        let Some(viewport) = active_pane_viewport(
-            &self.state,
-            &self.ui,
-            self.configuration.settings(),
-            content_width,
-            self.workspace_render_height(),
-        )
-        .filter(|viewport| viewport.view == view_id) else {
+        let Some(viewport) = active_editor_pane_viewport(&self.state, &self.ui)
+            .filter(|viewport| viewport.view == view_id)
+        else {
             return;
         };
         let body = usize::from(
@@ -10280,14 +10258,8 @@ impl InteractiveApplication {
                         return Ok(());
                     }
                 };
-                let result = self
-                    .resolve_native_window_target(&target)
-                    .and_then(|target| {
-                        self.apply_native_window_placement(
-                            target,
-                            WindowPlacement::Docked { edge, size },
-                        )
-                    });
+                let result =
+                    self.place_graph_window(&target, WindowPlacement::Docked { edge, size });
                 if let Err(error) = result {
                     self.show_error(error);
                 }
@@ -10299,47 +10271,33 @@ impl InteractiveApplication {
                 width,
                 height,
             } => {
-                let result = self
-                    .resolve_native_window_target(&target)
-                    .and_then(|target| {
-                        self.apply_native_window_placement(
-                            target,
-                            WindowPlacement::Floating(WindowRect {
-                                x,
-                                y,
-                                width,
-                                height,
-                            }),
-                        )
-                    });
+                let result = self.place_graph_window(
+                    &target,
+                    WindowPlacement::Floating(WindowRect {
+                        x,
+                        y,
+                        width,
+                        height,
+                    }),
+                );
                 if let Err(error) = result {
                     self.show_error(error);
                 }
             }
             AppEffect::WindowFullscreen(target) => {
-                let result = self
-                    .resolve_native_window_target(&target)
-                    .and_then(|target| {
-                        self.apply_native_window_placement(target, WindowPlacement::Fullscreen)
-                    });
+                let result = self.place_graph_window(&target, WindowPlacement::Fullscreen);
                 if let Err(error) = result {
                     self.show_error(error);
                 }
             }
             AppEffect::WindowHide(target) => {
-                let result = self
-                    .resolve_native_window_target(&target)
-                    .and_then(|target| {
-                        self.apply_native_window_placement(target, WindowPlacement::Hidden)
-                    });
+                let result = self.place_graph_window(&target, WindowPlacement::Hidden);
                 if let Err(error) = result {
                     self.show_error(error);
                 }
             }
             AppEffect::WindowShow(target) => {
-                let result = self
-                    .resolve_native_window_target(&target)
-                    .and_then(|target| self.show_native_window(target));
+                let result = self.show_graph_window(&target);
                 if let Err(error) = result {
                     self.show_error(error);
                 }
@@ -10360,9 +10318,7 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::WindowMove { target, x, y } => {
-                let result = self
-                    .resolve_native_window_target(&target)
-                    .and_then(|target| self.move_native_window(target, x, y));
+                let result = self.move_graph_window(&target, x, y);
                 if let Err(error) = result {
                     self.show_error(error);
                 }

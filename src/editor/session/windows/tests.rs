@@ -916,6 +916,51 @@ fn native_command_plans_are_source_bound_before_any_candidate_copy() {
     );
     assert_eq!(foreign_windows.graph(), &foreign_before);
 
+    let placement_plan = windows
+        .plan_window_command(
+            WindowCommand::Place(
+                "focused",
+                crate::ui::window::WindowPlacement::Floating(WindowRect {
+                    x: 3,
+                    y: 2,
+                    width: 30,
+                    height: 8,
+                }),
+            ),
+            &(&state).into(),
+            policy(),
+            catalog.clone(),
+        )
+        .unwrap_or_else(|_| panic!("source-bound editor placement plan"));
+    let placement_before = windows.graph().clone();
+    windows.invalidate_native();
+    assert!(
+        windows
+            .accept_window_command(placement_plan, &source, &catalog)
+            .is_err()
+    );
+    assert_eq!(windows.graph(), &placement_before);
+
+    windows.project(ProjectionRequest {
+        tab: windows.graph().active_tab().unwrap(),
+        source_revision: state.window_revision().unwrap(),
+        graph_revision: windows.graph().revision().unwrap(),
+        bounds: WindowRect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 30,
+        },
+        minimum_size: (4, 2),
+        insets: (0, 0),
+        surfaces: NativeSurfaceWindowBinding {
+            explorer: None,
+            terminal: None,
+            dashboard: None,
+            picker: None,
+        },
+        protected: None,
+    });
     let plan = windows
         .plan_window_command(
             WindowCommand::Swap("focused", "focused"),

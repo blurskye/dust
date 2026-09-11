@@ -28,6 +28,87 @@ pub(super) struct WorkspaceProjection {
     borders: Vec<crate::ui::window::ProjectedBorder>,
 }
 
+fn global_editor_pane_viewports(state: &EditorState, ui: &UiState) -> Vec<PaneViewport> {
+    let Some(source_revision) = state.window_revision() else {
+        return Vec::new();
+    };
+    let Some(layout) = ui
+        .editor_window_layout
+        .as_ref()
+        .filter(|layout| layout.source_revision == source_revision)
+    else {
+        return Vec::new();
+    };
+    let Some(compositor) = ui
+        .compositor_layout
+        .as_ref()
+        .filter(|compositor| compositor.source_revision == source_revision)
+    else {
+        return Vec::new();
+    };
+    compositor
+        .projection
+        .windows
+        .iter()
+        .filter_map(|projected| {
+            let binding = layout
+                .bindings
+                .iter()
+                .find(|binding| binding.window == projected.window)?;
+            Some(PaneViewport {
+                pane: binding.pane,
+                view: binding.view,
+                x: projected.rect.x,
+                y: projected.rect.y,
+                width: projected.rect.width,
+                height: projected.rect.height,
+            })
+        })
+        .collect()
+}
+
+#[must_use]
+pub fn editor_pane_viewport_at(
+    state: &EditorState,
+    ui: &UiState,
+    column: u16,
+    row: u16,
+) -> Option<PaneViewport> {
+    let layout = ui.editor_window_layout.as_ref()?;
+    let projected = ui
+        .compositor_layout
+        .as_ref()?
+        .projection
+        .windows
+        .iter()
+        .rev()
+        .find(|projected| {
+            layout
+                .bindings
+                .iter()
+                .any(|binding| binding.window == projected.window)
+                && column >= projected.rect.x
+                && column < projected.rect.x.saturating_add(projected.rect.width)
+                && row >= projected.rect.y
+                && row < projected.rect.y.saturating_add(projected.rect.height)
+        })?;
+    let binding = layout
+        .bindings
+        .iter()
+        .find(|binding| binding.window == projected.window)?;
+    global_editor_pane_viewports(state, ui)
+        .into_iter()
+        .find(|viewport| viewport.pane == binding.pane)
+}
+
+#[must_use]
+pub fn active_editor_pane_viewport(state: &EditorState, ui: &UiState) -> Option<PaneViewport> {
+    let tab = state.tabs.get(state.active_tab?)?;
+    global_editor_pane_viewports(state, ui)
+        .into_iter()
+        .find(|viewport| viewport.pane == tab.focused)
+}
+
 pub(super) fn workspace_projection(
     state: &EditorState,
     ui: &UiState,
@@ -129,6 +210,89 @@ pub fn active_pane_viewport(
     pane_viewports(state, ui, config, width, height)
         .into_iter()
         .find(|viewport| viewport.pane == tab.focused)
+}
+
+pub(super) fn render_non_tiled_editor_window(
+    frame: &mut Frame,
+    state: &EditorState,
+    ui: &UiState,
+    config: &Config,
+    projected: &crate::ui::window::ProjectedCompositorWindow,
+) -> bool {
+    if projected.layer == crate::ui::window::CompositorLayer::Tiled {
+        return false;
+    }
+    let Some(tab) = state.active_tab.and_then(|tab| state.tabs.get(tab)) else {
+        return false;
+    };
+    let Some(source_revision) = state.window_revision() else {
+        return false;
+    };
+    let Some(binding) = ui
+        .editor_window_layout
+        .as_ref()
+        .filter(|layout| layout.source_revision == source_revision)
+        .and_then(|layout| {
+            layout
+                .bindings
+                .iter()
+                .find(|binding| binding.window == projected.window)
+        })
+    else {
+        return false;
+    };
+    let rendered = render_editor_view(
+        state,
+        binding.view,
+        ui,
+        config,
+        projected.rect.width,
+        projected.rect.height,
+    );
+    for y in 0..projected.rect.height {
+        for x in 0..projected.rect.width {
+            let Some(cell) = rendered.grid.get(x, y) else {
+                continue;
+            };
+            if !cell.continuation {
+                frame.grid.set_cell(
+                    projected.rect.x.saturating_add(x),
+                    projected.rect.y.saturating_add(y),
+                    &cell.symbol,
+                    cell.style,
+                );
+            }
+        }
+    }
+    if binding.pane == tab.focused && projected.focused {
+        frame.cursor = rendered.cursor.map(|(x, y, shape)| {
+            (
+                projected.rect.x.saturating_add(x),
+                projected.rect.y.saturating_add(y),
+                shape,
+            )
+        });
+    }
+    true
+}
+
+pub(super) fn render_non_tiled_editor_windows(
+    frame: &mut Frame,
+    state: &EditorState,
+    ui: &UiState,
+    config: &Config,
+) {
+    let Some(compositor) = ui.compositor_layout.as_ref() else {
+        return;
+    };
+    for projected in compositor
+        .projection
+        .windows
+        .iter()
+        .filter(|window| window.layer != crate::ui::window::CompositorLayer::Floating)
+    {
+        render_non_tiled_editor_window(frame, state, ui, config, projected);
+    }
 }
 
 pub(super) fn render_workspace(

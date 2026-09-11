@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 use crate::{
     editor::text::TextBuffer,
     editor::{Axis, EditorState},
-    ui::window::{WindowError, WindowGraph, WindowPlacement},
+    ui::window::{ContentAdapterKind, ContentTypeId, WindowError, WindowGraph, WindowPlacement},
 };
 
 use super::{EditorWindowBridge, NativeSurfaceBridge};
@@ -73,6 +73,62 @@ fn same_content_has_independent_views_and_windows_with_stable_focus_identity() {
     assert_eq!(bridge.window_for(second_pane), Some(second_window));
     assert!(after.windows[0].rect.width > before.windows[0].rect.width);
     assert!(bridge.is_current(&(&state).into(), "[scratch]"));
+}
+
+#[test]
+fn editor_reconciliation_preserves_foreign_tiled_windows_and_identity() {
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    state.open_text(TextBuffer::from_text("one"), None);
+    let mut bridge = EditorWindowBridge::default();
+    let mut graph = WindowGraph::default();
+    reconcile(&mut bridge, &mut graph, &state);
+    let tab = bridge
+        .tab_for(state.active_tab.expect("tab"))
+        .expect("graph tab");
+    let content = graph
+        .create_content(
+            ContentTypeId::new("terminal.external-tui").unwrap(),
+            ContentAdapterKind::ExternalTui,
+            "external".into(),
+            false,
+            "external",
+            1,
+        )
+        .unwrap();
+    let view = graph.create_view(content, "external", 1).unwrap();
+    let window = graph
+        .open_window(tab, view, WindowPlacement::Tiled, true, "external", 1)
+        .unwrap();
+
+    state.set_buffer_dirty(state.active_buffer_id().expect("buffer"), true);
+    reconcile(&mut bridge, &mut graph, &state);
+    assert_eq!(graph.window(window).expect("foreign tile").view, view);
+    assert_eq!(graph.view(view).expect("foreign view").content, content);
+    assert_eq!(
+        graph
+            .window(window)
+            .expect("foreign tiled placement")
+            .placement,
+        WindowPlacement::Tiled
+    );
+    assert!(
+        graph
+            .tiled_layout_snapshot(tab)
+            .expect("mixed tiled layout")
+            .project(
+                crate::ui::window::WindowRect {
+                    x: 0,
+                    y: 0,
+                    width: 80,
+                    height: 20,
+                },
+                1,
+                1,
+            )
+            .windows
+            .iter()
+            .any(|projected| projected.window == window)
+    );
 }
 
 #[test]

@@ -94,10 +94,10 @@ use crate::ui::{
     LanguageCompletionState, NativeSurfaceWindowBinding, PickerSurfaceKind, PromptKind,
     TerminalError, TerminalOptions, TerminalPanelMode, TerminalSession, ToolMenuRow, ToolMenuState,
     ToolRuntimeOption, ToolRuntimePickerState, UiEvent, UiFold, UiInlayHint, UiState, UiSyntaxSpan,
-    VisualRowAnchor, VisualRowModel, active_pane_viewport, editor_state_content_width,
-    editor_state_gutter_width, editor_workspace_insets, explorer_panel_width, pane_viewports,
-    render, snap_display_column, snap_display_column_forward, terminal_panel_geometry,
-    terminal_tab_at_column,
+    VisualRowAnchor, VisualRowModel, active_editor_pane_viewport, editor_pane_viewport_at,
+    editor_state_content_width, editor_state_gutter_width, editor_workspace_insets,
+    explorer_panel_width, render, snap_display_column, snap_display_column_forward,
+    terminal_panel_geometry, terminal_tab_at_column,
 };
 use crate::workspace::{
     DiagnosticOwner, ExecutionSource, ExplorerKind, FileSnapshot, PickerAction, PickerItem,
