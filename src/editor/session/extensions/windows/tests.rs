@@ -105,11 +105,20 @@ fn tree(revision: u64, text: &str) -> PluginUiTree {
 }
 
 fn open_request(revision: u64, tree: PluginUiTree) -> PluginUiRequest {
+    open_request_for("demo", revision, tree)
+}
+
+fn open_request_for(owner: &str, revision: u64, mut tree: PluginUiTree) -> PluginUiRequest {
+    for node in &mut tree.nodes {
+        if node.action.as_deref() == Some("plugin.demo.open") {
+            node.action = Some(format!("plugin.{owner}.open"));
+        }
+    }
     PluginUiRequest {
         token: 1,
         kind: PluginUiRequestKind::OpenWindow {
             expected_graph_revision: revision,
-            content_type: "plugin.demo.panel".into(),
+            content_type: format!("plugin.{owner}.panel"),
             title: "Demo".into(),
             placement: PluginRequestedPlacement::Floating {
                 x: 5,
@@ -2457,6 +2466,163 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
         .max()
         .expect("retiring target window ceiling");
 
+    let mut wrong_tab_graph = graph.clone();
+    let wrong_tab = wrong_tab_graph
+        .create_workspace_tab("wrong-tab", 1)
+        .expect("hostile target tab");
+    let mut wrong_tab_invocation = invocation(
+        1,
+        "clone",
+        &wrong_tab_graph,
+        crate::ui::window::ContentId(original.content),
+        crate::ui::window::ViewId(original.view),
+        crate::ui::window::WindowId(original.window),
+    );
+    wrong_tab_invocation
+        .ui
+        .as_mut()
+        .expect("wrong-tab UI source")
+        .tab = wrong_tab.0;
+    let mut wrong_tab_runtime =
+        Runtime::load(core, &admission).expect("wrong-tab target Component");
+    wrong_tab_runtime
+        .execute(wrong_tab_invocation, &catalogue)
+        .expect("wrong-tab guest clone staging");
+    let mut wrong_tab_request = wrong_tab_runtime.take_requests();
+    assert_eq!(wrong_tab_request.len(), 1);
+    let wrong_tab_token = wrong_tab_request[0].token;
+    let mut wrong_tab_host = host.clone();
+    let wrong_tab_graph_before = wrong_tab_graph.clone();
+    let wrong_tab_host_before = wrong_tab_host.clone();
+    let error = wrong_tab_host
+        .process_target03(
+            &mut wrong_tab_graph,
+            &catalogue,
+            &admission,
+            wrong_tab_request.remove(0),
+        )
+        .expect_err("cross-tab source mismatch must reject");
+    assert_eq!(error.code, wire::ErrorCode::StaleSource);
+    assert!(error.message.contains("tab source is stale"));
+    assert_eq!(wrong_tab_graph, wrong_tab_graph_before);
+    assert_eq!(wrong_tab_host, wrong_tab_host_before);
+    let callback_error = wrong_tab_runtime
+        .handle_events(
+            vec![callback(
+                1,
+                wrong_tab_token,
+                Err(wire::Failure {
+                    code: error.code,
+                    message: error.message,
+                    retryable: false,
+                }),
+            )],
+            &catalogue,
+        )
+        .expect_err("wrong-tab clone gets one typed terminal result");
+    assert!(
+        callback_error.starts_with("ErrorCode::StaleSource:"),
+        "{callback_error}"
+    );
+    wrong_tab_runtime
+        .deactivate()
+        .expect("wrong-tab load retirement");
+
+    let mut ceiling_graph = graph.clone();
+    let mut ceiling_host = host.clone();
+    while ceiling_graph
+        .windows()
+        .filter(|window| {
+            window.tab == tab && window.placement != crate::ui::window::WindowPlacement::Tiled
+        })
+        .count()
+        < 128
+    {
+        let view = ceiling_graph
+            .create_view(editor_content, "builtin.test", 1)
+            .expect("ceiling filler view");
+        ceiling_graph
+            .open_window(
+                tab,
+                view,
+                WindowPlacement::Floating(WindowRect {
+                    x: 0,
+                    y: 0,
+                    width: 2,
+                    height: 2,
+                }),
+                true,
+                "builtin.test",
+                1,
+            )
+            .expect("window below non-tiled ceiling");
+    }
+    assert_eq!(
+        ceiling_graph
+            .windows()
+            .filter(|window| {
+                window.tab == tab && window.placement != crate::ui::window::WindowPlacement::Tiled
+            })
+            .count(),
+        128
+    );
+    ceiling_graph.validate().expect("valid graph at ceiling");
+    let mut ceiling_runtime =
+        Runtime::load(core, &admission).expect("graph ceiling target Component");
+    ceiling_runtime
+        .execute(
+            invocation(
+                1,
+                "clone",
+                &ceiling_graph,
+                crate::ui::window::ContentId(original.content),
+                crate::ui::window::ViewId(original.view),
+                crate::ui::window::WindowId(original.window),
+            ),
+            &catalogue,
+        )
+        .expect("valid guest clone at graph ceiling");
+    let mut ceiling_request = ceiling_runtime.take_requests();
+    assert_eq!(ceiling_request.len(), 1);
+    let ceiling_token = ceiling_request[0].token;
+    let ceiling_graph_before = ceiling_graph.clone();
+    let ceiling_host_before = ceiling_host.clone();
+    let error = ceiling_host
+        .process_target03(
+            &mut ceiling_graph,
+            &catalogue,
+            &admission,
+            ceiling_request.remove(0),
+        )
+        .expect_err("universal non-tiled ceiling rejects actual Component clone");
+    assert_eq!(error.code, wire::ErrorCode::LimitExceeded);
+    assert!(error.message.contains("non-tiled window ceiling"));
+    assert_eq!(ceiling_graph, ceiling_graph_before);
+    assert_eq!(ceiling_host, ceiling_host_before);
+    let callback_error = ceiling_runtime
+        .handle_events(
+            vec![callback(
+                1,
+                ceiling_token,
+                Err(wire::Failure {
+                    code: error.code,
+                    message: error.message,
+                    retryable: false,
+                }),
+            )],
+            &catalogue,
+        )
+        .expect_err("graph-ceiling clone gets one typed terminal result");
+    assert!(
+        callback_error.starts_with("ErrorCode::LimitExceeded:"),
+        "{callback_error}"
+    );
+    assert!(ceiling_runtime.take_requests().is_empty());
+    assert!(ceiling_runtime.take_notices().is_empty());
+    ceiling_runtime
+        .deactivate()
+        .expect("graph ceiling load retirement");
+
     assert!(!remove_fixture(&mut host, &mut graph, "demo", 8).unwrap());
     assert_eq!(host.snapshots().len(), 2);
 
@@ -2561,6 +2727,32 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
             .is_err()
     );
 
+    let other_index = index("other", 77);
+    catalogue
+        .install(other_index.clone())
+        .expect("unrelated catalogue generation");
+    let other_revision = graph.revision().expect("unrelated open revision");
+    let other_event = process_fixture(
+        &mut host,
+        &mut graph,
+        &other_index,
+        open_request_for("other", other_revision, tree(1, "unrelated generation")),
+    );
+    assert!(other_event.error.is_none(), "{:?}", other_event.error);
+    let other_snapshot = host
+        .snapshots()
+        .into_iter()
+        .find(|snapshot| snapshot.handle == other_event.handle.expect("unrelated handle"))
+        .expect("unrelated host snapshot");
+    let other_window = graph
+        .window(other_snapshot.window)
+        .expect("unrelated graph window")
+        .clone();
+    let other_content = graph
+        .content_for_window(other_snapshot.window)
+        .expect("unrelated graph content")
+        .clone();
+
     runtime
         .execute(
             invocation(
@@ -2651,7 +2843,20 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
 
     assert!(remove_fixture(&mut host, &mut graph, "demo", 9).unwrap());
     assert!(catalogue.remove_generation("demo", 9));
-    assert!(host.snapshots().is_empty());
+    assert_eq!(
+        host.snapshots().as_slice(),
+        std::slice::from_ref(&other_snapshot)
+    );
+    assert_eq!(graph.window(other_snapshot.window), Some(&other_window));
+    assert_eq!(
+        graph.content_for_window(other_snapshot.window),
+        Some(&other_content)
+    );
+    assert!(catalogue.get("other").is_some_and(|index| {
+        index.owner == other_index.owner
+            && index.generation == other_index.generation
+            && index.checksum == other_index.checksum
+    }));
     assert!(
         graph
             .content_snapshots()
@@ -2710,6 +2915,16 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
         .expect("replacement retirement");
     assert!(remove_fixture(&mut host, &mut graph, "demo", 10).unwrap());
     assert!(catalogue.remove_generation("demo", 10));
+    assert_eq!(host.snapshots(), [other_snapshot]);
+    assert_eq!(graph.window(other_window.id), Some(&other_window));
+    assert_eq!(graph.content(other_content.id), Some(&other_content));
+    assert!(catalogue.get("other").is_some_and(|index| {
+        index.owner == other_index.owner
+            && index.generation == other_index.generation
+            && index.checksum == other_index.checksum
+    }));
+    assert!(remove_fixture(&mut host, &mut graph, "other", 77).unwrap());
+    assert!(catalogue.remove_generation("other", 77));
 }
 
 #[test]

@@ -1,9 +1,15 @@
 use dust::{
     process::{
         ExecutionPreflightEvent, ExecutionPreflightRequest, ExecutionPreflightService, PtyEvent,
-        PtyPolicy, PtyRequest, PtyService,
+        PtyId, PtyPolicy, PtyRequest, PtyService,
     },
-    ui::{PtyInputKey, PtyScreen, encode_key, encode_paste},
+    ui::{
+        PtyInputKey, PtyScreen, encode_key, encode_paste,
+        window::{
+            ContentAdapterKind, ContentLifecycle, ContentTypeId, WindowError, WindowGraph,
+            WindowPlacement, WindowRect,
+        },
+    },
 };
 use std::{
     collections::BTreeMap,
@@ -217,6 +223,7 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
             policy: PtyPolicy::default(),
         })
         .unwrap();
+    assert_eq!(id, PtyId(1), "one external TUI process was admitted");
     let mut screen = PtyScreen::new(40, 8, 1024);
     let mut raw = Vec::new();
     let mut sent = false;
@@ -243,6 +250,83 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
                         assert!(screen.bracketed_paste());
                         assert!(screen.focus_reporting());
                         assert!(screen.sgr_mouse());
+
+                        let mut graph = WindowGraph::default();
+                        let tab = graph
+                            .create_workspace_tab("external-tui-test", 1)
+                            .expect("external TUI tab");
+                        let content = graph
+                            .create_content(
+                                ContentTypeId::new("terminal.external-tui").expect("content type"),
+                                ContentAdapterKind::ExternalTui,
+                                "external TUI fixture".into(),
+                                false,
+                                "external-tui-test",
+                                1,
+                            )
+                            .expect("external TUI content");
+                        graph
+                            .update_content_lifecycle(
+                                content,
+                                "external TUI fixture".into(),
+                                false,
+                                ContentLifecycle::Running,
+                            )
+                            .expect("running external TUI lifecycle");
+                        let view = graph
+                            .create_view(content, "external-tui-test", 1)
+                            .expect("authoritative external TUI view");
+                        graph
+                            .open_window(
+                                tab,
+                                view,
+                                WindowPlacement::Floating(WindowRect {
+                                    x: 1,
+                                    y: 1,
+                                    width: 40,
+                                    height: 8,
+                                }),
+                                true,
+                                "external-tui-test",
+                                1,
+                            )
+                            .expect("focused external TUI window");
+                        let graph_before = graph.clone();
+                        let screen_before = (
+                            screen.dimensions(),
+                            screen.cursor(),
+                            screen.lines(),
+                            screen.alternate_active(),
+                            screen.application_cursor(),
+                            screen.bracketed_paste(),
+                            screen.focus_reporting(),
+                            screen.sgr_mouse(),
+                        );
+                        assert_eq!(ptys.pending(), 1);
+                        assert_eq!(
+                            graph.require_clone_view(content),
+                            Err(WindowError::Unsupported("clone-view"))
+                        );
+                        assert_eq!(
+                            graph.create_view(content, "external-tui-test", 1),
+                            Err(WindowError::Unsupported("clone-view"))
+                        );
+                        assert_eq!(graph, graph_before);
+                        assert_eq!(
+                            (
+                                screen.dimensions(),
+                                screen.cursor(),
+                                screen.lines(),
+                                screen.alternate_active(),
+                                screen.application_cursor(),
+                                screen.bracketed_paste(),
+                                screen.focus_reporting(),
+                                screen.sgr_mouse(),
+                            ),
+                            screen_before
+                        );
+                        assert_eq!(ptys.pending(), 1);
+
                         ptys.resize(id, 50, 10).unwrap();
                         screen.resize(50, 10);
                         ptys.input(id, encode_key(PtyInputKey::Up, true).to_vec(), 1024)
