@@ -196,6 +196,11 @@ pub struct PluginManager {
     pub(super) stopped: bool,
 }
 impl PluginManager {
+    #[cfg(test)]
+    pub(crate) fn fixture_queued(&self) -> usize {
+        self.queued.load(Ordering::Acquire)
+    }
+
     pub fn start(capacity: usize) -> Self {
         let capacity = capacity.clamp(1, 64);
         let (tx, rx) = mpsc::sync_channel::<QueuedRequest>(capacity);

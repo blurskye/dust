@@ -40,6 +40,53 @@ fn candidates_are_bound_to_the_session_and_owner_epoch_not_only_graph_revision()
 }
 
 #[test]
+fn failed_explorer_reconstruction_does_not_publish_a_partial_graph_or_bridge() {
+    let (state, windows) = editor_fixture();
+    let graph = windows.graph().clone();
+    let native = windows.core.native.clone();
+    let epoch = windows.epoch;
+    let signature = super::bridge::NativeSurfaceSignature {
+        editor_tab: None,
+        editor_window: None,
+        explorer_visible: true,
+        explorer_views: (1..=crate::UNIVERSAL_LAYOUT_WINDOW_CEILING as u64)
+            .collect::<Vec<_>>()
+            .into(),
+        focused_explorer: Some(1),
+        explorer_size: 24,
+        active_terminal: None,
+        terminal_focused: false,
+        terminal_size: 8,
+        terminal_set_revision: Some(0),
+        terminal_width: 80,
+        terminal_height: 24,
+        dashboard_visible: false,
+        picker_rect: None,
+        picker_surface: None,
+        protected_prompt_height: 0,
+        configuration_generation: 0,
+    };
+    let error = match windows.prepare_reconcile(
+        &(&state).into(),
+        "[scratch]",
+        super::NativeDescriptions {
+            signature,
+            explorer_title: "Explorer",
+            dashboard_title: "Dust",
+            picker_title: "Picker",
+            terminals: &[],
+        },
+    ) {
+        Ok(_) => panic!("graph ceiling must reject reconstruction"),
+        Err(error) => error,
+    };
+    assert!(error.contains("ceiling"), "{error}");
+    assert_eq!(windows.graph(), &graph);
+    assert_eq!(windows.core.native, native);
+    assert_eq!(windows.epoch, epoch);
+}
+
+#[test]
 fn editor_transition_rejects_changed_and_foreign_sources_without_window_publication() {
     let catalog = crate::extensions::PluginCatalogVersion::default();
     let (mut state, mut windows) = editor_fixture();
@@ -718,6 +765,7 @@ fn startup_document_and_dashboard_publish_together_only_for_the_accepted_proposa
             editor_tab: None,
             editor_window: None,
             explorer_visible: false,
+            explorer_views: vec![1].into(),
             focused_explorer: None,
             explorer_size: 24,
             active_terminal: None,

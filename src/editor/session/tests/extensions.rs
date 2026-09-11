@@ -956,6 +956,171 @@ fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
 }
 
 #[test]
+fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callback() {
+    use sha2::{Digest, Sha256};
+    let core = include_bytes!("../../../../tests/fixtures/retained-guest/retained-guest.core.wasm");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(core)),
+        "3773ae204a9b1fe0436f2252161663562be895aea2392b1b4bd187c43af74416"
+    );
+    let component = wit_component::ComponentEncoder::default()
+        .module(core)
+        .expect("fixture metadata")
+        .validate(true)
+        .encode()
+        .expect("component");
+    let store = tempfile::tempdir().expect("plugin store");
+    fs::write(store.path().join("fixture.wasm"), &component).unwrap();
+    let manifest = crate::editor::session::extensions::fixture_manifest(format!(
+        "{:x}",
+        Sha256::digest(&component)
+    ));
+    write_plugin_manifest(store.path(), &manifest);
+
+    for (command, private) in [("drive", false), ("private", true)] {
+        let mut app = app();
+        app.state.open_text(TextBuffer::from_text("editor"), None);
+        app.set_dashboard_visibility(false);
+        app.reconcile_editor_windows();
+        let load = app
+            .extension
+            .index_from_store(
+                "demo".into(),
+                store.path().to_path_buf(),
+                PathBuf::from("manifest.toml"),
+                PathBuf::from("fixture.wasm"),
+                app.plugin_limits(),
+            )
+            .expect("index request");
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !app.extension.is_active_generation("demo", load) {
+            app.process_plugin_events();
+            assert!(Instant::now() < deadline, "fixture activation timed out");
+            thread::yield_now();
+        }
+        app.process_effect(AppEffect::PluginExecute {
+            plugin: "demo".into(),
+            command: command.into(),
+        });
+        if private {
+            while !app
+                .window_session
+                .graph()
+                .content_snapshots()
+                .iter()
+                .any(|content| {
+                    content.adapter == crate::ui::window::ContentAdapterKind::PrivateCellSurface
+                })
+            {
+                app.process_plugin_events();
+                assert!(Instant::now() < deadline, "private open timed out");
+                thread::yield_now();
+            }
+            app.process_effect(AppEffect::PluginExecute {
+                plugin: "demo".into(),
+                command: command.into(),
+            });
+        }
+        while if private {
+            app.ui.private_surfaces.is_empty()
+        } else {
+            app.ui.plugin_surfaces.is_empty()
+        } {
+            app.process_plugin_events();
+            assert!(
+                Instant::now() < deadline,
+                "{command} window timed out: notice={:?}, statuses={:?}, retained={:?}, private={:?}, delivery={}",
+                app.ui.notification,
+                app.extension.statuses(),
+                app.ui.plugin_surfaces,
+                app.ui.private_surfaces,
+                app.extension.fixture_delivery_state()
+            );
+            thread::yield_now();
+        }
+        let window = if private {
+            app.ui
+                .private_surfaces
+                .last()
+                .expect("private surface")
+                .window
+        } else {
+            app.ui
+                .plugin_surfaces
+                .last()
+                .expect("retained surface")
+                .window
+        };
+        let target = format!("window:{}", window.0);
+        let graph = app.window_session.graph().clone();
+        let editor = app.state.window_version();
+        let catalogue = app.extension.contributions().version();
+        let retained = app.ui.plugin_surfaces.clone();
+        let private_surfaces = app.ui.private_surfaces.clone();
+        let delivery = app.extension.fixture_delivery_state();
+
+        let error = app
+            .clone_graph_window(&target, crate::editor::Axis::Horizontal)
+            .expect_err("production 0.2 presenter clone must be rejected");
+        assert!(error.contains("clone-view"), "{error}");
+        assert_eq!(app.window_session.graph(), &graph);
+        assert_eq!(app.state.window_version(), editor);
+        assert_eq!(app.extension.contributions().version(), catalogue);
+        assert_eq!(app.ui.plugin_surfaces, retained);
+        assert_eq!(app.ui.private_surfaces, private_surfaces);
+        assert_eq!(app.extension.fixture_delivery_state(), delivery);
+
+        app.extension
+            .disable_generation("demo", load)
+            .expect("disable actual component generation");
+        app.remove_plugin_contribution_generation("demo", load);
+        while app.extension.fixture_queued() != 0 {
+            app.process_plugin_events();
+            assert!(Instant::now() < deadline, "fixture unload timed out");
+            thread::yield_now();
+        }
+        assert!(app.extension.contributions().get("demo").is_none());
+        let graph = app.window_session.graph().clone();
+        let delivery = app.extension.fixture_delivery_state();
+        assert!(
+            app.clone_graph_window(&target, crate::editor::Axis::Horizontal)
+                .is_err()
+        );
+        assert_eq!(app.window_session.graph(), &graph);
+        assert_eq!(app.extension.fixture_delivery_state(), delivery);
+
+        let replacement = app
+            .extension
+            .index_from_store(
+                "demo".into(),
+                store.path().to_path_buf(),
+                PathBuf::from("manifest.toml"),
+                PathBuf::from("fixture.wasm"),
+                app.plugin_limits(),
+            )
+            .expect("replacement index request");
+        assert_ne!(replacement, load);
+        let replacement_deadline = Instant::now() + Duration::from_secs(15);
+        while !app.extension.is_active_generation("demo", replacement) {
+            app.process_plugin_events();
+            assert!(
+                Instant::now() < replacement_deadline,
+                "replacement activation timed out"
+            );
+            thread::yield_now();
+        }
+        let graph = app.window_session.graph().clone();
+        let delivery = app.extension.fixture_delivery_state();
+        assert!(
+            app.clone_graph_window(&target, crate::editor::Axis::Horizontal)
+                .is_err()
+        );
+        assert_eq!(app.window_session.graph(), &graph);
+        assert_eq!(app.extension.fixture_delivery_state(), delivery);
+    }
+}
+
+#[test]
 fn packaged_real_guest_confirmation_updates_its_custom_view() {
     use sha2::{Digest, Sha256};
     let core = include_bytes!("../../../../tests/fixtures/retained-guest/retained-guest.core.wasm");

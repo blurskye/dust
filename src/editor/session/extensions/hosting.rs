@@ -232,4 +232,17 @@ impl ExtensionSession {
     pub(in crate::editor::session) fn fixture_window_state(&self) -> String {
         format!("{:?}|{:?}", self.windows, self.ui)
     }
+    pub(in crate::editor::session) fn fixture_queued(&self) -> usize {
+        self.manager.fixture_queued()
+    }
+    pub(in crate::editor::session) fn fixture_delivery_state(&self) -> String {
+        format!(
+            "{:?}|{:?}|{:?}|{:?}|queued={}",
+            self.windows,
+            self.ui,
+            self.events,
+            self.results,
+            self.manager.fixture_queued()
+        )
+    }
 }

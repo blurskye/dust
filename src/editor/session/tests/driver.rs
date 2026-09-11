@@ -274,12 +274,95 @@ impl TestSession {
         self.application.reconcile_editor_windows();
     }
     pub(super) fn clone_explorer(&mut self) {
-        self.application
-            .process_effect(crate::editor::AppEffect::WindowClone {
-                target: "explorer".into(),
-                axis: crate::editor::Axis::Horizontal,
-            });
+        self.clone_explorer_view(1).unwrap();
+    }
+    pub(super) fn clone_explorer_view(&mut self, view: u64) -> Result<(), String> {
+        let ids = self
+            .application
+            .window_session
+            .native_ids()
+            .explorer_view(view)
+            .ok_or_else(|| "explorer fixture view is unavailable".to_owned())?;
+        self.application.clone_graph_window(
+            &format!("window:{}", ids.window.0),
+            crate::editor::Axis::Horizontal,
+        )?;
         self.application.reconcile_editor_windows();
+        Ok(())
+    }
+    pub(super) fn close_explorer_view(&mut self, view: u64) -> Result<(), String> {
+        let ids = self
+            .application
+            .window_session
+            .native_ids()
+            .explorer_view(view)
+            .ok_or_else(|| "explorer fixture view is unavailable".to_owned())?;
+        self.application
+            .close_graph_window(&format!("window:{}", ids.window.0))
+    }
+    pub(super) fn reset_window_runtime(&mut self) -> Result<(), String> {
+        self.application.window_session.reset_runtime(&[])?;
+        self.application.reconcile_editor_windows();
+        self.application.sync_explorer_ui();
+        Ok(())
+    }
+    pub(super) fn explorer_focus(&self) -> Option<u64> {
+        self.application.window_session.focused_explorer()
+    }
+    pub(super) fn explorer_selections(&self) -> std::collections::BTreeMap<u64, Option<u64>> {
+        let mut selections = std::collections::BTreeMap::new();
+        selections.insert(
+            1,
+            self.application
+                .ui
+                .explorer
+                .as_ref()
+                .and_then(|view| view.rows.iter().find(|row| row.selected))
+                .map(|row| row.node_id),
+        );
+        selections.extend(self.application.ui.explorer_views.iter().map(|view| {
+            (
+                view.view,
+                view.content
+                    .rows
+                    .iter()
+                    .find(|row| row.selected)
+                    .map(|row| row.node_id),
+            )
+        }));
+        selections
+    }
+    pub(super) fn explorer_body(&self, view: u64) -> crate::ui::window::WindowRect {
+        let ids = self
+            .application
+            .window_session
+            .native_ids()
+            .explorer_view(view)
+            .expect("explorer fixture view");
+        let rect = self
+            .application
+            .compositor_projection()
+            .and_then(|projection| projection.window(ids.window))
+            .expect("projected explorer fixture")
+            .rect;
+        crate::ui::geometry::explorer_body_geometry(rect, self.application.configuration.settings())
+    }
+    pub(super) fn explorer_graph_shape(&self) -> (usize, usize, usize) {
+        let ids = self.explorer_content_ids();
+        let contents = ids
+            .iter()
+            .map(|entry| entry.1)
+            .collect::<std::collections::BTreeSet<_>>();
+        let views = self
+            .application
+            .window_session
+            .graph()
+            .content_snapshots()
+            .into_iter()
+            .filter(|content| contents.contains(&content.id))
+            .map(|content| content.view_count)
+            .sum();
+        (contents.len(), views, ids.len())
     }
     pub(super) fn explorer_content_ids(
         &self,

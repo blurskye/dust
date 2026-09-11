@@ -1200,6 +1200,12 @@ impl InteractiveApplication {
             editor_tab: editor.active_tab(&(&self.state).into()),
             editor_window: editor.focused_window(&(&self.state).into()),
             explorer_visible: self.ui.explorer.is_some(),
+            explorer_views: self
+                .explorer
+                .view_ids()
+                .map(|view| view.0)
+                .collect::<Vec<_>>()
+                .into(),
             focused_explorer: self
                 .ui
                 .explorer
@@ -1252,7 +1258,7 @@ impl InteractiveApplication {
             .is_current(&(&self.state).into(), scratch_label);
         let signature = self.native_surface_signature(self.window_session.editor_ids());
         if editor_current
-            && self.window_session.native_ids().is_current(signature)
+            && self.window_session.native_ids().is_current(&signature)
             && self.window_session.graph().revision() == self.ui.window_graph_revision
             && self
                 .window_session
@@ -1261,7 +1267,7 @@ impl InteractiveApplication {
         {
             return;
         }
-        let result = if editor_current && self.window_session.native_ids().is_current(signature) {
+        let result = if editor_current && self.window_session.native_ids().is_current(&signature) {
             Ok(())
         } else {
             let terminals = self.terminal_session.descriptions();

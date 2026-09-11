@@ -114,6 +114,9 @@ impl ExplorerSession {
         self.tree_for(self.active_view)
             .expect("active explorer view is owned")
     }
+    pub(in crate::editor::session) fn view_ids(&self) -> impl Iterator<Item = ExplorerViewId> + '_ {
+        std::iter::once(PRIMARY_EXPLORER_VIEW).chain(self.cloned_views.keys().copied())
+    }
     fn tree_mut(&mut self) -> &mut ExplorerState {
         if self.active_view == PRIMARY_EXPLORER_VIEW {
             &mut self.primary.tree
@@ -981,7 +984,16 @@ mod tests {
         let (mut owner, source) = fixture(root.path());
         let root_node = owner.tree().selected_id().unwrap();
         owner.load(root_node, source.clone(), 1, 100).unwrap();
+        drain(&mut owner, source.clone());
+
+        let asynchronous_stale = owner.prepare_clone(PRIMARY_EXPLORER_VIEW).unwrap();
+        std::fs::write(root.path().join("arrived-later.txt"), "late").unwrap();
+        owner.load(root_node, source.clone(), 1, 100).unwrap();
         drain(&mut owner, source);
+        assert_eq!(
+            owner.accept_clone(asynchronous_stale),
+            Err("explorer clone source is stale or foreign")
+        );
 
         let stale = owner.prepare_clone(PRIMARY_EXPLORER_VIEW).unwrap();
         owner.tree_mut().move_selection(1);
@@ -999,6 +1011,14 @@ mod tests {
         assert_eq!(
             owner.tree_for(clone).unwrap().selected_id(),
             primary_selection
+        );
+
+        owner.activate_view(PRIMARY_EXPLORER_VIEW).unwrap();
+        let focus_stale = owner.prepare_clone(PRIMARY_EXPLORER_VIEW).unwrap();
+        owner.activate_view(clone).unwrap();
+        assert_eq!(
+            owner.accept_clone(focus_stale),
+            Err("explorer clone source is stale or foreign")
         );
 
         owner.activate_view(PRIMARY_EXPLORER_VIEW).unwrap();

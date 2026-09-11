@@ -281,14 +281,14 @@ impl WindowSession {
         let core = &mut candidate.core;
         let current = core.editor.is_current(state, scratch);
         let bind = |editor: &EditorWindowBridge| {
-            let mut signature = descriptions.signature;
+            let mut signature = descriptions.signature.clone();
             signature.editor_tab = editor.active_tab(state);
             signature.editor_window = editor.focused_window(state);
             signature
         };
         if !current {
             let signature = bind(&core.editor);
-            if !core.native.is_current(signature) {
+            if !core.native.is_current(&signature) {
                 core.native
                     .reconcile(
                         &mut core.graph,
@@ -305,7 +305,7 @@ impl WindowSession {
                 .map_err(|e| e.to_string())?;
         }
         let signature = bind(&core.editor);
-        if !current || !core.native.is_current(signature) {
+        if !current || !core.native.is_current(&signature) {
             core.native
                 .reconcile(
                     &mut core.graph,
@@ -540,6 +540,10 @@ impl WindowSession {
         &mut self,
         plugin_generations: &[(String, u64)],
     ) -> Result<(), String> {
+        let semantic_focus = match self.focus {
+            super::FocusTarget::Explorer(_) | super::FocusTarget::Terminal(_) => Some(self.focus),
+            super::FocusTarget::Editor | super::FocusTarget::Plugin(_) => None,
+        };
         let mut candidate = self.candidate()?;
         let core = &mut candidate.core;
         for (plugin, load) in plugin_generations {
@@ -554,6 +558,10 @@ impl WindowSession {
             .reset(&mut core.graph)
             .map_err(|e| e.to_string())?;
         self.commit(candidate)?;
+        if let Some(focus) = semantic_focus {
+            self.focus = focus;
+            self.core.native.invalidate();
+        }
         self.origin = Arc::new(());
         Ok(())
     }

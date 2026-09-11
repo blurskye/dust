@@ -131,6 +131,139 @@ fn universal_window_clone_publishes_independent_explorer_views_over_shared_tree_
 }
 
 #[test]
+fn explorer_clone_uses_the_exact_nonfocused_semantic_source() {
+    let mut session = TestSession::new(crate::config::load_bundled_config());
+    session.new_buffer();
+    session.explorer_fixture();
+    session.float_explorer();
+    let primary = session.explorer_selections()[&1];
+
+    session.clone_explorer_view(1).unwrap();
+    session.page_explorer(1);
+    let clone = session.explorer_selections()[&2];
+    assert_ne!(clone, primary);
+
+    session.clone_explorer_view(1).unwrap();
+    assert_eq!(session.explorer_focus(), Some(3));
+    assert_eq!(session.explorer_selections()[&3], primary);
+
+    session.clone_explorer_view(2).unwrap();
+    assert_eq!(session.explorer_focus(), Some(4));
+    assert_eq!(session.explorer_selections()[&4], clone);
+}
+
+#[test]
+fn explorer_clone_runtime_reset_preserves_semantic_views_state_focus_and_shared_content() {
+    let mut session = TestSession::new(crate::config::load_bundled_config());
+    session.new_buffer();
+    session.explorer_fixture();
+    session.float_explorer();
+    session.clone_explorer();
+    session.page_explorer(1);
+    let before_ids = session.explorer_content_ids();
+    let before_state = session.explorer_selections();
+    assert_eq!(session.explorer_focus(), Some(2));
+
+    session.reset_window_runtime().unwrap();
+
+    let after_ids = session.explorer_content_ids();
+    assert_eq!(
+        after_ids.iter().map(|entry| entry.0).collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    assert_eq!(after_ids[0].1, after_ids[1].1);
+    assert_eq!(session.explorer_graph_shape(), (1, 2, 2));
+    assert!(after_ids.iter().all(|after| {
+        before_ids
+            .iter()
+            .find(|before| before.0 == after.0)
+            .is_some_and(|before| before.1 != after.1 && before.2 != after.2)
+    }));
+    assert_eq!(session.explorer_selections(), before_state);
+    assert_eq!(session.explorer_focus(), Some(2));
+}
+
+#[test]
+fn configuration_rebuild_keeps_cloned_explorer_identity_state_and_focus() {
+    let mut session = TestSession::new(crate::config::load_bundled_config());
+    session.new_buffer();
+    session.explorer_fixture();
+    session.float_explorer();
+    session.clone_explorer();
+    session.page_explorer(1);
+    let ids = session.explorer_content_ids();
+    let state = session.explorer_selections();
+
+    let mut candidate = crate::config::load_bundled_config();
+    candidate.config.windows.rules = vec![crate::config::WindowRuleConfig {
+        content_type: "builtin.explorer".into(),
+        placement: crate::config::WindowPlacementConfig::Docked {
+            edge: "right".into(),
+            size: 31,
+        },
+    }];
+    session.apply_candidate(candidate).unwrap();
+
+    assert_eq!(session.explorer_content_ids(), ids);
+    assert_eq!(session.explorer_selections(), state);
+    assert_eq!(session.explorer_focus(), Some(2));
+}
+
+#[test]
+fn closing_and_recloning_an_explorer_never_reuses_the_semantic_view_identity() {
+    let mut session = TestSession::new(crate::config::load_bundled_config());
+    session.new_buffer();
+    session.explorer_fixture();
+    session.float_explorer();
+    session.clone_explorer();
+    session.close_explorer_view(2).unwrap();
+    assert_eq!(
+        session
+            .explorer_content_ids()
+            .iter()
+            .map(|entry| entry.0)
+            .collect::<Vec<_>>(),
+        vec![1]
+    );
+    session.clone_explorer_view(1).unwrap();
+    assert_eq!(
+        session
+            .explorer_content_ids()
+            .iter()
+            .map(|entry| entry.0)
+            .collect::<Vec<_>>(),
+        vec![1, 3]
+    );
+}
+
+#[test]
+fn explorer_mouse_and_keyboard_input_target_the_exact_cloned_or_primary_view() {
+    let mut session = TestSession::new(crate::config::load_bundled_config());
+    session.new_buffer();
+    session.explorer_fixture();
+    session.float_explorer();
+    session.clone_explorer();
+    let initial = session.explorer_selections();
+
+    session.key("j");
+    let keyboard = session.explorer_selections();
+    assert_eq!(keyboard[&1], initial[&1]);
+    assert_ne!(keyboard[&2], initial[&2]);
+
+    let primary = session.explorer_body(1);
+    session.click(primary.x, primary.y.saturating_add(2));
+    assert_eq!(session.explorer_focus(), Some(1));
+    let mouse = session.explorer_selections();
+    assert_ne!(mouse[&1], keyboard[&1]);
+    assert_eq!(mouse[&2], keyboard[&2]);
+
+    session.key("j");
+    let primary_keyboard = session.explorer_selections();
+    assert_ne!(primary_keyboard[&1], mouse[&1]);
+    assert_eq!(primary_keyboard[&2], mouse[&2]);
+}
+
+#[test]
 fn stale_contribution_policy_is_rejected_before_window_graph_publication() {
     let mut session = TestSession::new(crate::config::load_bundled_config());
     session.new_buffer();
