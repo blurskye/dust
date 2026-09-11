@@ -1292,6 +1292,423 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
 }
 
 #[test]
+fn actual_target03_component_opens_and_clones_through_checked_existing_owners() {
+    use crate::extensions::target03::{Runtime, api::dust::plugin::host as wire};
+    use sha2::{Digest, Sha256};
+
+    let core = include_bytes!(
+        "../../../../../tests/fixtures/target03-clone-guest/target03-clone-guest.core.wasm"
+    );
+    assert_eq!(
+        format!("{:x}", Sha256::digest(core)),
+        "5aeedf6233f86a9b753829835cae404699b6238a04d0eebcb27530f5b3e784e2"
+    );
+    assert_eq!(
+        include_str!("../../../../../docs/specs/api-next.wit"),
+        include_str!("../../../../../tests/fixtures/target03-clone-guest/wit/dust-plugin.wit")
+    );
+
+    let mut index = index("demo", 9);
+    index.content_types[0].maximum_instances = 4;
+    index.commands.insert(
+        "clone".into(),
+        PluginCommandDeclaration {
+            title: "Clone".into(),
+            description: String::new(),
+            arguments: BTreeMap::new(),
+            context: PluginCommandContext::Application,
+            activation: PluginActivationBehavior::ActiveOnly,
+        },
+    );
+    index.commands.insert(
+        "unsupported".into(),
+        PluginCommandDeclaration {
+            title: "Unsupported".into(),
+            description: String::new(),
+            arguments: BTreeMap::new(),
+            context: PluginCommandContext::Application,
+            activation: PluginActivationBehavior::ActiveOnly,
+        },
+    );
+    let admission = Target03ContentAdmission {
+        index,
+        clone_view: true,
+    };
+    let mut runtime = Runtime::load(core).expect("actual target 0.3 Component");
+    assert_eq!(
+        runtime.activated_commands(),
+        [
+            "clone".to_owned(),
+            "open".to_owned(),
+            "unsupported".to_owned(),
+        ]
+        .into_iter()
+        .collect()
+    );
+
+    let mut graph = WindowGraph::default();
+    let tab = graph.create_workspace_tab("builtin.test", 1).expect("tab");
+    let editor_content = graph
+        .create_content(
+            ContentTypeId::new("builtin.text-buffer").unwrap(),
+            ContentAdapterKind::TextBuffer,
+            "editor".into(),
+            false,
+            "builtin.test",
+            1,
+        )
+        .unwrap();
+    let editor_view = graph
+        .create_view(editor_content, "builtin.test", 1)
+        .unwrap();
+    let editor_window = graph
+        .open_window(
+            tab,
+            editor_view,
+            WindowPlacement::Floating(WindowRect {
+                x: 0,
+                y: 0,
+                width: 20,
+                height: 6,
+            }),
+            true,
+            "builtin.test",
+            1,
+        )
+        .unwrap();
+    let invocation = |id: u64,
+                      command: &str,
+                      graph: &WindowGraph,
+                      content: crate::ui::window::ContentId,
+                      view: crate::ui::window::ViewId,
+                      window: crate::ui::window::WindowId| wire::Invocation {
+        id,
+        kind: wire::ExecutionKind::Command,
+        command: command.into(),
+        arguments: Vec::new(),
+        source: None,
+        ui: Some(wire::UiContext {
+            graph_revision: graph.revision().expect("graph revision"),
+            tab: tab.0,
+            window: window.0,
+            view: view.0,
+            content: content.0,
+            document_bytes: None,
+        }),
+    };
+    let callback =
+        |id: u64, token: u64, result: Result<wire::UiReceipt, wire::Failure>| wire::Event {
+            id,
+            context: wire::Invocation {
+                id: id + 100,
+                kind: wire::ExecutionKind::ResultOnly,
+                command: "ui-result".into(),
+                arguments: Vec::new(),
+                source: None,
+                ui: None,
+            },
+            value: wire::EventValue::UiResult((token, result)),
+        };
+
+    let mut host = PluginWindowHost::default();
+    let graph_before = graph.clone();
+    let error = runtime
+        .execute(invocation(
+            0,
+            "unsupported",
+            &graph,
+            editor_content,
+            editor_view,
+            editor_window,
+        ))
+        .expect_err("unimplemented target import must be typed Unsupported");
+    assert!(error.starts_with("ErrorCode::Unsupported:"), "{error}");
+    assert!(
+        error.contains("queue-snapshot is not implemented"),
+        "{error}"
+    );
+    assert!(runtime.take_requests().is_empty());
+    assert!(runtime.take_notices().is_empty());
+    assert_eq!(graph, graph_before);
+    assert!(host.snapshots().is_empty());
+
+    runtime
+        .execute(invocation(
+            1,
+            "open",
+            &graph,
+            editor_content,
+            editor_view,
+            editor_window,
+        ))
+        .expect("guest open callback");
+    let mut requests = runtime.take_requests();
+    assert_eq!(requests.len(), 1);
+    let original_token = requests[0].token;
+    let original = process_target03(&mut host, &mut graph, &admission, requests.remove(0))
+        .expect("checked original publication");
+    runtime
+        .handle_events(vec![callback(1, original_token, Ok(original))])
+        .expect("exact original UI result callback");
+    assert_eq!(
+        runtime.take_notices(),
+        [format!(
+            "ui-result:{original_token}:{}:{}:{}:{}:{}",
+            original.content,
+            original.view,
+            original.window,
+            original.graph_revision,
+            original.view_revision
+        )]
+    );
+
+    runtime
+        .execute(invocation(
+            2,
+            "clone",
+            &graph,
+            crate::ui::window::ContentId(original.content),
+            crate::ui::window::ViewId(original.view),
+            crate::ui::window::WindowId(original.window),
+        ))
+        .expect("guest clone callback");
+    let mut requests = runtime.take_requests();
+    assert_eq!(requests.len(), 1);
+    let clone_token = requests[0].token;
+    let clone = process_target03(&mut host, &mut graph, &admission, requests.remove(0))
+        .expect("checked clone publication");
+    assert_eq!(clone.content, original.content);
+    assert_ne!(clone.view, original.view);
+    assert_ne!(clone.window, original.window);
+    assert_eq!(graph.content_snapshots()[1].view_count, 2);
+    runtime
+        .handle_events(vec![callback(2, clone_token, Ok(clone))])
+        .expect("exact clone UI result callback");
+    assert_eq!(runtime.take_notices().len(), 1);
+    assert!(
+        runtime
+            .handle_events(vec![callback(3, clone_token, Ok(clone))])
+            .unwrap_err()
+            .contains("stale or duplicated")
+    );
+    assert!(runtime.take_notices().is_empty());
+
+    runtime
+        .execute(invocation(
+            20,
+            "clone",
+            &graph,
+            editor_content,
+            editor_view,
+            editor_window,
+        ))
+        .expect("hostile foreign-source guest callback");
+    let mut foreign = runtime.take_requests();
+    assert_eq!(foreign.len(), 1);
+    let foreign_token = foreign[0].token;
+    let graph_before = graph.clone();
+    let host_before = host.clone();
+    let error = process_target03(&mut host, &mut graph, &admission, foreign.remove(0))
+        .expect_err("foreign clone source must reject");
+    assert!(error.contains("stale or foreign"), "{error}");
+    assert_eq!(graph, graph_before);
+    assert_eq!(host, host_before);
+    assert!(
+        runtime
+            .handle_events(vec![callback(
+                20,
+                foreign_token,
+                Err(wire::Failure {
+                    code: wire::ErrorCode::ForeignHandle,
+                    message: error,
+                    retryable: false,
+                }),
+            )])
+            .is_err()
+    );
+    assert!(runtime.take_notices().is_empty());
+
+    runtime
+        .execute(invocation(
+            21,
+            "clone",
+            &graph,
+            crate::ui::window::ContentId(original.content),
+            crate::ui::window::ViewId(original.view),
+            crate::ui::window::WindowId(original.window),
+        ))
+        .expect("capability-refusal guest callback");
+    let mut denied = runtime.take_requests();
+    assert_eq!(denied.len(), 1);
+    let denied_token = denied[0].token;
+    let mut denied_admission = admission.clone();
+    denied_admission.clone_view = false;
+    let graph_before = graph.clone();
+    let host_before = host.clone();
+    let error = process_target03(&mut host, &mut graph, &denied_admission, denied.remove(0))
+        .expect_err("clone-view=false must reject");
+    assert!(error.contains("denied"), "{error}");
+    assert_eq!(graph, graph_before);
+    assert_eq!(host, host_before);
+    assert!(
+        runtime
+            .handle_events(vec![callback(
+                21,
+                denied_token,
+                Err(wire::Failure {
+                    code: wire::ErrorCode::PermissionDenied,
+                    message: error,
+                    retryable: false,
+                }),
+            )])
+            .is_err()
+    );
+    assert!(runtime.take_notices().is_empty());
+
+    runtime
+        .execute(invocation(
+            22,
+            "clone",
+            &graph,
+            crate::ui::window::ContentId(original.content),
+            crate::ui::window::ViewId(original.view),
+            crate::ui::window::WindowId(original.window),
+        ))
+        .expect("wrong-generation guest callback");
+    let mut wrong_generation = runtime.take_requests();
+    assert_eq!(wrong_generation.len(), 1);
+    let wrong_generation_token = wrong_generation[0].token;
+    let mut replacement_admission = admission.clone();
+    replacement_admission.index.generation += 1;
+    replacement_admission.index.checksum = "f".repeat(64);
+    let graph_before = graph.clone();
+    let host_before = host.clone();
+    let error = process_target03(
+        &mut host,
+        &mut graph,
+        &replacement_admission,
+        wrong_generation.remove(0),
+    )
+    .expect_err("wrong generation must reject");
+    assert!(error.contains("stale or foreign"), "{error}");
+    assert_eq!(graph, graph_before);
+    assert_eq!(host, host_before);
+    assert!(
+        runtime
+            .handle_events(vec![callback(
+                22,
+                wrong_generation_token,
+                Err(wire::Failure {
+                    code: wire::ErrorCode::ForeignHandle,
+                    message: error,
+                    retryable: false,
+                }),
+            )])
+            .is_err()
+    );
+    assert!(runtime.take_notices().is_empty());
+
+    let snapshots = host.snapshots();
+    assert_eq!(snapshots.len(), 2);
+    assert!(
+        snapshots[0]
+            .rows
+            .iter()
+            .any(|row| row.text == "target-0.3 original")
+    );
+    assert!(
+        snapshots[1]
+            .rows
+            .iter()
+            .any(|row| row.text == "target-0.3 clone")
+    );
+    let clone_handle = snapshots[1].handle;
+    let update = process_fixture(
+        &mut host,
+        &mut graph,
+        &admission.index,
+        PluginUiRequest {
+            token: 90,
+            kind: PluginUiRequestKind::ReplaceUi {
+                handle: clone_handle,
+                expected_tree_revision: 1,
+                tree: tree(2, "clone-only update"),
+            },
+        },
+    );
+    assert!(update.error.is_none(), "{:?}", update.error);
+    let snapshots = host.snapshots();
+    assert!(
+        snapshots[0]
+            .rows
+            .iter()
+            .any(|row| row.text == "target-0.3 original")
+    );
+    assert!(
+        snapshots[1]
+            .rows
+            .iter()
+            .any(|row| row.text == "clone-only update")
+    );
+
+    runtime
+        .execute(invocation(
+            3,
+            "clone",
+            &graph,
+            crate::ui::window::ContentId(original.content),
+            crate::ui::window::ViewId(original.view),
+            crate::ui::window::WindowId(original.window),
+        ))
+        .expect("delayed guest clone callback");
+    let mut delayed = runtime.take_requests();
+    assert_eq!(delayed.len(), 1);
+    let delayed_token = delayed[0].token;
+    let graph_before = graph.clone();
+    let host_before = host.clone();
+    graph
+        .focus(editor_window)
+        .expect("intervening graph change");
+    let changed = graph.clone();
+    let error = process_target03(&mut host, &mut graph, &admission, delayed.remove(0))
+        .expect_err("stale delayed callback must not publish");
+    assert!(error.contains("stale"), "{error}");
+    assert_eq!(host, host_before);
+    assert_ne!(graph, graph_before);
+    assert_eq!(graph, changed);
+    let failure = wire::Failure {
+        code: wire::ErrorCode::StaleSource,
+        message: error,
+        retryable: false,
+    };
+    assert!(
+        runtime
+            .handle_events(vec![callback(4, delayed_token, Err(failure))])
+            .unwrap_err()
+            .contains("stale")
+    );
+    assert!(
+        runtime
+            .handle_events(vec![callback(5, delayed_token, Ok(clone))])
+            .unwrap_err()
+            .contains("stale or duplicated")
+    );
+    assert!(runtime.take_notices().is_empty());
+
+    assert!(!remove_fixture(&mut host, &mut graph, "demo", 8).unwrap());
+    assert_eq!(host.snapshots().len(), 2);
+    runtime.deactivate().expect("bounded target deactivation");
+    assert!(remove_fixture(&mut host, &mut graph, "demo", 9).unwrap());
+    assert!(host.snapshots().is_empty());
+    assert!(
+        graph
+            .content_snapshots()
+            .iter()
+            .all(|content| content.id != crate::ui::window::ContentId(original.content))
+    );
+}
+
+#[test]
 fn generation_owned_retained_window_lifecycle_is_revision_checked() {
     let mut graph = WindowGraph::default();
     graph.create_workspace_tab("builtin.test", 1).expect("tab");
@@ -1695,6 +2112,244 @@ fn retained_tree_rejects_cycles_unreachable_nodes_and_undeclared_actions() {
     let mut undeclared = tree(1, "action");
     undeclared.nodes[2].action = Some("plugin.demo.missing".into());
     assert!(validate_tree(&index, &undeclared, None).is_err());
+}
+
+#[derive(Clone)]
+struct Target03ContentAdmission {
+    index: PluginContributionIndex,
+    clone_view: bool,
+}
+
+fn target03_tree(
+    tree: crate::extensions::target03::api::dust::plugin::host::Tree,
+) -> Result<PluginUiTree, String> {
+    use crate::extensions::target03::api::dust::plugin::host::{NodeKind, Role};
+    let nodes = tree
+        .nodes
+        .into_iter()
+        .map(|node| {
+            let kind = match node.kind {
+                NodeKind::Container => PluginUiNodeKind::Container,
+                NodeKind::Text => PluginUiNodeKind::Text,
+                NodeKind::ListNode => PluginUiNodeKind::List,
+                NodeKind::Button => PluginUiNodeKind::Button,
+                _ => return Err("target 0.3 node kind is unsupported in this lane".to_owned()),
+            };
+            let style = match node.role {
+                Role::Normal => PluginUiStyle::Default,
+                Role::Muted => PluginUiStyle::Muted,
+                Role::Accent => PluginUiStyle::Accent,
+                Role::Selected => PluginUiStyle::Selected,
+                Role::Warning => PluginUiStyle::Warning,
+                Role::Error => PluginUiStyle::Error,
+                Role::Border => PluginUiStyle::Border,
+                Role::Success => PluginUiStyle::Accent,
+            };
+            Ok(crate::extensions::PluginUiNode {
+                id: node.id,
+                kind,
+                text: node.text,
+                style,
+                action: node.action,
+                children: node.children,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(PluginUiTree {
+        revision: tree.revision,
+        root: tree.root,
+        nodes,
+    })
+}
+
+fn target03_placement(
+    placement: crate::extensions::target03::api::dust::plugin::host::Placement,
+) -> Result<WindowPlacement, String> {
+    use crate::extensions::target03::api::dust::plugin::host::Placement;
+    match placement {
+        Placement::Floating(rect) if rect.width > 0 && rect.height > 0 => {
+            Ok(WindowPlacement::Floating(WindowRect {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+            }))
+        }
+        _ => Err("target 0.3 placement is unsupported in this lane".into()),
+    }
+}
+
+fn process_target03(
+    host: &mut PluginWindowHost,
+    graph: &mut WindowGraph,
+    admission: &Target03ContentAdmission,
+    staged: crate::extensions::target03::StagedUiRequest,
+) -> Result<crate::extensions::target03::api::dust::plugin::host::UiReceipt, String> {
+    use crate::extensions::target03::api::dust::plugin::host::UiRequest;
+    let UiRequest::Open(open) = staged.request else {
+        return Err("target 0.3 request is unsupported in this lane".into());
+    };
+    let ui = staged
+        .invocation
+        .ui
+        .ok_or_else(|| "target 0.3 invocation has no UI source".to_owned())?;
+    if open.graph_revision != ui.graph_revision
+        || graph.revision() != Some(open.graph_revision)
+        || open.tab != ui.tab
+        || graph.active_tab().map(|tab| tab.0) != Some(open.tab)
+    {
+        return Err("target 0.3 graph or tab source is stale".into());
+    }
+    let declaration = admission
+        .index
+        .content_types
+        .iter()
+        .find(|content| content.id == open.content_type)
+        .ok_or_else(|| "target 0.3 content type is undeclared".to_owned())?;
+    if declaration.presenter != PluginPresenterKind::RetainedDeclarative
+        || !declaration
+            .allowed_placements
+            .contains(&PluginWindowPlacementKind::Floating)
+    {
+        return Err("target 0.3 presenter or placement is unavailable".into());
+    }
+    let tree = target03_tree(
+        open.tree
+            .ok_or_else(|| "target 0.3 retained view requires a tree".to_owned())?,
+    )?;
+    validate_tree(&admission.index, &tree, None).map_err(|error| error.detail)?;
+    let count = host
+        .instances
+        .values()
+        .filter(|instance| {
+            instance.plugin == admission.index.owner
+                && instance.load == admission.index.generation
+                && instance.content_type == declaration.id
+        })
+        .count();
+    if count >= usize::from(declaration.maximum_instances) {
+        return Err("target 0.3 content instance ceiling reached".into());
+    }
+
+    let owner = format!("plugin.{}", admission.index.owner);
+    let mut windows =
+        crate::editor::session::windows::WindowSession::from_test_graph(graph.clone());
+    let mut draft =
+        windows.begin_plugin_fixture(&admission.index.owner, admission.index.generation);
+    let mut candidate = host.clone();
+    let placement = target03_placement(open.placement)?;
+    let content = if let Some(content) = open.content {
+        if !admission.clone_view || content != ui.content {
+            return Err("target 0.3 clone-view is denied or has the wrong content".into());
+        }
+        let source_window = draft
+            .read()
+            .window(crate::ui::window::WindowId(ui.window))
+            .ok_or_else(|| "target 0.3 clone window is stale".to_owned())?;
+        let source_view = draft
+            .read()
+            .view(crate::ui::window::ViewId(ui.view))
+            .ok_or_else(|| "target 0.3 clone view is stale".to_owned())?;
+        if source_window.tab.0 != ui.tab
+            || source_window.view.0 != ui.view
+            || source_view.content.0 != content
+            || !candidate.instances.values().any(|instance| {
+                instance.plugin == admission.index.owner
+                    && instance.load == admission.index.generation
+                    && instance.checksum == admission.index.checksum
+                    && instance.content.0 == content
+                    && instance.view.0 == ui.view
+                    && instance.window.0 == ui.window
+            })
+        {
+            return Err("target 0.3 clone source is stale or foreign".into());
+        }
+        draft
+            .read()
+            .require_clone_view(crate::ui::window::ContentId(content))
+            .map_err(|error| error.to_string())?;
+        crate::ui::window::ContentId(content)
+    } else {
+        if staged.invocation.command != "open" {
+            return Err("target 0.3 clone omitted its content source".into());
+        }
+        let capabilities = ContentCapabilities {
+            focusable: declaration.focusable,
+            selectable: true,
+            editable: false,
+            clone_view: admission.clone_view,
+            tile: false,
+            dock: false,
+            float: true,
+            fullscreen: false,
+            hide: false,
+            close_view: true,
+            stop_resource: false,
+            persist_descriptor: false,
+        };
+        draft
+            .create_content_with_contract(
+                ContentTypeId::new(open.content_type).map_err(|error| error.to_string())?,
+                ContentContract::declared(ContentAdapterKind::DeclarativeUi, capabilities),
+                open.title,
+                false,
+                &owner,
+                admission.index.generation,
+            )
+            .map_err(|error| error.to_string())?
+    };
+    let view = draft
+        .create_view(content, &owner, admission.index.generation)
+        .map_err(|error| error.to_string())?;
+    let tab = crate::ui::window::WorkspaceTabId(open.tab);
+    let window = draft
+        .open_window(
+            tab,
+            view,
+            placement,
+            declaration.focusable,
+            &owner,
+            admission.index.generation,
+        )
+        .map_err(|error| error.to_string())?;
+    draft.validate().map_err(|error| error.to_string())?;
+    let handle = candidate.next_handle.max(1);
+    candidate.next_handle = handle
+        .checked_add(1)
+        .ok_or_else(|| "target 0.3 host handle space is exhausted".to_owned())?;
+    candidate.instances.insert(
+        handle,
+        PluginWindowInstance {
+            plugin: admission.index.owner.clone(),
+            load: admission.index.generation,
+            checksum: admission.index.checksum.clone(),
+            content_type: declaration.id.clone(),
+            content,
+            view,
+            window,
+            presenter: declaration.presenter,
+            tree: Some(tree.clone()),
+            private: None,
+            focused_node: first_focusable_node(&tree),
+            scroll: 0,
+        },
+    );
+    windows
+        .commit_plugin_fixture(draft)
+        .map_err(|error| error.to_string())?;
+    *host = candidate;
+    *graph = windows.graph().clone();
+    Ok(
+        crate::extensions::target03::api::dust::plugin::host::UiReceipt {
+            content: content.0,
+            view: view.0,
+            window: window.0,
+            graph_revision: graph
+                .revision()
+                .ok_or_else(|| "graph revision exhausted".to_owned())?,
+            view_revision: tree.revision,
+        },
+    )
 }
 
 // Owned initial graph fixtures exercise the same scoped proposal/commit boundary.
