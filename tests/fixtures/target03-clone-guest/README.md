@@ -9,7 +9,10 @@ from `src/lib.rs`; tests wrap it with `wit-component` and instantiate the real
 Component through Wasmtime. Its strict target fixture manifest admits retained
 and private content cloning. The guest opens and clones both presenters,
 observes exact `ui-result` and dimensions callbacks, and publishes fresh cells
-for every private view. It also calls one deliberately unimplemented import so
+for every private view. Hostile commands exercise oversized retained/private
+payloads, wrong/stale private identities, out-of-bounds and wide-overflow cells,
+result-only authority refusal, and execution/callback rollback after an accepted
+queue call. It also calls one deliberately unimplemented import so
 the host's typed `unsupported` rejection is exercised by actual guest code.
 
 Rebuild with the installed stable toolchain and checked lockfile:
@@ -23,4 +26,4 @@ sha256sum target03-clone-guest.core.wasm
 ```
 
 Expected SHA-256:
-`499d54fbd933b523ebafa9c689b9c44e7fcc0463570e6f66a26d04f3cf34abb9`.
+`f1646ee4732859e290144913dd171205c285c495233af97b9011f6dd16ea7bcf`.

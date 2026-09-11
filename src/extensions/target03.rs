@@ -1,5 +1,11 @@
 //! Test-only execution lane for the normative target ABI. Production remains 0.2.
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -25,6 +31,7 @@ struct TargetManifest {
 pub(crate) struct TargetAdmission {
     pub index: super::PluginContributionIndex,
     clone_view: BTreeSet<String>,
+    activation: Arc<()>,
 }
 
 impl TargetAdmission {
@@ -53,7 +60,11 @@ impl TargetAdmission {
         {
             return Err("target clone_view is empty, duplicated, or undeclared".into());
         }
-        Ok(Self { index, clone_view })
+        Ok(Self {
+            index,
+            clone_view,
+            activation: Arc::new(()),
+        })
     }
 
     pub(crate) fn can_clone(&self, content_type: &str) -> bool {
@@ -73,16 +84,62 @@ struct ContentAdmission {
     clone_view: bool,
 }
 
+#[derive(Debug)]
+struct LoadLease {
+    owner: String,
+    generation: u64,
+    checksum: String,
+    activation: Arc<()>,
+    active: AtomicBool,
+}
+
+impl LoadLease {
+    fn catalogue_current(&self, catalogue: &super::PluginContributionCatalog) -> bool {
+        self.active.load(Ordering::Acquire)
+            && catalogue.get(&self.owner).is_some_and(|index| {
+                index.generation == self.generation && index.checksum == self.checksum
+            })
+    }
+
+    fn current(
+        &self,
+        admission: &TargetAdmission,
+        catalogue: &super::PluginContributionCatalog,
+        source: &super::PluginCatalogVersion,
+    ) -> bool {
+        self.catalogue_current(catalogue)
+            && *source == catalogue.version()
+            && Arc::ptr_eq(&self.activation, &admission.activation)
+            && self.generation == admission.index.generation
+            && self.checksum == admission.index.checksum
+            && self.owner == admission.index.owner
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct StagedUiRequest {
     pub token: u64,
     pub invocation: wire::Invocation,
     pub request: wire::UiRequest,
+    lease: Arc<LoadLease>,
+    catalogue: super::PluginCatalogVersion,
+}
+
+impl StagedUiRequest {
+    pub(crate) fn current(
+        &self,
+        admission: &TargetAdmission,
+        catalogue: &super::PluginContributionCatalog,
+    ) -> bool {
+        self.lease.current(admission, catalogue, &self.catalogue)
+    }
 }
 
 struct HostState {
     limits: wasmtime::StoreLimits,
     invocation: Option<wire::Invocation>,
+    invocation_catalogue: Option<super::PluginCatalogVersion>,
+    lease: Arc<LoadLease>,
     next_token: u64,
     pending_tokens: BTreeSet<u64>,
     requests: Vec<StagedUiRequest>,
@@ -109,12 +166,39 @@ fn unsupported(operation: &str) -> wire::Failure {
     )
 }
 
+struct StageCheckpoint {
+    requests: usize,
+    notices: usize,
+    pending: BTreeSet<u64>,
+}
+
 impl HostState {
+    fn checkpoint(&self) -> StageCheckpoint {
+        StageCheckpoint {
+            requests: self.requests.len(),
+            notices: self.notices.len(),
+            pending: self.pending_tokens.clone(),
+        }
+    }
+
+    fn rollback(&mut self, checkpoint: StageCheckpoint) {
+        self.requests.truncate(checkpoint.requests);
+        self.notices.truncate(checkpoint.notices);
+        self.pending_tokens = checkpoint.pending;
+    }
+
     fn reserve(
         &mut self,
         invocation: wire::Invocation,
         request: wire::UiRequest,
     ) -> Result<u64, wire::Failure> {
+        let catalogue = self.invocation_catalogue.clone().ok_or_else(|| {
+            failure(
+                wire::ErrorCode::StaleSource,
+                "target invocation has no catalogue source",
+                false,
+            )
+        })?;
         if self.pending_tokens.len() >= 64 {
             return Err(failure(
                 wire::ErrorCode::QueueFull,
@@ -135,6 +219,8 @@ impl HostState {
             token,
             invocation,
             request,
+            lease: self.lease.clone(),
+            catalogue,
         });
         Ok(token)
     }
@@ -252,13 +338,19 @@ impl wire::Host for HostState {
                 }
             }
             wire::UiRequest::Cells(update) => {
+                if update.cells.len() > 4_096 {
+                    return Err(failure(
+                        wire::ErrorCode::LimitExceeded,
+                        "target private cells exceed the per-view ceiling",
+                        false,
+                    ));
+                }
                 if invocation.kind != wire::ExecutionKind::Lifecycle
                     || invocation.ui.is_some()
                     || self.callback_dimensions.get(&update.view)
                         != Some(&update.dimensions_revision)
                     || update.expected.checked_add(1) != Some(update.revision)
                     || update.revision == 0
-                    || update.cells.len() > 4_096
                     || update.dirty.len() > 64
                     || update.hits.len() > 64
                 {
@@ -322,6 +414,7 @@ pub(crate) struct Runtime {
     store: wasmtime::Store<HostState>,
     bindings: api::EditorPlugin,
     commands: BTreeSet<String>,
+    lease: Arc<LoadLease>,
 }
 
 impl Runtime {
@@ -348,11 +441,20 @@ impl Runtime {
             .memory_size(64 * 1024 * 1024)
             .instances(64)
             .build();
+        let lease = Arc::new(LoadLease {
+            owner: admission.index.owner.clone(),
+            generation: admission.index.generation,
+            checksum: admission.index.checksum.clone(),
+            activation: admission.activation.clone(),
+            active: AtomicBool::new(true),
+        });
         let mut store = wasmtime::Store::new(
             &engine,
             HostState {
                 limits,
                 invocation: None,
+                invocation_catalogue: None,
+                lease: lease.clone(),
                 next_token: 1,
                 pending_tokens: BTreeSet::new(),
                 requests: Vec::new(),
@@ -406,17 +508,24 @@ impl Runtime {
             store,
             bindings,
             commands,
+            lease,
         })
     }
 
-    pub(crate) fn execute(&mut self, invocation: wire::Invocation) -> Result<(), String> {
-        if !self.store.data().active {
-            return Err("target load is retired".into());
+    pub(crate) fn execute(
+        &mut self,
+        invocation: wire::Invocation,
+        catalogue: &super::PluginContributionCatalog,
+    ) -> Result<(), String> {
+        if !self.store.data().active || !self.lease.catalogue_current(catalogue) {
+            return Err("target load or catalogue source is retired".into());
         }
         if !self.commands.contains(&invocation.command) {
             return Err("target command is not activated".into());
         }
+        let checkpoint = self.store.data().checkpoint();
         self.store.data_mut().invocation = Some(invocation.clone());
+        self.store.data_mut().invocation_catalogue = Some(catalogue.version());
         let result = self
             .bindings
             .call_execute_command(&mut self.store, &invocation)
@@ -425,12 +534,20 @@ impl Runtime {
                 result.map_err(|failure| format!("{:?}: {}", failure.code, failure.message))
             });
         self.store.data_mut().invocation = None;
+        self.store.data_mut().invocation_catalogue = None;
+        if result.is_err() {
+            self.store.data_mut().rollback(checkpoint);
+        }
         result
     }
 
-    pub(crate) fn handle_events(&mut self, events: Vec<wire::Event>) -> Result<(), String> {
-        if !self.store.data().active {
-            return Err("target load is retired".into());
+    pub(crate) fn handle_events(
+        &mut self,
+        events: Vec<wire::Event>,
+        catalogue: &super::PluginContributionCatalog,
+    ) -> Result<(), String> {
+        if !self.store.data().active || !self.lease.catalogue_current(catalogue) {
+            return Err("target load or catalogue source is retired".into());
         }
         if events.is_empty() || events.len() > 64 {
             return Err("target event batch is empty or exceeds its ceiling".into());
@@ -477,8 +594,10 @@ impl Runtime {
         for token in &delivered_tokens {
             self.store.data_mut().pending_tokens.remove(token);
         }
+        let checkpoint = self.store.data().checkpoint();
         self.store.data_mut().callback_dimensions = dimensions;
         self.store.data_mut().invocation = events.first().map(|event| event.context.clone());
+        self.store.data_mut().invocation_catalogue = Some(catalogue.version());
         let result = self
             .bindings
             .call_handle_events(&mut self.store, &events)
@@ -487,7 +606,11 @@ impl Runtime {
                 result.map_err(|failure| format!("{:?}: {}", failure.code, failure.message))
             });
         self.store.data_mut().invocation = None;
+        self.store.data_mut().invocation_catalogue = None;
         self.store.data_mut().callback_dimensions.clear();
+        if result.is_err() {
+            self.store.data_mut().rollback(checkpoint);
+        }
         result
     }
 
@@ -502,9 +625,11 @@ impl Runtime {
             .and_then(|result| {
                 result.map_err(|failure| format!("{:?}: {}", failure.code, failure.message))
             });
+        self.lease.active.store(false, Ordering::Release);
         let state = self.store.data_mut();
         state.active = false;
         state.invocation = None;
+        state.invocation_catalogue = None;
         state.requests.clear();
         state.pending_tokens.clear();
         state.callback_dimensions.clear();
@@ -521,5 +646,11 @@ impl Runtime {
 
     pub(crate) fn take_notices(&mut self) -> Vec<String> {
         std::mem::take(&mut self.store.data_mut().notices)
+    }
+}
+
+impl Drop for Runtime {
+    fn drop(&mut self) {
+        self.lease.active.store(false, Ordering::Release);
     }
 }

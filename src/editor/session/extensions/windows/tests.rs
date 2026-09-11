@@ -1301,7 +1301,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     );
     assert_eq!(
         format!("{:x}", Sha256::digest(core)),
-        "499d54fbd933b523ebafa9c689b9c44e7fcc0463570e6f66a26d04f3cf34abb9"
+        "f1646ee4732859e290144913dd171205c285c495233af97b9011f6dd16ea7bcf"
     );
     assert_eq!(
         include_str!("../../../../../docs/specs/api-next.wit"),
@@ -1324,15 +1324,30 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
         )
         .is_err()
     );
+    let mut catalogue = crate::extensions::PluginContributionCatalog::default();
+    catalogue
+        .install(admission.index.clone())
+        .expect("target catalogue admission");
     let mut runtime = Runtime::load(core, &admission).expect("actual target 0.3 Component");
     assert_eq!(
         runtime.activated_commands(),
         [
+            "callbackopen".to_owned(),
             "clone".to_owned(),
             "cloneprivate".to_owned(),
+            "failafterqueue".to_owned(),
             "open".to_owned(),
             "openprivate".to_owned(),
+            "openprivatefail".to_owned(),
+            "openprivateoutofbounds".to_owned(),
+            "openprivateoversized".to_owned(),
+            "openprivatestaledim".to_owned(),
+            "openprivatestalesurface".to_owned(),
+            "openprivatetrap".to_owned(),
+            "openprivatewide".to_owned(),
+            "openprivatewrongview".to_owned(),
             "oversized".to_owned(),
+            "trapafterqueue".to_owned(),
             "unsupported".to_owned(),
         ]
         .into_iter()
@@ -1406,14 +1421,17 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     let mut host = PluginWindowHost::default();
     let graph_before = graph.clone();
     let error = runtime
-        .execute(invocation(
-            0,
-            "unsupported",
-            &graph,
-            editor_content,
-            editor_view,
-            editor_window,
-        ))
+        .execute(
+            invocation(
+                0,
+                "unsupported",
+                &graph,
+                editor_content,
+                editor_view,
+                editor_window,
+            ),
+            &catalogue,
+        )
         .expect_err("unimplemented target import must be typed Unsupported");
     assert!(error.starts_with("ErrorCode::Unsupported:"), "{error}");
     assert!(
@@ -1426,14 +1444,57 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     assert!(host.snapshots().is_empty());
 
     let error = runtime
-        .execute(invocation(
-            1,
-            "oversized",
-            &graph,
-            editor_content,
-            editor_view,
-            editor_window,
-        ))
+        .execute(
+            invocation(
+                1,
+                "failafterqueue",
+                &graph,
+                editor_content,
+                editor_view,
+                editor_window,
+            ),
+            &catalogue,
+        )
+        .expect_err("failed execution must roll back its accepted queue-ui");
+    assert!(error.contains("failure after accepted queue-ui"), "{error}");
+    assert!(runtime.take_requests().is_empty());
+    assert!(runtime.take_notices().is_empty());
+    assert_eq!(graph, graph_before);
+    assert!(host.snapshots().is_empty());
+
+    let mut trap_runtime = Runtime::load(core, &admission).expect("trap probe Component");
+    let error = trap_runtime
+        .execute(
+            invocation(
+                2,
+                "trapafterqueue",
+                &graph,
+                editor_content,
+                editor_view,
+                editor_window,
+            ),
+            &catalogue,
+        )
+        .expect_err("trapping execution must roll back its accepted queue-ui");
+    assert!(error.contains("error while executing"), "{error}");
+    assert!(trap_runtime.take_requests().is_empty());
+    assert!(trap_runtime.take_notices().is_empty());
+    drop(trap_runtime);
+    assert_eq!(graph, graph_before);
+    assert!(host.snapshots().is_empty());
+
+    let error = runtime
+        .execute(
+            invocation(
+                3,
+                "oversized",
+                &graph,
+                editor_content,
+                editor_view,
+                editor_window,
+            ),
+            &catalogue,
+        )
         .expect_err("oversized actual guest tree must fail before reservation");
     assert!(error.starts_with("ErrorCode::LimitExceeded:"), "{error}");
     assert!(runtime.take_requests().is_empty());
@@ -1441,23 +1502,27 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     assert!(host.snapshots().is_empty());
 
     runtime
-        .execute(invocation(
-            2,
-            "open",
-            &graph,
-            editor_content,
-            editor_view,
-            editor_window,
-        ))
+        .execute(
+            invocation(
+                4,
+                "open",
+                &graph,
+                editor_content,
+                editor_view,
+                editor_window,
+            ),
+            &catalogue,
+        )
         .expect("guest open callback");
     let mut requests = runtime.take_requests();
     assert_eq!(requests.len(), 1);
     let original_token = requests[0].token;
+    assert_eq!(original_token, 2, "failed execution never reuses its token");
     let original = host
-        .process_target03(&mut graph, &admission, requests.remove(0))
+        .process_target03(&mut graph, &catalogue, &admission, requests.remove(0))
         .expect("checked original publication");
     runtime
-        .handle_events(vec![callback(1, original_token, Ok(original))])
+        .handle_events(vec![callback(1, original_token, Ok(original))], &catalogue)
         .expect("exact original UI result callback");
     assert_eq!(
         runtime.take_notices(),
@@ -1472,46 +1537,99 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     );
 
     runtime
-        .execute(invocation(
-            3,
-            "clone",
-            &graph,
-            crate::ui::window::ContentId(original.content),
-            crate::ui::window::ViewId(original.view),
-            crate::ui::window::WindowId(original.window),
-        ))
+        .execute(
+            invocation(
+                4,
+                "clone",
+                &graph,
+                crate::ui::window::ContentId(original.content),
+                crate::ui::window::ViewId(original.view),
+                crate::ui::window::WindowId(original.window),
+            ),
+            &catalogue,
+        )
+        .expect("exact activation clone staging");
+    let mut wrong_activation = runtime.take_requests();
+    let wrong_activation_token = wrong_activation[0].token;
+    let same_metadata = TargetAdmission::parse(manifest_source, 9)
+        .expect("separate activation with the same textual metadata");
+    let graph_before = graph.clone();
+    let host_before = host.clone();
+    let error = host
+        .process_target03(
+            &mut graph,
+            &catalogue,
+            &same_metadata,
+            wrong_activation.remove(0),
+        )
+        .expect_err("a different activation cannot adopt staged work");
+    assert_eq!(error.code, wire::ErrorCode::StaleSource);
+    assert_eq!(graph, graph_before);
+    assert_eq!(host, host_before);
+    assert!(
+        runtime
+            .handle_events(
+                vec![callback(
+                    19,
+                    wrong_activation_token,
+                    Err(wire::Failure {
+                        code: error.code,
+                        message: error.message,
+                        retryable: false,
+                    }),
+                )],
+                &catalogue,
+            )
+            .is_err()
+    );
+
+    runtime
+        .execute(
+            invocation(
+                5,
+                "clone",
+                &graph,
+                crate::ui::window::ContentId(original.content),
+                crate::ui::window::ViewId(original.view),
+                crate::ui::window::WindowId(original.window),
+            ),
+            &catalogue,
+        )
         .expect("guest clone callback");
     let mut requests = runtime.take_requests();
     assert_eq!(requests.len(), 1);
     let clone_token = requests[0].token;
     let clone = host
-        .process_target03(&mut graph, &admission, requests.remove(0))
+        .process_target03(&mut graph, &catalogue, &admission, requests.remove(0))
         .expect("checked clone publication");
     assert_eq!(clone.content, original.content);
     assert_ne!(clone.view, original.view);
     assert_ne!(clone.window, original.window);
     assert_eq!(graph.content_snapshots()[1].view_count, 2);
     runtime
-        .handle_events(vec![callback(2, clone_token, Ok(clone))])
+        .handle_events(vec![callback(2, clone_token, Ok(clone))], &catalogue)
         .expect("exact clone UI result callback");
     assert_eq!(runtime.take_notices().len(), 1);
     assert!(
         runtime
-            .handle_events(vec![callback(3, clone_token, Ok(clone))])
+            .handle_events(vec![callback(3, clone_token, Ok(clone))], &catalogue)
             .unwrap_err()
             .contains("stale or duplicated")
     );
     assert!(runtime.take_notices().is_empty());
 
     runtime
-        .execute(invocation(
-            20,
-            "clone",
-            &graph,
-            editor_content,
-            editor_view,
-            editor_window,
-        ))
+        .execute(
+            invocation(
+                20,
+                "clone",
+                &graph,
+                editor_content,
+                editor_view,
+                editor_window,
+            ),
+            &catalogue,
+        )
         .expect("hostile foreign-source guest callback");
     let mut foreign = runtime.take_requests();
     assert_eq!(foreign.len(), 1);
@@ -1519,7 +1637,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     let graph_before = graph.clone();
     let host_before = host.clone();
     let error = host
-        .process_target03(&mut graph, &admission, foreign.remove(0))
+        .process_target03(&mut graph, &catalogue, &admission, foreign.remove(0))
         .expect_err("foreign clone source must reject");
     assert_eq!(error.code, wire::ErrorCode::ForeignHandle);
     assert!(error.message.contains("stale or foreign"));
@@ -1527,28 +1645,34 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     assert_eq!(host, host_before);
     assert!(
         runtime
-            .handle_events(vec![callback(
-                20,
-                foreign_token,
-                Err(wire::Failure {
-                    code: wire::ErrorCode::ForeignHandle,
-                    message: error.message,
-                    retryable: false,
-                }),
-            )])
+            .handle_events(
+                vec![callback(
+                    20,
+                    foreign_token,
+                    Err(wire::Failure {
+                        code: wire::ErrorCode::ForeignHandle,
+                        message: error.message,
+                        retryable: false,
+                    }),
+                )],
+                &catalogue
+            )
             .is_err()
     );
     assert!(runtime.take_notices().is_empty());
 
     runtime
-        .execute(invocation(
-            21,
-            "clone",
-            &graph,
-            crate::ui::window::ContentId(original.content),
-            crate::ui::window::ViewId(original.view),
-            crate::ui::window::WindowId(original.window),
-        ))
+        .execute(
+            invocation(
+                21,
+                "clone",
+                &graph,
+                crate::ui::window::ContentId(original.content),
+                crate::ui::window::ViewId(original.view),
+                crate::ui::window::WindowId(original.window),
+            ),
+            &catalogue,
+        )
         .expect("capability-refusal guest callback");
     let mut denied = runtime.take_requests();
     assert_eq!(denied.len(), 1);
@@ -1557,7 +1681,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     let graph_before = graph.clone();
     let host_before = host.clone();
     let error = host
-        .process_target03(&mut graph, &denied_admission, denied.remove(0))
+        .process_target03(&mut graph, &catalogue, &denied_admission, denied.remove(0))
         .expect_err("clone-view=false must reject");
     assert_eq!(error.code, wire::ErrorCode::PermissionDenied);
     assert!(error.message.contains("denied"));
@@ -1565,28 +1689,34 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     assert_eq!(host, host_before);
     assert!(
         runtime
-            .handle_events(vec![callback(
-                21,
-                denied_token,
-                Err(wire::Failure {
-                    code: wire::ErrorCode::PermissionDenied,
-                    message: error.message,
-                    retryable: false,
-                }),
-            )])
+            .handle_events(
+                vec![callback(
+                    21,
+                    denied_token,
+                    Err(wire::Failure {
+                        code: wire::ErrorCode::PermissionDenied,
+                        message: error.message,
+                        retryable: false,
+                    }),
+                )],
+                &catalogue
+            )
             .is_err()
     );
     assert!(runtime.take_notices().is_empty());
 
     runtime
-        .execute(invocation(
-            22,
-            "clone",
-            &graph,
-            crate::ui::window::ContentId(original.content),
-            crate::ui::window::ViewId(original.view),
-            crate::ui::window::WindowId(original.window),
-        ))
+        .execute(
+            invocation(
+                22,
+                "clone",
+                &graph,
+                crate::ui::window::ContentId(original.content),
+                crate::ui::window::ViewId(original.view),
+                crate::ui::window::WindowId(original.window),
+            ),
+            &catalogue,
+        )
         .expect("wrong-generation guest callback");
     let mut wrong_generation = runtime.take_requests();
     assert_eq!(wrong_generation.len(), 1);
@@ -1599,25 +1729,29 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     let error = host
         .process_target03(
             &mut graph,
+            &catalogue,
             &replacement_admission,
             wrong_generation.remove(0),
         )
         .expect_err("wrong generation must reject");
-    assert_eq!(error.code, wire::ErrorCode::ForeignHandle);
-    assert!(error.message.contains("stale or foreign"));
+    assert_eq!(error.code, wire::ErrorCode::StaleSource);
+    assert!(error.message.contains("retired"));
     assert_eq!(graph, graph_before);
     assert_eq!(host, host_before);
     assert!(
         runtime
-            .handle_events(vec![callback(
-                22,
-                wrong_generation_token,
-                Err(wire::Failure {
-                    code: wire::ErrorCode::ForeignHandle,
-                    message: error.message,
-                    retryable: false,
-                }),
-            )])
+            .handle_events(
+                vec![callback(
+                    22,
+                    wrong_generation_token,
+                    Err(wire::Failure {
+                        code: error.code,
+                        message: error.message,
+                        retryable: false,
+                    }),
+                )],
+                &catalogue
+            )
             .is_err()
     );
     assert!(runtime.take_notices().is_empty());
@@ -1666,24 +1800,30 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     );
 
     runtime
-        .execute(invocation(
-            30,
-            "openprivate",
-            &graph,
-            crate::ui::window::ContentId(clone.content),
-            crate::ui::window::ViewId(clone.view),
-            crate::ui::window::WindowId(clone.window),
-        ))
+        .execute(
+            invocation(
+                30,
+                "openprivate",
+                &graph,
+                crate::ui::window::ContentId(clone.content),
+                crate::ui::window::ViewId(clone.view),
+                crate::ui::window::WindowId(clone.window),
+            ),
+            &catalogue,
+        )
         .expect("guest private open callback");
     let mut private_open = runtime.take_requests();
     assert_eq!(private_open.len(), 1);
     let private_open_token = private_open[0].token;
     let private_original = host
-        .process_target03(&mut graph, &admission, private_open.remove(0))
+        .process_target03(&mut graph, &catalogue, &admission, private_open.remove(0))
         .expect("checked private original publication");
     assert_eq!(private_original.view_revision, 0);
     runtime
-        .handle_events(vec![callback(30, private_open_token, Ok(private_original))])
+        .handle_events(
+            vec![callback(30, private_open_token, Ok(private_original))],
+            &catalogue,
+        )
         .expect("private original result acknowledgement");
     runtime.take_notices();
     assert!(host.private_snapshots(&graph).is_empty());
@@ -1702,32 +1842,31 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
             1,
         );
     let private_dimensions = host
-        .target03_dimensions(&projection, &admission, 31)
+        .target03_dimensions(&projection, &catalogue, &admission, 31)
         .expect("private original dimensions");
     assert_eq!(private_dimensions.len(), 1);
     let duplicate_dimensions = private_dimensions[0].clone();
     runtime
-        .handle_events(private_dimensions)
+        .handle_events(private_dimensions, &catalogue)
         .expect("guest dimensions acknowledgement and fresh cell callback");
     assert!(runtime.take_notices()[0].starts_with("dimensions:"));
     let mut private_cells = runtime.take_requests();
     assert_eq!(private_cells.len(), 1);
     let private_cells_token = private_cells[0].token;
     let private_cells_receipt = host
-        .process_target03(&mut graph, &admission, private_cells.remove(0))
+        .process_target03(&mut graph, &catalogue, &admission, private_cells.remove(0))
         .expect("fresh original private cells");
     runtime
-        .handle_events(vec![callback(
-            32,
-            private_cells_token,
-            Ok(private_cells_receipt),
-        )])
+        .handle_events(
+            vec![callback(32, private_cells_token, Ok(private_cells_receipt))],
+            &catalogue,
+        )
         .expect("private cell result acknowledgement");
     runtime.take_notices();
     assert_eq!(host.private_snapshots(&graph)[0].cells[0].grapheme, "A");
     assert!(
         runtime
-            .handle_events(vec![duplicate_dimensions])
+            .handle_events(vec![duplicate_dimensions], &catalogue)
             .unwrap_err()
             .contains("stale, duplicated")
     );
@@ -1737,41 +1876,50 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     let mut denied_private =
         Runtime::load(core, &denied_private_admission).expect("private denial Component");
     let error = denied_private
-        .execute(invocation(
-            33,
-            "cloneprivate",
-            &graph,
-            crate::ui::window::ContentId(private_original.content),
-            crate::ui::window::ViewId(private_original.view),
-            crate::ui::window::WindowId(private_original.window),
-        ))
+        .execute(
+            invocation(
+                33,
+                "cloneprivate",
+                &graph,
+                crate::ui::window::ContentId(private_original.content),
+                crate::ui::window::ViewId(private_original.view),
+                crate::ui::window::WindowId(private_original.window),
+            ),
+            &catalogue,
+        )
         .expect_err("clone_view=false rejects before token reservation");
     assert!(error.starts_with("ErrorCode::PermissionDenied:"), "{error}");
     assert!(denied_private.take_requests().is_empty());
     denied_private.deactivate().expect("denied load retirement");
 
     runtime
-        .execute(invocation(
-            34,
-            "cloneprivate",
-            &graph,
-            crate::ui::window::ContentId(private_original.content),
-            crate::ui::window::ViewId(private_original.view),
-            crate::ui::window::WindowId(private_original.window),
-        ))
+        .execute(
+            invocation(
+                34,
+                "cloneprivate",
+                &graph,
+                crate::ui::window::ContentId(private_original.content),
+                crate::ui::window::ViewId(private_original.view),
+                crate::ui::window::WindowId(private_original.window),
+            ),
+            &catalogue,
+        )
         .expect("guest private clone callback");
     let mut private_clone = runtime.take_requests();
     assert_eq!(private_clone.len(), 1);
     let private_clone_token = private_clone[0].token;
     let private_clone = host
-        .process_target03(&mut graph, &admission, private_clone.remove(0))
+        .process_target03(&mut graph, &catalogue, &admission, private_clone.remove(0))
         .expect("checked private clone publication");
     assert_eq!(private_clone.content, private_original.content);
     assert_ne!(private_clone.view, private_original.view);
     assert_ne!(private_clone.window, private_original.window);
     assert_eq!(private_clone.view_revision, 0);
     runtime
-        .handle_events(vec![callback(33, private_clone_token, Ok(private_clone))])
+        .handle_events(
+            vec![callback(33, private_clone_token, Ok(private_clone))],
+            &catalogue,
+        )
         .expect("private clone result acknowledgement");
     runtime.take_notices();
     assert_eq!(host.private_snapshots(&graph).len(), 1);
@@ -1790,25 +1938,24 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
             1,
         );
     let private_clone_dimensions = host
-        .target03_dimensions(&projection, &admission, 34)
+        .target03_dimensions(&projection, &catalogue, &admission, 34)
         .expect("private clone dimensions");
     assert_eq!(private_clone_dimensions.len(), 1);
     runtime
-        .handle_events(private_clone_dimensions)
+        .handle_events(private_clone_dimensions, &catalogue)
         .expect("guest clone dimensions acknowledgement and fresh cells");
     runtime.take_notices();
     let mut clone_cells = runtime.take_requests();
     assert_eq!(clone_cells.len(), 1);
     let clone_cells_token = clone_cells[0].token;
     let clone_cells_receipt = host
-        .process_target03(&mut graph, &admission, clone_cells.remove(0))
+        .process_target03(&mut graph, &catalogue, &admission, clone_cells.remove(0))
         .expect("fresh cloned private cells");
     runtime
-        .handle_events(vec![callback(
-            35,
-            clone_cells_token,
-            Ok(clone_cells_receipt),
-        )])
+        .handle_events(
+            vec![callback(35, clone_cells_token, Ok(clone_cells_receipt))],
+            &catalogue,
+        )
         .expect("cloned private cell result acknowledgement");
     runtime.take_notices();
     let private = host.private_snapshots(&graph);
@@ -1827,20 +1974,337 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
             .content
     );
     assert!(
-        host.target03_dimensions(&projection, &admission, 36)
+        host.target03_dimensions(&projection, &catalogue, &admission, 36)
             .expect("stable private geometry")
             .is_empty()
     );
 
     runtime
-        .execute(invocation(
-            40,
-            "clone",
-            &graph,
-            crate::ui::window::ContentId(original.content),
-            crate::ui::window::ViewId(original.view),
-            crate::ui::window::WindowId(original.window),
-        ))
+        .execute(
+            invocation(
+                42,
+                "openprivatefail",
+                &graph,
+                crate::ui::window::ContentId(private_clone.content),
+                crate::ui::window::ViewId(private_clone.view),
+                crate::ui::window::WindowId(private_clone.window),
+            ),
+            &catalogue,
+        )
+        .expect("callback rollback private open");
+    let mut fail_private = runtime.take_requests();
+    let fail_private_token = fail_private[0].token;
+    let fail_private_receipt = host
+        .process_target03(&mut graph, &catalogue, &admission, fail_private.remove(0))
+        .expect("callback rollback private publication");
+    runtime
+        .handle_events(
+            vec![callback(42, fail_private_token, Ok(fail_private_receipt))],
+            &catalogue,
+        )
+        .expect("callback rollback private receipt");
+    runtime.take_notices();
+    let projection = graph
+        .compositor_snapshot(tab)
+        .expect("callback rollback graph snapshot")
+        .project(
+            WindowRect {
+                x: 0,
+                y: 0,
+                width: 80,
+                height: 24,
+            },
+            1,
+            1,
+        );
+    let fail_dimensions = host
+        .target03_dimensions(&projection, &catalogue, &admission, 43)
+        .expect("callback rollback dimensions");
+    assert_eq!(fail_dimensions.len(), 1);
+    let duplicate_fail_dimensions = fail_dimensions[0].clone();
+    let error = runtime
+        .handle_events(fail_dimensions, &catalogue)
+        .expect_err("failed callback rolls back its queued cells");
+    assert!(
+        error.contains("failure after queued private cells"),
+        "{error}"
+    );
+    assert!(runtime.take_requests().is_empty());
+    assert!(runtime.take_notices().is_empty());
+    assert!(
+        runtime
+            .handle_events(vec![duplicate_fail_dimensions], &catalogue)
+            .unwrap_err()
+            .contains("stale, duplicated")
+    );
+    assert_eq!(host.private_snapshots(&graph).len(), 2);
+
+    runtime
+        .execute(
+            invocation(
+                44,
+                "openprivateoversized",
+                &graph,
+                crate::ui::window::ContentId(private_clone.content),
+                crate::ui::window::ViewId(private_clone.view),
+                crate::ui::window::WindowId(private_clone.window),
+            ),
+            &catalogue,
+        )
+        .expect("oversized private open");
+    let mut oversized_private = runtime.take_requests();
+    let oversized_private_token = oversized_private[0].token;
+    let oversized_private_receipt = host
+        .process_target03(
+            &mut graph,
+            &catalogue,
+            &admission,
+            oversized_private.remove(0),
+        )
+        .expect("oversized private publication");
+    runtime
+        .handle_events(
+            vec![callback(
+                44,
+                oversized_private_token,
+                Ok(oversized_private_receipt),
+            )],
+            &catalogue,
+        )
+        .expect("oversized private receipt");
+    runtime.take_notices();
+    let projection = graph
+        .compositor_snapshot(tab)
+        .expect("oversized private graph snapshot")
+        .project(
+            WindowRect {
+                x: 0,
+                y: 0,
+                width: 80,
+                height: 24,
+            },
+            1,
+            1,
+        );
+    let oversized_dimensions = host
+        .target03_dimensions(&projection, &catalogue, &admission, 45)
+        .expect("oversized private dimensions");
+    assert_eq!(oversized_dimensions.len(), 1);
+    let error = runtime
+        .handle_events(oversized_dimensions, &catalogue)
+        .expect_err("oversized actual private cells reject before reservation");
+    assert!(error.starts_with("ErrorCode::LimitExceeded:"), "{error}");
+    assert!(runtime.take_requests().is_empty());
+    assert!(runtime.take_notices().is_empty());
+    assert_eq!(host.private_snapshots(&graph).len(), 2);
+
+    let mut trap_callback_runtime =
+        Runtime::load(core, &admission).expect("callback trap probe Component");
+    trap_callback_runtime
+        .execute(
+            invocation(
+                900,
+                "openprivatetrap",
+                &graph,
+                crate::ui::window::ContentId(private_clone.content),
+                crate::ui::window::ViewId(private_clone.view),
+                crate::ui::window::WindowId(private_clone.window),
+            ),
+            &catalogue,
+        )
+        .expect("callback trap private open staging");
+    let mut trap_private = trap_callback_runtime.take_requests();
+    let trap_private_token = trap_private[0].token;
+    let trap_private_receipt = host
+        .process_target03(&mut graph, &catalogue, &admission, trap_private.remove(0))
+        .expect("callback trap private publication");
+    trap_callback_runtime
+        .handle_events(
+            vec![callback(900, trap_private_token, Ok(trap_private_receipt))],
+            &catalogue,
+        )
+        .expect("callback trap private receipt");
+    trap_callback_runtime.take_notices();
+    let projection = graph
+        .compositor_snapshot(tab)
+        .expect("callback trap graph snapshot")
+        .project(
+            WindowRect {
+                x: 0,
+                y: 0,
+                width: 80,
+                height: 24,
+            },
+            1,
+            1,
+        );
+    let trap_dimensions = host
+        .target03_dimensions(&projection, &catalogue, &admission, 901)
+        .expect("callback trap dimensions");
+    assert_eq!(trap_dimensions.len(), 1);
+    let duplicate_trap_dimensions = trap_dimensions[0].clone();
+    let error = trap_callback_runtime
+        .handle_events(trap_dimensions, &catalogue)
+        .expect_err("trapping callback must roll back accepted private cells");
+    assert!(error.contains("error while executing"), "{error}");
+    assert!(trap_callback_runtime.take_requests().is_empty());
+    assert!(trap_callback_runtime.take_notices().is_empty());
+    assert!(
+        trap_callback_runtime
+            .handle_events(vec![duplicate_trap_dimensions], &catalogue)
+            .unwrap_err()
+            .contains("stale, duplicated")
+    );
+    drop(trap_callback_runtime);
+    assert_eq!(host.private_snapshots(&graph).len(), 2);
+
+    let mut hostile_event = 1_000;
+    for (probe, runtime_rejects) in [
+        ("openprivatewrongview", true),
+        ("openprivatestaledim", true),
+        ("openprivatestalesurface", false),
+        ("openprivateoutofbounds", false),
+        ("openprivatewide", false),
+    ] {
+        let event = hostile_event;
+        hostile_event += 3;
+        runtime
+            .execute(
+                invocation(
+                    event,
+                    probe,
+                    &graph,
+                    crate::ui::window::ContentId(private_clone.content),
+                    crate::ui::window::ViewId(private_clone.view),
+                    crate::ui::window::WindowId(private_clone.window),
+                ),
+                &catalogue,
+            )
+            .expect("hostile private open staging");
+        let mut open = runtime.take_requests();
+        assert_eq!(open.len(), 1);
+        let open_token = open[0].token;
+        let receipt = host
+            .process_target03(&mut graph, &catalogue, &admission, open.remove(0))
+            .expect("hostile private view publication");
+        runtime
+            .handle_events(vec![callback(event, open_token, Ok(receipt))], &catalogue)
+            .unwrap_or_else(|error| panic!("{probe} view receipt: {error}"));
+        runtime.take_notices();
+        let projection = graph
+            .compositor_snapshot(tab)
+            .expect("hostile private graph snapshot")
+            .project(
+                WindowRect {
+                    x: 0,
+                    y: 0,
+                    width: 80,
+                    height: 24,
+                },
+                1,
+                1,
+            );
+        let dimensions = host
+            .target03_dimensions(&projection, &catalogue, &admission, event + 1)
+            .expect("hostile private dimensions");
+        assert_eq!(dimensions.len(), 1);
+        let callback_result = runtime.handle_events(dimensions, &catalogue);
+        if runtime_rejects {
+            let error = callback_result.expect_err("malformed callback import must reject");
+            assert!(error.starts_with("ErrorCode::InvalidArgument:"), "{error}");
+            assert!(runtime.take_requests().is_empty());
+        } else {
+            callback_result.expect("host receives the structurally admissible hostile update");
+            runtime.take_notices();
+            let mut cells = runtime.take_requests();
+            assert_eq!(cells.len(), 1);
+            let cell_token = cells[0].token;
+            let graph_before = graph.clone();
+            let host_before = host.clone();
+            let error = host
+                .process_target03(&mut graph, &catalogue, &admission, cells.remove(0))
+                .expect_err("hostile private cells must reject atomically");
+            assert!(matches!(
+                error.code,
+                wire::ErrorCode::Conflict | wire::ErrorCode::InvalidArgument
+            ));
+            assert_eq!(graph, graph_before);
+            assert_eq!(host, host_before);
+            assert!(
+                runtime
+                    .handle_events(
+                        vec![callback(
+                            event + 2,
+                            cell_token,
+                            Err(wire::Failure {
+                                code: error.code,
+                                message: error.message,
+                                retryable: false,
+                            }),
+                        )],
+                        &catalogue,
+                    )
+                    .is_err()
+            );
+        }
+        assert!(runtime.take_notices().is_empty());
+        assert_eq!(host.private_snapshots(&graph).len(), 2);
+    }
+    assert_eq!(host.snapshots().len(), 2);
+
+    runtime
+        .execute(
+            invocation(
+                90,
+                "openprivate",
+                &graph,
+                crate::ui::window::ContentId(private_clone.content),
+                crate::ui::window::ViewId(private_clone.view),
+                crate::ui::window::WindowId(private_clone.window),
+            ),
+            &catalogue,
+        )
+        .expect("full private content request staging");
+    let mut full_private = runtime.take_requests();
+    let full_private_token = full_private[0].token;
+    let graph_before = graph.clone();
+    let host_before = host.clone();
+    let error = host
+        .process_target03(&mut graph, &catalogue, &admission, full_private.remove(0))
+        .expect_err("full private content admission must reject");
+    assert_eq!(error.code, wire::ErrorCode::LimitExceeded);
+    assert_eq!(graph, graph_before);
+    assert_eq!(host, host_before);
+    assert!(
+        runtime
+            .handle_events(
+                vec![callback(
+                    46,
+                    full_private_token,
+                    Err(wire::Failure {
+                        code: error.code,
+                        message: error.message,
+                        retryable: false,
+                    }),
+                )],
+                &catalogue,
+            )
+            .is_err()
+    );
+    assert!(runtime.take_requests().is_empty());
+
+    runtime
+        .execute(
+            invocation(
+                47,
+                "clone",
+                &graph,
+                crate::ui::window::ContentId(original.content),
+                crate::ui::window::ViewId(original.view),
+                crate::ui::window::WindowId(original.window),
+            ),
+            &catalogue,
+        )
         .expect("delayed guest clone callback");
     let mut delayed = runtime.take_requests();
     assert_eq!(delayed.len(), 1);
@@ -1852,7 +2316,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
         .expect("intervening graph change");
     let changed = graph.clone();
     let error = host
-        .process_target03(&mut graph, &admission, delayed.remove(0))
+        .process_target03(&mut graph, &catalogue, &admission, delayed.remove(0))
         .expect_err("stale delayed callback must not publish");
     assert_eq!(error.code, wire::ErrorCode::StaleSource);
     assert!(error.message.contains("stale"));
@@ -1866,17 +2330,132 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     };
     assert!(
         runtime
-            .handle_events(vec![callback(4, delayed_token, Err(failure))])
+            .handle_events(vec![callback(4, delayed_token, Err(failure))], &catalogue)
             .unwrap_err()
             .contains("stale")
     );
     assert!(
         runtime
-            .handle_events(vec![callback(5, delayed_token, Ok(clone))])
+            .handle_events(vec![callback(5, delayed_token, Ok(clone))], &catalogue)
             .unwrap_err()
             .contains("stale or duplicated")
     );
     assert!(runtime.take_notices().is_empty());
+
+    runtime
+        .execute(
+            invocation(
+                48,
+                "clone",
+                &graph,
+                crate::ui::window::ContentId(original.content),
+                crate::ui::window::ViewId(original.view),
+                crate::ui::window::WindowId(original.window),
+            ),
+            &catalogue,
+        )
+        .expect("closed-source clone staging");
+    let mut closed_source = runtime.take_requests();
+    let closed_source_token = closed_source[0].token;
+    let mut closed_graph = graph.clone();
+    let mut closed_host = host.clone();
+    closed_graph
+        .close_window(crate::ui::window::WindowId(original.window))
+        .and_then(|_| closed_graph.remove_view(crate::ui::window::ViewId(original.view)))
+        .expect("close exact staged source view");
+    let closed_before = closed_graph.clone();
+    let closed_host_before = closed_host.clone();
+    let error = closed_host
+        .process_target03(
+            &mut closed_graph,
+            &catalogue,
+            &admission,
+            closed_source.remove(0),
+        )
+        .expect_err("closed source must reject before candidate publication");
+    assert_eq!(error.code, wire::ErrorCode::Closed);
+    assert_eq!(closed_graph, closed_before);
+    assert_eq!(closed_host, closed_host_before);
+    assert!(
+        runtime
+            .handle_events(
+                vec![callback(
+                    48,
+                    closed_source_token,
+                    Err(wire::Failure {
+                        code: error.code,
+                        message: error.message,
+                        retryable: false,
+                    }),
+                )],
+                &catalogue,
+            )
+            .is_err()
+    );
+
+    runtime
+        .execute(
+            invocation(
+                49,
+                "callbackopen",
+                &graph,
+                editor_content,
+                editor_view,
+                editor_window,
+            ),
+            &catalogue,
+        )
+        .expect("result-only authority probe staging");
+    let mut callback_open = runtime.take_requests();
+    assert_eq!(callback_open.len(), 1);
+    let callback_open_token = callback_open[0].token;
+    let callback_open_receipt = host
+        .process_target03(&mut graph, &catalogue, &admission, callback_open.remove(0))
+        .expect("authority probe publication");
+    runtime
+        .handle_events(
+            vec![callback(41, callback_open_token, Ok(callback_open_receipt))],
+            &catalogue,
+        )
+        .expect("result-only forbidden open was observed by real guest");
+    let notices = runtime.take_notices();
+    assert!(
+        notices
+            .iter()
+            .any(|notice| notice == "result-only-open-refused")
+    );
+    assert!(runtime.take_requests().is_empty());
+    let callback_handle = host
+        .snapshots()
+        .into_iter()
+        .find(|snapshot| snapshot.window.0 == callback_open_receipt.window)
+        .expect("authority probe host view")
+        .handle;
+    let close_revision = graph.revision().expect("close revision");
+    let close = process_fixture(
+        &mut host,
+        &mut graph,
+        &admission.index,
+        PluginUiRequest {
+            token: 999,
+            kind: PluginUiRequestKind::CloseWindow {
+                handle: callback_handle,
+                expected_graph_revision: close_revision,
+            },
+        },
+    );
+    assert!(close.error.is_none(), "{:?}", close.error);
+    let retired_window_ceiling = host
+        .snapshots()
+        .into_iter()
+        .map(|snapshot| snapshot.window.0)
+        .chain(
+            host.private_snapshots(&graph)
+                .into_iter()
+                .map(|snapshot| snapshot.window.0),
+        )
+        .max()
+        .expect("retiring target window ceiling");
 
     assert!(!remove_fixture(&mut host, &mut graph, "demo", 8).unwrap());
     assert_eq!(host.snapshots().len(), 2);
@@ -1884,26 +2463,32 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     let mut saturation = Runtime::load(core, &admission).expect("saturation Component");
     for id in 100..164 {
         saturation
-            .execute(invocation(
-                id,
+            .execute(
+                invocation(
+                    id,
+                    "open",
+                    &graph,
+                    editor_content,
+                    editor_view,
+                    editor_window,
+                ),
+                &catalogue,
+            )
+            .expect("reserved target request");
+    }
+    assert_eq!(saturation.take_requests().len(), 64);
+    let error = saturation
+        .execute(
+            invocation(
+                164,
                 "open",
                 &graph,
                 editor_content,
                 editor_view,
                 editor_window,
-            ))
-            .expect("reserved target request");
-    }
-    assert_eq!(saturation.take_requests().len(), 64);
-    let error = saturation
-        .execute(invocation(
-            164,
-            "open",
-            &graph,
-            editor_content,
-            editor_view,
-            editor_window,
-        ))
+            ),
+            &catalogue,
+        )
         .expect_err("pending terminal capacity stays reserved after staging drain");
     assert!(error.starts_with("ErrorCode::QueueFull:"), "{error}");
     saturation
@@ -1912,34 +2497,160 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     assert!(saturation.take_requests().is_empty());
     assert!(
         saturation
-            .execute(invocation(
-                165,
-                "open",
-                &graph,
-                editor_content,
-                editor_view,
-                editor_window,
-            ))
+            .execute(
+                invocation(
+                    165,
+                    "open",
+                    &graph,
+                    editor_content,
+                    editor_view,
+                    editor_window,
+                ),
+                &catalogue
+            )
             .unwrap_err()
             .contains("retired")
     );
 
-    runtime.deactivate().expect("bounded target deactivation");
+    runtime
+        .execute(
+            invocation(
+                166,
+                "clone",
+                &graph,
+                crate::ui::window::ContentId(original.content),
+                crate::ui::window::ViewId(original.view),
+                crate::ui::window::WindowId(original.window),
+            ),
+            &catalogue,
+        )
+        .expect("catalogue-bound clone staging");
+    let mut catalogue_stale = runtime.take_requests();
+    let catalogue_stale_token = catalogue_stale[0].token;
+    assert!(catalogue.remove_generation("demo", 9));
+    catalogue
+        .install(admission.index.clone())
+        .expect("same generation reinstallation");
+    let graph_before = graph.clone();
+    let host_before = host.clone();
+    let error = host
+        .process_target03(
+            &mut graph,
+            &catalogue,
+            &admission,
+            catalogue_stale.remove(0),
+        )
+        .expect_err("catalogue identity changed after staging");
+    assert_eq!(error.code, wire::ErrorCode::StaleSource);
+    assert_eq!(graph, graph_before);
+    assert_eq!(host, host_before);
     assert!(
         runtime
-            .execute(invocation(
-                166,
-                "open",
+            .handle_events(
+                vec![callback(
+                    6,
+                    catalogue_stale_token,
+                    Err(wire::Failure {
+                        code: error.code,
+                        message: error.message,
+                        retryable: false,
+                    }),
+                )],
+                &catalogue,
+            )
+            .is_err()
+    );
+
+    runtime
+        .execute(
+            invocation(
+                167,
+                "clone",
                 &graph,
-                editor_content,
-                editor_view,
-                editor_window,
-            ))
+                crate::ui::window::ContentId(original.content),
+                crate::ui::window::ViewId(original.view),
+                crate::ui::window::WindowId(original.window),
+            ),
+            &catalogue,
+        )
+        .expect("retirement-bound clone staging");
+    runtime
+        .execute(
+            invocation(
+                168,
+                "clone",
+                &graph,
+                crate::ui::window::ContentId(original.content),
+                crate::ui::window::ViewId(original.view),
+                crate::ui::window::WindowId(original.window),
+            ),
+            &catalogue,
+        )
+        .expect("replacement-race clone staging");
+    let mut retired = runtime.take_requests();
+    assert_eq!(retired.len(), 2);
+    runtime.deactivate().expect("bounded target deactivation");
+    let graph_before = graph.clone();
+    let host_before = host.clone();
+    let error = host
+        .process_target03(&mut graph, &catalogue, &admission, retired.remove(0))
+        .expect_err("taken request cannot outlive its runtime");
+    assert_eq!(error.code, wire::ErrorCode::StaleSource);
+    assert_eq!(graph, graph_before);
+    assert_eq!(host, host_before);
+    assert!(
+        runtime
+            .execute(
+                invocation(
+                    169,
+                    "open",
+                    &graph,
+                    editor_content,
+                    editor_view,
+                    editor_window,
+                ),
+                &catalogue,
+            )
             .unwrap_err()
             .contains("retired")
     );
     assert!(runtime.take_requests().is_empty());
+
+    let old_replacement_request = retired.remove(0);
+    let mut dropped = Runtime::load(core, &admission).expect("drop retirement Component");
+    dropped
+        .execute(
+            invocation(
+                170,
+                "clone",
+                &graph,
+                crate::ui::window::ContentId(original.content),
+                crate::ui::window::ViewId(original.view),
+                crate::ui::window::WindowId(original.window),
+            ),
+            &catalogue,
+        )
+        .expect("drop-bound clone staging");
+    let mut dropped_request = dropped.take_requests();
+    drop(dropped);
+    let graph_before = graph.clone();
+    let host_before = host.clone();
+    assert_eq!(
+        host.process_target03(
+            &mut graph,
+            &catalogue,
+            &admission,
+            dropped_request.remove(0),
+        )
+        .expect_err("taken request cannot outlive a dropped runtime")
+        .code,
+        wire::ErrorCode::StaleSource
+    );
+    assert_eq!(graph, graph_before);
+    assert_eq!(host, host_before);
+
     assert!(remove_fixture(&mut host, &mut graph, "demo", 9).unwrap());
+    assert!(catalogue.remove_generation("demo", 9));
     assert!(host.snapshots().is_empty());
     assert!(
         graph
@@ -1947,6 +2658,58 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
             .iter()
             .all(|content| content.id != crate::ui::window::ContentId(original.content))
     );
+
+    let replacement = TargetAdmission::parse(manifest_source, 10).expect("replacement admission");
+    catalogue
+        .install(replacement.index.clone())
+        .expect("replacement catalogue generation");
+    let mut replacement_runtime =
+        Runtime::load(core, &replacement).expect("replacement target Component");
+    replacement_runtime
+        .execute(
+            invocation(
+                171,
+                "open",
+                &graph,
+                editor_content,
+                editor_view,
+                editor_window,
+            ),
+            &catalogue,
+        )
+        .expect("replacement guest remains usable");
+    let mut replacement_requests = replacement_runtime.take_requests();
+    let replacement_receipt = host
+        .process_target03(
+            &mut graph,
+            &catalogue,
+            &replacement,
+            replacement_requests.remove(0),
+        )
+        .expect("replacement generation publication");
+    assert_ne!(replacement_receipt.content, original.content);
+    assert_ne!(replacement_receipt.view, original.view);
+    assert!(replacement_receipt.window > retired_window_ceiling);
+    let replacement_graph = graph.clone();
+    let replacement_host = host.clone();
+    assert_eq!(
+        host.process_target03(
+            &mut graph,
+            &catalogue,
+            &replacement,
+            old_replacement_request,
+        )
+        .expect_err("old staged request cannot enter replacement generation")
+        .code,
+        wire::ErrorCode::StaleSource
+    );
+    assert_eq!(graph, replacement_graph);
+    assert_eq!(host, replacement_host);
+    replacement_runtime
+        .deactivate()
+        .expect("replacement retirement");
+    assert!(remove_fixture(&mut host, &mut graph, "demo", 10).unwrap());
+    assert!(catalogue.remove_generation("demo", 10));
 }
 
 #[test]

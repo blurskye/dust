@@ -111,9 +111,16 @@ impl PluginWindowHost {
     pub(in crate::editor::session) fn process_target03(
         &mut self,
         graph: &mut WindowGraph,
+        catalogue: &crate::extensions::PluginContributionCatalog,
         admission: &TargetAdmission,
         staged: StagedUiRequest,
     ) -> Result<wire::UiReceipt, wire::Failure> {
+        if !staged.current(admission, catalogue) {
+            return Err(failure(
+                wire::ErrorCode::StaleSource,
+                "target load or catalogue source is retired",
+            ));
+        }
         match staged.request {
             wire::UiRequest::Open(open) => {
                 self.open_target03(graph, admission, staged.invocation, open)
@@ -139,6 +146,15 @@ impl PluginWindowHost {
                 "target invocation has no UI source",
             )
         })?;
+        if open.content.is_some()
+            && (graph.window(WindowId(ui.window)).is_none()
+                || graph.view(ViewId(ui.view)).is_none())
+        {
+            return Err(failure(
+                wire::ErrorCode::Closed,
+                "target clone source is closed",
+            ));
+        }
         if open.graph_revision != ui.graph_revision
             || graph.revision() != Some(open.graph_revision)
             || open.tab != ui.tab
@@ -451,9 +467,19 @@ impl PluginWindowHost {
     pub(in crate::editor::session) fn target03_dimensions(
         &mut self,
         projection: &crate::ui::window::CompositorProjection,
+        catalogue: &crate::extensions::PluginContributionCatalog,
         admission: &TargetAdmission,
         first_event: u64,
     ) -> Result<Vec<wire::Event>, wire::Failure> {
+        if !catalogue.get(&admission.index.owner).is_some_and(|index| {
+            index.generation == admission.index.generation
+                && index.checksum == admission.index.checksum
+        }) {
+            return Err(failure(
+                wire::ErrorCode::StaleSource,
+                "target catalogue generation is retired",
+            ));
+        }
         let mut candidate = self.clone();
         let mut events = Vec::new();
         for instance in candidate.instances.values_mut().filter(|instance| {
