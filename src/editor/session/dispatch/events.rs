@@ -160,6 +160,7 @@ impl InteractiveApplication {
                             | PromptKind::ExplorerRename
                             | PromptKind::PluginConfirmation
                             | PromptKind::TerminalClose
+                            | PromptKind::DirtyClose
                     )
                 }) {
                     self.close_prompt();

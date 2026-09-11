@@ -33,6 +33,11 @@ pub(in crate::editor::session) struct TerminalIntent {
     profile: String,
     nonce: Arc<()>,
 }
+struct TerminalCloseSource {
+    key: TerminalKey,
+    pty: Option<PtyId>,
+    phase: crate::ui::TerminalPhase,
+}
 impl TerminalIntent {
     pub(in crate::editor::session) fn profile(&self) -> &str {
         &self.profile
@@ -59,11 +64,15 @@ struct Open {
     request: ExecutionPreflightRequest,
     config: TerminalProfileConfig,
 }
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::editor::session) enum TerminalUpdate {
     Started(PtyId),
+    Exited(PtyId, Option<u32>),
+    IoComplete(PtyId),
     Closed(PtyId),
     StopUnknown(PtyId, String),
     Failed(PtyId, String),
+    Unknown(PtyId, String),
     Changed,
 }
 pub(super) struct TerminalSession {
@@ -83,7 +92,7 @@ pub(super) struct TerminalSession {
         TerminalIntent,
         Option<crate::debugger::DapTerminalReply>,
     )>,
-    close_intent: Option<TerminalKey>,
+    close_intent: Option<TerminalCloseSource>,
     closed: bool,
 }
 impl TerminalSession {
@@ -167,14 +176,29 @@ impl TerminalSession {
         let Some(key) = self.key_for(id) else {
             return false;
         };
-        self.close_intent = Some(key);
+        let terminal = &self.tabs[&id];
+        self.close_intent = Some(TerminalCloseSource {
+            key,
+            pty: terminal.pty,
+            phase: terminal.phase(),
+        });
         true
     }
     pub(in crate::editor::session) fn cancel_close(&mut self) {
         self.close_intent = None;
     }
-    pub(in crate::editor::session) fn take_close(&mut self) -> Option<TerminalKey> {
-        self.close_intent.take()
+    pub(in crate::editor::session) fn take_close(&mut self) -> Result<Option<PtyId>, String> {
+        let Some(source) = self.close_intent.take() else {
+            return Ok(None);
+        };
+        let id = self
+            .resolve(&source.key)
+            .ok_or("terminal close source retired or was replaced")?;
+        let terminal = &self.tabs[&id];
+        if terminal.pty != source.pty || terminal.phase() != source.phase {
+            return Err("terminal close source lifecycle changed".into());
+        }
+        Ok(Some(id))
     }
     fn key_for(&self, id: PtyId) -> Option<TerminalKey> {
         self.contains(id).then(|| TerminalKey {
@@ -194,6 +218,7 @@ impl TerminalSession {
                     crate::ui::TerminalPhase::Stopping => ContentLifecycle::Stopping,
                     crate::ui::TerminalPhase::Exited => ContentLifecycle::Exited,
                     crate::ui::TerminalPhase::Failed => ContentLifecycle::Failed,
+                    crate::ui::TerminalPhase::Unknown => ContentLifecycle::Unknown,
                 };
                 (id.0, terminal.profile.clone(), lifecycle)
             })
@@ -221,6 +246,7 @@ impl TerminalSession {
                             crate::ui::TerminalPhase::Stopping => "stopping",
                             crate::ui::TerminalPhase::Exited => "exited",
                             crate::ui::TerminalPhase::Failed => "failed",
+                            crate::ui::TerminalPhase::Unknown => "unknown",
                         },
                         if Some(*id) == self.selected {
                             " · active"
@@ -384,6 +410,10 @@ impl TerminalSession {
                 pending: Some(source.open),
                 running: false,
                 stopping: false,
+                exited: false,
+                io_complete: false,
+                failure: None,
+                unknown: None,
                 exit_code: None,
                 truncated: false,
                 mode: TerminalPanelMode::Input,
@@ -519,9 +549,6 @@ impl TerminalSession {
         let Some(tab) = self.tabs.remove(&id) else {
             return false;
         };
-        if self.close_intent.as_ref().is_some_and(|key| key.id == id) {
-            self.close_intent = None;
-        }
         if let Some(pty) = tab.pty {
             let _ = self.service.close(pty);
             self.retired.insert(pty);
@@ -552,9 +579,25 @@ impl TerminalSession {
     }
     pub(in crate::editor::session) fn begin_shutdown(&mut self) {
         self.preflights.clear();
+        self.cancel_open();
+        self.cancel_close();
         self.closed = true;
-        self.reset();
         self.service.begin_shutdown();
+    }
+    pub(in crate::editor::session) fn expire_shutdown(&mut self) -> Vec<TerminalUpdate> {
+        let ids = self
+            .tabs
+            .iter()
+            .filter_map(|(id, terminal)| terminal.pty.is_some().then_some(*id))
+            .collect::<Vec<_>>();
+        ids.into_iter()
+            .map(|id| {
+                let message = "shared shutdown deadline expired before PTY exit and I/O completion"
+                    .to_owned();
+                self.close(id);
+                TerminalUpdate::Unknown(id, message)
+            })
+            .collect()
     }
     pub(in crate::editor::session) fn pending(&self) -> usize {
         self.service.pending()
@@ -612,11 +655,18 @@ impl TerminalSession {
                 PtyEvent::Started { id, .. }
                 | PtyEvent::Output { id, .. }
                 | PtyEvent::Exited { id, .. }
+                | PtyEvent::IoComplete { id, .. }
                 | PtyEvent::Failed { id, .. }
+                | PtyEvent::Unknown { id, .. }
                 | PtyEvent::Resized { id, .. } => *id,
             };
             if self.retired.contains(&pty) {
-                if matches!(event, PtyEvent::Exited { .. } | PtyEvent::Failed { .. }) {
+                if matches!(
+                    event,
+                    PtyEvent::IoComplete { .. }
+                        | PtyEvent::Failed { .. }
+                        | PtyEvent::Unknown { .. }
+                ) {
                     self.retired.remove(&pty);
                 }
                 continue;
@@ -655,32 +705,71 @@ impl TerminalSession {
                     updates.push(TerminalUpdate::Changed);
                 }
                 PtyEvent::Exited { code, .. } => {
+                    if tab.exited
+                        || tab.io_complete
+                        || tab.failure.is_some()
+                        || tab.unknown.is_some()
+                    {
+                        continue;
+                    }
+                    tab.exited = true;
+                    tab.running = false;
+                    tab.exit_code = code;
+                    updates.push(TerminalUpdate::Exited(id, code));
+                }
+                PtyEvent::IoComplete { result, .. } => {
+                    if tab.io_complete || tab.failure.is_some() || tab.unknown.is_some() {
+                        continue;
+                    }
                     let stopping = tab.stopping;
                     tab.pty = None;
                     tab.screen.finish_bytes();
-                    tab.running = false;
-                    tab.exit_code = code;
-                    if stopping || code == Some(0) {
+                    tab.io_complete = true;
+                    updates.push(TerminalUpdate::IoComplete(id));
+                    if let Err(message) = result {
+                        tab.failure = Some(message.clone());
+                        tab.truncated = true;
+                        updates.push(TerminalUpdate::Failed(id, message));
+                    } else if tab.exit_code.is_some_and(|code| code != 0) {
+                        let message = format!("terminal exited with status {:?}", tab.exit_code);
+                        tab.failure = Some(message.clone());
+                        updates.push(TerminalUpdate::Failed(id, message));
+                    }
+                    if stopping || (tab.failure.is_none() && tab.exit_code == Some(0)) {
                         self.close(id);
                         updates.push(TerminalUpdate::Closed(id));
-                    } else {
-                        updates.push(TerminalUpdate::Failed(
-                            id,
-                            format!("terminal exited: {code:?}"),
-                        ));
                     }
                 }
                 PtyEvent::Failed { message, .. } => {
+                    if tab.io_complete || tab.failure.is_some() || tab.unknown.is_some() {
+                        continue;
+                    }
                     let stopping = tab.stopping;
                     tab.pty = None;
                     tab.screen.finish_bytes();
                     tab.running = false;
+                    tab.failure = Some(message.clone());
                     tab.truncated = true;
+                    updates.push(TerminalUpdate::Failed(id, message));
+                    if stopping {
+                        self.close(id);
+                        updates.push(TerminalUpdate::Closed(id));
+                    }
+                }
+                PtyEvent::Unknown { message, .. } => {
+                    if tab.io_complete || tab.failure.is_some() || tab.unknown.is_some() {
+                        continue;
+                    }
+                    let stopping = tab.stopping;
+                    tab.pty = None;
+                    tab.screen.finish_bytes();
+                    tab.running = false;
+                    tab.unknown = Some(message.clone());
                     if stopping {
                         self.close(id);
                         updates.push(TerminalUpdate::StopUnknown(id, message));
                     } else {
-                        updates.push(TerminalUpdate::Failed(id, message));
+                        updates.push(TerminalUpdate::Unknown(id, message));
                     }
                 }
             }
@@ -699,6 +788,10 @@ struct TerminalRuntime {
     screen: PtyScreen,
     running: bool,
     stopping: bool,
+    exited: bool,
+    io_complete: bool,
+    failure: Option<String>,
+    unknown: Option<String>,
     exit_code: Option<u32>,
     truncated: bool,
     mode: TerminalPanelMode,
@@ -738,6 +831,10 @@ impl TerminalSession {
                 screen: fixture.screen,
                 running: fixture.running,
                 stopping: false,
+                exited: fixture.exit_code.is_some(),
+                io_complete: fixture.exit_code.is_some(),
+                failure: None,
+                unknown: None,
                 exit_code: fixture.exit_code,
                 truncated: fixture.truncated,
                 mode: TerminalPanelMode::Input,
@@ -767,10 +864,14 @@ impl TerminalRuntime {
             TerminalPhase::Running
         } else if self.pending.is_some() {
             TerminalPhase::Preflight
+        } else if self.unknown.is_some() {
+            TerminalPhase::Unknown
+        } else if self.failure.is_some() {
+            TerminalPhase::Failed
+        } else if self.exited {
+            TerminalPhase::Exited
         } else if self.pty.is_some() {
             TerminalPhase::Starting
-        } else if self.exit_code.is_some() {
-            TerminalPhase::Exited
         } else {
             TerminalPhase::Failed
         }

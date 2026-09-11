@@ -14,8 +14,9 @@ use super::tooling::{
     nix_workspace_shell_for_host, tool_kind_key,
 };
 use super::windows::{
-    EditorWindowBridge, NativeDescriptions, NativeSurfaceSignature, NativeSurfaceTarget,
-    ProjectionRequest, RestoreWindowPolicy, WindowCandidate, WindowSession,
+    EditorCloseSave, EditorCloseStep, EditorCloseTarget, EditorWindowBridge, LayoutPlanError,
+    NativeDescriptions, NativeSurfaceSignature, NativeSurfaceTarget, ProjectionRequest,
+    RestoreWindowPolicy, WindowCandidate, WindowSession,
 };
 use configuration::*;
 #[cfg(test)]

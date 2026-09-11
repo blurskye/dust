@@ -167,7 +167,8 @@ impl InputSession {
                 }
                 crate::ui::PromptKind::ExplorerDelete
                 | crate::ui::PromptKind::PluginConfirmation
-                | crate::ui::PromptKind::TerminalClose => "confirmation_prompt",
+                | crate::ui::PromptKind::TerminalClose
+                | crate::ui::PromptKind::DirtyClose => "confirmation_prompt",
             });
         }
         self.documentation

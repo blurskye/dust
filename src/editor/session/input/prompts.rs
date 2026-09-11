@@ -291,6 +291,7 @@ impl InputSession {
                 | PromptKind::ExplorerRename
                 | PromptKind::PluginConfirmation
                 | PromptKind::TerminalClose
+                | PromptKind::DirtyClose
         ) {
             return;
         }

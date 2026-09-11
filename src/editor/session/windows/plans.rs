@@ -3,7 +3,8 @@ use super::NativeSurfaceTarget;
 use super::{EditorTopology, EditorWindowCandidate, NativeDescriptions, WindowSession};
 use crate::ui::window::{ContentTypeId, WindowTarget};
 use crate::{
-    editor::{EditorOperation, EditorWindowVersion, LayoutNode},
+    editor::text::TextVersion,
+    editor::{BufferId, EditorOperation, EditorWindowVersion, LayoutNode, PaneId, TabId, ViewId},
     extensions::PluginCatalogVersion,
     ui::window::{ContentId, ViewId as WindowViewId, WindowId, WindowPlacement},
 };
@@ -12,7 +13,7 @@ pub(in crate::editor::session) use commands::{
 };
 use std::sync::Arc;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LayoutAction {
     Split(crate::editor::Axis),
     ClosePane,
@@ -50,6 +51,58 @@ impl WindowPlan {
 pub(in crate::editor::session) enum LayoutPlanError {
     Dirty,
     Rejected(String),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::editor::session) enum EditorCloseTarget {
+    Buffer { view: ViewId, buffer: BufferId },
+    Layout(LayoutAction),
+    Window { pane: PaneId, window: WindowId },
+}
+
+#[derive(Clone, Debug)]
+struct DirtyBufferSource {
+    buffer: BufferId,
+    text: TextVersion,
+    title: String,
+}
+
+pub(in crate::editor::session) struct EditorCloseIntent {
+    nonce: Arc<()>,
+    source: EditorWindowVersion,
+    target: EditorCloseTarget,
+    tab: TabId,
+    focused: PaneId,
+    pane: PaneId,
+    dirty: Vec<DirtyBufferSource>,
+    next: usize,
+    waiting: bool,
+    discarded: Vec<BufferId>,
+}
+
+#[derive(Clone, Debug)]
+pub(in crate::editor::session) struct EditorCloseSave {
+    origin: Arc<()>,
+    nonce: Arc<()>,
+    buffer: BufferId,
+    text: TextVersion,
+}
+impl EditorCloseSave {
+    pub(in crate::editor::session) fn buffer(&self) -> BufferId {
+        self.buffer
+    }
+}
+
+pub(in crate::editor::session) enum EditorCloseStep {
+    Prompt {
+        title: String,
+        message: String,
+    },
+    Save(EditorCloseSave),
+    Ready {
+        target: EditorCloseTarget,
+        discarded: Vec<BufferId>,
+    },
 }
 
 /// A temporary input capture retains placement identity, not picker payloads or
@@ -95,7 +148,353 @@ impl WindowSession {
             && Arc::ptr_eq(&stamp.focus, &self.focus_stamp)
     }
 }
+fn editor_panes(node: &LayoutNode) -> Vec<PaneId> {
+    match node {
+        LayoutNode::Pane(pane) => vec![*pane],
+        LayoutNode::Split { first, second, .. } => {
+            let mut panes = editor_panes(first);
+            panes.extend(editor_panes(second));
+            panes
+        }
+    }
+}
+
 impl WindowSession {
+    fn validate_editor_close(
+        &self,
+        intent: &EditorCloseIntent,
+        source: &EditorTopology<'_>,
+    ) -> Result<(), String> {
+        if source.version() != &intent.source
+            || source.window_revision().is_none()
+            || self.core.editor.source() != Some(source.version())
+            || source.active_tab() != Some(intent.tab)
+            || source
+                .tabs()
+                .get(intent.tab)
+                .is_none_or(|tab| tab.focused != intent.focused)
+        {
+            return Err("dirty close source or focused target changed".into());
+        }
+        if let EditorCloseTarget::Buffer { view, buffer } = intent.target
+            && (source
+                .views()
+                .get(view)
+                .is_none_or(|candidate| candidate.buffer != buffer)
+                || source
+                    .panes()
+                    .get(intent.pane)
+                    .is_none_or(|pane| pane.view != view))
+        {
+            return Err("dirty close buffer/view target changed".into());
+        }
+        if let EditorCloseTarget::Window { pane, window } = intent.target
+            && (pane != intent.pane
+                || self.core.editor.pane_for_window(window) != Some(pane)
+                || source.panes().get(pane).is_none())
+        {
+            return Err("dirty close window target changed".into());
+        }
+        if intent.dirty[intent.next..].iter().any(|pending| {
+            source
+                .buffers()
+                .get(pending.buffer)
+                .is_none_or(|buffer| buffer.text.source_version() != pending.text)
+        }) {
+            return Err("dirty close text source changed".into());
+        }
+        Ok(())
+    }
+
+    fn editor_close_step(&mut self) -> EditorCloseStep {
+        let intent = self.editor_close.as_ref().expect("editor close intent");
+        if let Some(source) = intent.dirty.get(intent.next) {
+            EditorCloseStep::Prompt {
+                title: "Close dirty document".into(),
+                message: format!("Save changes to {} before closing?", source.title),
+            }
+        } else {
+            let intent = self.editor_close.take().expect("ready editor close intent");
+            EditorCloseStep::Ready {
+                target: intent.target,
+                discarded: intent.discarded,
+            }
+        }
+    }
+
+    pub(in crate::editor::session) fn begin_buffer_close(
+        &mut self,
+        source: &EditorTopology<'_>,
+        view: ViewId,
+        buffer: BufferId,
+    ) -> Result<EditorCloseStep, String> {
+        let tab = source.active_tab().ok_or("no active editor tab")?;
+        let pane = source
+            .tabs()
+            .get(tab)
+            .ok_or("active editor tab is stale")?
+            .focused;
+        if source
+            .panes()
+            .get(pane)
+            .is_none_or(|candidate| candidate.view != view)
+            || source
+                .views()
+                .get(view)
+                .is_none_or(|candidate| candidate.buffer != buffer)
+        {
+            return Err("close buffer target changed".into());
+        }
+        let buffer_state = source
+            .buffers()
+            .get(buffer)
+            .ok_or("close buffer target is missing")?;
+        let dirty = buffer_state.dirty.then(|| DirtyBufferSource {
+            buffer,
+            text: buffer_state.text.source_version(),
+            title: buffer_state.path.as_ref().map_or_else(
+                || "scratch buffer".into(),
+                |path| path.display().to_string(),
+            ),
+        });
+        self.editor_close = Some(EditorCloseIntent {
+            nonce: Arc::new(()),
+            source: source.version().clone(),
+            target: EditorCloseTarget::Buffer { view, buffer },
+            tab,
+            focused: pane,
+            pane,
+            dirty: dirty.into_iter().collect(),
+            next: 0,
+            waiting: false,
+            discarded: Vec::new(),
+        });
+        self.validate_editor_close(self.editor_close.as_ref().unwrap(), source)?;
+        Ok(self.editor_close_step())
+    }
+
+    pub(in crate::editor::session) fn begin_layout_close(
+        &mut self,
+        action: LayoutAction,
+        source: &EditorTopology<'_>,
+    ) -> Result<EditorCloseStep, String> {
+        if !matches!(action, LayoutAction::ClosePane | LayoutAction::CloseTab) {
+            return Err("editor close intent requires a close action".into());
+        }
+        let tab = source.active_tab().ok_or("no active editor tab")?;
+        let active = source.tabs().get(tab).ok_or("active editor tab is stale")?;
+        let pane = active.focused;
+        let closing_panes = if action == LayoutAction::ClosePane {
+            vec![pane]
+        } else {
+            editor_panes(&active.root)
+        };
+        let closing_views = closing_panes
+            .iter()
+            .filter_map(|pane| source.panes().get(*pane).map(|pane| pane.view))
+            .collect::<Vec<_>>();
+        let mut dirty = Vec::new();
+        for view in &closing_views {
+            let Some(buffer) = source.views().get(*view).map(|view| view.buffer) else {
+                continue;
+            };
+            if dirty
+                .iter()
+                .any(|source: &DirtyBufferSource| source.buffer == buffer)
+            {
+                continue;
+            }
+            let total = source
+                .views()
+                .values()
+                .filter(|view| view.buffer == buffer)
+                .count();
+            let closing = closing_views
+                .iter()
+                .filter(|view| {
+                    source
+                        .views()
+                        .get(**view)
+                        .is_some_and(|view| view.buffer == buffer)
+                })
+                .count();
+            let buffer_state = &source.buffers()[buffer];
+            if total == closing && buffer_state.dirty {
+                dirty.push(DirtyBufferSource {
+                    buffer,
+                    text: buffer_state.text.source_version(),
+                    title: buffer_state.path.as_ref().map_or_else(
+                        || "scratch buffer".into(),
+                        |path| path.display().to_string(),
+                    ),
+                });
+            }
+        }
+        self.editor_close = Some(EditorCloseIntent {
+            nonce: Arc::new(()),
+            source: source.version().clone(),
+            target: EditorCloseTarget::Layout(action),
+            tab,
+            focused: pane,
+            pane,
+            dirty,
+            next: 0,
+            waiting: false,
+            discarded: Vec::new(),
+        });
+        self.validate_editor_close(self.editor_close.as_ref().unwrap(), source)?;
+        Ok(self.editor_close_step())
+    }
+
+    pub(in crate::editor::session) fn begin_window_close(
+        &mut self,
+        window: WindowId,
+        source: &EditorTopology<'_>,
+    ) -> Result<EditorCloseStep, String> {
+        let pane = self
+            .core
+            .editor
+            .pane_for_window(window)
+            .ok_or("close target is not an editor window")?;
+        let tab = source.active_tab().ok_or("no active editor tab")?;
+        let active = source.tabs().get(tab).ok_or("active editor tab is stale")?;
+        if !editor_panes(&active.root).contains(&pane) {
+            return Err("editor window close target belongs to another workspace tab".into());
+        }
+        let view = source
+            .panes()
+            .get(pane)
+            .ok_or("editor window pane is stale")?
+            .view;
+        let buffer = source
+            .views()
+            .get(view)
+            .ok_or("editor window view is stale")?
+            .buffer;
+        let buffer_state = source
+            .buffers()
+            .get(buffer)
+            .ok_or("editor window content is stale")?;
+        let last_reference = source
+            .views()
+            .values()
+            .filter(|candidate| candidate.buffer == buffer)
+            .count()
+            == 1;
+        let dirty = (last_reference && buffer_state.dirty).then(|| DirtyBufferSource {
+            buffer,
+            text: buffer_state.text.source_version(),
+            title: buffer_state.path.as_ref().map_or_else(
+                || "scratch buffer".into(),
+                |path| path.display().to_string(),
+            ),
+        });
+        self.editor_close = Some(EditorCloseIntent {
+            nonce: Arc::new(()),
+            source: source.version().clone(),
+            target: EditorCloseTarget::Window { pane, window },
+            tab,
+            focused: active.focused,
+            pane,
+            dirty: dirty.into_iter().collect(),
+            next: 0,
+            waiting: false,
+            discarded: Vec::new(),
+        });
+        self.validate_editor_close(self.editor_close.as_ref().unwrap(), source)?;
+        Ok(self.editor_close_step())
+    }
+
+    pub(in crate::editor::session) fn choose_editor_close(
+        &mut self,
+        save: bool,
+        source: &EditorTopology<'_>,
+    ) -> Result<EditorCloseStep, String> {
+        let intent = self
+            .editor_close
+            .as_ref()
+            .ok_or("dirty close intent is closed")?;
+        self.validate_editor_close(intent, source)?;
+        if intent.waiting {
+            return Err("dirty close save is already pending".into());
+        }
+        let pending = intent
+            .dirty
+            .get(intent.next)
+            .ok_or("dirty close has no pending document")?;
+        let buffer = pending.buffer;
+        let text = pending.text.clone();
+        if save {
+            let token = EditorCloseSave {
+                origin: self.origin.clone(),
+                nonce: intent.nonce.clone(),
+                buffer,
+                text,
+            };
+            self.editor_close.as_mut().unwrap().waiting = true;
+            Ok(EditorCloseStep::Save(token))
+        } else {
+            let intent = self.editor_close.as_mut().unwrap();
+            intent.discarded.push(buffer);
+            intent.next += 1;
+            Ok(self.editor_close_step())
+        }
+    }
+
+    pub(in crate::editor::session) fn finish_editor_close_save(
+        &mut self,
+        token: &EditorCloseSave,
+        source: &EditorTopology<'_>,
+    ) -> Result<EditorCloseStep, String> {
+        let intent = self
+            .editor_close
+            .as_ref()
+            .ok_or("dirty close intent is closed")?;
+        let pending = intent
+            .dirty
+            .get(intent.next)
+            .ok_or("dirty close save target is closed")?;
+        if !Arc::ptr_eq(&token.origin, &self.origin)
+            || !Arc::ptr_eq(&token.nonce, &intent.nonce)
+            || !intent.waiting
+            || token.buffer != pending.buffer
+            || token.text != pending.text
+        {
+            return Err("dirty close save acknowledgement is duplicate, stale, or foreign".into());
+        }
+        if source
+            .buffers()
+            .get(token.buffer)
+            .is_none_or(|buffer| buffer.dirty || buffer.text.source_version() != token.text)
+        {
+            self.editor_close = None;
+            return Err("dirty close save acknowledgement no longer matches its text".into());
+        }
+        let intent = self.editor_close.as_mut().unwrap();
+        intent.source = source.version().clone();
+        intent.waiting = false;
+        intent.next += 1;
+        self.validate_editor_close(self.editor_close.as_ref().unwrap(), source)?;
+        Ok(self.editor_close_step())
+    }
+
+    pub(in crate::editor::session) fn fail_editor_close_save(&mut self, token: &EditorCloseSave) {
+        if self.editor_close.as_ref().is_some_and(|intent| {
+            Arc::ptr_eq(&token.origin, &self.origin)
+                && Arc::ptr_eq(&token.nonce, &intent.nonce)
+                && intent.waiting
+                && intent.dirty.get(intent.next).is_some_and(|pending| {
+                    token.buffer == pending.buffer && token.text == pending.text
+                })
+        }) {
+            self.editor_close = None;
+        }
+    }
+
+    pub(in crate::editor::session) fn cancel_editor_close(&mut self) {
+        self.editor_close = None;
+    }
+
     fn plan(
         &self,
         source: &EditorWindowVersion,
@@ -213,6 +612,68 @@ impl WindowSession {
         policy: &crate::config::Config,
         catalog: PluginCatalogVersion,
     ) -> Result<WindowPlan, LayoutPlanError> {
+        self.plan_layout_inner(action, source, policy, catalog, true)
+    }
+    pub(in crate::editor::session) fn plan_accepted_editor_close(
+        &self,
+        target: EditorCloseTarget,
+        discarded: Vec<BufferId>,
+        source: &EditorTopology<'_>,
+        policy: &crate::config::Config,
+        catalog: PluginCatalogVersion,
+    ) -> Result<WindowPlan, LayoutPlanError> {
+        let mut plan = match target {
+            EditorCloseTarget::Layout(action) => {
+                self.plan_layout_inner(action, source, policy, catalog, false)?
+            }
+            EditorCloseTarget::Window { pane, window } => {
+                let mut plan = self
+                    .plan(source.version(), catalog)
+                    .map_err(LayoutPlanError::Rejected)?;
+                let descriptor = self
+                    .core
+                    .graph
+                    .window(window)
+                    .ok_or_else(|| LayoutPlanError::Rejected("close window is stale".into()))?;
+                let view = descriptor.view;
+                let content = self
+                    .core
+                    .graph
+                    .view(view)
+                    .ok_or_else(|| LayoutPlanError::Rejected("close view is stale".into()))?
+                    .content;
+                if self.core.editor.pane_for_window(window) != Some(pane) {
+                    return Err(LayoutPlanError::Rejected(
+                        "close window identity changed".into(),
+                    ));
+                }
+                plan.target_source = Some((window, view, content, descriptor.tab));
+                plan.operations = vec![
+                    EditorOperation::FocusPaneId { pane },
+                    EditorOperation::ClosePane,
+                ];
+                plan
+            }
+            EditorCloseTarget::Buffer { .. } => {
+                return Err(LayoutPlanError::Rejected(
+                    "accepted buffer close is not a layout action".into(),
+                ));
+            }
+        };
+        if !discarded.is_empty() {
+            plan.operations
+                .push(EditorOperation::DiscardUnreferencedBuffers { buffers: discarded });
+        }
+        Ok(plan)
+    }
+    fn plan_layout_inner(
+        &self,
+        action: LayoutAction,
+        source: &EditorTopology<'_>,
+        policy: &crate::config::Config,
+        catalog: PluginCatalogVersion,
+        reject_dirty: bool,
+    ) -> Result<WindowPlan, LayoutPlanError> {
         let mut plan = self
             .plan(source.version(), catalog)
             .map_err(LayoutPlanError::Rejected)?;
@@ -232,14 +693,15 @@ impl WindowSession {
                 }
             }
         }
-        if source
-            .active_tab()
-            .and_then(|tab| source.tabs().get(tab))
-            .is_some_and(|tab| match action {
-                LayoutAction::ClosePane => dirty(tab.focused),
-                LayoutAction::CloseTab => any_dirty(&tab.root, &dirty),
-                _ => false,
-            })
+        if reject_dirty
+            && source
+                .active_tab()
+                .and_then(|tab| source.tabs().get(tab))
+                .is_some_and(|tab| match action {
+                    LayoutAction::ClosePane => dirty(tab.focused),
+                    LayoutAction::CloseTab => any_dirty(&tab.root, &dirty),
+                    _ => false,
+                })
         {
             return Err(LayoutPlanError::Dirty);
         }

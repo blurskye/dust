@@ -228,7 +228,10 @@ impl PtyService {
             let Ok(event) = self.receiver.try_recv() else {
                 break;
             };
-            if let PtyEvent::Exited { id, .. } | PtyEvent::Failed { id, .. } = &event {
+            if let PtyEvent::IoComplete { id, .. }
+            | PtyEvent::Failed { id, .. }
+            | PtyEvent::Unknown { id, .. } = &event
+            {
                 self.sessions.remove(id);
             }
             events.push(event);
@@ -247,7 +250,10 @@ impl PtyService {
                 let Ok(event) = self.receiver.try_recv() else {
                     break;
                 };
-                if let PtyEvent::Exited { id, .. } | PtyEvent::Failed { id, .. } = &event {
+                if let PtyEvent::IoComplete { id, .. }
+                | PtyEvent::Failed { id, .. }
+                | PtyEvent::Unknown { id, .. } = &event
+                {
                     self.sessions.remove(id);
                 }
                 events.push(event);
@@ -257,7 +263,7 @@ impl PtyService {
             }
             for id in ended {
                 self.sessions.remove(&id);
-                events.push(PtyEvent::Failed {
+                events.push(PtyEvent::Unknown {
                     id,
                     message: "PTY worker stopped without a terminal result".into(),
                 });
@@ -470,6 +476,7 @@ fn run(
         })
         .map_err(|e| fail(e.to_string()))?;
     let mut exit = None;
+    let mut exit_delivered = false;
     let mut read_done = false;
     let mut write_done = false;
     let mut failure = None;
@@ -523,16 +530,30 @@ fn run(
             }
         }
         if let Some(code) = exit {
-            if read_done && write_done {
-                let event = if let Some(message) = failure {
-                    PtyEvent::Failed { id, message }
-                } else {
+            if !exit_delivered {
+                if !deliver(
                     PtyEvent::Exited {
                         id,
                         code: Some(code),
-                    }
-                };
-                deliver(event, events, &cancel, &mut child);
+                    },
+                    events,
+                    &cancel,
+                    &mut child,
+                ) {
+                    return Ok(());
+                }
+                exit_delivered = true;
+            }
+            if read_done && write_done {
+                deliver(
+                    PtyEvent::IoComplete {
+                        id,
+                        result: failure.map_or(Ok(()), Err),
+                    },
+                    events,
+                    &cancel,
+                    &mut child,
+                );
                 return Ok(());
             }
         }

@@ -62,6 +62,7 @@ enum Operation {
         bytes: Vec<u8>,
         target: PathBuf,
         quit: bool,
+        close: Option<super::super::windows::EditorCloseSave>,
     },
 }
 pub(in crate::editor::session) struct FileReply {
@@ -91,6 +92,14 @@ impl FileReply {
         }
         Ok(())
     }
+    pub(in crate::editor::session) fn close_save(
+        &self,
+    ) -> Option<&super::super::windows::EditorCloseSave> {
+        match &self.intent.operation {
+            Operation::Save { close, .. } => close.as_ref(),
+            Operation::Open { .. } | Operation::Reload(_) => None,
+        }
+    }
     pub(in crate::editor::session) fn target(&self) -> Option<BufferId> {
         match &self.intent.operation {
             Operation::Open { .. } => None,
@@ -117,6 +126,7 @@ pub(in crate::editor::session) enum DocumentChange {
         bytes: Vec<u8>,
         target: PathBuf,
         quit: bool,
+        close: Option<super::super::windows::EditorCloseSave>,
     },
 }
 pub(in crate::editor::session) struct DocumentCommit {
@@ -265,6 +275,7 @@ impl DocumentSession {
                     bytes,
                     target,
                     quit: request.quit,
+                    close: request.close,
                 },
             },
         );
@@ -345,6 +356,7 @@ impl DocumentSession {
                     bytes,
                     target: _,
                     quit,
+                    close,
                 },
                 VfsResult::Write {
                     result,
@@ -371,6 +383,7 @@ impl DocumentSession {
                     bytes,
                     target,
                     quit,
+                    close,
                 }
             }
             _ => {
@@ -431,6 +444,7 @@ pub(in crate::editor::session) struct SaveRequest<'a> {
     pub policy: &'a crate::config::EditorConfig,
     pub force: bool,
     pub quit: bool,
+    pub close: Option<super::super::windows::EditorCloseSave>,
     pub other_open_paths: Vec<PathBuf>,
 }
 
@@ -605,6 +619,7 @@ mod tests {
                     bytes: b"old".to_vec(),
                     target: "/workspace/file".into(),
                     quit: true,
+                    close: None,
                 },
             },
             event: VfsResult::Write {

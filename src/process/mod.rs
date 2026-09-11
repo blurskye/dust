@@ -228,7 +228,15 @@ pub enum PtyEvent {
         id: PtyId,
         code: Option<u32>,
     },
+    IoComplete {
+        id: PtyId,
+        result: Result<(), String>,
+    },
     Failed {
+        id: PtyId,
+        message: String,
+    },
+    Unknown {
         id: PtyId,
         message: String,
     },

@@ -119,6 +119,9 @@ pub enum EditorOperation {
         second: crate::editor::PaneId,
     },
     CloseTab,
+    DiscardUnreferencedBuffers {
+        buffers: Vec<BufferId>,
+    },
     FocusPane {
         offset: isize,
         wrap: bool,
@@ -508,6 +511,20 @@ fn apply_operation(
         EditorOperation::CloseTab => state
             .close_active_tab()
             .map_err(|error| TransactionError::Layout(error.into()))?,
+        EditorOperation::DiscardUnreferencedBuffers { buffers } => {
+            for buffer in buffers {
+                if !state.buffers.contains_key(*buffer)
+                    || state.views.values().any(|view| view.buffer == *buffer)
+                {
+                    return Err(TransactionError::Layout(
+                        "discard target still has a view or is closed".into(),
+                    ));
+                }
+            }
+            for buffer in buffers {
+                state.remove_buffer(*buffer);
+            }
+        }
         EditorOperation::FocusPane { offset, wrap } => state
             .focus_pane(*offset, *wrap)
             .map_err(|error| TransactionError::Layout(error.into()))?,

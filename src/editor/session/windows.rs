@@ -24,8 +24,9 @@ pub(in crate::editor::session) use bridge::{NativeSurfaceSignature, NativeSurfac
 pub(in crate::editor::session) use mutations::{NativeDescriptions, RestoreWindowPolicy};
 pub use plans::LayoutAction;
 pub(in crate::editor::session) use plans::{
-    CommandEffect, CommandError, CommandPolicy, FocusLease, LayoutPlanError, NavigationStamp,
-    TargetError, WindowCommand, WindowPlan,
+    CommandEffect, CommandError, CommandPolicy, EditorCloseSave, EditorCloseStep,
+    EditorCloseTarget, FocusLease, LayoutPlanError, NavigationStamp, TargetError, WindowCommand,
+    WindowPlan,
 };
 pub(in crate::editor::session) use plugin::PluginWindowDraft;
 use std::sync::Arc;
@@ -76,6 +77,7 @@ pub(super) struct WindowSession {
     core: WindowCore,
     layout: Option<CompositorLayoutState>,
     content: SurfaceContentGeometry,
+    editor_close: Option<plans::EditorCloseIntent>,
 }
 
 impl WindowSession {

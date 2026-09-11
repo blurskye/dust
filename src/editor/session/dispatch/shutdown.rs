@@ -75,8 +75,13 @@ impl InteractiveApplication {
         if unfinished_tasks != 0 {
             self.show_error(format!("{unfinished_tasks} task outcomes are unknown at shutdown; admitted work may still complete"));
         }
+        for outcome in self.terminal_session.expire_shutdown() {
+            if let super::TerminalUpdate::Unknown(id, message) = outcome {
+                self.show_error(format!("terminal #{} outcome is Unknown: {message}", id.0));
+            }
+        }
         if self.terminal_session.pending() != 0 {
-            self.show_error(format!("{} PTY outcomes unknown at shared shutdown deadline; detached I/O or descendants may remain",self.terminal_session.pending()));
+            self.show_error(format!("{} PTY worker outcomes remain at shared shutdown deadline; detached I/O or descendants may remain",self.terminal_session.pending()));
         }
         if self.debugger_session.pending() != 0 {
             self.show_error(format!("{} DAP worker groups/reply receipts remain at shared shutdown deadline; I/O, reply and descendant outcomes unknown",self.debugger_session.pending()));

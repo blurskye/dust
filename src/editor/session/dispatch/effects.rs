@@ -3952,6 +3952,16 @@ impl InteractiveApplication {
 
     pub(super) fn apply_layout_action(&mut self, action: LayoutAction) {
         self.reconcile_editor_windows();
+        if matches!(action, LayoutAction::ClosePane | LayoutAction::CloseTab) {
+            match self
+                .window_session
+                .begin_layout_close(action, &(&self.state).into())
+            {
+                Ok(step) => self.handle_editor_close_step(step),
+                Err(error) => self.show_error(error),
+            }
+            return;
+        }
         let plan = match self.window_session.plan_layout(
             action,
             &(&self.state).into(),
@@ -4326,6 +4336,9 @@ impl InteractiveApplication {
         if kind != PromptKind::TerminalClose {
             self.terminal_session.cancel_close();
         }
+        if kind != PromptKind::DirtyClose {
+            self.window_session.cancel_editor_close();
+        }
         self.reconcile_editor_windows();
         self.input.hold_focus(self.window_session.capture_focus());
         let active = self.state.active_view.map(|view| {
@@ -4399,6 +4412,9 @@ impl InteractiveApplication {
         self.reconcile_editor_windows();
     }
     pub(super) fn close_prompt(&mut self) {
+        self.close_prompt_with_editor_close(true);
+    }
+    fn close_prompt_with_editor_close(&mut self, cancel_editor_close: bool) {
         if self
             .input
             .prompt()
@@ -4414,6 +4430,14 @@ impl InteractiveApplication {
             .is_some_and(|prompt| prompt.kind == PromptKind::TerminalClose)
         {
             self.terminal_session.cancel_close();
+        }
+        if cancel_editor_close
+            && self
+                .input
+                .prompt()
+                .is_some_and(|prompt| prompt.kind == PromptKind::DirtyClose)
+        {
+            self.window_session.cancel_editor_close();
         }
         if self
             .input
@@ -4464,17 +4488,18 @@ impl InteractiveApplication {
         );
     }
     pub(super) fn submit_terminal_close(&mut self, selected: crate::ui::ConfirmationChoice) {
-        let Some(key) = self.terminal_session.take_close() else {
-            self.close_prompt();
-            return;
-        };
-        let Some(id) = self.terminal_session.resolve(&key) else {
-            self.close_prompt();
-            return;
-        };
+        let source = self.terminal_session.take_close();
         // Restore the pre-prompt focus first; Hide or Stop then performs the
         // accepted final focus transition without the prompt lease undoing it.
         self.close_prompt();
+        let id = match source {
+            Ok(Some(id)) => id,
+            Ok(None) => return,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
         match selected {
             crate::ui::ConfirmationChoice::Yes => {
                 match self
@@ -4498,6 +4523,82 @@ impl InteractiveApplication {
             }
         }
     }
+    pub(super) fn handle_editor_close_step(&mut self, step: EditorCloseStep) {
+        match step {
+            EditorCloseStep::Prompt { title, message } => self.open_confirmation_actions(
+                PromptKind::DirtyClose,
+                title,
+                message,
+                crate::ui::ConfirmationChoice::No,
+                "Save",
+                "Discard",
+            ),
+            EditorCloseStep::Save(token) => {
+                let buffer = token.buffer();
+                let retained = token.clone();
+                match self.request_save_buffer(buffer, false, None, false, Some(token)) {
+                    Ok(()) => self.notify_message(self.message("saving", &[]), false),
+                    Err(error) => {
+                        self.window_session.fail_editor_close_save(&retained);
+                        self.show_document_failure(error);
+                    }
+                }
+            }
+            EditorCloseStep::Ready { target, discarded } => {
+                self.apply_accepted_editor_close(target, discarded);
+            }
+        }
+    }
+
+    fn submit_dirty_close(&mut self, selected: crate::ui::ConfirmationChoice) {
+        let step = self.window_session.choose_editor_close(
+            selected == crate::ui::ConfirmationChoice::Yes,
+            &(&self.state).into(),
+        );
+        self.close_prompt_with_editor_close(false);
+        match step {
+            Ok(step) => self.handle_editor_close_step(step),
+            Err(error) => {
+                self.window_session.cancel_editor_close();
+                self.show_error(error);
+            }
+        }
+    }
+
+    fn apply_accepted_editor_close(
+        &mut self,
+        target: EditorCloseTarget,
+        discarded: Vec<crate::editor::BufferId>,
+    ) {
+        match target {
+            EditorCloseTarget::Buffer { view, buffer } => {
+                self.close_buffer_target(view, buffer);
+            }
+            EditorCloseTarget::Layout(_) | EditorCloseTarget::Window { .. } => {
+                let plan = self.window_session.plan_accepted_editor_close(
+                    target,
+                    discarded,
+                    &(&self.state).into(),
+                    self.configuration.settings(),
+                    self.extension.contributions().version(),
+                );
+                match plan {
+                    Ok(plan) => {
+                        if let Err(error) = self.apply_window_plan(plan) {
+                            self.show_error(error);
+                        } else {
+                            self.cancel_pending_mapping();
+                            self.input.cancel_pending();
+                            self.ensure_cursor_visible();
+                        }
+                    }
+                    Err(LayoutPlanError::Dirty) => unreachable!("accepted close bypasses review"),
+                    Err(LayoutPlanError::Rejected(error)) => self.show_error(error),
+                }
+            }
+        }
+    }
+
     pub(super) fn submit_plugin_confirmation(&mut self, selected: crate::ui::ConfirmationChoice) {
         let answer = match selected {
             crate::ui::ConfirmationChoice::Yes => crate::extensions::PluginConfirmationAnswer::Yes,
@@ -4606,6 +4707,7 @@ impl InteractiveApplication {
                 | PromptKind::ExplorerRename
                 | PromptKind::PluginConfirmation
                 | PromptKind::TerminalClose
+                | PromptKind::DirtyClose
         ) {
             self.record_prompt_history(prompt.kind, &prompt.input);
         }
@@ -4658,6 +4760,11 @@ impl InteractiveApplication {
                 );
             }
             PromptKind::TerminalClose => self.submit_terminal_close(
+                prompt
+                    .confirmation
+                    .map_or(crate::ui::ConfirmationChoice::No, |state| state.selected),
+            ),
+            PromptKind::DirtyClose => self.submit_dirty_close(
                 prompt
                     .confirmation
                     .map_or(crate::ui::ConfirmationChoice::No, |state| state.selected),
@@ -5702,6 +5809,7 @@ impl InteractiveApplication {
                         }
                     }
                 }
+                TerminalUpdate::Exited(_, _) | TerminalUpdate::IoComplete(_) => {}
                 TerminalUpdate::StopUnknown(id, message) => {
                     if let Some(reply) = self.debugger_session.take_terminal(&id) {
                         let _ =
@@ -5714,6 +5822,12 @@ impl InteractiveApplication {
                         let _ = reply.respond(false, Some(message.clone()));
                     }
                     self.show_error(message);
+                }
+                TerminalUpdate::Unknown(id, message) => {
+                    if let Some(reply) = self.debugger_session.take_terminal(&id) {
+                        let _ = reply.respond(false, Some("terminal outcome is unknown".into()));
+                    }
+                    self.show_error(format!("terminal #{} outcome is unknown: {message}", id.0));
                 }
                 TerminalUpdate::Closed(id) => {
                     if let Some(reply) = self.debugger_session.take_terminal(&id) {
@@ -10426,12 +10540,30 @@ impl InteractiveApplication {
         requested_path: Option<PathBuf>,
         force: bool,
     ) {
-        let view = self.state.active_buffer_id().and_then(|id| {
-            self.state
-                .buffers
-                .get(id)
-                .map(|b| Self::document_view(id, b))
-        });
+        let Some(buffer) = self.state.active_buffer_id() else {
+            self.show_document_failure(crate::editor::session::documents::DocumentFailure::Policy(
+                "no_active_save",
+            ));
+            return;
+        };
+        match self.request_save_buffer(buffer, quit_after, requested_path, force, None) {
+            Ok(()) => self.notify_message(self.message("saving", &[]), false),
+            Err(error) => self.show_document_failure(error),
+        }
+    }
+    fn request_save_buffer(
+        &mut self,
+        buffer: crate::editor::BufferId,
+        quit_after: bool,
+        requested_path: Option<PathBuf>,
+        force: bool,
+        close: Option<EditorCloseSave>,
+    ) -> Result<(), crate::editor::session::documents::DocumentFailure> {
+        let view = self
+            .state
+            .buffers
+            .get(buffer)
+            .map(|candidate| Self::document_view(buffer, candidate));
         let request = crate::editor::session::documents::SaveRequest {
             editor: &self.state.window_version(),
             workspace: self.workspace.version(),
@@ -10440,30 +10572,46 @@ impl InteractiveApplication {
             policy: &self.configuration.settings().editor,
             force,
             quit: quit_after,
+            close,
             other_open_paths: self
                 .state
                 .buffers
                 .iter()
-                .filter(|(id, _)| Some(*id) != self.state.active_buffer_id())
-                .filter_map(|(_, b)| b.path.clone())
+                .filter(|(id, _)| *id != buffer)
+                .filter_map(|(_, candidate)| candidate.path.clone())
                 .collect(),
         };
-        match self.documents.request_save(view, request) {
-            Ok(()) => self.notify_message(self.message("saving", &[]), false),
-            Err(e) => self.show_document_failure(e),
-        }
+        self.documents.request_save(view, request)
     }
     pub(in crate::editor::session) fn close_active_buffer(&mut self, force: bool) {
-        let Some(view_id) = self.state.active_view else {
+        let Some(view) = self.state.active_view else {
             self.set_dashboard_visibility(true);
             return;
         };
-        let buffer_id = self.state.views[view_id].buffer;
-        let closed_path = self.state.buffers[buffer_id].path.clone();
-        if self.state.buffers[buffer_id].dirty && !force {
-            self.show_error(self.message("dirty_close", &[]));
+        let buffer = self.state.views[view].buffer;
+        if !force {
+            self.reconcile_editor_windows();
+            match self
+                .window_session
+                .begin_buffer_close(&(&self.state).into(), view, buffer)
+            {
+                Ok(step) => self.handle_editor_close_step(step),
+                Err(error) => self.show_error(error),
+            }
             return;
         }
+        self.close_buffer_target(view, buffer);
+    }
+    fn close_buffer_target(
+        &mut self,
+        view_id: crate::editor::ViewId,
+        buffer_id: crate::editor::BufferId,
+    ) {
+        let closed_path = self
+            .state
+            .buffers
+            .get(buffer_id)
+            .and_then(|buffer| buffer.path.clone());
         if let Err(error) = self
             .window_session
             .check_editor_admission(&(&self.state).into())
@@ -10530,10 +10678,14 @@ impl InteractiveApplication {
         reply: crate::editor::session::documents::FileReply,
     ) {
         use crate::editor::session::documents::DocumentChange;
+        let close_save = reply.close_save().cloned();
         if let Err(error) = self
             .window_session
             .check_editor_admission(&(&self.state).into())
         {
+            if let Some(token) = &close_save {
+                self.window_session.fail_editor_close_save(token);
+            }
             self.show_error(error);
             return;
         }
@@ -10543,6 +10695,9 @@ impl InteractiveApplication {
                 .iter()
                 .filter_map(|(id, b)| b.path.as_deref().map(|path| (id, path))),
         ) {
+            if let Some(token) = &close_save {
+                self.window_session.fail_editor_close_save(token);
+            }
             self.show_document_failure(error);
             return;
         }
@@ -10560,6 +10715,9 @@ impl InteractiveApplication {
         {
             Ok(change) => change,
             Err(e) => {
+                if let Some(token) = &close_save {
+                    self.window_session.fail_editor_close_save(token);
+                }
                 self.show_document_failure(e);
                 return;
             }
@@ -10614,11 +10772,18 @@ impl InteractiveApplication {
                 bytes,
                 target: path,
                 quit: quit_after,
+                close,
             } => {
                 if !candidate.save_document(buffer, &text, revision, bytes, path.clone()) {
+                    if let Some(token) = &close {
+                        self.window_session.fail_editor_close_save(token);
+                    }
                     return;
                 }
                 if let Err(e) = self.commit_editor_draft(candidate, None, false) {
+                    if let Some(token) = &close {
+                        self.window_session.fail_editor_close_save(token);
+                    }
                     self.show_error(e);
                     return;
                 }
@@ -10656,6 +10821,22 @@ impl InteractiveApplication {
                 }
                 if self.ui.explorer.is_some() {
                     self.start_git_status_refresh_with_feedback(false);
+                }
+                if let Some(token) = close {
+                    if still_dirty {
+                        self.window_session.fail_editor_close_save(&token);
+                        self.show_error(
+                            "document changed while its close save was pending; close was cancelled",
+                        );
+                    } else {
+                        match self
+                            .window_session
+                            .finish_editor_close_save(&token, &(&self.state).into())
+                        {
+                            Ok(step) => self.handle_editor_close_step(step),
+                            Err(error) => self.show_error(error),
+                        }
+                    }
                 }
                 if quit_after && !still_dirty {
                     if self

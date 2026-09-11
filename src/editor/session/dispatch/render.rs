@@ -457,7 +457,30 @@ impl InteractiveApplication {
     }
 
     pub(super) fn close_graph_window(&mut self, target: &str) -> Result<(), String> {
-        self.run_window_command(WindowCommand::Close(target))
+        let selected = self.terminal_session.selected().map(|id| id.0);
+        let window = self
+            .window_session
+            .resolve_graph_target(target, selected)
+            .map_err(|error| self.window_target_error(error))?;
+        if self
+            .window_session
+            .editor_ids()
+            .pane_for_window(window)
+            .is_some()
+        {
+            self.reconcile_editor_windows();
+            let window = self
+                .window_session
+                .resolve_graph_target(target, selected)
+                .map_err(|error| self.window_target_error(error))?;
+            let step = self
+                .window_session
+                .begin_window_close(window, &(&self.state).into())?;
+            self.handle_editor_close_step(step);
+            Ok(())
+        } else {
+            self.run_window_command(WindowCommand::Close(target))
+        }
     }
 
     pub(super) fn move_graph_window(&mut self, target: &str, x: u16, y: u16) -> Result<(), String> {

@@ -1065,7 +1065,7 @@ fn configured_file_format_policy_is_applied_at_save_boundary() {
 }
 
 #[test]
-fn dirty_layout_subtrees_are_blocked_and_forced_buffer_close_remains_reachable() {
+fn shared_dirty_buffers_do_not_block_view_only_tab_close_or_forced_buffer_close() {
     let mut app = app();
     let (dirty, _) = app
         .state
@@ -1080,12 +1080,13 @@ fn dirty_layout_subtrees_are_blocked_and_forced_buffer_close_remains_reachable()
     app.apply_layout_action(crate::editor::LayoutAction::CloseTab);
     assert_eq!(
         app.state.tabs.len(),
-        tab_count,
-        "dirty tab close is blocked"
+        tab_count - 1,
+        "a dirty buffer with views outside the tab is not a last reference"
     );
+    assert!(app.input.prompt().is_none());
     app.state
         .validate_layout()
-        .expect("blocked layout remains valid");
+        .expect("closed layout remains valid");
 
     app.close_active_buffer(true);
     assert!(app.state.buffers.contains_key(dirty));
@@ -1095,6 +1096,284 @@ fn dirty_layout_subtrees_are_blocked_and_forced_buffer_close_remains_reachable()
         .expect("reopen forced-close buffer");
     assert_eq!(app.state.active_buffer_id(), Some(dirty));
     app.state.validate_layout().expect("reopened layout valid");
+}
+
+#[test]
+fn dirty_buffer_close_save_discard_cancel_and_stale_ack_are_source_bound() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("dirty-close.txt");
+    std::fs::write(&path, "saved\n").unwrap();
+    let (buffer, _) = app.state.open_text(
+        crate::editor::text::TextBuffer::from_text("saved\n"),
+        Some(path.clone()),
+    );
+    app.set_dashboard_visibility(false);
+    app.state.buffers[buffer]
+        .text
+        .restore_text("discard me\n")
+        .unwrap();
+    app.state.set_buffer_dirty(buffer, true);
+    app.reconcile_editor_windows();
+    let arrangement = (
+        app.state.active_tab,
+        app.state.active_view,
+        app.state.tabs.len(),
+        app.state.panes.len(),
+        app.state.views.len(),
+    );
+
+    app.close_active_buffer(false);
+    let prompt = app.input.prompt().expect("dirty close prompt");
+    let confirmation = prompt.confirmation.as_ref().unwrap();
+    assert_eq!(prompt.kind, crate::ui::PromptKind::DirtyClose);
+    assert_eq!(confirmation.positive_label, "Save");
+    assert_eq!(confirmation.negative_label, "Discard");
+    assert_eq!(confirmation.selected, crate::ui::ConfirmationChoice::No);
+    app.close_prompt();
+    assert!(app.state.buffers.contains_key(buffer));
+    assert_eq!(
+        (
+            app.state.active_tab,
+            app.state.active_view,
+            app.state.tabs.len(),
+            app.state.panes.len(),
+            app.state.views.len(),
+        ),
+        arrangement
+    );
+
+    app.close_active_buffer(false);
+    app.input
+        .select_confirmation(crate::ui::ConfirmationChoice::Yes);
+    app.submit_prompt();
+    assert!(app.state.buffers.contains_key(buffer));
+    assert!(app.documents.file_work_pending());
+    app.state.buffers[buffer]
+        .text
+        .restore_text("newer edit\n")
+        .unwrap();
+    app.state.set_buffer_dirty(buffer, true);
+    super::wait_vfs(&mut app);
+    assert!(app.state.buffers.contains_key(buffer));
+    assert!(app.state.buffers[buffer].dirty);
+    assert!(
+        app.ui
+            .notification
+            .as_deref()
+            .is_some_and(|message| message.contains("close was cancelled"))
+    );
+
+    app.close_active_buffer(false);
+    app.submit_prompt();
+    assert!(!app.state.buffers.contains_key(buffer));
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "discard me\n");
+}
+
+#[test]
+fn exact_dirty_window_close_rejects_stale_focus_then_discards_only_its_target() {
+    let mut app = app();
+    let (keeper, _) = app
+        .state
+        .open_text(crate::editor::text::TextBuffer::from_text("keeper"), None);
+    app.state
+        .split_active(crate::editor::Axis::Horizontal, 500)
+        .unwrap();
+    let (dirty, _) = app
+        .state
+        .open_text(crate::editor::text::TextBuffer::from_text("dirty"), None);
+    app.state.set_buffer_dirty(dirty, true);
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let pane = app.state.tabs[app.state.active_tab.unwrap()].focused;
+    let window = app.window_session.editor_ids().window_for(pane).unwrap();
+    let target = format!("window:{}", window.0);
+
+    app.close_graph_window(&target).unwrap();
+    app.apply_layout_action(crate::editor::LayoutAction::FocusPane(-1));
+    let graph = app.window_session.graph().clone();
+    app.submit_prompt();
+    assert_eq!(app.window_session.graph(), &graph);
+    assert!(app.state.buffers.contains_key(dirty));
+    assert!(
+        app.ui
+            .notification
+            .as_deref()
+            .is_some_and(|message| message.contains("source or focused target changed"))
+    );
+
+    app.close_graph_window(&target).unwrap();
+    app.submit_prompt();
+    assert!(app.state.buffers.contains_key(keeper));
+    assert!(!app.state.buffers.contains_key(dirty));
+    assert!(app.window_session.graph().window(window).is_none());
+}
+
+#[test]
+fn dirty_close_save_waits_for_exact_vfs_ack_and_failure_preserves_arrangement() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("save-before-close.txt");
+    std::fs::write(&path, "old\n").unwrap();
+    let (buffer, _) = app.state.open_text(
+        crate::editor::text::TextBuffer::from_text("old\n"),
+        Some(path.clone()),
+    );
+    app.set_dashboard_visibility(false);
+    app.state.buffers[buffer]
+        .text
+        .restore_text("new\n")
+        .unwrap();
+    app.state.set_buffer_dirty(buffer, true);
+    app.reconcile_editor_windows();
+    app.close_active_buffer(false);
+    app.input
+        .select_confirmation(crate::ui::ConfirmationChoice::Yes);
+    app.submit_prompt();
+    assert!(app.state.buffers.contains_key(buffer));
+    super::wait_vfs(&mut app);
+    assert!(!app.state.buffers.contains_key(buffer));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "new\n");
+
+    let directory = app.state.workspace_root.join("not-a-file");
+    std::fs::create_dir(&directory).unwrap();
+    let (failed, _) = app.state.open_text(
+        crate::editor::text::TextBuffer::from_text("dirty\n"),
+        Some(directory),
+    );
+    app.set_dashboard_visibility(false);
+    app.state.set_buffer_dirty(failed, true);
+    app.reconcile_editor_windows();
+    let arrangement = (
+        app.state.active_tab,
+        app.state.active_view,
+        app.state.tabs.len(),
+        app.state.panes.len(),
+        app.state.views.len(),
+    );
+    app.close_active_buffer(false);
+    app.input
+        .select_confirmation(crate::ui::ConfirmationChoice::Yes);
+    app.submit_prompt();
+    super::wait_vfs(&mut app);
+    assert!(app.state.buffers.contains_key(failed));
+    assert!(app.state.buffers[failed].dirty);
+    assert_eq!(
+        (
+            app.state.active_tab,
+            app.state.active_view,
+            app.state.tabs.len(),
+            app.state.panes.len(),
+            app.state.views.len(),
+        ),
+        arrangement
+    );
+}
+
+#[test]
+fn tab_close_reviews_every_last_dirty_reference_before_one_publication() {
+    let mut app = app();
+    let keeper = app.state.workspace_root.join("keeper.txt");
+    std::fs::write(&keeper, "keeper\n").unwrap();
+    app.state.open_text(
+        crate::editor::text::TextBuffer::from_text("keeper\n"),
+        Some(keeper),
+    );
+    app.state.new_tab().unwrap();
+    let first_path = app.state.workspace_root.join("first.txt");
+    let second_path = app.state.workspace_root.join("second.txt");
+    std::fs::write(&first_path, "first\n").unwrap();
+    std::fs::write(&second_path, "second\n").unwrap();
+    let (first, _) = app.state.open_text(
+        crate::editor::text::TextBuffer::from_text("first\n"),
+        Some(first_path.clone()),
+    );
+    app.state
+        .split_active(crate::editor::Axis::Horizontal, 500)
+        .unwrap();
+    let (second, _) = app.state.open_text(
+        crate::editor::text::TextBuffer::from_text("second\n"),
+        Some(second_path),
+    );
+    app.state.buffers[first]
+        .text
+        .restore_text("first saved\n")
+        .unwrap();
+    app.state.set_buffer_dirty(first, true);
+    app.state.buffers[second]
+        .text
+        .restore_text("second discarded\n")
+        .unwrap();
+    app.state.set_buffer_dirty(second, true);
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let tabs = app.state.tabs.len();
+
+    app.apply_layout_action(crate::editor::LayoutAction::CloseTab);
+    assert_eq!(app.state.tabs.len(), tabs);
+    app.input
+        .select_confirmation(crate::ui::ConfirmationChoice::Yes);
+    app.submit_prompt();
+    assert_eq!(
+        app.state.tabs.len(),
+        tabs,
+        "save admission is not close ACK"
+    );
+    super::wait_vfs(&mut app);
+    assert_eq!(
+        app.state.tabs.len(),
+        tabs,
+        "second dirty target needs review"
+    );
+    assert_eq!(
+        app.input.prompt().unwrap().kind,
+        crate::ui::PromptKind::DirtyClose
+    );
+    app.submit_prompt();
+    assert_eq!(app.state.tabs.len(), tabs - 1);
+    assert_eq!(
+        std::fs::read_to_string(first_path).unwrap(),
+        "first saved\n"
+    );
+    assert!(!app.state.buffers.contains_key(second));
+
+    app.state.new_tab().unwrap();
+    let (a, _) = app
+        .state
+        .open_text(crate::editor::text::TextBuffer::from_text("a"), None);
+    app.state
+        .split_active(crate::editor::Axis::Vertical, 500)
+        .unwrap();
+    let (b, _) = app
+        .state
+        .open_text(crate::editor::text::TextBuffer::from_text("b"), None);
+    app.state.set_buffer_dirty(a, true);
+    app.state.set_buffer_dirty(b, true);
+    app.reconcile_editor_windows();
+    let source = (
+        app.state.active_tab,
+        app.state.active_view,
+        app.state.tabs.len(),
+        app.state.panes.len(),
+        app.state.views.len(),
+    );
+    app.apply_layout_action(crate::editor::LayoutAction::CloseTab);
+    app.submit_prompt();
+    assert!(
+        app.input.prompt().is_some(),
+        "second dirty target is reviewed"
+    );
+    app.close_prompt();
+    assert_eq!(
+        (
+            app.state.active_tab,
+            app.state.active_view,
+            app.state.tabs.len(),
+            app.state.panes.len(),
+            app.state.views.len(),
+        ),
+        source
+    );
+    assert!(app.state.buffers.contains_key(a));
+    assert!(app.state.buffers.contains_key(b));
 }
 
 #[test]
@@ -1371,6 +1650,11 @@ fn buffer_line_mouse_selects_and_right_click_closes_with_dirty_safety() {
     );
     assert!(app.handle_content_tab_mouse(&right, bounds.x + local, row));
     assert!(app.state.buffers.contains_key(first));
+    assert_eq!(
+        app.input.prompt().map(|prompt| prompt.kind),
+        Some(crate::ui::PromptKind::DirtyClose)
+    );
+    app.close_prompt();
     app.state.set_buffer_dirty(first, false);
     app.reconcile_editor_windows();
     let local = (0..bounds.width)
@@ -3594,6 +3878,153 @@ fn terminal_preflight_close_and_capture_keep_original_pty_and_geometry() {
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(2));
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
+    use super::driver::TestSession;
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.terminals.profiles.insert(
+        "nonzero".into(),
+        crate::config::TerminalProfileConfig {
+            program: "/bin/sh".into(),
+            arguments: vec!["-c".into(), "printf 'FAILED\\n'; exit 7".into()],
+            cwd: None,
+            environment: Default::default(),
+            columns: 40,
+            rows: 8,
+        },
+    );
+    let mut driver = TestSession::new(loaded.clone());
+    driver.new_buffer();
+    driver.trust_owned_terminal_fixture();
+    driver.terminal_open("nonzero");
+    let deadline = Instant::now() + Duration::from_secs(4);
+    loop {
+        driver.pump_terminal();
+        if driver.terminal_pending() == 0
+            && driver.terminal_phase() == Some(crate::ui::TerminalPhase::Failed)
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(
+        driver.terminal_phase(),
+        Some(crate::ui::TerminalPhase::Failed)
+    );
+    assert_eq!(driver.terminal_exit_code(), Some(7));
+
+    loaded.config.terminals.maximum_output_bytes = 4;
+    loaded.config.terminals.scrollback_bytes = 4;
+    loaded.config.terminals.profiles.insert(
+        "reader-failure".into(),
+        crate::config::TerminalProfileConfig {
+            program: "/bin/sh".into(),
+            arguments: vec!["-c".into(), "printf 123456789".into()],
+            cwd: None,
+            environment: Default::default(),
+            columns: 40,
+            rows: 8,
+        },
+    );
+    let mut failed = TestSession::new(loaded.clone());
+    failed.new_buffer();
+    failed.trust_owned_terminal_fixture();
+    failed.terminal_open("reader-failure");
+    let deadline = Instant::now() + Duration::from_secs(4);
+    loop {
+        failed.pump_terminal();
+        if failed.terminal_pending() == 0
+            && failed.terminal_phase() == Some(crate::ui::TerminalPhase::Failed)
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(
+        failed.terminal_phase(),
+        Some(crate::ui::TerminalPhase::Failed)
+    );
+
+    loaded.config.terminals.maximum_output_bytes = 32 * 1024 * 1024;
+    loaded.config.terminals.scrollback_bytes = 8 * 1024 * 1024;
+    loaded.config.terminals.profiles.insert(
+        "stale-close".into(),
+        crate::config::TerminalProfileConfig {
+            program: "/bin/sh".into(),
+            arguments: vec![
+                "-c".into(),
+                "i=0; while [ $i -lt 100000 ]; do i=$((i+1)); done; exit 7".into(),
+            ],
+            cwd: None,
+            environment: Default::default(),
+            columns: 40,
+            rows: 8,
+        },
+    );
+    let mut stale = TestSession::new(loaded.clone());
+    stale.new_buffer();
+    stale.trust_owned_terminal_fixture();
+    stale.terminal_open("stale-close");
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while stale.terminal_phase() != Some(crate::ui::TerminalPhase::Running) {
+        stale.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    stale.terminal_begin_close();
+    while stale.terminal_phase() != Some(crate::ui::TerminalPhase::Failed) {
+        stale.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    stale.terminal_submit_close();
+    assert_eq!(
+        stale.terminal_phase(),
+        Some(crate::ui::TerminalPhase::Failed)
+    );
+    assert!(
+        stale
+            .notification()
+            .is_some_and(|message| message.contains("close source lifecycle changed"))
+    );
+
+    loaded.config.terminals.profiles.insert(
+        "unknown".into(),
+        crate::config::TerminalProfileConfig {
+            program: "/bin/sh".into(),
+            arguments: vec!["-c".into(), "while :; do :; done".into()],
+            cwd: None,
+            environment: Default::default(),
+            columns: 40,
+            rows: 8,
+        },
+    );
+    let mut unknown = TestSession::new(loaded);
+    unknown.new_buffer();
+    unknown.trust_owned_terminal_fixture();
+    unknown.terminal_open("unknown");
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while unknown.terminal_phase() != Some(crate::ui::TerminalPhase::Running) {
+        unknown.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    unknown.terminal_hide_and_show();
+    assert_eq!(
+        unknown.terminal_phase(),
+        Some(crate::ui::TerminalPhase::Running),
+        "hiding and showing a live terminal must not stop or restart its PTY"
+    );
+    let notices = unknown.expire_shutdown_with_terminal();
+    assert!(notices.iter().any(|message| {
+        message.contains("outcome is Unknown")
+            && message.contains("shared shutdown deadline expired")
+    }));
 }
 
 #[cfg(unix)]

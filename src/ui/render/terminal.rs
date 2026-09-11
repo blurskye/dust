@@ -39,6 +39,7 @@ pub(super) fn terminal_tab_label(tab: &TerminalTabState, config: &Config) -> Str
         TerminalPhase::Starting => Some(" [starting]"),
         TerminalPhase::Stopping => Some(" [stopping]"),
         TerminalPhase::Failed => Some(" [failed]"),
+        TerminalPhase::Unknown => Some(" [unknown]"),
         _ => None,
     } {
         title.push_str(status);

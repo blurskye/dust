@@ -22,7 +22,7 @@ fn drain(service: &mut PtyService, id: PtyId) -> Vec<PtyEvent> {
     let mut received = Vec::new();
     loop {
         let batch = service.poll().unwrap();
-        let done=batch.iter().any(|e|matches!(e,PtyEvent::Exited{id:source,..}|PtyEvent::Failed{id:source,..} if *source==id));
+        let done=batch.iter().any(|e|matches!(e,PtyEvent::IoComplete{id:source,..}|PtyEvent::Failed{id:source,..}|PtyEvent::Unknown{id:source,..} if *source==id));
         received.extend(batch);
         if done {
             return received;
@@ -81,6 +81,8 @@ fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {
     thread::sleep(Duration::from_millis(20));
     let events = drain(&mut service, id);
     let mut resized = false;
+    let mut exited = false;
+    let mut io_complete = false;
     for event in events {
         match event {
             PtyEvent::Output {
@@ -93,11 +95,20 @@ fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {
                 assert_eq!((columns, rows), (61, 9));
                 resized = true;
             }
-            PtyEvent::Exited { code, .. } => assert_eq!(code, Some(0)),
+            PtyEvent::Exited { code, .. } => {
+                assert_eq!(code, Some(0));
+                exited = true;
+            }
+            PtyEvent::IoComplete { result, .. } => {
+                assert!(exited, "I/O completion preceded child exit");
+                result.expect("successful PTY I/O completion");
+                io_complete = true;
+            }
             other => panic!("unexpected {other:?}"),
         }
     }
     assert!(resized);
+    assert!(exited && io_complete);
     let output = String::from_utf8(output).unwrap();
     assert!(output.contains("ACK:hello"));
     let rows = output
@@ -175,9 +186,17 @@ fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {
     let mut oversized = request(root.path(), "printf 123456789");
     oversized.policy.maximum_output_bytes = 4;
     let id = limited.open(oversized).unwrap();
-    assert!(drain(&mut limited, id).iter().any(
-        |e| matches!(e,PtyEvent::Failed{message,..} if message.contains("output limit exceeded"))
-    ));
+    let limited = drain(&mut limited, id);
+    let exit = limited
+        .iter()
+        .position(|event| matches!(event, PtyEvent::Exited { .. }))
+        .expect("output failure still reaps the child");
+    let io = limited
+        .iter()
+        .position(|event| matches!(event, PtyEvent::IoComplete { result: Err(message), .. } if message.contains("output limit exceeded")))
+        .expect("reader failure is a distinct I/O completion");
+    assert!(exit < io);
+
     let mut detached = PtyService::start(1);
     let _ = detached
         .open(request(root.path(), "while :; do :; done"))

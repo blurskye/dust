@@ -9,6 +9,7 @@ pub enum ContentLifecycle {
     Stopping,
     Exited,
     Failed,
+    Unknown,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

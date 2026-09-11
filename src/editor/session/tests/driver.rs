@@ -793,6 +793,28 @@ impl TestSession {
             self.application.submit_prompt();
         }
     }
+    pub(super) fn terminal_begin_close(&mut self) {
+        self.application
+            .process_effect(crate::editor::AppEffect::TerminalClose);
+        assert!(
+            self.application
+                .input
+                .prompt()
+                .is_some_and(|prompt| prompt.kind == crate::ui::PromptKind::TerminalClose)
+        );
+    }
+    pub(super) fn terminal_submit_close(&mut self) {
+        self.application.submit_prompt();
+    }
+    pub(super) fn terminal_hide_and_show(&mut self) {
+        self.terminal_begin_close();
+        self.terminal_submit_close();
+        self.application
+            .process_effect(crate::editor::AppEffect::TerminalToggle);
+    }
+    pub(super) fn notification(&self) -> Option<&str> {
+        self.application.ui.notification.as_deref()
+    }
     pub(super) fn terminal_unfocus(&mut self) {
         self.application
             .process_effect(crate::editor::AppEffect::TerminalUnfocus);
@@ -830,6 +852,34 @@ impl TestSession {
     }
     pub(super) fn terminal_pending(&self) -> usize {
         self.application.terminal_session.pending()
+    }
+    pub(super) fn terminal_phase(&self) -> Option<crate::ui::TerminalPhase> {
+        let selected = self.application.terminal_session.selected()?;
+        self.application
+            .ui
+            .terminal_panel
+            .as_ref()?
+            .tabs
+            .iter()
+            .find(|tab| tab.id == selected.0)
+            .map(|tab| tab.phase)
+    }
+    pub(super) fn terminal_exit_code(&self) -> Option<u32> {
+        self.application
+            .ui
+            .terminal_panel
+            .as_ref()
+            .and_then(|panel| panel.exit_code)
+    }
+    pub(super) fn expire_shutdown_with_terminal(&mut self) -> Vec<String> {
+        let _ = self
+            .application
+            .finish_shutdown_before(Instant::now() - Duration::from_millis(1));
+        self.application
+            .notices
+            .history()
+            .map(|(_, message)| message.clone())
+            .collect()
     }
     pub(super) fn terminal_dimensions(&self) -> Option<(u16, u16)> {
         self.application.terminal_body_dimensions()

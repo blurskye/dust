@@ -333,6 +333,7 @@ impl WindowSession {
         Ok(state)
     }
     pub(in crate::editor::session) fn invalidate_native(&mut self) {
+        self.cancel_editor_close();
         self.core.native.invalidate();
         self.invalidate();
         self.epoch = self.epoch.saturating_add(1);

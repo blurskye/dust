@@ -61,6 +61,7 @@ pub enum PromptKind {
     ExplorerRename,
     PluginConfirmation,
     TerminalClose,
+    DirtyClose,
 }
 
 impl PromptKind {
@@ -76,6 +77,7 @@ impl PromptKind {
             Self::ExplorerRename => &text.explorer_rename_title,
             Self::PluginConfirmation => "Plugin confirmation",
             Self::TerminalClose => "Close terminal",
+            Self::DirtyClose => "Close document",
         }
     }
 
@@ -89,7 +91,7 @@ impl PromptKind {
             Self::GitReset => &text.git_reset_marker,
             Self::ExplorerDelete => &text.explorer_delete_marker,
             Self::ExplorerRename => &text.explorer_rename_marker,
-            Self::PluginConfirmation | Self::TerminalClose => "",
+            Self::PluginConfirmation | Self::TerminalClose | Self::DirtyClose => "",
         }
     }
 }
@@ -457,6 +459,7 @@ pub enum TerminalPhase {
     Stopping,
     Exited,
     Failed,
+    Unknown,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
