@@ -76,6 +76,61 @@ fn tiny_terminal_projection_clips_safely_and_restores_the_same_sessions() {
 }
 
 #[test]
+fn universal_window_clone_publishes_independent_explorer_views_over_shared_tree_data() {
+    let mut session = TestSession::new(crate::config::load_bundled_config());
+    session.new_buffer();
+    session.explorer_fixture();
+    session.float_explorer();
+    let primary_selection = session
+        .projection()
+        .explorer
+        .as_ref()
+        .and_then(|explorer| explorer.rows.iter().find(|row| row.selected))
+        .map(|row| row.node_id)
+        .unwrap_or_else(|| {
+            panic!(
+                "primary explorer selection: {:?}",
+                session.projection().explorer
+            )
+        });
+
+    session.clone_explorer();
+    let ids = session.explorer_content_ids();
+    assert_eq!(ids.len(), 2);
+    assert_eq!(ids[0].1, ids[1].1, "tree data has one content identity");
+    assert_ne!(ids[0].2, ids[1].2, "each tree has its own graph view");
+    let projection = session.projection();
+    assert_eq!(projection.explorer_views.len(), 1);
+    assert!(projection.explorer_views[0].focused);
+    assert_eq!(
+        projection.explorer_views[0]
+            .content
+            .rows
+            .iter()
+            .find(|row| row.selected)
+            .map(|row| row.node_id),
+        Some(primary_selection)
+    );
+
+    session.page_explorer(1);
+    let projection = session.projection();
+    let primary_after = projection
+        .explorer
+        .as_ref()
+        .and_then(|explorer| explorer.rows.iter().find(|row| row.selected))
+        .map(|row| row.node_id);
+    let clone_after = projection.explorer_views[0]
+        .content
+        .rows
+        .iter()
+        .find(|row| row.selected)
+        .map(|row| row.node_id);
+    assert_eq!(primary_after, Some(primary_selection));
+    assert_ne!(clone_after, primary_after);
+    let _frame = session.frame();
+}
+
+#[test]
 fn stale_contribution_policy_is_rejected_before_window_graph_publication() {
     let mut session = TestSession::new(crate::config::load_bundled_config());
     session.new_buffer();
@@ -449,6 +504,94 @@ fn plugin_admission_counts_all_graph_and_host_copies_in_invalid_unchanged_valid_
     eprintln!(
         "admission copies (graph, host): invalid=(0,0), unchanged=(0,0), valid-open={valid_copies:?}, valid-retained=(0,0); 256 idle reconciliations=(0,0), content builds=0"
     );
+}
+
+#[test]
+fn production_02_retained_and_private_clone_refusals_do_not_touch_host_tokens_or_graph() {
+    use crate::extensions::{
+        PluginPrivateCellPolicy, PluginRequestedPlacement, PluginUiNode, PluginUiNodeKind,
+        PluginUiRequest, PluginUiRequestKind, PluginUiStyle, PluginUiTree,
+    };
+    for private in [false, true] {
+        let mut session = TestSession::new(crate::config::load_bundled_config());
+        session.new_buffer();
+        session.resize(100, 30);
+        let mut manifest = super::plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
+        if private {
+            manifest
+                .capabilities
+                .insert(crate::extensions::PluginCapability::PrivateCells);
+            let contribution = &mut manifest.contributions.content_types[0];
+            contribution.presenter = crate::extensions::PluginPresenterKind::PrivateCells;
+            contribution.private_cells = Some(PluginPrivateCellPolicy {
+                maximum_cells: 128,
+                maximum_patch_cells: 32,
+                maximum_dirty_rectangles: 8,
+                maximum_styles: 8,
+                maximum_hit_regions: 8,
+                maximum_bytes: 4_096,
+                cursor: true,
+            });
+        }
+        let index = crate::extensions::index_manifest_contributions(
+            &manifest,
+            77,
+            "clone refusal fixture".into(),
+        )
+        .unwrap();
+        session.install_plugin_fixture(index.clone());
+        let tree = (!private).then_some(PluginUiTree {
+            revision: 1,
+            root: 1,
+            nodes: vec![PluginUiNode {
+                id: 1,
+                kind: PluginUiNodeKind::Text,
+                text: "retained".into(),
+                style: PluginUiStyle::Accent,
+                action: None,
+                children: Vec::new(),
+            }],
+        });
+        let opened = session.plugin_request(
+            &index,
+            PluginUiRequest {
+                token: 41,
+                kind: PluginUiRequestKind::OpenWindow {
+                    expected_graph_revision: session.graph_revision(),
+                    content_type: "plugin.demo.panel".into(),
+                    title: "Demo".into(),
+                    placement: PluginRequestedPlacement::Floating {
+                        x: 5,
+                        y: 3,
+                        width: 24,
+                        height: 7,
+                    },
+                    tree,
+                },
+            },
+        );
+        assert!(opened.error.is_none(), "{:?}", opened.error);
+        let target = session.plugin_window_target("plugin.demo");
+        let before = session.plugin_clone_state();
+        session.clone_plugin_window(target.clone());
+        assert_eq!(session.plugin_clone_state(), before);
+
+        session.remove_catalog_load("demo", 77);
+        let unloaded = session.plugin_clone_state();
+        session.clone_plugin_window(target.clone());
+        assert_eq!(session.plugin_clone_state(), unloaded);
+
+        let replacement = crate::extensions::index_manifest_contributions(
+            &manifest,
+            78,
+            "replacement fixture".into(),
+        )
+        .unwrap();
+        session.install_plugin_fixture(replacement);
+        let replaced = session.plugin_clone_state();
+        session.clone_plugin_window(target);
+        assert_eq!(session.plugin_clone_state(), replaced);
+    }
 }
 
 #[test]

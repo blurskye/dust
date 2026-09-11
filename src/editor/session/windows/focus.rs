@@ -7,7 +7,7 @@ use crate::ui::window::{SpatialDirection, WindowId};
 pub(in crate::editor::session) enum FocusTarget {
     #[default]
     Editor,
-    Explorer,
+    Explorer(u64),
     Terminal(u64),
     Plugin(WindowId),
 }
@@ -24,7 +24,14 @@ impl WindowSession {
         self.focus
     }
     pub(in crate::editor::session) fn explorer_focused(&self) -> bool {
-        self.focus() == FocusTarget::Explorer
+        matches!(self.focus(), FocusTarget::Explorer(_))
+    }
+    pub(in crate::editor::session) fn focused_explorer(&self) -> Option<u64> {
+        if let FocusTarget::Explorer(view) = self.focus {
+            Some(view)
+        } else {
+            None
+        }
     }
     pub(in crate::editor::session) fn focused_terminal(&self) -> Option<u64> {
         if let FocusTarget::Terminal(id) = self.focus {
@@ -49,7 +56,7 @@ impl WindowSession {
         self.invalidate_native();
     }
     pub(in crate::editor::session) fn focus_explorer(&mut self) {
-        self.request_focus(FocusTarget::Explorer);
+        self.request_focus(FocusTarget::Explorer(1));
     }
     pub(in crate::editor::session) fn leave_explorer(&mut self) {
         if self.explorer_focused() {
@@ -78,7 +85,10 @@ impl WindowSession {
         };
         match self.core.native.target_for_window(window) {
             Some(NativeSurfaceTarget::Picker(_)) => {} // temporary capture, not terminal selection
-            Some(NativeSurfaceTarget::Explorer) => self.focus = FocusTarget::Explorer,
+            Some(NativeSurfaceTarget::Explorer) => self.focus = FocusTarget::Explorer(1),
+            Some(NativeSurfaceTarget::ExplorerView(view)) => {
+                self.focus = FocusTarget::Explorer(view)
+            }
             Some(NativeSurfaceTarget::Terminal(id)) => self.focus = FocusTarget::Terminal(id),
             Some(NativeSurfaceTarget::Dashboard) => self.focus = FocusTarget::Editor,
             None => {
@@ -101,7 +111,9 @@ impl WindowSession {
     ) -> Option<WindowId> {
         let layout = self.layout.as_ref()?;
         let current = match self.focus {
-            FocusTarget::Explorer => layout.surfaces.explorer,
+            FocusTarget::Explorer(view) => {
+                self.core.native.explorer_view(view).map(|ids| ids.window)
+            }
             FocusTarget::Terminal(id) => self.core.native.terminal(id).map(|ids| ids.window),
             FocusTarget::Plugin(window) => Some(window),
             FocusTarget::Editor => self.core.graph.focused(),

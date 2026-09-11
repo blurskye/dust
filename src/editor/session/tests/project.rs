@@ -817,12 +817,7 @@ fn explorer_watch_batches_reload_through_directory_service_and_preserve_identity
         app.explorer.tree().id_for_path(&directory),
         Some(directory_id)
     );
-    assert!(
-        app.explorer
-            .tree()
-            .node(directory_id)
-            .is_some_and(|node| node.expanded)
-    );
+    assert!(app.explorer.tree().is_expanded(directory_id));
     assert_eq!(app.explorer.tree().id_for_path(&kept), Some(kept_id));
     fs::remove_file(&kept).unwrap();
     let generation = app.explorer.watch_generation().unwrap();

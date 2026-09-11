@@ -113,7 +113,7 @@ impl ExplorerSession {
     }
     fn selected_parent(&self) -> Result<PathBuf, String> {
         let node = self
-            .tree
+            .tree()
             .selected_node()
             .ok_or("select an explorer directory first")?;
         match node.kind {
@@ -127,7 +127,7 @@ impl ExplorerSession {
     }
     fn mutable_path(&self) -> Result<PathBuf, String> {
         let node = self
-            .tree
+            .tree()
             .selected_node()
             .ok_or("select an explorer path first")?;
         if node.kind == ExplorerKind::Root {
@@ -657,7 +657,7 @@ impl ExplorerSession {
             return Err("explorer roots changed".into());
         }
         let node = self
-            .tree
+            .tree()
             .selected_node()
             .ok_or("select an explorer path first")?;
         if matches!(node.kind, ExplorerKind::Root | ExplorerKind::Directory) {

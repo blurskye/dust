@@ -252,7 +252,7 @@ impl WindowSession {
             return Err("native focus plan is not an editor transition".into());
         }
         if plan.focus_editor {
-            descriptions.signature.explorer_focused = false;
+            descriptions.signature.focused_explorer = None;
             descriptions.signature.terminal_focused = false;
         }
         if plan.hide_dashboard {

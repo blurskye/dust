@@ -7,6 +7,7 @@ use crate::editor::FocusDirection;
 #[derive(Clone, Copy)]
 pub(in crate::editor::session) enum WindowCommand<'a> {
     Clone(&'a str, crate::editor::Axis, u16),
+    CloneExplorer(&'a str, u64, u64, crate::editor::Axis),
     Resize(&'a str, i16),
     Direction(FocusDirection, Option<NativeSurfaceTarget>),
     Close(&'a str),
@@ -34,13 +35,16 @@ impl From<TargetError> for CommandError {
 }
 pub(super) enum NativeAction {
     None,
+    CloneExplorer(NativeSurfaceTarget, u64, crate::editor::Axis),
     Place(NativeSurfaceTarget, WindowPlacement),
     Close(NativeSurfaceTarget),
     Swap(NativeSurfaceTarget, NativeSurfaceTarget),
 }
 pub(in crate::editor::session) enum CommandEffect {
     None,
+    ClonedExplorer(u64),
     ClosedExplorer,
+    ClosedExplorerView(u64),
     CloseTerminal(u64),
     ClosedPicker(crate::ui::PickerSurfaceKind),
 }
@@ -87,6 +91,37 @@ impl WindowSession {
                 });
                 plan.clone_source = Some((window, source_view, source_content));
                 plan.hide_dashboard = true;
+            }
+            WindowCommand::CloneExplorer(name, source, destination, axis) => {
+                let window = target(name)?;
+                let native = self.core.native.target_for_window(window).ok_or_else(|| {
+                    CommandError::Rejected("clone target is not a native tree view".into())
+                })?;
+                let actual = match native {
+                    NativeSurfaceTarget::Explorer => 1,
+                    NativeSurfaceTarget::ExplorerView(view) => view,
+                    _ => {
+                        return Err(CommandError::Rejected(
+                            "clone target is not a native tree view".into(),
+                        ));
+                    }
+                };
+                if actual != source {
+                    return Err(CommandError::Rejected(
+                        "explorer clone source identity is stale".into(),
+                    ));
+                }
+                let ids = self
+                    .core
+                    .native
+                    .ids_for_target(native)
+                    .ok_or_else(|| CommandError::Rejected("clone target is stale".into()))?;
+                self.core
+                    .graph
+                    .require_clone_view(ids.content)
+                    .map_err(|error| CommandError::Rejected(error.to_string()))?;
+                plan.clone_source = Some((window, ids.view, ids.content));
+                plan.native = Some(NativeAction::CloneExplorer(native, destination, axis));
             }
             WindowCommand::Resize(name, amount) => {
                 let window = target(name)?;
@@ -144,6 +179,13 @@ impl WindowSession {
             WindowCommand::Close(name) => {
                 let window = target(name)?;
                 if let Some(native) = self.core.native.target_for_window(window) {
+                    if native == NativeSurfaceTarget::Explorer
+                        && self.core.native.explorer_view_count() > 1
+                    {
+                        return Err(CommandError::Rejected(
+                            "close cloned explorer views before the primary explorer".into(),
+                        ));
+                    }
                     if native == NativeSurfaceTarget::Dashboard && source.active_tab().is_none() {
                         return Err(CommandError::Rejected(
                             "cannot close the only dashboard surface".into(),
@@ -207,6 +249,16 @@ impl WindowSession {
         }
         match plan.native.ok_or("not a native command plan")? {
             NativeAction::None => {}
+            NativeAction::CloneExplorer(source, view, axis) => {
+                let mut candidate = self.candidate()?;
+                candidate
+                    .core
+                    .native
+                    .clone_explorer(&mut candidate.core.graph, source, view, axis)
+                    .map_err(|error| error.to_string())?;
+                self.commit(candidate)?;
+                return Ok(CommandEffect::ClonedExplorer(view));
+            }
             NativeAction::Place(target, placement) => self.place_native(target, placement)?,
             NativeAction::Swap(a, b) => self.swap_native(a, b)?,
             NativeAction::Close(NativeSurfaceTarget::Terminal(id)) => {
@@ -225,6 +277,9 @@ impl WindowSession {
                 self.commit(candidate)?;
                 return Ok(match target {
                     NativeSurfaceTarget::Explorer => CommandEffect::ClosedExplorer,
+                    NativeSurfaceTarget::ExplorerView(view) => {
+                        CommandEffect::ClosedExplorerView(view)
+                    }
                     NativeSurfaceTarget::Picker(kind) => CommandEffect::ClosedPicker(kind),
                     _ => CommandEffect::None,
                 });

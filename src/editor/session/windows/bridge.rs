@@ -10,7 +10,7 @@ use crate::{
     ui::window::{
         ContentAdapterKind, ContentContract, ContentId, ContentLifecycle, ContentTypeId, TileAxis,
         TiledLayoutNode, TiledLayoutSnapshot, ViewId, WindowError, WindowGraph, WindowId,
-        WindowPlacement, WorkspaceTabId,
+        WindowPlacement, WindowRect, WorkspaceTabId,
     },
 };
 
@@ -312,7 +312,7 @@ pub(in crate::editor::session) struct NativeSurfaceSignature {
     pub editor_tab: Option<WorkspaceTabId>,
     pub editor_window: Option<WindowId>,
     pub explorer_visible: bool,
-    pub explorer_focused: bool,
+    pub focused_explorer: Option<u64>,
     pub explorer_size: u16,
     pub active_terminal: Option<u64>,
     pub terminal_focused: bool,
@@ -337,6 +337,7 @@ pub(in crate::editor::session) struct NativeSurfaceIds {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::editor::session) enum NativeSurfaceTarget {
     Explorer,
+    ExplorerView(u64),
     Terminal(u64),
     Dashboard,
     Picker(PickerSurfaceKind),
@@ -345,11 +346,13 @@ pub(in crate::editor::session) enum NativeSurfaceTarget {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(in crate::editor::session) struct NativeSurfaceBridge {
     explorer: Option<NativeSurfaceIds>,
+    explorer_views: BTreeMap<u64, NativeSurfaceIds>,
     dashboard: Option<NativeSurfaceIds>,
     pickers: BTreeMap<PickerSurfaceKind, NativeSurfaceIds>,
     terminals: HashMap<u64, NativeSurfaceIds>,
     explorer_placement: Option<WindowPlacement>,
     explorer_restore_placement: Option<WindowPlacement>,
+    explorer_view_placements: BTreeMap<u64, WindowPlacement>,
     explorer_closed: bool,
     dashboard_placement: Option<WindowPlacement>,
     dashboard_restore_placement: Option<WindowPlacement>,
@@ -401,6 +404,7 @@ impl NativeSurfaceBridge {
                 && graph.window(ids.window).is_some()
         };
         self.explorer = self.explorer.filter(|ids| live_ids(*ids, graph));
+        self.explorer_views.retain(|_, ids| live_ids(*ids, graph));
         self.dashboard = self.dashboard.filter(|ids| live_ids(*ids, graph));
         self.pickers.retain(|_, ids| live_ids(*ids, graph));
         self.terminals.retain(|_, ids| live_ids(*ids, graph));
@@ -444,9 +448,13 @@ impl NativeSurfaceBridge {
             graph.rehost(ids.window, tab, ids.view, explorer_placement, true)?;
             Some(ids)
         } else {
-            let content = graph.create_content(
-                ContentTypeId::new("builtin.explorer")?,
+            let mut capabilities = crate::ui::window::ContentCapabilities::for_adapter(
                 ContentAdapterKind::DeclarativeUi,
+            );
+            capabilities.clone_view = true;
+            let content = graph.create_content_with_contract(
+                ContentTypeId::new("builtin.explorer")?,
+                ContentContract::declared(ContentAdapterKind::DeclarativeUi, capabilities),
                 explorer_title.to_owned(),
                 false,
                 owner,
@@ -463,6 +471,17 @@ impl NativeSurfaceBridge {
             self.explorer = Some(ids);
             Some(ids)
         };
+        for (view, ids) in &self.explorer_views {
+            let placement = self.explorer_view_placements.get(view).copied().unwrap_or(
+                WindowPlacement::Floating(WindowRect {
+                    x: 2,
+                    y: 2,
+                    width: 40,
+                    height: 20,
+                }),
+            );
+            graph.rehost(ids.window, tab, ids.view, placement, true)?;
+        }
 
         let dashboard_placement = if signature.dashboard_visible {
             self.dashboard_placement
@@ -621,9 +640,14 @@ impl NativeSurfaceBridge {
                 .and_then(|id| self.terminals.get(&id))
         {
             graph.focus(ids.window)?;
-        } else if signature.explorer_visible && signature.explorer_focused {
-            if let Some(explorer) = explorer {
-                graph.focus(explorer.window)?;
+        } else if let Some(view) = signature.focused_explorer {
+            let ids = if view == 1 {
+                explorer
+            } else {
+                self.explorer_views.get(&view).copied()
+            };
+            if let Some(ids) = ids {
+                graph.focus(ids.window)?;
             }
         } else if let Some(editor) = signature.editor_window {
             graph.focus(editor)?;
@@ -634,7 +658,7 @@ impl NativeSurfaceBridge {
         }
         if signature.picker_rect.is_none()
             && !signature.terminal_focused
-            && !signature.explorer_focused
+            && signature.focused_explorer.is_none()
             && let Some(plugin) = retained_plugin_focus
             && graph
                 .window(plugin)
@@ -663,6 +687,27 @@ impl NativeSurfaceBridge {
 
     pub(in crate::editor::session) fn explorer(&self) -> Option<NativeSurfaceIds> {
         self.explorer
+    }
+
+    pub(in crate::editor::session) fn explorer_view(&self, view: u64) -> Option<NativeSurfaceIds> {
+        if view == 1 {
+            self.explorer
+        } else {
+            self.explorer_views.get(&view).copied()
+        }
+    }
+
+    pub(in crate::editor::session) fn explorer_view_count(&self) -> usize {
+        usize::from(self.explorer.is_some()).saturating_add(self.explorer_views.len())
+    }
+
+    pub(in crate::editor::session) fn explorer_views(
+        &self,
+    ) -> impl Iterator<Item = (u64, NativeSurfaceIds)> + '_ {
+        self.explorer
+            .map(|ids| (1, ids))
+            .into_iter()
+            .chain(self.explorer_views.iter().map(|(view, ids)| (*view, *ids)))
     }
 
     pub(in crate::editor::session) fn dashboard(&self) -> Option<NativeSurfaceIds> {
@@ -704,6 +749,13 @@ impl NativeSurfaceBridge {
         if self.explorer.is_some_and(|ids| ids.window == window) {
             return Some(NativeSurfaceTarget::Explorer);
         }
+        if let Some(view) = self
+            .explorer_views
+            .iter()
+            .find_map(|(view, ids)| (ids.window == window).then_some(*view))
+        {
+            return Some(NativeSurfaceTarget::ExplorerView(view));
+        }
         if self.dashboard.is_some_and(|ids| ids.window == window) {
             return Some(NativeSurfaceTarget::Dashboard);
         }
@@ -723,6 +775,7 @@ impl NativeSurfaceBridge {
     ) -> Option<NativeSurfaceIds> {
         match target {
             NativeSurfaceTarget::Explorer => self.explorer,
+            NativeSurfaceTarget::ExplorerView(view) => self.explorer_views.get(&view).copied(),
             NativeSurfaceTarget::Terminal(id) => self.terminals.get(&id).copied(),
             NativeSurfaceTarget::Dashboard => self.dashboard,
             NativeSurfaceTarget::Picker(kind) => self.pickers.get(&kind).copied(),
@@ -735,6 +788,9 @@ impl NativeSurfaceBridge {
     ) -> Option<WindowPlacement> {
         match target {
             NativeSurfaceTarget::Explorer => self.explorer_placement,
+            NativeSurfaceTarget::ExplorerView(view) => {
+                self.explorer_view_placements.get(&view).copied()
+            }
             NativeSurfaceTarget::Terminal(id) => self.terminal_placement(id),
             NativeSurfaceTarget::Dashboard => self.dashboard_placement,
             NativeSurfaceTarget::Picker(kind) => self.picker_placements.get(&kind).copied(),
@@ -760,6 +816,15 @@ impl NativeSurfaceBridge {
                     self.explorer_restore_placement = Some(placement);
                 }
                 self.explorer_placement = Some(placement);
+                ids
+            }
+            NativeSurfaceTarget::ExplorerView(view) => {
+                let ids = self
+                    .explorer_views
+                    .get(&view)
+                    .copied()
+                    .ok_or(WindowError::UnknownWindow)?;
+                self.explorer_view_placements.insert(view, placement);
                 ids
             }
             NativeSurfaceTarget::Terminal(id) => {
@@ -800,6 +865,11 @@ impl NativeSurfaceBridge {
             NativeSurfaceTarget::Explorer => {
                 self.explorer_restore_placement.unwrap_or(explorer_fallback)
             }
+            NativeSurfaceTarget::ExplorerView(view) => self
+                .explorer_view_placements
+                .get(&view)
+                .copied()
+                .unwrap_or(explorer_fallback),
             NativeSurfaceTarget::Terminal(id) => self
                 .terminal_restore_placements
                 .get(&id)
@@ -830,6 +900,11 @@ impl NativeSurfaceBridge {
     ) -> Result<NativeSurfaceIds, WindowError> {
         let ids = match target {
             NativeSurfaceTarget::Explorer => self.explorer.ok_or(WindowError::UnknownWindow)?,
+            NativeSurfaceTarget::ExplorerView(view) => self
+                .explorer_views
+                .get(&view)
+                .copied()
+                .ok_or(WindowError::UnknownWindow)?,
             NativeSurfaceTarget::Terminal(id) => self
                 .terminals
                 .get(&id)
@@ -844,11 +919,22 @@ impl NativeSurfaceBridge {
         };
         graph.close_window(ids.window)?;
         graph.remove_view(ids.view)?;
-        graph.remove_content(ids.content)?;
+        if graph
+            .content_snapshots()
+            .into_iter()
+            .find(|content| content.id == ids.content)
+            .is_some_and(|content| content.view_count == 0)
+        {
+            graph.remove_content(ids.content)?;
+        }
         match target {
             NativeSurfaceTarget::Explorer => {
                 self.explorer = None;
                 self.explorer_closed = true;
+            }
+            NativeSurfaceTarget::ExplorerView(view) => {
+                self.explorer_views.remove(&view);
+                self.explorer_view_placements.remove(&view);
             }
             NativeSurfaceTarget::Terminal(id) => {
                 self.terminals.remove(&id);
@@ -866,6 +952,61 @@ impl NativeSurfaceBridge {
                 self.picker_restore_placements.remove(&kind);
             }
         }
+        self.signature = None;
+        Ok(ids)
+    }
+
+    pub(super) fn clone_explorer(
+        &mut self,
+        graph: &mut WindowGraph,
+        source: NativeSurfaceTarget,
+        view: u64,
+        axis: crate::editor::Axis,
+    ) -> Result<NativeSurfaceIds, WindowError> {
+        if view <= 1 || self.explorer_views.contains_key(&view) {
+            return Err(WindowError::UnknownView);
+        }
+        let source = self
+            .ids_for_target(source)
+            .ok_or(WindowError::UnknownWindow)?;
+        graph.require_clone_view(source.content)?;
+        let source_window = graph
+            .window(source.window)
+            .ok_or(WindowError::UnknownWindow)?;
+        let source_tab = source_window.tab;
+        let placement = match source_window.placement {
+            WindowPlacement::Floating(mut rect) => {
+                match axis {
+                    crate::editor::Axis::Horizontal => rect.x = rect.x.saturating_add(2),
+                    crate::editor::Axis::Vertical => rect.y = rect.y.saturating_add(1),
+                }
+                WindowPlacement::Floating(rect)
+            }
+            _ => WindowPlacement::Floating(WindowRect {
+                x: 2,
+                y: 2,
+                width: 40,
+                height: 20,
+            }),
+        };
+        let owner = "builtin.surfaces";
+        let generation = 1;
+        let universal_view = graph.create_view(source.content, owner, generation)?;
+        let window = graph.open_window(
+            source_tab,
+            universal_view,
+            placement,
+            true,
+            owner,
+            generation,
+        )?;
+        let ids = NativeSurfaceIds {
+            content: source.content,
+            view: universal_view,
+            window,
+        };
+        self.explorer_views.insert(view, ids);
+        self.explorer_view_placements.insert(view, placement);
         self.signature = None;
         Ok(ids)
     }

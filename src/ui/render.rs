@@ -567,6 +567,14 @@ pub struct EditorWindowBinding {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExplorerWindowUiState {
+    pub view: u64,
+    pub window: WindowId,
+    pub content: ExplorerUiState,
+    pub focused: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EditorWindowLayoutState {
     pub source_revision: u64,
     pub layout: TiledLayoutSnapshot,
@@ -644,6 +652,7 @@ pub struct UiState {
     pub private_surfaces: Vec<PrivateSurfaceUiState>,
     pub key_hints: Option<KeyHintUiState>,
     pub explorer: Option<ExplorerUiState>,
+    pub explorer_views: Vec<ExplorerWindowUiState>,
     pub explorer_focused: bool,
     pub terminal_panel: Option<TerminalPanelState>,
     /// Renderer-pure content-switcher projection supplied by the application-owned window graph.
@@ -969,8 +978,37 @@ pub fn render(
         width,
         height,
     );
+    let cloned_explorer_focused = ui.explorer_views.iter().any(|view| view.focused);
     if let (Some(rect), Some(explorer)) = (explorer_rect, &ui.explorer) {
-        render_explorer_window(&mut workspace_frame, explorer, ui, config, rect);
+        render_explorer_window(
+            &mut workspace_frame,
+            explorer,
+            ui,
+            config,
+            rect,
+            ui.explorer_focused && !cloned_explorer_focused,
+        );
+    }
+    if let Some(compositor) = compositor {
+        let mut explorer_views = ui.explorer_views.iter().collect::<Vec<_>>();
+        explorer_views.sort_by_key(|view| {
+            compositor
+                .projection
+                .window(view.window)
+                .map_or((u16::MAX, view.view), |window| (window.z_index, view.view))
+        });
+        for view in explorer_views {
+            if let Some(window) = compositor.projection.window(view.window) {
+                render_explorer_window(
+                    &mut workspace_frame,
+                    &view.content,
+                    ui,
+                    config,
+                    window.rect,
+                    view.focused,
+                );
+            }
+        }
     }
     let mut frame =
         if let (Some(terminal), Some(geometry)) = (&ui.terminal_panel, terminal_geometry) {

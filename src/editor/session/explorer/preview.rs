@@ -29,7 +29,7 @@ pub(super) struct Preview {
 impl ExplorerSession {
     fn preview_current(&self, preview: &Preview) -> bool {
         Arc::ptr_eq(&preview.epoch, &self.epoch)
-            && self.tree.selected_node().is_some_and(|node| {
+            && self.tree().selected_node().is_some_and(|node| {
                 node.id == preview.node
                     && node.path == preview.path
                     && node.kind == ExplorerKind::File
@@ -59,7 +59,7 @@ impl ExplorerSession {
         failed: &str,
     ) -> (Option<RequestId>, Option<PreviewRead>) {
         let node = self
-            .tree
+            .tree()
             .selected_node()
             .filter(|node| policy.preview_enabled && node.kind == ExplorerKind::File);
         let Some(node) = node else {

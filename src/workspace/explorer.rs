@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ExplorerNodeId(pub u64);
@@ -35,37 +36,90 @@ pub struct ExplorerNode {
     pub name: String,
     pub kind: ExplorerKind,
     pub load: ExplorerLoadState,
-    pub expanded: bool,
     pub children: Vec<ExplorerNodeId>,
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ExplorerState {
+struct ExplorerData {
     nodes: BTreeMap<ExplorerNodeId, ExplorerNode>,
     by_path: HashMap<PathBuf, ExplorerNodeId>,
     roots: Vec<ExplorerNodeId>,
+    next_id: u64,
+    root_revision: u64,
+}
+
+/// One tree view over shared directory data. Selection, expansion, filter and
+/// visible-row projection belong to this view; cloning shares only `data`.
+#[derive(Clone, Debug)]
+pub struct ExplorerState {
+    data: Arc<ExplorerData>,
     selected: Option<ExplorerNodeId>,
+    expanded: BTreeSet<ExplorerNodeId>,
+    filter: String,
     visible_nodes: Vec<ExplorerNodeId>,
     visible_positions: HashMap<ExplorerNodeId, usize>,
     projection_generation: u64,
-    next_id: u64,
-    pub root_revision: u64,
+}
+
+impl Default for ExplorerState {
+    fn default() -> Self {
+        Self {
+            data: Arc::new(ExplorerData::default()),
+            selected: None,
+            expanded: BTreeSet::new(),
+            filter: String::new(),
+            visible_nodes: Vec::new(),
+            visible_positions: HashMap::new(),
+            projection_generation: 0,
+        }
+    }
 }
 
 impl ExplorerState {
+    /// Clone only view state while retaining the exact shared tree data source.
+    #[must_use]
+    pub fn clone_view(&self) -> Self {
+        self.clone()
+    }
+
+    /// Adopt a newer shared data snapshot without adopting another view's
+    /// selection, expansion or filter state.
+    pub(crate) fn synchronize_data_from(&mut self, source: &Self) {
+        self.data = source.data.clone();
+        self.selected = self
+            .selected
+            .filter(|id| self.data.nodes.contains_key(id))
+            .or_else(|| self.data.roots.first().copied());
+        self.expanded.retain(|id| self.data.nodes.contains_key(id));
+        self.rebuild_visible_projection();
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn shares_data_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.data, &other.data)
+    }
+
+    #[must_use]
+    pub fn root_revision(&self) -> u64 {
+        self.data.root_revision
+    }
+
     pub fn reset_roots(&mut self, roots: &[WorkspaceRoot], root_revision: u64) {
-        let previous = std::mem::take(&mut self.by_path);
-        self.nodes.clear();
-        self.roots.clear();
+        let previous = self.data.by_path.clone();
+        let data = Arc::make_mut(&mut self.data);
+        data.nodes.clear();
+        data.by_path.clear();
+        data.roots.clear();
         for root in roots {
             let id = previous
                 .get(&root.identity.canonical_path)
                 .copied()
-                .unwrap_or_else(|| self.allocate());
-            self.by_path
+                .unwrap_or_else(|| allocate(data));
+            data.by_path
                 .insert(root.identity.canonical_path.clone(), id);
-            self.roots.push(id);
-            self.nodes.insert(
+            data.roots.push(id);
+            data.nodes.insert(
                 id,
                 ExplorerNode {
                     id,
@@ -75,35 +129,22 @@ impl ExplorerState {
                     name: root.name.clone(),
                     kind: ExplorerKind::Root,
                     load: ExplorerLoadState::Unloaded,
-                    expanded: false,
                     children: Vec::new(),
                 },
             );
         }
+        data.root_revision = root_revision;
         self.selected = self
             .selected
-            .filter(|id| self.nodes.contains_key(id))
-            .or(self.roots.first().copied());
-        self.root_revision = root_revision;
+            .filter(|id| data.nodes.contains_key(id))
+            .or(data.roots.first().copied());
+        self.expanded.retain(|id| data.nodes.contains_key(id));
         self.rebuild_visible_projection();
     }
 
-    fn allocate(&mut self) -> ExplorerNodeId {
-        self.next_id = self.next_id.saturating_add(1);
-        ExplorerNodeId(self.next_id)
-    }
-
-    fn remove_subtree(&mut self, id: ExplorerNodeId) {
-        if let Some(node) = self.nodes.remove(&id) {
-            for child in node.children {
-                self.remove_subtree(child);
-            }
-            self.by_path.remove(&node.path);
-        }
-    }
-
     pub fn begin_load(&mut self, node: ExplorerNodeId, generation: u64) -> bool {
-        let Some(node) = self.nodes.get_mut(&node) else {
+        let data = Arc::make_mut(&mut self.data);
+        let Some(node) = data.nodes.get_mut(&node) else {
             return false;
         };
         if !matches!(node.kind, ExplorerKind::Root | ExplorerKind::Directory) {
@@ -121,19 +162,21 @@ impl ExplorerState {
         root_revision: u64,
         children: Vec<ExplorerChild>,
     ) -> bool {
-        if root_revision != self.root_revision
+        if root_revision != self.data.root_revision
             || !self
+                .data
                 .nodes
                 .get(&node)
                 .is_some_and(|node| node.load == ExplorerLoadState::Loading(generation))
         {
             return false;
         }
-        let root = self.nodes[&node].root;
-        let old_children = self.nodes[&node].children.clone();
+        let data = Arc::make_mut(&mut self.data);
+        let root = data.nodes[&node].root;
+        let old_children = data.nodes[&node].children.clone();
         let old_ids_by_path = old_children
             .iter()
-            .filter_map(|id| self.nodes.get(id).map(|child| (child.path.clone(), *id)))
+            .filter_map(|id| data.nodes.get(id).map(|child| (child.path.clone(), *id)))
             .collect::<HashMap<_, _>>();
         let mut reused = BTreeSet::new();
         let mut ids = Vec::new();
@@ -141,9 +184,9 @@ impl ExplorerState {
             let existing = old_ids_by_path
                 .get(&child.path)
                 .copied()
-                .filter(|id| self.nodes.get(id).is_some_and(|old| old.kind == child.kind));
+                .filter(|id| data.nodes.get(id).is_some_and(|old| old.kind == child.kind));
             let id = if let Some(id) = existing {
-                if let Some(old) = self.nodes.get_mut(&id) {
+                if let Some(old) = data.nodes.get_mut(&id) {
                     old.parent = Some(node);
                     old.root = root;
                     old.name = child.name;
@@ -153,15 +196,15 @@ impl ExplorerState {
                 id
             } else {
                 if let Some(stale) = old_ids_by_path.get(&child.path).copied() {
-                    self.remove_subtree(stale);
+                    remove_subtree(data, stale);
                 }
-                let id = self
+                let id = data
                     .by_path
                     .get(&child.path)
                     .copied()
-                    .unwrap_or_else(|| self.allocate());
-                self.by_path.insert(child.path.clone(), id);
-                self.nodes.insert(
+                    .unwrap_or_else(|| allocate(data));
+                data.by_path.insert(child.path.clone(), id);
+                data.nodes.insert(
                     id,
                     ExplorerNode {
                         id,
@@ -171,7 +214,6 @@ impl ExplorerState {
                         name: child.name,
                         kind: child.kind,
                         load: ExplorerLoadState::Unloaded,
-                        expanded: false,
                         children: Vec::new(),
                     },
                 );
@@ -181,27 +223,27 @@ impl ExplorerState {
         }
         for old in old_children {
             if !reused.contains(&old) && !ids.contains(&old) {
-                self.remove_subtree(old);
+                remove_subtree(data, old);
             }
         }
         if self
             .selected
-            .is_some_and(|selected| !self.nodes.contains_key(&selected))
+            .is_some_and(|selected| !data.nodes.contains_key(&selected))
         {
             self.selected = Some(node);
         }
-        if let Some(parent) = self.nodes.get_mut(&node) {
+        if let Some(parent) = data.nodes.get_mut(&node) {
             parent.children = ids;
             parent.load = ExplorerLoadState::Loaded;
-            parent.expanded = true;
         }
+        self.expanded.insert(node);
         self.rebuild_visible_projection();
         true
     }
 
     pub fn set_error(&mut self, node: ExplorerNodeId, generation: u64) {
         let mut changed = false;
-        if let Some(node) = self.nodes.get_mut(&node)
+        if let Some(node) = Arc::make_mut(&mut self.data).nodes.get_mut(&node)
             && node.load == ExplorerLoadState::Loading(generation)
         {
             node.load = ExplorerLoadState::Error;
@@ -213,21 +255,42 @@ impl ExplorerState {
     }
 
     pub fn toggle_loaded(&mut self, id: ExplorerNodeId) {
-        let mut changed = false;
-        if let Some(node) = self.nodes.get_mut(&id)
-            && node.load == ExplorerLoadState::Loaded
+        if !self
+            .data
+            .nodes
+            .get(&id)
+            .is_some_and(|node| node.load == ExplorerLoadState::Loaded)
         {
-            node.expanded = !node.expanded;
-            changed = true;
+            return;
         }
-        if changed {
+        if !self.expanded.remove(&id) {
+            self.expanded.insert(id);
+        }
+        self.rebuild_visible_projection();
+    }
+
+    pub fn set_filter(&mut self, filter: impl Into<String>) {
+        let filter = filter.into();
+        if self.filter != filter {
+            self.filter = filter;
             self.rebuild_visible_projection();
         }
+    }
+
+    #[must_use]
+    pub fn filter(&self) -> &str {
+        &self.filter
+    }
+
+    #[must_use]
+    pub fn is_expanded(&self, id: ExplorerNodeId) -> bool {
+        self.expanded.contains(&id)
     }
 
     pub fn select_first_child(&mut self) {
         if let Some(id) = self.selected
             && let Some(child) = self
+                .data
                 .nodes
                 .get(&id)
                 .and_then(|node| node.children.first())
@@ -239,7 +302,7 @@ impl ExplorerState {
 
     #[must_use]
     pub fn id_for_path(&self, path: &Path) -> Option<ExplorerNodeId> {
-        self.by_path.get(path).copied()
+        self.data.by_path.get(path).copied()
     }
 
     pub const fn selected_id(&self) -> Option<ExplorerNodeId> {
@@ -247,13 +310,13 @@ impl ExplorerState {
     }
 
     /// Return whether each node in the root-to-row lineage is its parent's last child.
-    /// Presentation owners turn this structural data into configured tree glyphs.
     #[must_use]
     pub fn tree_lineage(&self, id: ExplorerNodeId) -> Vec<bool> {
         let mut lineage = Vec::new();
         let mut current = id;
-        while let Some(parent) = self.nodes.get(&current).and_then(|node| node.parent) {
+        while let Some(parent) = self.data.nodes.get(&current).and_then(|node| node.parent) {
             let is_last = self
+                .data
                 .nodes
                 .get(&parent)
                 .and_then(|node| node.children.last())
@@ -267,17 +330,17 @@ impl ExplorerState {
 
     #[must_use]
     pub fn selected_node(&self) -> Option<&ExplorerNode> {
-        self.selected.and_then(|id| self.nodes.get(&id))
+        self.selected.and_then(|id| self.data.nodes.get(&id))
     }
     #[must_use]
     pub fn node(&self, id: ExplorerNodeId) -> Option<&ExplorerNode> {
-        self.nodes.get(&id)
+        self.data.nodes.get(&id)
     }
     #[must_use]
     pub fn visible(&self) -> Vec<&ExplorerNode> {
         self.visible_nodes
             .iter()
-            .filter_map(|id| self.nodes.get(id))
+            .filter_map(|id| self.data.nodes.get(id))
             .collect()
     }
     #[must_use]
@@ -294,11 +357,12 @@ impl ExplorerState {
     }
     #[must_use]
     pub fn watched_directories(&self) -> Vec<PathBuf> {
-        self.nodes
+        self.data
+            .nodes
             .values()
             .filter(|node| {
                 matches!(node.kind, ExplorerKind::Root | ExplorerKind::Directory)
-                    && node.expanded
+                    && self.expanded.contains(&node.id)
                     && matches!(
                         node.load,
                         ExplorerLoadState::Loaded | ExplorerLoadState::Loading(_)
@@ -309,7 +373,7 @@ impl ExplorerState {
     }
     fn rebuild_visible_projection(&mut self) {
         let mut visible = Vec::new();
-        for root in &self.roots {
+        for root in &self.data.roots {
             self.collect_visible_ids(*root, &mut visible);
         }
         self.visible_positions.clear();
@@ -318,14 +382,34 @@ impl ExplorerState {
         self.visible_nodes = visible;
         self.projection_generation = self.projection_generation.saturating_add(1);
     }
-    fn collect_visible_ids(&self, id: ExplorerNodeId, out: &mut Vec<ExplorerNodeId>) {
-        if let Some(node) = self.nodes.get(&id) {
+    fn collect_visible_ids(&self, id: ExplorerNodeId, out: &mut Vec<ExplorerNodeId>) -> bool {
+        let Some(node) = self.data.nodes.get(&id) else {
+            return false;
+        };
+        if self.filter.is_empty() {
             out.push(id);
-            if node.expanded {
+            if self.expanded.contains(&id) {
                 for child in &node.children {
                     self.collect_visible_ids(*child, out);
                 }
             }
+            return true;
+        }
+        let mut descendants = Vec::new();
+        let mut descendant_matches = false;
+        for child in &node.children {
+            descendant_matches |= self.collect_visible_ids(*child, &mut descendants);
+        }
+        let matches = node
+            .name
+            .to_lowercase()
+            .contains(&self.filter.to_lowercase());
+        if matches || descendant_matches {
+            out.push(id);
+            out.extend(descendants);
+            true
+        } else {
+            false
         }
     }
     pub fn move_selection(&mut self, delta: isize) {
@@ -359,7 +443,7 @@ impl ExplorerState {
         }
     }
     pub fn select(&mut self, id: ExplorerNodeId) {
-        if self.nodes.contains_key(&id) {
+        if self.data.nodes.contains_key(&id) {
             self.selected = Some(id)
         }
     }
@@ -368,12 +452,9 @@ impl ExplorerState {
     }
     pub fn collapse_or_parent_from(&mut self, first_presented: usize) {
         let Some(id) = self.selected else { return };
-        if self.nodes.get(&id).is_some_and(|n| n.expanded) {
-            if let Some(n) = self.nodes.get_mut(&id) {
-                n.expanded = false;
-                self.rebuild_visible_projection();
-            }
-        } else if let Some(parent) = self.nodes.get(&id).and_then(|n| n.parent)
+        if self.expanded.remove(&id) {
+            self.rebuild_visible_projection();
+        } else if let Some(parent) = self.data.nodes.get(&id).and_then(|node| node.parent)
             && self
                 .visible_positions
                 .get(&parent)
@@ -381,5 +462,19 @@ impl ExplorerState {
         {
             self.selected = Some(parent)
         }
+    }
+}
+
+fn allocate(data: &mut ExplorerData) -> ExplorerNodeId {
+    data.next_id = data.next_id.saturating_add(1);
+    ExplorerNodeId(data.next_id)
+}
+
+fn remove_subtree(data: &mut ExplorerData, id: ExplorerNodeId) {
+    if let Some(node) = data.nodes.remove(&id) {
+        for child in node.children {
+            remove_subtree(data, child);
+        }
+        data.by_path.remove(&node.path);
     }
 }

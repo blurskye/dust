@@ -187,10 +187,45 @@ impl InteractiveApplication {
                 let over_terminal = self
                     .terminal_window_rect()
                     .is_some_and(|rect| rect_contains_point(rect, column, row));
-                let over_explorer = !over_terminal
-                    && self
-                        .explorer_window_rect()
-                        .is_some_and(|rect| rect_contains_point(rect, column, row));
+                let explorer_window = (!over_terminal)
+                    .then(|| {
+                        self.compositor_projection()
+                            .and_then(|projection| projection.hit_test(column, row))
+                    })
+                    .flatten()
+                    .filter(|window| {
+                        matches!(
+                            self.window_session.native_ids().target_for_window(*window),
+                            Some(
+                                NativeSurfaceTarget::Explorer
+                                    | NativeSurfaceTarget::ExplorerView(_)
+                            )
+                        )
+                    })
+                    .or_else(|| {
+                        (!over_terminal
+                            && self
+                                .explorer_window_rect()
+                                .is_some_and(|rect| rect_contains_point(rect, column, row)))
+                        .then(|| {
+                            self.window_session
+                                .native_ids()
+                                .explorer()
+                                .map(|ids| ids.window)
+                        })
+                        .flatten()
+                    });
+                let over_explorer = explorer_window.is_some();
+                if let Some(window) = explorer_window
+                    && let Ok(plan) = self.window_session.plan_focus(
+                        window,
+                        &self.state.window_version(),
+                        self.extension.contributions().version(),
+                    )
+                    && self.apply_window_plan(plan).is_ok()
+                {
+                    self.reconcile_editor_windows();
+                }
                 if over_terminal
                     && key.terminal_mouse()
                         == Some(crate::editor::input::TerminalMouseInput::LeftDown)
@@ -259,7 +294,6 @@ impl InteractiveApplication {
                 } else if over_terminal {
                     "terminal_mouse"
                 } else if over_explorer {
-                    self.set_explorer_focus(true);
                     "explorer_mouse"
                 } else if self.window_session.dashboard_visible()
                     || self.state.active_view.is_none()

@@ -813,27 +813,6 @@ fn universal_window_clone_refuses_native_noncloneable_content_without_mutation()
     let mut app = app();
     app.state.open_text(TextBuffer::from_text("editor"), None);
     app.set_dashboard_visibility(false);
-    app.open_explorer();
-    let explorer = app
-        .window_session
-        .native_ids()
-        .explorer()
-        .expect("explorer window")
-        .window;
-    let graph_before_explorer = app.window_session.graph().clone();
-    let source_before_explorer = app.state.window_version();
-    app.process_effect(AppEffect::WindowClone {
-        target: format!("window:{}", explorer.0),
-        axis: crate::editor::Axis::Horizontal,
-    });
-    assert_eq!(app.window_session.graph(), &graph_before_explorer);
-    assert_eq!(app.state.window_version(), source_before_explorer);
-    assert!(
-        app.ui
-            .notification
-            .as_deref()
-            .is_some_and(|message| message.contains("does not support clone-view"))
-    );
 
     app.terminal_session.fixture(
         crate::process::PtyId(1),
@@ -2798,6 +2777,80 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
     assert!(app.terminal_session.selected().is_none());
     assert!(!app.window_session.terminal_focused());
     assert!(app.ui.terminal_panel.is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn live_pty_clone_refusal_preserves_process_screen_geometry_focus_and_sources() {
+    use super::driver::TestSession;
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.terminals.profiles.insert(
+        "clone-refusal".into(),
+        crate::config::TerminalProfileConfig {
+            program: "/bin/sh".into(),
+            arguments: vec![
+                "-c".into(),
+                "printf x >> starts; printf 'READY\\n'; read value; printf 'ACK:%s\\n' \"$value\"; read end".into(),
+            ],
+            cwd: None,
+            environment: Default::default(),
+            columns: 47,
+            rows: 9,
+        },
+    );
+    let mut driver = TestSession::new(loaded);
+    driver.new_buffer();
+    driver.trust_owned_terminal_fixture();
+    driver.terminal_open("clone-refusal");
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while !driver
+        .projection()
+        .terminal_panel
+        .as_ref()
+        .is_some_and(|panel| {
+            panel.cells.iter().any(|row| {
+                row.iter()
+                    .map(|cell| cell.text.as_str())
+                    .collect::<String>()
+                    .contains("READY")
+            })
+        })
+    {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+
+    let before = driver.terminal_clone_state();
+    driver.clone_terminal();
+    assert_eq!(driver.terminal_clone_state(), before);
+    assert_eq!(driver.terminal_started_markers(), "x");
+
+    driver.terminal_send("still-original\n");
+    while !driver
+        .projection()
+        .terminal_panel
+        .as_ref()
+        .is_some_and(|panel| {
+            panel.cells.iter().any(|row| {
+                row.iter()
+                    .map(|cell| cell.text.as_str())
+                    .collect::<String>()
+                    .contains("ACK:still-original")
+            })
+        })
+    {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(driver.terminal_started_markers(), "x");
+    driver.terminal_close();
+    while driver.terminal_pending() != 0 {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
 }
 
 #[cfg(unix)]

@@ -1172,8 +1172,8 @@ fn legitimate_client(editor: &mut crate::editor::EditorState) { editor.workspace
         ),
         (
             "explorer_tree",
-            "fn bypass(owner:&mut super::explorer::ExplorerSession) { let _=&mut owner.tree; }",
-            "tree",
+            "fn bypass(owner:&mut super::explorer::ExplorerSession) { let _=&mut owner.primary; }",
+            "primary",
             "E0616",
         ),
         (

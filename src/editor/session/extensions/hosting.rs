@@ -229,4 +229,7 @@ impl ExtensionSession {
     pub(in crate::editor::session) fn fixture_window_clone_count() -> usize {
         PluginWindowHost::test_clone_count()
     }
+    pub(in crate::editor::session) fn fixture_window_state(&self) -> String {
+        format!("{:?}|{:?}", self.windows, self.ui)
+    }
 }

@@ -69,6 +69,7 @@ pub(super) fn render_explorer_window(
     ui: &UiState,
     config: &Config,
     rect: WindowRect,
+    focused: bool,
 ) {
     if rect.width < 2 || rect.height == 0 {
         return;
@@ -94,11 +95,11 @@ pub(super) fn render_explorer_window(
     render_explorer_dock(
         &mut local,
         explorer,
-        ui,
         config,
         panel_width,
         rect.height,
         local_body,
+        focused,
     );
     for y in 0..rect.height {
         for x in 0..rect.width {
@@ -114,7 +115,7 @@ pub(super) fn render_explorer_window(
             }
         }
     }
-    if ui.explorer_focused {
+    if focused {
         frame.cursor = explorer
             .rows
             .iter()
@@ -134,11 +135,11 @@ pub(super) fn render_explorer_window(
 pub(super) fn render_explorer_dock(
     grid: &mut CellGrid,
     explorer: &ExplorerUiState,
-    ui: &UiState,
     config: &Config,
     panel_width: u16,
     height: u16,
     body: WindowRect,
+    focused: bool,
 ) {
     if panel_width == 0 || height == 0 {
         return;
@@ -193,7 +194,7 @@ pub(super) fn render_explorer_dock(
                 Style::ExplorerCount,
                 panel_width,
             );
-        } else if ui.explorer_focused {
+        } else if focused {
             grid.put_text_clipped(
                 1,
                 1,

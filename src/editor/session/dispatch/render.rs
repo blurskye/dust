@@ -42,6 +42,11 @@ impl InteractiveApplication {
     pub(super) fn project_window_activation(&mut self) {
         self.ui.dashboard = self.window_session.dashboard_visible();
         self.ui.explorer_focused = self.window_session.explorer_focused();
+        if let Some(view) = self.window_session.focused_explorer() {
+            let _ = self
+                .explorer
+                .activate_view(super::super::explorer::ExplorerViewId(view));
+        }
     }
     pub(super) fn project_window_content_tabs(&mut self) {
         self.sync_ui_diagnostics();
@@ -287,7 +292,9 @@ impl InteractiveApplication {
         self.window_session.place_native(target, placement)?;
         if placement == WindowPlacement::Hidden {
             match target {
-                NativeSurfaceTarget::Explorer => self.set_explorer_focus(false),
+                NativeSurfaceTarget::Explorer | NativeSurfaceTarget::ExplorerView(_) => {
+                    self.set_explorer_focus(false)
+                }
                 NativeSurfaceTarget::Terminal(_) => self.set_terminal_focus(false),
                 NativeSurfaceTarget::Dashboard | NativeSurfaceTarget::Picker(_) => {}
             }
@@ -351,11 +358,58 @@ impl InteractiveApplication {
         target: &str,
         axis: crate::editor::Axis,
     ) -> Result<(), String> {
-        self.run_window_command(WindowCommand::Clone(
-            target,
-            axis,
-            self.configuration.settings().ui.panes.default_ratio,
-        ))
+        let selected_terminal = self.terminal_session.selected().map(|id| id.0);
+        let window = self
+            .window_session
+            .resolve_graph_target(target, selected_terminal)
+            .map_err(|error| self.window_target_error(error))?;
+        let explorer_source = match self.window_session.native_ids().target_for_window(window) {
+            Some(NativeSurfaceTarget::Explorer) => Some(1),
+            Some(NativeSurfaceTarget::ExplorerView(view)) => Some(view),
+            _ => None,
+        };
+        let Some(source) = explorer_source else {
+            return self.run_window_command(WindowCommand::Clone(
+                target,
+                axis,
+                self.configuration.settings().ui.panes.default_ratio,
+            ));
+        };
+        let explorer = self
+            .explorer
+            .prepare_clone(super::super::explorer::ExplorerViewId(source))?;
+        self.explorer.check_clone(&explorer)?;
+        let plan = self
+            .window_session
+            .plan_window_command(
+                WindowCommand::CloneExplorer(target, source, explorer.id().0, axis),
+                &(&self.state).into(),
+                CommandPolicy {
+                    selected_terminal,
+                    pane_step: self.configuration.settings().ui.panes.resize_step,
+                    terminal_step: self.configuration.settings().ui.terminal_panel.resize_step,
+                },
+                self.extension.contributions().version(),
+            )
+            .map_err(|error| match error {
+                CommandError::Dirty => self.message("dirty_close", &[]),
+                CommandError::Target(error) => self.window_target_error(error),
+                CommandError::Rejected(error) => error,
+            })?;
+        self.explorer.check_clone(&explorer)?;
+        match self.window_session.accept_window_command(
+            plan,
+            &self.state.window_version(),
+            &self.extension.contributions().version(),
+        )? {
+            CommandEffect::ClonedExplorer(view) if view == explorer.id().0 => {}
+            _ => return Err("explorer clone returned the wrong window effect".into()),
+        }
+        self.explorer.accept_clone(explorer)?;
+        self.project_window_activation();
+        self.reconcile_editor_windows();
+        self.sync_explorer_ui();
+        Ok(())
     }
 
     pub(super) fn resize_graph_window(&mut self, target: &str, amount: i16) -> Result<(), String> {
@@ -430,6 +484,9 @@ impl InteractiveApplication {
             &self.extension.contributions().version(),
         )? {
             CommandEffect::None => {}
+            CommandEffect::ClonedExplorer(_) => {
+                return Err("explorer clone bypassed its source owner".into());
+            }
             CommandEffect::ClosedExplorer => {
                 if self
                     .input
@@ -439,8 +496,16 @@ impl InteractiveApplication {
                     self.close_prompt();
                 }
                 self.ui.explorer = None;
+                self.ui.explorer_views.clear();
                 self.set_explorer_focus(false);
                 self.reconcile_explorer_watch();
+            }
+            CommandEffect::ClosedExplorerView(view) => {
+                self.explorer
+                    .remove_view(super::super::explorer::ExplorerViewId(view))?;
+                self.ui
+                    .explorer_views
+                    .retain(|candidate| candidate.view != view);
             }
             CommandEffect::ClosedPicker(kind) => {
                 if self.ui.picker.as_ref().is_some_and(|p| p.surface == kind) {
@@ -524,23 +589,74 @@ impl InteractiveApplication {
             return;
         }
         let title = self.message("explorer_title", &[]);
-        let body =
-            self.window_session
-                .content()
-                .explorer
-                .unwrap_or(crate::ui::window::WindowRect {
-                    x: 0,
-                    y: 0,
-                    width: 0,
-                    height: 0,
-                });
+        let explorer_windows = self
+            .window_session
+            .native_ids()
+            .explorer_views()
+            .filter_map(|(view, ids)| {
+                let rect = self
+                    .window_session
+                    .layout()?
+                    .projection
+                    .window(ids.window)?
+                    .rect;
+                Some((view, ids.window, rect))
+            })
+            .collect::<Vec<_>>();
         self.request_explorer_preview();
-        self.ui.explorer = Some(self.explorer.projection(
-            &self.configuration.settings().ui.explorer,
-            body,
-            self.git.decorations(),
-            title,
-        ));
+        let focused = self.window_session.focused_explorer();
+        let policy = &self.configuration.settings().ui.explorer;
+        let decorations = self.git.decorations();
+        let mut primary = None;
+        let mut clones = Vec::new();
+        for (view, window, rect) in explorer_windows {
+            let body = if view == 1 {
+                self.window_session.content().explorer.unwrap_or_else(|| {
+                    crate::ui::geometry::explorer_body_geometry(rect, self.configuration.settings())
+                })
+            } else {
+                crate::ui::geometry::explorer_body_geometry(rect, self.configuration.settings())
+            };
+            let Ok(projection) = self.explorer.projection_for(
+                super::super::explorer::ExplorerViewId(view),
+                policy,
+                body,
+                decorations,
+                title.clone(),
+            ) else {
+                continue;
+            };
+            if view == 1 {
+                primary = Some(projection);
+            } else {
+                clones.push(crate::ui::ExplorerWindowUiState {
+                    view,
+                    window,
+                    content: projection,
+                    focused: focused == Some(view),
+                });
+            }
+        }
+        if primary.is_none() {
+            let body = self.ui.surface_content.explorer.unwrap_or(WindowRect {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0,
+            });
+            primary = self
+                .explorer
+                .projection_for(
+                    super::super::explorer::PRIMARY_EXPLORER_VIEW,
+                    policy,
+                    body,
+                    decorations,
+                    title,
+                )
+                .ok();
+        }
+        self.ui.explorer = primary;
+        self.ui.explorer_views = clones;
         self.reconcile_explorer_watch();
         self.reconcile_editor_windows();
     }
@@ -583,7 +699,7 @@ impl InteractiveApplication {
             return;
         }
         self.window_session.allow_explorer();
-        if self.explorer.tree().root_revision != self.workspace.root_revision()
+        if self.explorer.tree().root_revision() != self.workspace.root_revision()
             || self.explorer.tree().visible_ids().is_empty()
         {
             self.explorer
@@ -706,21 +822,41 @@ impl InteractiveApplication {
         let Some((column, row)) = self.input.mouse_position() else {
             return;
         };
-        let Some(rect) = self.window_session.content().explorer else {
+        let view = self.window_session.focused_explorer().unwrap_or(1);
+        let Some(ids) = self.window_session.native_ids().explorer_view(view) else {
             return;
         };
-        if self.compositor_projection().is_none() || !rect_contains_point(rect, column, row) {
+        let Some(rect) = self
+            .compositor_projection()
+            .and_then(|projection| projection.window(ids.window))
+            .map(|window| window.rect)
+        else {
+            return;
+        };
+        let body = crate::ui::geometry::explorer_body_geometry(rect, self.configuration.settings());
+        if !rect_contains_point(body, column, row) {
             return;
         }
-        let Some(explorer_ui) = self.ui.explorer.as_ref() else {
-            return;
+        let explorer_ui = if view == 1 {
+            self.ui.explorer.as_ref()
+        } else {
+            self.ui
+                .explorer_views
+                .iter()
+                .find(|candidate| candidate.view == view)
+                .map(|candidate| &candidate.content)
         };
-        let index = usize::from(row.saturating_sub(rect.y));
-        let Some(id) = explorer_ui.rows.get(index).map(|row| row.node_id) else {
+        let index = usize::from(row.saturating_sub(body.y));
+        let Some(id) = explorer_ui
+            .and_then(|explorer| explorer.rows.get(index))
+            .map(|row| row.node_id)
+        else {
             return;
         };
         self.explorer.select(ExplorerNodeId(id));
-        self.set_explorer_focus(true);
+        if view == 1 {
+            self.set_explorer_focus(true);
+        }
         self.sync_explorer_ui();
     }
 
@@ -1064,7 +1200,11 @@ impl InteractiveApplication {
             editor_tab: editor.active_tab(&(&self.state).into()),
             editor_window: editor.focused_window(&(&self.state).into()),
             explorer_visible: self.ui.explorer.is_some(),
-            explorer_focused: self.ui.explorer.is_some() && self.window_session.explorer_focused(),
+            focused_explorer: self
+                .ui
+                .explorer
+                .as_ref()
+                .and_then(|_| self.window_session.focused_explorer()),
             explorer_size,
             active_terminal: self.displayed_terminal().map(|id| id.0),
             terminal_focused: self.displayed_terminal().is_some_and(|id| {

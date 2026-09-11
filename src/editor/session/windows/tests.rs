@@ -718,7 +718,7 @@ fn startup_document_and_dashboard_publish_together_only_for_the_accepted_proposa
             editor_tab: None,
             editor_window: None,
             explorer_visible: false,
-            explorer_focused: false,
+            focused_explorer: None,
             explorer_size: 24,
             active_terminal: None,
             terminal_focused: false,

@@ -13,6 +13,30 @@ use std::{
 };
 use tempfile::TempDir;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct TerminalCloneState {
+    graph: crate::ui::window::WindowGraph,
+    editor: crate::editor::EditorWindowVersion,
+    descriptions: Vec<(u64, String, crate::ui::window::ContentLifecycle)>,
+    selected: Option<crate::process::PtyId>,
+    focused: Option<u64>,
+    dimensions: Option<(usize, usize)>,
+    screen: Vec<String>,
+    pending: usize,
+    starts: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct PluginCloneState {
+    graph: String,
+    editor: crate::editor::EditorWindowVersion,
+    catalog: crate::extensions::PluginCatalogVersion,
+    host: String,
+    retained: Vec<crate::ui::PluginSurfaceUiState>,
+    private: Vec<crate::ui::PrivateSurfaceUiState>,
+    copies: (usize, usize, usize),
+}
+
 pub(super) struct TestSession {
     application: InteractiveApplication,
     clock: Arc<ManualClock>,
@@ -97,6 +121,42 @@ impl TestSession {
                 .extension
                 .remove_contribution(owner, crate::extensions::PluginLoadId(load))
         );
+    }
+    pub(super) fn plugin_window_target(&self, owner: &str) -> String {
+        let window = self
+            .application
+            .window_session
+            .graph()
+            .windows()
+            .into_iter()
+            .find(|window| {
+                self.application
+                    .window_session
+                    .graph()
+                    .content_for_window(window.id)
+                    .is_some_and(|content| content.owner == owner)
+            })
+            .map(|window| window.id)
+            .expect("plugin window");
+        format!("window:{}", window.0)
+    }
+    pub(super) fn clone_plugin_window(&mut self, target: String) {
+        self.application
+            .process_effect(crate::editor::AppEffect::WindowClone {
+                target,
+                axis: crate::editor::Axis::Vertical,
+            });
+    }
+    pub(super) fn plugin_clone_state(&self) -> PluginCloneState {
+        PluginCloneState {
+            graph: format!("{:?}", self.application.window_session.graph()),
+            editor: self.application.state.window_version(),
+            catalog: self.application.extension.contributions().version(),
+            host: self.application.extension.fixture_window_state(),
+            retained: self.application.ui.plugin_surfaces.clone(),
+            private: self.application.ui.private_surfaces.clone(),
+            copies: self.copy_counts(),
+        }
     }
     pub(super) fn plugin_request(
         &mut self,
@@ -212,6 +272,24 @@ impl TestSession {
             std::thread::yield_now();
         }
         self.application.reconcile_editor_windows();
+    }
+    pub(super) fn clone_explorer(&mut self) {
+        self.application
+            .process_effect(crate::editor::AppEffect::WindowClone {
+                target: "explorer".into(),
+                axis: crate::editor::Axis::Horizontal,
+            });
+        self.application.reconcile_editor_windows();
+    }
+    pub(super) fn explorer_content_ids(
+        &self,
+    ) -> Vec<(u64, crate::ui::window::ContentId, crate::ui::window::ViewId)> {
+        self.application
+            .window_session
+            .native_ids()
+            .explorer_views()
+            .map(|(view, ids)| (view, ids.content, ids.view))
+            .collect()
     }
     pub(super) fn float_explorer(&mut self) {
         self.application
@@ -532,6 +610,29 @@ impl TestSession {
     pub(super) fn terminal_send(&mut self, text: &str) {
         self.application
             .process_effect(crate::editor::AppEffect::TerminalSend(text.into()));
+    }
+    pub(super) fn clone_terminal(&mut self) {
+        self.application
+            .process_effect(crate::editor::AppEffect::WindowClone {
+                target: "terminal".into(),
+                axis: crate::editor::Axis::Horizontal,
+            });
+    }
+    pub(super) fn terminal_clone_state(&self) -> TerminalCloneState {
+        let selected = self.application.terminal_session.selected();
+        TerminalCloneState {
+            graph: self.application.window_session.graph().clone(),
+            editor: self.application.state.window_version(),
+            descriptions: self.application.terminal_session.descriptions(),
+            selected,
+            focused: self.application.window_session.focused_terminal(),
+            dimensions: selected.map(|id| self.application.terminal_session.fixture_dimensions(id)),
+            screen: selected
+                .map(|id| self.application.terminal_session.fixture_lines(id))
+                .unwrap_or_default(),
+            pending: self.application.terminal_session.pending(),
+            starts: self.terminal_started_markers(),
+        }
     }
     pub(super) fn pump_terminal(&mut self) {
         self.application.process_execution_preflight();
