@@ -803,7 +803,7 @@ while True:
                 (0.2, b"\r", None),
                 (0.2, b":rootstatus\r", None),
                 (0.2, f":e {target}\r".encode(), None),
-                (0.8, b":q\r", None),
+                (1.5, b":q\r", None),
             ],
         )
         assert code == 0
