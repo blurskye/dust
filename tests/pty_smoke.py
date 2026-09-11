@@ -101,6 +101,7 @@ def run(
     clean: bool = True,
     config_home: pathlib.Path | None = None,
     stage_actions: dict[int, Callable[[], None]] | None = None,
+    stage_expectations: dict[int, Callable[[str], bool]] | None = None,
     seen_workspace: bool = True,
     environment: dict[str, str] | None = None,
     coalesce_resize_input: bool = False,
@@ -134,11 +135,20 @@ def run(
     snapshots: list[bytes] = []
     for stage_index, (delay, data, size) in enumerate(stages):
         deadline = time.time() + delay
+        expected = (stage_expectations or {}).get(stage_index)
+        last_read = time.time()
         while time.time() < deadline:
+            if (
+                expected is not None
+                and expected(terminal_screen(bytes(output)))
+                and time.time() - last_read >= 0.05
+            ):
+                break
             readable, _, _ = select.select([descriptor], [], [], 0.02)
             if readable:
                 try:
                     output.extend(os.read(descriptor, 65536))
+                    last_read = time.time()
                 except OSError:
                     break
         snapshots.append(bytes(output))
@@ -802,9 +812,12 @@ while True:
                 (0.2, b"root-b", None),
                 (0.2, b"\r", None),
                 (0.2, b":rootstatus\r", None),
-                (0.2, f":e {target}\r".encode(), None),
-                (1.5, b":q\r", None),
+                (1.5, f":e {target}\r".encode(), None),
+                (5.0, b":q\r", None),
             ],
+            stage_expectations={
+                6: lambda screen: "second root" in screen and "from-b.txt" in screen,
+            },
         )
         assert code == 0
         assert "added workspace root" in terminal_screen(snapshots[1])
@@ -812,7 +825,7 @@ while True:
         assert "root-b" in terminal_screen(snapshots[3])
         assert "active root" in terminal_screen(snapshots[5])
         opened = terminal_screen(snapshots[6])
-        assert "second root" in opened and "from-b.txt" in opened
+        assert "second root" in opened and "from-b.txt" in opened, opened
         assert_restored(output)
 
     with tempfile.TemporaryDirectory() as directory:
@@ -981,19 +994,28 @@ while True:
             [str(first)],
             [
                 (0.5, f":edit {second}\r".encode(), None),
-                (0.6, f":edit {third}\r".encode(), None),
-                (0.6, b":explore\r", None),
-                (0.4, b"\x0c", None),  # explorer -> editor
+                (5.0, f":edit {third}\r".encode(), None),
+                (5.0, b":explore\r", None),
+                (5.0, b"\x0c", None),  # explorer -> editor
                 (0.3, b"H", None),
                 (0.3, b"L", None),
                 (0.3, b":q\r", None),
             ],
+            stage_expectations={
+                1: lambda screen: "BETA-CONTENT" in screen,
+                2: lambda screen: "GAMMA-CONTENT" in screen,
+                3: lambda screen: "Explorer" in screen.splitlines()[0][:41]
+                and all(
+                    name in screen.splitlines()[0][41:]
+                    for name in ("alpha.rs", "beta.rs", "gamma.rs")
+                ),
+            },
         )
         assert code == 0
         opened = terminal_screen(snapshots[3])
         top = opened.splitlines()[0]
         assert "Explorer" in top[:41]
-        assert all(name in top[41:] for name in ("alpha.rs", "beta.rs", "gamma.rs"))
+        assert all(name in top[41:] for name in ("alpha.rs", "beta.rs", "gamma.rs")), top
         assert "BETA-CONTENT" in terminal_screen(snapshots[5])
         assert "GAMMA-CONTENT" in terminal_screen(snapshots[6])
         assert_restored(output)
