@@ -346,6 +346,18 @@ impl InteractiveApplication {
         self.window_session.native_placement(target)
     }
 
+    pub(super) fn clone_graph_window(
+        &mut self,
+        target: &str,
+        axis: crate::editor::Axis,
+    ) -> Result<(), String> {
+        self.run_window_command(WindowCommand::Clone(
+            target,
+            axis,
+            self.configuration.settings().ui.panes.default_ratio,
+        ))
+    }
+
     pub(super) fn resize_graph_window(&mut self, target: &str, amount: i16) -> Result<(), String> {
         self.run_window_command(WindowCommand::Resize(target, amount))
     }

@@ -6,6 +6,7 @@ use crate::editor::FocusDirection;
 
 #[derive(Clone, Copy)]
 pub(in crate::editor::session) enum WindowCommand<'a> {
+    Clone(&'a str, crate::editor::Axis, u16),
     Resize(&'a str, i16),
     Direction(FocusDirection, Option<NativeSurfaceTarget>),
     Close(&'a str),
@@ -61,6 +62,32 @@ impl WindowSession {
             })
         };
         match command {
+            WindowCommand::Clone(name, axis, ratio) => {
+                let window = target(name)?;
+                let source_view = self
+                    .core
+                    .graph
+                    .window(window)
+                    .ok_or_else(|| CommandError::Rejected("clone target is stale".into()))?
+                    .view;
+                let source_content = self
+                    .core
+                    .graph
+                    .view(source_view)
+                    .ok_or_else(|| CommandError::Rejected("clone source view is stale".into()))?
+                    .content;
+                self.core
+                    .graph
+                    .require_clone_view(source_content)
+                    .map_err(|error| CommandError::Rejected(error.to_string()))?;
+                plan.operations.push(EditorOperation::ClonePane {
+                    pane: pane(window)?,
+                    axis,
+                    ratio,
+                });
+                plan.clone_source = Some((window, source_view, source_content));
+                plan.hide_dashboard = true;
+            }
             WindowCommand::Resize(name, amount) => {
                 let window = target(name)?;
                 if let Some(native) = self.core.native.target_for_window(window) {

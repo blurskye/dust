@@ -187,6 +187,29 @@ fn new_tabs_share_the_global_layout_pane_ceiling_without_partial_mutation() {
 }
 
 #[test]
+fn clone_pane_refuses_the_global_ceiling_without_partial_mutation() {
+    let mut state = EditorState::new(PathBuf::from("/bounded-clone"));
+    state.open_text(TextBuffer::from_text("seed"), None);
+    for _ in 1..super::MAXIMUM_LAYOUT_PANES {
+        state.new_tab().expect("tab within pane ceiling");
+    }
+    let tab = state.active_tab.expect("active tab");
+    let pane = state.tabs[tab].focused;
+    let revision = state.window_revision();
+    let active = state.active_view;
+    let views = state.views.len();
+    assert_eq!(
+        state.clone_pane(pane, super::Axis::Horizontal, 500),
+        Err("layout pane ceiling reached")
+    );
+    assert_eq!(state.window_revision(), revision);
+    assert_eq!(state.active_view, active);
+    assert_eq!(state.panes.len(), super::MAXIMUM_LAYOUT_PANES);
+    assert_eq!(state.views.len(), views);
+    state.validate_layout().expect("bounded clone refusal");
+}
+
+#[test]
 fn directional_focus_selects_spatial_neighbors_in_a_two_by_two_layout() {
     let mut state = EditorState::new(PathBuf::from("/directional"));
     state.open_text(TextBuffer::from_text("seed"), None);

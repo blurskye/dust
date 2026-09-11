@@ -100,6 +100,11 @@ pub enum EditorOperation {
         axis: crate::editor::Axis,
         ratio: u16,
     },
+    ClonePane {
+        pane: crate::editor::PaneId,
+        axis: crate::editor::Axis,
+        ratio: u16,
+    },
     NewTab,
     ClosePane,
     ResizePane {
@@ -476,6 +481,11 @@ fn apply_operation(
         EditorOperation::SplitPane { axis, ratio } => {
             state
                 .split_active(*axis, *ratio)
+                .map_err(|error| TransactionError::Layout(error.into()))?;
+        }
+        EditorOperation::ClonePane { pane, axis, ratio } => {
+            state
+                .clone_pane(*pane, *axis, *ratio)
                 .map_err(|error| TransactionError::Layout(error.into()))?;
         }
         EditorOperation::NewTab => {

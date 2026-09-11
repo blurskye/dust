@@ -13,6 +13,30 @@ pub(super) fn register_commands(
     )?;
     register(
         registry,
+        "window.clone",
+        "Clone a supported window with independent view state",
+        ContextRequirement::Application,
+        ArgumentSchema::default()
+            .field("target", ArgumentType::String, true)
+            .field("axis", ArgumentType::String, true),
+        |invocation| {
+            let axis = match string_arg(invocation, "axis")? {
+                "horizontal" => crate::editor::Axis::Horizontal,
+                "vertical" => crate::editor::Axis::Vertical,
+                _ => {
+                    return Err(CommandError::InvalidArguments(
+                        "window clone axis must be horizontal or vertical".into(),
+                    ));
+                }
+            };
+            Ok(AppEffect::WindowClone {
+                target: string_arg(invocation, "target")?.to_owned(),
+                axis,
+            })
+        },
+    )?;
+    register(
+        registry,
         "window.dock",
         "Dock an ordinary native window",
         ContextRequirement::Application,

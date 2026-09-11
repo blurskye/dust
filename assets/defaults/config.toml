@@ -1120,6 +1120,7 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "terminal.cycle" = "Cycle selected terminal"
 "terminal.resize" = "Resize terminal window"
 "window.list" = "List all windows"
+"window.clone" = "Clone window view"
 "window.dock" = "Dock native window"
 "window.float" = "Float native window"
 "window.fullscreen" = "Fullscreen native window"

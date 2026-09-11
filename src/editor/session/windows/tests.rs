@@ -805,6 +805,69 @@ fn native_command_plans_are_source_bound_before_any_candidate_copy() {
         pane_step: 2,
         terminal_step: 2,
     };
+    let copies = crate::ui::window::WindowGraph::test_clone_count();
+    let clone_plan = windows
+        .plan_window_command(
+            WindowCommand::Clone("focused", crate::editor::Axis::Horizontal, 500),
+            &(&state).into(),
+            policy(),
+            catalog.clone(),
+        )
+        .unwrap_or_else(|_| panic!("clone plan"));
+    assert!(matches!(
+        clone_plan.operations(),
+        [crate::editor::EditorOperation::ClonePane { .. }]
+    ));
+    assert_eq!(crate::ui::window::WindowGraph::test_clone_count(), copies);
+    let mut changed = state.clone();
+    changed
+        .split_active(crate::editor::Axis::Vertical, 500)
+        .expect("change clone source");
+    let before_clone_rejection = windows.graph().clone();
+    assert!(
+        windows
+            .check_plan(&clone_plan, &changed.window_version(), &catalog)
+            .is_err()
+    );
+    assert_eq!(windows.graph(), &before_clone_rejection);
+    let mut exhausted = state.clone();
+    exhausted.exhaust_window_source_for_test();
+    assert!(
+        windows
+            .check_plan(&clone_plan, &exhausted.window_version(), &catalog)
+            .is_err()
+    );
+    assert_eq!(windows.graph(), &before_clone_rejection);
+
+    let (foreign_state, mut foreign_windows) = editor_fixture();
+    foreign_windows.project(ProjectionRequest {
+        tab: foreign_windows.graph().active_tab().unwrap(),
+        source_revision: foreign_state.window_revision().unwrap(),
+        graph_revision: foreign_windows.graph().revision().unwrap(),
+        bounds: WindowRect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 30,
+        },
+        minimum_size: (4, 2),
+        insets: (0, 0),
+        surfaces: NativeSurfaceWindowBinding {
+            explorer: None,
+            terminal: None,
+            dashboard: None,
+            picker: None,
+        },
+        protected: None,
+    });
+    let foreign_before = foreign_windows.graph().clone();
+    assert!(
+        foreign_windows
+            .check_plan(&clone_plan, &foreign_state.window_version(), &catalog)
+            .is_err()
+    );
+    assert_eq!(foreign_windows.graph(), &foreign_before);
+
     let plan = windows
         .plan_window_command(
             WindowCommand::Swap("focused", "focused"),
@@ -818,12 +881,12 @@ fn native_command_plans_are_source_bound_before_any_candidate_copy() {
         .unwrap();
     let plan = windows
         .plan_window_command(
-            WindowCommand::Swap("focused", "focused"),
+            WindowCommand::Clone("focused", crate::editor::Axis::Vertical, 500),
             &(&state).into(),
             policy(),
             catalog.clone(),
         )
-        .unwrap_or_else(|_| panic!("plan"));
+        .unwrap_or_else(|_| panic!("clone plan"));
     windows.invalidate_native();
     let before = windows.graph().clone();
     let copies = crate::ui::window::WindowGraph::test_clone_count();

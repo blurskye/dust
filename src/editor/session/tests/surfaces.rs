@@ -600,6 +600,354 @@ fn accepted_virtual_snapshot_publishes_through_the_tiled_editor_bridge() {
 }
 
 #[test]
+fn universal_window_clone_uses_editor_owned_independent_text_and_virtual_views() {
+    let mut app = app();
+    let (buffer, original_view) = app
+        .state
+        .open_text(TextBuffer::from_text("αbc\nline"), None);
+    {
+        let view = &mut app.state.views[original_view];
+        view.cursor = crate::editor::text::ByteOffset(2);
+        view.selection = Some(crate::editor::Selection {
+            anchor: crate::editor::text::ByteOffset(0),
+            head: crate::editor::text::ByteOffset(2),
+            kind: crate::editor::SelectionKind::Character,
+        });
+        view.scroll_line = 1;
+        view.scroll_column = 3;
+        view.mode = crate::editor::EditorMode::Insert;
+    }
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let original_window = app.window_session.graph().focused().expect("text window");
+    let original_content = app
+        .window_session
+        .graph()
+        .content_for_window(original_window)
+        .expect("text content")
+        .id;
+    let before_counts = app.window_session.graph().counts();
+
+    let invocation = crate::editor::CommandInvocation::new(
+        "window.clone",
+        crate::editor::InvocationSource::Test,
+    )
+    .expect("clone command")
+    .with_argument(
+        "target",
+        crate::editor::CommandValue::String(format!("window:{}", original_window.0)),
+    )
+    .with_argument(
+        "axis",
+        crate::editor::CommandValue::String("vertical".into()),
+    );
+    let outcome = app
+        .commands
+        .execute(&app.state, &invocation)
+        .expect("typed clone command");
+    let [effect] = outcome.effects.as_slice() else {
+        panic!("clone command must emit one effect");
+    };
+    assert!(matches!(
+        effect,
+        AppEffect::WindowClone {
+            target,
+            axis: crate::editor::Axis::Vertical,
+        } if target == &format!("window:{}", original_window.0)
+    ));
+    app.process_effect(outcome.effects.into_iter().next().expect("clone effect"));
+
+    let cloned_view = app.state.active_view.expect("cloned editor view");
+    let cloned_window = app.window_session.graph().focused().expect("cloned window");
+    assert_ne!(cloned_view, original_view);
+    assert_ne!(cloned_window, original_window);
+    assert_eq!(app.state.views[cloned_view].buffer, buffer);
+    assert_eq!(
+        app.window_session
+            .graph()
+            .content_for_window(cloned_window)
+            .expect("cloned text content")
+            .id,
+        original_content
+    );
+    assert_eq!(
+        app.window_session.graph().counts(),
+        (
+            before_counts.0,
+            before_counts.1 + 1,
+            before_counts.2 + 1,
+            before_counts.3,
+        )
+    );
+    assert_eq!(
+        app.state.views[cloned_view].cursor,
+        app.state.views[original_view].cursor
+    );
+    assert_eq!(
+        app.state.views[cloned_view].selection,
+        app.state.views[original_view].selection
+    );
+    assert_eq!(app.state.views[cloned_view].scroll_line, 1);
+    assert_eq!(app.state.views[cloned_view].scroll_column, 3);
+    assert_eq!(
+        app.state.views[cloned_view].mode,
+        crate::editor::EditorMode::Insert
+    );
+
+    let transaction = crate::editor::EditorTransaction::new(crate::editor::TransactionId(999))
+        .with_operation(crate::editor::EditorOperation::SetCursor {
+            view: cloned_view,
+            position: crate::editor::text::ByteOffset(3),
+        })
+        .with_operation(crate::editor::EditorOperation::SetScroll {
+            view: cloned_view,
+            first_line: 0,
+        })
+        .with_operation(crate::editor::EditorOperation::SetScrollColumn {
+            view: cloned_view,
+            first_column: 0,
+        })
+        .with_operation(crate::editor::EditorOperation::SetSelection {
+            view: cloned_view,
+            selection: None,
+        })
+        .with_operation(crate::editor::EditorOperation::SetMode {
+            view: cloned_view,
+            mode: crate::editor::EditorMode::Normal,
+        });
+    app.apply_authoritative_editor_transaction(&transaction)
+        .expect("update only cloned view");
+    assert_eq!(
+        app.state.views[original_view].cursor,
+        crate::editor::text::ByteOffset(2)
+    );
+    assert_eq!(app.state.views[original_view].scroll_line, 1);
+    assert_eq!(app.state.views[original_view].scroll_column, 3);
+    assert!(app.state.views[original_view].selection.is_some());
+    assert_eq!(
+        app.state.views[original_view].mode,
+        crate::editor::EditorMode::Insert
+    );
+
+    app.process_effect(AppEffect::WindowClone {
+        target: format!("window:{}", original_window.0),
+        axis: crate::editor::Axis::Horizontal,
+    });
+    let exact_clone = app.state.active_view.expect("exact source clone");
+    assert_ne!(exact_clone, cloned_view);
+    assert_eq!(app.state.views[exact_clone].buffer, buffer);
+    assert_eq!(
+        app.state.views[exact_clone].cursor,
+        app.state.views[original_view].cursor
+    );
+    assert_eq!(
+        app.state.views[exact_clone].selection,
+        app.state.views[original_view].selection
+    );
+    assert_eq!(
+        app.state.views[exact_clone].scroll_line,
+        app.state.views[original_view].scroll_line
+    );
+    assert_eq!(
+        app.state.views[exact_clone].scroll_column,
+        app.state.views[original_view].scroll_column
+    );
+    assert_eq!(
+        app.state.views[exact_clone].mode,
+        app.state.views[original_view].mode
+    );
+    assert_ne!(
+        app.state.views[exact_clone].cursor,
+        app.state.views[cloned_view].cursor
+    );
+    assert_ne!(
+        app.state.views[exact_clone].selection,
+        app.state.views[cloned_view].selection
+    );
+
+    let mut virtual_app = super::app();
+    virtual_app.process_effect(AppEffect::HealthVirtualOpen);
+    let virtual_buffer = virtual_app.state.active_buffer_id().expect("health buffer");
+    let virtual_view = virtual_app.state.active_view.expect("health view");
+    virtual_app.reconcile_editor_windows();
+    let virtual_window = virtual_app
+        .window_session
+        .graph()
+        .focused()
+        .expect("health window");
+    let virtual_content = virtual_app
+        .window_session
+        .graph()
+        .content_for_window(virtual_window)
+        .expect("health content")
+        .id;
+    virtual_app.process_effect(AppEffect::WindowClone {
+        target: format!("window:{}", virtual_window.0),
+        axis: crate::editor::Axis::Horizontal,
+    });
+    let cloned_virtual_view = virtual_app.state.active_view.expect("cloned health view");
+    let cloned_virtual_window = virtual_app
+        .window_session
+        .graph()
+        .focused()
+        .expect("cloned health window");
+    assert_ne!(cloned_virtual_view, virtual_view);
+    assert_eq!(
+        virtual_app.state.views[cloned_virtual_view].buffer,
+        virtual_buffer
+    );
+    assert!(virtual_app.state.buffers[virtual_buffer].is_virtual_read_only());
+    assert_eq!(
+        virtual_app
+            .window_session
+            .graph()
+            .content_for_window(cloned_virtual_window)
+            .expect("cloned health content")
+            .id,
+        virtual_content
+    );
+}
+
+#[test]
+fn universal_window_clone_refuses_native_noncloneable_content_without_mutation() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("editor"), None);
+    app.set_dashboard_visibility(false);
+    app.open_explorer();
+    let explorer = app
+        .window_session
+        .native_ids()
+        .explorer()
+        .expect("explorer window")
+        .window;
+    let graph_before_explorer = app.window_session.graph().clone();
+    let source_before_explorer = app.state.window_version();
+    app.process_effect(AppEffect::WindowClone {
+        target: format!("window:{}", explorer.0),
+        axis: crate::editor::Axis::Horizontal,
+    });
+    assert_eq!(app.window_session.graph(), &graph_before_explorer);
+    assert_eq!(app.state.window_version(), source_before_explorer);
+    assert!(
+        app.ui
+            .notification
+            .as_deref()
+            .is_some_and(|message| message.contains("does not support clone-view"))
+    );
+
+    app.terminal_session.fixture(
+        crate::process::PtyId(1),
+        crate::editor::session::terminal::TerminalFixture {
+            profile: "clone-refusal".into(),
+            screen: crate::ui::PtyScreen::new(80, 8, 100),
+            running: true,
+            exit_code: None,
+            truncated: false,
+        },
+        app.workspace.version(),
+    );
+    app.terminal_session.select(crate::process::PtyId(1));
+    app.set_terminal_focus(true);
+    app.sync_terminal_panel();
+    let terminal = app
+        .window_session
+        .native_ids()
+        .terminal(1)
+        .expect("terminal window")
+        .window;
+    let graph_before_terminal = app.window_session.graph().clone();
+    let source_before_terminal = app.state.window_version();
+    let terminal_count = app.terminal_session.len();
+    app.process_effect(AppEffect::WindowClone {
+        target: format!("window:{}", terminal.0),
+        axis: crate::editor::Axis::Vertical,
+    });
+    assert_eq!(app.window_session.graph(), &graph_before_terminal);
+    assert_eq!(app.state.window_version(), source_before_terminal);
+    assert_eq!(app.terminal_session.len(), terminal_count);
+    assert!(app.terminal_session.contains(crate::process::PtyId(1)));
+    assert!(
+        app.ui
+            .notification
+            .as_deref()
+            .is_some_and(|message| message.contains("does not support clone-view"))
+    );
+
+    let mut closed_app = super::app();
+    closed_app
+        .state
+        .open_text(TextBuffer::from_text("close then clone"), None);
+    let first_tab = closed_app.state.active_tab.expect("first tab");
+    let first_pane = closed_app.state.tabs[first_tab].focused;
+    closed_app.state.new_tab().expect("remaining tab");
+    closed_app.set_dashboard_visibility(false);
+    closed_app.reconcile_editor_windows();
+    let closed = closed_app
+        .window_session
+        .editor_ids()
+        .window_for(first_pane)
+        .expect("window to close");
+    closed_app
+        .state
+        .activate_tab(first_tab)
+        .expect("activate window tab");
+    closed_app
+        .state
+        .focus_pane_id(first_pane)
+        .expect("focus window to close");
+    closed_app
+        .state
+        .close_active_pane()
+        .expect("close source pane");
+    closed_app.reconcile_editor_windows();
+    assert!(closed_app.window_session.graph().window(closed).is_none());
+    let graph_after_close = closed_app.window_session.graph().clone();
+    let source_after_close = closed_app.state.window_version();
+    closed_app.process_effect(AppEffect::WindowClone {
+        target: format!("window:{}", closed.0),
+        axis: crate::editor::Axis::Horizontal,
+    });
+    assert_eq!(closed_app.window_session.graph(), &graph_after_close);
+    assert_eq!(closed_app.state.window_version(), source_after_close);
+    assert!(
+        closed_app
+            .ui
+            .notification
+            .as_deref()
+            .is_some_and(|message| message.contains("unknown window identity"))
+    );
+}
+
+#[test]
+fn window_clone_rejects_an_exhausted_editor_source_before_graph_mutation() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("seed"), None);
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let window = app.window_session.graph().focused().expect("source window");
+    app.state.exhaust_window_source_for_test();
+    let graph_before = app.window_session.graph().clone();
+    let panes_before = app.state.panes.len();
+    let active_before = app.state.active_view;
+
+    app.process_effect(AppEffect::WindowClone {
+        target: format!("window:{}", window.0),
+        axis: crate::editor::Axis::Horizontal,
+    });
+
+    assert_eq!(app.window_session.graph(), &graph_before);
+    assert_eq!(app.state.window_version().revision(), None);
+    assert_eq!(app.state.panes.len(), panes_before);
+    assert_eq!(app.state.active_view, active_before);
+    assert!(
+        app.ui
+            .notification
+            .as_deref()
+            .is_some_and(|message| message.contains("source revision is exhausted"))
+    );
+}
+
+#[test]
 fn virtual_read_only_origin_never_queues_save_reload_or_recovery_io() {
     let mut app = app();
     let (buffer, _) = app

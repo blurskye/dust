@@ -273,6 +273,16 @@ fn private_cells_are_local_revisioned_atomic_and_generation_owned() {
     assert!(opened.error.is_none(), "{:?}", opened.error);
     let handle = opened.handle.expect("handle");
     let window = graph.focused().expect("focused private window");
+    let content = graph
+        .content_for_window(window)
+        .expect("private content")
+        .id;
+    let before_clone = graph.clone();
+    assert_eq!(
+        graph.create_view(content, "plugin.demo", 9),
+        Err(crate::ui::window::WindowError::Unsupported("clone-view"))
+    );
+    assert_eq!(graph, before_clone);
     let projection = graph.compositor_snapshot(tab).expect("snapshot").project(
         WindowRect {
             x: 0,
@@ -1297,7 +1307,11 @@ fn generation_owned_retained_window_lifecycle_is_revision_checked() {
     assert!(event.error.is_none(), "{:?}", event.error);
     let handle = event.handle.expect("handle");
     assert_eq!(host.snapshots()[0].rows[0].text, "Hello");
-    let content = &graph.content_snapshots()[0];
+    let content = graph
+        .content_snapshots()
+        .into_iter()
+        .next()
+        .expect("plugin content");
     assert_eq!(content.lifecycle, ContentLifecycle::Ready);
     let capabilities = content.capabilities;
     assert!(capabilities.focusable);
@@ -1308,6 +1322,16 @@ fn generation_owned_retained_window_lifecycle_is_revision_checked() {
     assert!(capabilities.close_view);
     assert!(!capabilities.editable);
     assert!(!capabilities.clone_view);
+    assert_eq!(
+        graph.require_clone_view(content.id),
+        Err(crate::ui::window::WindowError::Unsupported("clone-view"))
+    );
+    let before_clone = graph.clone();
+    assert_eq!(
+        graph.create_view(content.id, "plugin.demo", 7),
+        Err(crate::ui::window::WindowError::Unsupported("clone-view"))
+    );
+    assert_eq!(graph, before_clone);
     assert!(!capabilities.tile);
     assert!(!capabilities.fullscreen);
     assert!(!capabilities.stop_resource);

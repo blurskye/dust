@@ -82,6 +82,10 @@ pub enum AppEffect {
     Layout(LayoutAction),
     SurfaceFocus(FocusDirection),
     WindowList,
+    WindowClone {
+        target: String,
+        axis: crate::editor::Axis,
+    },
     RetainedUiFocus(isize),
     RetainedUiScroll(isize),
     RetainedUiActivate,

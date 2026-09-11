@@ -771,6 +771,30 @@ fn content_capabilities_reject_clone_focus_placement_and_close_before_mutation()
         Err(WindowError::Unsupported("clone-view"))
     );
 
+    let external_tui = graph
+        .create_content(
+            ContentTypeId::new("terminal.external-tui").expect("type"),
+            ContentAdapterKind::ExternalTui,
+            "external tui".into(),
+            false,
+            "native",
+            1,
+        )
+        .expect("external tui content");
+    graph
+        .create_view(external_tui, "native", 1)
+        .expect("authoritative external tui view");
+    let before_external_clone = graph.clone();
+    assert_eq!(
+        graph.require_clone_view(external_tui),
+        Err(WindowError::Unsupported("clone-view"))
+    );
+    assert_eq!(
+        graph.create_view(external_tui, "native", 1),
+        Err(WindowError::Unsupported("clone-view"))
+    );
+    assert_eq!(graph, before_external_clone);
+
     let text = graph
         .create_content(
             ContentTypeId::new("editor.text").expect("type"),

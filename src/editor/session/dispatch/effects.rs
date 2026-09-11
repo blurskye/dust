@@ -10180,6 +10180,11 @@ impl InteractiveApplication {
             AppEffect::ExtendMouseSelection => self.apply_mouse_cursor(true),
             AppEffect::Layout(action) => self.apply_layout_action(action),
             AppEffect::SurfaceFocus(direction) => self.focus_surface(direction),
+            AppEffect::WindowClone { target, axis } => {
+                if let Err(error) = self.clone_graph_window(&target, axis) {
+                    self.show_error(error);
+                }
+            }
             AppEffect::WindowList => {
                 let graph = self.window_session.graph();
                 let items = graph

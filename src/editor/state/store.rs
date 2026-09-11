@@ -410,33 +410,53 @@ impl EditorState {
     }
 
     pub fn split_active(&mut self, axis: Axis, ratio: u16) -> Result<ViewId, &'static str> {
+        let tab = self.active_tab.ok_or("no active tab")?;
+        let pane = self.tabs.get(tab).ok_or("active tab is stale")?.focused;
+        self.clone_pane(pane, axis, ratio)
+    }
+
+    pub fn clone_pane(
+        &mut self,
+        source_pane: PaneId,
+        axis: Axis,
+        ratio: u16,
+    ) -> Result<ViewId, &'static str> {
         if !(100..=900).contains(&ratio) {
             return Err("split ratio must be between 100 and 900");
         }
-        let tab_id = self.active_tab.ok_or("no active tab")?;
-        let tab = self.tabs.get(tab_id).ok_or("active tab is stale")?;
-        let focused = tab.focused;
+        let tab_id = self
+            .tabs
+            .iter()
+            .find_map(|(id, tab)| pane_ids(&tab.root).contains(&source_pane).then_some(id))
+            .ok_or("source pane is absent from the editor")?;
+        let tab = self.tabs.get(tab_id).ok_or("source tab is stale")?;
         if self.panes.len() >= MAXIMUM_LAYOUT_PANES {
             return Err("layout pane ceiling reached");
         }
-        if pane_depth(&tab.root, focused, 1).is_some_and(|depth| depth >= MAXIMUM_LAYOUT_DEPTH) {
+        if pane_depth(&tab.root, source_pane, 1).is_some_and(|depth| depth >= MAXIMUM_LAYOUT_DEPTH)
+        {
             return Err("layout depth ceiling reached");
         }
-        let source_view = self.panes.get(focused).ok_or("focused pane is stale")?.view;
+        let source_view = self
+            .panes
+            .get(source_pane)
+            .ok_or("source pane is stale")?
+            .view;
         let cloned = self
             .views
             .get(source_view)
-            .ok_or("active view is stale")?
+            .ok_or("source view is stale")?
             .clone();
         let view = self.views.insert(cloned);
         let pane = self.panes.insert(Pane { view });
-        let tab = self.tabs.get_mut(tab_id).ok_or("active tab is stale")?;
-        if !split_leaf(&mut tab.root, focused, axis, ratio, pane) {
+        let tab = self.tabs.get_mut(tab_id).ok_or("source tab is stale")?;
+        if !split_leaf(&mut tab.root, source_pane, axis, ratio, pane) {
             self.panes.remove(pane);
             self.views.remove(view);
-            return Err("focused pane is absent from layout");
+            return Err("source pane is absent from layout");
         }
         tab.focused = pane;
+        self.active_tab = Some(tab_id);
         self.active_view = Some(view);
         self.mark_window_changed();
         Ok(view)

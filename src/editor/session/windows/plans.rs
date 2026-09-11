@@ -5,7 +5,7 @@ use crate::ui::window::{ContentTypeId, WindowTarget};
 use crate::{
     editor::{EditorOperation, EditorWindowVersion, LayoutNode},
     extensions::PluginCatalogVersion,
-    ui::window::{WindowId, WindowPlacement},
+    ui::window::{ContentId, ViewId as WindowViewId, WindowId, WindowPlacement},
 };
 pub(in crate::editor::session) use commands::{
     CommandEffect, CommandError, CommandPolicy, WindowCommand,
@@ -31,6 +31,7 @@ pub(in crate::editor::session) struct WindowPlan {
     catalog: PluginCatalogVersion,
     operations: Vec<EditorOperation>,
     target: Option<WindowId>,
+    clone_source: Option<(WindowId, WindowViewId, ContentId)>,
     focus_editor: bool,
     hide_dashboard: bool,
     native: Option<commands::NativeAction>,
@@ -104,6 +105,7 @@ impl WindowSession {
             catalog,
             operations: Vec::new(),
             target: None,
+            clone_source: None,
             focus_editor: false,
             hide_dashboard: false,
             native: None,
@@ -122,6 +124,22 @@ impl WindowSession {
             || &plan.catalog != catalog
         {
             return Err("window plan owner, editor or catalog source is stale".into());
+        }
+        if let Some((window, view, content)) = plan.clone_source
+            && (self
+                .core
+                .graph
+                .window(window)
+                .map(|descriptor| descriptor.view)
+                != Some(view)
+                || self
+                    .core
+                    .graph
+                    .view(view)
+                    .map(|descriptor| descriptor.content)
+                    != Some(content))
+        {
+            return Err("window clone source identity is stale".into());
         }
         Ok(())
     }

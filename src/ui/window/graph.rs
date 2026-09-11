@@ -155,6 +155,12 @@ impl WindowGraph {
         self.require_content_capability(content, "editing", |capabilities| capabilities.editable)
     }
 
+    pub fn require_clone_view(&self, content: ContentId) -> Result<(), WindowError> {
+        self.require_content_capability(content, "clone-view", |capabilities| {
+            capabilities.clone_view
+        })
+    }
+
     pub fn require_persist_descriptor(&self, content: ContentId) -> Result<(), WindowError> {
         self.require_content_capability(content, "persist-descriptor", |capabilities| {
             capabilities.persist_descriptor
