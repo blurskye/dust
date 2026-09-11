@@ -1119,6 +1119,7 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "terminal.focus_active" = "Focus visible terminal panel"
 "terminal.cycle" = "Cycle selected terminal"
 "terminal.resize" = "Resize terminal window"
+"window.list" = "List all windows"
 "window.dock" = "Dock native window"
 "window.float" = "Float native window"
 "window.fullscreen" = "Fullscreen native window"

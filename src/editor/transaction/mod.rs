@@ -125,6 +125,9 @@ pub enum EditorOperation {
         offset: isize,
         wrap: bool,
     },
+    FocusTabId {
+        tab: crate::editor::TabId,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -503,6 +506,9 @@ fn apply_operation(
             .map_err(|error| TransactionError::Layout(error.into()))?,
         EditorOperation::FocusTab { offset, wrap } => state
             .focus_tab(*offset, *wrap)
+            .map_err(|error| TransactionError::Layout(error.into()))?,
+        EditorOperation::FocusTabId { tab } => state
+            .activate_tab(*tab)
             .map_err(|error| TransactionError::Layout(error.into()))?,
     }
     Ok(())

@@ -742,6 +742,7 @@ impl WindowSession {
         }
         rules
             .into_iter()
+            // These are semantic placement defaults, never live content descriptors.
             .filter_map(|(content_type, placement)| {
                 persisted_window_placement(placement).map(|placement| PersistedWindowRule {
                     content_type: content_type.into(),

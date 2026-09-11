@@ -137,11 +137,17 @@ impl WindowSession {
             .graph
             .window(window)
             .ok_or("focus target is closed")?;
-        if Some(descriptor.tab) != self.core.graph.active_tab()
-            || !descriptor.focusable
-            || descriptor.placement == WindowPlacement::Hidden
-        {
-            return Err("focus target is hidden or outside the active tab".into());
+        if !descriptor.focusable || descriptor.placement == WindowPlacement::Hidden {
+            return Err("focus target is hidden or not focusable".into());
+        }
+        if Some(descriptor.tab) != self.core.graph.active_tab() {
+            let editor_tab = self
+                .core
+                .editor
+                .editor_tab_for(descriptor.tab)
+                .ok_or("focus target tab is not owned by the active editor")?;
+            plan.operations
+                .push(EditorOperation::FocusTabId { tab: editor_tab });
         }
         plan.target = Some(window);
         if let Some(pane) = self.core.editor.pane_for_window(window) {
@@ -235,8 +241,14 @@ impl WindowSession {
             descriptions.signature.dashboard_visible = source.active_tab().is_none();
         }
         let mut candidate = self.prepare_reconcile(&source, scratch, descriptions)?;
-        if plan.focus_editor && candidate.core.graph.focused() != plan.target {
-            return Err("editor focus transition did not select the planned target".into());
+        if let Some(target) = plan.target
+            && candidate.core.graph.focused() != Some(target)
+        {
+            candidate
+                .core
+                .graph
+                .focus(target)
+                .map_err(|error| error.to_string())?;
         }
         if plan.hide_dashboard {
             candidate.dashboard = Some(false);

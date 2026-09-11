@@ -2377,11 +2377,63 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
     );
     app.process_effect(crate::editor::AppEffect::TerminalFocus(1));
 
+    let visible_placement = app
+        .window_session
+        .graph()
+        .window(terminal_ids.window)
+        .expect("terminal window")
+        .placement;
     app.process_effect(crate::editor::AppEffect::TerminalClose);
+    let close = app.input.prompt().expect("running terminal close prompt");
+    assert_eq!(close.kind, crate::ui::PromptKind::TerminalClose);
+    let confirmation = close.confirmation.as_ref().expect("close actions");
+    assert_eq!(confirmation.positive_label, "Stop");
+    assert_eq!(confirmation.negative_label, "Hide");
+    assert_eq!(confirmation.selected, crate::ui::ConfirmationChoice::No);
+    app.close_prompt();
+    assert!(app.terminal_session.contains(PtyId(1)));
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(terminal_ids.window)
+            .expect("cancelled close keeps window")
+            .placement,
+        visible_placement
+    );
+
+    app.process_effect(crate::editor::AppEffect::TerminalClose);
+    app.submit_prompt();
+    assert!(app.terminal_session.contains(PtyId(1)));
+    assert_eq!(
+        app.window_session.native_ids().terminal(1),
+        Some(terminal_ids)
+    );
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(terminal_ids.window)
+            .expect("hidden terminal keeps identity")
+            .placement,
+        WindowPlacement::Hidden
+    );
+    app.process_effect(crate::editor::AppEffect::TerminalToggle);
+    assert_eq!(
+        app.window_session.native_ids().terminal(1),
+        Some(terminal_ids)
+    );
+
+    app.process_effect(crate::editor::AppEffect::TerminalClose);
+    assert!(app.terminal_session.select(PtyId(2)));
+    app.input
+        .select_confirmation(crate::ui::ConfirmationChoice::Yes);
+    app.submit_prompt();
     assert!(!app.terminal_session.contains(PtyId(1)));
     assert_eq!(app.terminal_session.selected(), Some(PtyId(2)));
     assert!(app.ui.terminal_panel.is_some());
     app.process_effect(crate::editor::AppEffect::TerminalClose);
+    app.input
+        .select_confirmation(crate::ui::ConfirmationChoice::Yes);
+    app.submit_prompt();
     assert!(app.terminal_session.len() == 0);
     assert!(
         app.terminal_session.resolve(&original_key).is_none(),
@@ -2501,6 +2553,16 @@ fn terminal_preflight_close_and_capture_keep_original_pty_and_geometry() {
         thread::sleep(Duration::from_millis(2));
     }
     driver.terminal_close();
+    assert_eq!(
+        driver
+            .projection()
+            .terminal_panel
+            .as_ref()
+            .expect("stopping terminal remains projected")
+            .tabs[0]
+            .phase,
+        crate::ui::TerminalPhase::Stopping
+    );
     while driver.terminal_pending() != 0 {
         driver.pump_terminal();
         assert!(Instant::now() < deadline);

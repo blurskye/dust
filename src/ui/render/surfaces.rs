@@ -941,10 +941,16 @@ pub(super) fn render_prompt(
                 frame.grid.put_text_clipped(
                     geometry.left,
                     geometry.top.saturating_add(1),
-                    if confirmation.selected == crate::ui::ConfirmationChoice::Yes {
-                        "[ Yes ]  No"
+                    &if confirmation.selected == crate::ui::ConfirmationChoice::Yes {
+                        format!(
+                            "[ {} ]  {}",
+                            confirmation.positive_label, confirmation.negative_label
+                        )
                     } else {
-                        "Yes  [ No ]"
+                        format!(
+                            "{}  [ {} ]",
+                            confirmation.positive_label, confirmation.negative_label
+                        )
                     },
                     Style::Selection,
                     right,
@@ -1098,11 +1104,11 @@ pub(super) fn render_prompt(
             frame.cursor = None;
             return;
         }
-        let yes = "[ Yes ]";
-        let no = "[ No ]";
-        let buttons_width = text_width(yes, config.editor.ambiguous_width)
+        let positive = format!("[ {} ]", confirmation.positive_label);
+        let negative = format!("[ {} ]", confirmation.negative_label);
+        let buttons_width = text_width(&positive, config.editor.ambiguous_width)
             .saturating_add(1)
-            .saturating_add(text_width(no, config.editor.ambiguous_width));
+            .saturating_add(text_width(&negative, config.editor.ambiguous_width));
         let buttons_x = geometry.left.saturating_add(
             geometry
                 .width
@@ -1113,7 +1119,7 @@ pub(super) fn render_prompt(
         let no_x = frame.grid.put_text_clipped(
             buttons_x,
             button_y,
-            yes,
+            &positive,
             if confirmation.selected == crate::ui::ConfirmationChoice::Yes {
                 Style::Selection
             } else {
@@ -1124,7 +1130,7 @@ pub(super) fn render_prompt(
         frame.grid.put_text_clipped(
             no_x.saturating_add(1),
             button_y,
-            no,
+            &negative,
             if confirmation.selected == crate::ui::ConfirmationChoice::No {
                 Style::Selection
             } else {

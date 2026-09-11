@@ -159,6 +159,7 @@ impl InteractiveApplication {
                             | PromptKind::ExplorerDelete
                             | PromptKind::ExplorerRename
                             | PromptKind::PluginConfirmation
+                            | PromptKind::TerminalClose
                     )
                 }) {
                     self.close_prompt();

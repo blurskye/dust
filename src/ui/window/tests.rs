@@ -755,6 +755,17 @@ fn content_capabilities_reject_clone_focus_placement_and_close_before_mutation()
     graph
         .require_stop_resource(terminal)
         .expect("terminal declares stop-resource");
+    graph
+        .require_selection(terminal)
+        .expect("terminal selection is supported");
+    assert_eq!(
+        graph.require_editing(terminal),
+        Err(WindowError::Unsupported("editing"))
+    );
+    assert_eq!(
+        graph.require_persist_descriptor(terminal),
+        Err(WindowError::Unsupported("persist-descriptor"))
+    );
     assert_eq!(
         graph.create_view(terminal, "native", 1),
         Err(WindowError::Unsupported("clone-view"))
@@ -776,6 +787,11 @@ fn content_capabilities_reject_clone_focus_placement_and_close_before_mutation()
     graph
         .create_view(text, "native", 1)
         .expect("text declares clone-view");
+    graph.require_selection(text).expect("text selection");
+    graph.require_editing(text).expect("text editing");
+    graph
+        .require_persist_descriptor(text)
+        .expect("text descriptor persistence");
 
     let plugin = graph
         .create_content(
@@ -790,6 +806,15 @@ fn content_capabilities_reject_clone_focus_placement_and_close_before_mutation()
     let plugin_view = graph
         .create_view(plugin, "plugin", 1)
         .expect("first plugin view");
+    graph.require_selection(plugin).expect("plugin selection");
+    assert_eq!(
+        graph.require_editing(plugin),
+        Err(WindowError::Unsupported("editing"))
+    );
+    assert_eq!(
+        graph.require_persist_descriptor(plugin),
+        Err(WindowError::Unsupported("persist-descriptor"))
+    );
     assert_eq!(
         graph.require_stop_resource(plugin),
         Err(WindowError::Unsupported("stop-resource"))

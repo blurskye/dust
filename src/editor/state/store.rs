@@ -533,6 +533,12 @@ impl EditorState {
             .map(|(_, _, pane)| pane))
     }
 
+    pub fn activate_tab(&mut self, tab: TabId) -> Result<(), &'static str> {
+        let pane = self.tabs.get(tab).ok_or("target tab is stale")?.focused;
+        self.active_tab = Some(tab);
+        self.set_focused_pane(tab, pane)
+    }
+
     pub fn focus_tab(&mut self, offset: isize, wrap: bool) -> Result<(), &'static str> {
         let tabs = self.tabs.keys().collect::<Vec<_>>();
         let active = self.active_tab.ok_or("no active tab")?;

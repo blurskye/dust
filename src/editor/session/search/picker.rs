@@ -26,6 +26,7 @@ pub(in crate::editor::session) enum PickerPayload {
     ProposalFile(usize),
     WorkspaceRoot(crate::workspace::RootId),
     Terminal(crate::editor::session::terminal::TerminalKey),
+    Window(crate::ui::window::WindowId),
     LspSession(String),
     Debug(crate::editor::session::debugger::DebugKey),
     PersistedLocation(PersistedLocation),

@@ -5,6 +5,14 @@ pub(super) fn register_commands(
 ) -> Result<(), CommandError> {
     register(
         registry,
+        "window.list",
+        "List all native and extension windows",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_| Ok(AppEffect::WindowList),
+    )?;
+    register(
+        registry,
         "window.dock",
         "Dock an ordinary native window",
         ContextRequirement::Application,

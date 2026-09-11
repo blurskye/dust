@@ -2,6 +2,80 @@ use super::driver::TestSession;
 use crate::ui::Style;
 
 #[test]
+fn universal_window_switcher_reports_type_lifecycle_location_and_owner() {
+    let mut session = TestSession::new(crate::config::load_bundled_config());
+    session.new_buffer();
+    session.reconcile_windows();
+    session.window_list();
+    let picker = session.projection().picker.as_ref().expect("window picker");
+    assert_eq!(picker.title, "Windows");
+    let editor = picker
+        .rows
+        .iter()
+        .find(|row| row.source == "builtin.editor")
+        .expect("native editor window");
+    assert!(editor.detail.contains("builtin.text"), "{}", editor.detail);
+    assert!(editor.detail.contains("Ready"), "{}", editor.detail);
+    assert!(editor.detail.contains("Tiled"), "{}", editor.detail);
+    assert!(editor.detail.contains("tab "), "{}", editor.detail);
+}
+
+#[test]
+fn universal_window_switcher_focuses_an_exact_window_across_editor_tabs() {
+    let mut session = TestSession::new(crate::config::load_bundled_config());
+    session.new_buffer();
+    session.reconcile_windows();
+    let original = session.focused_window().expect("first editor window");
+    let original_tab = session.active_tab().expect("first editor tab");
+    session.new_tab();
+    assert_ne!(session.active_tab(), Some(original_tab));
+    session.window_list();
+    let target = format!("window:{}", original.0);
+    let index = session
+        .projection()
+        .picker
+        .as_ref()
+        .expect("window picker")
+        .rows
+        .iter()
+        .position(|row| row.id == target)
+        .expect("original window row");
+    for _ in 0..index {
+        session.key("down");
+    }
+    session.key("enter");
+    assert_eq!(session.active_tab(), Some(original_tab));
+    assert_eq!(session.focused_window(), Some(original));
+}
+
+#[test]
+fn tiny_terminal_projection_clips_safely_and_restores_the_same_sessions() {
+    let mut session = TestSession::new(crate::config::load_bundled_config());
+    session.new_buffer();
+    session.terminal_fixture();
+    session.resize(3, 3);
+    let tiny = session.frame();
+    if let Some((x, y, _)) = tiny.cursor {
+        assert!(x < 3 && y < 3);
+    }
+    session.resize(80, 24);
+    let restored = session.frame();
+    assert_eq!(
+        session
+            .projection()
+            .terminal_panel
+            .as_ref()
+            .expect("terminal projection restored")
+            .tabs
+            .len(),
+        2
+    );
+    if let Some((x, y, _)) = restored.cursor {
+        assert!(x < 80 && y < 24);
+    }
+}
+
+#[test]
 fn stale_contribution_policy_is_rejected_before_window_graph_publication() {
     let mut session = TestSession::new(crate::config::load_bundled_config());
     session.new_buffer();

@@ -299,6 +299,12 @@ impl EditorWindowBridge {
     pub(in crate::editor::session) fn tab_for(&self, tab: TabId) -> Option<WorkspaceTabId> {
         self.tabs.get(&tab).copied()
     }
+
+    pub(in crate::editor::session) fn editor_tab_for(&self, tab: WorkspaceTabId) -> Option<TabId> {
+        self.tabs
+            .iter()
+            .find_map(|(editor, candidate)| (*candidate == tab).then_some(*editor))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

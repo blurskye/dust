@@ -473,6 +473,38 @@ fn staged_window_work_rejects_editor_and_catalog_changes_without_a_window_epoch_
 }
 
 #[test]
+fn cross_tab_focus_plan_targets_the_exact_editor_tab_without_eager_mutation() {
+    use crate::editor::{EditorOperation, EditorTransaction, TransactionId};
+    let (mut state, mut windows) = editor_fixture();
+    let catalog = crate::extensions::PluginContributionCatalog::default();
+    let original_window = windows.graph().focused().expect("first tab window");
+    state
+        .apply_transaction(
+            &EditorTransaction::new(TransactionId(1)).with_operation(EditorOperation::NewTab),
+        )
+        .unwrap();
+    let candidate = windows
+        .prepare_editor(&(&state).into(), "[scratch]")
+        .unwrap();
+    windows.commit(candidate).unwrap();
+    let active_before = state.active_tab;
+    let graph_before = windows.graph().clone();
+    let plan = windows
+        .plan_focus(original_window, &state.window_version(), catalog.version())
+        .unwrap();
+    assert!(matches!(
+        plan.operations().first(),
+        Some(EditorOperation::FocusTabId { tab }) if Some(*tab) != active_before
+    ));
+    assert!(matches!(
+        plan.operations().get(1),
+        Some(EditorOperation::FocusPaneId { .. })
+    ));
+    assert_eq!(state.active_tab, active_before);
+    assert_eq!(windows.graph(), &graph_before);
+}
+
+#[test]
 fn focus_capture_survives_geometry_invalidation_but_not_reset_or_another_editor() {
     let (state, mut windows) = editor_fixture();
     let catalog = crate::extensions::PluginContributionCatalog::default();

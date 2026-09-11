@@ -3552,15 +3552,26 @@ impl InteractiveApplication {
             AppEffect::TerminalYank { line } => self.yank_terminal_text(line),
             AppEffect::TerminalClose => {
                 if let Some(id) = self.terminal_session.selected() {
-                    match self
-                        .window_session
-                        .require_native_stop(NativeSurfaceTarget::Terminal(id.0))
-                    {
-                        Ok(()) => {
-                            self.terminal_session.cancel_open();
-                            self.retire_terminal(id, true);
+                    if self.terminal_session.stopping(id) {
+                        self.show_error("terminal stop is already pending");
+                    } else if self.terminal_session.requires_close_confirmation(id) {
+                        if self.input.prompt().is_some() {
+                            self.show_error(
+                                "close the active prompt before closing a running terminal",
+                            );
+                        } else if self.terminal_session.begin_close(id) {
+                            self.open_confirmation_actions(
+                                PromptKind::TerminalClose,
+                                format!("Terminal #{} is active", id.0),
+                                "Hide this terminal or stop its process?".into(),
+                                crate::ui::ConfirmationChoice::No,
+                                "Stop",
+                                "Hide",
+                            );
                         }
-                        Err(error) => self.show_error(error),
+                    } else {
+                        self.terminal_session.cancel_open();
+                        self.retire_terminal(id, true);
                     }
                 } else {
                     self.terminal_session.cancel_open();
@@ -4289,6 +4300,9 @@ impl InteractiveApplication {
         if kind != PromptKind::ExplorerDelete {
             self.cancel_explorer_confirmation();
         }
+        if kind != PromptKind::TerminalClose {
+            self.terminal_session.cancel_close();
+        }
         self.reconcile_editor_windows();
         self.input.hold_focus(self.window_session.capture_focus());
         let active = self.state.active_view.map(|view| {
@@ -4310,6 +4324,17 @@ impl InteractiveApplication {
         title: String,
         message: String,
         selected: crate::ui::ConfirmationChoice,
+    ) {
+        self.open_confirmation_actions(kind, title, message, selected, "Yes", "No");
+    }
+    pub(super) fn open_confirmation_actions(
+        &mut self,
+        kind: PromptKind,
+        title: String,
+        message: String,
+        selected: crate::ui::ConfirmationChoice,
+        positive_label: &str,
+        negative_label: &str,
     ) {
         self.open_prompt(kind, String::new());
         let binding = |command: &str| {
@@ -4339,8 +4364,14 @@ impl InteractiveApplication {
             hints.push(format!("{key} cancel"));
         }
         let hint = hints.join(" · ");
-        self.input
-            .configure_confirmation(title, message, selected, hint);
+        self.input.configure_confirmation_actions(
+            title,
+            message,
+            selected,
+            positive_label,
+            negative_label,
+            hint,
+        );
         self.project_input_prompt();
         self.reconcile_editor_windows();
     }
@@ -4354,6 +4385,13 @@ impl InteractiveApplication {
                 .answer_confirmation(crate::extensions::PluginConfirmationAnswer::Cancelled);
         }
         self.cancel_explorer_rename_prompt();
+        if self
+            .input
+            .prompt()
+            .is_some_and(|prompt| prompt.kind == PromptKind::TerminalClose)
+        {
+            self.terminal_session.cancel_close();
+        }
         if self
             .input
             .prompt()
@@ -4401,6 +4439,41 @@ impl InteractiveApplication {
             request.message,
             selected,
         );
+    }
+    pub(super) fn submit_terminal_close(&mut self, selected: crate::ui::ConfirmationChoice) {
+        let Some(key) = self.terminal_session.take_close() else {
+            self.close_prompt();
+            return;
+        };
+        let Some(id) = self.terminal_session.resolve(&key) else {
+            self.close_prompt();
+            return;
+        };
+        // Restore the pre-prompt focus first; Hide or Stop then performs the
+        // accepted final focus transition without the prompt lease undoing it.
+        self.close_prompt();
+        match selected {
+            crate::ui::ConfirmationChoice::Yes => {
+                match self
+                    .window_session
+                    .require_native_stop(NativeSurfaceTarget::Terminal(id.0))
+                {
+                    Ok(()) => {
+                        self.terminal_session.cancel_open();
+                        self.retire_terminal(id, true);
+                    }
+                    Err(error) => self.show_error(error),
+                }
+            }
+            crate::ui::ConfirmationChoice::No => {
+                if let Err(error) = self
+                    .window_session
+                    .place_native(NativeSurfaceTarget::Terminal(id.0), WindowPlacement::Hidden)
+                {
+                    self.show_error(error);
+                }
+            }
+        }
     }
     pub(super) fn submit_plugin_confirmation(&mut self, selected: crate::ui::ConfirmationChoice) {
         let answer = match selected {
@@ -4509,6 +4582,7 @@ impl InteractiveApplication {
                 | PromptKind::ExplorerDelete
                 | PromptKind::ExplorerRename
                 | PromptKind::PluginConfirmation
+                | PromptKind::TerminalClose
         ) {
             self.record_prompt_history(prompt.kind, &prompt.input);
         }
@@ -4560,6 +4634,11 @@ impl InteractiveApplication {
                         .map_or(crate::ui::ConfirmationChoice::No, |state| state.selected),
                 );
             }
+            PromptKind::TerminalClose => self.submit_terminal_close(
+                prompt
+                    .confirmation
+                    .map_or(crate::ui::ConfirmationChoice::No, |state| state.selected),
+            ),
             PromptKind::ExplorerRename => self.submit_explorer_rename_prompt(&prompt.input),
             PromptKind::SearchForward | PromptKind::SearchBackward => {
                 if prompt.input.is_empty() {
@@ -5235,9 +5314,26 @@ impl InteractiveApplication {
         self.debugger_session.reject_terminals(reason);
     }
 
-    pub(super) fn retire_terminal(&mut self, id: PtyId, _request_close: bool) {
+    pub(super) fn retire_terminal(&mut self, id: PtyId, request_close: bool) {
         let focused = self.window_session.focused_terminal() == Some(id.0);
-        self.terminal_session.close(id);
+        if request_close {
+            match self.terminal_session.request_stop(id) {
+                Ok(true) => {
+                    if focused {
+                        self.set_terminal_focus(false);
+                    }
+                    self.sync_terminal_panel();
+                    return;
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    self.show_error(error);
+                    return;
+                }
+            }
+        } else {
+            self.terminal_session.close(id);
+        }
         if let Some(reply) = self.debugger_session.take_terminal(&id) {
             let _ = reply.respond(
                 false,
@@ -5582,6 +5678,13 @@ impl InteractiveApplication {
                             self.show_error(error);
                         }
                     }
+                }
+                TerminalUpdate::StopUnknown(id, message) => {
+                    if let Some(reply) = self.debugger_session.take_terminal(&id) {
+                        let _ =
+                            reply.respond(false, Some("terminal stop outcome is unknown".into()));
+                    }
+                    self.show_error(format!("terminal stop outcome is unknown: {message}"));
                 }
                 TerminalUpdate::Failed(id, message) => {
                     if let Some(reply) = self.debugger_session.take_terminal(&id) {
@@ -7242,6 +7345,20 @@ impl InteractiveApplication {
                     self.sync_terminal_panel();
                 } else {
                     self.show_error(self.message("terminal_missing", &[]));
+                }
+            }
+            Some(PickerPayload::Window(window)) => {
+                self.reconcile_editor_windows();
+                let result = self
+                    .window_session
+                    .plan_focus(
+                        window,
+                        &self.state.window_version(),
+                        self.extension.contributions().version(),
+                    )
+                    .and_then(|plan| self.apply_window_plan(plan));
+                if let Err(error) = result {
+                    self.show_error(error);
                 }
             }
             Some(PickerPayload::LspSession(key)) => self.select_lsp_session(&key),
@@ -10063,6 +10180,32 @@ impl InteractiveApplication {
             AppEffect::ExtendMouseSelection => self.apply_mouse_cursor(true),
             AppEffect::Layout(action) => self.apply_layout_action(action),
             AppEffect::SurfaceFocus(direction) => self.focus_surface(direction),
+            AppEffect::WindowList => {
+                let graph = self.window_session.graph();
+                let items = graph
+                    .windows()
+                    .filter_map(|window| {
+                        let content = graph.content_for_window(window.id)?;
+                        Some((
+                            PickerItem {
+                                id: PickerItemId(format!("window:{}", window.id.0)),
+                                label: content.title.clone(),
+                                detail: format!(
+                                    "{} · {:?} · {:?} · tab {}",
+                                    content.content_type.as_str(),
+                                    content.lifecycle,
+                                    window.placement,
+                                    window.tab.0
+                                ),
+                                source: content.owner.clone(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::Window(window.id),
+                        ))
+                    })
+                    .collect();
+                self.install_picker("Windows".into(), items);
+            }
             AppEffect::RetainedUiFocus(delta) => {
                 self.apply_retained_ui_interaction(PluginUiInteraction::Focus(delta));
             }

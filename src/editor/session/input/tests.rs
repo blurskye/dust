@@ -38,10 +38,12 @@ fn prompt_edits_preserve_grapheme_boundaries_and_history_policy() {
 fn confirmation_choice_is_typed_and_does_not_accept_text() {
     let mut input = InputSession::new(10);
     input.open_prompt(PromptKind::ExplorerDelete, String::new(), None);
-    assert!(input.configure_confirmation(
+    assert!(input.configure_confirmation_actions(
         "Delete?".into(),
         "target".into(),
         crate::ui::ConfirmationChoice::No,
+        "Yes",
+        "No",
         String::new(),
     ));
     input.prompt_insert("yes");

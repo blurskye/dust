@@ -62,6 +62,7 @@ struct Open {
 pub(in crate::editor::session) enum TerminalUpdate {
     Started(PtyId),
     Closed(PtyId),
+    StopUnknown(PtyId, String),
     Failed(PtyId, String),
     Changed,
 }
@@ -82,6 +83,7 @@ pub(super) struct TerminalSession {
         TerminalIntent,
         Option<crate::debugger::DapTerminalReply>,
     )>,
+    close_intent: Option<TerminalKey>,
     closed: bool,
 }
 impl TerminalSession {
@@ -99,6 +101,7 @@ impl TerminalSession {
             policy: policy.clone(),
             retired: HashSet::new(),
             validation: None,
+            close_intent: None,
             closed: false,
         }
     }
@@ -150,13 +153,34 @@ impl TerminalSession {
     }
     #[cfg(test)]
     pub(in crate::editor::session) fn key(&self, id: PtyId) -> Option<TerminalKey> {
+        self.key_for(id)
+    }
+    pub(in crate::editor::session) fn resolve(&self, key: &TerminalKey) -> Option<PtyId> {
+        (Arc::ptr_eq(&key.owner, &self.owner) && self.contains(key.id)).then_some(key.id)
+    }
+    pub(in crate::editor::session) fn requires_close_confirmation(&self, id: PtyId) -> bool {
+        self.tabs
+            .get(&id)
+            .is_some_and(|terminal| terminal.running || terminal.pty.is_some())
+    }
+    pub(in crate::editor::session) fn begin_close(&mut self, id: PtyId) -> bool {
+        let Some(key) = self.key_for(id) else {
+            return false;
+        };
+        self.close_intent = Some(key);
+        true
+    }
+    pub(in crate::editor::session) fn cancel_close(&mut self) {
+        self.close_intent = None;
+    }
+    pub(in crate::editor::session) fn take_close(&mut self) -> Option<TerminalKey> {
+        self.close_intent.take()
+    }
+    fn key_for(&self, id: PtyId) -> Option<TerminalKey> {
         self.contains(id).then(|| TerminalKey {
             owner: self.owner.clone(),
             id,
         })
-    }
-    pub(in crate::editor::session) fn resolve(&self, key: &TerminalKey) -> Option<PtyId> {
-        (Arc::ptr_eq(&key.owner, &self.owner) && self.contains(key.id)).then_some(key.id)
     }
     pub(in crate::editor::session) fn descriptions(&self) -> Vec<(u64, String, ContentLifecycle)> {
         let mut rows = self
@@ -167,6 +191,7 @@ impl TerminalSession {
                     crate::ui::TerminalPhase::Preflight => ContentLifecycle::Preflight,
                     crate::ui::TerminalPhase::Starting => ContentLifecycle::Starting,
                     crate::ui::TerminalPhase::Running => ContentLifecycle::Running,
+                    crate::ui::TerminalPhase::Stopping => ContentLifecycle::Stopping,
                     crate::ui::TerminalPhase::Exited => ContentLifecycle::Exited,
                     crate::ui::TerminalPhase::Failed => ContentLifecycle::Failed,
                 };
@@ -193,6 +218,7 @@ impl TerminalSession {
                             crate::ui::TerminalPhase::Preflight => "preflight",
                             crate::ui::TerminalPhase::Starting => "starting",
                             crate::ui::TerminalPhase::Running => "running",
+                            crate::ui::TerminalPhase::Stopping => "stopping",
                             crate::ui::TerminalPhase::Exited => "exited",
                             crate::ui::TerminalPhase::Failed => "failed",
                         },
@@ -357,6 +383,7 @@ impl TerminalSession {
                 ),
                 pending: Some(source.open),
                 running: false,
+                stopping: false,
                 exit_code: None,
                 truncated: false,
                 mode: TerminalPanelMode::Input,
@@ -465,11 +492,36 @@ impl TerminalSession {
         tab.pending = None;
         Ok(id)
     }
+    pub(in crate::editor::session) fn request_stop(&mut self, id: PtyId) -> Result<bool, String> {
+        let next_revision = self
+            .revision
+            .and_then(|revision| revision.checked_add(1))
+            .ok_or("terminal revision exhausted")?;
+        let tab = self.tabs.get_mut(&id).ok_or("terminal closed")?;
+        let Some(pty) = tab.pty else {
+            self.close(id);
+            return Ok(false);
+        };
+        if tab.stopping {
+            return Ok(true);
+        }
+        self.service.close(pty).map_err(|error| error.to_string())?;
+        tab.stopping = true;
+        tab.running = false;
+        self.revision = Some(next_revision);
+        Ok(true)
+    }
+    pub(in crate::editor::session) fn stopping(&self, id: PtyId) -> bool {
+        self.tabs.get(&id).is_some_and(|terminal| terminal.stopping)
+    }
     pub(in crate::editor::session) fn close(&mut self, id: PtyId) -> bool {
         self.preflights.retain(|_, key| key.id != id);
         let Some(tab) = self.tabs.remove(&id) else {
             return false;
         };
+        if self.close_intent.as_ref().is_some_and(|key| key.id == id) {
+            self.close_intent = None;
+        }
         if let Some(pty) = tab.pty {
             let _ = self.service.close(pty);
             self.retired.insert(pty);
@@ -483,6 +535,7 @@ impl TerminalSession {
     pub(in crate::editor::session) fn reset(&mut self) {
         self.preflights.clear();
         self.cancel_open();
+        self.cancel_close();
         let ids = self.tabs.keys().copied().collect::<Vec<_>>();
         for id in ids {
             self.close(id);
@@ -578,8 +631,10 @@ impl TerminalSession {
             let tab = self.tabs.get_mut(&id).expect("located source");
             match event {
                 PtyEvent::Started { .. } => {
-                    tab.running = true;
-                    updates.push(TerminalUpdate::Started(id));
+                    if !tab.stopping {
+                        tab.running = true;
+                        updates.push(TerminalUpdate::Started(id));
+                    }
                 }
                 PtyEvent::Output {
                     bytes, truncated, ..
@@ -600,11 +655,12 @@ impl TerminalSession {
                     updates.push(TerminalUpdate::Changed);
                 }
                 PtyEvent::Exited { code, .. } => {
+                    let stopping = tab.stopping;
                     tab.pty = None;
                     tab.screen.finish_bytes();
                     tab.running = false;
                     tab.exit_code = code;
-                    if code == Some(0) {
+                    if stopping || code == Some(0) {
                         self.close(id);
                         updates.push(TerminalUpdate::Closed(id));
                     } else {
@@ -615,11 +671,17 @@ impl TerminalSession {
                     }
                 }
                 PtyEvent::Failed { message, .. } => {
+                    let stopping = tab.stopping;
                     tab.pty = None;
                     tab.screen.finish_bytes();
                     tab.running = false;
                     tab.truncated = true;
-                    updates.push(TerminalUpdate::Failed(id, message));
+                    if stopping {
+                        self.close(id);
+                        updates.push(TerminalUpdate::StopUnknown(id, message));
+                    } else {
+                        updates.push(TerminalUpdate::Failed(id, message));
+                    }
                 }
             }
         }
@@ -636,6 +698,7 @@ struct TerminalRuntime {
     requested_size: (u16, u16),
     screen: PtyScreen,
     running: bool,
+    stopping: bool,
     exit_code: Option<u32>,
     truncated: bool,
     mode: TerminalPanelMode,
@@ -674,6 +737,7 @@ impl TerminalSession {
                 requested_size: (columns as u16, rows as u16),
                 screen: fixture.screen,
                 running: fixture.running,
+                stopping: false,
                 exit_code: fixture.exit_code,
                 truncated: fixture.truncated,
                 mode: TerminalPanelMode::Input,
@@ -697,7 +761,9 @@ impl TerminalSession {
 impl TerminalRuntime {
     fn phase(&self) -> crate::ui::TerminalPhase {
         use crate::ui::TerminalPhase;
-        if self.running {
+        if self.stopping {
+            TerminalPhase::Stopping
+        } else if self.running {
             TerminalPhase::Running
         } else if self.pending.is_some() {
             TerminalPhase::Preflight

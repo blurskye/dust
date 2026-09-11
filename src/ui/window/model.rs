@@ -6,6 +6,7 @@ pub enum ContentLifecycle {
     Preflight,
     Starting,
     Running,
+    Stopping,
     Exited,
     Failed,
 }

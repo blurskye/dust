@@ -166,7 +166,8 @@ impl InputSession {
                     "workspace_trust_prompt"
                 }
                 crate::ui::PromptKind::ExplorerDelete
-                | crate::ui::PromptKind::PluginConfirmation => "confirmation_prompt",
+                | crate::ui::PromptKind::PluginConfirmation
+                | crate::ui::PromptKind::TerminalClose => "confirmation_prompt",
             });
         }
         self.documentation

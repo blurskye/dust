@@ -14,6 +14,9 @@ impl TerminalSession {
         if tab.scope != workspace.version() || !Arc::ptr_eq(&tab.epoch, &self.epoch) {
             return Err("terminal input source retired".into());
         }
+        if tab.stopping {
+            return Err("terminal stop is pending".into());
+        }
         if tab.mode != TerminalPanelMode::Input
             && !matches!(input, TerminalInput::Text(_) | TerminalInput::Focus(_))
         {

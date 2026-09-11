@@ -37,6 +37,7 @@ pub(super) fn terminal_tab_label(tab: &TerminalTabState, config: &Config) -> Str
     if let Some(status) = match tab.phase {
         TerminalPhase::Preflight => Some(" [preflight]"),
         TerminalPhase::Starting => Some(" [starting]"),
+        TerminalPhase::Stopping => Some(" [stopping]"),
         TerminalPhase::Failed => Some(" [failed]"),
         _ => None,
     } {

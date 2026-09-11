@@ -55,11 +55,13 @@ impl InputSession {
         self.history_index = None;
         mode
     }
-    pub(in crate::editor::session) fn configure_confirmation(
+    pub(in crate::editor::session) fn configure_confirmation_actions(
         &mut self,
         title: String,
         message: String,
         selected: ConfirmationChoice,
+        positive_label: &str,
+        negative_label: &str,
         hint: String,
     ) -> bool {
         let Some(prompt) = &mut self.prompt else {
@@ -69,6 +71,8 @@ impl InputSession {
             title,
             message,
             selected,
+            positive_label: positive_label.into(),
+            negative_label: negative_label.into(),
             hint,
         });
         true
@@ -286,6 +290,7 @@ impl InputSession {
                 | PromptKind::ExplorerDelete
                 | PromptKind::ExplorerRename
                 | PromptKind::PluginConfirmation
+                | PromptKind::TerminalClose
         ) {
             return;
         }

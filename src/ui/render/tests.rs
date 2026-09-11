@@ -372,6 +372,8 @@ fn ordinary_confirmation_wraps_unicode_and_uses_safe_default_geometry() {
         title: "Delete this path?".into(),
         message: "Permanently  delete `長い/界界界界界界/target.rs`?".into(),
         selected: crate::ui::ConfirmationChoice::No,
+        positive_label: "Yes".into(),
+        negative_label: "No".into(),
         hint: "Left/Right select · Enter confirm · Escape cancel".into(),
     });
     let geometry = crate::ui::prompt_geometry_for_state(30, 12, &loaded.config, &prompt);
@@ -404,6 +406,46 @@ fn ordinary_confirmation_wraps_unicode_and_uses_safe_default_geometry() {
 }
 
 #[test]
+fn confirmation_uses_custom_action_labels_for_geometry_and_paint() {
+    let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
+    let loaded = crate::config::load_bundled_config();
+    let mut prompt = PromptState::new(PromptKind::TerminalClose);
+    prompt.confirmation = Some(crate::ui::ConfirmationState {
+        title: "Terminal #7 is running".into(),
+        message: "Hide this terminal or stop its process?".into(),
+        selected: crate::ui::ConfirmationChoice::No,
+        positive_label: "Stop".into(),
+        negative_label: "Hide".into(),
+        hint: "Enter confirm · Escape cancel".into(),
+    });
+    assert!(crate::ui::confirmation_fully_visible(
+        40,
+        8,
+        &loaded.config,
+        &prompt
+    ));
+    let frame = render(
+        &state,
+        &UiState {
+            dashboard: true,
+            prompt: Some(prompt),
+            ..UiState::default()
+        },
+        &loaded.config,
+        &loaded.dashboard,
+        40,
+        8,
+    );
+    let screen = (0..8)
+        .map(|row| frame.grid.row_text(row))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(screen.contains("[ Stop ]"));
+    assert!(screen.contains("[ Hide ]"));
+    assert!(!screen.contains("[ Yes ]"));
+}
+
+#[test]
 fn confirmation_visibility_uses_render_workspace_and_button_width() {
     let mut state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
     state.open_text(crate::editor::text::TextBuffer::from_text("x"), None);
@@ -413,6 +455,8 @@ fn confirmation_visibility_uses_render_workspace_and_button_width() {
         title: "Boundary".into(),
         message: "/tmp/a".into(),
         selected: crate::ui::ConfirmationChoice::Yes,
+        positive_label: "Yes".into(),
+        negative_label: "No".into(),
         hint: "Enter confirm".into(),
     });
     assert!(crate::ui::confirmation_fully_visible(
@@ -458,6 +502,8 @@ fn confirmation_fails_closed_when_the_full_target_cannot_be_shown() {
         title: "Delete this path?".into(),
         message: format!("target/{}", "界  ".repeat(80)),
         selected: crate::ui::ConfirmationChoice::Yes,
+        positive_label: "Yes".into(),
+        negative_label: "No".into(),
         hint: "Enter confirm".into(),
     });
     assert!(!crate::ui::confirmation_fully_visible(
@@ -493,6 +539,8 @@ fn confirmation_fails_closed_when_the_full_target_cannot_be_shown() {
         title: "Tall".into(),
         message: (0..400).map(|_| "target\n").collect(),
         selected: crate::ui::ConfirmationChoice::No,
+        positive_label: "Yes".into(),
+        negative_label: "No".into(),
         hint: String::new(),
     });
     assert_eq!(

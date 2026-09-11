@@ -81,6 +81,7 @@ pub enum AppEffect {
     ExtendMouseSelection,
     Layout(LayoutAction),
     SurfaceFocus(FocusDirection),
+    WindowList,
     RetainedUiFocus(isize),
     RetainedUiScroll(isize),
     RetainedUiActivate,

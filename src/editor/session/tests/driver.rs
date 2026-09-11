@@ -53,6 +53,22 @@ impl TestSession {
         self.application
             .process_effect(crate::editor::AppEffect::NewBuffer);
     }
+    pub(super) fn new_tab(&mut self) {
+        self.application
+            .process_effect(crate::editor::AppEffect::Layout(
+                crate::editor::LayoutAction::NewTab,
+            ));
+    }
+    pub(super) fn window_list(&mut self) {
+        self.application
+            .process_effect(crate::editor::AppEffect::WindowList);
+    }
+    pub(super) fn focused_window(&self) -> Option<crate::ui::window::WindowId> {
+        self.application.window_session.graph().focused()
+    }
+    pub(super) fn active_tab(&self) -> Option<crate::editor::TabId> {
+        self.application.state.active_tab
+    }
     pub(super) fn reconcile_windows(&mut self) {
         self.application.reconcile_editor_windows();
     }
@@ -497,6 +513,17 @@ impl TestSession {
     pub(super) fn terminal_close(&mut self) {
         self.application
             .process_effect(crate::editor::AppEffect::TerminalClose);
+        if self
+            .application
+            .input
+            .prompt()
+            .is_some_and(|prompt| prompt.kind == crate::ui::PromptKind::TerminalClose)
+        {
+            self.application
+                .input
+                .select_confirmation(crate::ui::ConfirmationChoice::Yes);
+            self.application.submit_prompt();
+        }
     }
     pub(super) fn terminal_unfocus(&mut self) {
         self.application

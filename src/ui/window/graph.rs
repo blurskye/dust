@@ -145,17 +145,43 @@ impl WindowGraph {
         self.mark_changed()
     }
 
+    pub fn require_selection(&self, content: ContentId) -> Result<(), WindowError> {
+        self.require_content_capability(content, "selection", |capabilities| {
+            capabilities.selectable
+        })
+    }
+
+    pub fn require_editing(&self, content: ContentId) -> Result<(), WindowError> {
+        self.require_content_capability(content, "editing", |capabilities| capabilities.editable)
+    }
+
+    pub fn require_persist_descriptor(&self, content: ContentId) -> Result<(), WindowError> {
+        self.require_content_capability(content, "persist-descriptor", |capabilities| {
+            capabilities.persist_descriptor
+        })
+    }
+
     pub fn require_stop_resource(&self, content: ContentId) -> Result<(), WindowError> {
-        if self
+        self.require_content_capability(content, "stop-resource", |capabilities| {
+            capabilities.stop_resource
+        })
+    }
+
+    fn require_content_capability(
+        &self,
+        content: ContentId,
+        operation: &'static str,
+        permits: impl FnOnce(ContentCapabilities) -> bool,
+    ) -> Result<(), WindowError> {
+        let capabilities = self
             .contents
             .get(&content)
             .ok_or(WindowError::UnknownContent)?
-            .capabilities
-            .stop_resource
-        {
+            .capabilities;
+        if permits(capabilities) {
             Ok(())
         } else {
-            Err(WindowError::Unsupported("stop-resource"))
+            Err(WindowError::Unsupported(operation))
         }
     }
 
@@ -1056,6 +1082,16 @@ impl WindowGraph {
     #[must_use]
     pub fn window(&self, id: WindowId) -> Option<&WindowDescriptor> {
         self.windows.get(&id)
+    }
+
+    pub fn windows(&self) -> impl Iterator<Item = &WindowDescriptor> {
+        self.windows.values()
+    }
+
+    #[must_use]
+    pub fn content_for_window(&self, id: WindowId) -> Option<&ContentDescriptor> {
+        let view = self.views.get(&self.windows.get(&id)?.view)?;
+        self.contents.get(&view.content)
     }
 
     #[must_use]

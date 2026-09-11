@@ -57,6 +57,7 @@ pub enum PromptKind {
     ExplorerDelete,
     ExplorerRename,
     PluginConfirmation,
+    TerminalClose,
 }
 
 impl PromptKind {
@@ -71,6 +72,7 @@ impl PromptKind {
             Self::ExplorerDelete => &text.explorer_delete_title,
             Self::ExplorerRename => &text.explorer_rename_title,
             Self::PluginConfirmation => "Plugin confirmation",
+            Self::TerminalClose => "Close terminal",
         }
     }
 
@@ -84,7 +86,7 @@ impl PromptKind {
             Self::GitReset => &text.git_reset_marker,
             Self::ExplorerDelete => &text.explorer_delete_marker,
             Self::ExplorerRename => &text.explorer_rename_marker,
-            Self::PluginConfirmation => "",
+            Self::PluginConfirmation | Self::TerminalClose => "",
         }
     }
 }
@@ -106,6 +108,8 @@ pub struct ConfirmationState {
     pub title: String,
     pub message: String,
     pub selected: ConfirmationChoice,
+    pub positive_label: String,
+    pub negative_label: String,
     pub hint: String,
 }
 
@@ -447,6 +451,7 @@ pub enum TerminalPhase {
     Preflight,
     Starting,
     Running,
+    Stopping,
     Exited,
     Failed,
 }
@@ -788,8 +793,12 @@ pub(crate) fn confirmation_layout(
         .command_line
         .top_rows
         .min(terminal_height.saturating_sub(geometry.height));
-    let buttons_width = u16::try_from(text_width("[ Yes ] [ No ]", config.editor.ambiguous_width))
-        .unwrap_or(u16::MAX);
+    let buttons = format!(
+        "[ {} ] [ {} ]",
+        confirmation.positive_label, confirmation.negative_label
+    );
+    let buttons_width =
+        u16::try_from(text_width(&buttons, config.editor.ambiguous_width)).unwrap_or(u16::MAX);
     let fully_visible = !oversized
         && geometry.width >= buttons_width.saturating_add(4)
         && desired_height <= terminal_height
