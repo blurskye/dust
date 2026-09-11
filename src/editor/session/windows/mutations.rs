@@ -11,6 +11,12 @@ use crate::{
 };
 use std::{collections::BTreeMap, sync::Arc};
 
+pub(in crate::editor::session) struct RestoreWindowPolicy<'a> {
+    pub rules: &'a [PersistedWindowRule],
+    pub descriptors: &'a [crate::persistence::PersistedContentDescriptor],
+}
+
+#[derive(Clone)]
 pub(in crate::editor::session) struct NativeDescriptions<'a> {
     pub signature: NativeSurfaceSignature,
     pub explorer_title: &'a str,
@@ -162,8 +168,10 @@ impl WindowSession {
         scratch: &str,
         mut descriptions: NativeDescriptions<'_>,
         generations: &[(String, u64)],
+        policy: RestoreWindowPolicy<'_>,
     ) -> Result<super::EditorWindowCandidate, String> {
         descriptions.signature.dashboard_visible = false;
+        let restored_descriptions = descriptions.clone();
         let mut transition = self.prepare_editor_transition(
             proposal,
             source.0,
@@ -171,6 +179,69 @@ impl WindowSession {
             scratch,
             Some(descriptions),
         )?;
+        validate_window_rules(policy.rules).map_err(|error| error.to_string())?;
+        for rule in policy.rules {
+            transition
+                .candidate
+                .core
+                .native
+                .set_semantic_default(
+                    &rule.content_type,
+                    restored_window_placement(&rule.placement)?,
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        let topology = transition.proposal.topology();
+        let mut signature = restored_descriptions.signature;
+        signature.editor_tab = transition.candidate.core.editor.active_tab(&topology);
+        signature.editor_window = transition.candidate.core.editor.focused_window(&topology);
+        transition
+            .candidate
+            .core
+            .native
+            .reconcile(
+                &mut transition.candidate.core.graph,
+                signature,
+                restored_descriptions.explorer_title,
+                restored_descriptions.dashboard_title,
+                restored_descriptions.picker_title,
+                restored_descriptions.terminals,
+            )
+            .map_err(|error| error.to_string())?;
+        let placements = policy
+            .descriptors
+            .iter()
+            .filter(|descriptor| descriptor.adapter == "text-buffer")
+            .map(|descriptor| {
+                let mut parts = descriptor.semantic_id.split(':');
+                let (Some("text"), Some(tab), Some(pane), None) =
+                    (parts.next(), parts.next(), parts.next(), parts.next())
+                else {
+                    return Err("invalid persisted text semantic identity".to_owned());
+                };
+                Ok((
+                    tab.parse::<usize>()
+                        .map_err(|_| "invalid persisted text tab identity".to_owned())?,
+                    pane.parse::<usize>()
+                        .map_err(|_| "invalid persisted text pane identity".to_owned())?,
+                    descriptor
+                        .path
+                        .clone()
+                        .ok_or("persisted text descriptor has no path")?,
+                    restored_window_placement(&descriptor.desired_placement)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        transition
+            .candidate
+            .core
+            .editor
+            .restore_desired_placements(
+                &topology,
+                &mut transition.candidate.core.graph,
+                &placements,
+            )
+            .map_err(|error| error.to_string())?;
         for (plugin, load) in generations {
             transition
                 .candidate
@@ -727,6 +798,35 @@ fn configured_window_placements(
 
 use crate::persistence::{PersistedWindowPlacement, PersistedWindowRule, validate_window_rules};
 impl WindowSession {
+    pub(in crate::editor::session) fn persisted_editor_placement(
+        &self,
+        pane: crate::editor::PaneId,
+        expected_adapter: crate::ui::window::ContentAdapterKind,
+    ) -> Result<PersistedWindowPlacement, String> {
+        let window = self
+            .editor_ids()
+            .window_for(pane)
+            .ok_or("editor pane has no authoritative window")?;
+        let content = self
+            .graph()
+            .content_for_window(window)
+            .ok_or("editor window content is stale")?;
+        if content.adapter != expected_adapter {
+            return Err("editor content adapter disagrees with its domain owner".into());
+        }
+        self.graph()
+            .require_persist_descriptor(content.id)
+            .map_err(|error| error.to_string())?;
+        let placement = self.editor_ids().desired_placement(pane).unwrap_or(
+            self.graph()
+                .window(window)
+                .ok_or("editor window is stale")?
+                .placement,
+        );
+        persisted_window_placement(placement)
+            .ok_or_else(|| "editor window placement is not persistable".into())
+    }
+
     pub(in crate::editor::session) fn persisted_rules(
         &self,
         selected: Option<u64>,
@@ -778,8 +878,11 @@ impl WindowSession {
         self.prepare_semantic_defaults(&rules, descriptions)
     }
 }
-fn persisted_window_placement(placement: WindowPlacement) -> Option<PersistedWindowPlacement> {
+pub(super) fn persisted_window_placement(
+    placement: WindowPlacement,
+) -> Option<PersistedWindowPlacement> {
     match placement {
+        WindowPlacement::Tiled => Some(PersistedWindowPlacement::Tiled),
         WindowPlacement::Docked { edge, size } => Some(PersistedWindowPlacement::Docked {
             edge: match edge {
                 DockEdge::Left => "left",
@@ -798,14 +901,15 @@ fn persisted_window_placement(placement: WindowPlacement) -> Option<PersistedWin
         }),
         WindowPlacement::Fullscreen => Some(PersistedWindowPlacement::Fullscreen),
         WindowPlacement::Hidden => Some(PersistedWindowPlacement::Hidden),
-        WindowPlacement::Tiled | WindowPlacement::Overlay(_) => None,
+        WindowPlacement::Overlay(_) => None,
     }
 }
 
-fn restored_window_placement(
+pub(super) fn restored_window_placement(
     placement: &PersistedWindowPlacement,
 ) -> Result<WindowPlacement, String> {
     let placement = match placement {
+        PersistedWindowPlacement::Tiled => WindowPlacement::Tiled,
         PersistedWindowPlacement::Docked { edge, size } => WindowPlacement::Docked {
             edge: match edge.as_str() {
                 "left" => DockEdge::Left,

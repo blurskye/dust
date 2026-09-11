@@ -493,6 +493,89 @@ fn health_virtual_dogfood_opens_refreshes_and_remains_read_only() {
     assert!(app.ui.content_tabs.iter().any(|entry| entry.icon == "V"
         && entry.closeable
         && entry.kind == ContentTabKind::VirtualDocument));
+    let virtual_content = app
+        .window_session
+        .graph()
+        .content_for_window(
+            app.window_session
+                .graph()
+                .focused()
+                .expect("virtual window"),
+        )
+        .expect("virtual content");
+    assert_eq!(
+        virtual_content.adapter,
+        crate::ui::window::ContentAdapterKind::VirtualDocument
+    );
+    assert!(virtual_content.capabilities.persist_descriptor);
+    let persisted = app.capture_session().expect("virtual descriptor session");
+    assert!(persisted.tabs.is_empty());
+    assert_eq!(persisted.content_descriptors.len(), 1);
+    let descriptor = &persisted.content_descriptors[0];
+    assert_eq!(descriptor.semantic_id, "virtual:0");
+    assert_eq!(descriptor.content_type, "builtin.virtual-document");
+    assert_eq!(descriptor.adapter, "virtual-document");
+    assert_eq!(descriptor.provider.as_deref(), Some("builtin.health"));
+    assert_eq!(descriptor.source.as_deref(), Some("builtin.health.virtual"));
+    assert_eq!(descriptor.key.as_deref(), Some("health"));
+    assert_eq!(
+        persisted.unavailable_virtual_descriptors(),
+        std::collections::BTreeSet::from(["builtin.health:builtin.health.virtual:health".into()])
+    );
+    let encoded = serde_json::to_value(descriptor).expect("virtual descriptor JSON");
+    for forbidden in [
+        "generation",
+        "load",
+        "revision",
+        "callback",
+        "cells",
+        "text",
+    ] {
+        assert!(encoded.get(forbidden).is_none(), "serialized {forbidden}");
+    }
+    app.report_unavailable_persisted_content(&persisted);
+    assert!(app.ui.config_diagnostic.as_deref().is_some_and(|message| {
+        message.contains("production API 0.2")
+            && message.contains("builtin.health:builtin.health.virtual:health")
+            && message.contains("continuing without")
+    }));
+    let mut unavailable_restore = persisted.clone();
+    unavailable_restore
+        .window_rules
+        .push(crate::persistence::PersistedWindowRule {
+            content_type: "builtin.terminal".into(),
+            placement: crate::persistence::PersistedWindowPlacement::Floating {
+                x: 7,
+                y: 5,
+                width: 40,
+                height: 9,
+            },
+        });
+    app.persistence
+        .fixture_restore_source(crate::editor::session::persistence::RestoreContext {
+            editor: &app.state,
+            workspace: &app.workspace,
+            input: &app.input,
+            windows: &app.window_session,
+            configuration: app.configuration.binding_revision(),
+        });
+    app.restore_session(unavailable_restore);
+    assert!(app.terminal_session.descriptions().is_empty());
+    assert!(app.window_session.native_ids().terminal(1).is_none());
+    assert!(
+        app.window_session
+            .native_ids()
+            .semantic_defaults(None)
+            .contains(&(
+                "builtin.terminal",
+                WindowPlacement::Floating(WindowRect {
+                    x: 7,
+                    y: 5,
+                    width: 40,
+                    height: 9,
+                })
+            ))
+    );
     let ids = (
         buffer,
         app.state.active_view,
@@ -3157,6 +3240,141 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
 }
 
 #[test]
+fn semantic_content_restore_uses_fresh_ids_and_preserves_unclamped_desired_placement() {
+    use crate::editor::session::persistence::RestoreContext;
+    use crate::persistence::PersistedWindowPlacement;
+
+    let mut app = app();
+    let path = app.state.workspace_root.join("descriptor-restore.txt");
+    std::fs::write(&path, "restored descriptor\n").expect("fixture file");
+    app.state.open_text(
+        TextBuffer::from_text("restored descriptor\n"),
+        Some(path.clone()),
+    );
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let old_window = app.window_session.graph().focused().expect("old window");
+    let old_view = app
+        .window_session
+        .graph()
+        .window(old_window)
+        .expect("old descriptor")
+        .view;
+    let old_content = app
+        .window_session
+        .graph()
+        .view(old_view)
+        .expect("old view")
+        .content;
+
+    let mut session = app.capture_session().expect("captured session");
+    assert_eq!(session.content_descriptors.len(), 1);
+    let desired = PersistedWindowPlacement::Floating {
+        x: 90,
+        y: 30,
+        width: 73,
+        height: 19,
+    };
+    session.content_descriptors[0].desired_placement = desired.clone();
+    let encoded = serde_json::to_string(&session.content_descriptors).expect("descriptor JSON");
+    for forbidden in [
+        "content_id",
+        "view_id",
+        "window_id",
+        "generation",
+        "capabilities",
+    ] {
+        assert!(!encoded.contains(forbidden));
+    }
+
+    macro_rules! context {
+        () => {
+            RestoreContext {
+                editor: &app.state,
+                workspace: &app.workspace,
+                input: &app.input,
+                windows: &app.window_session,
+                configuration: app.configuration.binding_revision(),
+            }
+        };
+    }
+    app.persistence.fixture_restore_source(context!());
+    app.restore_session(session);
+    wait_vfs(&mut app);
+
+    let new_window = app.window_session.graph().focused().expect("fresh window");
+    let new_descriptor = app
+        .window_session
+        .graph()
+        .window(new_window)
+        .expect("fresh descriptor");
+    let new_view = new_descriptor.view;
+    let new_content = app
+        .window_session
+        .graph()
+        .view(new_view)
+        .expect("fresh view")
+        .content;
+    assert!(new_window.0 > old_window.0);
+    assert!(new_view.0 > old_view.0);
+    assert!(new_content.0 > old_content.0);
+    // Desired placement is retained independently from the currently
+    // projected effective placement.
+    assert_eq!(new_descriptor.placement, WindowPlacement::Tiled);
+    app.reconcile_editor_windows();
+    assert_eq!(
+        app.capture_session()
+            .expect("recaptured")
+            .content_descriptors[0]
+            .desired_placement,
+        desired
+    );
+    assert_eq!(
+        app.state.buffers[app.state.active_buffer_id().expect("buffer")]
+            .path
+            .as_ref(),
+        Some(&path)
+    );
+    app.window_session.graph().validate().expect("valid graph");
+}
+
+#[test]
+fn malformed_content_descriptor_restore_is_atomic_before_io_or_publication() {
+    use crate::editor::session::persistence::RestoreContext;
+
+    let mut app = app();
+    let path = app.state.workspace_root.join("descriptor-hostile.txt");
+    std::fs::write(&path, "preserved\n").expect("fixture file");
+    app.state
+        .open_text(TextBuffer::from_text("preserved\n"), Some(path));
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let mut session = app.capture_session().expect("session");
+    session.content_descriptors[0].adapter = "terminal-session".into();
+    session.content_descriptors[0].content_type = "builtin.terminal".into();
+    let state_before = app.state.version();
+    let graph_before = app.window_session.graph().clone();
+    let pending_before = app.persistence.pending();
+    app.persistence.fixture_restore_source(RestoreContext {
+        editor: &app.state,
+        workspace: &app.workspace,
+        input: &app.input,
+        windows: &app.window_session,
+        configuration: app.configuration.binding_revision(),
+    });
+    app.restore_session(session);
+    assert_eq!(app.state.version(), state_before);
+    assert_eq!(app.window_session.graph(), &graph_before);
+    assert_eq!(app.persistence.pending(), pending_before);
+    assert!(
+        app.ui
+            .config_diagnostic
+            .as_deref()
+            .is_some_and(|message| message.contains("forbidden content type"))
+    );
+}
+
+#[test]
 fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
     use crate::{
         editor::session::persistence::RestoreContext,
@@ -3184,6 +3402,7 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
         }],
         active_tab: 0,
         window_rules: Vec::new(),
+        content_descriptors: Vec::new(),
     };
     macro_rules! context {
         () => {
@@ -3229,8 +3448,17 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
     assert_eq!(restored.scroll_column, 0); // default wrapping keeps the restored cursor visible
     app.state.validate_layout().unwrap();
     app.window_session.graph().validate().unwrap();
+    app.open_explorer();
     let before = app.state.version();
+    let graph_before = app.window_session.graph().clone();
+    let defaults_before = app.window_session.native_ids().semantic_defaults(None);
     let mut missing = session;
+    missing
+        .window_rules
+        .push(crate::persistence::PersistedWindowRule {
+            content_type: "builtin.explorer".into(),
+            placement: crate::persistence::PersistedWindowPlacement::Fullscreen,
+        });
     if let PersistedLayout::Pane { pane } = &mut missing.tabs[0].layout {
         pane.path = app.state.workspace_root.join("missing.txt");
     }
@@ -3238,6 +3466,11 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
     app.restore_session(missing);
     wait_vfs(&mut app);
     assert_eq!(app.state.version(), before);
+    assert_eq!(app.window_session.graph(), &graph_before);
+    assert_eq!(
+        app.window_session.native_ids().semantic_defaults(None),
+        defaults_before
+    );
     // A delayed metadata load cannot overwrite newer marks or recent ordering.
     let location = |byte| PersistedLocation {
         path: path.clone(),

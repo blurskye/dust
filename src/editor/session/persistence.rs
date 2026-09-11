@@ -9,7 +9,9 @@ use std::path::PathBuf;
 mod session;
 #[cfg(test)]
 pub(in crate::editor::session) use session::capture_persisted_layout;
-pub(in crate::editor::session) use session::{RestoreContext, RestoreReady, RestoreUpdate};
+pub(in crate::editor::session) use session::{
+    RestoreContext, RestorePrepared, RestoreReady, RestoreUpdate,
+};
 
 pub(in crate::editor::session) struct PersistenceSession {
     load_source: Option<session::RestoreSource>,

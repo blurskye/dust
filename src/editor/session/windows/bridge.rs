@@ -40,6 +40,7 @@ pub(in crate::editor::session) struct EditorWindowBridge {
     buffers: HashMap<BufferId, ContentId>,
     views: HashMap<EditorViewId, ViewId>,
     panes: HashMap<PaneId, WindowId>,
+    desired_placements: HashMap<PaneId, WindowPlacement>,
     tabs: HashMap<TabId, WorkspaceTabId>,
     source: Option<crate::editor::EditorWindowVersion>,
     scratch_label: Option<String>,
@@ -84,6 +85,7 @@ impl EditorWindowBridge {
 
         let titles = editor_buffer_titles(state, scratch_label);
         let text_type = ContentTypeId::new("builtin.text-buffer")?;
+        let virtual_type = ContentTypeId::new("builtin.virtual-document")?;
         for (buffer_id, buffer) in state.buffers() {
             let title = titles
                 .get(&buffer_id)
@@ -92,9 +94,14 @@ impl EditorWindowBridge {
             if let Some(content) = self.buffers.get(&buffer_id).copied() {
                 graph.update_content(content, title, buffer.dirty)?;
             } else {
+                let (content_type, adapter) = if buffer.is_virtual_read_only() {
+                    (virtual_type.clone(), ContentAdapterKind::VirtualDocument)
+                } else {
+                    (text_type.clone(), ContentAdapterKind::TextBuffer)
+                };
                 let content = graph.create_content(
-                    text_type.clone(),
-                    ContentAdapterKind::TextBuffer,
+                    content_type,
+                    adapter,
                     title,
                     buffer.dirty,
                     EDITOR_OWNER,
@@ -152,6 +159,8 @@ impl EditorWindowBridge {
             }
         }
 
+        self.desired_placements
+            .retain(|pane, _| state.panes().contains_key(*pane));
         for (tab_id, tab) in state.tabs() {
             let universal_tab = self.tabs[&tab_id];
             let root = editor_tiled_layout(&tab.root, &self.panes)?;
@@ -216,6 +225,64 @@ impl EditorWindowBridge {
             self.reconciliation_count = self.reconciliation_count.saturating_add(1);
         }
         Ok(())
+    }
+
+    pub(super) fn restore_desired_placements(
+        &mut self,
+        state: &EditorTopology<'_>,
+        graph: &mut WindowGraph,
+        descriptors: &[(usize, usize, std::path::PathBuf, WindowPlacement)],
+    ) -> Result<(), WindowError> {
+        let mut planned = Vec::with_capacity(descriptors.len());
+        for (tab_index, pane_index, path, placement) in descriptors {
+            let (_, tab) = state
+                .tabs()
+                .iter()
+                .nth(*tab_index)
+                .ok_or(WindowError::UnknownWorkspaceTab)?;
+            let pane = editor_panes(&tab.root)
+                .get(*pane_index)
+                .copied()
+                .ok_or(WindowError::UnknownWindow)?;
+            let editor_pane = state.panes().get(pane).ok_or(WindowError::UnknownWindow)?;
+            let buffer = state
+                .views()
+                .get(editor_pane.view)
+                .and_then(|view| state.buffers().get(view.buffer))
+                .ok_or(WindowError::UnknownContent)?;
+            if buffer.path.as_ref() != Some(path) {
+                return Err(WindowError::InvalidContentType(
+                    "stale persisted text descriptor".into(),
+                ));
+            }
+            let window = self
+                .panes
+                .get(&pane)
+                .copied()
+                .ok_or(WindowError::UnknownWindow)?;
+            let content = graph
+                .content_for_window(window)
+                .ok_or(WindowError::UnknownContent)?;
+            graph.require_persist_descriptor(content.id)?;
+            // Validate every desired placement before changing the candidate.
+            placement.validate()?;
+            planned.push((pane, window, *placement));
+        }
+
+        self.desired_placements.clear();
+        for (pane, _, placement) in planned {
+            if placement != WindowPlacement::Tiled {
+                self.desired_placements.insert(pane, placement);
+            }
+        }
+        graph.validate()
+    }
+
+    pub(in crate::editor::session) fn desired_placement(
+        &self,
+        pane: PaneId,
+    ) -> Option<WindowPlacement> {
+        self.desired_placements.get(&pane).copied()
     }
 
     pub(in crate::editor::session) fn active_layout(
@@ -285,7 +352,6 @@ impl EditorWindowBridge {
         self.views.get(&view).copied()
     }
 
-    #[cfg(test)]
     pub(in crate::editor::session) fn window_for(&self, pane: PaneId) -> Option<WindowId> {
         self.panes.get(&pane).copied()
     }

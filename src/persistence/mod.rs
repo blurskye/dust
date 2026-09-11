@@ -17,6 +17,9 @@ use thiserror::Error;
 
 pub const STATE_VERSION: u32 = 2;
 const MAXIMUM_SCROLL_COLUMN: usize = 1_000_000_000;
+const MAXIMUM_DESCRIPTOR_ID_BYTES: usize = 128;
+const MAXIMUM_PROVIDER_ID_BYTES: usize = 256;
+const MAXIMUM_VIRTUAL_KEY_BYTES: usize = 1024;
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone, Debug)]
 pub struct PersistencePolicy {
@@ -71,6 +74,7 @@ pub struct PersistedTab {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PersistedWindowPlacement {
+    Tiled,
     Docked {
         edge: String,
         size: u16,
@@ -93,6 +97,20 @@ pub struct PersistedWindowRule {
     pub placement: PersistedWindowPlacement,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PersistedContentDescriptor {
+    /// Inert location in the persisted semantic layout, never a runtime ID.
+    pub semantic_id: String,
+    pub content_type: String,
+    pub adapter: String,
+    pub path: Option<PathBuf>,
+    pub provider: Option<String>,
+    pub source: Option<String>,
+    pub key: Option<String>,
+    pub desired_placement: PersistedWindowPlacement,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersistedSession {
@@ -101,6 +119,26 @@ pub struct PersistedSession {
     pub active_tab: usize,
     /// Semantic placement defaults reconstructed with fresh runtime IDs.
     pub window_rules: Vec<PersistedWindowRule>,
+    /// This backward-compatible schema-2 extension is absent from older files.
+    #[serde(default)]
+    pub content_descriptors: Vec<PersistedContentDescriptor>,
+}
+impl PersistedSession {
+    #[must_use]
+    pub fn unavailable_virtual_descriptors(&self) -> BTreeSet<String> {
+        self.content_descriptors
+            .iter()
+            .filter(|descriptor| descriptor.adapter == "virtual-document")
+            .filter_map(|descriptor| {
+                Some(format!(
+                    "{}:{}:{}",
+                    descriptor.provider.as_deref()?,
+                    descriptor.source.as_deref()?,
+                    descriptor.key.as_deref()?
+                ))
+            })
+            .collect()
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -181,8 +219,12 @@ impl PersistedState {
             self.breakpoints.len(),
             self.watches.len(),
             self.large_file_overrides.len(),
+            self.session.as_ref().map_or(0, |s| s.roots.len()),
             self.session.as_ref().map_or(0, |s| s.tabs.len()),
             self.session.as_ref().map_or(0, |s| s.window_rules.len()),
+            self.session
+                .as_ref()
+                .map_or(0, |s| s.content_descriptors.len()),
         ] {
             if length > policy.maximum_entries {
                 return Err(PersistenceError::TooManyEntries);
@@ -226,9 +268,192 @@ impl PersistedState {
         }
         if let Some(session) = &self.session {
             validate_window_rules(&session.window_rules)?;
+            validate_content_descriptors(session, policy.maximum_entries)?;
         }
         Ok(())
     }
+}
+
+pub fn validate_content_descriptors(
+    session: &PersistedSession,
+    maximum_entries: usize,
+) -> Result<(), PersistenceError> {
+    if (session.tabs.is_empty() && session.active_tab != 0)
+        || (!session.tabs.is_empty() && session.active_tab >= session.tabs.len())
+        || session
+            .roots
+            .iter()
+            .any(|root| !valid_descriptor_path(root))
+    {
+        return Err(PersistenceError::InvalidSession);
+    }
+    let mut identities = BTreeSet::new();
+    let mut virtual_identities = BTreeSet::new();
+    let mut text = BTreeMap::new();
+    for descriptor in &session.content_descriptors {
+        if descriptor.semantic_id.is_empty()
+            || descriptor.semantic_id.len() > MAXIMUM_DESCRIPTOR_ID_BYTES
+            || descriptor.semantic_id.chars().any(char::is_control)
+            || !identities.insert(descriptor.semantic_id.as_str())
+            || descriptor.adapter.is_empty()
+            || descriptor.adapter.len() > 64
+            || descriptor.adapter.chars().any(char::is_control)
+            || !valid_content_type(&descriptor.content_type)
+            || !valid_persisted_window_placement(&descriptor.desired_placement)
+        {
+            return Err(PersistenceError::InvalidContentDescriptor);
+        }
+        match descriptor.adapter.as_str() {
+            "text-buffer" => {
+                if descriptor.content_type != "builtin.text-buffer" {
+                    return Err(PersistenceError::InvalidContentDescriptor);
+                }
+                let (tab, pane) = parse_text_semantic_id(&descriptor.semantic_id)
+                    .ok_or(PersistenceError::InvalidContentDescriptor)?;
+                let path = descriptor
+                    .path
+                    .as_ref()
+                    .ok_or(PersistenceError::InvalidContentDescriptor)?;
+                if descriptor.provider.is_some()
+                    || descriptor.source.is_some()
+                    || descriptor.key.is_some()
+                    || !valid_descriptor_path(path)
+                {
+                    return Err(PersistenceError::InvalidContentDescriptor);
+                }
+                if descriptor.semantic_id != format!("text:{tab}:{pane}")
+                    || text.insert((tab, pane), path).is_some()
+                {
+                    return Err(PersistenceError::InvalidContentDescriptor);
+                }
+            }
+            "virtual-document" => {
+                if descriptor.content_type != "builtin.virtual-document"
+                    || descriptor.path.is_some()
+                    || !valid_descriptor_part(
+                        descriptor.provider.as_deref(),
+                        MAXIMUM_PROVIDER_ID_BYTES,
+                    )
+                    || !valid_descriptor_part(
+                        descriptor.source.as_deref(),
+                        MAXIMUM_PROVIDER_ID_BYTES,
+                    )
+                    || !valid_descriptor_part(descriptor.key.as_deref(), MAXIMUM_VIRTUAL_KEY_BYTES)
+                {
+                    return Err(PersistenceError::InvalidContentDescriptor);
+                }
+                let index = descriptor
+                    .semantic_id
+                    .strip_prefix("virtual:")
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .ok_or(PersistenceError::InvalidContentDescriptor)?;
+                if descriptor.semantic_id != format!("virtual:{index}")
+                    || !virtual_identities.insert(index)
+                {
+                    return Err(PersistenceError::InvalidContentDescriptor);
+                }
+            }
+            "terminal-session" | "external-tui" | "declarative-ui" | "private-cell-surface" => {
+                return Err(PersistenceError::ForbiddenContentDescriptor);
+            }
+            _ => return Err(PersistenceError::UnknownContentDescriptor),
+        }
+    }
+
+    let mut pane_count = 0usize;
+    for (tab_index, tab) in session.tabs.iter().enumerate() {
+        let mut panes = Vec::new();
+        collect_layout_paths(&tab.layout, &mut panes, maximum_entries)?;
+        if tab
+            .focused_path
+            .as_ref()
+            .is_some_and(|focused| !valid_descriptor_path(focused) || !panes.contains(&focused))
+        {
+            return Err(PersistenceError::StaleContentDescriptor);
+        }
+        for (pane_index, path) in panes.into_iter().enumerate() {
+            pane_count = pane_count
+                .checked_add(1)
+                .ok_or(PersistenceError::TooManyEntries)?;
+            if !session.content_descriptors.is_empty()
+                && text.get(&(tab_index, pane_index)).copied() != Some(path)
+            {
+                return Err(PersistenceError::StaleContentDescriptor);
+            }
+        }
+    }
+    if pane_count > maximum_entries {
+        return Err(PersistenceError::TooManyEntries);
+    }
+    // An empty list denotes a legacy schema-2 session. New descriptor-bearing
+    // sessions must describe every and only persisted text pane.
+    if !session.content_descriptors.is_empty() && text.len() != pane_count {
+        return Err(PersistenceError::StaleContentDescriptor);
+    }
+    if session.tabs.is_empty()
+        && !session
+            .content_descriptors
+            .iter()
+            .any(|descriptor| descriptor.adapter == "virtual-document")
+    {
+        return Err(PersistenceError::InvalidContentDescriptor);
+    }
+    Ok(())
+}
+
+fn parse_text_semantic_id(value: &str) -> Option<(usize, usize)> {
+    let mut parts = value.split(':');
+    match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some("text"), Some(tab), Some(pane), None) => {
+            Some((tab.parse().ok()?, pane.parse().ok()?))
+        }
+        _ => None,
+    }
+}
+
+fn valid_descriptor_part(value: Option<&str>, maximum: usize) -> bool {
+    value.is_some_and(|value| {
+        !value.is_empty() && value.len() <= maximum && !value.chars().any(char::is_control)
+    })
+}
+
+fn collect_layout_paths<'a>(
+    layout: &'a PersistedLayout,
+    panes: &mut Vec<&'a PathBuf>,
+    maximum: usize,
+) -> Result<(), PersistenceError> {
+    if panes.len() >= maximum {
+        return Err(PersistenceError::TooManyEntries);
+    }
+    match layout {
+        PersistedLayout::Pane { pane } => {
+            if !valid_descriptor_path(&pane.path) {
+                return Err(PersistenceError::InvalidContentDescriptor);
+            }
+            panes.push(&pane.path);
+        }
+        PersistedLayout::Split {
+            axis,
+            ratio,
+            first,
+            second,
+        } => {
+            if !matches!(axis.as_str(), "horizontal" | "vertical") || !(100..=900).contains(ratio) {
+                return Err(PersistenceError::InvalidContentDescriptor);
+            }
+            collect_layout_paths(first, panes, maximum)?;
+            collect_layout_paths(second, panes, maximum)?;
+        }
+    }
+    Ok(())
+}
+
+fn valid_descriptor_path(path: &Path) -> bool {
+    path.is_absolute()
+        && path.as_os_str().as_encoded_bytes().len() <= 4096
+        && !path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
 }
 
 pub fn validate_window_rules(rules: &[PersistedWindowRule]) -> Result<(), PersistenceError> {
@@ -246,6 +471,7 @@ pub fn validate_window_rules(rules: &[PersistedWindowRule]) -> Result<(), Persis
                     "builtin.explorer" | "builtin.terminal"
                 )
                 || !content_types.insert(rule.content_type.as_str())
+                || matches!(rule.placement, PersistedWindowPlacement::Tiled)
                 || !valid_persisted_window_placement(&rule.placement)
         })
     {
@@ -275,7 +501,9 @@ fn valid_persisted_window_placement(placement: &PersistedWindowPlacement) -> boo
             *size > 0 && matches!(edge.as_str(), "left" | "right" | "top" | "bottom")
         }
         PersistedWindowPlacement::Floating { width, height, .. } => *width > 0 && *height > 0,
-        PersistedWindowPlacement::Fullscreen | PersistedWindowPlacement::Hidden => true,
+        PersistedWindowPlacement::Tiled
+        | PersistedWindowPlacement::Fullscreen
+        | PersistedWindowPlacement::Hidden => true,
     }
 }
 
@@ -533,6 +761,16 @@ pub enum PersistenceError {
     TooManyEntries,
     #[error("persistent window rule is invalid or duplicated")]
     InvalidWindowRule,
+    #[error("persistent session structure is invalid")]
+    InvalidSession,
+    #[error("persistent content descriptor is invalid or duplicated")]
+    InvalidContentDescriptor,
+    #[error("persistent content descriptor names an unknown content type")]
+    UnknownContentDescriptor,
+    #[error("persistent content descriptor names a forbidden content type")]
+    ForbiddenContentDescriptor,
+    #[error("persistent content descriptor is stale for its semantic layout")]
+    StaleContentDescriptor,
     #[error("persistence entry exceeds its byte ceiling")]
     EntryTooLarge,
     #[error("persistence path has no parent")]
@@ -547,11 +785,16 @@ pub enum PersistenceError {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, fs, path::PathBuf};
+    use std::{
+        collections::{BTreeMap, BTreeSet},
+        fs,
+        path::PathBuf,
+    };
 
     use tempfile::tempdir;
 
     use super::{
+        MAXIMUM_DESCRIPTOR_ID_BYTES, MAXIMUM_VIRTUAL_KEY_BYTES, PersistedContentDescriptor,
         PersistedLayout, PersistedLocation, PersistedPane, PersistedSession, PersistedState,
         PersistedTab, PersistedWindowPlacement, PersistedWindowRule, PersistenceError,
         PersistencePolicy, STATE_VERSION, read_state, write_state,
@@ -582,6 +825,7 @@ mod tests {
                         size: 41,
                     },
                 }],
+                content_descriptors: Vec::new(),
             }),
             jumps: vec![PersistedLocation {
                 path: PathBuf::from("/workspace/main.rs"),
@@ -685,8 +929,215 @@ mod tests {
     }
 
     #[test]
+    fn content_descriptors_are_bounded_strict_semantic_and_authority_free() {
+        let mut state = state_with_horizontal_offsets();
+        let descriptor = PersistedContentDescriptor {
+            semantic_id: "text:0:0".into(),
+            content_type: "builtin.text-buffer".into(),
+            adapter: "text-buffer".into(),
+            path: Some(PathBuf::from("/workspace/main.rs")),
+            provider: None,
+            source: None,
+            key: None,
+            desired_placement: PersistedWindowPlacement::Floating {
+                x: 80,
+                y: 12,
+                width: 91,
+                height: 37,
+            },
+        };
+        state.session.as_mut().expect("session").content_descriptors = vec![descriptor.clone()];
+        state
+            .validate(&PersistencePolicy::default())
+            .expect("valid semantic descriptor");
+        let encoded = serde_json::to_string(&state).expect("encode descriptor");
+        for forbidden in [
+            "content_id",
+            "view_id",
+            "window_id",
+            "generation",
+            "capabilities",
+            "callback",
+            "pty",
+            "process",
+            "cells",
+        ] {
+            assert!(!encoded.contains(forbidden), "serialized {forbidden}");
+        }
+
+        let mut unknown_field = serde_json::to_value(&state).expect("value");
+        unknown_field["session"]["content_descriptors"][0]["runtime_id"] = serde_json::json!(7);
+        assert!(serde_json::from_value::<PersistedState>(unknown_field).is_err());
+
+        let mut duplicate = state.clone();
+        duplicate
+            .session
+            .as_mut()
+            .expect("session")
+            .content_descriptors
+            .push(descriptor.clone());
+        assert!(matches!(
+            duplicate.validate(&PersistencePolicy::default()),
+            Err(PersistenceError::InvalidContentDescriptor)
+        ));
+
+        let mut stale = state.clone();
+        stale.session.as_mut().expect("session").content_descriptors[0].path =
+            Some(PathBuf::from("/workspace/other.rs"));
+        assert!(matches!(
+            stale.validate(&PersistencePolicy::default()),
+            Err(PersistenceError::StaleContentDescriptor)
+        ));
+
+        let mut oversized = state.clone();
+        oversized
+            .session
+            .as_mut()
+            .expect("session")
+            .content_descriptors[0]
+            .semantic_id = "x".repeat(MAXIMUM_DESCRIPTOR_ID_BYTES + 1);
+        assert!(matches!(
+            oversized.validate(&PersistencePolicy::default()),
+            Err(PersistenceError::InvalidContentDescriptor)
+        ));
+
+        let mut invalid_placement = state.clone();
+        invalid_placement
+            .session
+            .as_mut()
+            .expect("session")
+            .content_descriptors[0]
+            .desired_placement = PersistedWindowPlacement::Floating {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 1,
+        };
+        assert!(matches!(
+            invalid_placement.validate(&PersistencePolicy::default()),
+            Err(PersistenceError::InvalidContentDescriptor)
+        ));
+
+        let mut unknown = state;
+        unknown
+            .session
+            .as_mut()
+            .expect("session")
+            .content_descriptors[0]
+            .adapter = "future-surface".into();
+        assert!(matches!(
+            unknown.validate(&PersistencePolicy::default()),
+            Err(PersistenceError::UnknownContentDescriptor)
+        ));
+    }
+
+    #[test]
+    fn forbidden_and_unavailable_descriptors_are_distinguished_without_live_authority() {
+        let descriptor = PersistedContentDescriptor {
+            semantic_id: "virtual:0".into(),
+            content_type: "builtin.virtual-document".into(),
+            adapter: "virtual-document".into(),
+            path: None,
+            provider: Some("plugin.demo".into()),
+            source: Some("plugin.demo.help".into()),
+            key: Some("index".into()),
+            desired_placement: PersistedWindowPlacement::Hidden,
+        };
+        let mut state = state_with_horizontal_offsets();
+        state.session.as_mut().expect("session").tabs.clear();
+        state
+            .session
+            .as_mut()
+            .expect("session")
+            .window_rules
+            .clear();
+        state.session.as_mut().expect("session").content_descriptors = vec![descriptor.clone()];
+        state
+            .validate(&PersistencePolicy::default())
+            .expect("bounded unavailable provider descriptor");
+        assert_eq!(
+            state
+                .session
+                .as_ref()
+                .expect("session")
+                .unavailable_virtual_descriptors(),
+            BTreeSet::from(["plugin.demo:plugin.demo.help:index".into()])
+        );
+
+        for (adapter, content_type) in [
+            ("terminal-session", "builtin.terminal"),
+            ("external-tui", "builtin.external-tui"),
+            ("declarative-ui", "builtin.explorer"),
+            ("declarative-ui", "plugin.demo.retained"),
+            ("private-cell-surface", "plugin.demo.private"),
+        ] {
+            let mut forbidden = state.clone();
+            let target = &mut forbidden
+                .session
+                .as_mut()
+                .expect("session")
+                .content_descriptors[0];
+            target.adapter = adapter.into();
+            target.content_type = content_type.into();
+            target.path = None;
+            assert!(matches!(
+                forbidden.validate(&PersistencePolicy::default()),
+                Err(PersistenceError::ForbiddenContentDescriptor)
+            ));
+        }
+
+        let mut oversized_key = state.clone();
+        oversized_key
+            .session
+            .as_mut()
+            .expect("session")
+            .content_descriptors[0]
+            .key = Some("k".repeat(MAXIMUM_VIRTUAL_KEY_BYTES + 1));
+        assert!(matches!(
+            oversized_key.validate(&PersistencePolicy::default()),
+            Err(PersistenceError::InvalidContentDescriptor)
+        ));
+
+        let mut too_many = state;
+        too_many
+            .session
+            .as_mut()
+            .expect("session")
+            .content_descriptors
+            .push(PersistedContentDescriptor {
+                semantic_id: "virtual:1".into(),
+                ..descriptor
+            });
+        assert!(matches!(
+            too_many.validate(&PersistencePolicy {
+                maximum_file_bytes: usize::MAX,
+                maximum_entries: 1,
+            }),
+            Err(PersistenceError::TooManyEntries)
+        ));
+    }
+
+    #[test]
     fn pre_v1_missing_unknown_and_oversized_scroll_columns_are_rejected() {
         let state = state_with_horizontal_offsets();
+        let mut legacy_schema_2 = serde_json::to_value(&state).expect("serialize state");
+        legacy_schema_2["session"]
+            .as_object_mut()
+            .expect("session")
+            .remove("content_descriptors");
+        let legacy: PersistedState =
+            serde_json::from_value(legacy_schema_2).expect("legacy schema-2 state");
+        legacy
+            .validate(&PersistencePolicy::default())
+            .expect("legacy descriptor omission");
+
+        let mut unsupported = state.clone();
+        unsupported.version = STATE_VERSION + 1;
+        assert!(matches!(
+            unsupported.validate(&PersistencePolicy::default()),
+            Err(PersistenceError::UnsupportedVersion(_))
+        ));
+
         let mut value = serde_json::to_value(&state).expect("serialize state");
         value["jumps"][0]
             .as_object_mut()

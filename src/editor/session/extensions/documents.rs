@@ -175,6 +175,24 @@ impl VirtualDocumentEditorBridge {
     ) -> Option<&VirtualDocumentEditorEntry> {
         self.entries.values().find(|e| e.buffer == buffer)
     }
+
+    /// Semantic provider coordinates only. Load generations, document handles,
+    /// revisions, and retained content are deliberately not exposed to persistence.
+    pub(in crate::editor::session) fn descriptor_sources(
+        &self,
+    ) -> Vec<(BufferId, String, String, String)> {
+        self.entries
+            .values()
+            .map(|entry| {
+                (
+                    entry.buffer,
+                    entry.plugin.clone(),
+                    entry.source.clone(),
+                    entry.key.clone(),
+                )
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]

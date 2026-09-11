@@ -6,7 +6,7 @@ use super::lsp::{LspAutostartObservation, LspLaunch};
 use super::lsp::{LspLaunchRequest, LspLaunchSource, PendingLspProjectRoot};
 #[cfg(test)]
 use super::lsp::{LspProjectionOwner, LspRuntimeState};
-use super::persistence::{RestoreContext, RestoreReady, RestoreUpdate};
+use super::persistence::{RestoreContext, RestorePrepared, RestoreReady, RestoreUpdate};
 use super::search::{MatcherSource, PickerContent, PickerOrigin, PickerPayload};
 use super::terminal::{TerminalInput, TerminalUpdate};
 use super::tooling::{
@@ -15,7 +15,7 @@ use super::tooling::{
 };
 use super::windows::{
     EditorWindowBridge, NativeDescriptions, NativeSurfaceSignature, NativeSurfaceTarget,
-    ProjectionRequest, WindowCandidate, WindowSession,
+    ProjectionRequest, RestoreWindowPolicy, WindowCandidate, WindowSession,
 };
 use configuration::*;
 #[cfg(test)]

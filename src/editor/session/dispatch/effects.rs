@@ -1132,9 +1132,19 @@ impl InteractiveApplication {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(super) fn capture_session(&self) -> Option<PersistedSession> {
-        self.persistence
-            .capture_session(&self.state, &self.workspace, self.capture_window_rules())
+        self.try_capture_session().ok().flatten()
+    }
+
+    fn try_capture_session(&self) -> Result<Option<PersistedSession>, String> {
+        self.persistence.capture_session(
+            &self.state,
+            &self.workspace,
+            &self.window_session,
+            self.capture_window_rules(),
+            &self.extension.virtual_descriptor_sources(),
+        )
     }
 
     pub(super) fn save_persistence(&mut self) {
@@ -1153,9 +1163,16 @@ impl InteractiveApplication {
                 return;
             }
         }
+        let session = match self.try_capture_session() {
+            Ok(session) => session,
+            Err(error) => {
+                self.ui.config_diagnostic = Some(error);
+                return;
+            }
+        };
         let state = PersistedState {
             version: STATE_VERSION,
-            session: self.capture_session(),
+            session,
             recent_files: self.persistence.recent_files().to_vec(),
             marks: self.persistence.marks().to_vec(),
             jumps: self.persistence.jumps().to_vec(),
@@ -1203,13 +1220,8 @@ impl InteractiveApplication {
                     {
                         self.ui.config_diagnostic = Some(error);
                     }
-                    if let Some(session) = &session
-                        && let Err(diagnostic) =
-                            self.apply_persisted_window_rules(&session.window_rules)
-                    {
-                        self.ui.config_diagnostic = Some(format!(
-                            "persistent window layout rejected transactionally: {diagnostic}"
-                        ));
+                    if let Some(session) = &session {
+                        self.report_unavailable_persisted_content(session);
                     }
                     let configured = &self.configuration.settings().persistence;
                     self.persistence.restore_history(&mut state, configured);
@@ -1241,7 +1253,20 @@ impl InteractiveApplication {
         }
     }
 
+    pub(super) fn report_unavailable_persisted_content(&mut self, session: &PersistedSession) {
+        // ponytail: production 0.2 has no source-owned restore callback; report
+        // unavailable descriptors rather than inventing host-side provider authority.
+        let unavailable = session.unavailable_virtual_descriptors();
+        if !unavailable.is_empty() {
+            self.ui.config_diagnostic = Some(format!(
+                "persistent virtual content unavailable under production API 0.2; continuing without: {}",
+                unavailable.into_iter().collect::<Vec<_>>().join(", ")
+            ));
+        }
+    }
+
     pub(super) fn restore_session(&mut self, session: PersistedSession) {
+        let empty_rules = session.window_rules.clone();
         let paths = match self.persistence.begin_restore(
             session,
             RestoreContext {
@@ -1253,12 +1278,21 @@ impl InteractiveApplication {
             },
             self.configuration.settings().persistence.maximum_entries,
         ) {
-            Ok(paths) => paths,
+            Ok(Some(paths)) => paths,
+            Ok(None) => return,
             Err(error) => {
                 self.ui.config_diagnostic = Some(error);
                 return;
             }
         };
+        if paths.is_empty() {
+            if let Err(error) = self.apply_persisted_window_rules(&empty_rules) {
+                self.ui.config_diagnostic = Some(format!(
+                    "persistent window layout rejected transactionally: {error}"
+                ));
+            }
+            return;
+        }
         let roots = self
             .workspace
             .roots()
@@ -1310,33 +1344,44 @@ impl InteractiveApplication {
                 windows: &self.window_session,
                 configuration: self.configuration.binding_revision(),
             })
-            .and_then(|(draft, paths)| {
-                let terminals = self.terminal_session.descriptions();
-                let descriptions = NativeDescriptions {
-                    signature: self.native_surface_signature(self.window_session.editor_ids()),
-                    explorer_title: &self.message("explorer_title", &[]),
-                    dashboard_title: &self.configuration.dashboard().identity,
-                    picker_title: self
-                        .ui
-                        .picker
-                        .as_ref()
-                        .map_or("Picker", |picker| &picker.title),
-                    terminals: &terminals,
-                };
-                let current = self.state.version();
-                let catalog = self.extension.contributions().version();
-                let transition = self.window_session.prepare_restore_transition(
-                    draft,
-                    (&current, catalog.clone()),
-                    &self.configuration.settings().ui.buffer_line.scratch_label,
-                    descriptions,
-                    &self.extension.window_generations(),
-                )?;
-                let state = self
-                    .window_session
-                    .accept_editor_transition(transition, &current, &catalog)?;
-                Ok((state, paths))
-            });
+            .and_then(
+                |RestorePrepared {
+                     draft,
+                     paths,
+                     window_rules,
+                     content_descriptors,
+                 }| {
+                    let terminals = self.terminal_session.descriptions();
+                    let descriptions = NativeDescriptions {
+                        signature: self.native_surface_signature(self.window_session.editor_ids()),
+                        explorer_title: &self.message("explorer_title", &[]),
+                        dashboard_title: &self.configuration.dashboard().identity,
+                        picker_title: self
+                            .ui
+                            .picker
+                            .as_ref()
+                            .map_or("Picker", |picker| &picker.title),
+                        terminals: &terminals,
+                    };
+                    let current = self.state.version();
+                    let catalog = self.extension.contributions().version();
+                    let transition = self.window_session.prepare_restore_transition(
+                        draft,
+                        (&current, catalog.clone()),
+                        &self.configuration.settings().ui.buffer_line.scratch_label,
+                        descriptions,
+                        &self.extension.window_generations(),
+                        RestoreWindowPolicy {
+                            rules: &window_rules,
+                            descriptors: &content_descriptors,
+                        },
+                    )?;
+                    let state = self
+                        .window_session
+                        .accept_editor_transition(transition, &current, &catalog)?;
+                    Ok((state, paths))
+                },
+            );
         match result {
             Ok((state, paths)) => {
                 self.state = state;

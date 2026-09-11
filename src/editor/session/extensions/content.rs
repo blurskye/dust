@@ -269,6 +269,12 @@ impl ExtensionSession {
                 .forget_document(&entry.plugin, entry.load, entry.document);
         }
     }
+
+    pub(in crate::editor::session) fn virtual_descriptor_sources(
+        &self,
+    ) -> Vec<(BufferId, String, String, String)> {
+        self.virtual_editor.descriptor_sources()
+    }
     fn virtual_publication<'a>(
         &'a mut self,
         context: VirtualContext<'_>,

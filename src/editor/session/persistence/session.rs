@@ -13,8 +13,9 @@ use crate::{
     },
     files::{RequestId, VfsResult},
     persistence::{
-        PersistedLayout, PersistedLocation, PersistedMark, PersistedPane, PersistedSession,
-        PersistedState, PersistedTab, PersistedWindowRule,
+        PersistedContentDescriptor, PersistedLayout, PersistedLocation, PersistedMark,
+        PersistedPane, PersistedSession, PersistedState, PersistedTab, PersistedWindowRule,
+        validate_content_descriptors, validate_window_rules,
     },
 };
 use std::ops::ControlFlow::{self, Break, Continue};
@@ -88,6 +89,13 @@ impl RestoreRead<'_> {
         Ok(())
     }
 }
+pub(in crate::editor::session) struct RestorePrepared {
+    pub draft: EditorDraft,
+    pub paths: Vec<PathBuf>,
+    pub window_rules: Vec<PersistedWindowRule>,
+    pub content_descriptors: Vec<PersistedContentDescriptor>,
+}
+
 pub(in crate::editor::session) struct RestoreReady {
     source: RestoreSource,
     session: PersistedSession,
@@ -97,16 +105,18 @@ impl RestoreReady {
     pub(in crate::editor::session) fn prepare(
         self,
         context: RestoreContext<'_>,
-    ) -> Result<(EditorDraft, Vec<PathBuf>), String> {
+    ) -> Result<RestorePrepared, String> {
         if !self.source.current(&context) {
             return Err("session restore source changed".into());
         }
         let mut draft = context.editor.draft();
         draft.restore_layout(&self.session, &self.loaded)?;
-        Ok((
+        Ok(RestorePrepared {
             draft,
-            self.loaded.into_values().map(|(path, _)| path).collect(),
-        ))
+            paths: self.loaded.into_values().map(|(path, _)| path).collect(),
+            window_rules: self.session.window_rules,
+            content_descriptors: self.session.content_descriptors,
+        })
     }
 }
 pub(in crate::editor::session) enum RestoreUpdate {
@@ -130,12 +140,14 @@ impl PersistenceSession {
         session: PersistedSession,
         context: RestoreContext<'_>,
         maximum: usize,
-    ) -> Result<Vec<PathBuf>, String> {
+    ) -> Result<Option<Vec<PathBuf>>, String> {
         if self.restore.is_some() || self.closing {
             return Err("session restoration is already pending or closing".into());
         }
+        validate_window_rules(&session.window_rules).map_err(|error| error.to_string())?;
+        validate_content_descriptors(&session, maximum).map_err(|error| error.to_string())?;
         let Some(source) = self.load_source.take() else {
-            return Ok(Vec::new());
+            return Ok(None);
         };
         if !source.current(&context) || context.editor.buffers.values().any(|buffer| buffer.dirty) {
             return Err("session restore source changed; current editing was preserved".into());
@@ -164,7 +176,7 @@ impl PersistenceSession {
             return Err("session restore paths exceed policy or leave the workspace".into());
         }
         if paths.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Some(Vec::new()));
         }
         let result = paths.iter().cloned().collect();
         self.restore = Some(PendingRestore {
@@ -174,7 +186,7 @@ impl PersistenceSession {
             requests: HashMap::new(),
             loaded: HashMap::new(),
         });
-        Ok(result)
+        Ok(Some(result))
     }
     pub(in crate::editor::session) fn restore_read(
         &mut self,
@@ -361,9 +373,12 @@ impl PersistenceSession {
         &self,
         state: &EditorState,
         workspace: &WorkspaceSession,
+        windows: &WindowSession,
         rules: Vec<PersistedWindowRule>,
-    ) -> Option<PersistedSession> {
+        virtual_sources: &[(crate::editor::BufferId, String, String, String)],
+    ) -> Result<Option<PersistedSession>, String> {
         let mut tabs = Vec::new();
+        let mut descriptors = Vec::new();
         let mut active_tab = 0;
         for (id, tab) in &state.tabs {
             let Some(layout) = capture_persisted_layout(state, &tab.root) else {
@@ -372,27 +387,85 @@ impl PersistenceSession {
             if Some(id) == state.active_tab {
                 active_tab = tabs.len();
             }
-            let focused_path = state
-                .panes
-                .get(tab.focused)
-                .and_then(|pane| state.views.get(pane.view))
-                .and_then(|view| state.buffers.get(view.buffer))
-                .and_then(|buffer| buffer.path.clone());
+            let tab_index = tabs.len();
+            let mut panes = Vec::new();
+            collect_persistable_editor_panes(state, &tab.root, &mut panes);
+            let focused_path = panes
+                .iter()
+                .find(|(pane, _)| *pane == tab.focused)
+                .map(|(_, path)| path.clone());
+            for (pane_index, (pane, path)) in panes.into_iter().enumerate() {
+                descriptors.push(PersistedContentDescriptor {
+                    semantic_id: format!("text:{tab_index}:{pane_index}"),
+                    content_type: "builtin.text-buffer".into(),
+                    adapter: "text-buffer".into(),
+                    path: Some(path),
+                    provider: None,
+                    source: None,
+                    key: None,
+                    desired_placement: windows.persisted_editor_placement(
+                        pane,
+                        crate::ui::window::ContentAdapterKind::TextBuffer,
+                    )?,
+                });
+            }
             tabs.push(PersistedTab {
                 layout,
                 focused_path,
             });
         }
-        (!tabs.is_empty()).then(|| PersistedSession {
-            roots: workspace
-                .roots()
-                .iter()
-                .map(|root| root.identity.canonical_path.clone())
-                .collect(),
-            tabs,
-            active_tab,
-            window_rules: rules,
-        })
+
+        let sources = virtual_sources
+            .iter()
+            .map(|(buffer, provider, source, key)| (*buffer, (provider, source, key)))
+            .collect::<HashMap<_, _>>();
+        let mut virtual_index = 0usize;
+        for (_, tab) in &state.tabs {
+            let mut panes = Vec::new();
+            collect_editor_panes(&tab.root, &mut panes);
+            for pane in panes {
+                let Some(view) = state
+                    .panes
+                    .get(pane)
+                    .and_then(|pane| state.views.get(pane.view))
+                else {
+                    continue;
+                };
+                let Some((provider, source, key)) = sources.get(&view.buffer) else {
+                    continue;
+                };
+                descriptors.push(PersistedContentDescriptor {
+                    semantic_id: format!("virtual:{virtual_index}"),
+                    content_type: "builtin.virtual-document".into(),
+                    adapter: "virtual-document".into(),
+                    path: None,
+                    provider: Some((*provider).clone()),
+                    source: Some((*source).clone()),
+                    key: Some((*key).clone()),
+                    desired_placement: windows.persisted_editor_placement(
+                        pane,
+                        crate::ui::window::ContentAdapterKind::VirtualDocument,
+                    )?,
+                });
+                virtual_index = virtual_index
+                    .checked_add(1)
+                    .ok_or("virtual descriptor identity is exhausted")?;
+            }
+        }
+
+        Ok(
+            (!tabs.is_empty() || !descriptors.is_empty()).then(|| PersistedSession {
+                roots: workspace
+                    .roots()
+                    .iter()
+                    .map(|root| root.identity.canonical_path.clone())
+                    .collect(),
+                tabs,
+                active_tab,
+                window_rules: rules,
+                content_descriptors: descriptors,
+            }),
+        )
     }
 }
 #[cfg(test)]
@@ -404,6 +477,44 @@ impl PersistenceSession {
         self.load_source = Some(RestoreSource::capture(&context));
     }
 }
+fn collect_editor_panes(
+    layout: &crate::editor::LayoutNode,
+    panes: &mut Vec<crate::editor::PaneId>,
+) {
+    match layout {
+        crate::editor::LayoutNode::Pane(pane) => panes.push(*pane),
+        crate::editor::LayoutNode::Split { first, second, .. } => {
+            collect_editor_panes(first, panes);
+            collect_editor_panes(second, panes);
+        }
+    }
+}
+
+fn collect_persistable_editor_panes(
+    state: &EditorState,
+    layout: &crate::editor::LayoutNode,
+    panes: &mut Vec<(crate::editor::PaneId, PathBuf)>,
+) {
+    match layout {
+        crate::editor::LayoutNode::Pane(pane) => {
+            if let Some(path) = state
+                .panes
+                .get(*pane)
+                .and_then(|pane| state.views.get(pane.view))
+                .and_then(|view| state.buffers.get(view.buffer))
+                .filter(|buffer| !buffer.dirty)
+                .and_then(|buffer| buffer.path.clone())
+            {
+                panes.push((*pane, path));
+            }
+        }
+        crate::editor::LayoutNode::Split { first, second, .. } => {
+            collect_persistable_editor_panes(state, first, panes);
+            collect_persistable_editor_panes(state, second, panes);
+        }
+    }
+}
+
 fn collect_persisted_panes(layout: &PersistedLayout, panes: &mut Vec<PersistedPane>) {
     match layout {
         PersistedLayout::Pane { pane } => panes.push(pane.clone()),

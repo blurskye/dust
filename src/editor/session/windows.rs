@@ -21,7 +21,7 @@ use crate::{
 pub(in crate::editor::session) use bridge::EditorWindowBridge;
 use bridge::NativeSurfaceBridge;
 pub(in crate::editor::session) use bridge::{NativeSurfaceSignature, NativeSurfaceTarget};
-pub(in crate::editor::session) use mutations::NativeDescriptions;
+pub(in crate::editor::session) use mutations::{NativeDescriptions, RestoreWindowPolicy};
 pub use plans::LayoutAction;
 pub(in crate::editor::session) use plans::{
     CommandEffect, CommandError, CommandPolicy, FocusLease, LayoutPlanError, NavigationStamp,
