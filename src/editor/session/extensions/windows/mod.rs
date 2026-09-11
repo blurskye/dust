@@ -18,6 +18,8 @@ use crate::{
 };
 
 mod host;
+#[cfg(test)]
+mod target03;
 mod validation;
 use validation::{
     apply_private_patch, ensure_focused_visible, first_focusable_node, focusable_nodes,

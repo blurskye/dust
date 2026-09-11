@@ -1,0 +1,72 @@
+target_api = "0.3.0"
+clone_view = ["plugin.demo.panel", "plugin.demo.private"]
+
+[plugin]
+id = "demo"
+version = "0.0.0"
+component_sha256 = "499d54fbd933b523ebafa9c689b9c44e7fcc0463570e6f66a26d04f3cf34abb9"
+capabilities = ["private_cells"]
+
+[plugin.commands.open]
+title = "Open retained"
+context = "application"
+activation = "active_only"
+
+[plugin.commands.clone]
+title = "Clone retained"
+context = "application"
+activation = "active_only"
+
+[plugin.commands.openprivate]
+title = "Open private"
+context = "application"
+activation = "active_only"
+
+[plugin.commands.cloneprivate]
+title = "Clone private"
+context = "application"
+activation = "active_only"
+
+[plugin.commands.unsupported]
+title = "Unsupported probe"
+context = "application"
+activation = "active_only"
+
+[plugin.commands.oversized]
+title = "Oversized tree probe"
+context = "application"
+activation = "active_only"
+
+[plugin.contributions]
+schema_version = 1
+
+[[plugin.contributions.content_types]]
+id = "plugin.demo.panel"
+title = "Target retained"
+presenter = "retained_declarative"
+default_placement = "floating"
+allowed_placements = ["floating"]
+focusable = true
+maximum_instances = 4
+context = "dashboard"
+command = "plugin.demo.open"
+
+[[plugin.contributions.content_types]]
+id = "plugin.demo.private"
+title = "Target private"
+presenter = "private_cells"
+default_placement = "floating"
+allowed_placements = ["floating"]
+focusable = true
+maximum_instances = 4
+context = "dashboard"
+command = "plugin.demo.openprivate"
+
+[plugin.contributions.content_types.private_cells]
+maximum_cells = 128
+maximum_patch_cells = 32
+maximum_dirty_rectangles = 8
+maximum_styles = 8
+maximum_hit_regions = 8
+maximum_bytes = 4096
+cursor = true

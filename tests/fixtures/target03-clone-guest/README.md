@@ -6,10 +6,11 @@ manifests, the SDK, and `wit/dust-plugin.wit` remain on 0.2.
 
 `target03-clone-guest.core.wasm` is the checked no-WASI core module generated
 from `src/lib.rs`; tests wrap it with `wit-component` and instantiate the real
-Component through Wasmtime. It opens and clones retained content and observes
-exact `ui-result` callbacks. It also calls one deliberately unimplemented
-import so the host's typed `unsupported` rejection is exercised by actual guest
-code.
+Component through Wasmtime. Its strict target fixture manifest admits retained
+and private content cloning. The guest opens and clones both presenters,
+observes exact `ui-result` and dimensions callbacks, and publishes fresh cells
+for every private view. It also calls one deliberately unimplemented import so
+the host's typed `unsupported` rejection is exercised by actual guest code.
 
 Rebuild with the installed stable toolchain and checked lockfile:
 
@@ -22,4 +23,4 @@ sha256sum target03-clone-guest.core.wasm
 ```
 
 Expected SHA-256:
-`5aeedf6233f86a9b753829835cae404699b6238a04d0eebcb27530f5b3e784e2`.
+`499d54fbd933b523ebafa9c689b9c44e7fcc0463570e6f66a26d04f3cf34abb9`.
