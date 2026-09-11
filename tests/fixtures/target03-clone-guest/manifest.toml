@@ -5,7 +5,7 @@ tile_view = ["plugin.demo.panel", "plugin.demo.private"]
 [plugin]
 id = "demo"
 version = "0.0.0"
-component_sha256 = "9d1caf84261a71dc3123cea6bcd652e6a92105dd74b9995486c47a34d319d545"
+component_sha256 = "2b74a38adc00bfad1f32da7f5c369c42359edace5c40765a25aeab20cfff05a6"
 capabilities = ["private_cells"]
 
 [plugin.commands.open]
@@ -68,6 +68,11 @@ title = "Unsupported probe"
 context = "application"
 activation = "active_only"
 
+[plugin.commands.unsupportedreplace]
+title = "Unsupported retained replacement probe"
+context = "application"
+activation = "active_only"
+
 [plugin.commands.oversized]
 title = "Oversized tree probe"
 context = "application"
@@ -80,6 +85,26 @@ activation = "active_only"
 
 [plugin.commands.trapafterqueue]
 title = "Transactional trap probe"
+context = "application"
+activation = "active_only"
+
+[plugin.commands.fuelafterqueue]
+title = "Transactional fuel probe"
+context = "application"
+activation = "active_only"
+
+[plugin.commands.oversizednotice]
+title = "Oversized notice probe"
+context = "application"
+activation = "active_only"
+
+[plugin.commands.oversizedresult]
+title = "Oversized result probe"
+context = "application"
+activation = "active_only"
+
+[plugin.commands.oversizedtitle]
+title = "Oversized title probe"
 context = "application"
 activation = "active_only"
 

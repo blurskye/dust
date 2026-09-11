@@ -293,7 +293,11 @@ impl PluginWindowDraft {
         &mut self,
         window: WindowId,
     ) -> Result<(), WindowError> {
-        self.require_window(window)?;
+        let target = self
+            .graph
+            .window(window)
+            .ok_or(WindowError::UnknownWindow)?;
+        self.require_owner(&target.owner, target.generation)?;
         self.graph.focus(window)
     }
     pub(in crate::editor::session) fn close_window(

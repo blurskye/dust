@@ -19,6 +19,38 @@ pub(crate) mod api {
 
 use api::dust::plugin::host as wire;
 
+const GUEST_FUEL_PER_CALL: u64 = 10_000_000;
+const MAX_MESSAGE_BYTES: usize = 4_096;
+const MAX_REQUEST_BYTES: usize = 1024 * 1024;
+
+fn guest_failure(failure: wire::Failure) -> String {
+    if failure.message.len() > MAX_MESSAGE_BYTES {
+        return format!(
+            "{:?}: target guest failure message exceeds the message ceiling",
+            wire::ErrorCode::LimitExceeded
+        );
+    }
+    format!("{:?}: {}", failure.code, failure.message)
+}
+
+fn invocation_size(invocation: &wire::Invocation) -> Option<usize> {
+    let mut size = invocation.command.len();
+    for argument in &invocation.arguments {
+        size = size.checked_add(argument.name.len())?.checked_add(16)?;
+        if let wire::Scalar::Text(value) = &argument.value {
+            size = size.checked_add(value.len())?;
+        }
+    }
+    Some(size)
+}
+
+fn events_within_bounds(events: &[wire::Event]) -> bool {
+    events.iter().all(|event| match &event.value {
+        wire::EventValue::UiResult((_, Err(failure))) => failure.message.len() <= MAX_MESSAGE_BYTES,
+        _ => true,
+    })
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TargetManifest {
@@ -90,6 +122,12 @@ impl TargetAdmission {
     pub(crate) fn without_clone(&self, content_type: &str) -> Self {
         let mut candidate = self.clone();
         candidate.clone_view.remove(content_type);
+        candidate
+    }
+
+    pub(crate) fn without_tile(&self, content_type: &str) -> Self {
+        let mut candidate = self.clone();
+        candidate.tile_view.remove(content_type);
         candidate
     }
 }
@@ -562,7 +600,7 @@ impl Runtime {
         );
         store.limiter(|state| &mut state.limits);
         store
-            .set_fuel(10_000_000)
+            .set_fuel(GUEST_FUEL_PER_CALL)
             .map_err(|error| error.to_string())?;
         store.set_epoch_deadline(1);
         let mut linker = wasmtime::component::Linker::new(&engine);
@@ -572,8 +610,8 @@ impl Runtime {
             .map_err(|error| error.to_string())?;
         let commands = bindings
             .call_activate(&mut store)
-            .map_err(|error| error.to_string())?
-            .map_err(|failure| format!("{:?}: {}", failure.code, failure.message))?
+            .map_err(|error| format!("{error:#}"))?
+            .map_err(guest_failure)?
             .into_iter()
             .collect::<BTreeSet<_>>();
         let declared = admission
@@ -604,16 +642,20 @@ impl Runtime {
         if !self.commands.contains(&invocation.command) {
             return Err("target command is not activated".into());
         }
+        if invocation_size(&invocation).is_none_or(|size| size > MAX_REQUEST_BYTES) {
+            return Err("target invocation exceeds the request byte ceiling".into());
+        }
+        self.store
+            .set_fuel(GUEST_FUEL_PER_CALL)
+            .map_err(|error| error.to_string())?;
         let checkpoint = self.store.data().checkpoint();
         self.store.data_mut().invocation = Some(invocation.clone());
         self.store.data_mut().invocation_catalogue = Some(catalogue.version());
         let result = self
             .bindings
             .call_execute_command(&mut self.store, &invocation)
-            .map_err(|error| error.to_string())
-            .and_then(|result| {
-                result.map_err(|failure| format!("{:?}: {}", failure.code, failure.message))
-            });
+            .map_err(|error| format!("{error:#}"))
+            .and_then(|result| result.map_err(guest_failure));
         self.store.data_mut().invocation = None;
         self.store.data_mut().invocation_catalogue = None;
         if result.is_err() {
@@ -632,6 +674,9 @@ impl Runtime {
         }
         if events.is_empty() || events.len() > 64 {
             return Err("target event batch is empty or exceeds its ceiling".into());
+        }
+        if !events_within_bounds(&events) {
+            return Err("target event result exceeds the message ceiling".into());
         }
         let mut delivered_tokens = BTreeSet::new();
         let mut delivered_ids = BTreeSet::new();
@@ -671,6 +716,9 @@ impl Runtime {
                 _ => return Err("target event kind or callback authority is invalid".into()),
             }
         }
+        self.store
+            .set_fuel(GUEST_FUEL_PER_CALL)
+            .map_err(|error| error.to_string())?;
         self.store.data_mut().delivered_events.extend(delivered_ids);
         for token in &delivered_tokens {
             self.store.data_mut().pending_tokens.remove(token);
@@ -682,10 +730,8 @@ impl Runtime {
         let result = self
             .bindings
             .call_handle_events(&mut self.store, &events)
-            .map_err(|error| error.to_string())
-            .and_then(|result| {
-                result.map_err(|failure| format!("{:?}: {}", failure.code, failure.message))
-            });
+            .map_err(|error| format!("{error:#}"))
+            .and_then(|result| result.map_err(guest_failure));
         self.store.data_mut().invocation = None;
         self.store.data_mut().invocation_catalogue = None;
         self.store.data_mut().callback_dimensions.clear();
@@ -699,13 +745,14 @@ impl Runtime {
         if !self.store.data().active {
             return Err("target load is retired".into());
         }
+        self.store
+            .set_fuel(GUEST_FUEL_PER_CALL)
+            .map_err(|error| error.to_string())?;
         let result = self
             .bindings
             .call_deactivate(&mut self.store)
-            .map_err(|error| error.to_string())
-            .and_then(|result| {
-                result.map_err(|failure| format!("{:?}: {}", failure.code, failure.message))
-            });
+            .map_err(|error| format!("{error:#}"))
+            .and_then(|result| result.map_err(guest_failure));
         self.lease.active.store(false, Ordering::Release);
         let state = self.store.data_mut();
         state.active = false;

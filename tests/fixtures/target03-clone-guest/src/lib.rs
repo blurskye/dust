@@ -8,8 +8,8 @@ use std::{
 
 use dust::plugin::host::{
     self, Cell, CellUpdate, CloseView, Dock, Edge, EventValue, ExecutionKind, Focus, Node,
-    NodeKind, Notice, OpenView, Place, Placement, Rect, Role, Severity, SnapshotRequest, Tree,
-    UiRequest,
+    NodeKind, Notice, OpenView, Place, Placement, Rect, ReplaceTree, Role, Severity,
+    SnapshotRequest, Tree, UiRequest,
 };
 
 #[derive(Clone, Copy)]
@@ -81,9 +81,14 @@ impl Guest for GuestComponent {
             "focus".into(),
             "close".into(),
             "unsupported".into(),
+            "unsupportedreplace".into(),
             "oversized".into(),
             "failafterqueue".into(),
             "trapafterqueue".into(),
+            "fuelafterqueue".into(),
+            "oversizednotice".into(),
+            "oversizedresult".into(),
+            "oversizedtitle".into(),
             "callbackopen".into(),
             "openprivatefail".into(),
             "openprivateoversized".into(),
@@ -145,6 +150,26 @@ impl Guest for GuestComponent {
             }))?;
             return Ok(());
         }
+        if invocation.command == "unsupportedreplace" {
+            host::queue_ui(&UiRequest::Replace(ReplaceTree {
+                view: ui.view,
+                expected: 1,
+                tree: tree("unsupported replacement"),
+            }))?;
+            return Err(failure(
+                "unsupported retained replacement unexpectedly succeeded",
+            ));
+        }
+        if invocation.command == "oversizednotice" {
+            host::notify(&Notice {
+                severity: Severity::Info,
+                message: "x".repeat(4_097),
+            })?;
+            return Err(failure("oversized notice unexpectedly succeeded"));
+        }
+        if invocation.command == "oversizedresult" {
+            return Err(failure("x".repeat(4_097)));
+        }
         if invocation.command == "oversized" {
             let mut oversized = tree("oversized");
             oversized.nodes.extend((2..=257).map(|id| Node {
@@ -180,6 +205,7 @@ impl Guest for GuestComponent {
         }
         let fail_after_queue = invocation.command == "failafterqueue";
         let trap_after_queue = invocation.command == "trapafterqueue";
+        let fuel_after_queue = invocation.command == "fuelafterqueue";
         let callback_open = invocation.command == "callbackopen";
         let fail_private = invocation.command == "openprivatefail";
         let oversized_private = invocation.command == "openprivateoversized";
@@ -193,9 +219,8 @@ impl Guest for GuestComponent {
             _ => None,
         };
         let (content, content_type, label) = match invocation.command.as_str() {
-            "open" | "failafterqueue" | "trapafterqueue" | "callbackopen" => {
-                (None, "plugin.demo.panel", Some("target-0.3 original"))
-            }
+            "open" | "failafterqueue" | "trapafterqueue" | "fuelafterqueue" | "oversizedtitle"
+            | "callbackopen" => (None, "plugin.demo.panel", Some("target-0.3 original")),
             "clone" => (
                 Some(ui.content),
                 "plugin.demo.panel",
@@ -224,7 +249,11 @@ impl Guest for GuestComponent {
         let token = host::queue_ui(&UiRequest::Open(OpenView {
             content_type: content_type.into(),
             content,
-            title: "Target 0.3 fixture".into(),
+            title: if invocation.command == "oversizedtitle" {
+                "x".repeat(129)
+            } else {
+                "Target 0.3 fixture".into()
+            },
             graph_revision: ui.graph_revision,
             tab: ui.tab,
             placement: Placement::Floating(Rect {
@@ -262,6 +291,12 @@ impl Guest for GuestComponent {
         }
         if trap_after_queue {
             panic!("trap after accepted queue-ui");
+        }
+        if fuel_after_queue {
+            let mut value = invocation.id;
+            loop {
+                value = std::hint::black_box(value.wrapping_mul(31).wrapping_add(1));
+            }
         }
         if fail_after_queue {
             Err(failure("failure after accepted queue-ui"))

@@ -1310,7 +1310,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     );
     assert_eq!(
         format!("{:x}", Sha256::digest(core)),
-        "9d1caf84261a71dc3123cea6bcd652e6a92105dd74b9995486c47a34d319d545"
+        "2b74a38adc00bfad1f32da7f5c369c42359edace5c40765a25aeab20cfff05a6"
     );
     assert_eq!(
         include_str!("../../../../../docs/specs/api-next.wit"),
@@ -1359,6 +1359,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
             "failafterqueue".to_owned(),
             "focus".to_owned(),
             "fullscreen".to_owned(),
+            "fuelafterqueue".to_owned(),
             "hide".to_owned(),
             "move".to_owned(),
             "open".to_owned(),
@@ -1372,9 +1373,13 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
             "openprivatewide".to_owned(),
             "openprivatewrongview".to_owned(),
             "oversized".to_owned(),
+            "oversizednotice".to_owned(),
+            "oversizedresult".to_owned(),
+            "oversizedtitle".to_owned(),
             "tile".to_owned(),
             "trapafterqueue".to_owned(),
             "unsupported".to_owned(),
+            "unsupportedreplace".to_owned(),
         ]
         .into_iter()
         .collect()
@@ -1473,6 +1478,29 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
         .execute(
             invocation(
                 1,
+                "unsupportedreplace",
+                &graph,
+                editor_content,
+                editor_view,
+                editor_window,
+            ),
+            &catalogue,
+        )
+        .expect_err("unimplemented retained replacement must be typed Unsupported");
+    assert!(error.starts_with("ErrorCode::Unsupported:"), "{error}");
+    assert!(
+        error.contains("queue-ui request is not implemented"),
+        "{error}"
+    );
+    assert!(runtime.take_requests().is_empty());
+    assert!(runtime.take_notices().is_empty());
+    assert_eq!(graph, graph_before);
+    assert!(host.snapshots().is_empty());
+
+    let error = runtime
+        .execute(
+            invocation(
+                2,
                 "failafterqueue",
                 &graph,
                 editor_content,
@@ -1509,10 +1537,80 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     assert_eq!(graph, graph_before);
     assert!(host.snapshots().is_empty());
 
-    let error = runtime
+    let mut fuel_runtime = Runtime::load(core, &admission).expect("fuel probe Component");
+    let error = fuel_runtime
         .execute(
             invocation(
                 3,
+                "fuelafterqueue",
+                &graph,
+                editor_content,
+                editor_view,
+                editor_window,
+            ),
+            &catalogue,
+        )
+        .expect_err("fuel exhaustion must roll back its accepted queue-ui");
+    assert!(error.to_ascii_lowercase().contains("fuel"), "{error}");
+    assert!(fuel_runtime.take_requests().is_empty());
+    assert!(fuel_runtime.take_notices().is_empty());
+    drop(fuel_runtime);
+    assert_eq!(graph, graph_before);
+    assert!(host.snapshots().is_empty());
+
+    let mut bounded_runtime = Runtime::load(core, &admission).expect("bounded result Component");
+    for (id, command, expected) in [
+        (4, "oversizednotice", "InvalidArgument"),
+        (5, "oversizedresult", "LimitExceeded"),
+        (6, "oversizedtitle", "InvalidArgument"),
+    ] {
+        let error = bounded_runtime
+            .execute(
+                invocation(
+                    id,
+                    command,
+                    &graph,
+                    editor_content,
+                    editor_view,
+                    editor_window,
+                ),
+                &catalogue,
+            )
+            .expect_err("oversized actual Component output must reject");
+        assert!(
+            error.starts_with(&format!("ErrorCode::{expected}:")),
+            "{error}"
+        );
+        assert!(bounded_runtime.take_requests().is_empty());
+        assert!(bounded_runtime.take_notices().is_empty());
+        assert_eq!(graph, graph_before);
+        assert!(host.snapshots().is_empty());
+    }
+    let mut oversized_invocation = invocation(
+        7,
+        "open",
+        &graph,
+        editor_content,
+        editor_view,
+        editor_window,
+    );
+    oversized_invocation.arguments.push(wire::Argument {
+        name: "payload".into(),
+        value: wire::Scalar::Text("x".repeat(1024 * 1024)),
+    });
+    let error = bounded_runtime
+        .execute(oversized_invocation, &catalogue)
+        .expect_err("oversized invocation must reject before entering the Component");
+    assert!(error.contains("request byte ceiling"), "{error}");
+    assert!(bounded_runtime.take_requests().is_empty());
+    bounded_runtime
+        .deactivate()
+        .expect("bounded result load retirement");
+
+    let error = runtime
+        .execute(
+            invocation(
+                8,
                 "oversized",
                 &graph,
                 editor_content,
@@ -1547,9 +1645,44 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     let original = host
         .process_target03(&mut graph, &catalogue, &admission, requests.remove(0))
         .expect("checked original publication");
+    let original_content = crate::ui::window::ContentId(original.content);
+    assert!(
+        graph
+            .content(original_content)
+            .expect("actual Component content")
+            .capabilities
+            .clone_view
+    );
+    assert_eq!(
+        graph.require_persist_descriptor(original_content),
+        Err(crate::ui::window::WindowError::Unsupported(
+            "persist-descriptor"
+        ))
+    );
+    let graph_after_original = graph.clone();
+    let host_after_original = host.clone();
+    let error = runtime
+        .handle_events(
+            vec![callback(
+                50,
+                original_token,
+                Err(wire::Failure {
+                    code: wire::ErrorCode::ProtocolFailure,
+                    message: "x".repeat(4_097),
+                    retryable: false,
+                }),
+            )],
+            &catalogue,
+        )
+        .expect_err("oversized callback result must reject before token delivery");
+    assert!(error.contains("message ceiling"), "{error}");
+    assert_eq!(graph, graph_after_original);
+    assert_eq!(host, host_after_original);
+    assert!(runtime.take_requests().is_empty());
+    assert!(runtime.take_notices().is_empty());
     runtime
         .handle_events(vec![callback(1, original_token, Ok(original))], &catalogue)
-        .expect("exact original UI result callback");
+        .expect("exact original UI result callback after bounded refusal");
     assert_eq!(
         runtime.take_notices(),
         [format!(
@@ -1608,6 +1741,54 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
             )
             .is_err()
     );
+
+    for (id, mismatch) in [(191, "owner"), (192, "checksum")] {
+        runtime
+            .execute(
+                invocation(
+                    id,
+                    "clone",
+                    &graph,
+                    crate::ui::window::ContentId(original.content),
+                    crate::ui::window::ViewId(original.view),
+                    crate::ui::window::WindowId(original.window),
+                ),
+                &catalogue,
+            )
+            .expect("load-identity mismatch staging");
+        let mut request = runtime.take_requests();
+        let token = request[0].token;
+        let mut wrong_admission = admission.clone();
+        match mismatch {
+            "owner" => wrong_admission.index.owner = "foreign".into(),
+            "checksum" => wrong_admission.index.checksum = "e".repeat(64),
+            _ => unreachable!(),
+        }
+        let graph_before = graph.clone();
+        let host_before = host.clone();
+        let error = host
+            .process_target03(&mut graph, &catalogue, &wrong_admission, request.remove(0))
+            .expect_err("wrong load identity cannot adopt staged work");
+        assert_eq!(error.code, wire::ErrorCode::StaleSource);
+        assert_eq!(graph, graph_before);
+        assert_eq!(host, host_before);
+        assert!(
+            runtime
+                .handle_events(
+                    vec![callback(
+                        id,
+                        token,
+                        Err(wire::Failure {
+                            code: error.code,
+                            message: error.message,
+                            retryable: false,
+                        }),
+                    )],
+                    &catalogue,
+                )
+                .is_err()
+        );
+    }
 
     runtime
         .execute(
@@ -1766,9 +1947,8 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
         .expect("cross-tab switch target");
     graph.set_active_tab(other_tab).expect("switch away");
     assert_ne!(graph.active_tab(), Some(tab));
-    graph
-        .focus(crate::ui::window::WindowId(focused.window))
-        .expect("host switcher returns to exact retained target");
+    let cross_tab_focused = apply_component_window_operation!(140, "focus", focused);
+    assert_eq!(cross_tab_focused.window, focused.window);
     assert_eq!(graph.active_tab(), Some(tab));
     assert_eq!(
         graph
@@ -1847,6 +2027,61 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     );
     assert!(runtime.take_notices().is_empty());
 
+    for (id, identity) in [(520, "window"), (521, "view"), (522, "content")] {
+        let mut hostile = invocation(
+            id,
+            "move",
+            &graph,
+            crate::ui::window::ContentId(original.content),
+            crate::ui::window::ViewId(original.view),
+            crate::ui::window::WindowId(original.window),
+        );
+        let ui = hostile.ui.as_mut().expect("hostile identity UI source");
+        match identity {
+            "window" => ui.window = editor_window.0,
+            "view" => ui.view = editor_view.0,
+            "content" => ui.content = editor_content.0,
+            _ => unreachable!(),
+        }
+        runtime
+            .execute(hostile, &catalogue)
+            .unwrap_or_else(|error| panic!("actual Component wrong-{identity} staging: {error}"));
+        let mut hostile_request = runtime.take_requests();
+        assert_eq!(hostile_request.len(), 1);
+        let token = hostile_request[0].token;
+        let graph_before = graph.clone();
+        let host_before = host.clone();
+        let error = host
+            .process_target03(
+                &mut graph,
+                &catalogue,
+                &admission,
+                hostile_request.remove(0),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, wire::ErrorCode::ForeignHandle);
+        assert_eq!(graph, graph_before);
+        assert_eq!(host, host_before);
+        assert!(
+            runtime
+                .handle_events(
+                    vec![callback(
+                        id,
+                        token,
+                        Err(wire::Failure {
+                            code: error.code,
+                            message: error.message,
+                            retryable: false,
+                        }),
+                    )],
+                    &catalogue,
+                )
+                .is_err()
+        );
+        assert!(runtime.take_requests().is_empty());
+        assert!(runtime.take_notices().is_empty());
+    }
+
     runtime
         .execute(
             invocation(
@@ -1886,6 +2121,54 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                     }),
                 )],
                 &catalogue
+            )
+            .is_err()
+    );
+    assert!(runtime.take_notices().is_empty());
+
+    runtime
+        .execute(
+            invocation(
+                211,
+                "tile",
+                &graph,
+                crate::ui::window::ContentId(original.content),
+                crate::ui::window::ViewId(original.view),
+                crate::ui::window::WindowId(original.window),
+            ),
+            &catalogue,
+        )
+        .expect("capability-invalid tile staging");
+    let mut denied_tile = runtime.take_requests();
+    assert_eq!(denied_tile.len(), 1);
+    let denied_tile_token = denied_tile[0].token;
+    let denied_tile_admission = admission.without_tile("plugin.demo.panel");
+    let graph_before = graph.clone();
+    let host_before = host.clone();
+    let error = host
+        .process_target03(
+            &mut graph,
+            &catalogue,
+            &denied_tile_admission,
+            denied_tile.remove(0),
+        )
+        .expect_err("tile-view=false must reject");
+    assert_eq!(error.code, wire::ErrorCode::PermissionDenied);
+    assert_eq!(graph, graph_before);
+    assert_eq!(host, host_before);
+    assert!(
+        runtime
+            .handle_events(
+                vec![callback(
+                    211,
+                    denied_tile_token,
+                    Err(wire::Failure {
+                        code: error.code,
+                        message: error.message,
+                        retryable: false,
+                    }),
+                )],
+                &catalogue,
             )
             .is_err()
     );
@@ -2118,9 +2401,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     graph
         .set_active_tab(private_other_tab)
         .expect("switch away from private view");
-    graph
-        .focus(crate::ui::window::WindowId(private_focused.window))
-        .expect("host switcher returns to exact private target");
+    let private_cross_tab_focused =
+        apply_component_window_operation!(141, "focus", private_focused);
+    assert_eq!(private_cross_tab_focused.window, private_focused.window);
     assert_eq!(graph.active_tab(), Some(tab));
     assert_eq!(
         graph
@@ -2637,6 +2920,77 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
             .contains("stale or duplicated")
     );
     assert!(runtime.take_notices().is_empty());
+
+    for (offset, command) in [
+        "open",
+        "clone",
+        "openprivate",
+        "cloneprivate",
+        "move",
+        "tile",
+        "dock",
+        "fullscreen",
+        "hide",
+        "focus",
+        "close",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = 400 + u64::try_from(offset).expect("operation ID");
+        runtime
+            .execute(
+                invocation(
+                    id,
+                    command,
+                    &graph,
+                    crate::ui::window::ContentId(original.content),
+                    crate::ui::window::ViewId(original.view),
+                    crate::ui::window::WindowId(original.window),
+                ),
+                &catalogue,
+            )
+            .unwrap_or_else(|error| panic!("actual Component {command} staging: {error}"));
+        let mut request = runtime.take_requests();
+        assert_eq!(request.len(), 1, "one staged {command} request");
+        let token = request[0].token;
+        let mut stale_graph = graph.clone();
+        let mut stale_host = host.clone();
+        stale_graph
+            .focus(crate::ui::window::WindowId(original.window))
+            .expect("intervening focus changes graph revision");
+        let changed_graph = stale_graph.clone();
+        let unchanged_host = stale_host.clone();
+        let error = match stale_host.process_target03(
+            &mut stale_graph,
+            &catalogue,
+            &admission,
+            request.remove(0),
+        ) {
+            Ok(receipt) => panic!("stale {command} published {receipt:?}"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, wire::ErrorCode::StaleSource, "{command}");
+        assert_eq!(stale_graph, changed_graph, "{command} graph changed");
+        assert_eq!(stale_host, unchanged_host, "{command} host changed");
+        let callback_error = runtime
+            .handle_events(
+                vec![callback(
+                    id,
+                    token,
+                    Err(wire::Failure {
+                        code: error.code,
+                        message: error.message,
+                        retryable: false,
+                    }),
+                )],
+                &catalogue,
+            )
+            .expect_err("guest receives one terminal stale result");
+        assert!(callback_error.starts_with("ErrorCode::StaleSource:"));
+        assert!(runtime.take_requests().is_empty());
+        assert!(runtime.take_notices().is_empty());
+    }
 
     runtime
         .execute(

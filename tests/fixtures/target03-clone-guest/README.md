@@ -10,12 +10,13 @@ Component through Wasmtime. Its strict target fixture manifest admits retained
 and private content cloning. The guest opens and clones both presenters,
 observes exact `ui-result` and dimensions callbacks, and publishes fresh cells
 for every private view. Hostile commands exercise oversized retained/private
-payloads, wrong/stale private identities, out-of-bounds and wide-overflow cells,
-result-only authority refusal, and execution/callback rollback after an accepted
-queue call. It also drives checked move, tile, dock, fullscreen, hide, focus and
-close-view requests through the exact live Component source, and calls one
-deliberately unimplemented import so the host's typed `unsupported` rejection
-is exercised by actual guest code.
+payloads, titles, notices and guest results; wrong/stale private identities;
+out-of-bounds and wide-overflow cells; result-only authority refusal; and
+execution/callback rollback after an accepted queue call, including a real fuel
+trap. It also drives checked move, tile, dock, fullscreen, hide, focus and
+close-view requests through the exact live Component source, and calls
+deliberately unimplemented snapshot and retained-replacement paths so the host's
+typed `unsupported` rejection is exercised by actual guest code.
 
 Rebuild with the installed stable toolchain and checked lockfile:
 
@@ -28,4 +29,4 @@ sha256sum target03-clone-guest.core.wasm
 ```
 
 Expected SHA-256:
-`9d1caf84261a71dc3123cea6bcd652e6a92105dd74b9995486c47a34d319d545`.
+`2b74a38adc00bfad1f32da7f5c369c42359edace5c40765a25aeab20cfff05a6`.
