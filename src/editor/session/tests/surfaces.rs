@@ -3227,9 +3227,10 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
     app.set_terminal_focus(true);
     app.sync_terminal_panel();
     let original_key = app.terminal_session.key(PtyId(1)).unwrap();
+    let source = app.window_session.terminal_geometry_source(1).unwrap();
     assert!(
         app.terminal_session
-            .resize(PtyId(1), u16::MAX, u16::MAX, &app.workspace)
+            .resize(PtyId(1), u16::MAX, u16::MAX, source, &app.workspace)
             .is_err()
     );
     assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (80, 8));
@@ -3739,6 +3740,253 @@ fn live_pty_clone_refusal_preserves_process_screen_geometry_focus_and_sources() 
 
 #[cfg(unix)]
 #[test]
+fn real_pty_geometry_ack_focus_placement_and_cross_tab_keep_one_process() {
+    use super::driver::TestSession;
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.terminals.profiles.insert(
+        "geometry".into(),
+        crate::config::TerminalProfileConfig {
+            program: "/bin/sh".into(),
+            arguments: vec![
+                "-c".into(),
+                "printf x >> starts; printf '\\033[?1049h\\033[?1h\\033[?2004h\\033[?1002h\\033[?1006hREADY\\n'; while read value; do printf 'ACK:%s\\n' \"$value\"; done".into(),
+            ],
+            cwd: None,
+            environment: Default::default(),
+            columns: 47,
+            rows: 9,
+        },
+    );
+    let mut driver = TestSession::new(loaded);
+    driver.new_buffer();
+    driver.trust_owned_terminal_fixture();
+    driver.terminal_open("geometry");
+    let deadline = Instant::now() + Duration::from_secs(4);
+    let contains = |driver: &TestSession, needle: &str| {
+        driver
+            .terminal_lines()
+            .iter()
+            .any(|line| line.contains(needle))
+    };
+    while !contains(&driver, "READY") {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    let initial_identity = driver.terminal_window_identity().unwrap();
+    assert_eq!(driver.terminal_started_markers(), "x");
+    assert_eq!(
+        (
+            driver.selected_terminal(),
+            driver.displayed_terminal(),
+            driver.keyboard_terminal(),
+        ),
+        (Some(1), Some(1), Some(1))
+    );
+    driver.key("escape");
+    driver.key("escape");
+    assert_eq!(
+        driver.terminal_mode(),
+        Some(crate::ui::TerminalPanelMode::Normal)
+    );
+    let screen_state = driver.terminal_screen_state().unwrap();
+    assert!(screen_state.alternate);
+    assert!(screen_state.cursor_visible);
+    assert!(screen_state.application_cursor);
+    assert!(screen_state.bracketed_paste);
+    assert_eq!(screen_state.mouse_mode, crate::ui::PtyMouseMode::Drag);
+    assert!(screen_state.sgr_mouse);
+    let cursor = driver.terminal_cursor();
+
+    let wait_for_ack = |driver: &mut TestSession| loop {
+        driver.pump_terminal();
+        let requested = driver
+            .terminal_dimensions()
+            .map(|(columns, rows)| (usize::from(columns), usize::from(rows)));
+        if driver.terminal_screen_dimensions() == requested {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    };
+
+    let before_rehost = driver.terminal_screen_dimensions().unwrap();
+    driver
+        .place_terminal(WindowPlacement::Floating(WindowRect {
+            x: 5,
+            y: 3,
+            width: 40,
+            height: 10,
+        }))
+        .unwrap();
+    let retired_source = driver.terminal_geometry_source().unwrap();
+    assert_eq!(driver.terminal_pending_resizes(), Some(1));
+    assert_eq!(driver.terminal_screen_dimensions(), Some(before_rehost));
+    driver.reset_terminal_window_runtime().unwrap();
+    let identity = driver.terminal_window_identity().unwrap();
+    let original_tab = driver.terminal_window_tab().unwrap();
+    assert_ne!(identity, initial_identity);
+    let current_source = driver.terminal_geometry_source().unwrap();
+    assert_ne!(current_source, retired_source);
+    assert_eq!(driver.terminal_pending_resizes(), Some(1));
+    assert!(
+        driver.terminal_pending_resize_matches(&current_source),
+        "same-size rehost must replace the retired receipt with a current one"
+    );
+    assert_eq!(driver.terminal_screen_dimensions(), Some(before_rehost));
+    assert_eq!(driver.terminal_started_markers(), "x");
+    wait_for_ack(&mut driver);
+    assert_eq!(driver.terminal_screen_state(), Some(screen_state));
+    assert_eq!(driver.terminal_cursor(), cursor);
+
+    for placement in [
+        WindowPlacement::Fullscreen,
+        WindowPlacement::Docked {
+            edge: DockEdge::Top,
+            size: 5,
+        },
+        WindowPlacement::Docked {
+            edge: DockEdge::Right,
+            size: 10,
+        },
+        WindowPlacement::Docked {
+            edge: DockEdge::Left,
+            size: 8,
+        },
+        WindowPlacement::Docked {
+            edge: DockEdge::Bottom,
+            size: 12,
+        },
+    ] {
+        let before = driver.terminal_screen_dimensions().unwrap();
+        driver.place_terminal(placement).unwrap();
+        assert_eq!(driver.terminal_window_identity(), Some(identity));
+        assert_eq!(driver.terminal_started_markers(), "x");
+        if driver
+            .terminal_dimensions()
+            .is_some_and(|size| size != (before.0 as u16, before.1 as u16))
+        {
+            assert_eq!(
+                driver.terminal_screen_dimensions(),
+                Some(before),
+                "screen dimensions changed before the exact PTY ACK"
+            );
+        }
+        wait_for_ack(&mut driver);
+        assert_eq!(driver.terminal_screen_state(), Some(screen_state));
+        assert_eq!(
+            driver.terminal_mode(),
+            Some(crate::ui::TerminalPanelMode::Normal)
+        );
+        assert_eq!(driver.terminal_cursor(), cursor);
+        assert!(contains(&driver, "READY"));
+    }
+
+    let frame_cursor = driver.frame().cursor;
+    assert!(frame_cursor.is_some());
+    driver.resize(0, 0);
+    let zero = driver.frame();
+    assert_eq!((zero.grid.width(), zero.grid.height()), (0, 0));
+    assert_eq!(zero.cursor, None);
+    assert_eq!(driver.terminal_window_identity(), Some(identity));
+    assert_eq!(driver.terminal_screen_state(), Some(screen_state));
+    assert_eq!(driver.terminal_started_markers(), "x");
+    driver.resize(80, 24);
+    assert_eq!(driver.frame().cursor, frame_cursor);
+    assert_eq!(driver.terminal_screen_state(), Some(screen_state));
+
+    let acknowledged = driver.terminal_screen_dimensions();
+    driver.place_terminal(WindowPlacement::Hidden).unwrap();
+    assert_eq!(
+        (
+            driver.selected_terminal(),
+            driver.displayed_terminal(),
+            driver.keyboard_terminal(),
+        ),
+        (Some(1), Some(1), None)
+    );
+    assert_eq!(driver.context(), "editor.normal");
+    assert_ne!(driver.focused_window(), Some(identity.2));
+    assert_eq!(
+        driver.terminal_mode(),
+        Some(crate::ui::TerminalPanelMode::Normal)
+    );
+    assert_eq!(driver.terminal_cursor(), cursor);
+    assert_eq!(driver.terminal_screen_dimensions(), acknowledged);
+    assert_eq!(driver.terminal_started_markers(), "x");
+    driver.key("i");
+    driver.paste("hidden-must-not-route");
+    driver.key("enter");
+    driver.key("escape");
+    driver.show_terminal().unwrap();
+    assert_eq!(
+        (
+            driver.selected_terminal(),
+            driver.displayed_terminal(),
+            driver.keyboard_terminal(),
+        ),
+        (Some(1), Some(1), None)
+    );
+    assert_eq!(driver.terminal_screen_state(), Some(screen_state));
+    driver.focus_only_terminal();
+    assert_eq!(driver.focused_window(), Some(identity.2));
+    driver.key("i");
+    driver.paste("visible-route");
+    driver.key("enter");
+    while !contains(&driver, "ACK:visible-route") {
+        driver.pump_terminal();
+        assert!(
+            Instant::now() < deadline,
+            "terminal output: {:?}",
+            driver.terminal_lines()
+        );
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert!(!contains(&driver, "ACK:hidden-must-not-route"));
+    driver.key("escape");
+    driver.key("escape");
+    assert_eq!(
+        driver.terminal_mode(),
+        Some(crate::ui::TerminalPanelMode::Normal)
+    );
+
+    driver.new_tab();
+    assert_eq!(driver.terminal_window_identity(), Some(identity));
+    assert_ne!(driver.terminal_window_tab(), Some(original_tab));
+    assert_eq!(driver.terminal_started_markers(), "x");
+    assert_eq!(
+        driver.terminal_mode(),
+        Some(crate::ui::TerminalPanelMode::Normal)
+    );
+    assert_eq!(
+        (
+            driver.selected_terminal(),
+            driver.displayed_terminal(),
+            driver.keyboard_terminal(),
+        ),
+        (Some(1), Some(1), Some(1))
+    );
+    assert_eq!(driver.context(), "terminal_normal");
+    assert_eq!(driver.focused_window(), Some(identity.2));
+    driver.key("i");
+    driver.paste("cross-tab-route");
+    driver.key("enter");
+    while !contains(&driver, "ACK:cross-tab-route") {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(driver.terminal_started_markers(), "x");
+    driver.terminal_close();
+    while driver.terminal_pending() != 0 {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn terminal_preflight_close_and_capture_keep_original_pty_and_geometry() {
     use super::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
@@ -3817,7 +4065,18 @@ fn terminal_preflight_close_and_capture_keep_original_pty_and_geometry() {
         None,
         "background readiness cannot seize focus"
     );
+    let acknowledged = driver.terminal_screen_dimensions().unwrap();
     driver.resize(63, 27);
+    assert_ne!(
+        Some((acknowledged.0 as u16, acknowledged.1 as u16)),
+        driver.terminal_dimensions(),
+        "fixture must request a changed PTY size"
+    );
+    assert_eq!(
+        driver.terminal_screen_dimensions(),
+        Some(acknowledged),
+        "the virtual screen must letterbox until the PTY resize ACK is drained"
+    );
     loop {
         driver.pump_terminal();
         let panel = driver.projection().terminal_panel.as_ref().unwrap();

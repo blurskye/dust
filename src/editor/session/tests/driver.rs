@@ -268,6 +268,12 @@ impl TestSession {
             .terminal_session
             .select(crate::process::PtyId(id));
     }
+    pub(super) fn selected_terminal(&self) -> Option<u64> {
+        self.application.terminal_session.selected().map(|id| id.0)
+    }
+    pub(super) fn displayed_terminal(&self) -> Option<u64> {
+        self.application.displayed_terminal().map(|id| id.0)
+    }
     pub(super) fn keyboard_terminal(&self) -> Option<u64> {
         self.application.keyboard_terminal().map(|id| id.0)
     }
@@ -359,6 +365,13 @@ impl TestSession {
         self.application.window_session.reset_runtime(&[])?;
         self.application.reconcile_editor_windows();
         self.application.sync_explorer_ui();
+        Ok(())
+    }
+    pub(super) fn reset_terminal_window_runtime(&mut self) -> Result<(), String> {
+        self.application.window_session.reset_runtime(&[])?;
+        self.application.reconcile_editor_windows();
+        self.application.sync_terminal_panel();
+        self.application.resize_active_terminal_to_panel();
         Ok(())
     }
     pub(super) fn explorer_focus(&self) -> Option<u64> {
@@ -830,6 +843,57 @@ impl TestSession {
                 axis: crate::editor::Axis::Horizontal,
             });
     }
+    pub(super) fn place_terminal(
+        &mut self,
+        placement: crate::ui::window::WindowPlacement,
+    ) -> Result<(), String> {
+        self.application.place_graph_window("terminal", placement)
+    }
+    pub(super) fn show_terminal(&mut self) -> Result<(), String> {
+        self.application.show_graph_window("terminal")
+    }
+    pub(super) fn terminal_window_identity(
+        &self,
+    ) -> Option<(
+        crate::ui::window::ContentId,
+        crate::ui::window::ViewId,
+        crate::ui::window::WindowId,
+    )> {
+        let id = self.application.displayed_terminal()?;
+        let ids = self
+            .application
+            .window_session
+            .native_ids()
+            .terminal(id.0)?;
+        Some((ids.content, ids.view, ids.window))
+    }
+    pub(super) fn terminal_geometry_source(
+        &self,
+    ) -> Option<crate::editor::session::windows::TerminalGeometrySource> {
+        let id = self.application.displayed_terminal()?;
+        self.application
+            .window_session
+            .terminal_geometry_source(id.0)
+    }
+    pub(super) fn terminal_window_tab(&self) -> Option<crate::ui::window::WorkspaceTabId> {
+        let (_, _, window) = self.terminal_window_identity()?;
+        self.application
+            .window_session
+            .graph()
+            .window(window)
+            .map(|window| window.tab)
+    }
+    pub(super) fn terminal_mode(&self) -> Option<crate::ui::TerminalPanelMode> {
+        let id = self.application.displayed_terminal()?;
+        self.application.terminal_session.mode(id)
+    }
+    pub(super) fn terminal_cursor(&self) -> Option<(usize, usize)> {
+        self.application
+            .ui
+            .terminal_panel
+            .as_ref()
+            .and_then(|panel| panel.cursor)
+    }
     pub(super) fn terminal_clone_state(&self) -> TerminalCloneState {
         let selected = self.application.terminal_session.selected();
         TerminalCloneState {
@@ -883,6 +947,40 @@ impl TestSession {
     }
     pub(super) fn terminal_dimensions(&self) -> Option<(u16, u16)> {
         self.application.terminal_body_dimensions()
+    }
+    pub(super) fn terminal_screen_dimensions(&self) -> Option<(usize, usize)> {
+        let id = self.application.displayed_terminal()?;
+        Some(self.application.terminal_session.fixture_dimensions(id))
+    }
+    pub(super) fn terminal_pending_resizes(&self) -> Option<usize> {
+        let id = self.application.displayed_terminal()?;
+        Some(
+            self.application
+                .terminal_session
+                .fixture_pending_resizes(id),
+        )
+    }
+    pub(super) fn terminal_pending_resize_matches(
+        &self,
+        source: &crate::editor::session::windows::TerminalGeometrySource,
+    ) -> bool {
+        self.application.displayed_terminal().is_some_and(|id| {
+            self.application
+                .terminal_session
+                .fixture_pending_resize_matches(id, source)
+        })
+    }
+    pub(super) fn terminal_screen_state(
+        &self,
+    ) -> Option<crate::editor::session::terminal::TerminalScreenState> {
+        let id = self.application.displayed_terminal()?;
+        Some(self.application.terminal_session.fixture_screen_state(id))
+    }
+    pub(super) fn terminal_lines(&self) -> Vec<String> {
+        self.application
+            .displayed_terminal()
+            .map(|id| self.application.terminal_session.fixture_lines(id))
+            .unwrap_or_default()
     }
     pub(super) fn terminal_started_markers(&self) -> String {
         std::fs::read_to_string(self._workspace.path().join("starts")).unwrap_or_default()

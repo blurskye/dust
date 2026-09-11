@@ -55,8 +55,13 @@ fn tiny_terminal_projection_clips_safely_and_restores_the_same_sessions() {
     let mut session = TestSession::new(crate::config::load_bundled_config());
     session.new_buffer();
     session.terminal_fixture();
+    session.resize(0, 0);
+    let zero = session.frame();
+    assert_eq!((zero.grid.width(), zero.grid.height()), (0, 0));
+    assert_eq!(zero.cursor, None);
     session.resize(3, 3);
     let tiny = session.frame();
+    assert_eq!((tiny.grid.width(), tiny.grid.height()), (3, 3));
     if let Some((x, y, _)) = tiny.cursor {
         assert!(x < 3 && y < 3);
     }
@@ -823,9 +828,24 @@ fn terminal_selection_does_not_capture_keys_and_temporary_input_precedes_termina
     session.new_buffer();
     session.resize(100, 30);
     session.terminal_fixture();
-    assert_eq!(session.keyboard_terminal(), Some(1));
+    assert_eq!(
+        (
+            session.selected_terminal(),
+            session.displayed_terminal(),
+            session.keyboard_terminal(),
+        ),
+        (Some(1), Some(1), Some(1))
+    );
     session.select_terminal_without_focus(2);
-    assert_eq!(session.keyboard_terminal(), Some(1));
+    assert_eq!(
+        (
+            session.selected_terminal(),
+            session.displayed_terminal(),
+            session.keyboard_terminal(),
+        ),
+        (Some(2), Some(1), Some(1)),
+        "manager selection must not change display or keyboard routing"
+    );
     session.background_completion_fixture();
     assert_eq!(session.context(), "terminal");
     assert_eq!(session.keyboard_terminal(), Some(1));

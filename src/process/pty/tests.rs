@@ -75,7 +75,7 @@ fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {
         "reservation excludes a second producer before encoding"
     );
     drop(loan);
-    service.resize(id, 61, 9).unwrap();
+    service.resize_checked(id, 17, 61, 9).unwrap();
     service.input(id, b"hello\n".to_vec(), 64).unwrap();
     // A capacity-one undrained output queue must backpressure, not drop escape/text bytes.
     thread::sleep(Duration::from_millis(20));
@@ -91,8 +91,13 @@ fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {
                 assert!(!truncated);
                 output.extend(bytes);
             }
-            PtyEvent::Resized { columns, rows, .. } => {
-                assert_eq!((columns, rows), (61, 9));
+            PtyEvent::Resized {
+                sequence,
+                columns,
+                rows,
+                ..
+            } => {
+                assert_eq!((sequence, columns, rows), (17, 61, 9));
                 resized = true;
             }
             PtyEvent::Exited { code, .. } => {

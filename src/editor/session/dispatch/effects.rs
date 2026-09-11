@@ -3448,6 +3448,7 @@ impl InteractiveApplication {
                 if self.window_session.terminal_focused() {
                     self.place_active_terminal(WindowPlacement::Hidden);
                 } else if let Some(id) = self.terminal_session.selected() {
+                    self.terminal_session.display(id);
                     if self.terminal_window_rect().is_none()
                         && let Err(error) =
                             self.show_native_window(NativeSurfaceTarget::Terminal(id.0))
@@ -3522,14 +3523,12 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::TerminalResize(rows) => {
-                if self.terminal_session.selected().is_none() {
-                    self.show_error(self.message("terminal_missing", &[]));
-                } else {
+                if let Some(id) = self.displayed_terminal() {
                     let result = if self.compositor_projection().is_none() {
                         Err("universal compositor projection is missing or stale".into())
                     } else {
                         self.window_session.resize_terminal(
-                            self.terminal_session.selected().unwrap().0,
+                            id.0,
                             rows,
                             &self.configuration.settings().ui.terminal_panel,
                         )
@@ -3541,6 +3540,8 @@ impl InteractiveApplication {
                     self.sync_terminal_panel();
                     self.sync_explorer_ui();
                     self.ensure_cursor_visible();
+                } else {
+                    self.show_error(self.message("terminal_missing", &[]));
                 }
             }
             AppEffect::TerminalDock { edge, size } => {
@@ -3596,7 +3597,7 @@ impl InteractiveApplication {
             }
             AppEffect::TerminalYank { line } => self.yank_terminal_text(line),
             AppEffect::TerminalClose => {
-                if let Some(id) = self.terminal_session.selected() {
+                if let Some(id) = self.displayed_terminal() {
                     if self.terminal_session.stopping(id) {
                         self.show_error("terminal stop is already pending");
                     } else if self.terminal_session.requires_close_confirmation(id) {
@@ -5796,7 +5797,10 @@ impl InteractiveApplication {
     }
 
     pub(super) fn process_pty_events(&mut self) {
-        let updates = self.terminal_session.drain(&self.workspace);
+        let windows = &self.window_session;
+        let updates = self
+            .terminal_session
+            .drain(&self.workspace, |id| windows.terminal_geometry_source(id.0));
         if updates.is_empty() {
             return;
         }

@@ -33,6 +33,7 @@ impl InteractiveApplication {
     }
     pub(super) fn set_terminal_focus(&mut self, focused: bool) {
         if focused && let Some(id) = self.terminal_session.selected() {
+            self.terminal_session.display(id);
             self.window_session.focus_terminal(id.0);
         } else {
             self.window_session.leave_terminal();
@@ -40,6 +41,14 @@ impl InteractiveApplication {
         self.project_window_activation();
     }
     pub(super) fn project_window_activation(&mut self) {
+        if let Some(id) = self
+            .window_session
+            .focused_terminal()
+            .map(PtyId)
+            .filter(|id| self.terminal_session.contains(*id))
+        {
+            self.terminal_session.display(id);
+        }
         self.ui.dashboard = self.window_session.dashboard_visible();
         self.ui.explorer_focused = self.window_session.explorer_focused();
         if let Some(view) = self.window_session.focused_explorer() {
@@ -222,7 +231,7 @@ impl InteractiveApplication {
             .focused_terminal()
             .map(PtyId)
             .filter(|id| self.terminal_session.contains(*id))
-            .or(self.terminal_session.selected())
+            .or(self.terminal_session.displayed())
     }
     pub(super) fn terminal_window_rect(&self) -> Option<WindowRect> {
         let layout = self.window_session.layout()?;
@@ -252,9 +261,13 @@ impl InteractiveApplication {
         let Some((columns, rows)) = self.terminal_body_dimensions() else {
             return;
         };
+        let Some(source) = self.window_session.terminal_geometry_source(id.0) else {
+            self.show_error("terminal geometry source is missing, stale or foreign");
+            return;
+        };
         if let Err(error) = self
             .terminal_session
-            .resize(id, columns, rows, &self.workspace)
+            .resize(id, columns, rows, source, &self.workspace)
         {
             self.show_error(error);
         }
@@ -304,7 +317,7 @@ impl InteractiveApplication {
     }
 
     pub(super) fn place_active_terminal(&mut self, placement: WindowPlacement) {
-        let Some(id) = self.terminal_session.selected() else {
+        let Some(id) = self.displayed_terminal() else {
             self.show_error(self.message("terminal_missing", &[]));
             return;
         };

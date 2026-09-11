@@ -15,7 +15,10 @@ use crate::{
             SurfaceContentGeometry, documentation_page_rows, explorer_body_geometry,
             picker_content_geometry,
         },
-        window::{CompositorProjection, WindowRect, WorkspaceTabId},
+        window::{
+            CompositorProjection, ContentId, ViewId, WindowId, WindowPlacement, WindowRect,
+            WorkspaceTabId,
+        },
     },
 };
 pub(in crate::editor::session) use bridge::EditorWindowBridge;
@@ -43,6 +46,69 @@ pub(super) struct ProjectionRequest {
 }
 
 pub(in crate::editor::session) use crate::editor::EditorTopology;
+
+#[derive(Clone, Debug)]
+pub(in crate::editor::session) struct TerminalGeometrySource {
+    origin: Arc<()>,
+    terminal: u64,
+    content: ContentId,
+    content_owner: String,
+    content_generation: u64,
+    view: ViewId,
+    view_owner: String,
+    view_generation: u64,
+    window: WindowId,
+    window_owner: String,
+    window_generation: u64,
+    tab: WorkspaceTabId,
+    tab_owner: String,
+    tab_generation: u64,
+    placement: WindowPlacement,
+}
+
+impl PartialEq for TerminalGeometrySource {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.origin, &other.origin)
+            && self.terminal == other.terminal
+            && self.content == other.content
+            && self.content_owner == other.content_owner
+            && self.content_generation == other.content_generation
+            && self.view == other.view
+            && self.view_owner == other.view_owner
+            && self.view_generation == other.view_generation
+            && self.window == other.window
+            && self.window_owner == other.window_owner
+            && self.window_generation == other.window_generation
+            && self.tab == other.tab
+            && self.tab_owner == other.tab_owner
+            && self.tab_generation == other.tab_generation
+            && self.placement == other.placement
+    }
+}
+impl Eq for TerminalGeometrySource {}
+
+#[cfg(test)]
+impl TerminalGeometrySource {
+    pub(in crate::editor::session) fn fixture(generation: u64) -> Self {
+        Self {
+            origin: Arc::new(()),
+            terminal: generation,
+            content: ContentId(generation),
+            content_owner: "fixture".into(),
+            content_generation: generation,
+            view: ViewId(generation),
+            view_owner: "fixture".into(),
+            view_generation: generation,
+            window: WindowId(generation),
+            window_owner: "fixture".into(),
+            window_generation: generation,
+            tab: WorkspaceTabId(generation),
+            tab_owner: "fixture".into(),
+            tab_generation: generation,
+            placement: WindowPlacement::Hidden,
+        }
+    }
+}
 
 #[derive(Clone, Default)]
 struct WindowCore {

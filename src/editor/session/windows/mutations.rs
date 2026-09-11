@@ -1,8 +1,8 @@
 use super::EditorTopology;
 use super::bridge::{EditorWindowBridge, NativeSurfaceBridge};
 use super::{
-    EditorWindowCandidate, NativeSurfaceSignature, NativeSurfaceTarget, WindowCandidate,
-    WindowSession,
+    EditorWindowCandidate, NativeSurfaceSignature, NativeSurfaceTarget, TerminalGeometrySource,
+    WindowCandidate, WindowSession,
 };
 use crate::ui::window::{ContentLifecycle, WindowGraph, WindowId, WindowPlacement};
 use crate::{
@@ -49,6 +49,36 @@ impl WindowSession {
     }
     pub(in crate::editor::session) fn native_ids(&self) -> &NativeSurfaceBridge {
         &self.core.native
+    }
+    pub(in crate::editor::session) fn terminal_geometry_source(
+        &self,
+        terminal: u64,
+    ) -> Option<TerminalGeometrySource> {
+        let ids = self.core.native.terminal(terminal)?;
+        let window = self.core.graph.window(ids.window)?;
+        let view = self.core.graph.view(ids.view)?;
+        let content = self.core.graph.content(ids.content)?;
+        let tab = self.core.graph.workspace_tab(window.tab)?;
+        if window.view != view.id || view.content != content.id {
+            return None;
+        }
+        Some(TerminalGeometrySource {
+            origin: self.origin.clone(),
+            terminal,
+            content: content.id,
+            content_owner: content.owner.clone(),
+            content_generation: content.generation,
+            view: view.id,
+            view_owner: view.owner.clone(),
+            view_generation: view.generation,
+            window: window.id,
+            window_owner: window.owner.clone(),
+            window_generation: window.generation,
+            tab: tab.id,
+            tab_owner: tab.owner.clone(),
+            tab_generation: tab.generation,
+            placement: window.placement,
+        })
     }
 
     pub(in crate::editor::session) fn configure_initial(

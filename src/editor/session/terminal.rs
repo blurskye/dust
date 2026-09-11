@@ -1,5 +1,6 @@
 //! Terminal screens, tab selection and PTY source lifetimes. No window/focus authority.
 mod input;
+use super::windows::TerminalGeometrySource;
 use super::workspace::{ExecutionReady, TerminalPermit, WorkspaceSession, WorkspaceVersion};
 use crate::{
     config::{TerminalProfileConfig, TerminalsConfig},
@@ -12,7 +13,7 @@ use crate::{
 pub(in crate::editor::session) use input::TerminalInput;
 use input::{clamp_terminal_cursor, keep_terminal_cursor_visible};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
 };
 
@@ -80,6 +81,7 @@ pub(super) struct TerminalSession {
     preflights: HashMap<crate::process::PreflightId, TerminalKey>,
     tabs: HashMap<PtyId, TerminalRuntime>,
     selected: Option<PtyId>,
+    displayed: Option<PtyId>,
     next: Option<u64>,
     revision: Option<u64>,
     intent: Option<Intent>,
@@ -102,6 +104,7 @@ impl TerminalSession {
             preflights: HashMap::new(),
             tabs: HashMap::new(),
             selected: None,
+            displayed: None,
             next: Some(1),
             revision: Some(0),
             intent: None,
@@ -144,6 +147,16 @@ impl TerminalSession {
     pub(in crate::editor::session) fn selected(&self) -> Option<PtyId> {
         self.selected
     }
+    pub(in crate::editor::session) fn displayed(&self) -> Option<PtyId> {
+        self.displayed.filter(|id| self.contains(*id))
+    }
+    pub(in crate::editor::session) fn display(&mut self, id: PtyId) -> bool {
+        if !self.contains(id) {
+            return false;
+        }
+        self.displayed = Some(id);
+        true
+    }
     pub(in crate::editor::session) fn revision(&self) -> Option<u64> {
         self.revision
     }
@@ -158,6 +171,9 @@ impl TerminalSession {
             return false;
         }
         self.selected = Some(id);
+        if self.displayed.is_none() {
+            self.displayed = Some(id);
+        }
         true
     }
     #[cfg(test)]
@@ -399,6 +415,9 @@ impl TerminalSession {
                 scope: source.scope,
                 epoch: source.epoch,
                 requested_size: (config.columns, config.rows),
+                geometry_source: None,
+                next_resize: Some(1),
+                pending_resizes: VecDeque::new(),
                 screen: PtyScreen::new(
                     config.columns,
                     config.rows,
@@ -557,6 +576,9 @@ impl TerminalSession {
         if self.selected == Some(id) {
             self.selected = self.tabs.keys().min_by_key(|id| id.0).copied();
         }
+        if self.displayed == Some(id) {
+            self.displayed = self.selected.filter(|selected| self.contains(*selected));
+        }
         true
     }
     pub(in crate::editor::session) fn reset(&mut self) {
@@ -612,6 +634,7 @@ impl TerminalSession {
         id: PtyId,
         columns: u16,
         rows: u16,
+        source: TerminalGeometrySource,
         workspace: &WorkspaceSession,
     ) -> Result<(), String> {
         let Some(tab) = self.tabs.get_mut(&id) else {
@@ -623,22 +646,50 @@ impl TerminalSession {
         if columns == 0 || rows == 0 || usize::from(columns) * usize::from(rows) > 1_000_000 {
             return Err("terminal geometry is empty or exceeds its cell limit".into());
         }
-        if tab.requested_size == (columns, rows) {
+        let same_size = tab.requested_size == (columns, rows);
+        let same_source = tab.geometry_source.as_ref() == Some(&source);
+        let acknowledged = tab.screen.dimensions() == (usize::from(columns), usize::from(rows));
+        if same_size && same_source && (acknowledged || !tab.pending_resizes.is_empty()) {
+            return Ok(());
+        }
+        if same_size && !same_source && acknowledged {
+            tab.pending_resizes.clear();
+            tab.geometry_source = Some(source);
             return Ok(());
         }
         if let Some(pty) = tab.pty {
+            if same_source && tab.pending_resizes.len() >= 256 {
+                return Err("terminal resize acknowledgement queue is full".into());
+            }
+            let sequence = tab
+                .next_resize
+                .ok_or("terminal resize identity exhausted")?;
             self.service
-                .resize(pty, columns, rows)
+                .resize_checked(pty, sequence, columns, rows)
                 .map_err(|e| e.to_string())?;
+            tab.next_resize = sequence.checked_add(1);
+            if !same_source {
+                tab.pending_resizes.clear();
+            }
+            tab.pending_resizes.push_back(PendingResize {
+                terminal: id,
+                pty,
+                source: source.clone(),
+                sequence,
+                columns,
+                rows,
+            });
         } else {
             tab.screen.resize(columns, rows);
         }
+        tab.geometry_source = Some(source);
         tab.requested_size = (columns, rows);
         Ok(())
     }
     pub(in crate::editor::session) fn drain(
         &mut self,
         workspace: &WorkspaceSession,
+        current_geometry: impl Fn(PtyId) -> Option<TerminalGeometrySource>,
     ) -> Vec<TerminalUpdate> {
         let stale = self
             .tabs
@@ -699,8 +750,28 @@ impl TerminalSession {
                     }
                     updates.push(TerminalUpdate::Changed);
                 }
-                PtyEvent::Resized { columns, rows, .. } => {
-                    tab.screen.resize(columns, rows);
+                PtyEvent::Resized {
+                    sequence,
+                    columns,
+                    rows,
+                    ..
+                } => {
+                    let receipt = ResizeReceipt {
+                        terminal: id,
+                        pty,
+                        sequence,
+                        columns,
+                        rows,
+                    };
+                    let current = current_geometry(id);
+                    if !acknowledge_resize(
+                        &mut tab.pending_resizes,
+                        &mut tab.screen,
+                        receipt,
+                        current.as_ref(),
+                    ) {
+                        continue;
+                    }
                     keep_terminal_cursor_visible(tab);
                     updates.push(TerminalUpdate::Changed);
                 }
@@ -778,6 +849,57 @@ impl TerminalSession {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PendingResize {
+    terminal: PtyId,
+    pty: PtyId,
+    source: TerminalGeometrySource,
+    sequence: u64,
+    columns: u16,
+    rows: u16,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ResizeReceipt {
+    terminal: PtyId,
+    pty: PtyId,
+    sequence: u64,
+    columns: u16,
+    rows: u16,
+}
+
+fn acknowledge_resize(
+    pending: &mut VecDeque<PendingResize>,
+    screen: &mut PtyScreen,
+    receipt: ResizeReceipt,
+    current: Option<&TerminalGeometrySource>,
+) -> bool {
+    let Some(expected) = pending.front() else {
+        return false;
+    };
+    if (
+        expected.terminal,
+        expected.pty,
+        expected.sequence,
+        expected.columns,
+        expected.rows,
+    ) != (
+        receipt.terminal,
+        receipt.pty,
+        receipt.sequence,
+        receipt.columns,
+        receipt.rows,
+    ) {
+        return false;
+    }
+    let expected = pending.pop_front().expect("matched pending resize");
+    if !pending.is_empty() || current != Some(&expected.source) {
+        return false;
+    }
+    screen.resize(receipt.columns, receipt.rows);
+    true
+}
+
 struct TerminalRuntime {
     profile: String,
     pty: Option<PtyId>,
@@ -785,6 +907,9 @@ struct TerminalRuntime {
     epoch: Arc<()>,
     pending: Option<Open>,
     requested_size: (u16, u16),
+    geometry_source: Option<TerminalGeometrySource>,
+    next_resize: Option<u64>,
+    pending_resizes: VecDeque<PendingResize>,
     screen: PtyScreen,
     running: bool,
     stopping: bool,
@@ -799,6 +924,18 @@ struct TerminalRuntime {
     visual_anchor: Option<(usize, usize)>,
     visual_linewise: bool,
     scroll_offset: usize,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::editor::session) struct TerminalScreenState {
+    pub(in crate::editor::session) cursor: (usize, usize),
+    pub(in crate::editor::session) alternate: bool,
+    pub(in crate::editor::session) cursor_visible: bool,
+    pub(in crate::editor::session) application_cursor: bool,
+    pub(in crate::editor::session) bracketed_paste: bool,
+    pub(in crate::editor::session) mouse_mode: crate::ui::PtyMouseMode,
+    pub(in crate::editor::session) sgr_mouse: bool,
 }
 
 #[cfg(test)]
@@ -828,6 +965,9 @@ impl TerminalSession {
                 epoch: self.epoch.clone(),
                 pending: None,
                 requested_size: (columns as u16, rows as u16),
+                geometry_source: None,
+                next_resize: Some(1),
+                pending_resizes: VecDeque::new(),
                 screen: fixture.screen,
                 running: fixture.running,
                 stopping: false,
@@ -849,6 +989,37 @@ impl TerminalSession {
     }
     pub(in crate::editor::session) fn fixture_dimensions(&self, id: PtyId) -> (usize, usize) {
         self.tabs[&id].screen.dimensions()
+    }
+    pub(in crate::editor::session) fn fixture_pending_resizes(&self, id: PtyId) -> usize {
+        self.tabs[&id].pending_resizes.len()
+    }
+    pub(in crate::editor::session) fn fixture_pending_resize_matches(
+        &self,
+        id: PtyId,
+        source: &TerminalGeometrySource,
+    ) -> bool {
+        let tab = &self.tabs[&id];
+        tab.geometry_source.as_ref() == Some(source)
+            && tab.pending_resizes.len() == 1
+            && tab
+                .pending_resizes
+                .front()
+                .is_some_and(|pending| &pending.source == source)
+    }
+    pub(in crate::editor::session) fn fixture_screen_state(
+        &self,
+        id: PtyId,
+    ) -> TerminalScreenState {
+        let screen = &self.tabs[&id].screen;
+        TerminalScreenState {
+            cursor: screen.cursor(),
+            alternate: screen.alternate_active(),
+            cursor_visible: screen.cursor_visible(),
+            application_cursor: screen.application_cursor(),
+            bracketed_paste: screen.bracketed_paste(),
+            mouse_mode: screen.mouse_mode(),
+            sgr_mouse: screen.sgr_mouse(),
+        }
     }
     pub(in crate::editor::session) fn fixture_lines(&self, id: PtyId) -> Vec<String> {
         self.tabs[&id].screen.lines()
@@ -875,5 +1046,106 @@ impl TerminalRuntime {
         } else {
             TerminalPhase::Failed
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resize_acknowledgements_are_ordered_exact_and_one_shot() {
+        let terminal = PtyId(2);
+        let pty = PtyId(12);
+        let source = TerminalGeometrySource::fixture(42);
+        let replacement = TerminalGeometrySource::fixture(43);
+        let pending_resize =
+            |source: &TerminalGeometrySource, sequence, columns, rows| PendingResize {
+                terminal,
+                pty,
+                source: source.clone(),
+                sequence,
+                columns,
+                rows,
+            };
+        let receipt = |sequence, columns, rows| ResizeReceipt {
+            terminal,
+            pty,
+            sequence,
+            columns,
+            rows,
+        };
+        let mut pending = VecDeque::from([
+            pending_resize(&source, 7, 40, 10),
+            pending_resize(&source, 8, 60, 20),
+        ]);
+        let mut screen = PtyScreen::new(20, 5, 20);
+        assert!(!acknowledge_resize(
+            &mut pending,
+            &mut screen,
+            receipt(8, 60, 20),
+            Some(&source),
+        ));
+        assert!(!acknowledge_resize(
+            &mut pending,
+            &mut screen,
+            ResizeReceipt {
+                terminal: PtyId(3),
+                ..receipt(7, 40, 10)
+            },
+            Some(&source),
+        ));
+        assert_eq!(pending.len(), 2);
+        assert!(!acknowledge_resize(
+            &mut pending,
+            &mut screen,
+            receipt(7, 40, 10),
+            Some(&source),
+        ));
+        assert_eq!(pending.len(), 1, "superseded ACK was retired");
+        assert!(!acknowledge_resize(
+            &mut pending,
+            &mut screen,
+            receipt(7, 40, 10),
+            Some(&source),
+        ));
+        assert!(acknowledge_resize(
+            &mut pending,
+            &mut screen,
+            receipt(8, 60, 20),
+            Some(&source),
+        ));
+        assert_eq!(screen.dimensions(), (60, 20));
+        assert!(!acknowledge_resize(
+            &mut pending,
+            &mut screen,
+            receipt(8, 60, 20),
+            Some(&source),
+        ));
+
+        pending.push_back(pending_resize(&source, 9, 40, 10));
+        assert!(!acknowledge_resize(
+            &mut pending,
+            &mut screen,
+            receipt(9, 40, 10),
+            Some(&replacement),
+        ));
+        assert!(pending.is_empty(), "stale window receipt was retired");
+        assert_eq!(screen.dimensions(), (60, 20));
+        pending.push_back(pending_resize(&replacement, 10, 40, 10));
+        assert!(!acknowledge_resize(
+            &mut pending,
+            &mut screen,
+            receipt(9, 40, 10),
+            Some(&replacement),
+        ));
+        assert!(acknowledge_resize(
+            &mut pending,
+            &mut screen,
+            receipt(10, 40, 10),
+            Some(&replacement),
+        ));
+        assert!(pending.is_empty());
+        assert_eq!(screen.dimensions(), (40, 10));
     }
 }

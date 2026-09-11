@@ -212,6 +212,7 @@ pub struct PtyRequest {
 pub enum PtyEvent {
     Resized {
         id: PtyId,
+        sequence: u64,
         columns: u16,
         rows: u16,
     },

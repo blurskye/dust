@@ -207,7 +207,7 @@ impl TerminalSession {
         let id = focused
             .map(PtyId)
             .filter(|id| self.contains(*id))
-            .or(self.selected)?;
+            .or(self.displayed())?;
         let terminal = self.tabs.get(&id)?;
         let (cursor_column, cursor_row) = terminal.screen.cursor();
         let (columns, rows) = terminal.screen.dimensions();

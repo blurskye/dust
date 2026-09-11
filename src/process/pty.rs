@@ -34,7 +34,7 @@ struct Input {
 }
 struct Handle {
     input: SyncSender<Input>,
-    resize: SyncSender<(u16, u16)>,
+    resize: SyncSender<(u64, u16, u16)>,
     cancel: Arc<AtomicBool>,
     queued: Arc<AtomicUsize>,
     maximum: usize,
@@ -192,6 +192,15 @@ impl PtyService {
         admission.submit(bytes)
     }
     pub fn resize(&self, id: PtyId, columns: u16, rows: u16) -> Result<(), PtyError> {
+        self.resize_checked(id, 0, columns, rows)
+    }
+    pub(crate) fn resize_checked(
+        &self,
+        id: PtyId,
+        sequence: u64,
+        columns: u16,
+        rows: u16,
+    ) -> Result<(), PtyError> {
         if self.closed || columns == 0 || rows == 0 {
             return Err(PtyError::InvalidPolicy);
         }
@@ -199,7 +208,10 @@ impl PtyService {
         if handle.cancel.load(Ordering::Acquire) || handle.finished.load(Ordering::Acquire) {
             return Err(PtyError::Stopped);
         }
-        handle.resize.try_send((columns, rows)).map_err(queue)
+        handle
+            .resize
+            .try_send((sequence, columns, rows))
+            .map_err(queue)
     }
     /// Out-of-band cancellation cannot be lost behind a full command queue.
     pub fn close(&self, id: PtyId) -> Result<(), PtyError> {
@@ -339,7 +351,7 @@ fn run(
     root: Option<crate::workspace::RootIdentity>,
     events: &SyncSender<PtyEvent>,
     cancel: Arc<AtomicBool>,
-    controls: (Receiver<Input>, Receiver<(u16, u16)>),
+    controls: (Receiver<Input>, Receiver<(u64, u16, u16)>),
     resident: Arc<Slot>,
 ) -> Result<(), PtyError> {
     let (input, resize) = controls;
@@ -486,7 +498,7 @@ fn run(
             writer_stop.store(true, Ordering::Release);
         }
         for _ in 0..256 {
-            let Ok((columns, rows)) = resize.try_recv() else {
+            let Ok((sequence, columns, rows)) = resize.try_recv() else {
                 break;
             };
             pair.master
@@ -498,7 +510,12 @@ fn run(
                 })
                 .map_err(|e| fail(e.to_string()))?;
             if !deliver(
-                PtyEvent::Resized { id, columns, rows },
+                PtyEvent::Resized {
+                    id,
+                    sequence,
+                    columns,
+                    rows,
+                },
                 events,
                 &cancel,
                 &mut child,
