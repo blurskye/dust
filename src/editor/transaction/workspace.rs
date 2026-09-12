@@ -1,8 +1,15 @@
 //! Workspace preview source capture and all-or-nothing editor draft preparation.
-use super::*;
-use crate::editor::text::TextVersion;
-use crate::workspace::WorkspaceEditProposal;
 use std::path::PathBuf;
+
+use crate::{
+    editor::{
+        state::{BufferId, EditorState, EditorWindowVersion, TransactionId},
+        text::{ByteOffset, TextBuffer, TextEditSet, TextVersion},
+    },
+    workspace::WorkspaceEditProposal,
+};
+
+use super::{EditorDraft, EditorOperation, EditorTransaction, Precondition};
 
 pub(crate) struct WorkspaceEditSources {
     editor: EditorWindowVersion,

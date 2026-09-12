@@ -1,4 +1,12 @@
-use super::*;
+use std::{collections::HashMap, path::PathBuf};
+
+use crate::editor::{
+    command::CommandInvocation,
+    text::{BufferRevision, ByteOffset, TextBuffer},
+    transaction::UndoTree,
+};
+
+use super::id::{BufferId, PaneId, ViewId};
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum EditorMode {

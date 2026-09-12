@@ -1,4 +1,22 @@
-use super::*;
+use std::{collections::HashSet, path::PathBuf};
+
+use slotmap::{Key, SlotMap};
+
+use crate::editor::text::{BufferRevision, ByteOffset, TextBuffer};
+
+use super::{
+    MAXIMUM_LAYOUT_DEPTH, MAXIMUM_LAYOUT_PANES,
+    id::{BufferId, PaneId, TabId, ViewId},
+    layout::{
+        FocusRectangle, collect_focus_rectangles, focus_score, layout_depth,
+        layout_ratios_are_valid, offset_index, pane_depth, pane_ids, remove_leaf, resize_parent,
+        resize_parent_on_axis, split_leaf, swap_layout_leaves,
+    },
+    model::{
+        Axis, Buffer, BufferOrigin, EditingPolicy, EditorMode, FocusDirection, LayoutNode, Pane,
+        RegisterStore, Tab, View,
+    },
+};
 
 /// Opaque identity/revision of editor-owned window topology. Transaction clones
 /// preserve identity; independently constructed editor states do not.

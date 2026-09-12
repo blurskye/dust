@@ -338,6 +338,62 @@ fn editor_command_globs_fail_by_logical_physical_and_block_scope_but_test_globs_
 }
 
 #[test]
+fn editor_state_and_transaction_globs_fail_by_every_scope_but_test_globs_do_not() {
+    let rejected = |result: Result<(), ArchitectureError>| {
+        let error = result.unwrap_err();
+        assert!(
+            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("editor command/state/transaction") && detail.contains("imports and exports explicitly")),
+            "{error}"
+        );
+    };
+    for owner in ["state", "transaction"] {
+        let declaration = format!("pub mod {owner};");
+        let path = format!("src/editor/{owner}.rs");
+        for source in [
+            "use crate::*; pub fn invalid() {}",
+            "pub fn invalid() { use crate::*; }",
+        ] {
+            rejected(check(
+                &[("src/editor/mod.rs", &declaration), (&path, source)],
+                "pub fn service() {}",
+            ));
+        }
+
+        let logical_declaration = format!("#[path = \"../remounted.rs\"] pub mod {owner};");
+        rejected(check(
+            &[
+                ("src/editor/mod.rs", &logical_declaration),
+                ("src/remounted.rs", "use crate::*;"),
+            ],
+            "pub fn service() {}",
+        ));
+
+        let physical_declaration =
+            format!("#[path = \"editor/{owner}/remounted.rs\"] pub mod remounted;");
+        let physical_path = format!("src/editor/{owner}/remounted.rs");
+        rejected(check(
+            &[
+                ("src/facade.rs", &physical_declaration),
+                (&physical_path, "use crate::*;"),
+            ],
+            "pub fn service() {}",
+        ));
+
+        check(
+            &[
+                ("src/editor/mod.rs", &declaration),
+                (
+                    &path,
+                    "use std::path::Path; #[cfg(test)] use crate::*; #[cfg(test)] mod tests { use super::*; } pub fn valid(_: &Path) {}",
+                ),
+            ],
+            "pub fn service() {}",
+        )
+        .unwrap();
+    }
+}
+
+#[test]
 fn workspace_globs_fail_by_logical_physical_and_block_scope_but_test_globs_do_not() {
     let library = "extern crate self as local_crate; pub mod editor; pub mod language; pub mod facade; pub mod workspace;";
     for source in [
