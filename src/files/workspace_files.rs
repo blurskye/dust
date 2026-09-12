@@ -1,4 +1,19 @@
-use super::*;
+use std::{
+    collections::HashSet,
+    fs, io,
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, SyncSender, TrySendError},
+    },
+    thread,
+};
+
+use ignore::WalkBuilder;
+use thiserror::Error;
+
+use super::workspace_search::{ABSOLUTE_WORKSPACE_SEARCH_FILES, owner_root};
 
 pub(super) const ABSOLUTE_WORKSPACE_FILE_PATH_BYTES: usize = 16 * 1024 * 1024;
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -1,4 +1,12 @@
-use super::*;
+use std::{
+    path::{Path, PathBuf},
+    sync::mpsc::{self, Receiver},
+    thread,
+};
+
+use ignore::WalkBuilder;
+
+use super::{error::VfsError, vfs::canonical_path};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DirectoryEntryKind {

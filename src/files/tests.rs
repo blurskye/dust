@@ -11,7 +11,8 @@ use tempfile::tempdir;
 use super::directory::{list_scoped_directory, natural_name_key};
 use super::recovery::{
     RECOVERY_DIRECTORY_ENTRY_CEILING, RECOVERY_JOURNAL_BYTE_CEILING, RECOVERY_PAYLOAD_BYTE_CEILING,
-    bounded_recovery_entries, recovery_journal_size_allowed, recovery_payload_size_allowed,
+    bounded_recovery_entries, read_bounded_bytes, read_bounded_utf8, recovery_journal_size_allowed,
+    recovery_payload_size_allowed,
 };
 use super::vfs::checked_atomic_write;
 use super::watch::watch_name_bytes;
@@ -21,8 +22,7 @@ use super::{
     ProjectRootStrategy, RecoveryRecord, VfsError, VfsResult, VfsWorker, WorkspaceSearchEvent,
     WorkspaceSearchMatch, WorkspaceSearchPolicy, WorkspaceSearchService, WorkspaceSearchSummary,
     WriteExpectation, atomic_write, cleanup_recovery, diff_explorer_fingerprints,
-    discover_recovery, explorer_directory_fingerprint, read_bounded_bytes, read_bounded_utf8,
-    write_recovery,
+    discover_recovery, explorer_directory_fingerprint, write_recovery,
 };
 
 #[test]

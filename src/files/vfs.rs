@@ -1,4 +1,29 @@
-use super::*;
+use std::{
+    fs,
+    io::{self, Read, Write},
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
+    },
+    thread::{self, JoinHandle},
+    time::Duration,
+};
+
+#[cfg(unix)]
+use std::fs::File;
+
+use tempfile::NamedTempFile;
+
+use super::{
+    error::VfsError,
+    explorer_intent::{ExplorerIo, ExplorerIoReply, PreparedExplorerMutation},
+    recovery::{
+        DOCUMENT_BYTE_CEILING, RecoveryCleanup, RecoveryDiscovery, RecoveryRecord,
+        cleanup_recovery, discover_recovery, read_bounded_bytes, write_recovery,
+    },
+};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct RequestId(pub u64);

@@ -1,4 +1,13 @@
-use super::*;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::{Path, PathBuf},
+    sync::mpsc::{self, Receiver, SyncSender, TryRecvError},
+    thread,
+    time::Duration,
+};
+
+use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ExplorerWatchEntryKind {

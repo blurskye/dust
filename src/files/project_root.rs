@@ -1,4 +1,13 @@
-use super::*;
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+    sync::mpsc::{self, Receiver, TryRecvError},
+    thread,
+};
+
+use serde::{Deserialize, Serialize};
+
+use super::{error::VfsError, recovery::read_bounded_utf8, vfs::canonical_path};
 
 pub const PROJECT_ROOT_MARKER_CEILING: usize = 16;
 pub const PROJECT_ROOT_ANCESTOR_CEILING: usize = 64;

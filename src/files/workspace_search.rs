@@ -1,4 +1,21 @@
-use super::*;
+use std::{
+    collections::HashSet,
+    fs, io,
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, SyncSender, TrySendError},
+    },
+    thread,
+};
+
+use globset::{Glob, GlobSet, GlobSetBuilder};
+use ignore::WalkBuilder;
+use regex::{Regex, RegexBuilder};
+use thiserror::Error;
+
+use super::recovery::read_bounded_bytes;
 
 pub(super) const ABSOLUTE_WORKSPACE_SEARCH_FILES: usize = 1_000_000;
 pub(super) const ABSOLUTE_WORKSPACE_SEARCH_RESULTS: usize = 100_000;

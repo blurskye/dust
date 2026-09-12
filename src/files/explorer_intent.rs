@@ -281,7 +281,7 @@ impl ExplorerIo {
                         result: Err(cancellation()),
                     };
                 }
-                match super::canonical_path(&path).and_then(|canonical| {
+                match super::vfs::canonical_path(&path).and_then(|canonical| {
                     let roots = super::vfs::participating_roots(&[&path], &[&canonical], &roots)?;
                     roots_current(&roots)?;
                     Ok((canonical, roots))

@@ -220,6 +220,59 @@ fn configuration_globs_fail_by_logical_physical_and_block_scope_but_test_globs_d
 }
 
 #[test]
+fn filesystem_globs_fail_by_logical_physical_and_block_scope_but_test_globs_do_not() {
+    for source in [
+        "use crate::*; pub fn invalid() {}",
+        "pub fn invalid() { use crate::*; }",
+    ] {
+        let error = check(
+            &[
+                (
+                    "src/lib.rs",
+                    "extern crate self as local_crate; pub mod editor; pub mod files; pub mod language; pub mod facade;",
+                ),
+                ("src/files.rs", source),
+            ],
+            "pub fn service() {}",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("filesystem") && detail.contains("imports and exports explicitly")),
+            "{source}: {error}"
+        );
+    }
+    let remounted = check(
+        &[
+            (
+                "src/facade.rs",
+                "#[path = \"files/remounted.rs\"] pub mod remounted;",
+            ),
+            ("src/files/remounted.rs", "use crate::*;"),
+        ],
+        "pub fn service() {}",
+    )
+    .unwrap_err();
+    assert!(
+        matches!(&remounted, ArchitectureError::Dependency { detail, .. } if detail.contains("filesystem") && detail.contains("imports and exports explicitly")),
+        "{remounted}"
+    );
+    check(
+        &[
+            (
+                "src/lib.rs",
+                "extern crate self as local_crate; pub mod editor; pub mod files; pub mod language; pub mod facade;",
+            ),
+            (
+                "src/files.rs",
+                "use std::path::Path; #[cfg(test)] use crate::*; pub fn valid(_: &Path) {}",
+            ),
+        ],
+        "pub fn service() {}",
+    )
+    .unwrap();
+}
+
+#[test]
 fn production_wildcard_reexports_fail_globally_but_imports_and_test_code_remain_scoped() {
     for source in [
         "pub use crate::editor::*;",
