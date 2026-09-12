@@ -97,18 +97,54 @@ fn legitimate_domain_clients_comments_strings_and_test_only_code_are_not_authori
 }
 
 #[test]
-fn migrated_owner_globs_and_unaccounted_module_paths_fail_closed() {
-    let error = check(
-        &[(
-            "src/editor/mod.rs",
-            "pub mod session { pub mod input { use super::*; } }",
-        )],
+fn migrated_owner_and_command_globs_fail_closed_but_test_only_globs_do_not() {
+    for source in [
+        "pub mod session { pub mod input { use super::*; } }",
+        "pub mod session { pub mod dispatch { pub mod commands { use super::*; } } }",
+        "pub mod session { pub mod dispatch { pub mod commands { pub use super::*; } } }",
+    ] {
+        let error = check(&[("src/editor/mod.rs", source)], "pub fn service() {}").unwrap_err();
+        assert!(
+            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("imports and exports explicitly") && detail.contains("production wildcards remain globally")),
+            "{source}: {error}"
+        );
+    }
+    let remounted = check(
+        &[
+            (
+                "src/editor/mod.rs",
+                "#[path = \"session/commands/remounted.rs\"] pub mod remounted;",
+            ),
+            ("src/editor/session/commands/remounted.rs", "use super::*;"),
+        ],
         "pub fn service() {}",
     )
     .unwrap_err();
     assert!(
-        matches!(error, ArchitectureError::Dependency { detail, .. } if detail.contains("imports and exports explicitly"))
+        matches!(remounted, ArchitectureError::Dependency { detail, .. } if detail.contains("imports and exports explicitly"))
     );
+    check(
+        &[(
+            "src/editor/mod.rs",
+            r#"
+            pub mod session {
+                pub mod dispatch {
+                    pub mod commands {
+                        #[cfg(test)] use super::*;
+                        #[cfg(all(unix, test))] pub use super::*;
+                        #[cfg(test)] mod tests { use super::*; }
+                    }
+                }
+            }
+            "#,
+        )],
+        "pub fn service() {}",
+    )
+    .unwrap();
+}
+
+#[test]
+fn unaccounted_module_paths_fail_closed() {
     let error = check(
         &[],
         "#[cfg_attr(unix, path = \"elsewhere.rs\")] pub mod nested;",

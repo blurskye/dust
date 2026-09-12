@@ -23,6 +23,7 @@ struct Module {
 struct Graph {
     modules: BTreeMap<String, Module>,
     references: Vec<(String, PathBuf, Vec<String>)>,
+    wildcards: Vec<(String, PathBuf)>,
     self_aliases: BTreeSet<String>,
 }
 
@@ -349,43 +350,8 @@ impl Graph {
             refs.visit_item(item);
             children.extend(refs.nested_modules);
             for (alias, target) in refs.uses {
-                if alias.is_none()
-                    && [
-                        "configuration",
-                        "documents",
-                        "input",
-                        "notifications",
-                        "syntax",
-                        "windows",
-                        "workspace",
-                        "persistence",
-                        "search",
-                        "explorer",
-                        "workspace_edits",
-                        "lsp_edits",
-                        "plugin_edits",
-                        "diagnostics",
-                        "tasks",
-                        "terminal",
-                        "debugger",
-                        "git",
-                        "recovery",
-                        "tooling",
-                        "lsp",
-                        "extensions",
-                    ]
-                    .iter()
-                    .any(|owner| {
-                        name == format!("crate::editor::session::{owner}")
-                            || name.starts_with(&format!("crate::editor::session::{owner}::"))
-                    })
-                {
-                    return Err(failure(
-                        file,
-                        format!(
-                            "migrated owner {name} must name its imports and exports explicitly"
-                        ),
-                    ));
+                if alias.is_none() {
+                    self.wildcards.push((name.clone(), file.to_owned()));
                 }
                 self.references
                     .push((name.clone(), file.to_owned(), target.clone()));
@@ -552,6 +518,52 @@ pub(super) fn audit(root: &Path, paths: &[PathBuf]) -> Result<(), ArchitectureEr
         .map_err(ArchitectureError::Io)?;
     let mut graph = Graph::default();
     graph.load("crate".into(), &clean(&root.join("src/lib.rs")), &files, 0)?;
+    let binary = clean(&root.join("src/main.rs"));
+    if files.contains_key(&binary) {
+        graph.load("binary".into(), &binary, &files, 0)?;
+    }
+    let command_root = clean(&root.join("src/editor/session/commands"));
+    if let Some((module, file)) = graph.wildcards.iter().find(|(module, file)| {
+        [
+            "configuration",
+            "documents",
+            "input",
+            "notifications",
+            "syntax",
+            "windows",
+            "workspace",
+            "persistence",
+            "search",
+            "explorer",
+            "workspace_edits",
+            "lsp_edits",
+            "plugin_edits",
+            "diagnostics",
+            "tasks",
+            "terminal",
+            "debugger",
+            "git",
+            "recovery",
+            "tooling",
+            "lsp",
+            "extensions",
+        ]
+        .iter()
+        .any(|owner| {
+            module == &format!("crate::editor::session::{owner}")
+                || module.starts_with(&format!("crate::editor::session::{owner}::"))
+        }) || file.starts_with(&command_root)
+            || module == "crate::editor::session::dispatch::commands"
+            || module.starts_with("crate::editor::session::dispatch::commands::")
+    }) {
+        return Err(failure(
+            file,
+            format!(
+                "migrated owner or command module {module} must name its imports and exports explicitly ({} production wildcards remain globally)",
+                graph.wildcards.len()
+            ),
+        ));
+    }
     for (module, file, reference) in &graph.references {
         let service = [
             "files",

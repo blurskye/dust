@@ -255,6 +255,7 @@ pub fn audit_source(root: &Path) -> Result<ArchitectureAudit, ArchitectureError>
             "official bounded no-redirect HTTPS registry",
             "compiled pinned built-in syntax registry",
             "single editor-session composition boundary",
+            "explicit migrated-owner and command-module imports",
             "service owners do not mutate editor state",
             "worker-owned bounded filesystem traversal",
             "worker-owned explorer metadata watching",
