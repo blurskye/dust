@@ -1,5 +1,10 @@
-use super::*;
-use std::sync::Arc;
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
+use super::root::{RootId, WorkspaceRoot};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ExplorerNodeId(pub u64);

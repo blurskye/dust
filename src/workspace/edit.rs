@@ -1,4 +1,16 @@
-use super::*;
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
+
+use thiserror::Error;
+
+use crate::editor::text::{BufferRevision, TextBuffer, TextEdit, TextEditSet};
+
+use super::{
+    ABSOLUTE_PROPOSAL_EDIT_LIMIT, ABSOLUTE_PROPOSAL_FILE_LIMIT,
+    root::{ExecutionSource, RootId, WorkspaceState},
+};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ProposalId(pub u64);

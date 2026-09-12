@@ -1,4 +1,17 @@
-use super::*;
+use std::{
+    collections::HashSet,
+    fs,
+    io::{self, Read, Write},
+    path::{Path, PathBuf},
+    sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
+    thread,
+};
+
+use serde::{Deserialize, Serialize};
+use tempfile::NamedTempFile;
+use thiserror::Error;
+
+use super::{edit::WorkspaceError, root::RootIdentity};
 
 #[derive(Clone, Debug, Default)]
 pub struct TrustStore {

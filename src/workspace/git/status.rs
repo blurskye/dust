@@ -1,4 +1,16 @@
-use super::*;
+use std::{
+    hash::{Hash, Hasher},
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, TryRecvError},
+    },
+    thread,
+    time::{Duration, Instant},
+};
+
+use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct GitStatusGeneration(pub u64);

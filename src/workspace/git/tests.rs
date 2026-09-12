@@ -1,4 +1,12 @@
-use super::mutation::stage_hunk;
+use std::{
+    hash::{Hash, Hasher},
+    path::{Path, PathBuf},
+    sync::atomic::AtomicBool,
+    thread,
+    time::{Duration, Instant},
+};
+
+use super::mutation::{stage_hunk, worktree_hash};
 use super::*;
 use tempfile::tempdir;
 fn commit(repo: &git2::Repository, path: &str, text: &str) {

@@ -273,6 +273,69 @@ fn filesystem_globs_fail_by_logical_physical_and_block_scope_but_test_globs_do_n
 }
 
 #[test]
+fn workspace_globs_fail_by_logical_physical_and_block_scope_but_test_globs_do_not() {
+    let library = "extern crate self as local_crate; pub mod editor; pub mod language; pub mod facade; pub mod workspace;";
+    for source in [
+        "use crate::*; pub fn invalid() {}",
+        "pub fn invalid() { use crate::*; }",
+    ] {
+        let error = check(
+            &[("src/lib.rs", library), ("src/workspace.rs", source)],
+            "pub fn service() {}",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("workspace") && detail.contains("imports and exports explicitly")),
+            "{source}: {error}"
+        );
+    }
+    let logical = check(
+        &[
+            ("src/lib.rs", library),
+            (
+                "src/workspace.rs",
+                "#[path = \"remounted.rs\"] pub mod remounted;",
+            ),
+            ("src/remounted.rs", "use crate::*;"),
+        ],
+        "pub fn service() {}",
+    )
+    .unwrap_err();
+    assert!(
+        matches!(&logical, ArchitectureError::Dependency { detail, .. } if detail.contains("workspace") && detail.contains("imports and exports explicitly")),
+        "{logical}"
+    );
+    let physical = check(
+        &[
+            ("src/lib.rs", library),
+            ("src/workspace.rs", "pub fn valid() {}"),
+            (
+                "src/facade.rs",
+                "#[path = \"workspace/remounted.rs\"] pub mod remounted;",
+            ),
+            ("src/workspace/remounted.rs", "use crate::*;"),
+        ],
+        "pub fn service() {}",
+    )
+    .unwrap_err();
+    assert!(
+        matches!(&physical, ArchitectureError::Dependency { detail, .. } if detail.contains("workspace") && detail.contains("imports and exports explicitly")),
+        "{physical}"
+    );
+    check(
+        &[
+            ("src/lib.rs", library),
+            (
+                "src/workspace.rs",
+                "use std::path::Path; #[cfg(test)] use crate::*; #[cfg(test)] mod tests { use super::*; } pub fn valid(_: &Path) {}",
+            ),
+        ],
+        "pub fn service() {}",
+    )
+    .unwrap();
+}
+
+#[test]
 fn production_wildcard_reexports_fail_globally_but_imports_and_test_code_remain_scoped() {
     for source in [
         "pub use crate::editor::*;",

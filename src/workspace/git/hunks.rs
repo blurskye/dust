@@ -1,4 +1,21 @@
-use super::*;
+use std::{
+    hash::{Hash, Hasher},
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, TryRecvError},
+    },
+    thread,
+    time::{Duration, Instant},
+};
+
+use thiserror::Error;
+
+use super::{
+    mutation::{GitIndexFingerprint, git_index_fingerprint, worktree_hash},
+    status::GitRepositoryId,
+};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum GitDiffLayer {

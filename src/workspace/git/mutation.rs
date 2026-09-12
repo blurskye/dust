@@ -1,4 +1,24 @@
-use super::*;
+use std::{
+    hash::{Hash, Hasher},
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, TryRecvError},
+    },
+    thread,
+    time::{Duration, Instant},
+};
+
+use thiserror::Error;
+
+use super::{
+    hunks::{
+        GitDiffLayer, GitDiffLineKind, GitHunk, GitHunkError, GitHunkGeneration, GitHunkId,
+        GitHunkPolicy, read_hunks_owned, validate_hunk_policy,
+    },
+    status::GitRepositoryId,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct GitIndexFingerprint(pub [u8; 32]);

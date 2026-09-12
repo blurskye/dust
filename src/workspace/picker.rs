@@ -1,4 +1,8 @@
-use super::*;
+use std::collections::HashSet;
+
+use crate::editor::text::ByteRange;
+
+use super::ABSOLUTE_PICKER_ITEM_LIMIT;
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PickerItemId(pub String);
