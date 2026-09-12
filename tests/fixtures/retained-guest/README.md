@@ -1,10 +1,13 @@
 # Retained UI Component fixture
 
 `retained-guest.core.wasm` is a deterministic `wasm32-unknown-unknown` core
-module generated from `src/lib.rs` and the checked-in WIT copy. Tests wrap the
-embedded Component metadata with `wit-component` and instantiate the result
-through Dust's production no-WASI Wasmtime Component path. Tests never invoke
-Cargo, rustc, a shell, or another compiler.
+module generated from `src/lib.rs` and the checked-in byte-identical copy of
+production `wit/dust-plugin.wit` (`dust:plugin@0.2.0`, world `editor-plugin`).
+Tests wrap the embedded Component metadata with `wit-component` and instantiate
+the result through Dust's production no-WASI Wasmtime Component path. Tests
+never invoke Cargo, rustc, a shell, or another compiler. This fixture is the
+maintained 0.2 authoring example, not a published SDK crate or evidence for the
+incompatible target 0.3 host/package contract.
 
 Reproduction (maintainer-only, outside test execution):
 

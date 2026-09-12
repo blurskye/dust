@@ -8,6 +8,14 @@ GPL-3.0-or-later.
 
 The authoritative ABI is [`wit/dust-plugin.wit`](../wit/dust-plugin.wit), package `dust:plugin@0.2.0`, world `editor-plugin`. Third-party editor plugins must be WebAssembly Components implementing that world. Core Wasm modules, WASI applications, native libraries, and subprocess shims are not plugins. This is an intentional pre-release ABI break: 0.1 Components must be rebuilt against the 0.2 WIT. The same pre-release slice removes the native `explorer.delete.confirm` command and its `ExplorerDeleteConfirm` application effect; deletion now submits the typed shared confirmation directly, so integrations must not dispatch that removed phrase-era surface.
 
+## Shipped boundary and authoring availability
+
+The checkout ships the production WIT, generated host bindings, strict manifest loader and a maintained no-WASI Rust guest fixture. It does **not** ship a separate published Rust SDK crate, package-schema generator, dev runner or mock-host/simulator. The fixture is the current buildable example; its pinned `wit-bindgen` dependency is not a promise of a generally published SDK package.
+
+The incompatible target is [`specs/api-next.wit`](specs/api-next.wit), package `dust:plugin@0.3.0`. It is not imported by production and cannot be selected through a manifest or command-line flag. Production has no 0.3 `features`, `limits`, `handle-events`, `deactivate`, interaction, snapshot-token, grant, service, cancellation or handle-release path. A future promotion requires a replacement host, rebuilt maintained guest/SDK/fixtures and explicit ABI/unsupported-feature tests; changing a version string, reusing the world name, adapting integers or structurally matching types is not compatibility.
+
+The production fixture mirrors the authoritative WIT byte-for-byte and is wrapped and instantiated by tests. The separate `target03-clone-guest` and `src/extensions/target03.rs` lane is compiled only under `cfg(test)`: it exercises a partial target UI protocol with an ad hoc fixture admission record. It is not an accepted production Component, a schema-2 package, a complete target host or X-08 promotion evidence.
+
 ## Theme support
 
 Component plugins currently have **no theme-contribution API**: contribution
@@ -17,6 +25,29 @@ selectable editor theme. Custom themes currently use validated Dust TOML files
 in the user's `themes/` directory; see [the theme guide](user-guide-linux.md#select-a-theme).
 Native Neovim/Lua themes are not executable Dust plugins. Declarative plugin
 palette contributions and theme-only package installation remain unimplemented.
+
+## Current plugin manifest (contribution schema 1)
+
+Production reads a strict TOML `PluginManifest`; it does not read `dust-package.toml`. Unknown fields fail because every manifest record is closed. The required top-level fields are `id`, `version`, `component_sha256`, `capabilities`, `commands` and `contributions`. Plugin IDs are 1–64 lowercase ASCII letters/digits beginning with a letter; versions are nonempty control-free strings up to 128 bytes but are not currently parsed as SemVer; the component digest is 64 hexadecimal characters and is compared case-insensitively. `capabilities` is a set containing only the nine names below. `commands` is a map of local command IDs (the same 1–64 character shape), bounded by `plugins.maximum_commands` (default 256, accepted configuration range 1–4096).
+
+Each command record has required `title` (1–256 bytes after nonempty-trim validation), `context` (`application`, `workspace`, `view`, `buffer` or `selection`) and `activation = "active_only"`; `description` defaults to empty and is at most 2,048 bytes. `arguments` defaults to an empty map, admits at most 32 names, and each closed declaration has `kind = "string" | "boolean" | "integer"` plus `required` defaulting to false. The public command is `plugin.<plugin-id>.<local-command>`.
+
+Configured entries are `[plugins.entries.<expected-id>]` records with required relative `manifest`, relative `component` and Boolean `enabled` fields. Neither path may be absolute or contain `..`; they resolve below `plugins.store`, which itself resolves below the user state directory when relative. The entry key must equal the parsed manifest ID. Safe mode skips configured loading.
+
+`contributions.schema_version` defaults to 1 and must equal 1. Its arrays default empty and its optional `storage` record defaults absent:
+
+| Contribution | Current accepted shape and principal bounds |
+|---|---|
+| `input_contexts` | At most 64 `{id,title,parent_surface?}` records. IDs are `plugin.<owner>.<local>`; title is at most 256 bytes/128 display columns; parent, when present, is `panel`, `picker`, `explorer` or `terminal`. |
+| `keymaps` | At most 256 `{id,context,mode="",keys,command,arguments={}}` records. A sequence is at most 1,024 bytes/64 tokens. Command arguments must match the static declaration. Only same-plugin commands or the documented retained/private host-command allowlist are accepted. |
+| `key_groups` | At most 64 `{id,context,mode="",prefix,label,icon?,order=0}` records. Prefix uses the key-sequence bounds; label is 1–256 bytes; an icon is at most 32 bytes/eight characters and has nonzero display width. |
+| `content_types` | At most 64 closed records with namespaced `id`, nonempty `title`, `presenter`, `default_placement`, nonempty `allowed_placements`, `focusable=true`, `maximum_instances=1` (accepted 1–16), `context`, `command`, and presenter-matched `private_cells?`. Placements are `docked`, `floating`, `fullscreen`, `hidden`. |
+| `subscriptions` | At most 32 `{id,kind,maximum_queued,maximum_rate_per_second,coalesce=true}` records. Kinds are `workspace-metadata-changed`, `active-surface-changed`, `buffer-summary-changed` and `plugin-surface-changed`; queue is 1–64, rate 1–120 and aggregate queued capacity at most 128. The matching capability and at least one declaration are both required. |
+| `providers` | At most 32 `{id,kind,command,maximum_concurrent_requests,maximum_items,maximum_bytes,deadline_milliseconds}` records. Only `kind = "picker-source"` has a runtime contract; its command has no required arguments, concurrency is 1–8, items 1–4,096, bytes 1–1 MiB and deadline 10–30,000 ms. Aggregate declared provider bytes are at most 4 MiB. |
+| `virtual_documents` | At most 32 `{id,title,language,mode,maximum_concurrent_documents,maximum_document_bytes,maximum_document_lines,maximum_patch_bytes,maximum_patches_per_request,deadline_milliseconds,command,context}` records. The only current mode spelling is `"ReadOnly"`; command has no required arguments, concurrency is 1–16, bytes 1–1 MiB, lines 1–100,000, patch bytes 1–256 KiB, patches/request 1–256 and deadline 10–30,000 ms. Aggregate declared document bytes are at most 4 MiB. |
+| `storage` | One optional `{maximum_items,maximum_value_bytes,maximum_total_bytes}` record: 1–4,096 items, 1–256 KiB/value and 1–4 MiB total, with value no larger than total. It and `plugin_storage` must either both be present or both be absent. |
+
+All contribution IDs are at most 128 bytes, namespaced to the plugin and unique across contribution kinds. Static conflicts, capability/declaration mismatch, invalid context or command linkage, duplicate key sequences/prefixes, and limit-plus-one fail before Component bytes are read. [`src/extensions/manifest.rs`](../src/extensions/manifest.rs) and [`src/extensions/index.rs`](../src/extensions/index.rs) remain authoritative for less common field-level checks.
 
 ## Shared confirmation (delivered first template)
 
@@ -56,6 +87,21 @@ UI remains available for custom compositions and behavior.
 6. Disable, failure, package rollback/removal, or worker loss removes exact-generation command, context, mapping, group, pending-hint, subscription/event/ack state, opaque UI handle, retained tree, graph Content/View/Window, and runtime ownership. Every load has a monotonic owner ID: indexed/loaded/failed/executed events, status changes, prepared-token acknowledgments, and conditional disables are accepted only for the current ID. Rejected stale loads cannot reinstall contributions, register commands, execute, commit a package token, overwrite status, or disable a replacement runtime. Cancellation removes foreground ownership immediately; if the bounded worker queue is full, an exact conditional disable remains pending and must be ordered before a same-ID replacement load. Current loads and pending disables are each bounded by the validated plugin queue capacity; excess loads fail explicitly. Worker disconnection clears static/runtime ownership and aborts unacknowledged prepared tokens.
 7. Static acceptance never commits a package lock. The package worker publishes it only after the exact runtime generation reports `Loaded`. Live add/remove/change of configured plugin entries is currently rejected before mutation and requires restart.
 
+Bundled runtime policy defaults are:
+
+| Setting | Default | Current configuration admission |
+|---|---:|---:|
+| `plugins.queue_capacity` | 8 | 1–64; this is both the worker queue/current-load ceiling and the plugin-storage worker capacity |
+| `plugins.maximum_component_bytes` | 64 MiB | 1 KiB–256 MiB |
+| `plugins.maximum_commands` | 256 | 1–4,096 |
+| `plugins.fuel` | 10,000,000 | Any nonzero `u64` |
+| `plugins.epoch_deadline_ticks` | 10 | `u64`; current command execution schedules one epoch increment after `ticks * 10 ms` |
+| `plugins.maximum_memory_bytes` | 64 MiB | `usize` passed to Wasmtime Store limits |
+| `plugins.maximum_table_elements` | 10,000 | `u32` passed to Wasmtime Store limits |
+| `plugins.maximum_instances` | 16 | `u32` passed to Wasmtime Store limits |
+
+The last four Store/deadline values do not currently have the target X-07 range validator. These are production defaults and parser behavior, not a claim that all configurable production values satisfy target 0.3 ceilings. Manifest/broker ceilings in this document remain hard current checks where stated.
+
 A retained content declaration has this manifest shape:
 
 ```toml
@@ -91,21 +137,31 @@ private_cells = { maximum_cells = 4096, maximum_patch_cells = 2048, maximum_dirt
 
 Smaller values are recommended. Zero, host-ceiling excess, policy/presenter mismatch, absent capability, namespace theft, and aggregate private declarations above 8,192 cells reject before Component bytes. User `[windows]` rules may name a plugin content ID only after its enabled static index proves that declaration.
 
-## Host authority
+## Exact production WIT surface and authority
 
-Capabilities are deny-by-default and checked on every host call:
+The manifest capability spellings are `read_current_buffer`, `propose_edits`, `show_message`, `read_config`, `private_cells`, `event_subscriptions`, `picker_providers`, `plugin_storage` and `virtual_documents`. A listed capability is admitted with the configured plugin manifest and checked again by its corresponding host call. It is not a 0.3 permission declaration or a host-issued grant. A private-cell presenter requires `private_cells`; events, providers, storage and virtual documents enforce both directions, rejecting capability-without-declaration and declaration-without-capability. Project trust does not add a capability.
 
-- `read-current-buffer`: returns one immutable UTF-8 snapshot with stable buffer and revision IDs.
-- `propose-edits`: accepts bounded byte ranges against that exact snapshot. Dust converts valid output into its ordinary workspace-edit preview; the component never mutates text or disk directly.
-- `show-message`: accepts bounded terminal-sanitized text.
-- `read-config`: reads only the plugin's bounded namespace.
-- `private-cells`: permits only statically declared private presenters within their accepted per-content maxima; it grants no global terminal or protected-layer access.
-- `event-subscriptions`: requires one or more static namespaced subscriptions. The delivered kinds are `workspace-metadata-changed`, `active-surface-changed`, `buffer-summary-changed`, and `plugin-surface-changed`; queue/rate maxima and mandatory coalescing are accepted before Component bytes.
-- `picker-providers`: permits only statically declared `picker-source` requests under the declaration's concurrency/item/byte/deadline policy. Other provider kinds remain statically reserved but runtime-unsupported.
-- `plugin-storage`: requires one static quota declaration and permits only queued logical-key storage calls. It grants no path, namespace, general filesystem, secret, or cross-plugin access.
-- `current-ui-revision`: returns only the current immutable revision needed to source-check a queued UI proposal; it exposes no graph handle, geometry or mutation authority.
-- `queue-ui-request`: enqueues at most 64 retained-window proposals during one component execution. It never mutates the graph in the component worker. A trapped/failed execution publishes none of its queued proposals. The application later checks the exact active load/checksum/catalog generation, expected graph or tree revision, declared content/placement/instance policy, active workspace tab, graph ceilings, close order, and protected compositor boundary before clone-validate-commit.
-- `take-ui-events`: drains bounded asynchronous results on a later execution. Events expose only an opaque generation-bound lifecycle handle plus accepted revisions; they never expose Rust references or raw graph authority. UI failures carry a stable `ui-error-code` (`queue-full`, stale graph/tree/handle, foreign generation, undeclared content/action, disallowed placement, hidden focus, cross-tab, instance/graph ceiling, invalid tree/placement, close order, generation loss, wrong presenter, stale surface/dimensions, invalid local bounds/grapheme/style/cursor/hit region, overlap/split-wide, patch ceiling, or internal rejection) plus a sanitized detail capped at 4 KiB. Guests branch on the code, not detail text.
+The 0.2 host imports are exactly:
+
+| Import | Current source, success and delivery contract |
+|---|---|
+| `current-buffer` | Capability-gated snapshot of the invocation's admitted current buffer; string error when denied or absent. |
+| `propose-edits` | Capability-gated staged byte edits against a buffer/revision; at most 1,024 calls, 4,096 edits and 1 MiB replacement bytes across the execution. The returned ordinal is not an editor-commit receipt. |
+| `show-message` | Capability-gated notice; control characters are removed, text is capped to 4,096 characters and at most 64 messages survive the execution. |
+| `config-get` | Capability-gated lookup in the bounded configuration supplied for this invocation; denial/missing key returns `none`. |
+| `current-ui-revision` | Current immutable UI admission revision or `none`; no graph handle or mutation authority. No separate manifest capability exists. |
+| `queue-ui-request` / `take-ui-events` | At most 64 staged requests in one successful execution; results drain on a later execution as typed `ui-error`/revision/opaque-handle events. Admission is by static content/action/placement declarations, not a generic UI capability. |
+| `queue-confirmation` / `take-confirmation-results` | One host-owned request per execution when the shared lane is available; a typed answer/failure is delivered during a later result-only execution. No permission grant results. |
+| `take-host-events` / `acknowledge-host-events` | `event_subscriptions` only; later delivery of at most 64 envelopes and acknowledgement of at most 64 unique delivered nonzero IDs. |
+| `queue-storage-request` / `take-storage-results` | `plugin_storage` plus accepted quota; at most 64 staged logical-key requests and later typed worker results. |
+| `take-picker-provider-requests` / `queue-picker-provider-chunk` | `picker_providers` plus accepted `picker-source`; at most 64 delivered requests/chunks, with exact request and sequence validation. |
+| `take-virtual-document-requests` / `queue-virtual-document-proposal` | `virtual_documents` plus accepted read-only source; at most 64 delivered requests/proposals with exact document/request/cancellation identity. |
+
+The world exports only `activate() -> result<list<string>, string>` and `execute-command(command, list<string>) -> result<string, string>`. There is no 0.2 event callback export: asynchronous values are supplied only when the host later admits another execution of the relevant command. Invocation input admits at most 256 positional strings, each at most 65,536 bytes, and at most 1,024 configuration entries; a successful guest result is at most 1 MiB. Activation output is capped to `plugins.maximum_commands`, each name is capped to 256 characters, and every retained name must be statically declared. Host calls using plain `string` failures and guest string errors have no stable typed error-code contract; only the UI, confirmation, provider, storage and virtual-document records define closed typed codes.
+
+A trap, fuel/deadline interruption, guest error, malformed output or host execution violation discards that execution's staged effects and fails the current load. Production removes the runtime after the first such execution failure; it does not implement the target rolling three-failures-in-60-seconds retirement rule. 0.2 also has no `deactivate` callback. Disable/unload revokes generation-owned state and sends a best-effort internal worker removal, subject to queue ordering; it cannot promise guest cleanup code.
+
+`queue-ui-request` never mutates the graph in the component worker. A trapped/failed execution publishes none of its queued proposals. The application later checks the exact active load/checksum/catalog generation, expected graph or tree revision, declared content/placement/instance policy, active workspace tab, graph ceilings, close order, and protected compositor boundary before clone-validate-commit. `take-ui-events` exposes only an opaque generation-bound lifecycle handle plus accepted revisions; it never exposes Rust references or raw graph authority. UI failures carry a stable `ui-error-code` (`queue-full`, stale graph/tree/handle, foreign generation, undeclared content/action, disallowed placement, hidden focus, cross-tab, instance/graph ceiling, invalid tree/placement, close order, generation loss, wrong presenter, stale surface/dimensions, invalid local bounds/grapheme/style/cursor/hit region, overlap/split-wide, patch ceiling, or internal rejection) plus a sanitized detail capped at 4 KiB. Guests branch on the code, not detail text.
 
 `take-host-events` delivers at most 64 immutable envelopes only during a later command execution. Each envelope has a host-issued ID, monotonic sequence, typed kind, revision, bounded payload, and coalesced/dropped counters. `acknowledge-host-events` accepts at most 64 unique nonzero IDs; only the exact active generation can retire them. Unchanged observations do not enqueue or execute a guest, and high-frequency changes replace the pending envelope for their kind. There is no synchronous event callback.
 
@@ -155,6 +211,35 @@ There is no immediate-mode callback, synchronous input/render hook, global frame
 
 Command names and manifest IDs must form valid Dust command-ID segments. Arguments and results are bounded by the host. Edit offsets are UTF-8 byte offsets, must be ordered and on code-point boundaries, and must carry the snapshot's buffer/revision. Stale proposals are discarded. Accepted proposals create dirty buffers and never save files.
 
-## Package requirements
+## Current package and lock formats
 
-Registry sources require an exact version and SHA-256; Git sources require an exact commit and tree hash. Development path sources are marked non-reproducible. Dust verifies store objects and Component binaries before lock publication. The official HTTPS registry client is fixed to `https://dust.blurskye.dev/registry/v1`, follows no redirects, applies independent deadlines and streamed byte ceilings, verifies artifact SHA-256, and uses an integrity-checked bounded offline cache. Direct Git network fetching remains explicitly unsupported until an equivalent non-CLI exact-commit/tree implementation exists.
+The current package workflow does not consume a unified archive manifest. `package.install` and `package.update` take three workspace-rooted files after the exact **`trust this workspace`** gate: a JSON `PackageManifest`, the schema-1 plugin TOML above, and Component bytes. Safe mode blocks the operation. Each manifest is at most 1 MiB; the package object ceiling is fixed at 64 MiB and a lower configured plugin component ceiling narrows it during activation. The closed JSON package record has required fields:
+
+```json
+{
+  "name": "publisher/name",
+  "version": "1.2.3",
+  "component": "plugin.wasm",
+  "source": {
+    "source": "registry",
+    "registry": "https://dust.blurskye.dev/registry/v1",
+    "version": "1.2.3",
+    "archive_sha256": "<64 hexadecimal characters>"
+  },
+  "dependencies": []
+}
+```
+
+`source` is a Serde-tagged variant:
+
+- `registry`: `{source, registry, version, archive_sha256}`; version must be nonempty and not `*`, and the digest must be 64 hexadecimal characters. Metadata obtained through the official registry additionally requires the fixed official origin and exact duplicated identity/version/digest.
+- `git`: `{source, url, commit, tree_sha256}`; commit is exactly 40 or 64 hexadecimal characters and the digest is 64 hexadecimal characters. This is only a source descriptor: direct Git network fetching is unsupported and never invokes a Git CLI.
+- `path`: `{source, path}` with an absolute path. The standalone resolver can represent it and marks its result non-reproducible, but package staging rejects it; it is not an installable production source.
+
+Each dependency is the closed `{name, source}` record. The local package parser does not currently require `publisher/name` syntax or SemVer for the top-level `name`/`version`; the official registry path adds its own identity equality and character checks, but still does not parse SemVer. The installed package path does not currently resolve or fetch a transitive graph; it records the supplied dependency names, and removal refuses a package named by another active lock entry. The JSON `component` string is required by the serializer but the current install command supplies the actual Component path separately; do not rely on that field for artifact selection. Package/plugin/source digests must all equal the bytes committed under the lowercase SHA-256 store key. The worker validates a Component and calls `activate` before returning a prepared token; the persistent owner then loads the exact generation, and only its `Loaded` event permits lock commit. A prepared/activation failure leaves the old lock active, though an unreferenced staged object can remain until garbage collection.
+
+The active lock is `dust-packages.lock.json`, a closed JSON `PackageLock` with `version: 1`, `packages` and `reproducible`. Each package has `name`, `version`, the tagged `source` above, `content_sha256` and `dependencies`. It has no schema-2 generation/target/artifact map/features/permission digest and no enclosing lock checksum. Writes are owner-private on Unix, bounded (16 MiB in the application/CLI), file-synced and atomically renamed; one previous lock is retained. Startup and rollback re-read each checksum-bound activation TOML, hash and Component-validate each referenced store object before loading. Verification checks lock version 1, unique package names, source/digest shape and every store object's SHA-256; Wasm-prefixed objects must validate as Components. It does not prove publisher signatures or registry service provenance.
+
+In-app `package.registry.search` and `.show` are explicit network discovery actions. `.install` is safe-mode blocked and trust-gated before artifact preparation. Package list/verify/remove/rollback/GC are asynchronous application operations on a fixed-capacity-eight worker; queue failure is reported and does not imply completion. There is no current package-operation cancellation API. GC removes only unreferenced recognized hash/activation files up to the requested bound. The headless `--package-install` option deliberately refuses to commit because it cannot prove persistent runtime activation; headless list/remove/rollback and `--verify-package-lock` operate on current lock version 1. See the [registry client contract](registry-client.md) for wire/cache details.
+
+Neither this JSON descriptor nor lock version 1 is `dust-package.toml`/lock schema 2. Target migration is incompatible and requires the implemented 0.3 host, a schema/lock migrator, rebuilt maintained guest/SDK/fixtures, and explicit compatibility tests; a schema number edit or 0.2 wire shim is invalid.
