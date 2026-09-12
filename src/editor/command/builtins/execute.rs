@@ -1,4 +1,24 @@
-use super::*;
+use unicode_segmentation::UnicodeSegmentation;
+
+use crate::editor::{
+    state::{EditorMode, EditorState, RegisterShape, ReplaceRecord},
+    text::{
+        ByteOffset, ByteRange, DisplayWidthPolicy, TextEdit, TextEditSet, display_column_at,
+        insertion_at_display_column, next_grapheme_boundary, previous_grapheme_boundary,
+    },
+    transaction::{EditorOperation, UndoPolicy},
+};
+
+use super::{
+    super::{CommandError, CommandId, CommandInvocation, CommandOutcome},
+    motion::{
+        block_start_column, motion_target, operator_range, repeat_visual_ranges, visual_ranges,
+    },
+    transaction::{
+        bool_argument, build_indent, build_insert_transition, build_join_lines, build_toggle_case,
+        failed, string_argument, transaction_for,
+    },
+};
 
 pub(super) fn execute_builtin<E>(
     state: &EditorState,
@@ -160,7 +180,7 @@ pub(super) fn execute_builtin<E>(
                 .operations
                 .push(EditorOperation::PushReplaceRecord {
                     view: view_id,
-                    record: crate::editor::ReplaceRecord {
+                    record: ReplaceRecord {
                         start: view.cursor,
                         original,
                         inserted_len: replacement.len(),
@@ -609,7 +629,7 @@ pub(super) fn execute_builtin<E>(
                 .push(EditorOperation::Redo { buffer: buffer_id });
         }
         other => {
-            return Err(CommandError::Unknown(crate::editor::CommandId::new(other)?));
+            return Err(CommandError::Unknown(CommandId::new(other)?));
         }
     }
 

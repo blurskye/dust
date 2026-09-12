@@ -1,11 +1,23 @@
-use super::*;
+use crate::editor::{
+    state::{EditingPolicy, RegisterShape, SelectionKind, View},
+    text::{
+        ByteOffset, ByteRange, DisplayWidthPolicy, TextBuffer, byte_range_for_display_columns,
+        display_column_at, insertion_at_display_column, next_grapheme_boundary,
+        previous_grapheme_boundary,
+    },
+};
+
+use super::{
+    super::{CommandError, CommandInvocation},
+    transaction::{failed, integer_argument, string_argument},
+};
 
 pub(super) fn motion_target(
     text: &TextBuffer,
     cursor: ByteOffset,
     motion: &str,
     count: usize,
-    policy: crate::editor::EditingPolicy,
+    policy: EditingPolicy,
 ) -> Result<ByteOffset, CommandError> {
     let mut target = cursor;
     match motion {
@@ -138,7 +150,7 @@ pub(super) fn motion_target(
 pub(super) fn block_start_column(
     text: &TextBuffer,
     view: &View,
-    policy: crate::editor::EditingPolicy,
+    policy: EditingPolicy,
 ) -> Result<usize, CommandError> {
     let width_policy = DisplayWidthPolicy {
         tab_width: policy.tab_width,
@@ -169,7 +181,7 @@ pub(super) fn repeat_visual_ranges(
     text: &TextBuffer,
     view: &View,
     invocation: &CommandInvocation,
-    policy: crate::editor::EditingPolicy,
+    policy: EditingPolicy,
 ) -> Result<(Vec<ByteRange>, RegisterShape), CommandError> {
     let shape = string_argument(invocation, "shape")?;
     let width = usize::try_from(integer_argument(invocation, "width")?)
@@ -257,7 +269,7 @@ pub(super) fn repeat_visual_ranges(
 pub(super) fn visual_ranges(
     text: &TextBuffer,
     view: &View,
-    policy: crate::editor::EditingPolicy,
+    policy: EditingPolicy,
 ) -> Result<(Vec<ByteRange>, RegisterShape), CommandError> {
     let selection = view
         .selection
@@ -343,7 +355,7 @@ pub(super) fn operator_range(
     motion: &str,
     count: usize,
     linewise: bool,
-    policy: crate::editor::EditingPolicy,
+    policy: EditingPolicy,
 ) -> Result<ByteRange, CommandError> {
     if linewise {
         let line = text.byte_to_line(cursor).map_err(failed)?;

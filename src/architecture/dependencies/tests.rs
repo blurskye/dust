@@ -273,6 +273,71 @@ fn filesystem_globs_fail_by_logical_physical_and_block_scope_but_test_globs_do_n
 }
 
 #[test]
+fn editor_command_globs_fail_by_logical_physical_and_block_scope_but_test_globs_do_not() {
+    for source in [
+        "use crate::*; pub fn invalid() {}",
+        "pub fn invalid() { use crate::*; }",
+    ] {
+        let error = check(
+            &[
+                ("src/editor/mod.rs", "pub mod command;"),
+                ("src/editor/command.rs", source),
+            ],
+            "pub fn service() {}",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("editor command") && detail.contains("imports and exports explicitly")),
+            "{source}: {error}"
+        );
+    }
+    let logical = check(
+        &[
+            (
+                "src/editor/mod.rs",
+                "#[path = \"../remounted.rs\"] pub mod command;",
+            ),
+            ("src/remounted.rs", "use crate::*;"),
+        ],
+        "pub fn service() {}",
+    )
+    .unwrap_err();
+    assert!(
+        matches!(&logical, ArchitectureError::Dependency { detail, .. } if detail.contains("editor command") && detail.contains("imports and exports explicitly")),
+        "{logical}"
+    );
+    let physical = check(
+        &[
+            (
+                "src/facade.rs",
+                "#[path = \"editor/command/remounted.rs\"] pub mod remounted;",
+            ),
+            ("src/editor/command/remounted.rs", "use crate::*;"),
+        ],
+        "pub fn service() {}",
+    )
+    .unwrap_err();
+    assert!(
+        matches!(&physical, ArchitectureError::Dependency { detail, .. } if detail.contains("editor command") && detail.contains("imports and exports explicitly")),
+        "{physical}"
+    );
+    check(
+        &[
+            (
+                "src/editor/mod.rs",
+                "pub mod command;",
+            ),
+            (
+                "src/editor/command.rs",
+                "use std::path::Path; #[cfg(test)] use crate::*; #[cfg(test)] mod tests { use super::*; } pub fn valid(_: &Path) {}",
+            ),
+        ],
+        "pub fn service() {}",
+    )
+    .unwrap();
+}
+
+#[test]
 fn workspace_globs_fail_by_logical_physical_and_block_scope_but_test_globs_do_not() {
     let library = "extern crate self as local_crate; pub mod editor; pub mod language; pub mod facade; pub mod workspace;";
     for source in [

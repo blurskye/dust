@@ -1,9 +1,25 @@
-use super::*;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use crate::editor::{
+    state::{BufferId, EditingPolicy, EditorMode, TransactionId, ViewId},
+    text::{
+        BufferRevision, ByteOffset, ByteRange, TextBuffer, TextEdit, TextEditSet,
+        next_grapheme_boundary,
+    },
+    transaction::{EditorOperation, EditorTransaction, Precondition},
+};
+
+use super::{
+    super::{CommandError, CommandInvocation},
+    motion::{first_nonblank, line_content_end},
+};
+
+static NEXT_TRANSACTION: AtomicU64 = AtomicU64::new(1);
 
 pub(super) fn transaction_for(
     view: ViewId,
-    buffer: crate::editor::BufferId,
-    revision: crate::editor::text::BufferRevision,
+    buffer: BufferId,
+    revision: BufferRevision,
 ) -> EditorTransaction {
     EditorTransaction::new(TransactionId(
         NEXT_TRANSACTION.fetch_add(1, Ordering::Relaxed),
@@ -53,7 +69,7 @@ pub(super) fn build_insert_transition(
     transaction: &mut EditorTransaction,
     text: &TextBuffer,
     view: ViewId,
-    buffer: crate::editor::BufferId,
+    buffer: BufferId,
     cursor: ByteOffset,
     placement: &str,
 ) -> Result<(), CommandError> {
@@ -106,7 +122,7 @@ pub(super) fn build_join_lines(
     transaction: &mut EditorTransaction,
     text: &TextBuffer,
     view: ViewId,
-    buffer: crate::editor::BufferId,
+    buffer: BufferId,
     cursor: ByteOffset,
     count: usize,
 ) -> Result<(), CommandError> {
@@ -155,7 +171,7 @@ pub(super) fn build_toggle_case(
     transaction: &mut EditorTransaction,
     text: &TextBuffer,
     view: ViewId,
-    buffer: crate::editor::BufferId,
+    buffer: BufferId,
     cursor: ByteOffset,
     count: usize,
 ) -> Result<(), CommandError> {
@@ -206,10 +222,10 @@ pub(super) fn build_indent(
     transaction: &mut EditorTransaction,
     text: &TextBuffer,
     view: ViewId,
-    buffer: crate::editor::BufferId,
+    buffer: BufferId,
     range: ByteRange,
     indent: bool,
-    policy: crate::editor::EditingPolicy,
+    policy: EditingPolicy,
 ) -> Result<(), CommandError> {
     let first_line = text.byte_to_line(range.start).map_err(failed)?;
     let final_byte = range.end.get().saturating_sub(1).max(range.start.get());

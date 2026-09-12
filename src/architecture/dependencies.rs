@@ -537,7 +537,8 @@ pub(super) fn audit(root: &Path, paths: &[PathBuf]) -> Result<(), ArchitectureEr
     if files.contains_key(&binary) {
         graph.load("binary".into(), &binary, &files, 0)?;
     }
-    let command_root = clean(&root.join("src/editor/session/commands"));
+    let session_command_root = clean(&root.join("src/editor/session/commands"));
+    let editor_command_root = clean(&root.join("src/editor/command"));
     let config_root = clean(&root.join("src/config"));
     let files_root = clean(&root.join("src/files"));
     let workspace_root = clean(&root.join("src/workspace"));
@@ -573,7 +574,10 @@ pub(super) fn audit(root: &Path, paths: &[PathBuf]) -> Result<(), ArchitectureEr
         .any(|owner| {
             module == &format!("crate::editor::session::{owner}")
                 || module.starts_with(&format!("crate::editor::session::{owner}::"))
-        }) || file.starts_with(&command_root)
+        }) || file.starts_with(&session_command_root)
+            || file.starts_with(&editor_command_root)
+            || module == "crate::editor::command"
+            || module.starts_with("crate::editor::command::")
             || file.starts_with(&config_root)
             || module == "crate::config"
             || module.starts_with("crate::config::")
@@ -590,7 +594,7 @@ pub(super) fn audit(root: &Path, paths: &[PathBuf]) -> Result<(), ArchitectureEr
         return Err(failure(
             file,
             format!(
-                "migrated owner, configuration, filesystem, workspace, or composition module {module} must name its imports and exports explicitly ({} production wildcards remain globally)",
+                "migrated owner, editor command, configuration, filesystem, workspace, or composition module {module} must name its imports and exports explicitly ({} production wildcards remain globally)",
                 graph.wildcards.len()
             ),
         ));
