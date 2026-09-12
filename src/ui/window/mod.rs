@@ -19,17 +19,27 @@ const MAXIMUM_NON_TILED_WINDOWS_PER_TAB: usize = 128;
 const MAXIMUM_OVERLAY_WINDOWS_PER_TAB: usize = 32;
 const MAXIMUM_PROTECTED_REGIONS: usize = 16;
 mod identity;
-pub use identity::*;
+pub use identity::{ContentId, ContentTypeId, ViewId, WindowId, WindowTarget, WorkspaceTabId};
 mod layout;
-pub use layout::*;
+pub use layout::{
+    CompositorLayer, CompositorProjection, CompositorSnapshot, CompositorWindowSnapshot,
+    ContentAdapterKind, DockEdge, ProjectedBorder, ProjectedCompositorWindow, ProjectedWindow,
+    SpatialDirection, TileAxis, TiledLayoutNode, TiledLayoutProjection, TiledLayoutSnapshot,
+    WindowPlacement, WindowRect,
+};
 mod model;
-pub use model::*;
+pub use model::{
+    ContentCapabilities, ContentContract, ContentDescriptor, ContentLifecycle, ContentSnapshot,
+    ViewDescriptor, WindowDescriptor, WorkspaceTabDescriptor,
+};
 mod graph;
-pub use graph::*;
+pub use graph::WindowGraph;
 mod projection;
 use projection::*;
 mod error;
-pub use error::*;
+pub use error::WindowError;
+pub(crate) use error::validate_title;
+use error::{increment, validate_identity, validate_owner};
 
 #[cfg(test)]
 mod tests;

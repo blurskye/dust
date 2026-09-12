@@ -14,7 +14,7 @@ fn check(extra: &[(&str, &str)], service: &str) -> Result<(), ArchitectureError>
         ("src/language/mod.rs", "pub mod lsp;"),
         (
             "src/facade.rs",
-            "pub mod nested { pub use crate::editor::EditorState as Actor; } pub use nested::*; pub type Wrapped = Option<Box<Actor>>;",
+            "pub mod nested { pub use crate::editor::EditorState as Actor; } pub use nested::Actor; pub type Wrapped = Option<Box<Actor>>;",
         ),
         ("src/language/lsp.rs", service),
     ];
@@ -160,6 +160,43 @@ fn migrated_owner_and_composition_globs_fail_closed_but_test_only_globs_do_not()
                 }
             }
             "#,
+        )],
+        "pub fn service() {}",
+    )
+    .unwrap();
+}
+
+#[test]
+fn production_wildcard_reexports_fail_globally_but_imports_and_test_code_remain_scoped() {
+    for source in [
+        "pub use crate::editor::*;",
+        "pub fn nested() { pub use crate::editor::*; }",
+    ] {
+        let error = check(&[("src/facade.rs", source)], "pub fn service() {}").unwrap_err();
+        assert!(
+            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("production wildcard reexport") && detail.contains("must name every export explicitly")),
+            "{source}: {error}"
+        );
+    }
+    let remounted = check(
+        &[
+            (
+                "src/facade.rs",
+                "#[path = \"shared.rs\"] pub mod remounted;",
+            ),
+            ("src/shared.rs", "pub use crate::editor::*;"),
+        ],
+        "pub fn service() {}",
+    )
+    .unwrap_err();
+    assert!(
+        matches!(&remounted, ArchitectureError::Dependency { detail, .. } if detail.contains("production wildcard reexport")),
+        "{remounted}"
+    );
+    check(
+        &[(
+            "src/facade.rs",
+            "use crate::editor::*; #[cfg(test)] pub use crate::editor::*; pub fn client(_: &EditorState) {}",
         )],
         "pub fn service() {}",
     )

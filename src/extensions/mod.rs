@@ -40,15 +40,55 @@ use std::{
 };
 use thiserror::Error;
 mod manifest;
-pub use manifest::*;
+pub(crate) use manifest::PluginCatalogVersion;
+use manifest::{
+    MAXIMUM_PLUGIN_EVENT_QUEUE, MAXIMUM_PLUGIN_PROVIDERS, MAXIMUM_PLUGIN_SUBSCRIPTIONS,
+    MAXIMUM_PLUGIN_VIRTUAL_DOCUMENTS, MAXIMUM_PRIVATE_BYTES, MAXIMUM_PRIVATE_CELLS_PER_CONTENT,
+    MAXIMUM_PRIVATE_CELLS_PER_PLUGIN, MAXIMUM_PRIVATE_DIRTY_RECTANGLES,
+    MAXIMUM_PRIVATE_HIT_REGIONS, MAXIMUM_PRIVATE_PATCH_CELLS, MAXIMUM_PRIVATE_STYLES,
+    MAXIMUM_PROVIDER_BYTES, MAXIMUM_PROVIDER_ITEMS, MAXIMUM_STORAGE_ITEMS,
+    MAXIMUM_STORAGE_TOTAL_BYTES, MAXIMUM_STORAGE_VALUE_BYTES,
+    MAXIMUM_VIRTUAL_DOCUMENT_AGGREGATE_BYTES, MAXIMUM_VIRTUAL_DOCUMENT_BYTES,
+    MAXIMUM_VIRTUAL_DOCUMENT_LINES, MAXIMUM_VIRTUAL_PATCH_BYTES, PLUGIN_UI_HOST_COMMANDS,
+};
+pub use manifest::{
+    PluginActivationBehavior, PluginArgumentDeclaration, PluginArgumentKind, PluginCapability,
+    PluginCommandContext, PluginCommandDeclaration, PluginContentTypeContribution,
+    PluginContributionCatalog, PluginContributionIndex, PluginContributionProvenance,
+    PluginContributions, PluginInputContextContribution, PluginKeyGroupContribution,
+    PluginKeymapContribution, PluginLimits, PluginManifest, PluginPresenterKind,
+    PluginPrivateCellPolicy, PluginProviderContribution, PluginProviderKind,
+    PluginStorageContribution, PluginSubscriptionContribution, PluginSubscriptionKind,
+    PluginVirtualDocumentContribution, PluginVirtualDocumentMode, PluginWindowPlacementKind,
+};
 mod execution;
-pub use execution::*;
+pub(crate) use execution::{ActiveRuntime, LoadOutcome};
+pub use execution::{
+    LoadedComponent, PluginConfirmationAnswer, PluginConfirmationError,
+    PluginConfirmationErrorCode, PluginConfirmationOutcome, PluginConfirmationRequest,
+    PluginConfirmationResult, PluginEdit, PluginEditProposal, PluginExecution,
+    PluginExecutionRequest, PluginHostEventEnvelope, PluginHostEventQueue, PluginLoadId,
+    PluginPrivateCell, PluginPrivateCursor, PluginPrivateHitRegion, PluginPrivatePatch,
+    PluginPrivateRect, PluginPrivateSnapshot, PluginPrivateStyle, PluginRequestedPlacement,
+    PluginSnapshot, PluginStatus, PluginSurfaceGeometry, PluginUiError, PluginUiErrorCode,
+    PluginUiEvent, PluginUiNode, PluginUiNodeKind, PluginUiRequest, PluginUiRequestKind,
+    PluginUiStyle, PluginUiTree,
+};
 mod manager;
-pub use manager::*;
+pub(crate) use manager::{
+    OwnedPluginEvent, PluginExecutionReply, PluginInvocation, PluginInvocationOrigin,
+};
+pub use manager::{PluginEvent, PluginManager};
 pub mod component;
 mod index;
-pub use component::*;
-pub use index::*;
+pub use component::{ComponentHostState, component_api};
+use component::{
+    component_confirmation_result, component_provider_request, component_storage_result,
+    component_ui_error, component_virtual_document_request,
+};
+pub use index::{PluginError, activate_candidate, index_manifest_contributions};
+pub(crate) use index::{execute_component, load_component};
+use index::{index_manifest_from_store, load_manifest_component, validate_manifest};
 
 #[cfg(test)]
 mod manager_tests;

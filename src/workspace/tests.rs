@@ -1,3 +1,4 @@
+use super::trust::{TRUST_STATE_BYTE_LIMIT, load_trust_database, persist_trust_database};
 use super::*;
 use tempfile::tempdir;
 

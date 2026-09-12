@@ -19,11 +19,16 @@ struct Module {
     globs: Vec<Vec<String>>,
     definitions: BTreeSet<String>,
 }
+struct Wildcard {
+    module: String,
+    file: PathBuf,
+    reexport: bool,
+}
 #[derive(Default)]
 struct Graph {
     modules: BTreeMap<String, Module>,
     references: Vec<(String, PathBuf, Vec<String>)>,
-    wildcards: Vec<(String, PathBuf)>,
+    wildcards: Vec<Wildcard>,
     self_aliases: BTreeSet<String>,
 }
 
@@ -131,7 +136,7 @@ fn flatten(tree: &UseTree, prefix: Vec<String>, aliases: &mut Vec<(Option<String
 struct References {
     nested_modules: Vec<syn::ItemMod>,
     paths: Vec<Vec<String>>,
-    uses: Vec<(Option<String>, Vec<String>)>,
+    uses: Vec<(Option<String>, Vec<String>, bool)>,
     aliases: Vec<(String, Vec<Vec<String>>)>,
 }
 impl References {
@@ -174,7 +179,13 @@ impl<'ast> Visit<'ast> for References {
         visit::visit_path(self, path);
     }
     fn visit_item_use(&mut self, item: &'ast syn::ItemUse) {
-        flatten(&item.tree, Vec::new(), &mut self.uses);
+        let mut uses = Vec::new();
+        flatten(&item.tree, Vec::new(), &mut uses);
+        let reexport = !matches!(item.vis, syn::Visibility::Inherited);
+        self.uses.extend(
+            uses.into_iter()
+                .map(|(alias, target)| (alias, target, reexport)),
+        );
     }
     fn visit_item_type(&mut self, item: &'ast syn::ItemType) {
         let mut refs = References::new();
@@ -349,9 +360,13 @@ impl Graph {
             let mut refs = References::new();
             refs.visit_item(item);
             children.extend(refs.nested_modules);
-            for (alias, target) in refs.uses {
+            for (alias, target, reexport) in refs.uses {
                 if alias.is_none() {
-                    self.wildcards.push((name.clone(), file.to_owned()));
+                    self.wildcards.push(Wildcard {
+                        module: name.clone(),
+                        file: file.to_owned(),
+                        reexport,
+                    });
                 }
                 self.references
                     .push((name.clone(), file.to_owned(), target.clone()));
@@ -524,7 +539,9 @@ pub(super) fn audit(root: &Path, paths: &[PathBuf]) -> Result<(), ArchitectureEr
     }
     let command_root = clean(&root.join("src/editor/session/commands"));
     let dispatch_root = clean(&root.join("src/editor/session/dispatch"));
-    if let Some((module, file)) = graph.wildcards.iter().find(|(module, file)| {
+    if let Some(Wildcard { module, file, .. }) = graph.wildcards.iter().find(|wildcard| {
+        let module = &wildcard.module;
+        let file = &wildcard.file;
         [
             "configuration",
             "documents",
@@ -562,6 +579,21 @@ pub(super) fn audit(root: &Path, paths: &[PathBuf]) -> Result<(), ArchitectureEr
             file,
             format!(
                 "migrated owner or composition module {module} must name its imports and exports explicitly ({} production wildcards remain globally)",
+                graph.wildcards.len()
+            ),
+        ));
+    }
+    let reexports = graph
+        .wildcards
+        .iter()
+        .filter(|wildcard| wildcard.reexport)
+        .count();
+    if let Some(wildcard) = graph.wildcards.iter().find(|wildcard| wildcard.reexport) {
+        return Err(failure(
+            &wildcard.file,
+            format!(
+                "production wildcard reexport in {} must name every export explicitly ({reexports} wildcard reexports; {} production wildcards remain globally)",
+                wildcard.module,
                 graph.wildcards.len()
             ),
         ));

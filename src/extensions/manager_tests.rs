@@ -1,3 +1,4 @@
+use super::manager::{QueuedRequest, Request, WorkerEvent};
 use super::*;
 fn manager(sender: SyncSender<QueuedRequest>, receiver: Receiver<WorkerEvent>) -> PluginManager {
     PluginManager {

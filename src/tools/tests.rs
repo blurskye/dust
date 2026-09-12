@@ -2,13 +2,16 @@ use std::io::Write;
 
 use reqwest::Url;
 
+use super::catalog::{
+    managed_tool_installed_version_at, nix_lsp_launch_environment_at, nix_lsp_runtime_at,
+    nixos_os_release_at, tool_launch_environment_at,
+};
+use super::version::probe_tool_version;
 use super::{
     ToolArchiveFormat, ToolInstall, ToolInstaller, ToolKind, ToolOperation, ToolVersionRequest,
     archive_entry_matches, bundled_tool_catalog, discover_executable, elf_interpreter,
-    install_nix_lsp_profile, install_tool, managed_tool_installed_version_at,
-    mason_snapshot_counts, nix_lsp_launch_environment_at, nix_lsp_runtime_at, nix_lsp_shell,
-    nixos_os_release_at, prepare_nix_lsp_workspace_at, probe_tool_version, relative_catalog_path,
-    runtime_artifact, tool_launch_environment_at, uninstall_managed_tool,
+    install_nix_lsp_profile, install_tool, mason_snapshot_counts, nix_lsp_shell,
+    prepare_nix_lsp_workspace_at, relative_catalog_path, runtime_artifact, uninstall_managed_tool,
     uninstall_nix_lsp_profile, validate_tool_id, write_managed_tool_version,
 };
 

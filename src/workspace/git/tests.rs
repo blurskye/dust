@@ -1,3 +1,4 @@
+use super::mutation::stage_hunk;
 use super::*;
 use tempfile::tempdir;
 fn commit(repo: &git2::Repository, path: &str, text: &str) {

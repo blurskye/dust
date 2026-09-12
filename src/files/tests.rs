@@ -8,16 +8,20 @@ use std::{
 use crate::editor::text::TextBuffer;
 use tempfile::tempdir;
 
+use super::directory::{list_scoped_directory, natural_name_key};
+use super::recovery::{
+    RECOVERY_DIRECTORY_ENTRY_CEILING, RECOVERY_JOURNAL_BYTE_CEILING, RECOVERY_PAYLOAD_BYTE_CEILING,
+    bounded_recovery_entries, recovery_journal_size_allowed, recovery_payload_size_allowed,
+};
+use super::vfs::checked_atomic_write;
+use super::watch::watch_name_bytes;
 use super::{
     DirectoryEntryKind, DirectoryService, ExplorerMutation, ExplorerWatchEntryKind,
     ExplorerWatchError, ExplorerWatchPolicy, ExplorerWatchService, ProjectRootService,
-    ProjectRootStrategy, RECOVERY_DIRECTORY_ENTRY_CEILING, RECOVERY_JOURNAL_BYTE_CEILING,
-    RECOVERY_PAYLOAD_BYTE_CEILING, RecoveryRecord, VfsError, VfsResult, VfsWorker,
-    WorkspaceSearchEvent, WorkspaceSearchMatch, WorkspaceSearchPolicy, WorkspaceSearchService,
-    WorkspaceSearchSummary, WriteExpectation, atomic_write, bounded_recovery_entries,
-    checked_atomic_write, cleanup_recovery, diff_explorer_fingerprints, discover_recovery,
-    explorer_directory_fingerprint, list_scoped_directory, natural_name_key, read_bounded_bytes,
-    read_bounded_utf8, recovery_journal_size_allowed, recovery_payload_size_allowed,
+    ProjectRootStrategy, RecoveryRecord, VfsError, VfsResult, VfsWorker, WorkspaceSearchEvent,
+    WorkspaceSearchMatch, WorkspaceSearchPolicy, WorkspaceSearchService, WorkspaceSearchSummary,
+    WriteExpectation, atomic_write, cleanup_recovery, diff_explorer_fingerprints,
+    discover_recovery, explorer_directory_fingerprint, read_bounded_bytes, read_bounded_utf8,
     write_recovery,
 };
 
@@ -169,7 +173,7 @@ fn explorer_watch_preserves_non_utf8_names_and_never_follows_symlinks() {
     let root = tempdir().unwrap();
     let canonical = fs::canonicalize(root.path()).unwrap();
     let non_utf8 = std::ffi::OsString::from_vec(vec![b'x', 0xff]);
-    assert_eq!(super::watch_name_bytes(&non_utf8), vec![b'x', 0xff]);
+    assert_eq!(watch_name_bytes(&non_utf8), vec![b'x', 0xff]);
     let outside = tempdir().unwrap();
     fs::write(outside.path().join("hidden"), "x").unwrap();
     symlink(outside.path(), root.path().join("link")).unwrap();

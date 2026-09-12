@@ -6,12 +6,12 @@ use std::{
 
 use serde_json::{Value, json};
 
+use super::session::requested_executable_name;
 use super::{
     LspDocument, LspEvent, LspFeature, LspFeatureResult, LspMarkupKind, LspPolicy, LspProgressKind,
     LspService, PositionEncoding, SyncKind, completion_items, file_uri, hover_result,
     incremental_change, initialize_capabilities, initialize_message, inlay_hints,
-    language_id_for_path, lsp_progress_event, path_from_file_uri, requested_executable_name,
-    workspace_edit,
+    language_id_for_path, lsp_progress_event, path_from_file_uri, workspace_edit,
 };
 use crate::tools::{ToolDefinition, ToolKind, tool_launch_environment};
 

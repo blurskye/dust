@@ -31,21 +31,29 @@ mod origins;
 use origins::EventSender;
 pub(crate) use origins::{ApplyEditReply, EditContext, OwnedLspEvent, PendingEditReply};
 mod model;
-pub use model::*;
+pub use model::{
+    LspCapabilities, LspCodeAction, LspCodeLens, LspCompletionItem, LspDiagnostic, LspDocument,
+    LspDocumentEdit, LspEvent, LspFeature, LspFeatureResult, LspHealth, LspHover, LspInlayHint,
+    LspLocation, LspMarkupContent, LspMarkupKind, LspPolicy, LspPosition, LspProgressKind,
+    LspPullDiagnostics, LspRange, LspResourceOperation, LspSemanticTokenDelta,
+    LspSemanticTokenEdit, LspSemanticTokens, LspServerConfiguration, LspSessionKey, LspSymbol,
+    LspTextEdit, LspWorkspaceEdit, ServerRequestId, SyncKind,
+};
 mod session;
-pub use session::*;
+pub use session::{LspService, LspSessionLaunch};
+use session::{PendingRequest, SessionCommand};
 mod protocol;
 use protocol::*;
 mod server_message;
 use server_message::*;
 mod paths;
-pub use paths::*;
+pub use paths::{file_uri, language_id_for_path, path_from_file_uri};
 mod error;
-pub use error::*;
+pub use error::LspError;
 mod snippet;
-pub use snippet::*;
+pub use snippet::{ParsedSnippet, SnippetTabstop, parse_snippet};
 mod markdown;
-pub use markdown::*;
+pub use markdown::sanitize_markdown;
 
 #[cfg(test)]
 mod tests;

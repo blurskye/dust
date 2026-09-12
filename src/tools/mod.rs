@@ -42,20 +42,38 @@ const MAXIMUM_NIX_RUNTIME_ENVIRONMENT_BYTES: u64 = 32 * 1024;
 const MAXIMUM_OS_RELEASE_BYTES: u64 = 16 * 1024;
 static NIXOS_HOST: OnceLock<bool> = OnceLock::new();
 mod package_lock;
-pub use package_lock::*;
+use package_lock::{
+    BUNDLED_TOOL_CATALOG, NEXT_PACKAGE_TEMP, read_bounded_regular, valid_digest, valid_source,
+    write_protected_atomic,
+};
+pub use package_lock::{
+    LockedPackage, PackageDependency, PackageError, PackageLock, PackageManifest, PackageSource,
+    commit_store_bytes, resolve_manifests, verify_lock_store, write_lock_atomic,
+};
 mod mason_catalog;
 pub use mason_catalog::mason_filetype_for_path;
 use mason_catalog::mason_lsp_definitions;
 #[cfg(test)]
 use mason_catalog::mason_snapshot_counts;
 mod catalog;
-pub use catalog::*;
+pub(crate) use catalog::nix_lsp_launch_environment_for_workspace_at;
+pub use catalog::{
+    DebugProgramPolicy, ToolArchiveFormat, ToolDefinition, ToolEntry, ToolInstall, ToolKind,
+    ToolStatus, ToolVersionPin, bundled_tool_catalog, discover_executable, inspect_tools,
+    inspect_tools_at, is_nixos_host, managed_tool_executable, managed_tool_installed_version,
+    nix_lsp_launch_environment, nix_lsp_profile_installed, nix_lsp_shell, nix_lsp_tool_installed,
+    nix_lsp_workspace_root, rust_analyzer_is_rustup_proxy, tool_launch_environment,
+    tool_store_root,
+};
+use catalog::{NixCompatibilityRuntime, parse_nix_runtime_environment, write_managed_tool_version};
 mod installer_service;
-pub use installer_service::*;
+pub use installer_service::{ToolInstallProgress, ToolInstallResult, ToolInstaller, ToolOperation};
 mod version;
-pub use version::*;
+#[cfg(not(unix))]
+use version::probe_tool_version;
+pub use version::{ToolVersionRequest, ToolVersionResult, ToolVersionService};
 mod nix_workspace;
-pub use nix_workspace::*;
+pub use nix_workspace::{NixWorkspaceResult, NixWorkspaceService};
 mod install_prepare;
 use install_prepare::*;
 mod download;
@@ -65,9 +83,13 @@ use compatibility::*;
 mod runtimes;
 use runtimes::*;
 mod install;
-pub use install::*;
+pub use install::ToolInstallerError;
+use install::install_tool;
 mod package_service;
-pub use package_service::*;
+pub use package_service::{
+    PackageManager, PackageOperation, PackageOperationResult, PackageService, PackageServiceEvent,
+    PreparedPackage,
+};
 
 #[cfg(test)]
 mod tests;

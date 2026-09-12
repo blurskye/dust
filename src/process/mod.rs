@@ -13,7 +13,7 @@ use std::{
 use thiserror::Error;
 
 mod jobs;
-pub use jobs::*;
+pub use jobs::{JobError, JobEvent, JobId, JobPolicy, JobRequest, JobStream, JobSupervisor};
 
 pub const PROTOCOL_MESSAGE_BYTE_CEILING: usize = 16 * 1024 * 1024;
 const PROTOCOL_HEADER_BYTE_CEILING: usize = 16 * 1024;

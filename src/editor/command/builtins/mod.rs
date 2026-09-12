@@ -16,7 +16,7 @@ use crate::editor::{
 
 static NEXT_TRANSACTION: AtomicU64 = AtomicU64::new(1);
 mod registration;
-pub use registration::*;
+pub use registration::register_builtin_commands;
 mod execute;
 use execute::*;
 mod transaction;

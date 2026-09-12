@@ -29,7 +29,23 @@ use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 mod settings;
-pub use settings::*;
+pub use settings::{
+    AmbiguousWidth, BomPolicy, BorderStyle, BufferLineConfig, ColorMode, CommandLineConfig,
+    ConfigWatchConfig, CursorConfig, CursorShape, DebugAdapterConfig, DebugConfig,
+    DebugRequestKind, DebugSessionConfig, DocumentationPopupConfig, EditorConfig,
+    EditorViewportConfig, ExplorerConfig, ExplorerGlyphSet, ExplorerGlyphs, ExplorerIconMode,
+    ExplorerWatchConfig, FinalNewlinePolicy, GitSignsConfig, HistoryConfig, HistoryStreamConfig,
+    IndentGuideConfig, InlayHintLevel, InputConfig, KeyHintAnchor, KeyHintConfig,
+    KeymapPolicyConfig, LargeFileConfig, LineEndingPolicy, LineNumbers, LspConfig,
+    LspProgressConfig, NotificationConfig, ObservabilityConfig, PackageRegistryConfig,
+    PackagesConfig, PaneConfig, PersistenceConfig, PickerConfig, PluginEntryConfig, PluginsConfig,
+    ProblemMatcherConfig, ProcessConfig, PromptTextConfig, RecoveryConfig, RegisterConfig,
+    RegisterStorage, RuntimeConfig, SearchConfig, StartupConfig, StatusLineConfig, SyntaxConfig,
+    TabLineConfig, TaskConfig, TaskKind, TerminalPanelConfig, TerminalProfileConfig,
+    TerminalsConfig, ThemeAttribute, ThemeColor, ThemeConfig, ThemeStyle, ThemeStyles,
+    ToolManagerConfig, UiConfig, WindowPlacementConfig, WindowRuleConfig, WindowsConfig,
+    WorkspaceConfig, WorkspaceSearchConfig,
+};
 mod validation;
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
