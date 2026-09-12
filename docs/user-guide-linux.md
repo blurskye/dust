@@ -13,7 +13,7 @@ dust --clean         # ignore user configuration
 dust --safe-mode     # disable plugins, project execution, and session restore
 ```
 
-A workspace Dust has not seen before opens the protected trust prompt after the first frame. Type `trust this workspace` to allow project commands, or press Escape to keep editing without execution. Dust remembers that the prompt was shown. Use `:trust` later to approve the workspace.
+A workspace Dust has not seen before opens the protected trust prompt after the first frame. With bundled configuration, type `trust this workspace` to allow project commands, or press Escape to keep editing without execution. Current configuration schema 1 still accepts `[workspace].trust_confirmation_phrase` and the prompt uses that configured value; leave it at the bundled phrase to preserve the intended safety copy. This is a known Partial implementation mismatch with the protected P-01/C-01 target, which fixes the exact phrase. Dust remembers that the prompt was shown. Use `:trust` later to approve the workspace.
 
 Press `:` from the dashboard, editor, or explorer to open the command menu. Start typing to filter commands; Enter accepts and Escape closes it.
 

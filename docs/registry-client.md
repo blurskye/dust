@@ -11,8 +11,11 @@ publisher programme is deployed or reachable.
 
 The current API manifest reports `package_network = official-https-no-redirect-v1`.
 In-app `package.registry.search` and `.show` are explicit network actions;
-`package.registry.install` additionally requires the exact **`trust this workspace`**
-gate and is blocked by safe mode. The application has no automatic startup update.
+`package.registry.install` additionally requires the workspace to be trusted and is
+blocked by safe mode. The bundled trust prompt requires **`trust this workspace`**,
+but current configuration schema 1 can replace that phrase; this is a known Partial
+mismatch with the protected target copy, not registry or plugin authority to bypass
+trust. The application has no automatic startup update.
 
 ## Endpoints consumed
 

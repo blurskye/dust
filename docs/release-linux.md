@@ -24,7 +24,7 @@ target/release/dust --check-api-compatibility api/compat-v1.json
 
 ## User-local install/update
 
-Installation accepts a regular binary, optionally verifies an expected SHA-256, rejects symlink destinations, writes a unique mode-0755 temporary file, syncs it, and atomically renames it to `<prefix>/bin/dust`. An existing binary becomes `dust.previous`.
+Installation accepts a regular binary, optionally verifies an expected SHA-256, writes a process-named create-new mode-0755 temporary file, syncs it, and atomically renames it to `<prefix>/bin/dust`. It does not write through a `dust` symlink: a resolving symlink is refused and a dangling symlink is replaced by the final rename. An existing binary becomes `dust.previous`.
 
 ```sh
 target/release/dust --install-binary target/release/dust \
@@ -38,4 +38,4 @@ The same operation updates an installation. Roll back or uninstall with:
 "$HOME/.local/bin/dust" --install-prefix "$HOME/.local" --uninstall
 ```
 
-Rollback requires the regular `dust.previous` file. Uninstall removes only the managed regular files and refuses symlinks or non-files. These commands do not modify shell profiles, desktop integration, system directories, or package-manager databases.
+Current rollback checks only that `dust.previous` resolves to a file before renaming it; that check follows symlinks and does not satisfy the target C-06 no-follow/ownership validation. Use rollback only with a private, inspected user-owned prefix until that Partial implementation gap is closed. Uninstall rejects a resolved managed symlink or non-file, but its current existence check skips a dangling symlink; inspect the private prefix after failure or removal. These commands do not modify shell profiles, desktop integration, system directories, or package-manager databases.
