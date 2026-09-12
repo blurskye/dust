@@ -176,24 +176,26 @@ impl WindowSession {
         {
             return Err("dirty close source or focused target changed".into());
         }
-        if let EditorCloseTarget::Buffer { view, buffer } = intent.target
-            && (source
+        if let EditorCloseTarget::Buffer { view, buffer } = intent.target {
+            if source
                 .views()
                 .get(view)
                 .is_none_or(|candidate| candidate.buffer != buffer)
                 || source
                     .panes()
                     .get(intent.pane)
-                    .is_none_or(|pane| pane.view != view))
-        {
-            return Err("dirty close buffer/view target changed".into());
+                    .is_none_or(|pane| pane.view != view)
+            {
+                return Err("dirty close buffer/view target changed".into());
+            }
         }
-        if let EditorCloseTarget::Window { pane, window } = intent.target
-            && (pane != intent.pane
+        if let EditorCloseTarget::Window { pane, window } = intent.target {
+            if pane != intent.pane
                 || self.core.editor.pane_for_window(window) != Some(pane)
-                || source.panes().get(pane).is_none())
-        {
-            return Err("dirty close window target changed".into());
+                || source.panes().get(pane).is_none()
+            {
+                return Err("dirty close window target changed".into());
+            }
         }
         if intent.dirty[intent.next..].iter().any(|pending| {
             source
@@ -531,8 +533,8 @@ impl WindowSession {
         {
             return Err("window plan owner, editor or catalog source is stale".into());
         }
-        if let Some((window, view, content, tab)) = plan.target_source
-            && (self
+        if let Some((window, view, content, tab)) = plan.target_source {
+            if self
                 .core
                 .graph
                 .window(window)
@@ -543,12 +545,13 @@ impl WindowSession {
                     .graph
                     .view(view)
                     .map(|descriptor| descriptor.content)
-                    != Some(content))
-        {
-            return Err("window target identity is stale".into());
+                    != Some(content)
+            {
+                return Err("window target identity is stale".into());
+            }
         }
-        if let Some((window, view, content)) = plan.clone_source
-            && (self
+        if let Some((window, view, content)) = plan.clone_source {
+            if self
                 .core
                 .graph
                 .window(window)
@@ -559,9 +562,10 @@ impl WindowSession {
                     .graph
                     .view(view)
                     .map(|descriptor| descriptor.content)
-                    != Some(content))
-        {
-            return Err("window clone source identity is stale".into());
+                    != Some(content)
+            {
+                return Err("window clone source identity is stale".into());
+            }
         }
         Ok(())
     }
@@ -772,14 +776,14 @@ impl WindowSession {
                 _ => return Err("editor transition carries an invalid window action".into()),
             }
         }
-        if let Some(target) = plan.target
-            && candidate.core.graph.focused() != Some(target)
-        {
-            candidate
-                .core
-                .graph
-                .focus(target)
-                .map_err(|error| error.to_string())?;
+        if let Some(target) = plan.target {
+            if candidate.core.graph.focused() != Some(target) {
+                candidate
+                    .core
+                    .graph
+                    .focus(target)
+                    .map_err(|error| error.to_string())?;
+            }
         }
         if plan.hide_dashboard {
             candidate.dashboard = Some(false);

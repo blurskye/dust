@@ -243,11 +243,11 @@ impl ExplorerState {
 
     pub fn set_error(&mut self, node: ExplorerNodeId, generation: u64) {
         let mut changed = false;
-        if let Some(node) = Arc::make_mut(&mut self.data).nodes.get_mut(&node)
-            && node.load == ExplorerLoadState::Loading(generation)
-        {
-            node.load = ExplorerLoadState::Error;
-            changed = true;
+        if let Some(node) = Arc::make_mut(&mut self.data).nodes.get_mut(&node) {
+            if node.load == ExplorerLoadState::Loading(generation) {
+                node.load = ExplorerLoadState::Error;
+                changed = true;
+            }
         }
         if changed {
             self.rebuild_visible_projection();
@@ -288,15 +288,16 @@ impl ExplorerState {
     }
 
     pub fn select_first_child(&mut self) {
-        if let Some(id) = self.selected
-            && let Some(child) = self
+        if let Some(id) = self.selected {
+            if let Some(child) = self
                 .data
                 .nodes
                 .get(&id)
                 .and_then(|node| node.children.first())
                 .copied()
-        {
-            self.selected = Some(child);
+            {
+                self.selected = Some(child);
+            }
         }
     }
 
@@ -454,13 +455,14 @@ impl ExplorerState {
         let Some(id) = self.selected else { return };
         if self.expanded.remove(&id) {
             self.rebuild_visible_projection();
-        } else if let Some(parent) = self.data.nodes.get(&id).and_then(|node| node.parent)
-            && self
+        } else if let Some(parent) = self.data.nodes.get(&id).and_then(|node| node.parent) {
+            if self
                 .visible_positions
                 .get(&parent)
                 .is_some_and(|index| *index >= first_presented)
-        {
-            self.selected = Some(parent)
+            {
+                self.selected = Some(parent)
+            }
         }
     }
 }

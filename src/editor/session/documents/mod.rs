@@ -218,10 +218,10 @@ impl DocumentSession {
                 result: event,
             });
         }
-        if let VfsResult::Read { id, .. } | VfsResult::Write { id, .. } = &event
-            && self.pending_files.contains_key(id)
-        {
-            return self.file_reply(*id, event);
+        if let VfsResult::Read { id, .. } | VfsResult::Write { id, .. } = &event {
+            if self.pending_files.contains_key(id) {
+                return self.file_reply(*id, event);
+            }
         }
         if let VfsResult::Read { id, path, result } = event {
             if self.pending_startup.contains_key(&id) {
@@ -367,12 +367,13 @@ impl DocumentSession {
         let mut large = Vec::new();
         for (id, path, text) in documents {
             live.insert(id);
-            if !self.overrides.contains_key(&id)
-                && let Some(mode) = path
+            if !self.overrides.contains_key(&id) {
+                if let Some(mode) = path
                     .and_then(|path| self.restored_overrides.get(path))
                     .copied()
-            {
-                self.overrides.insert(id, mode);
+                {
+                    self.overrides.insert(id, mode);
+                }
             }
             if self.effective_large_file(id, Some(text), policy) {
                 large.push(id);

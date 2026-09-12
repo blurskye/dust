@@ -423,21 +423,22 @@ impl LspSession {
         self.forget_synced(&key);
         if origin.2 {
             for (id, replay) in &mut documents {
-                if *id != buffer
-                    && let Some(current) = editor
+                if *id != buffer {
+                    if let Some(current) = editor
                         .buffers
                         .get(*id)
                         .filter(|b| b.path.as_ref() == Some(&replay.path))
-                {
-                    replay.version = current.text.revision().0;
-                    replay.text = current.text.to_string();
-                    let version = current.text.source_version();
-                    if self
-                        .service
-                        .sync_owned(&key, replay.clone(), (*id, version.clone()))
-                        .is_ok()
                     {
-                        self.synced.insert((key.clone(), *id), version);
+                        replay.version = current.text.revision().0;
+                        replay.text = current.text.to_string();
+                        let version = current.text.source_version();
+                        if self
+                            .service
+                            .sync_owned(&key, replay.clone(), (*id, version.clone()))
+                            .is_ok()
+                        {
+                            self.synced.insert((key.clone(), *id), version);
+                        }
                     }
                 }
             }

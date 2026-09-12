@@ -87,11 +87,12 @@ impl InputSession {
         if self.mouse.generation != Some(plan.generation) {
             return;
         }
-        if let Some(anchor) = plan.anchor
-            && anchor.editor.same_editor(editor)
-            && current == Some((anchor.view, anchor.buffer, anchor.revision))
-        {
-            self.mouse.anchor = Some(anchor);
+        if let Some(anchor) = plan.anchor {
+            if anchor.editor.same_editor(editor)
+                && current == Some((anchor.view, anchor.buffer, anchor.revision))
+            {
+                self.mouse.anchor = Some(anchor);
+            }
         }
     }
     pub(in crate::editor::session) fn mouse_plan(

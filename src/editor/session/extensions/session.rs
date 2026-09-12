@@ -340,10 +340,10 @@ impl ExtensionSession {
         let received = self
             .edits
             .receive(reply, &self.manager, workspace, configuration);
-        if received.is_err()
-            && let Some(origin) = origin
-        {
-            self.confirmations.release_terminal(&origin);
+        if received.is_err() {
+            if let Some(origin) = origin {
+                self.confirmations.release_terminal(&origin);
+            }
         }
         received
     }

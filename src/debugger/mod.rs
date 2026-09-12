@@ -469,92 +469,97 @@ fn run_adapter(
                     launched = true;
                 }
                 Some("response") => {
-                    if let Some(request_seq) = message.get("request_seq").and_then(Value::as_i64)
-                        && pending.get(&request_seq).is_some_and(|(command, _)| {
+                    if let Some(request_seq) = message.get("request_seq").and_then(Value::as_i64) {
+                        if pending.get(&request_seq).is_some_and(|(command, _)| {
                             message.get("command").and_then(Value::as_str) == Some(command.as_str())
-                        })
-                        && let Some((command, generation)) = pending.remove(&request_seq)
-                        && (generation == stop_generation || is_startup_request(&command))
-                    {
-                        if message.get("success").and_then(Value::as_bool) != Some(true) {
-                            let message = format!(
-                                "DAP {command} request rejected: {}",
-                                bounded(message.get("message"))
-                            );
-                            if is_startup_request(&command) {
-                                events
-                                    .send(DapEvent::Failed {
-                                        adapter: adapter.clone(),
-                                        message,
-                                    })
-                                    .ok();
-                                break;
+                        }) {
+                            if let Some((command, generation)) = pending.remove(&request_seq) {
+                                if generation == stop_generation || is_startup_request(&command) {
+                                    if message.get("success").and_then(Value::as_bool) != Some(true)
+                                    {
+                                        let message = format!(
+                                            "DAP {command} request rejected: {}",
+                                            bounded(message.get("message"))
+                                        );
+                                        if is_startup_request(&command) {
+                                            events
+                                                .send(DapEvent::Failed {
+                                                    adapter: adapter.clone(),
+                                                    message,
+                                                })
+                                                .ok();
+                                            break;
+                                        }
+                                        events
+                                            .send(DapEvent::RequestFailed {
+                                                adapter: adapter.clone(),
+                                                stop_generation: generation,
+                                                request_seq,
+                                                command,
+                                                message,
+                                            })
+                                            .ok();
+                                        continue;
+                                    }
+                                    if is_startup_request(&command) {
+                                        launch_accepted = true;
+                                        // A launch acknowledgement is not a continued event.
+                                        if !paused {
+                                            events
+                                                .send(DapEvent::Running {
+                                                    adapter: adapter.clone(),
+                                                })
+                                                .ok();
+                                        }
+                                    } else if matches!(
+                                        command.as_str(),
+                                        "continue" | "next" | "stepIn" | "stepOut"
+                                    ) {
+                                        paused = false;
+                                        if launch_accepted {
+                                            events
+                                                .send(DapEvent::Running {
+                                                    adapter: adapter.clone(),
+                                                })
+                                                .ok();
+                                        }
+                                    }
+                                    if let Some(response) = normalize_response(
+                                        &command,
+                                        message.get("body").unwrap_or(&Value::Null),
+                                        &path_maps,
+                                    ) {
+                                        events
+                                            .send(DapEvent::Response {
+                                                adapter: adapter.clone(),
+                                                stop_generation: generation,
+                                                response,
+                                            })
+                                            .ok();
+                                    } else if matches!(
+                                        command.as_str(),
+                                        "threads"
+                                            | "stackTrace"
+                                            | "scopes"
+                                            | "variables"
+                                            | "evaluate"
+                                            | "source"
+                                            | "setBreakpoints"
+                                    ) {
+                                        events
+                                            .send(DapEvent::RequestFailed {
+                                                adapter: adapter.clone(),
+                                                stop_generation: generation,
+                                                request_seq,
+                                                command,
+                                                message:
+                                                    "DAP response body is missing or malformed"
+                                                        .into(),
+                                            })
+                                            .ok();
+                                    }
+                                }
                             }
-                            events
-                                .send(DapEvent::RequestFailed {
-                                    adapter: adapter.clone(),
-                                    stop_generation: generation,
-                                    request_seq,
-                                    command,
-                                    message,
-                                })
-                                .ok();
-                            continue;
-                        }
-                        if is_startup_request(&command) {
-                            launch_accepted = true;
-                            // A launch acknowledgement is not a continued event.
-                            if !paused {
-                                events
-                                    .send(DapEvent::Running {
-                                        adapter: adapter.clone(),
-                                    })
-                                    .ok();
-                            }
-                        } else if matches!(
-                            command.as_str(),
-                            "continue" | "next" | "stepIn" | "stepOut"
-                        ) {
-                            paused = false;
-                            if launch_accepted {
-                                events
-                                    .send(DapEvent::Running {
-                                        adapter: adapter.clone(),
-                                    })
-                                    .ok();
-                            }
-                        }
-                        if let Some(response) = normalize_response(
-                            &command,
-                            message.get("body").unwrap_or(&Value::Null),
-                            &path_maps,
-                        ) {
-                            events
-                                .send(DapEvent::Response {
-                                    adapter: adapter.clone(),
-                                    stop_generation: generation,
-                                    response,
-                                })
-                                .ok();
-                        } else if matches!(
-                            command.as_str(),
-                            "threads"
-                                | "stackTrace"
-                                | "scopes"
-                                | "variables"
-                                | "evaluate"
-                                | "source"
-                                | "setBreakpoints"
-                        ) {
-                            events
-                                .send(DapEvent::RequestFailed {
-                                    adapter: adapter.clone(),
-                                    stop_generation: generation,
-                                    request_seq,
-                                    command,
-                                    message: "DAP response body is missing or malformed".into(),
-                                })
-                                .ok();
                         }
                     }
                 }

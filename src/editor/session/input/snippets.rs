@@ -223,10 +223,10 @@ impl InputSession {
             .map(|range| TextEdit::new(*range, replacement.clone()))
             .collect::<Vec<_>>();
         for operation in &mut transaction.operations {
-            if let EditorOperation::ApplyEdits { buffer, edits } = operation
-                && *buffer == session.buffer
-            {
-                *edits = TextEditSet::new(session.revision, replacement_edits.clone());
+            if let EditorOperation::ApplyEdits { buffer, edits } = operation {
+                if *buffer == session.buffer {
+                    *edits = TextEditSet::new(session.revision, replacement_edits.clone());
+                }
             }
         }
         let shift = |position: ByteOffset| {

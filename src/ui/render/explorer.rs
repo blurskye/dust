@@ -41,15 +41,15 @@ pub(super) fn place_workspace_frame(
     );
     for y in 0..content.grid.height().min(bounds.height) {
         for x in 0..content.grid.width().min(bounds.width) {
-            if let Some(cell) = content.grid.get(x, y)
-                && !cell.continuation
-            {
-                grid.set_cell(
-                    bounds.x.saturating_add(x),
-                    bounds.y.saturating_add(y),
-                    &cell.symbol,
-                    cell.style,
-                );
+            if let Some(cell) = content.grid.get(x, y) {
+                if !cell.continuation {
+                    grid.set_cell(
+                        bounds.x.saturating_add(x),
+                        bounds.y.saturating_add(y),
+                        &cell.symbol,
+                        cell.style,
+                    );
+                }
             }
         }
     }
@@ -103,15 +103,15 @@ pub(super) fn render_explorer_window(
     );
     for y in 0..rect.height {
         for x in 0..rect.width {
-            if let Some(cell) = local.get(x, y)
-                && !cell.continuation
-            {
-                frame.grid.set_cell(
-                    rect.x.saturating_add(x),
-                    rect.y.saturating_add(y),
-                    &cell.symbol,
-                    cell.style,
-                );
+            if let Some(cell) = local.get(x, y) {
+                if !cell.continuation {
+                    frame.grid.set_cell(
+                        rect.x.saturating_add(x),
+                        rect.y.saturating_add(y),
+                        &cell.symbol,
+                        cell.style,
+                    );
+                }
             }
         }
     }

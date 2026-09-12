@@ -146,13 +146,13 @@ impl<'a> VisualRowModel<'a> {
         folds.sort_unstable_by_key(|&(start, end)| (start, std::cmp::Reverse(end)));
         let mut normalized_folds: Vec<(usize, usize)> = Vec::with_capacity(folds.len());
         for (start, end) in folds {
-            if let Some(last) = normalized_folds.last_mut()
-                && start <= last.1
-            {
-                last.1 = last.1.max(end);
-            } else {
-                normalized_folds.push((start, end));
+            if let Some(last) = normalized_folds.last_mut() {
+                if start <= last.1 {
+                    last.1 = last.1.max(end);
+                    continue;
+                }
             }
+            normalized_folds.push((start, end));
         }
         Self {
             text,

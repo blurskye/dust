@@ -705,10 +705,11 @@ fn scoped_read_rejects_symlink_escape_after_canonicalization() {
             result,
             ..
         }) = worker.try_result().expect("result")
-            && result_id == id
         {
-            assert!(matches!(result, Err(VfsError::OutsideScope(_))));
-            break;
+            if result_id == id {
+                assert!(matches!(result, Err(VfsError::OutsideScope(_))));
+                break;
+            }
         }
         assert!(Instant::now() < deadline, "scoped read timed out");
         std::thread::sleep(Duration::from_millis(5));
@@ -766,9 +767,10 @@ fn explorer_mutations_are_scoped_non_overwriting_and_worker_owned() {
                 result,
                 ..
             }) = worker.try_result().expect("worker")
-                && result_id == id
             {
-                return result;
+                if result_id == id {
+                    return result;
+                }
             }
             assert!(Instant::now() < deadline, "explorer mutation timed out");
             std::thread::sleep(Duration::from_millis(2));

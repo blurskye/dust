@@ -119,10 +119,10 @@ impl SearchSession {
         ticket: PreviewTicket,
         error: String,
     ) {
-        if Arc::ptr_eq(&ticket.0, &self.preview_epoch)
-            && let Some(preview) = &mut self.preview
-        {
-            preview.lines = vec![format!("preview unavailable: {error}")];
+        if Arc::ptr_eq(&ticket.0, &self.preview_epoch) {
+            if let Some(preview) = &mut self.preview {
+                preview.lines = vec![format!("preview unavailable: {error}")];
+            }
         }
     }
     pub(in crate::editor::session) fn accept_preview(
@@ -173,12 +173,13 @@ pub(super) fn search_picker_preview(
     {
         start = start.saturating_add(1);
     }
-    if start > 0
-        && let Some(line_break) = bytes[start..match_start]
+    if start > 0 {
+        if let Some(line_break) = bytes[start..match_start]
             .iter()
             .position(|byte| *byte == b'\n')
-    {
-        start = start.saturating_add(line_break).saturating_add(1);
+        {
+            start = start.saturating_add(line_break).saturating_add(1);
+        }
     }
     let mut end = start.saturating_add(maximum_bytes).min(bytes.len());
     while end > start && std::str::from_utf8(&bytes[start..end]).is_err() {

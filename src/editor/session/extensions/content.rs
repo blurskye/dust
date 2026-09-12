@@ -121,10 +121,10 @@ impl ExtensionSession {
         if provider.is_some_and(|request| !self.provider_presentable(request)) {
             return;
         }
-        if self.active_picker != provider
-            && let Some(previous) = self.active_picker.take()
-        {
-            self.providers.cancel(previous);
+        if self.active_picker != provider {
+            if let Some(previous) = self.active_picker.take() {
+                self.providers.cancel(previous);
+            }
         }
         self.active_picker = provider;
     }
@@ -349,7 +349,7 @@ impl ExtensionSession {
         );
         let mut draft = context.editor.draft();
         let mut bridge = self.virtual_editor.clone();
-        if !refresh && let Some(entry) = existing {
+        if let Some(entry) = existing.filter(|_| !refresh) {
             if !entry.matches(draft.topology()) {
                 return Err("virtual document source changed".into());
             }

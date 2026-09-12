@@ -523,19 +523,21 @@ pub(super) fn content_tab_segments(
     if !dirty.is_empty() {
         segments.push((dirty, Style::BufferLineDirty));
     }
-    if config.ui.buffer_line.show_diagnostics
-        && let Some(diagnostic) = entry.diagnostic
-    {
-        let marker = match diagnostic.severity {
-            ContentTabDiagnosticSeverity::Error => &config.ui.buffer_line.diagnostic_error_marker,
-            ContentTabDiagnosticSeverity::Warning => {
-                &config.ui.buffer_line.diagnostic_warning_marker
-            }
-        };
-        segments.push((
-            format!(" {marker}{}", diagnostic.count),
-            Style::BufferLineDiagnostic,
-        ));
+    if config.ui.buffer_line.show_diagnostics {
+        if let Some(diagnostic) = entry.diagnostic {
+            let marker = match diagnostic.severity {
+                ContentTabDiagnosticSeverity::Error => {
+                    &config.ui.buffer_line.diagnostic_error_marker
+                }
+                ContentTabDiagnosticSeverity::Warning => {
+                    &config.ui.buffer_line.diagnostic_warning_marker
+                }
+            };
+            segments.push((
+                format!(" {marker}{}", diagnostic.count),
+                Style::BufferLineDiagnostic,
+            ));
+        }
     }
     if config.ui.buffer_line.show_close && entry.closeable {
         segments.push((

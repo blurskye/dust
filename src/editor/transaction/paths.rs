@@ -114,13 +114,13 @@ impl EditorState {
             })
             .collect::<Vec<_>>();
         for (_, path) in &destinations {
-            if let Some(path) = path
-                && self.buffers.iter().any(|(id, buffer)| {
+            if let Some(path) = path {
+                if self.buffers.iter().any(|(id, buffer)| {
                     buffer.path.as_ref() == Some(path)
                         && !destinations.iter().any(|(expected, _)| *expected == id)
-                })
-            {
-                return Err("filesystem operation completed, but destination belongs to another buffer; paths were not reconciled".into());
+                }) {
+                    return Err("filesystem operation completed, but destination belongs to another buffer; paths were not reconciled".into());
+                }
             }
         }
         if destinations.is_empty() {

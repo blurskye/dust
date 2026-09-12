@@ -145,10 +145,10 @@ impl WindowSession {
             line.order.retain(|buffer| represented.contains(buffer));
             line.pins.retain(|buffer| represented.contains(buffer));
             for content in &snapshots {
-                if let Some(buffer) = bridge.buffer_for_content(content.id)
-                    && !line.order.contains(&buffer)
-                {
-                    line.order.push(buffer)
+                if let Some(buffer) = bridge.buffer_for_content(content.id) {
+                    if !line.order.contains(&buffer) {
+                        line.order.push(buffer)
+                    }
                 }
             }
             if before_order != line.order || before_pins != line.pins {

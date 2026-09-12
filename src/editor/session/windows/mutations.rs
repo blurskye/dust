@@ -499,17 +499,18 @@ impl WindowSession {
         self.require_projected_graph()?;
         let mut candidate = self.candidate()?;
         let core = &mut candidate.core;
-        if placement == WindowPlacement::Hidden
-            && let Some(current) = core
+        if placement == WindowPlacement::Hidden {
+            if let Some(current) = core
                 .native
                 .ids_for_target(target)
                 .and_then(|ids| core.graph.window(ids.window))
                 .map(|w| w.placement)
                 .filter(|p| *p != WindowPlacement::Hidden)
-        {
-            core.native
-                .place_target(target, current)
-                .map_err(|e| e.to_string())?;
+            {
+                core.native
+                    .place_target(target, current)
+                    .map_err(|e| e.to_string())?;
+            }
         }
         let ids = core
             .native
@@ -866,18 +867,22 @@ impl WindowSession {
         if !rules
             .iter()
             .any(|(content_type, _)| *content_type == "builtin.explorer")
-            && let Some(ids) = self.native_ids().explorer()
-            && let Some(window) = self.graph().window(ids.window)
         {
-            rules.push(("builtin.explorer", window.placement));
+            if let Some(ids) = self.native_ids().explorer() {
+                if let Some(window) = self.graph().window(ids.window) {
+                    rules.push(("builtin.explorer", window.placement));
+                }
+            }
         }
         if !rules
             .iter()
             .any(|(content_type, _)| *content_type == "builtin.terminal")
-            && let Some(ids) = selected.and_then(|id| self.native_ids().terminal(id))
-            && let Some(window) = self.graph().window(ids.window)
         {
-            rules.push(("builtin.terminal", window.placement));
+            if let Some(ids) = selected.and_then(|id| self.native_ids().terminal(id)) {
+                if let Some(window) = self.graph().window(ids.window) {
+                    rules.push(("builtin.terminal", window.placement));
+                }
+            }
         }
         rules
             .into_iter()

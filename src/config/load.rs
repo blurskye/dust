@@ -776,10 +776,10 @@ impl ConfigurationWorker {
                                 match load_consistent_configuration(use_user_configuration, &theme)
                                 {
                                     Ok(consistent) => {
-                                        if consistent.theme == theme
-                                            && let Some(stable) = consistent.fingerprint
-                                        {
-                                            fingerprint = stable;
+                                        if consistent.theme == theme {
+                                            if let Some(stable) = consistent.fingerprint {
+                                                fingerprint = stable;
+                                            }
                                         }
                                         changed_at = None;
                                         consistent.candidate
@@ -838,10 +838,10 @@ impl ConfigurationWorker {
                                 match load_consistent_configuration(use_user_configuration, &theme)
                                 {
                                     Ok(consistent) => {
-                                        if consistent.theme == theme
-                                            && let Some(stable) = consistent.fingerprint
-                                        {
-                                            fingerprint = stable;
+                                        if consistent.theme == theme {
+                                            if let Some(stable) = consistent.fingerprint {
+                                                fingerprint = stable;
+                                            }
                                         }
                                         changed_at = None;
                                         generation = generation.saturating_add(1);

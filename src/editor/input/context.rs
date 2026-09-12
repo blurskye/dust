@@ -220,10 +220,10 @@ impl InputContextRegistry {
         {
             return Err(InputContextError::GlobalLimit);
         }
-        if let Some(parent) = &parent_surface
-            && !PARENT_SURFACES.contains(&parent.as_str())
-        {
-            return Err(InputContextError::InvalidParent(parent.clone()));
+        if let Some(parent) = &parent_surface {
+            if !PARENT_SURFACES.contains(&parent.as_str()) {
+                return Err(InputContextError::InvalidParent(parent.clone()));
+            }
         }
         self.contexts.insert(
             id.clone(),

@@ -152,27 +152,27 @@ pub(super) fn render_editor_view(
         Vec::new()
     };
     let mut diagnostic_lines = BTreeMap::<usize, Vec<&UiDiagnostic>>::new();
-    if !(large_file && config.editor.large_file.disable_diagnostics)
-        && let Some(path) = &buffer.path
-    {
-        for diagnostic in ui
-            .diagnostics
-            .iter()
-            .filter(|diagnostic| &diagnostic.path == path)
-            .take(2_000)
-        {
-            if let Ok(line) = buffer.text.byte_to_line(diagnostic.range.start) {
-                diagnostic_lines.entry(line).or_default().push(diagnostic);
+    if !(large_file && config.editor.large_file.disable_diagnostics) {
+        if let Some(path) = &buffer.path {
+            for diagnostic in ui
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| &diagnostic.path == path)
+                .take(2_000)
+            {
+                if let Ok(line) = buffer.text.byte_to_line(diagnostic.range.start) {
+                    diagnostic_lines.entry(line).or_default().push(diagnostic);
+                }
             }
-        }
-        for diagnostics in diagnostic_lines.values_mut() {
-            diagnostics.sort_unstable_by_key(|diagnostic| {
-                (
-                    diagnostic.severity,
-                    diagnostic.range.start,
-                    &diagnostic.message,
-                )
-            });
+            for diagnostics in diagnostic_lines.values_mut() {
+                diagnostics.sort_unstable_by_key(|diagnostic| {
+                    (
+                        diagnostic.severity,
+                        diagnostic.range.start,
+                        &diagnostic.message,
+                    )
+                });
+            }
         }
     }
 
@@ -494,31 +494,33 @@ pub(super) fn render_editor_view(
                         "?"
                     };
                     grid.set_cell(x, screen_row, replacement, style);
-                } else if grapheme == " "
-                    && let Some(guide) = indent_guide_symbol.filter(|_| {
+                } else if grapheme == " " {
+                    if let Some(guide) = indent_guide_symbol.filter(|_| {
                         is_indent_guide_column(
                             grapheme_column,
                             leading_indentation,
                             config.editor.indent_width,
                         )
-                    })
-                {
-                    let active_guide = active_indent_scope
-                        .is_some_and(|scope| scope.contains(line_index, grapheme_column));
-                    grid.set_cell(
-                        x,
-                        screen_row,
-                        guide,
-                        if style == Style::Default {
-                            if active_guide {
-                                Style::Muted
+                    }) {
+                        let active_guide = active_indent_scope
+                            .is_some_and(|scope| scope.contains(line_index, grapheme_column));
+                        grid.set_cell(
+                            x,
+                            screen_row,
+                            guide,
+                            if style == Style::Default {
+                                if active_guide {
+                                    Style::Muted
+                                } else {
+                                    Style::Border
+                                }
                             } else {
-                                Style::Border
-                            }
-                        } else {
-                            style
-                        },
-                    );
+                                style
+                            },
+                        );
+                    } else {
+                        grid.set_cell(x, screen_row, grapheme, style);
+                    }
                 } else {
                     grid.set_cell(x, screen_row, grapheme, style);
                 }
@@ -535,17 +537,17 @@ pub(super) fn render_editor_view(
             }
             inlay_cursor = inlay_cursor.saturating_add(1);
         }
-        if let Some(diagnostics) = diagnostic_lines.get(&line_index)
-            && let Some(diagnostic) = diagnostics.first()
-        {
-            let text = format!("  ●● {}", diagnostic_label(diagnostic));
-            grid.put_text_clipped(
-                x,
-                screen_row,
-                &text,
-                diagnostic_style(diagnostic.severity),
-                width,
-            );
+        if let Some(diagnostics) = diagnostic_lines.get(&line_index) {
+            if let Some(diagnostic) = diagnostics.first() {
+                let text = format!("  ●● {}", diagnostic_label(diagnostic));
+                grid.put_text_clipped(
+                    x,
+                    screen_row,
+                    &text,
+                    diagnostic_style(diagnostic.severity),
+                    width,
+                );
+            }
         }
         screen_row = screen_row.saturating_add(1);
         if ui.expanded_diagnostic.as_ref().is_some_and(|expanded| {
@@ -558,43 +560,44 @@ pub(super) fn render_editor_view(
                             .iter()
                             .any(|diagnostic| expanded.severities.contains(&diagnostic.severity))
                     })
-        }) && let Some(diagnostics) = diagnostic_lines.get(&line_index)
-        {
-            if screen_row < body_height {
-                grid.put_text_clipped(
-                    gutter_width,
-                    screen_row,
-                    "Diagnostics:",
-                    Style::Muted,
-                    width,
-                );
-                screen_row = screen_row.saturating_add(1);
-            }
-            let severities = &ui
-                .expanded_diagnostic
-                .as_ref()
-                .expect("checked expanded diagnostic")
-                .severities;
-            for (index, diagnostic) in diagnostics
-                .iter()
-                .filter(|diagnostic| severities.contains(&diagnostic.severity))
-                .enumerate()
-            {
-                if screen_row >= body_height {
-                    break;
+        }) {
+            if let Some(diagnostics) = diagnostic_lines.get(&line_index) {
+                if screen_row < body_height {
+                    grid.put_text_clipped(
+                        gutter_width,
+                        screen_row,
+                        "Diagnostics:",
+                        Style::Muted,
+                        width,
+                    );
+                    screen_row = screen_row.saturating_add(1);
                 }
-                grid.put_text_clipped(
-                    gutter_width,
-                    screen_row,
-                    &format!(
-                        "{}. {}",
-                        index.saturating_add(1),
-                        diagnostic_label(diagnostic)
-                    ),
-                    diagnostic_style(diagnostic.severity),
-                    width,
-                );
-                screen_row = screen_row.saturating_add(1);
+                let severities = &ui
+                    .expanded_diagnostic
+                    .as_ref()
+                    .expect("checked expanded diagnostic")
+                    .severities;
+                for (index, diagnostic) in diagnostics
+                    .iter()
+                    .filter(|diagnostic| severities.contains(&diagnostic.severity))
+                    .enumerate()
+                {
+                    if screen_row >= body_height {
+                        break;
+                    }
+                    grid.put_text_clipped(
+                        gutter_width,
+                        screen_row,
+                        &format!(
+                            "{}. {}",
+                            index.saturating_add(1),
+                            diagnostic_label(diagnostic)
+                        ),
+                        diagnostic_style(diagnostic.severity),
+                        width,
+                    );
+                    screen_row = screen_row.saturating_add(1);
+                }
             }
         }
         line_index = line_index.saturating_add(1);

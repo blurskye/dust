@@ -45,15 +45,15 @@ pub fn read_content_length_message(
         if line == "\r\n" || line == "\n" {
             break;
         }
-        if let Some((name, value)) = line.split_once(':')
-            && name.eq_ignore_ascii_case("content-length")
-        {
-            content_length = Some(
-                value
-                    .trim()
-                    .parse::<usize>()
-                    .map_err(|_| ProtocolError::InvalidContentLength)?,
-            );
+        if let Some((name, value)) = line.split_once(':') {
+            if name.eq_ignore_ascii_case("content-length") {
+                content_length = Some(
+                    value
+                        .trim()
+                        .parse::<usize>()
+                        .map_err(|_| ProtocolError::InvalidContentLength)?,
+                );
+            }
         }
     }
     let content_length = content_length.ok_or(ProtocolError::MissingContentLength)?;

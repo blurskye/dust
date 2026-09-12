@@ -107,9 +107,10 @@ impl InteractiveApplication {
             &self.commands,
             self.extension.contributions(),
             true,
-        ) && let Err(error) = self.commit_contribution_candidate(candidate)
-        {
-            self.show_error(error);
+        ) {
+            if let Err(error) = self.commit_contribution_candidate(candidate) {
+                self.show_error(error);
+            }
         }
         self.notices.record(
             LogLevel::Error,
@@ -850,24 +851,24 @@ impl InteractiveApplication {
                 command,
             });
         }
-        if !execution.ui_requests.is_empty()
-            && self.extension.is_active_generation(&plugin, load)
-            && let Some(index) = self
+        if !execution.ui_requests.is_empty() && self.extension.is_active_generation(&plugin, load) {
+            if let Some(index) = self
                 .extension
                 .contributions()
                 .get(&plugin)
                 .filter(|index| index.generation == load.0)
                 .cloned()
-        {
-            let requests = std::mem::take(&mut execution.ui_requests);
-            let events = requests
-                .into_iter()
-                .map(|request| self.apply_plugin_ui_request(&index, request))
-                .collect::<Vec<_>>();
-            self.extension.queue_ui(plugin.clone(), load, events);
-            self.ui.plugin_surfaces = self.extension.window_snapshots();
-            self.window_session.invalidate_native();
-            self.reconcile_editor_windows();
+            {
+                let requests = std::mem::take(&mut execution.ui_requests);
+                let events = requests
+                    .into_iter()
+                    .map(|request| self.apply_plugin_ui_request(&index, request))
+                    .collect::<Vec<_>>();
+                self.extension.queue_ui(plugin.clone(), load, events);
+                self.ui.plugin_surfaces = self.extension.window_snapshots();
+                self.window_session.invalidate_native();
+                self.reconcile_editor_windows();
+            }
         }
         for message in execution.messages {
             self.notify_message(message, false);
@@ -2728,10 +2729,10 @@ impl InteractiveApplication {
                         PickerPayload::ProposalFile(index) => Some(*index),
                         _ => None,
                     });
-                if let Some(index) = selected
-                    && self.workspace_edits.toggle(index).is_ok()
-                {
-                    self.show_workspace_proposal();
+                if let Some(index) = selected {
+                    if self.workspace_edits.toggle(index).is_ok() {
+                        self.show_workspace_proposal();
+                    }
                 }
             }
             AppEffect::WorkspaceEditAccept => self.accept_workspace_proposal(),
@@ -3449,12 +3450,13 @@ impl InteractiveApplication {
                     self.place_active_terminal(WindowPlacement::Hidden);
                 } else if let Some(id) = self.terminal_session.selected() {
                     self.terminal_session.display(id);
-                    if self.terminal_window_rect().is_none()
-                        && let Err(error) =
+                    if self.terminal_window_rect().is_none() {
+                        if let Err(error) =
                             self.show_native_window(NativeSurfaceTarget::Terminal(id.0))
-                    {
-                        self.show_error(error);
-                        return Ok(());
+                        {
+                            self.show_error(error);
+                            return Ok(());
+                        }
                     }
                     self.set_terminal_focus(true);
                     self.resize_active_terminal_to_panel();
@@ -5344,10 +5346,10 @@ impl InteractiveApplication {
             };
             match update {
                 crate::editor::session::tasks::TaskUpdate::Output => {
-                    if let Some(name) = self.tasks.active_output().map(str::to_owned)
-                        && self.search.picker_surface() == PickerSurfaceKind::Output
-                    {
-                        self.show_output_picker(&name);
+                    if let Some(name) = self.tasks.active_output().map(str::to_owned) {
+                        if self.search.picker_surface() == PickerSurfaceKind::Output {
+                            self.show_output_picker(&name);
+                        }
                     }
                 }
                 crate::editor::session::tasks::TaskUpdate::Finished {
@@ -5923,11 +5925,11 @@ impl InteractiveApplication {
                 .completion_max_rows
                 .max(1),
         );
-        if let Some((selected, scroll)) = self.language.move_completion(direction, rows)
-            && let Some(completion) = self.ui.language_completion.as_mut()
-        {
-            completion.selected = selected;
-            completion.scroll = scroll;
+        if let Some((selected, scroll)) = self.language.move_completion(direction, rows) {
+            if let Some(completion) = self.ui.language_completion.as_mut() {
+                completion.selected = selected;
+                completion.scroll = scroll;
+            }
         }
         self.refresh_lsp_completion_documentation();
     }
@@ -6021,24 +6023,25 @@ impl InteractiveApplication {
         };
         if let Err(error) = self.apply_lsp_workspace_edit(workspace_edit) {
             self.show_error(error);
-        } else if session_allowed
-            && let Some(start) = insertion_start
-            && !tabstops.is_empty()
-        {
-            let source = self.state.window_version();
-            self.input.install_snippet(
-                crate::editor::session::input::SnippetDocument {
-                    editor: &source,
-                    buffer: buffer_id,
-                    text: &self.state.buffers[buffer_id].text,
-                    view: self.state.active_view,
-                },
-                start,
-                tabstops
-                    .into_iter()
-                    .map(|stop| (stop.index, stop.start, stop.end)),
-            );
-            self.select_snippet_current();
+        } else if session_allowed {
+            if let Some(start) = insertion_start {
+                if !tabstops.is_empty() {
+                    let source = self.state.window_version();
+                    self.input.install_snippet(
+                        crate::editor::session::input::SnippetDocument {
+                            editor: &source,
+                            buffer: buffer_id,
+                            text: &self.state.buffers[buffer_id].text,
+                            view: self.state.active_view,
+                        },
+                        start,
+                        tabstops
+                            .into_iter()
+                            .map(|stop| (stop.index, stop.start, stop.end)),
+                    );
+                    self.select_snippet_current();
+                }
+            }
         }
         self.language.clear_completion();
         self.ui.language_completion = None;
@@ -6655,11 +6658,11 @@ impl InteractiveApplication {
         complete: bool,
         origin: PickerOrigin,
     ) {
-        if let PickerOrigin::PluginProvider(request) = origin
-            && !self.extension.provider_presentable(request)
-        {
-            self.show_error("plugin picker source retired");
-            return;
+        if let PickerOrigin::PluginProvider(request) = origin {
+            if !self.extension.provider_presentable(request) {
+                self.show_error("plugin picker source retired");
+                return;
+            }
         }
         let retired_preview = self
             .search
@@ -7174,10 +7177,10 @@ impl InteractiveApplication {
         self.retire_stale_picker();
         let query = self.search.picker_insert(text);
         self.sync_picker_ui();
-        if self.search.live()
-            && let Some(query) = query
-        {
-            self.restart_live_workspace_search(query);
+        if self.search.live() {
+            if let Some(query) = query {
+                self.restart_live_workspace_search(query);
+            }
         }
     }
 
@@ -7185,10 +7188,10 @@ impl InteractiveApplication {
         self.retire_stale_picker();
         let query = self.search.picker_backspace();
         self.sync_picker_ui();
-        if self.search.live()
-            && let Some(query) = query
-        {
-            self.restart_live_workspace_search(query);
+        if self.search.live() {
+            if let Some(query) = query {
+                self.restart_live_workspace_search(query);
+            }
         }
     }
 
@@ -8973,9 +8976,9 @@ impl InteractiveApplication {
         );
         if definition.kind == ToolKind::Lsp {
             if self.selected_lsp_runtime_available(&definition) {
-                if let Some((_, document)) = self.active_lsp_document()
-                    && !definition.supports_language(&document.language_id)
-                {
+                if self.active_lsp_document().is_some_and(|(_, document)| {
+                    !definition.supports_language(&document.language_id)
+                }) {
                     self.notify_message(
                         format!(
                             "{} is installed. Open a supported file to start it.",
@@ -8993,15 +8996,15 @@ impl InteractiveApplication {
                 ));
             } else {
                 let source = self.selected_lsp_runtime_source(&definition);
-                if source == LspRuntimeSource::Path
-                    && definition.id == "rust-analyzer"
-                    && let Some(path) = discover_executable(&definition.executable)
-                    && Self::rust_analyzer_is_rustup_proxy(&path)
-                {
-                    let key = Self::tool_version_key(&definition, source, Some(&path));
-                    if matches!(self.tooling.version(&key), Some(Err(_))) {
-                        self.show_error(Self::unavailable_rust_analyzer_message());
-                        return;
+                if source == LspRuntimeSource::Path && definition.id == "rust-analyzer" {
+                    if let Some(path) = discover_executable(&definition.executable) {
+                        if Self::rust_analyzer_is_rustup_proxy(&path) {
+                            let key = Self::tool_version_key(&definition, source, Some(&path));
+                            if matches!(self.tooling.version(&key), Some(Err(_))) {
+                                self.show_error(Self::unavailable_rust_analyzer_message());
+                                return;
+                            }
+                        }
                     }
                 }
                 self.install_tool_by_id(id, Some(source));
@@ -9048,12 +9051,12 @@ impl InteractiveApplication {
                 )
             });
         let source = focused.as_ref().map(|(source, _)| *source);
-        if let Some((source, Some(version))) = focused
-            && matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix)
-        {
-            if let Err(error) = self.tooling.select_version(&id, version) {
-                self.show_error(error);
-                return;
+        if let Some((source, Some(version))) = focused {
+            if matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix) {
+                if let Err(error) = self.tooling.select_version(&id, version) {
+                    self.show_error(error);
+                    return;
+                }
             }
         }
         self.install_tool_by_id(&id, source);
@@ -9741,11 +9744,12 @@ impl InteractiveApplication {
             let supports = state.definition.supports_language(&document.language_id);
             if owns && supports {
                 sessions.push(key.clone());
-                if let Some(previous) = state.documents.get(&buffer)
-                    && (previous.path != document.path
-                        || previous.language_id != document.language_id)
-                {
-                    detach.push((key.clone(), previous.uri()));
+                if let Some(previous) = state.documents.get(&buffer) {
+                    if previous.path != document.path
+                        || previous.language_id != document.language_id
+                    {
+                        detach.push((key.clone(), previous.uri()));
+                    }
                 }
             } else if let Some(previous) = state.documents.get(&buffer) {
                 detach.push((key.clone(), previous.uri()));
@@ -10638,10 +10642,10 @@ impl InteractiveApplication {
         if removed {
             self.documents
                 .retire_buffer(buffer_id, closed_path.as_deref());
-            if let Some(path) = &closed_path
-                && let Some(id) = self.explorer.retire_buffer_path(path)
-            {
-                self.documents.cancel_request(id);
+            if let Some(path) = &closed_path {
+                if let Some(id) = self.explorer.retire_buffer_path(path) {
+                    self.documents.cancel_request(id);
+                }
             }
             self.extension.close_virtual_buffer(buffer_id);
             let documents = self
@@ -10815,13 +10819,13 @@ impl InteractiveApplication {
                     },
                     false,
                 );
-                if let Some(server) = self.language.active().map(String::as_str)
-                    && let Some(document) = lsp_document
-                {
-                    let _ = self.language.save(server, document);
-                    // An older save snapshot must not leave the worker's document
-                    // identity behind the current editor incarnation/content.
-                    self.language.invalidate_active_document(buffer);
+                if let Some(server) = self.language.active().map(String::as_str) {
+                    if let Some(document) = lsp_document {
+                        let _ = self.language.save(server, document);
+                        // An older save snapshot must not leave the worker's document
+                        // identity behind the current editor incarnation/content.
+                        self.language.invalidate_active_document(buffer);
+                    }
                 }
                 if self.ui.explorer.is_some() {
                     self.start_git_status_refresh_with_feedback(false);

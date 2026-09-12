@@ -182,20 +182,21 @@ impl InteractiveApplication {
         if let Some(buffer) = self
             .documents
             .take_startup_primary(&self.state.window_version(), self.workspace.root_revision())
-            && self.state.buffers.contains_key(buffer)
         {
-            if let Err(error) = self
-                .window_session
-                .check_editor_admission(&(&self.state).into())
-            {
-                self.show_error(error);
-                return;
-            }
-            let mut candidate = self.state.draft();
-            if candidate.show_document(buffer).is_ok()
-                && let Err(error) = self.commit_editor_draft(candidate, None, true)
-            {
-                self.show_error(error);
+            if self.state.buffers.contains_key(buffer) {
+                if let Err(error) = self
+                    .window_session
+                    .check_editor_admission(&(&self.state).into())
+                {
+                    self.show_error(error);
+                    return;
+                }
+                let mut candidate = self.state.draft();
+                if candidate.show_document(buffer).is_ok() {
+                    if let Err(error) = self.commit_editor_draft(candidate, None, true) {
+                        self.show_error(error);
+                    }
+                }
             }
         }
     }

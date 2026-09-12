@@ -188,10 +188,10 @@ pub(super) fn mason_lsp_definitions() -> Vec<ToolDefinition> {
 #[must_use]
 pub fn mason_filetype_for_path(path: &Path) -> Option<&'static str> {
     let snapshot = snapshot();
-    if let Some(filename) = path.file_name().and_then(|name| name.to_str())
-        && let Some(filetype) = snapshot.filetypes.filenames.get(filename)
-    {
-        return Some(filetype);
+    if let Some(filename) = path.file_name().and_then(|name| name.to_str()) {
+        if let Some(filetype) = snapshot.filetypes.filenames.get(filename) {
+            return Some(filetype);
+        }
     }
     let extension = path.extension()?.to_str()?.to_ascii_lowercase();
     snapshot

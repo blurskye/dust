@@ -20,11 +20,12 @@ impl InputSession {
     ) {
         if !invocation.id.as_str().starts_with("macro.")
             && !invocation.id.as_str().starts_with("input.")
-            && let Some((_, recorded)) = &mut self.recording_macro
         {
-            let mut invocation = invocation.clone();
-            invocation.target = Default::default();
-            recorded.push(invocation);
+            if let Some((_, recorded)) = &mut self.recording_macro {
+                let mut invocation = invocation.clone();
+                invocation.target = Default::default();
+                recorded.push(invocation);
+            }
         }
         if invocation.source == InvocationSource::Macro || suppress_repeat {
             return;

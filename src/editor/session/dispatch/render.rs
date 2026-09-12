@@ -32,9 +32,13 @@ impl InteractiveApplication {
         self.project_window_activation();
     }
     pub(super) fn set_terminal_focus(&mut self, focused: bool) {
-        if focused && let Some(id) = self.terminal_session.selected() {
-            self.terminal_session.display(id);
-            self.window_session.focus_terminal(id.0);
+        if focused {
+            if let Some(id) = self.terminal_session.selected() {
+                self.terminal_session.display(id);
+                self.window_session.focus_terminal(id.0);
+            } else {
+                self.window_session.leave_terminal();
+            }
         } else {
             self.window_session.leave_terminal();
         }
@@ -79,11 +83,12 @@ impl InteractiveApplication {
         self.retire_stale_explorer_intents();
         self.window_session
             .project_content(self.ui.picker.as_ref(), self.configuration.settings());
-        if let Some(geometry) = self.window_session.content().picker
-            && let Some(scroll) = self.search.picker_scroll(usize::from(geometry.list.height))
-            && let Some(ui) = &mut self.ui.picker
-        {
-            ui.scroll = scroll;
+        if let Some(geometry) = self.window_session.content().picker {
+            if let Some(scroll) = self.search.picker_scroll(usize::from(geometry.list.height)) {
+                if let Some(ui) = &mut self.ui.picker {
+                    ui.scroll = scroll;
+                }
+            }
         }
         self.ui.surface_content = self.window_session.content().clone();
     }
@@ -749,10 +754,10 @@ impl InteractiveApplication {
             .read_scoped_bounded(request.path, request.roots, request.maximum)
             .map_err(|error| error.to_string());
         let admitted = result.as_ref().ok().copied();
-        if !self.explorer.admit_preview(request.ticket, result)
-            && let Some(id) = admitted
-        {
-            self.documents.cancel_request(id);
+        if !self.explorer.admit_preview(request.ticket, result) {
+            if let Some(id) = admitted {
+                self.documents.cancel_request(id);
+            }
         }
     }
 

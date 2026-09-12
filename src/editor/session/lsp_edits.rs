@@ -199,12 +199,13 @@ impl LspEditSources {
             for doc in &edit.documents {
                 let path = path_from_file_uri(&doc.uri)
                     .ok_or_else(|| format!("unsupported workspace-edit URI {}", doc.uri))?;
-                if let Some(buffer) = current.iter().find(|buffer| buffer.path == path)
-                    && doc
+                if let Some(buffer) = current.iter().find(|buffer| buffer.path == path) {
+                    if doc
                         .version
                         .is_some_and(|version| version != buffer.text.revision().0)
-                {
-                    return Err("workspace edit document revision is stale".into());
+                    {
+                        return Err("workspace edit document revision is stale".into());
+                    }
                 }
                 if let Some(context) = context.as_ref() {
                     let actual = current

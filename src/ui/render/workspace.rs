@@ -406,10 +406,10 @@ pub(super) fn render_workspace(
                 }
             }
         }
-        if rect.pane == tab.focused
-            && let Some((x, y, shape)) = frame.cursor
-        {
-            cursor = Some((rect.x.saturating_add(x), rect.y.saturating_add(y), shape));
+        if rect.pane == tab.focused {
+            if let Some((x, y, shape)) = frame.cursor {
+                cursor = Some((rect.x.saturating_add(x), rect.y.saturating_add(y), shape));
+            }
         }
     }
     let (horizontal, vertical) = match config.ui.panes.border {
@@ -425,10 +425,10 @@ pub(super) fn render_workspace(
             grid.set_cell(cell_x, cell_y, &symbol.to_string(), Style::Border);
         }
     }
-    if projection.status_rows > 0
-        && let Some(view) = state.active_view
-    {
-        render_status_line(&mut grid, state, view, ui, config, width, height - 1);
+    if projection.status_rows > 0 {
+        if let Some(view) = state.active_view {
+            render_status_line(&mut grid, state, view, ui, config, width, height - 1);
+        }
     }
     Frame { grid, cursor }
 }

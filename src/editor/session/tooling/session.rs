@@ -383,13 +383,14 @@ impl ToolingSession {
             .find(|e| e.definition.id == result.id)
             .map_or_else(|| result.id.clone(), |e| e.definition.name.clone());
         self.entries = inspect_tools();
-        if let Err(error) = &result.result
-            && let Some(entry) = self
+        if let Err(error) = &result.result {
+            if let Some(entry) = self
                 .entries
                 .iter_mut()
                 .find(|e| e.definition.id == result.id)
-        {
-            entry.status = ToolStatus::Failed(error.clone());
+            {
+                entry.status = ToolStatus::Failed(error.clone());
+            }
         }
         self.replace_probe_worker();
         let prefix = format!("{}:", result.id);
@@ -539,11 +540,11 @@ impl ToolingSession {
     ) -> String {
         let mut value = version.trim();
         for prefix in [&definition.name, &definition.executable] {
-            if let Some(rest) = value.strip_prefix(prefix)
-                && rest.starts_with(char::is_whitespace)
-            {
-                value = rest.trim_start();
-                break;
+            if let Some(rest) = value.strip_prefix(prefix) {
+                if rest.starts_with(char::is_whitespace) {
+                    value = rest.trim_start();
+                    break;
+                }
             }
         }
         let module_suffix = format!("/{} ", definition.name);
@@ -718,10 +719,11 @@ impl ToolingSession {
             if definition.kind == ToolKind::Lsp
                 && lsp_runtime_source_allowed_on_host(LspRuntimeSource::Nix, nixos_host)
                 && nix_lsp_tool_installed(&definition)
-                && let Some(executable) = self.selected_managed_executable(&definition)
             {
-                let selected = self.selected_managed_definition(&definition);
-                self.queue_tool_version_probe(&selected, LspRuntimeSource::Nix, executable);
+                if let Some(executable) = self.selected_managed_executable(&definition) {
+                    let selected = self.selected_managed_definition(&definition);
+                    self.queue_tool_version_probe(&selected, LspRuntimeSource::Nix, executable);
+                }
             }
         }
     }

@@ -371,9 +371,11 @@ impl WorkspaceSession {
             source: self.version(),
             identities,
         });
-        if changed && let Err(error) = self.persist_state(None) {
-            self.confirmation = None;
-            return Err(error);
+        if changed {
+            if let Err(error) = self.persist_state(None) {
+                self.confirmation = None;
+                return Err(error);
+            }
         }
         Ok(())
     }
@@ -622,18 +624,17 @@ impl WorkspaceSession {
                 validation.failed |= !result.as_ref().is_ok_and(|id| id == &expected)
                     || !self.store.is_trusted(&expected);
                 if validation.failed {
-                    if let Ok(actual) = &result
-                        && actual.canonical_path == expected.canonical_path
-                        && actual != &expected
-                    {
-                        if let Some(root) = self
-                            .state
-                            .roots()
-                            .iter()
-                            .find(|root| root.identity == expected)
-                            .map(|root| root.id)
-                        {
-                            let _ = self.state.replace_root_identity(root, actual.clone());
+                    if let Ok(actual) = &result {
+                        if actual.canonical_path == expected.canonical_path && actual != &expected {
+                            if let Some(root) = self
+                                .state
+                                .roots()
+                                .iter()
+                                .find(|root| root.identity == expected)
+                                .map(|root| root.id)
+                            {
+                                let _ = self.state.replace_root_identity(root, actual.clone());
+                            }
                         }
                     }
                     if !previously_failed {

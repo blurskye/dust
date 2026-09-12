@@ -1152,31 +1152,31 @@ pub fn render(
     if let Some(tool_menu) = &ui.tool_menu {
         render_tool_menu(&mut frame, tool_menu, config, width, workspace_height);
     }
-    if let Some(picker) = &ui.picker
-        && let Some(rect) = compositor.and_then(|compositor| {
+    if let Some(picker) = &ui.picker {
+        if let Some(rect) = compositor.and_then(|compositor| {
             let window = compositor.surfaces.picker?;
             compositor
                 .projection
                 .window(window)
                 .map(|window| window.rect)
-        })
-    {
-        render_picker(&mut frame, picker, config, rect, ui.surface_content.picker);
+        }) {
+            render_picker(&mut frame, picker, config, rect, ui.surface_content.picker);
+        }
     }
-    if let Some(completion) = &ui.language_completion
-        && let Some(pane) = active_editor_pane_viewport(state, ui)
-    {
-        render_language_completion(
-            &mut frame,
-            completion,
-            config,
-            WindowRect {
-                x: pane.x,
-                y: pane.y,
-                width: pane.width,
-                height: pane.height,
-            },
-        );
+    if let Some(completion) = &ui.language_completion {
+        if let Some(pane) = active_editor_pane_viewport(state, ui) {
+            render_language_completion(
+                &mut frame,
+                completion,
+                config,
+                WindowRect {
+                    x: pane.x,
+                    y: pane.y,
+                    width: pane.width,
+                    height: pane.height,
+                },
+            );
+        }
     }
     if let Some(documentation) = &ui.documentation_popup {
         render_documentation_popup(
@@ -1230,16 +1230,17 @@ pub fn render(
                 .as_ref()
                 .map(|message| (message, Style::Error))
         });
-    if let Some((message, style)) = message
-        && let Some(rect) = super::geometry::notification_geometry(config, width, workspace_height)
-    {
-        frame.grid.put_text_clipped(
-            rect.x,
-            rect.y,
-            message,
-            style,
-            rect.x.saturating_add(rect.width),
-        );
+    if let Some((message, style)) = message {
+        if let Some(rect) = super::geometry::notification_geometry(config, width, workspace_height)
+        {
+            frame.grid.put_text_clipped(
+                rect.x,
+                rect.y,
+                message,
+                style,
+                rect.x.saturating_add(rect.width),
+            );
+        }
     }
     if let Some(prompt) = &ui.prompt {
         let prompt_height = compositor.map_or(height, |compositor| {

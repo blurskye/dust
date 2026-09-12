@@ -176,13 +176,13 @@ fn write_live_snapshot(path: &PathBuf, snapshot: &LiveCrashSnapshot) -> std::io:
             fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
         }
     }
-    if let Ok(metadata) = fs::symlink_metadata(path)
-        && (!metadata.file_type().is_file() || metadata.file_type().is_symlink())
-    {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "crash snapshot target must be a regular file",
-        ));
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "crash snapshot target must be a regular file",
+            ));
+        }
     }
     let bytes = serde_json::to_vec(snapshot).map_err(std::io::Error::other)?;
     if bytes.len() > 64 * 1024 {

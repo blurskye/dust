@@ -725,10 +725,10 @@ fn write_state(
         fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
             .map_err(PersistenceError::Io)?;
     }
-    if let Ok(metadata) = fs::symlink_metadata(path)
-        && (!metadata.file_type().is_file() || metadata.file_type().is_symlink())
-    {
-        return Err(PersistenceError::InvalidFileType);
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+            return Err(PersistenceError::InvalidFileType);
+        }
     }
     let sequence = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
     let temp = path.with_extension(format!("tmp.{}.{}", std::process::id(), sequence));

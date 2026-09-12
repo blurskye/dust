@@ -240,21 +240,23 @@ impl PluginStorageService {
     }
 
     pub fn reset_generation(&mut self, plugin: &str, load: PluginLoadId) {
-        if let Ok(mut generations) = self.generations.lock()
-            && let Some((current, epoch)) = generations.get_mut(plugin)
-            && *current == load
-        {
-            *epoch = epoch.saturating_add(1).max(1);
+        if let Ok(mut generations) = self.generations.lock() {
+            if let Some((current, epoch)) = generations.get_mut(plugin) {
+                if *current == load {
+                    *epoch = epoch.saturating_add(1).max(1);
+                }
+            }
         }
     }
 
     pub fn remove_generation(&mut self, plugin: &str, load: PluginLoadId) {
-        if let Ok(mut generations) = self.generations.lock()
-            && generations
+        if let Ok(mut generations) = self.generations.lock() {
+            if generations
                 .get(plugin)
                 .is_some_and(|(current, _)| *current == load)
-        {
-            generations.remove(plugin);
+            {
+                generations.remove(plugin);
+            }
         }
     }
 

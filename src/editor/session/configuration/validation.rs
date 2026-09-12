@@ -39,14 +39,14 @@ pub(in crate::editor::session) fn validate_configured_commands(
     while let Some(index) = remainder.find(marker) {
         remainder = &remainder[index + marker.len()..];
         let trimmed = remainder.trim_start();
-        if let Some(trimmed) = trimmed.strip_prefix('"')
-            && let Some(end) = trimmed.find('"')
-        {
-            let key = &trimmed[..end];
-            if !loaded.config.messages.contains_key(key) {
-                errors.push(format!(
-                    "missing message `{key}` used by application surface"
-                ));
+        if let Some(trimmed) = trimmed.strip_prefix('"') {
+            if let Some(end) = trimmed.find('"') {
+                let key = &trimmed[..end];
+                if !loaded.config.messages.contains_key(key) {
+                    errors.push(format!(
+                        "missing message `{key}` used by application surface"
+                    ));
+                }
             }
         }
     }

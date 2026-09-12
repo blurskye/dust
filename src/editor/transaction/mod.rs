@@ -606,12 +606,11 @@ impl EditorDraft {
             self.state.close_view(view).map_err(str::to_owned)?;
         }
         self.state.remove_buffer(buffer);
-        if let Some((tab, pane)) = focus
-            && self.state.tabs.contains_key(tab)
-            && self.state.panes.contains_key(pane)
-        {
-            self.state.active_tab = Some(tab);
-            self.state.focus_pane_id(pane).map_err(str::to_owned)?;
+        if let Some((tab, pane)) = focus {
+            if self.state.tabs.contains_key(tab) && self.state.panes.contains_key(pane) {
+                self.state.active_tab = Some(tab);
+                self.state.focus_pane_id(pane).map_err(str::to_owned)?;
+            }
         }
         Ok(())
     }
@@ -735,10 +734,10 @@ impl EditorDraft {
         if removed {
             self.state.remove_buffer(buffer);
         }
-        if self.state.active_view.is_none()
-            && let Some(buffer) = self.state.buffers.keys().next()
-        {
-            self.state.show_buffer(buffer)?;
+        if self.state.active_view.is_none() {
+            if let Some(buffer) = self.state.buffers.keys().next() {
+                self.state.show_buffer(buffer)?;
+            }
         }
         Ok(removed)
     }

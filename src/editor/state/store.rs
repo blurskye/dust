@@ -381,23 +381,24 @@ impl EditorState {
             self.mark_window_changed();
             return;
         }
-        if let Some(tab_id) = self.active_tab
-            && let Some(tab) = self.tabs.get(tab_id)
-            && let Some(pane) = self.panes.get_mut(tab.focused)
-        {
-            let previous = pane.view;
-            pane.view = view;
-            self.active_view = Some(view);
-            if previous != view
-                && !self
-                    .panes
-                    .iter()
-                    .any(|(_, candidate)| candidate.view == previous)
-            {
-                self.views.remove(previous);
+        if let Some(tab_id) = self.active_tab {
+            if let Some(tab) = self.tabs.get(tab_id) {
+                if let Some(pane) = self.panes.get_mut(tab.focused) {
+                    let previous = pane.view;
+                    pane.view = view;
+                    self.active_view = Some(view);
+                    if previous != view
+                        && !self
+                            .panes
+                            .iter()
+                            .any(|(_, candidate)| candidate.view == previous)
+                    {
+                        self.views.remove(previous);
+                    }
+                    self.mark_window_changed();
+                    return;
+                }
             }
-            self.mark_window_changed();
-            return;
         }
         let pane = self.panes.insert(Pane { view });
         let tab = self.tabs.insert(Tab {

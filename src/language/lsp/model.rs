@@ -35,14 +35,15 @@ impl LspServerConfiguration {
         if matches!(
             server_id,
             "astro-language-server" | "astro" | "vue-language-server" | "vue_ls"
-        ) && let Some(tsdk) = typescript_sdk_for_executable(executable)
-        {
-            return Self {
-                initialization_options: Some(json!({
-                    "typescript":{"tsdk":tsdk.to_string_lossy()}
-                })),
-                settings: json!({}),
-            };
+        ) {
+            if let Some(tsdk) = typescript_sdk_for_executable(executable) {
+                return Self {
+                    initialization_options: Some(json!({
+                        "typescript":{"tsdk":tsdk.to_string_lossy()}
+                    })),
+                    settings: json!({}),
+                };
+            }
         }
         Self::standard()
     }

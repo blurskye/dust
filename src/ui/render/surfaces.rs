@@ -1155,14 +1155,16 @@ pub(super) fn render_prompt(
         .saturating_add(config.ui.command_line.input_padding);
     let input_y = geometry.top.saturating_add(if show_help { 2 } else { 1 });
     let content_right = right.saturating_sub(1);
-    if show_help && let Some(help) = &prompt.help {
-        frame.grid.put_text_clipped(
-            input_x,
-            geometry.top.saturating_add(1),
-            help,
-            Style::Muted,
-            content_right,
-        );
+    if show_help {
+        if let Some(help) = &prompt.help {
+            frame.grid.put_text_clipped(
+                input_x,
+                geometry.top.saturating_add(1),
+                help,
+                Style::Muted,
+                content_right,
+            );
+        }
     }
     let marker_end = frame.grid.put_text_clipped(
         input_x,

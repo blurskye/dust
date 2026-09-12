@@ -95,22 +95,21 @@ impl RecoverySession {
         if !config.enabled {
             return;
         }
-        if !self.discovery_queued
-            && let Ok(id) = io.discover(&self.directory, config.maximum_discovered_records)
-        {
-            self.discovery_queued = true;
-            self.pending.insert(id, Pending::Discovery);
+        if !self.discovery_queued {
+            if let Ok(id) = io.discover(&self.directory, config.maximum_discovered_records) {
+                self.discovery_queued = true;
+                self.pending.insert(id, Pending::Discovery);
+            }
         }
-        if config.cleanup_enabled
-            && !self.cleanup_queued
-            && let Ok(id) = io.cleanup(
+        if config.cleanup_enabled && !self.cleanup_queued {
+            if let Ok(id) = io.cleanup(
                 &self.directory,
                 config.maximum_retained_records,
                 config.maximum_age_days,
-            )
-        {
-            self.cleanup_queued = true;
-            self.pending.insert(id, Pending::Cleanup);
+            ) {
+                self.cleanup_queued = true;
+                self.pending.insert(id, Pending::Cleanup);
+            }
         }
         let debounce = Duration::from_millis(config.write_debounce_ms);
         for (buffer, state) in &editor.buffers {
@@ -134,23 +133,24 @@ impl RecoverySession {
             } else {
                 self.scheduled.remove(&buffer);
                 self.pruned.remove(&buffer);
-                if config.delete_clean_journals
-                    && let Some(revision) = self.revisions.get(&buffer).copied()
-                {
-                    let path = self.path(buffer);
-                    if !self
-                        .pending
-                        .values()
-                        .any(|p| matches!(p, Pending::Delete { path: p, .. } if *p == path))
-                        && let Ok(id) = io.delete(&path)
-                    {
-                        self.pending.insert(
-                            id,
-                            Pending::Delete {
-                                path,
-                                buffer: Some((buffer, revision)),
-                            },
-                        );
+                if config.delete_clean_journals {
+                    if let Some(revision) = self.revisions.get(&buffer).copied() {
+                        let path = self.path(buffer);
+                        if !self
+                            .pending
+                            .values()
+                            .any(|p| matches!(p, Pending::Delete { path: p, .. } if *p == path))
+                        {
+                            if let Ok(id) = io.delete(&path) {
+                                self.pending.insert(
+                                    id,
+                                    Pending::Delete {
+                                        path,
+                                        buffer: Some((buffer, revision)),
+                                    },
+                                );
+                            }
+                        }
                     }
                 }
             }

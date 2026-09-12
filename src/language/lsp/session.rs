@@ -595,10 +595,10 @@ pub(super) fn run_session(
                         },
                         &message,
                     );
-                } else if let Some(id) = message.get("id").and_then(Value::as_i64)
-                    && let Some(request) = pending.remove(&id)
-                {
-                    handle_response(&server, request, message, &events);
+                } else if let Some(id) = message.get("id").and_then(Value::as_i64) {
+                    if let Some(request) = pending.remove(&id) {
+                        handle_response(&server, request, message, &events);
+                    }
                 }
             }
             Ok(Err(error)) => {

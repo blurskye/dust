@@ -78,23 +78,23 @@ pub(super) fn managed_bun_runtime(
 ) -> Result<PathBuf, String> {
     // NixOS uses Dust's exact checked GNU Bun artifact so PATH cannot silently
     // change the runtime processed by the private compatibility environment.
-    if compatibility.is_none()
-        && let Some(bun) = discover_executable("bun")
-    {
-        let bun = fs::canonicalize(&bun)
-            .map_err(|error| format!("cannot canonicalize Bun runtime: {error}"))?;
-        if bun.is_file() && bun.is_absolute() {
-            report("verifying Bun runtime", 0, None);
-            run_managed(
-                &bun,
-                &["--version".into()],
-                root,
-                &BTreeMap::from([("HOME".into(), root.display().to_string())]),
-                cancellations,
-                None,
-            )
-            .map_err(|error| format!("configured Bun runtime is not runnable: {error}"))?;
-            return Ok(bun);
+    if compatibility.is_none() {
+        if let Some(bun) = discover_executable("bun") {
+            let bun = fs::canonicalize(&bun)
+                .map_err(|error| format!("cannot canonicalize Bun runtime: {error}"))?;
+            if bun.is_file() && bun.is_absolute() {
+                report("verifying Bun runtime", 0, None);
+                run_managed(
+                    &bun,
+                    &["--version".into()],
+                    root,
+                    &BTreeMap::from([("HOME".into(), root.display().to_string())]),
+                    cancellations,
+                    None,
+                )
+                .map_err(|error| format!("configured Bun runtime is not runnable: {error}"))?;
+                return Ok(bun);
+            }
         }
     }
     if compatibility.is_none() && !fhs_glibc_loader_available() {

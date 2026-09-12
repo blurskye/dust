@@ -340,10 +340,10 @@ fn validate_metadata(
     validate_segment(&value.publisher)?;
     validate_segment(&value.name)?;
     validate_version(&value.version)?;
-    if let Some((publisher, name, version)) = expected
-        && (value.publisher != publisher || value.name != name || value.version != version)
-    {
-        return Err(RegistryError::InvalidMetadata);
+    if let Some((publisher, name, version)) = expected {
+        if value.publisher != publisher || value.name != name || value.version != version {
+            return Err(RegistryError::InvalidMetadata);
+        }
     }
     let identity = format!("{}/{}", value.publisher, value.name);
     match &value.package.source {

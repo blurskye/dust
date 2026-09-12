@@ -97,11 +97,11 @@ pub(super) fn install_tool(
                 unreachable!("handled before staging")
             }
         }
-        if let Some(compatibility) = compatibility
-            && !matches!(install, ToolInstall::NpmPackage { .. })
-        {
-            report("applying Nix compatibility", 0, None);
-            patch_nix_compatibility_tree(&staging, compatibility, cancellations)?;
+        if let Some(compatibility) = compatibility {
+            if !matches!(install, ToolInstall::NpmPackage { .. }) {
+                report("applying Nix compatibility", 0, None);
+                patch_nix_compatibility_tree(&staging, compatibility, cancellations)?;
+            }
         }
         if !matches!(install, ToolInstall::NpmPackage { .. }) {
             report("verifying", 0, None);

@@ -461,10 +461,10 @@ impl WindowGraph {
                 generation,
             },
         );
-        if placement == WindowPlacement::Tiled
-            && let Some(workspace_tab) = self.workspace_tabs.get_mut(&tab)
-        {
-            workspace_tab.tiled_root = append_tiled_window(workspace_tab.tiled_root.take(), id);
+        if placement == WindowPlacement::Tiled {
+            if let Some(workspace_tab) = self.workspace_tabs.get_mut(&tab) {
+                workspace_tab.tiled_root = append_tiled_window(workspace_tab.tiled_root.take(), id);
+            }
         }
         if focusable && placement != WindowPlacement::Hidden {
             self.active_tab = Some(tab);
@@ -525,13 +525,13 @@ impl WindowGraph {
             .get(&window)
             .map(|descriptor| (descriptor.tab, descriptor.placement))
             .ok_or(WindowError::UnknownWindow)?;
-        if matches!(previous_placement, WindowPlacement::Tiled)
-            && let Some(previous) = self.workspace_tabs.get_mut(&previous_tab)
-        {
-            previous.tiled_root = previous
-                .tiled_root
-                .take()
-                .and_then(|root| remove_tiled_window(root, window));
+        if matches!(previous_placement, WindowPlacement::Tiled) {
+            if let Some(previous) = self.workspace_tabs.get_mut(&previous_tab) {
+                previous.tiled_root = previous
+                    .tiled_root
+                    .take()
+                    .and_then(|root| remove_tiled_window(root, window));
+            }
         }
         let descriptor = self
             .windows
@@ -541,10 +541,11 @@ impl WindowGraph {
         descriptor.view = view;
         descriptor.placement = placement;
         descriptor.focusable = focusable;
-        if placement == WindowPlacement::Tiled
-            && let Some(workspace_tab) = self.workspace_tabs.get_mut(&tab)
-        {
-            workspace_tab.tiled_root = append_tiled_window(workspace_tab.tiled_root.take(), window);
+        if placement == WindowPlacement::Tiled {
+            if let Some(workspace_tab) = self.workspace_tabs.get_mut(&tab) {
+                workspace_tab.tiled_root =
+                    append_tiled_window(workspace_tab.tiled_root.take(), window);
+            }
         }
         if self.focused == Some(window) {
             if !focusable || placement == WindowPlacement::Hidden {
@@ -677,12 +678,13 @@ impl WindowGraph {
         let (tab, previous_placement) = (descriptor.tab, descriptor.placement);
         if matches!(previous_placement, WindowPlacement::Tiled)
             && !matches!(placement, WindowPlacement::Tiled)
-            && let Some(workspace_tab) = self.workspace_tabs.get_mut(&tab)
         {
-            workspace_tab.tiled_root = workspace_tab
-                .tiled_root
-                .take()
-                .and_then(|root| remove_tiled_window(root, window));
+            if let Some(workspace_tab) = self.workspace_tabs.get_mut(&tab) {
+                workspace_tab.tiled_root = workspace_tab
+                    .tiled_root
+                    .take()
+                    .and_then(|root| remove_tiled_window(root, window));
+            }
         }
         let descriptor = self
             .windows
@@ -691,9 +693,11 @@ impl WindowGraph {
         descriptor.placement = placement;
         if !matches!(previous_placement, WindowPlacement::Tiled)
             && placement == WindowPlacement::Tiled
-            && let Some(workspace_tab) = self.workspace_tabs.get_mut(&tab)
         {
-            workspace_tab.tiled_root = append_tiled_window(workspace_tab.tiled_root.take(), window);
+            if let Some(workspace_tab) = self.workspace_tabs.get_mut(&tab) {
+                workspace_tab.tiled_root =
+                    append_tiled_window(workspace_tab.tiled_root.take(), window);
+            }
         }
         if placement == WindowPlacement::Hidden && self.focused == Some(window) {
             self.focused = None;
@@ -847,13 +851,13 @@ impl WindowGraph {
             .windows
             .remove(&window)
             .ok_or(WindowError::UnknownWindow)?;
-        if matches!(removed.placement, WindowPlacement::Tiled)
-            && let Some(tab) = self.workspace_tabs.get_mut(&removed.tab)
-        {
-            tab.tiled_root = tab
-                .tiled_root
-                .take()
-                .and_then(|root| remove_tiled_window(root, window));
+        if matches!(removed.placement, WindowPlacement::Tiled) {
+            if let Some(tab) = self.workspace_tabs.get_mut(&removed.tab) {
+                tab.tiled_root = tab
+                    .tiled_root
+                    .take()
+                    .and_then(|root| remove_tiled_window(root, window));
+            }
         }
         if self.focused == Some(window) {
             self.focused = None;
@@ -1079,10 +1083,10 @@ impl WindowGraph {
                 return Err(WindowError::TooManyOverlayWindows);
             }
         }
-        if let Some(tab) = self.active_tab
-            && !self.workspace_tabs.contains_key(&tab)
-        {
-            return Err(WindowError::UnknownWorkspaceTab);
+        if let Some(tab) = self.active_tab {
+            if !self.workspace_tabs.contains_key(&tab) {
+                return Err(WindowError::UnknownWorkspaceTab);
+            }
         }
         for (tab, remembered) in &self.remembered_focus {
             if !self.eligible_focus(*remembered, *tab) {
@@ -1250,12 +1254,12 @@ impl WindowGraph {
                     && window.placement != WindowPlacement::Hidden
             })
         });
-        if let Some(focused) = self.focused
-            && let Some(window) = self.windows.get(&focused)
-            && window.focusable
-            && window.placement != WindowPlacement::Hidden
-        {
-            self.remembered_focus.insert(window.tab, focused);
+        if let Some(focused) = self.focused {
+            if let Some(window) = self.windows.get(&focused) {
+                if window.focusable && window.placement != WindowPlacement::Hidden {
+                    self.remembered_focus.insert(window.tab, focused);
+                }
+            }
         }
     }
 

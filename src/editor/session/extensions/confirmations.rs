@@ -73,15 +73,15 @@ impl ConfirmationReservationLoan<'_> {
 }
 impl Drop for ConfirmationReservationLoan<'_> {
     fn drop(&mut self) {
-        if self.reserved
-            && !self.committed
-            && let Some(index) = self
+        if self.reserved && !self.committed {
+            if let Some(index) = self
                 .owner
                 .reservations
                 .iter()
                 .position(|reservation| reservation.same(&self.origin))
-        {
-            self.owner.reservations.remove(index);
+            {
+                self.owner.reservations.remove(index);
+            }
         }
     }
 }

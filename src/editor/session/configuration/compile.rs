@@ -925,15 +925,17 @@ pub(in crate::editor::session) fn compile_typed_keymap_entries(
         let contribution_layer = entry.origin.layer;
         if let Some(previous) =
             effective_declarations.insert((context.clone(), sequence.clone()), index)
-            && effective_entries[previous].origin.layer != contribution_layer
         {
-            let declared = display_key_declaration(&entry.keys, &effective_keys);
-            let previous_entry = &effective_entries[previous];
-            let previous_declared = display_key_declaration(&previous_entry.keys, &effective_keys);
-            result.conflicts.push(format!(
-                "keymap id `{}` {declared} shadows id `{}` {previous_declared} in `{context}`",
-                entry.id, previous_entry.id
-            ));
+            if effective_entries[previous].origin.layer != contribution_layer {
+                let declared = display_key_declaration(&entry.keys, &effective_keys);
+                let previous_entry = &effective_entries[previous];
+                let previous_declared =
+                    display_key_declaration(&previous_entry.keys, &effective_keys);
+                result.conflicts.push(format!(
+                    "keymap id `{}` {declared} shadows id `{}` {previous_declared} in `{context}`",
+                    entry.id, previous_entry.id
+                ));
+            }
         }
         if let Some(previous) = sequence_declarations.insert(
             (context.clone(), sequence.clone(), contribution_layer),

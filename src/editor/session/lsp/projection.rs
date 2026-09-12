@@ -139,19 +139,19 @@ impl LspSession {
             return Ok(());
         };
         let key = (server.to_owned(), document.uri());
-        if matches!(feature, LspFeature::PullDiagnostics { .. })
-            && let Some(id) = self.projection.pull_ids.get(&key)
-        {
-            feature = LspFeature::PullDiagnostics {
-                previous_result_id: Some(id.clone()),
-            };
+        if matches!(feature, LspFeature::PullDiagnostics { .. }) {
+            if let Some(id) = self.projection.pull_ids.get(&key) {
+                feature = LspFeature::PullDiagnostics {
+                    previous_result_id: Some(id.clone()),
+                };
+            }
         }
-        if matches!(feature, LspFeature::SemanticTokensFull)
-            && let Some((Some(id), _)) = self.projection.semantic.get(&key)
-        {
-            feature = LspFeature::SemanticTokensDelta {
-                previous_result_id: id.clone(),
-            };
+        if matches!(feature, LspFeature::SemanticTokensFull) {
+            if let Some((Some(id), _)) = self.projection.semantic.get(&key) {
+                feature = LspFeature::SemanticTokensDelta {
+                    previous_result_id: id.clone(),
+                };
+            }
         }
         let generation = self
             .next_generation()

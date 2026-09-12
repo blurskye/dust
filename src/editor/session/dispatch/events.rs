@@ -217,44 +217,50 @@ impl InteractiveApplication {
                         .flatten()
                     });
                 let over_explorer = explorer_window.is_some();
-                if let Some(window) = explorer_window
-                    && let Ok(plan) = self.window_session.plan_focus(
+                if let Some(window) = explorer_window {
+                    if let Ok(plan) = self.window_session.plan_focus(
                         window,
                         &self.state.window_version(),
                         self.extension.contributions().version(),
-                    )
-                    && self.apply_window_plan(plan).is_ok()
-                {
-                    self.reconcile_editor_windows();
+                    ) {
+                        if self.apply_window_plan(plan).is_ok() {
+                            self.reconcile_editor_windows();
+                        }
+                    }
                 }
                 if over_terminal
                     && key.terminal_mouse()
                         == Some(crate::editor::input::TerminalMouseInput::LeftDown)
-                    && let Some(rect) = self.terminal_window_rect()
-                    && row == rect.y
-                    && let Some(id) = self.ui.terminal_panel.as_ref().and_then(|terminal| {
-                        terminal_tab_at_column(
-                            terminal,
-                            self.configuration.settings(),
-                            rect.width,
-                            column.saturating_sub(rect.x),
-                        )
-                    })
                 {
-                    self.process_effect(AppEffect::TerminalFocus(id));
-                    return;
+                    if let Some(rect) = self.terminal_window_rect() {
+                        if row == rect.y {
+                            if let Some(id) = self.ui.terminal_panel.as_ref().and_then(|terminal| {
+                                terminal_tab_at_column(
+                                    terminal,
+                                    self.configuration.settings(),
+                                    rect.width,
+                                    column.saturating_sub(rect.x),
+                                )
+                            }) {
+                                self.process_effect(AppEffect::TerminalFocus(id));
+                                return;
+                            }
+                        }
+                    }
                 }
-                if over_explorer && let Some(mouse) = key.terminal_mouse() {
-                    match mouse {
-                        crate::editor::input::TerminalMouseInput::ScrollUp => {
-                            self.move_explorer_selection(-3);
-                            return;
+                if over_explorer {
+                    if let Some(mouse) = key.terminal_mouse() {
+                        match mouse {
+                            crate::editor::input::TerminalMouseInput::ScrollUp => {
+                                self.move_explorer_selection(-3);
+                                return;
+                            }
+                            crate::editor::input::TerminalMouseInput::ScrollDown => {
+                                self.move_explorer_selection(3);
+                                return;
+                            }
+                            _ => {}
                         }
-                        crate::editor::input::TerminalMouseInput::ScrollDown => {
-                            self.move_explorer_selection(3);
-                            return;
-                        }
-                        _ => {}
                     }
                 }
                 let plugin_context = self
@@ -264,27 +270,28 @@ impl InteractiveApplication {
                 if self.ui.picker.is_none()
                     && self.input.prompt().is_none()
                     && self.ui.tool_menu.is_none()
-                    && let Some(context) = plugin_context
                 {
-                    if let Some(window) = self
-                        .compositor_projection()
-                        .and_then(|projection| projection.hit_test(column, row))
-                    {
-                        if self
-                            .window_session
-                            .plan_focus(
-                                window,
-                                &self.state.window_version(),
-                                self.extension.contributions().version(),
-                            )
-                            .and_then(|plan| self.apply_window_plan(plan))
-                            .is_ok()
+                    if let Some(context) = plugin_context {
+                        if let Some(window) = self
+                            .compositor_projection()
+                            .and_then(|projection| projection.hit_test(column, row))
                         {
-                            self.reconcile_editor_windows();
+                            if self
+                                .window_session
+                                .plan_focus(
+                                    window,
+                                    &self.state.window_version(),
+                                    self.extension.contributions().version(),
+                                )
+                                .and_then(|plan| self.apply_window_plan(plan))
+                                .is_ok()
+                            {
+                                self.reconcile_editor_windows();
+                            }
                         }
+                        self.handle_key_in_context(&context, key);
+                        return;
                     }
-                    self.handle_key_in_context(&context, key);
-                    return;
                 }
                 let context = if self.ui.picker.is_some() {
                     "picker_mouse"
@@ -304,38 +311,43 @@ impl InteractiveApplication {
                     self.set_explorer_focus(false);
                     "editor_mouse"
                 };
-                if context == "terminal_mouse"
-                    && self.window_session.terminal_focused()
-                    && let Some(id) = self.keyboard_terminal()
-                    && self.terminal_session.mode(id) == Some(TerminalPanelMode::Input)
-                    && let Some(rect) =
-                        self.window_session
-                            .native_ids()
-                            .terminal(id.0)
-                            .and_then(|ids| {
-                                self.compositor_projection()?
-                                    .window(ids.window)
-                                    .map(|w| w.rect)
-                            })
-                    && let Some(geometry) = crate::ui::terminal_geometry_from_rect(rect)
-                    && let Some(event) = key.terminal_mouse()
-                {
-                    let rect = WindowRect {
-                        x: geometry.x,
-                        y: geometry.body_top,
-                        width: geometry.width,
-                        height: geometry.body_height,
-                    };
-                    match self.terminal_session.send(
-                        id,
-                        TerminalInput::Mouse(event, column, row, rect),
-                        &self.workspace,
-                    ) {
-                        Ok(true) => return,
-                        Ok(false) => {}
-                        Err(error) => {
-                            self.show_error(error);
-                            return;
+                if context == "terminal_mouse" && self.window_session.terminal_focused() {
+                    if let Some(id) = self.keyboard_terminal() {
+                        if self.terminal_session.mode(id) == Some(TerminalPanelMode::Input) {
+                            if let Some(rect) = self
+                                .window_session
+                                .native_ids()
+                                .terminal(id.0)
+                                .and_then(|ids| {
+                                    self.compositor_projection()?
+                                        .window(ids.window)
+                                        .map(|w| w.rect)
+                                })
+                            {
+                                if let Some(geometry) = crate::ui::terminal_geometry_from_rect(rect)
+                                {
+                                    if let Some(event) = key.terminal_mouse() {
+                                        let rect = WindowRect {
+                                            x: geometry.x,
+                                            y: geometry.body_top,
+                                            width: geometry.width,
+                                            height: geometry.body_height,
+                                        };
+                                        match self.terminal_session.send(
+                                            id,
+                                            TerminalInput::Mouse(event, column, row, rect),
+                                            &self.workspace,
+                                        ) {
+                                            Ok(true) => return,
+                                            Ok(false) => {}
+                                            Err(error) => {
+                                                self.show_error(error);
+                                                return;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -450,16 +462,16 @@ impl InteractiveApplication {
                 crate::editor::input::TerminalNavigationKey::Home => crate::ui::PtyInputKey::Home,
                 crate::editor::input::TerminalNavigationKey::End => crate::ui::PtyInputKey::End,
             });
-            if let Some(encoded) = encoded
-                && let Some(id) = self.keyboard_terminal()
-            {
-                if let Err(error) =
-                    self.terminal_session
-                        .send(id, TerminalInput::Key(encoded), &self.workspace)
-                {
-                    self.show_error(error);
+            if let Some(encoded) = encoded {
+                if let Some(id) = self.keyboard_terminal() {
+                    if let Err(error) =
+                        self.terminal_session
+                            .send(id, TerminalInput::Key(encoded), &self.workspace)
+                    {
+                        self.show_error(error);
+                    }
+                    return;
                 }
-                return;
             }
         }
         let context = self.active_input_context();
@@ -504,8 +516,8 @@ impl InteractiveApplication {
             MappingResolution::Pending | MappingResolution::Ambiguous => return,
             MappingResolution::Missing => {
                 let mut handled = false;
-                if let Some(character) = key.text_character()
-                    && let Some(command_id) = self
+                if let Some(character) = key.text_character() {
+                    if let Some(command_id) = self
                         .configuration
                         .settings()
                         .input
@@ -520,22 +532,24 @@ impl InteractiveApplication {
                                 .get(&context)
                                 .cloned()
                         })
-                {
-                    self.invoke_text_command(&command_id, character.to_string());
-                    handled = true;
+                    {
+                        self.invoke_text_command(&command_id, character.to_string());
+                        handled = true;
+                    }
                 }
-                if !handled
-                    && let Some(command_id) = self
+                if !handled {
+                    if let Some(command_id) = self
                         .configuration
                         .settings()
                         .input
                         .unmatched_commands
                         .get(&context)
                         .cloned()
-                {
-                    self.invoke_mapped_command(&command_id);
-                    if self.active_input_context() != context {
-                        self.handle_configured_key(key);
+                    {
+                        self.invoke_mapped_command(&command_id);
+                        if self.active_input_context() != context {
+                            self.handle_configured_key(key);
+                        }
                     }
                 }
             }
@@ -545,17 +559,18 @@ impl InteractiveApplication {
 
     pub(super) fn handle_configured_paste(&mut self, text: String) {
         self.close_documentation();
-        if self.window_session.terminal_focused()
-            && let Some(id) = self.keyboard_terminal()
-            && self.terminal_session.mode(id) == Some(TerminalPanelMode::Input)
-        {
-            if let Err(error) =
-                self.terminal_session
-                    .send(id, TerminalInput::Paste(&text), &self.workspace)
-            {
-                self.show_error(error);
+        if self.window_session.terminal_focused() {
+            if let Some(id) = self.keyboard_terminal() {
+                if self.terminal_session.mode(id) == Some(TerminalPanelMode::Input) {
+                    if let Err(error) =
+                        self.terminal_session
+                            .send(id, TerminalInput::Paste(&text), &self.workspace)
+                    {
+                        self.show_error(error);
+                    }
+                    return;
+                }
             }
-            return;
         }
         self.cancel_pending_mapping();
         let context = self.active_input_context();
@@ -1353,13 +1368,13 @@ impl InteractiveApplication {
             );
             let mut draft = self.state.draft();
             if activate {
-                if reply.split
-                    && self.state.active_view.is_some()
-                    && let Err(error) =
+                if reply.split && self.state.active_view.is_some() {
+                    if let Err(error) =
                         draft.split_document(self.configuration.settings().ui.panes.default_ratio)
-                {
-                    self.show_error(error);
-                    return;
+                    {
+                        self.show_error(error);
+                        return;
+                    }
                 }
                 draft.open_document(text, path);
             } else {
@@ -1507,11 +1522,11 @@ impl InteractiveApplication {
         let (change, target) = request.into_change();
         match self.state.reconcile_paths(change, target.as_deref()) {
             Ok((draft, recent)) => {
-                if let Some(draft) = draft
-                    && let Err(error) = self.commit_editor_draft(draft, None, false)
-                {
-                    self.show_error(error);
-                    return;
+                if let Some(draft) = draft {
+                    if let Err(error) = self.commit_editor_draft(draft, None, false) {
+                        self.show_error(error);
+                        return;
+                    }
                 }
                 for path in recent {
                     self.record_recent_file(path);
@@ -2469,54 +2484,55 @@ impl InteractiveApplication {
                 if !self.language.record_semantic(server, uri, &result) {
                     return;
                 }
-                if let Some(path) = path_from_file_uri(uri)
-                    && let Some((buffer_id, buffer)) = self
+                if let Some(path) = path_from_file_uri(uri) {
+                    if let Some((buffer_id, buffer)) = self
                         .state
                         .buffers
                         .iter()
                         .find(|(_, buffer)| buffer.path.as_ref() == Some(&path))
-                {
-                    let encoding = self.lsp_position_encoding();
-                    let codec = PositionCodec::new(&buffer.text);
-                    let legend = self
-                        .language
-                        .capabilities()
-                        .map(|value| value.semantic_token_types.as_slice())
-                        .unwrap_or(&[]);
-                    let mut line = 0usize;
-                    let mut character = 0usize;
-                    let mut spans = Vec::new();
-                    for token in result.data.chunks_exact(5).take(100_000) {
-                        line = line.saturating_add(token[0] as usize);
-                        character = if token[0] == 0 {
-                            character.saturating_add(token[1] as usize)
-                        } else {
-                            token[1] as usize
-                        };
-                        let Some(name) = legend.get(token[3] as usize) else {
-                            continue;
-                        };
-                        let Ok(start) = codec.lsp_to_byte(line, character, encoding) else {
-                            continue;
-                        };
-                        let Ok(end) = codec.lsp_to_byte(
-                            line,
-                            character.saturating_add(token[2] as usize),
-                            encoding,
-                        ) else {
-                            continue;
-                        };
-                        let Ok(range) = ByteRange::new(start, end) else {
-                            continue;
-                        };
-                        spans.push(UiSyntaxSpan {
-                            buffer: buffer_id,
-                            revision: buffer.text.revision(),
-                            range,
-                            role: semantic_role(name),
-                        });
+                    {
+                        let encoding = self.lsp_position_encoding();
+                        let codec = PositionCodec::new(&buffer.text);
+                        let legend = self
+                            .language
+                            .capabilities()
+                            .map(|value| value.semantic_token_types.as_slice())
+                            .unwrap_or(&[]);
+                        let mut line = 0usize;
+                        let mut character = 0usize;
+                        let mut spans = Vec::new();
+                        for token in result.data.chunks_exact(5).take(100_000) {
+                            line = line.saturating_add(token[0] as usize);
+                            character = if token[0] == 0 {
+                                character.saturating_add(token[1] as usize)
+                            } else {
+                                token[1] as usize
+                            };
+                            let Some(name) = legend.get(token[3] as usize) else {
+                                continue;
+                            };
+                            let Ok(start) = codec.lsp_to_byte(line, character, encoding) else {
+                                continue;
+                            };
+                            let Ok(end) = codec.lsp_to_byte(
+                                line,
+                                character.saturating_add(token[2] as usize),
+                                encoding,
+                            ) else {
+                                continue;
+                            };
+                            let Ok(range) = ByteRange::new(start, end) else {
+                                continue;
+                            };
+                            spans.push(UiSyntaxSpan {
+                                buffer: buffer_id,
+                                revision: buffer.text.revision(),
+                                range,
+                                role: semantic_role(name),
+                            });
+                        }
+                        self.ui.lsp_semantic_spans = spans;
                     }
-                    self.ui.lsp_semantic_spans = spans;
                 }
             }
             LspFeatureResult::SemanticTokenDelta(delta) => {
@@ -2541,32 +2557,33 @@ impl InteractiveApplication {
                 } else {
                     self.language.inlays_received();
                 }
-                if let Some(path) = path_from_file_uri(uri)
-                    && let Some((buffer_id, buffer)) = self
+                if let Some(path) = path_from_file_uri(uri) {
+                    if let Some((buffer_id, buffer)) = self
                         .state
                         .buffers
                         .iter()
                         .find(|(_, buffer)| buffer.path.as_ref() == Some(&path))
-                {
-                    let encoding = self.lsp_position_encoding();
-                    let codec = PositionCodec::new(&buffer.text);
-                    self.ui.lsp_inlay_hints = items
-                        .into_iter()
-                        .filter_map(|item| {
-                            Some(UiInlayHint {
-                                buffer: buffer_id,
-                                revision: buffer.text.revision(),
-                                position: codec
-                                    .lsp_to_byte(
-                                        item.position.line,
-                                        item.position.character,
-                                        encoding,
-                                    )
-                                    .ok()?,
-                                label: item.label,
+                    {
+                        let encoding = self.lsp_position_encoding();
+                        let codec = PositionCodec::new(&buffer.text);
+                        self.ui.lsp_inlay_hints = items
+                            .into_iter()
+                            .filter_map(|item| {
+                                Some(UiInlayHint {
+                                    buffer: buffer_id,
+                                    revision: buffer.text.revision(),
+                                    position: codec
+                                        .lsp_to_byte(
+                                            item.position.line,
+                                            item.position.character,
+                                            encoding,
+                                        )
+                                        .ok()?,
+                                    label: item.label,
+                                })
                             })
-                        })
-                        .collect();
+                            .collect();
+                    }
                 }
             }
             LspFeatureResult::CodeLens(items) => {
@@ -2589,63 +2606,71 @@ impl InteractiveApplication {
                 self.install_picker(self.message("picker_code_lens_title", &[]), rows);
             }
             LspFeatureResult::Ranges(items) => {
-                if let Some(path) = path_from_file_uri(uri)
-                    && let Some((buffer_id, buffer)) = self
+                if let Some(path) = path_from_file_uri(uri) {
+                    if let Some((buffer_id, buffer)) = self
                         .state
                         .buffers
                         .iter()
                         .find(|(_, buffer)| buffer.path.as_ref() == Some(&path))
-                {
-                    let encoding = self.lsp_position_encoding();
-                    let codec = PositionCodec::new(&buffer.text);
-                    let ranges = items
-                        .into_iter()
-                        .filter_map(|item| {
-                            ByteRange::new(
-                                codec
-                                    .lsp_to_byte(item.start.line, item.start.character, encoding)
-                                    .ok()?,
-                                codec
-                                    .lsp_to_byte(item.end.line, item.end.character, encoding)
-                                    .ok()?,
-                            )
-                            .ok()
-                        })
-                        .collect::<Vec<_>>();
-                    match method {
-                        "textDocument/documentHighlight" => {
-                            self.ui.lsp_highlight_spans = ranges
-                                .into_iter()
-                                .map(|range| UiSyntaxSpan {
-                                    buffer: buffer_id,
-                                    revision: buffer.text.revision(),
-                                    range,
-                                    role: crate::language::syntax::SyntaxRole::Variable,
-                                })
-                                .collect()
-                        }
-                        "textDocument/foldingRange" => {
-                            if let Some(view) = self.state.active_view {
-                                self.ui.lsp_folds = ranges
+                    {
+                        let encoding = self.lsp_position_encoding();
+                        let codec = PositionCodec::new(&buffer.text);
+                        let ranges = items
+                            .into_iter()
+                            .filter_map(|item| {
+                                ByteRange::new(
+                                    codec
+                                        .lsp_to_byte(
+                                            item.start.line,
+                                            item.start.character,
+                                            encoding,
+                                        )
+                                        .ok()?,
+                                    codec
+                                        .lsp_to_byte(item.end.line, item.end.character, encoding)
+                                        .ok()?,
+                                )
+                                .ok()
+                            })
+                            .collect::<Vec<_>>();
+                        match method {
+                            "textDocument/documentHighlight" => {
+                                self.ui.lsp_highlight_spans = ranges
                                     .into_iter()
-                                    .filter_map(|range| {
-                                        Some(UiFold {
-                                            view,
-                                            start_line: buffer
-                                                .text
-                                                .byte_to_line(range.start)
-                                                .ok()?,
-                                            end_line: buffer.text.byte_to_line(range.end).ok()?,
-                                            collapsed: false,
-                                        })
+                                    .map(|range| UiSyntaxSpan {
+                                        buffer: buffer_id,
+                                        revision: buffer.text.revision(),
+                                        range,
+                                        role: crate::language::syntax::SyntaxRole::Variable,
                                     })
                                     .collect()
                             }
+                            "textDocument/foldingRange" => {
+                                if let Some(view) = self.state.active_view {
+                                    self.ui.lsp_folds = ranges
+                                        .into_iter()
+                                        .filter_map(|range| {
+                                            Some(UiFold {
+                                                view,
+                                                start_line: buffer
+                                                    .text
+                                                    .byte_to_line(range.start)
+                                                    .ok()?,
+                                                end_line: buffer
+                                                    .text
+                                                    .byte_to_line(range.end)
+                                                    .ok()?,
+                                                collapsed: false,
+                                            })
+                                        })
+                                        .collect()
+                                }
+                            }
+                            "textDocument/selectionRange" => {
+                                self.language.install_selection_ranges(ranges)
+                            }
+                            _ => {}
                         }
-                        "textDocument/selectionRange" => {
-                            self.language.install_selection_ranges(ranges)
-                        }
-                        _ => {}
                     }
                 }
             }
