@@ -1,4 +1,4 @@
-> **Current-interface reference, not the target specification.** This document describes the implemented interface at baseline `0a9c551`. Future requirements and their delivery status live in [specs/README.md](specs/README.md).
+> **Current-interface reference, not the target specification.** This guide describes the production interface in the checkout being used; registered commands, bundled defaults and `dust --help` prevail over a prose mismatch. Future requirements and delivery classification live in [specs/README.md](specs/README.md).
 
 # Dust on Linux
 

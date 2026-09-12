@@ -4,6 +4,7 @@ A keyboard-first terminal IDE with modal editing, native workspace/LSP/DAP workf
 
 - [Authoritative specification](docs/specs/README.md)
 - [Delivery status and qualification](docs/specs/delivery.md)
+- [Architecture and ownership](ARCHITECTURE.md)
 - [Current Linux user guide](docs/user-guide-linux.md)
 - [Current plugin SDK (ABI 0.2)](docs/plugin-sdk.md)
 - [Documentation map](docs/README.md)

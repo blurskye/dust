@@ -1,4 +1,4 @@
-> **Current-interface reference, not the target specification.** This document describes the implemented interface at baseline `0a9c551`. Future requirements and their delivery status live in [specs/README.md](specs/README.md).
+> **Current-interface reference, not the target specification.** This document describes release operations implemented in the checkout being used; source and registered CLI behavior prevail over a prose mismatch. Future requirements and delivery classification live in [specs/README.md](specs/README.md).
 
 # Linux release, installation, and rollback
 
