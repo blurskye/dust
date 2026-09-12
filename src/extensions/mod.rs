@@ -27,30 +27,8 @@ pub use virtual_documents::{
     VIRTUAL_DOCUMENT_REQUEST_QUEUE_CEILING, VIRTUAL_DOCUMENT_TITLE_BYTE_CEILING,
 };
 
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
-    fs,
-    io::Read,
-    path::{Path, PathBuf},
-    sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
-    thread,
-    time::Duration,
-};
-use thiserror::Error;
 mod manifest;
 pub(crate) use manifest::PluginCatalogVersion;
-use manifest::{
-    MAXIMUM_PLUGIN_EVENT_QUEUE, MAXIMUM_PLUGIN_PROVIDERS, MAXIMUM_PLUGIN_SUBSCRIPTIONS,
-    MAXIMUM_PLUGIN_VIRTUAL_DOCUMENTS, MAXIMUM_PRIVATE_BYTES, MAXIMUM_PRIVATE_CELLS_PER_CONTENT,
-    MAXIMUM_PRIVATE_CELLS_PER_PLUGIN, MAXIMUM_PRIVATE_DIRTY_RECTANGLES,
-    MAXIMUM_PRIVATE_HIT_REGIONS, MAXIMUM_PRIVATE_PATCH_CELLS, MAXIMUM_PRIVATE_STYLES,
-    MAXIMUM_PROVIDER_BYTES, MAXIMUM_PROVIDER_ITEMS, MAXIMUM_STORAGE_ITEMS,
-    MAXIMUM_STORAGE_TOTAL_BYTES, MAXIMUM_STORAGE_VALUE_BYTES,
-    MAXIMUM_VIRTUAL_DOCUMENT_AGGREGATE_BYTES, MAXIMUM_VIRTUAL_DOCUMENT_BYTES,
-    MAXIMUM_VIRTUAL_DOCUMENT_LINES, MAXIMUM_VIRTUAL_PATCH_BYTES, PLUGIN_UI_HOST_COMMANDS,
-};
 pub use manifest::{
     PluginActivationBehavior, PluginArgumentDeclaration, PluginArgumentKind, PluginCapability,
     PluginCommandContext, PluginCommandDeclaration, PluginContentTypeContribution,
@@ -62,7 +40,6 @@ pub use manifest::{
     PluginVirtualDocumentContribution, PluginVirtualDocumentMode, PluginWindowPlacementKind,
 };
 mod execution;
-pub(crate) use execution::{ActiveRuntime, LoadOutcome};
 pub use execution::{
     LoadedComponent, PluginConfirmationAnswer, PluginConfirmationError,
     PluginConfirmationErrorCode, PluginConfirmationOutcome, PluginConfirmationRequest,
@@ -82,13 +59,9 @@ pub use manager::{PluginEvent, PluginManager};
 pub mod component;
 mod index;
 pub use component::{ComponentHostState, component_api};
-use component::{
-    component_confirmation_result, component_provider_request, component_storage_result,
-    component_ui_error, component_virtual_document_request,
-};
 pub use index::{PluginError, activate_candidate, index_manifest_contributions};
+#[cfg(test)]
 pub(crate) use index::{execute_component, load_component};
-use index::{index_manifest_from_store, load_manifest_component, validate_manifest};
 
 #[cfg(test)]
 mod manager_tests;

@@ -1,5 +1,13 @@
 use super::manager::{QueuedRequest, Request, WorkerEvent};
+use super::manifest::MAXIMUM_STORAGE_TOTAL_BYTES;
 use super::*;
+use std::{
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    fs,
+    path::PathBuf,
+    sync::mpsc::{self, Receiver, SyncSender},
+    time::Duration,
+};
 fn manager(sender: SyncSender<QueuedRequest>, receiver: Receiver<WorkerEvent>) -> PluginManager {
     PluginManager {
         owner: std::sync::Arc::new(()),

@@ -1,4 +1,36 @@
-use super::*;
+use super::{
+    execution::{
+        PluginConfirmationAnswer, PluginConfirmationError, PluginConfirmationErrorCode,
+        PluginConfirmationOutcome, PluginConfirmationRequest, PluginConfirmationResult,
+        PluginPrivateCell, PluginPrivateCursor, PluginPrivateHitRegion, PluginPrivatePatch,
+        PluginPrivateRect, PluginPrivateSnapshot, PluginPrivateStyle, PluginRequestedPlacement,
+        PluginUiError, PluginUiErrorCode, PluginUiNode, PluginUiNodeKind, PluginUiRequest,
+        PluginUiRequestKind, PluginUiStyle, PluginUiTree,
+    },
+    manifest::{
+        MAXIMUM_PRIVATE_BYTES, MAXIMUM_PRIVATE_CELLS_PER_CONTENT, MAXIMUM_PRIVATE_DIRTY_RECTANGLES,
+        MAXIMUM_PRIVATE_HIT_REGIONS, MAXIMUM_PRIVATE_PATCH_CELLS, MAXIMUM_PRIVATE_STYLES,
+        MAXIMUM_VIRTUAL_DOCUMENT_BYTES, MAXIMUM_VIRTUAL_PATCH_BYTES, PluginCapability,
+        PluginStorageContribution,
+    },
+    providers::{
+        self, PROVIDER_REQUEST_QUEUE_CEILING, PluginPickerChunk, PluginPickerItem,
+        PluginPickerRequestEnvelope, PluginProviderError, PluginProviderErrorCode,
+        PluginProviderTerminal,
+    },
+    storage::{
+        self, PluginStorageError, PluginStorageErrorCode, PluginStorageRequest,
+        PluginStorageRequestKind, PluginStorageResult, STORAGE_REQUEST_CEILING,
+    },
+    virtual_documents::{
+        PluginVirtualDocumentError, PluginVirtualDocumentErrorCode, PluginVirtualDocumentFull,
+        PluginVirtualDocumentPatch, PluginVirtualDocumentPatchSet, PluginVirtualDocumentProposal,
+        PluginVirtualDocumentProposalKind, PluginVirtualDocumentRequest,
+        PluginVirtualDocumentRequestKind, VIRTUAL_DOCUMENT_LANGUAGE_BYTE_CEILING,
+        VIRTUAL_DOCUMENT_REQUEST_QUEUE_CEILING, VIRTUAL_DOCUMENT_TITLE_BYTE_CEILING,
+    },
+};
+use std::collections::{BTreeMap, BTreeSet};
 
 pub mod component_api {
     wasmtime::component::bindgen!({ path: "wit", world: "editor-plugin" });
