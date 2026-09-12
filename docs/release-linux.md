@@ -2,7 +2,9 @@
 
 # Linux release, installation, and rollback
 
-Dust's release owner produces a deterministic USTAR stream compressed as `.tar.zst` with a pinned zstd crate/version, level 19, one stream, and checksum enabled. Entries are sorted, timestamps/UIDs/GIDs are zero, permissions are fixed, and symlinks and traversal names are rejected. The archive contains `bin/dust`, bundled assets, `Cargo.lock`, the canonical release manifest, provenance metadata, and a CycloneDX dependency inventory derived from the exact lockfile.
+These commands are local release mechanics, not a stable-release claim. The Rust 1.85 floor, independent reproducibility, dependency/advisory review, executed signing, publication, installer qualification and native platform matrix remain Unproven in [delivery status](specs/delivery.md). The checked workflow covers Linux x86-64 only; no macOS or Windows artifact is built or qualified here.
+
+Dust's release owner produces a deterministic USTAR stream compressed as `.tar.zst` with the locked zstd crate, level 19, one stream, and checksum enabled. Entries are sorted, timestamps/UIDs/GIDs are zero, permissions are fixed, and symlinks and traversal names are rejected. The archive contains `bin/dust`, bundled assets, `Cargo.lock`, the canonical release manifest, provenance metadata, and a CycloneDX dependency inventory derived from the exact lockfile.
 
 ```sh
 cargo build --release --locked
@@ -10,7 +12,9 @@ target/release/dust --release-archive target/release/dust \
   --output "$PWD/target/dust-linux.tar.zst"
 ```
 
-The command prints the archive SHA-256. This is build metadata, not a reproducibility or signature claim. Dust does not generate signing keys and does not claim unsigned artifacts are signed. Publication policy uses Sigstore keyless `cosign sign-blob` under the release workflow's OIDC identity, publishing the detached signature, certificate, and transparency-log bundle beside the archive at `https://dust.blurskye.dev/`. A local archive is unsigned until those external outputs exist and verify against the documented workflow identity.
+The command prints the archive SHA-256. This is build metadata, not reproducibility or signature evidence. Dust does not generate signing keys and does not claim unsigned artifacts are signed.
+
+The checked release workflow at `.github/workflows/release.yml` requests Sigstore keyless `cosign sign-blob` with GitHub Actions OIDC, writes one `dust-linux-x86_64.tar.zst.sigstore.json` verification bundle, and uploads that bundle with the archive, SHA-256 file and archive metadata as a workflow artifact. The repository contains policy and automation only: no successful workflow run, verified signer identity, independent reproduction, public release or publication to `https://dust.blurskye.dev/` is established by this guide. Domain promotion is an explicitly separate credentialed operator action and is not implemented by the workflow.
 
 Check a frozen API requirement before packaging:
 

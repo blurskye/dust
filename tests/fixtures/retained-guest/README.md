@@ -9,10 +9,10 @@ never invoke Cargo, rustc, a shell, or another compiler. This fixture is the
 maintained 0.2 authoring example, not a published SDK crate or evidence for the
 incompatible target 0.3 host/package contract.
 
-Reproduction (maintainer-only, outside test execution):
+Reproduction (maintainer-only, outside test execution) uses the already installed stable toolchain selected by the repository; it does not authorize rustup or network installation:
 
 ```text
-cargo +stable build --locked --release --target wasm32-unknown-unknown
+cargo build --locked --offline --release --target wasm32-unknown-unknown
 ```
 
 Copy `target/wasm32-unknown-unknown/release/dust_retained_guest.wasm` to

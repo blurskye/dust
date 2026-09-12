@@ -126,7 +126,7 @@ The status line shows active diagnostics, changed Git files, running tasks, LSP 
 
 ## Terminal
 
-`Ctrl-/` toggles the default terminal. `Ctrl-\\` focuses the active terminal. Double Escape enters terminal Normal mode; Visual selection and yanks use the ordinary register system. `:terminal.list` opens a selectable terminal-session menu rather than a transient message.
+`Ctrl-/` and `Ctrl-\\` are aliases for the same `terminal.toggle` command in the editor, explorer, dashboard and terminal contexts. From the editor, explorer or dashboard they open the default terminal or focus the existing dock; from the terminal they return focus to the editor without hiding or stopping the process. Double Escape enters terminal Normal mode; Visual selection and yanks use the ordinary register system. `:terminal.list` opens a selectable terminal-session menu rather than a transient message.
 
 Terminal processes are never restored as fake live sessions. Zero-exit terminals close automatically; failed terminals retain bounded output.
 
@@ -142,7 +142,7 @@ Dust provides a bounded local Git subset without invoking the Git CLI:
 - exact stage and protected reset of the selected unstaged hunk;
 - an explicit `Git N files` changed-file count in the status line.
 
-More advanced branch, history, blame, conflict, remote, and staged-hunk workflows remain delegated to LazyGit until their native Dust workflows are complete.
+Reset requires the exact protected phrase `reset this hunk`; an ordinary Yes/No confirmation cannot authorize it. More advanced branch, history, blame, conflict, remote, and staged-hunk workflows remain delegated to LazyGit until their native Dust workflows are complete.
 
 ## Recovery and health
 
@@ -154,12 +154,16 @@ Use `:health`, `dust --health`, or `application.safe_mode.status` to inspect run
 
 User configuration is loaded transactionally. Invalid reloads retain the previous working configuration. WhichKey-style help appears after `[ui.key_hints].delay_ms`; a pure prefix such as `g`, `Space`, or `Space s` remains open until the next key or cancellation. Only a prefix that is also a complete command expires through `[input].mapping_timeout_ms`.
 
-- Main configuration: `config.toml`
-- Keymaps: `keymaps.toml`
-- Dashboard: `dashboard.toml`
-- Theme: `themes/*.toml`
+Current Linux path resolution is:
 
-Run `dust --check-config` before restarting after large edits. `:config explain key` shows where a resolved value came from; `:keymap inspect key context` explains a binding.
+- Main configuration: `$DUST_CONFIG_HOME/config.toml` when set, otherwise `$XDG_CONFIG_HOME/dust/config.toml`, otherwise `$HOME/.config/dust/config.toml`.
+- Keymaps and dashboard: `keymaps.toml` and `dashboard.toml` beside the resolved `config.toml`.
+- Installed themes: `themes/*.toml` beside the resolved `config.toml`.
+- State directory: `$DUST_STATE_HOME` when set, otherwise `$XDG_STATE_HOME/dust`, otherwise `$HOME/.local/state/dust`.
+
+The current executable accepts those environment paths as supplied. If no applicable environment/home variable exists, it falls back to `./dust`; a relative override is also currently accepted. Use absolute override directories and do not rely on the cwd fallback: the target C-01 contract requires absolute bases and disables persistence/package writes when none can be resolved, and that target behavior remains Partial in delivery status.
+
+There is no generated configuration reference or JSON schema in this checkout; those outputs remain Unimplemented. The exact current fields, defaults and bounds come from the typed serializers/validators and [`assets/defaults/config.toml`](../assets/defaults/config.toml); bundled mappings and dashboard actions come from [`keymaps.toml`](../assets/defaults/keymaps.toml) and [`dashboard.toml`](../assets/defaults/dashboard.toml). A field shown only in the target specification is not accepted configuration. Run `dust --check-config` before restarting after large edits. `:config explain key` shows where a resolved value came from; `:keymap inspect key context` explains a binding.
 
 
 ### Select a theme
@@ -168,7 +172,7 @@ Use `:theme.select` (or `Space u t` from editor Normal mode). Type to filter, th
 
 The compact chooser leaves the editor visible for live preview (up to 64 columns and 12 rows by default). It lists **Dust** (the unchanged original theme), **Catppuccin Latte, Frappé, Macchiato and Mocha**, **Gruvbox Dark**, **Nord**, **Tokyo Night / Storm / Moon / Day**, **Rosé Pine / Moon / Dawn**, and validated `themes/<name>.toml` files beside the accepted user `config.toml`. Identical current/catalog entries appear only once. Theme names are left-aligned; `Builtin`, `Installed` or `Saved` provenance is right-aligned. `Current` is separate from the keyboard selection. This uses the common picker row renderer, including plugin-provider pickers; long source labels are clipped to at most a third of the row. The optional `ui.picker.source_separator` is a prefix for that trailing source column (empty by default). Longer lists scroll; other pickers keep their existing size. `builtin.theme` has its own ordinary-window placement rule. The file's declared `name` must match its filename; names use letters, digits, `-` or `_` (up to 96 UTF-8 bytes). Files are regular, non-symlink TOML files of at most 128 KiB, with the existing semantic roles and validated color fallbacks. Discovery examines at most 256 directory entries and loads at most 31 installed files; it reports invalid files and limits instead of silently applying a fallback. `--clean` skips installed-theme discovery, but does not clear editor state; safe mode skips state restoration. Palette sources and MIT/Apache-2.0 license notices are in `assets/themes/README.md` and `LICENSES/`.
 
-Theme selection does not reload the rest of your configuration or restart tools. The existing atomic state writer saves the chosen palette snapshot under `metadata["ui.theme.snapshot"]` in the configured state file (normally `$DUST_STATE_HOME/session.json`). It restores on the next launch, including when opening a file directly. Preview alone is never saved. State-save errors are reported; the initial notice says **save requested**, not that disk I/O has already completed. Normal persistence settings apply: disabling persistence or `save_on_exit` disables automatic theme saving; disabling `restore_on_startup` disables restoration. `:config.explain key=ui.theme` and `:config.explain key=theme.styles.accent.foreground` identify the effective editor-state selection. An accepted configuration reload replaces the selection and cancels any older pending theme restore. Child terminal programs still control their own output colors.
+Theme selection does not reload the rest of your configuration or restart tools. The existing atomic state writer saves the chosen palette snapshot under `metadata["ui.theme.snapshot"]` in `session.json` below the resolved state directory above. It restores on the next launch, including when opening a file directly. Preview alone is never saved. State-save errors are reported; the initial notice says **save requested**, not that disk I/O has already completed. Normal persistence settings apply: disabling persistence or `save_on_exit` disables automatic theme saving; disabling `restore_on_startup` disables restoration. `:config.explain key=ui.theme` and `:config.explain key=theme.styles.accent.foreground` identify the effective editor-state selection. An accepted configuration reload replaces the selection and cancels any older pending theme restore. Child terminal programs still control their own output colors.
 
 **No configuration-file write is needed to remember a choice.** To explicitly override the saved selection, set `theme = "<name>"` in your existing `[ui]` section and use `:config.reload`. Selecting a theme never rewrites configuration files. Bundled names are `dust`, `catppuccin-latte`, `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`, `gruvbox-dark`, `nord`, `tokyo-night`, `tokyo-night-storm`, `tokyo-night-moon`, `tokyo-night-day`, `rose-pine`, `rose-pine-moon` and `rose-pine-dawn`. The 14 bundled palettes work offline; chooser discovery does not download anything. Plugins cannot yet contribute themes through their manifests or WIT—use custom Dust TOML files for now, not executable Neovim theme plugins. For names other than the reserved original `dust`, an installed same-name file takes precedence when loading configuration; malformed installed files are reported, not silently replaced by the bundled palette.
 
