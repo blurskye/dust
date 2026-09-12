@@ -1,4 +1,8 @@
-use super::super::*;
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+
+use super::editor::{ColorMode, CursorShape};
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

@@ -538,6 +538,7 @@ pub(super) fn audit(root: &Path, paths: &[PathBuf]) -> Result<(), ArchitectureEr
         graph.load("binary".into(), &binary, &files, 0)?;
     }
     let command_root = clean(&root.join("src/editor/session/commands"));
+    let config_root = clean(&root.join("src/config"));
     let dispatch_root = clean(&root.join("src/editor/session/dispatch"));
     if let Some(Wildcard { module, file, .. }) = graph.wildcards.iter().find(|wildcard| {
         let module = &wildcard.module;
@@ -571,6 +572,9 @@ pub(super) fn audit(root: &Path, paths: &[PathBuf]) -> Result<(), ArchitectureEr
             module == &format!("crate::editor::session::{owner}")
                 || module.starts_with(&format!("crate::editor::session::{owner}::"))
         }) || file.starts_with(&command_root)
+            || file.starts_with(&config_root)
+            || module == "crate::config"
+            || module.starts_with("crate::config::")
             || file.starts_with(&dispatch_root)
             || module == "crate::editor::session::dispatch"
             || module.starts_with("crate::editor::session::dispatch::")
@@ -578,7 +582,7 @@ pub(super) fn audit(root: &Path, paths: &[PathBuf]) -> Result<(), ArchitectureEr
         return Err(failure(
             file,
             format!(
-                "migrated owner or composition module {module} must name its imports and exports explicitly ({} production wildcards remain globally)",
+                "migrated owner, configuration, or composition module {module} must name its imports and exports explicitly ({} production wildcards remain globally)",
                 graph.wildcards.len()
             ),
         ));

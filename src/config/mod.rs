@@ -15,19 +15,10 @@ pub(crate) use themes::{
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    env, fs,
-    hash::{Hash, Hasher},
-    io::Read,
-    path::{Path, PathBuf},
-    sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError},
-    thread::{self, JoinHandle},
-    time::{Duration, Instant, SystemTime},
+    path::PathBuf,
 };
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
-use thiserror::Error;
-use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
+use serde::{Deserialize, Serialize};
 mod settings;
 pub use settings::{
     AmbiguousWidth, BomPolicy, BorderStyle, BufferLineConfig, ColorMode, CommandLineConfig,

@@ -167,6 +167,59 @@ fn migrated_owner_and_composition_globs_fail_closed_but_test_only_globs_do_not()
 }
 
 #[test]
+fn configuration_globs_fail_by_logical_physical_and_block_scope_but_test_globs_do_not() {
+    for source in [
+        "use crate::*; pub fn invalid() {}",
+        "pub fn invalid() { use crate::*; }",
+    ] {
+        let error = check(
+            &[
+                (
+                    "src/lib.rs",
+                    "extern crate self as local_crate; pub mod config; pub mod editor; pub mod language; pub mod facade;",
+                ),
+                ("src/config.rs", source),
+            ],
+            "pub fn service() {}",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("configuration") && detail.contains("imports and exports explicitly")),
+            "{source}: {error}"
+        );
+    }
+    let remounted = check(
+        &[
+            (
+                "src/facade.rs",
+                "#[path = \"config/remounted.rs\"] pub mod remounted;",
+            ),
+            ("src/config/remounted.rs", "use crate::*;"),
+        ],
+        "pub fn service() {}",
+    )
+    .unwrap_err();
+    assert!(
+        matches!(&remounted, ArchitectureError::Dependency { detail, .. } if detail.contains("configuration") && detail.contains("imports and exports explicitly")),
+        "{remounted}"
+    );
+    check(
+        &[
+            (
+                "src/lib.rs",
+                "extern crate self as local_crate; pub mod config; pub mod editor; pub mod language; pub mod facade;",
+            ),
+            (
+                "src/config.rs",
+                "use std::path::Path; #[cfg(test)] use crate::*; pub fn valid(_: &Path) {}",
+            ),
+        ],
+        "pub fn service() {}",
+    )
+    .unwrap();
+}
+
+#[test]
 fn production_wildcard_reexports_fail_globally_but_imports_and_test_code_remain_scoped() {
     for source in [
         "pub use crate::editor::*;",
