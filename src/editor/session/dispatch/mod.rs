@@ -33,12 +33,9 @@ mod events;
 use super::persistence::capture_persisted_layout;
 use super::syntax::{IndentError, SyntaxDocument, SyntaxSession, semantic_role};
 use super::windows::rect_contains_point;
+use crate::editor::session::tasks::{AdapterContext, RunningTask};
 #[cfg(test)]
 use crate::editor::transaction::build_restored_layout;
-#[path = "../state.rs"]
-mod state;
-use crate::editor::session::tasks::{AdapterContext, RunningTask};
-use state::*;
 
 pub use commands::{
     AppEffect, DiagnosticFilter, LayoutAction, PickerKind, PromptMove, register_app_commands,

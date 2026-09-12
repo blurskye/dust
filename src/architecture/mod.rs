@@ -75,6 +75,8 @@ pub fn audit_source(root: &Path) -> Result<ArchitectureAudit, ArchitectureError>
         "assistant",
         "ai",
         "test_support",
+        "editor/session/state.rs",
+        "editor/session/state",
     ] {
         let path = source_root.join(removed);
         if path.exists() {

@@ -411,6 +411,8 @@ fn obsolete_and_ambiguous_source_owners_do_not_return() {
         "debugging",
         "observability",
         "test_support",
+        "editor/session/state.rs",
+        "editor/session/state",
         "editor/session/window_bridge.rs",
         "editor/session/window_bridge",
     ] {
