@@ -1,4 +1,11 @@
-use super::*;
+use super::super::configuration::resolve_configuration;
+use super::{
+    CommandRegistry, ConfigurationSession, DebugSession, DocumentSession, ExplorerWatchService,
+    InputSession, InteractiveApplication, InteractiveError, LoadedConfig, PathBuf,
+    PersistenceService, RegistryService, RootIdentity, StartupTarget, SyntaxSession, TextBuffer,
+    UiState, VfsWorker, WindowSession, WorkspaceId, WorkspaceState, build_state,
+    explorer_watch_policy, register_app_commands, register_builtin_commands,
+};
 
 impl InteractiveApplication {
     pub(super) fn new(

@@ -1,10 +1,42 @@
-use super::*;
+use super::super::configuration::{configured_grapheme_width, configured_text_width};
+use super::{
+    AdapterContext, AppEffect, ArgumentSchema, BTreeMap, BTreeSet, ByteOffset, ByteRange,
+    CommandId, CommandInvocation, CommandOutcome, CommandSource, CommandSpec, CommandValue,
+    ContextRequirement, DapControl, DapEvent, DapResponse, DapSourceBreakpoint, DeferredExecution,
+    DiagnosticFilter, DiagnosticOwner, DisplayWidthPolicy, DockEdge, DocumentationPopupKind,
+    EditorCloseSave, EditorCloseStep, EditorCloseTarget, EditorMode, EditorOperation, EditorState,
+    EditorTransaction, ExecutionPreflightEvent, ExecutionSource, ExplorerKind, ExplorerMutation,
+    FileSnapshot, FocusDirection, HashSet, InputAction, Instant, InteractiveApplication,
+    InvocationSource, LargeFileOverride, LayoutAction, LayoutPlanError, LogLevel,
+    LspAutostartObservation, LspDocument, LspFeature, LspLaunchRequest, LspLaunchSource,
+    LspMarkupContent, LspMarkupKind, LspRuntimeSource, LspWorkspaceEdit, MatcherSource,
+    NIX_LSP_NIXPKGS_REVISION, NativeDescriptions, NativeSurfaceTarget, PackageOperation, Path,
+    PathBuf, PendingLspProjectRoot, PersistedLargeFileOverride, PersistedLocation,
+    PersistedSession, PersistedState, PersistedWindowRule, PersistencePolicy, PickerAction,
+    PickerContent, PickerItem, PickerItemId, PickerKind, PickerOrigin, PickerPayload, PickerState,
+    PickerSurfaceKind, PluginEvent, PluginLimits, PluginLoadId, PluginUiInteraction, PositionCodec,
+    PositionEncoding, Precondition, PromptKind, PromptMove, RegistryRequest, RegistryResult,
+    RestoreContext, RestorePrepared, RestoreReady, RestoreWindowPolicy, RunningTask, STATE_VERSION,
+    SpatialDirection, TerminalInput, TerminalUpdate, TextBuffer, TextEdit, ToolDefinition,
+    ToolInstall, ToolKind, ToolMenuRow, ToolMenuState, ToolOperation, ToolRuntimeOption,
+    ToolRuntimePickerState, ToolStatus, TransactionId, UndoPolicy, VisualRowAnchor, VisualRowModel,
+    WindowCandidate, WindowPlacement, WindowRect, WindowUpdate, WorkspaceEditDraft,
+    WorkspaceFilePolicy, WorkspaceSearchMatch, WorkspaceSearchPolicy, WorkspaceTrust,
+    active_editor_pane_viewport, builtin_languages, discover_executable, editor_pane_viewport_at,
+    editor_state_content_width, editor_state_gutter_width, file_uri, is_nixos_host,
+    language_for_path, language_id_for_path, lsp_runtime_source_allowed_on_host,
+    managed_tool_executable, managed_tool_installed_version, mode_name_large,
+    nix_lsp_launch_environment, nix_lsp_profile_installed, nix_lsp_workspace_root,
+    nix_workspace_shell_for_host, parse_ex, path_from_file_uri, tool_kind_key,
+};
 use crate::editor::session::extensions::{VirtualContext, VirtualOpen, VirtualPublication};
 use crate::workspace::search_workflow::{
     ABS_MAX_BYTES, SearchMatcherKind, SearchPresenterKind, SearchRequestId, SearchSourceKind,
     SearchStreamGeneration, SearchWorkflowBroker, SearchWorkflowChunk, SearchWorkflowError,
     SearchWorkflowId, SearchWorkflowSpec, picker_item_adapter, plugin_item_adapter,
 };
+use slotmap::Key;
+use unicode_segmentation::UnicodeSegmentation;
 
 fn compose_workspace_file_items(
     items: Vec<(PickerItem, PickerPayload)>,
@@ -5599,7 +5631,7 @@ impl InteractiveApplication {
 }
 
 // Remaining editor/window routing; terminal data and algorithms live in the owner.
-use super::{InteractiveApplication, PtyId, RegisterShape, RegisterValue};
+use super::{PtyId, RegisterShape, RegisterValue};
 impl InteractiveApplication {
     fn terminal_command_target(&self) -> Option<PtyId> {
         self.keyboard_terminal()
@@ -11381,6 +11413,8 @@ impl InteractiveApplication {
 mod tests {
     use super::*;
     use crate::editor::session::workspace::{ExecutionPermit, ValidationId, WorkspaceSession};
+    use crate::workspace::{RootIdentity, WorkspaceId, WorkspaceState};
+    use std::time::Duration;
     fn permit(owner: &mut WorkspaceSession) -> (ValidationId, ExecutionPermit) {
         let id = owner
             .begin_validation()

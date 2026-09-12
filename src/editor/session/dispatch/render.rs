@@ -1,9 +1,18 @@
+use super::super::configuration::configured_text_width;
 use super::super::windows::{
     CommandEffect, CommandError, CommandPolicy, WindowCommand, rect_contains_point,
 };
 use super::{
     AppEffect, CompositorProjection, DockEdge, FocusDirection, NativeSurfaceTarget, PtyId,
     WindowPlacement, WindowRect, explorer_panel_width,
+};
+use super::{
+    BTreeMap, ByteOffset, ByteRange, EditorMode, EditorOperation, EditorTransaction,
+    EditorWindowBridge, EditorWindowLayoutState, LogLevel, NativeDescriptions,
+    NativeSurfaceSignature, NativeSurfaceWindowBinding, Precondition, ProjectionRequest,
+    TransactionId, UiEditorWindowBinding, UndoPolicy, ViewId, VisualRowAnchor, VisualRowModel,
+    active_editor_pane_viewport, editor_state_content_width, editor_workspace_insets,
+    snap_display_column, snap_display_column_forward, terminal_panel_geometry,
 };
 use super::{Duration, InteractiveApplication, LiveCrashSnapshot, PluginStatus};
 use super::{PickerOrigin, PickerPayload, PickerSurfaceKind};
@@ -1016,8 +1025,6 @@ impl InteractiveApplication {
         );
     }
 }
-
-use super::*;
 
 impl InteractiveApplication {
     pub(super) fn set_mode(&mut self, mode: EditorMode) {

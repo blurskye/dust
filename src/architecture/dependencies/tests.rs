@@ -97,9 +97,12 @@ fn legitimate_domain_clients_comments_strings_and_test_only_code_are_not_authori
 }
 
 #[test]
-fn migrated_owner_and_command_globs_fail_closed_but_test_only_globs_do_not() {
+fn migrated_owner_and_composition_globs_fail_closed_but_test_only_globs_do_not() {
     for source in [
         "pub mod session { pub mod input { use super::*; } }",
+        "pub mod session { pub mod dispatch { use super::*; } }",
+        "pub mod session { pub mod dispatch { pub use super::*; } }",
+        "pub mod session { pub mod dispatch { pub fn nested() { use super::*; } } }",
         "pub mod session { pub mod dispatch { pub mod commands { use super::*; } } }",
         "pub mod session { pub mod dispatch { pub mod commands { pub use super::*; } } }",
     ] {
@@ -123,12 +126,32 @@ fn migrated_owner_and_command_globs_fail_closed_but_test_only_globs_do_not() {
     assert!(
         matches!(remounted, ArchitectureError::Dependency { detail, .. } if detail.contains("imports and exports explicitly"))
     );
+    let remounted = check(
+        &[
+            (
+                "src/editor/mod.rs",
+                "#[path = \"session/dispatch/remounted.rs\"] pub mod remounted;",
+            ),
+            (
+                "src/editor/session/dispatch/remounted.rs",
+                "pub use super::*;",
+            ),
+        ],
+        "pub fn service() {}",
+    )
+    .unwrap_err();
+    assert!(
+        matches!(remounted, ArchitectureError::Dependency { detail, .. } if detail.contains("imports and exports explicitly"))
+    );
     check(
         &[(
             "src/editor/mod.rs",
             r#"
             pub mod session {
                 pub mod dispatch {
+                    #[cfg(test)] use super::*;
+                    #[cfg(all(unix, test))] pub use super::*;
+                    #[cfg(test)] mod tests { use super::*; }
                     pub mod commands {
                         #[cfg(test)] use super::*;
                         #[cfg(all(unix, test))] pub use super::*;

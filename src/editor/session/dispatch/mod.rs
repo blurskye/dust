@@ -1,4 +1,10 @@
-use super::configuration::{self, ConfigurationSession};
+use super::configuration::ConfigurationSession;
+#[cfg(test)]
+use super::configuration::{
+    KeymapOperation, compile_keymaps, compile_keymaps_with_plugin_catalog,
+    configuration_generation_is_newer, reload_keymaps, resolve_configuration,
+    validate_configured_commands,
+};
 use super::documents::{DocumentEvent, DocumentSession, LargeFileOverride, mode_name_large};
 use super::explorer::explorer_watch_policy;
 use super::input::InputSession;
@@ -17,11 +23,6 @@ use super::windows::{
     EditorCloseSave, EditorCloseStep, EditorCloseTarget, EditorWindowBridge, LayoutPlanError,
     NativeDescriptions, NativeSurfaceSignature, NativeSurfaceTarget, ProjectionRequest,
     RestoreWindowPolicy, WindowCandidate, WindowSession,
-};
-use configuration::*;
-#[cfg(test)]
-use configuration::{
-    KeymapOperation, compile_keymaps, compile_keymaps_with_plugin_catalog, reload_keymaps,
 };
 #[path = "../commands/mod.rs"]
 pub(super) mod commands;
@@ -102,9 +103,7 @@ use crate::workspace::{
     PickerItemId, PickerState, RootIdentity, WorkspaceEditDraft, WorkspaceId, WorkspaceState,
     WorkspaceTrust,
 };
-use slotmap::Key;
 use thiserror::Error;
-use unicode_segmentation::UnicodeSegmentation;
 
 use super::extensions::{PluginUiInteraction, WindowUpdate};
 use crate::editor::{ApplicationError, StartupTarget, build_state};
