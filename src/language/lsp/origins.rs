@@ -1,7 +1,20 @@
 //! Private event origins and consuming replies bound to the producing session.
-use super::*;
-use crate::editor::text::TextVersion;
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc,
+        mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
+    },
+};
+
+use crate::editor::text::{PositionEncoding, TextVersion};
+
+#[cfg(test)]
+use super::model::{LspDiagnostic, LspWorkspaceEdit};
+use super::{
+    model::{LspEvent, ServerRequestId},
+    session::SessionCommand,
+};
 
 #[derive(Clone, Debug)]
 pub(crate) struct EditContext {

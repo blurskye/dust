@@ -6,14 +6,22 @@ use std::{
 
 use serde_json::{Value, json};
 
-use super::session::requested_executable_name;
 use super::{
-    LspDocument, LspEvent, LspFeature, LspFeatureResult, LspMarkupKind, LspPolicy, LspProgressKind,
-    LspService, PositionEncoding, SyncKind, completion_items, file_uri, hover_result,
-    incremental_change, initialize_capabilities, initialize_message, inlay_hints,
-    language_id_for_path, lsp_progress_event, path_from_file_uri, workspace_edit,
+    model::{
+        LspDocument, LspEvent, LspFeature, LspFeatureResult, LspMarkupKind, LspPolicy,
+        LspProgressKind, SyncKind,
+    },
+    paths::{file_uri, language_id_for_path, path_from_file_uri},
+    protocol::{
+        completion_items, hover_result, incremental_change, initialize_capabilities,
+        initialize_message, inlay_hints, lsp_progress_event, normalize_result, workspace_edit,
+    },
+    session::{LspService, requested_executable_name},
 };
-use crate::tools::{ToolDefinition, ToolKind, tool_launch_environment};
+use crate::{
+    editor::text::PositionEncoding,
+    tools::{ToolDefinition, ToolKind, tool_launch_environment},
+};
 
 #[test]
 fn language_and_uri_mapping_are_deterministic() {
@@ -300,7 +308,7 @@ fn maximum_inlay_hint_profiles_are_adapter_specific_and_exhaustive() {
         super::LspServerConfiguration::standard()
     );
     assert!(matches!(
-        super::normalize_result(
+        normalize_result(
             &LspFeature::InlayHints {
                 range: super::LspRange {
                     start: super::LspPosition {

@@ -36,7 +36,6 @@ fn canonical_services_reject_direct_local_alias_reexport_glob_and_macro_authorit
         "pub fn bad() { use crate::editor::EditorState as Shared; let mut s = Shared { workspace_root: String::new() }; s.workspace_root.clear(); }",
         "use crate::editor as model; pub fn bad(s: &mut model::EditorState) { s.workspace_root.clear(); }",
         "use crate::facade::nested::{self as model}; pub fn bad(s: &mut model::Actor) { s.workspace_root.clear(); }",
-        "use crate::facade::*; pub fn bad(s: &mut Actor) { s.workspace_root.clear(); }",
         "pub fn bad(_: crate::facade::Wrapped) {}",
         "pub fn outer() { mod nested { pub fn bad(s: &mut crate::editor::EditorState) { s.workspace_root.clear(); } } }",
         "const _: () = { mod nested { pub fn bad(s: &mut crate::editor::EditorState) { s.workspace_root.clear(); } } };",
@@ -51,6 +50,22 @@ fn canonical_services_reject_direct_local_alias_reexport_glob_and_macro_authorit
             "{source}: {error}"
         );
     }
+    let source = "use crate::facade::*; pub fn bad(s: &mut Actor) { s.workspace_root.clear(); }";
+    let error = check(
+        &[
+            (
+                "src/lib.rs",
+                "extern crate self as local_crate; pub mod editor; pub mod language; pub mod facade; pub mod process;",
+            ),
+            ("src/process.rs", source),
+        ],
+        "pub fn service() {}",
+    )
+    .expect_err(source);
+    assert!(
+        matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("forbidden authority crate::editor")),
+        "{source}: {error}"
+    );
 }
 
 #[test]
@@ -514,6 +529,49 @@ fn extension_globs_fail_by_logical_physical_and_block_scope_but_test_globs_do_no
             ),
         ],
         "pub fn service() {}",
+    )
+    .unwrap();
+}
+
+#[test]
+fn language_lsp_globs_fail_by_logical_physical_and_block_scope_but_test_globs_do_not() {
+    let rejected = |result: Result<(), ArchitectureError>| {
+        let error = result.unwrap_err();
+        assert!(
+            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("language/LSP") && detail.contains("imports and exports explicitly")),
+            "{error}"
+        );
+    };
+    for source in [
+        "use crate::*; pub fn invalid() {}",
+        "pub fn invalid() { use crate::*; }",
+        "pub mod nested { use crate::*; }",
+    ] {
+        rejected(check(&[], source));
+    }
+    rejected(check(
+        &[
+            (
+                "src/language/mod.rs",
+                "#[path = \"../remounted.rs\"] pub mod lsp;",
+            ),
+            ("src/remounted.rs", "use crate::*;"),
+        ],
+        "pub fn unused() {}",
+    ));
+    rejected(check(
+        &[
+            (
+                "src/facade.rs",
+                "#[path = \"language/lsp/remounted.rs\"] pub mod remounted;",
+            ),
+            ("src/language/lsp/remounted.rs", "use crate::*;"),
+        ],
+        "pub fn valid() {}",
+    ));
+    check(
+        &[],
+        "use std::path::Path; #[cfg(test)] use crate::*; #[cfg(test)] mod tests { use super::*; } pub fn valid(_: &Path) {}",
     )
     .unwrap();
 }
