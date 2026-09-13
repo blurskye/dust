@@ -28,6 +28,7 @@ struct Wildcard {
 struct Graph {
     modules: BTreeMap<String, Module>,
     references: Vec<(String, PathBuf, Vec<String>)>,
+    mutable_references: Vec<(String, PathBuf, Vec<String>)>,
     wildcards: Vec<Wildcard>,
     self_aliases: BTreeSet<String>,
 }
@@ -136,6 +137,7 @@ fn flatten(tree: &UseTree, prefix: Vec<String>, aliases: &mut Vec<(Option<String
 struct References {
     nested_modules: Vec<syn::ItemMod>,
     paths: Vec<Vec<String>>,
+    mutable_paths: Vec<Vec<String>>,
     uses: Vec<(Option<String>, Vec<String>, bool)>,
     aliases: Vec<(String, Vec<Vec<String>>)>,
 }
@@ -144,6 +146,7 @@ impl References {
         Self {
             nested_modules: Vec::new(),
             paths: Vec::new(),
+            mutable_paths: Vec::new(),
             uses: Vec::new(),
             aliases: Vec::new(),
         }
@@ -157,6 +160,21 @@ impl<'ast> Visit<'ast> for References {
     }
     fn visit_item_mod(&mut self, module: &'ast syn::ItemMod) {
         self.nested_modules.push(module.clone());
+    }
+    fn visit_item_impl(&mut self, item: &'ast syn::ItemImpl) {
+        if item.trait_.as_ref().is_some_and(|(_, path, _)| {
+            path.segments.last().is_some_and(|segment| {
+                matches!(
+                    segment.ident.to_string().as_str(),
+                    "AsMut" | "BorrowMut" | "Deref" | "DerefMut" | "Index" | "IndexMut"
+                )
+            })
+        }) {
+            let mut refs = References::new();
+            visit::visit_item_impl(&mut refs, item);
+            self.mutable_paths.extend(refs.paths);
+        }
+        visit::visit_item_impl(self, item);
     }
     fn visit_impl_item_fn(&mut self, item: &'ast syn::ImplItemFn) {
         if production(&item.attrs) {
@@ -172,6 +190,45 @@ impl<'ast> Visit<'ast> for References {
         if production(&field.attrs) {
             visit::visit_field(self, field);
         }
+    }
+    fn visit_type_reference(&mut self, reference: &'ast syn::TypeReference) {
+        if reference.mutability.is_some() {
+            let mut refs = References::new();
+            refs.visit_type(&reference.elem);
+            self.mutable_paths.extend(refs.paths);
+        }
+        visit::visit_type_reference(self, reference);
+    }
+    fn visit_type_ptr(&mut self, pointer: &'ast syn::TypePtr) {
+        if pointer.mutability.is_some() {
+            let mut refs = References::new();
+            refs.visit_type(&pointer.elem);
+            self.mutable_paths.extend(refs.paths);
+        }
+        visit::visit_type_ptr(self, pointer);
+    }
+    fn visit_type_path(&mut self, path: &'ast syn::TypePath) {
+        if path.path.segments.last().is_some_and(|segment| {
+            matches!(
+                segment.ident.to_string().as_str(),
+                "AsMut"
+                    | "BorrowMut"
+                    | "Cell"
+                    | "IndexMut"
+                    | "Mutex"
+                    | "MutexGuard"
+                    | "RefCell"
+                    | "RefMut"
+                    | "RwLock"
+                    | "RwLockWriteGuard"
+                    | "UnsafeCell"
+            )
+        }) {
+            let mut refs = References::new();
+            visit::visit_type_path(&mut refs, path);
+            self.mutable_paths.extend(refs.paths);
+        }
+        visit::visit_type_path(self, path);
     }
     fn visit_attribute(&mut self, _: &'ast syn::Attribute) {}
     fn visit_path(&mut self, path: &'ast syn::Path) {
@@ -199,6 +256,15 @@ impl<'ast> Visit<'ast> for References {
         // Inspect identifiers in macro arguments as tokens, never comments or
         // string contents. The macro's generated expansion remains outside scope.
         if let Ok(tokens) = syn::parse2::<TokenPaths>(mac.tokens.clone()) {
+            if tokens.0.iter().any(|path| path == &["mut"]) {
+                self.mutable_paths.extend(
+                    tokens
+                        .0
+                        .iter()
+                        .filter(|path| path.as_slice() != ["mut"])
+                        .cloned(),
+                );
+            }
             self.paths.extend(tokens.0);
         }
     }
@@ -379,6 +445,11 @@ impl Graph {
             for (alias, targets) in refs.aliases {
                 module.aliases.entry(alias).or_default().extend(targets);
             }
+            self.mutable_references.extend(
+                refs.mutable_paths
+                    .into_iter()
+                    .map(|path| (name.clone(), file.to_owned(), path)),
+            );
             self.references.extend(
                 refs.paths
                     .into_iter()
@@ -525,6 +596,68 @@ impl Graph {
     }
 }
 
+const SESSION_OWNERS: &[(&str, &str, &str)] = &[
+    ("windows", "WindowSession", "windows"),
+    ("input", "InputSession", "input"),
+    ("notifications", "NoticeSession", "notifications"),
+    ("syntax", "SyntaxSession", "syntax"),
+    ("configuration", "ConfigurationSession", "configuration"),
+    ("documents", "DocumentSession", "documents"),
+    ("workspace", "WorkspaceSession", "workspace"),
+    ("persistence", "PersistenceSession", "persistence"),
+    ("search", "SearchSession", "search"),
+    ("explorer", "ExplorerSession", "explorer"),
+    ("workspace_edits", "WorkspaceEditSession", "workspace_edits"),
+    ("diagnostics", "DiagnosticSession", "diagnostics"),
+    ("tasks", "TaskSession", "tasks"),
+    ("terminal", "TerminalSession", "terminal"),
+    ("debugger", "DebugSession", "debugger"),
+    ("git", "GitSession", "git"),
+    ("recovery", "RecoverySession", "recovery"),
+    ("tooling", "ToolingSession", "tooling"),
+    ("lsp", "LspSession", "lsp"),
+    ("extensions", "ExtensionSession", "extensions"),
+    ("lsp_edits", "LspEditSources", "lsp"),
+    ("plugin_edits", "PluginEditSources", "extensions"),
+];
+
+fn session_owner(root: &Path, module: &str, file: &Path) -> Option<&'static str> {
+    let directory = clean(&root.join("src/editor/session"));
+    SESSION_OWNERS.iter().find_map(|(source, _, owner)| {
+        let logical = format!("crate::editor::session::{source}");
+        let physical = directory.join(source);
+        (module == logical
+            || module.starts_with(&format!("{logical}::"))
+            || file == physical.with_extension("rs")
+            || file.starts_with(physical))
+        .then_some(*owner)
+    })
+}
+
+fn mutable_authority_owner(target: &str) -> Option<&'static str> {
+    SESSION_OWNERS
+        .iter()
+        .find_map(|(source, kind, owner)| {
+            (target.starts_with(&format!("crate::editor::session::{source}::"))
+                && target.ends_with(&format!("::{kind}")))
+            .then_some(*owner)
+        })
+        .or_else(|| {
+            [
+                ("EditorState", "editor-state"),
+                ("UiState", "ui-state"),
+                ("WindowGraph", "windows"),
+                ("CommandRegistry", "command-registry"),
+                ("ResolvedConfiguration", "configuration"),
+            ]
+            .into_iter()
+            .find_map(|(kind, owner)| {
+                (target.starts_with("crate::") && target.ends_with(&format!("::{kind}")))
+                    .then_some(owner)
+            })
+        })
+}
+
 pub(super) fn audit(root: &Path, paths: &[PathBuf]) -> Result<(), ArchitectureError> {
     let files = paths
         .iter()
@@ -557,6 +690,26 @@ pub(super) fn audit(root: &Path, paths: &[PathBuf]) -> Result<(), ArchitectureEr
             )
         };
         return Err(failure(&wildcard.file, detail));
+    }
+    for (module, file, reference) in &graph.mutable_references {
+        let Some(source_owner) = session_owner(root, module, file) else {
+            continue;
+        };
+        for target in graph.resolve(module, reference, &mut Lookup::default()) {
+            if target.starts_with("!resolution-limit") {
+                return Err(failure(file, "canonical alias resolution budget exceeded"));
+            }
+            if let Some(target_owner) = mutable_authority_owner(&target) {
+                if target_owner != source_owner {
+                    return Err(failure(
+                        file,
+                        format!(
+                            "session owner {module} must not receive or expose mutable authority {target} owned by {target_owner}"
+                        ),
+                    ));
+                }
+            }
+        }
     }
     for (module, file, reference) in &graph.references {
         let service = [

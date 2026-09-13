@@ -306,6 +306,166 @@ fn configuration_cannot_import_higher_authority_or_launder_it_through_remounts()
 }
 
 #[test]
+fn session_owners_cannot_receive_or_expose_mutable_foreign_authority() {
+    let library = "extern crate self as local_crate; pub mod editor; pub mod facade; pub mod language; pub mod ui;";
+    let editor = "pub mod command { pub struct CommandRegistry<T>(pub T); } pub mod state { pub struct EditorState; } pub mod session;";
+    let session = "pub mod configuration { pub mod model { pub struct ResolvedConfiguration; } } pub mod notifications; pub mod windows { pub struct NavigationStamp; pub struct WindowGraphLoan; pub struct WindowSession; }";
+    let rejected = |source: &str| {
+        let error = check(
+            &[
+                ("src/lib.rs", library),
+                ("src/editor/mod.rs", editor),
+                ("src/editor/session/mod.rs", session),
+                ("src/editor/session/notifications.rs", source),
+                (
+                    "src/facade.rs",
+                    "pub use crate::editor::session::windows::WindowSession as MutableWindows;",
+                ),
+                (
+                    "src/ui/mod.rs",
+                    "pub mod render { pub struct UiState; } pub mod window { pub struct WindowGraph; }",
+                ),
+            ],
+            "pub fn service() {}",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("session owner crate::editor::session::notifications") && detail.contains("mutable authority")),
+            "{source}: {error}"
+        );
+    };
+    for source in [
+        "pub fn bad(_: &mut super::windows::WindowSession) {}",
+        "use super::windows::WindowSession as Foreign; pub fn bad(_: &mut Foreign) {}",
+        "use crate::editor::{session::{windows::WindowSession as Foreign}}; pub fn bad(_: &mut Foreign) {}",
+        "type Foreign = super::windows::WindowSession; pub fn bad(_: &mut Foreign) {}",
+        "pub fn bad(_: &mut crate::facade::MutableWindows) {}",
+        "pub fn bad(_: &mut ::local_crate::editor::session::windows::WindowSession) {}",
+        "pub fn bad(_: fn(&mut super::windows::WindowSession)) {}",
+        "pub fn bad(_: *mut super::windows::WindowSession) {}",
+        "pub fn bad(_: std::cell::Cell<super::windows::WindowSession>) {}",
+        "pub fn bad(_: std::cell::RefCell<super::windows::WindowSession>) {}",
+        "pub fn bad(_: std::cell::RefMut<'_, super::windows::WindowSession>) {}",
+        "pub fn bad(_: std::sync::Mutex<super::windows::WindowSession>) {}",
+        "pub fn bad(_: std::sync::RwLock<super::windows::WindowSession>) {}",
+        "pub fn bad(_: std::cell::UnsafeCell<super::windows::WindowSession>) {}",
+        "pub fn bad(_: &mut dyn AsMut<super::windows::WindowSession>) {}",
+        "macro_rules! ty { ($t:ty) => { $t } } pub fn bad(_: ty!(&mut super::windows::WindowSession)) {}",
+        "pub mod nested { pub fn bad(_: &mut super::super::windows::WindowSession) {} }",
+        "#[cfg(any(unix, test))] pub fn bad(_: &mut super::windows::WindowSession) {}",
+        "pub fn bad(_: &mut crate::editor::state::EditorState) {}",
+        "pub fn bad(_: &mut crate::ui::render::UiState) {}",
+        "pub fn bad(_: &mut crate::ui::window::WindowGraph) {}",
+        "pub fn bad(_: &mut crate::editor::command::CommandRegistry<()>) {}",
+        "pub fn bad(_: &mut super::configuration::model::ResolvedConfiguration) {}",
+    ] {
+        rejected(source);
+    }
+    rejected(
+        "struct Local(super::windows::WindowSession); impl std::ops::Deref for Local { type Target = super::windows::WindowSession; fn deref(&self) -> &Self::Target { &self.0 } } impl std::ops::DerefMut for Local { fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 } }",
+    );
+    rejected(
+        "struct Local(super::windows::WindowSession); impl std::borrow::Borrow<super::windows::WindowSession> for Local { fn borrow(&self) -> &super::windows::WindowSession { &self.0 } } impl std::borrow::BorrowMut<super::windows::WindowSession> for Local { fn borrow_mut(&mut self) -> &mut super::windows::WindowSession { &mut self.0 } }",
+    );
+    rejected(
+        "struct Local(super::windows::WindowSession); impl std::ops::Index<usize> for Local { type Output = super::windows::WindowSession; fn index(&self, _: usize) -> &Self::Output { &self.0 } } impl std::ops::IndexMut<usize> for Local { fn index_mut(&mut self, _: usize) -> &mut Self::Output { &mut self.0 } }",
+    );
+
+    check(
+        &[
+            ("src/lib.rs", library),
+            ("src/editor/mod.rs", editor),
+            (
+                "src/editor/session/mod.rs",
+                "pub mod notifications; pub mod windows;",
+            ),
+            (
+                "src/editor/session/notifications.rs",
+                "pub fn immutable(_: &super::windows::WindowSession, _: &super::windows::NavigationStamp) {} struct ExecutionLane; pub fn loan(_: &mut ExecutionLane) {} #[cfg(test)] pub fn test_only(_: &mut super::windows::WindowSession) {} #[cfg(all(unix, test))] mod tests { pub fn nested(_: &mut super::super::windows::WindowSession) {} }",
+            ),
+            (
+                "src/editor/session/windows.rs",
+                "pub struct WindowSession; pub struct NavigationStamp; pub fn own(_: &mut WindowSession, _: &mut crate::ui::window::WindowGraph) {}",
+            ),
+            (
+                "src/ui/mod.rs",
+                "pub mod window { pub struct WindowGraph; }",
+            ),
+            (
+                "src/facade.rs",
+                "pub fn public_client(_: &mut crate::editor::state::EditorState) {}",
+            ),
+        ],
+        "pub fn service() {}",
+    )
+    .unwrap();
+}
+
+#[test]
+fn session_owner_classification_uses_logical_and_physical_module_identity() {
+    let root = std::path::Path::new("/fixture");
+    for (source, kind, owner) in SESSION_OWNERS {
+        let logical = format!("crate::editor::session::{source}");
+        let physical = root.join("src/editor/session").join(source);
+        assert_eq!(
+            session_owner(root, &logical, &physical.with_extension("rs")),
+            Some(*owner)
+        );
+        assert_eq!(
+            session_owner(root, "crate::facade::remounted", &physical.join("child.rs")),
+            Some(*owner)
+        );
+        assert_eq!(
+            mutable_authority_owner(&format!("{logical}::{kind}")),
+            Some(*owner)
+        );
+    }
+
+    let library =
+        "extern crate self as local_crate; pub mod editor; pub mod facade; pub mod language;";
+    let target = "pub struct WindowSession;";
+    for extra in [
+        vec![
+            ("src/editor/mod.rs", "pub mod session;"),
+            (
+                "src/editor/session/mod.rs",
+                "#[path = \"../../shared.rs\"] pub mod notifications; pub mod windows;",
+            ),
+            (
+                "src/shared.rs",
+                "pub fn bad(_: &mut crate::editor::session::windows::WindowSession) {}",
+            ),
+            ("src/editor/session/windows.rs", target),
+        ],
+        vec![
+            ("src/editor/mod.rs", "pub mod session;"),
+            (
+                "src/editor/session/mod.rs",
+                "pub mod notifications; pub mod windows;",
+            ),
+            ("src/editor/session/notifications.rs", "pub fn valid() {}"),
+            ("src/editor/session/windows.rs", target),
+            (
+                "src/facade.rs",
+                "#[path = \"editor/session/notifications/remounted.rs\"] pub mod remounted;",
+            ),
+            (
+                "src/editor/session/notifications/remounted.rs",
+                "pub fn bad(_: &mut crate::editor::session::windows::WindowSession) {}",
+            ),
+        ],
+    ] {
+        let mut files = vec![("src/lib.rs", library)];
+        files.extend(extra);
+        let error = check(&files, "pub fn service() {}").unwrap_err();
+        assert!(
+            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("mutable authority") && detail.contains("WindowSession")),
+            "{error}"
+        );
+    }
+}
+
+#[test]
 fn filesystem_globs_fail_by_logical_physical_and_block_scope_but_test_globs_do_not() {
     for source in [
         "use crate::*; pub fn invalid() {}",
