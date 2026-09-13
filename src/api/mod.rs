@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, path::Path};
 pub const COMMAND_API_VERSION: u32 = 1;
 pub const WIT_API_VERSION: &str = "0.2.0";
-pub const CONFIG_SCHEMA_VERSION: u32 = 1;
+pub const CONFIG_SCHEMA_VERSION: u32 = crate::config::CONFIG_SCHEMA_VERSION;
 pub const PERSISTENCE_SCHEMA_VERSION: u32 = crate::persistence::STATE_VERSION;
 pub const PACKAGE_LOCK_SCHEMA_VERSION: u32 = 1;
 pub const THEME_SCHEMA_VERSION: u32 = 1;

@@ -235,6 +235,77 @@ fn configuration_globs_fail_by_logical_physical_and_block_scope_but_test_globs_d
 }
 
 #[test]
+fn configuration_cannot_import_higher_authority_or_launder_it_through_remounts() {
+    let library = "extern crate self as local_crate; pub mod api; pub mod config; pub mod editor; pub mod language; pub mod facade;";
+    let rejected = |result: Result<(), ArchitectureError>| {
+        let error = result.unwrap_err();
+        assert!(
+            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("forbidden authority crate::api")),
+            "{error}"
+        );
+    };
+    for source in [
+        "pub fn bad(_: crate::api::ApiManifest) {}",
+        "use crate::api::ApiManifest; pub fn bad(_: ApiManifest) {}",
+        "use crate::{api::{ApiManifest as Manifest}}; pub fn bad(_: Manifest) {}",
+        "pub use crate::api::ApiManifest as Manifest;",
+        "type Manifest = crate::api::ApiManifest; pub fn bad(_: Manifest) {}",
+        "pub fn bad(_: fn(crate::api::ApiManifest)) {}",
+        "macro_rules! authority { () => { crate::api::ApiManifest } } pub fn bad(_: authority!()) {}",
+        "pub mod nested { pub fn bad(_: crate::api::ApiManifest) {} }",
+        "#[cfg(any(unix, test))] pub fn bad(_: crate::api::ApiManifest) {}",
+    ] {
+        rejected(check(
+            &[
+                ("src/lib.rs", library),
+                ("src/api.rs", "pub struct ApiManifest;"),
+                ("src/config.rs", source),
+            ],
+            "pub fn service() {}",
+        ));
+    }
+    rejected(check(
+        &[
+            (
+                "src/lib.rs",
+                "extern crate self as local_crate; pub mod api; #[path = \"shared.rs\"] pub mod config; pub mod editor; pub mod language; pub mod facade;",
+            ),
+            ("src/api.rs", "pub struct ApiManifest;"),
+            ("src/shared.rs", "pub fn bad(_: crate::api::ApiManifest) {}"),
+        ],
+        "pub fn service() {}",
+    ));
+    rejected(check(
+        &[
+            ("src/lib.rs", library),
+            ("src/api.rs", "pub struct ApiManifest;"),
+            ("src/config.rs", "pub fn valid() {}"),
+            (
+                "src/facade.rs",
+                "#[path = \"config/remounted.rs\"] pub mod remounted;",
+            ),
+            (
+                "src/config/remounted.rs",
+                "pub fn bad(_: crate::api::ApiManifest) {}",
+            ),
+        ],
+        "pub fn service() {}",
+    ));
+    check(
+        &[
+            ("src/lib.rs", library),
+            ("src/api.rs", "pub struct ApiManifest;"),
+            (
+                "src/config.rs",
+                "#[cfg(test)] pub fn test_only(_: crate::api::ApiManifest) {} #[cfg(all(unix, test))] mod tests { pub fn nested(_: crate::api::ApiManifest) {} } pub fn valid() {}",
+            ),
+        ],
+        "pub fn service() {}",
+    )
+    .unwrap();
+}
+
+#[test]
 fn filesystem_globs_fail_by_logical_physical_and_block_scope_but_test_globs_do_not() {
     for source in [
         "use crate::*; pub fn invalid() {}",

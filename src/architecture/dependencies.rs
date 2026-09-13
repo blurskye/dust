@@ -560,6 +560,7 @@ pub(super) fn audit(root: &Path, paths: &[PathBuf]) -> Result<(), ArchitectureEr
     }
     for (module, file, reference) in &graph.references {
         let service = [
+            "config",
             "files",
             "workspace",
             "process",
@@ -572,7 +573,11 @@ pub(super) fn audit(root: &Path, paths: &[PathBuf]) -> Result<(), ArchitectureEr
         ]
         .iter()
         .any(|owner| {
-            module == &format!("crate::{owner}") || module.starts_with(&format!("crate::{owner}::"))
+            let source = clean(&root.join("src").join(owner));
+            module == &format!("crate::{owner}")
+                || module.starts_with(&format!("crate::{owner}::"))
+                || file == &source.with_extension("rs")
+                || file.starts_with(source)
         });
         if !service {
             continue;

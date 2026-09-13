@@ -38,6 +38,9 @@ pub use settings::{
     WorkspaceConfig, WorkspaceSearchConfig,
 };
 mod validation;
+
+pub(crate) const CONFIG_SCHEMA_VERSION: u32 = 1;
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -114,7 +117,7 @@ pub struct KeymapEntry {
 }
 
 const fn current_config_schema() -> u32 {
-    crate::api::CONFIG_SCHEMA_VERSION
+    CONFIG_SCHEMA_VERSION
 }
 pub fn migrate_config_source(source: &str) -> Result<(String, bool), String> {
     let mut document = source
@@ -127,13 +130,13 @@ pub fn migrate_config_source(source: &str) -> Result<(String, bool), String> {
     if version < 0
         || u32::try_from(version)
             .ok()
-            .is_none_or(|version| version > crate::api::CONFIG_SCHEMA_VERSION)
+            .is_none_or(|version| version > CONFIG_SCHEMA_VERSION)
     {
         return Err(format!("unsupported future configuration schema {version}"));
     }
-    let changed = version != i64::from(crate::api::CONFIG_SCHEMA_VERSION);
+    let changed = version != i64::from(CONFIG_SCHEMA_VERSION);
     if changed {
-        document["schema_version"] = toml_edit::value(i64::from(crate::api::CONFIG_SCHEMA_VERSION));
+        document["schema_version"] = toml_edit::value(i64::from(CONFIG_SCHEMA_VERSION));
     }
     Ok((document.to_string(), changed))
 }

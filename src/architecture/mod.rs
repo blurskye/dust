@@ -256,7 +256,7 @@ pub fn audit_source(root: &Path) -> Result<ArchitectureAudit, ArchitectureError>
             "compiled pinned built-in syntax registry",
             "single editor-session composition boundary",
             "explicit production imports and exports",
-            "service owners do not mutate editor state",
+            "resource and configuration domains do not import higher authority",
             "worker-owned bounded filesystem traversal",
             "worker-owned explorer metadata watching",
             "worker-owned root-scoped Git status and mutations",

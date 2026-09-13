@@ -339,7 +339,7 @@ impl Config {
         {
             return Err("workspace service limits are outside safe bounds");
         }
-        if self.schema_version > crate::api::CONFIG_SCHEMA_VERSION {
+        if self.schema_version > super::CONFIG_SCHEMA_VERSION {
             return Err("configuration schema is newer than this Dust build");
         }
         if !(1..=4096).contains(&self.debug.maximum_arguments)
