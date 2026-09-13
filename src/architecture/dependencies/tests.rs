@@ -63,7 +63,7 @@ fn canonical_services_reject_direct_local_alias_reexport_glob_and_macro_authorit
     )
     .expect_err(source);
     assert!(
-        matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("forbidden authority crate::editor")),
+        matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("production wildcard")),
         "{source}: {error}"
     );
 }
@@ -123,7 +123,7 @@ fn migrated_owner_and_composition_globs_fail_closed_but_test_only_globs_do_not()
     ] {
         let error = check(&[("src/editor/mod.rs", source)], "pub fn service() {}").unwrap_err();
         assert!(
-            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("imports and exports explicitly") && detail.contains("production wildcards remain globally")),
+            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("production wildcard") && (detail.contains("imports and exports explicitly") || detail.contains("must name every export explicitly"))),
             "{source}: {error}"
         );
     }
@@ -139,7 +139,7 @@ fn migrated_owner_and_composition_globs_fail_closed_but_test_only_globs_do_not()
     )
     .unwrap_err();
     assert!(
-        matches!(remounted, ArchitectureError::Dependency { detail, .. } if detail.contains("imports and exports explicitly"))
+        matches!(remounted, ArchitectureError::Dependency { detail, .. } if detail.contains("production wildcard"))
     );
     let remounted = check(
         &[
@@ -156,7 +156,7 @@ fn migrated_owner_and_composition_globs_fail_closed_but_test_only_globs_do_not()
     )
     .unwrap_err();
     assert!(
-        matches!(remounted, ArchitectureError::Dependency { detail, .. } if detail.contains("imports and exports explicitly"))
+        matches!(remounted, ArchitectureError::Dependency { detail, .. } if detail.contains("production wildcard"))
     );
     check(
         &[(
@@ -722,36 +722,42 @@ fn ui_render_and_window_globs_fail_by_logical_physical_and_block_scope_but_tests
 }
 
 #[test]
-fn production_wildcard_reexports_fail_globally_but_imports_and_test_code_remain_scoped() {
+fn production_wildcard_imports_and_reexports_fail_globally_but_test_code_does_not() {
     for source in [
+        "use crate::editor::*;",
+        "pub fn nested() { use crate::editor::*; }",
+        "pub mod nested { use crate::editor::*; }",
         "pub use crate::editor::*;",
         "pub fn nested() { pub use crate::editor::*; }",
+        "pub(crate) use crate::editor::*;",
     ] {
         let error = check(&[("src/facade.rs", source)], "pub fn service() {}").unwrap_err();
         assert!(
-            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("production wildcard reexport") && detail.contains("must name every export explicitly")),
+            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("production wildcard") && (detail.contains("imports and exports explicitly") || detail.contains("must name every export explicitly"))),
             "{source}: {error}"
         );
     }
-    let remounted = check(
-        &[
-            (
-                "src/facade.rs",
-                "#[path = \"shared.rs\"] pub mod remounted;",
-            ),
-            ("src/shared.rs", "pub use crate::editor::*;"),
-        ],
-        "pub fn service() {}",
-    )
-    .unwrap_err();
-    assert!(
-        matches!(&remounted, ArchitectureError::Dependency { detail, .. } if detail.contains("production wildcard reexport")),
-        "{remounted}"
-    );
+    for source in ["use crate::editor::*;", "pub use crate::editor::*;"] {
+        let error = check(
+            &[
+                (
+                    "src/facade.rs",
+                    "#[path = \"shared.rs\"] pub mod remounted;",
+                ),
+                ("src/shared.rs", source),
+            ],
+            "pub fn service() {}",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("production wildcard")),
+            "{source}: {error}"
+        );
+    }
     check(
         &[(
             "src/facade.rs",
-            "use crate::editor::*; #[cfg(test)] pub use crate::editor::*; pub fn client(_: &EditorState) {}",
+            "use crate::editor::EditorState; #[cfg(test)] use crate::editor::*; #[cfg(test)] pub use crate::editor::*; #[cfg(test)] mod tests { use super::*; } pub fn client(_: &EditorState) {}",
         )],
         "pub fn service() {}",
     )

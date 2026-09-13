@@ -537,114 +537,26 @@ pub(super) fn audit(root: &Path, paths: &[PathBuf]) -> Result<(), ArchitectureEr
     if files.contains_key(&binary) {
         graph.load("binary".into(), &binary, &files, 0)?;
     }
-    let session_command_root = clean(&root.join("src/editor/session/commands"));
-    let editor_command_root = clean(&root.join("src/editor/command"));
-    let editor_state_root = clean(&root.join("src/editor/state"));
-    let editor_transaction_root = clean(&root.join("src/editor/transaction"));
-    let config_root = clean(&root.join("src/config"));
-    let files_root = clean(&root.join("src/files"));
-    let workspace_root = clean(&root.join("src/workspace"));
-    let extensions_root = clean(&root.join("src/extensions"));
-    let language_lsp_root = clean(&root.join("src/language/lsp"));
-    let tools_root = clean(&root.join("src/tools"));
-    let ui_render_facade = clean(&root.join("src/ui/render.rs"));
-    let ui_render_root = clean(&root.join("src/ui/render"));
-    let ui_window_facade = clean(&root.join("src/ui/window.rs"));
-    let ui_window_root = clean(&root.join("src/ui/window"));
-    let dispatch_root = clean(&root.join("src/editor/session/dispatch"));
-    if let Some(Wildcard { module, file, .. }) = graph.wildcards.iter().find(|wildcard| {
-        let module = &wildcard.module;
-        let file = &wildcard.file;
-        [
-            "configuration",
-            "documents",
-            "input",
-            "notifications",
-            "syntax",
-            "windows",
-            "workspace",
-            "persistence",
-            "search",
-            "explorer",
-            "workspace_edits",
-            "lsp_edits",
-            "plugin_edits",
-            "diagnostics",
-            "tasks",
-            "terminal",
-            "debugger",
-            "git",
-            "recovery",
-            "tooling",
-            "lsp",
-            "extensions",
-        ]
-        .iter()
-        .any(|owner| {
-            module == &format!("crate::editor::session::{owner}")
-                || module.starts_with(&format!("crate::editor::session::{owner}::"))
-        }) || file.starts_with(&session_command_root)
-            || file.starts_with(&editor_command_root)
-            || module == "crate::editor::command"
-            || module.starts_with("crate::editor::command::")
-            || file.starts_with(&editor_state_root)
-            || module == "crate::editor::state"
-            || module.starts_with("crate::editor::state::")
-            || file.starts_with(&editor_transaction_root)
-            || module == "crate::editor::transaction"
-            || module.starts_with("crate::editor::transaction::")
-            || file.starts_with(&config_root)
-            || module == "crate::config"
-            || module.starts_with("crate::config::")
-            || file.starts_with(&files_root)
-            || module == "crate::files"
-            || module.starts_with("crate::files::")
-            || file.starts_with(&workspace_root)
-            || module == "crate::workspace"
-            || module.starts_with("crate::workspace::")
-            || file.starts_with(&extensions_root)
-            || module == "crate::extensions"
-            || module.starts_with("crate::extensions::")
-            || file.starts_with(&language_lsp_root)
-            || module == "crate::language::lsp"
-            || module.starts_with("crate::language::lsp::")
-            || file.starts_with(&tools_root)
-            || module == "crate::tools"
-            || module.starts_with("crate::tools::")
-            || file == &ui_render_facade
-            || file.starts_with(&ui_render_root)
-            || module == "crate::ui::render"
-            || module.starts_with("crate::ui::render::")
-            || file == &ui_window_facade
-            || file.starts_with(&ui_window_root)
-            || module == "crate::ui::window"
-            || module.starts_with("crate::ui::window::")
-            || file.starts_with(&dispatch_root)
-            || module == "crate::editor::session::dispatch"
-            || module.starts_with("crate::editor::session::dispatch::")
-    }) {
-        return Err(failure(
-            file,
-            format!(
-                "migrated owner, UI render/window, tools, language/LSP, extension host, editor command/state/transaction, configuration, filesystem, workspace, or composition module {module} must name its imports and exports explicitly ({} production wildcards remain globally)",
-                graph.wildcards.len()
-            ),
-        ));
-    }
-    let reexports = graph
-        .wildcards
-        .iter()
-        .filter(|wildcard| wildcard.reexport)
-        .count();
-    if let Some(wildcard) = graph.wildcards.iter().find(|wildcard| wildcard.reexport) {
-        return Err(failure(
-            &wildcard.file,
+    if let Some(wildcard) = graph.wildcards.first() {
+        let detail = if wildcard.reexport {
+            let reexports = graph
+                .wildcards
+                .iter()
+                .filter(|wildcard| wildcard.reexport)
+                .count();
             format!(
                 "production wildcard reexport in {} must name every export explicitly ({reexports} wildcard reexports; {} production wildcards remain globally)",
                 wildcard.module,
                 graph.wildcards.len()
-            ),
-        ));
+            )
+        } else {
+            format!(
+                "production module {} must name its imports and exports explicitly; this global policy includes configuration, filesystem, editor command/state/transaction, workspace, extension host, language/LSP, tools, UI render/window, migrated owners, and every other production module ({} production wildcards remain globally)",
+                wildcard.module,
+                graph.wildcards.len()
+            )
+        };
+        return Err(failure(&wildcard.file, detail));
     }
     for (module, file, reference) in &graph.references {
         let service = [
