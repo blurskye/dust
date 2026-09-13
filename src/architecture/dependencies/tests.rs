@@ -305,6 +305,307 @@ fn configuration_cannot_import_higher_authority_or_launder_it_through_remounts()
     .unwrap();
 }
 
+fn check_editor_ui(extra: &[(&str, &str)]) -> Result<(), ArchitectureError> {
+    let fixture = tempfile::tempdir().unwrap();
+    let base = [
+        (
+            "src/lib.rs",
+            "extern crate self as local_crate; pub mod config; pub mod editor; pub mod facade; pub mod files; pub mod language; pub mod ui; pub mod workspace;",
+        ),
+        (
+            "src/editor/mod.rs",
+            "pub mod command; pub mod input; pub mod session; pub mod state; pub mod text; pub mod transaction;",
+        ),
+        ("src/editor/command/mod.rs", "pub struct CommandInvocation;"),
+        ("src/editor/input/mod.rs", "pub struct KeyEvent;"),
+        ("src/editor/session/mod.rs", "pub struct SessionAuthority;"),
+        ("src/editor/state/mod.rs", "pub struct EditorState;"),
+        ("src/editor/text/mod.rs", "pub struct TextBuffer;"),
+        (
+            "src/editor/transaction/mod.rs",
+            "pub struct EditorTransaction;",
+        ),
+        (
+            "src/config.rs",
+            "pub struct Config; pub fn load_bundled_config() -> Config { Config }",
+        ),
+        ("src/files.rs", "pub struct VfsWorker;"),
+        (
+            "src/facade.rs",
+            "pub use crate::editor::state::EditorState as MutableEditor; pub use crate::files::VfsWorker as Worker; pub type WorkerAlias = Worker;",
+        ),
+        (
+            "src/language.rs",
+            "pub mod syntax { pub struct SyntaxRole; }",
+        ),
+        (
+            "src/workspace.rs",
+            "pub struct DiagnosticSeverity; pub struct FileSnapshot; pub struct ProposalState; pub struct WorkspaceEditProposal; pub mod git { pub struct GitRepositoryId; }",
+        ),
+        (
+            "src/ui/mod.rs",
+            "pub mod geometry; pub mod render; pub mod terminal; pub mod window;",
+        ),
+        ("src/ui/geometry.rs", "pub struct Geometry;"),
+        ("src/ui/render.rs", "pub struct UiState;"),
+        ("src/ui/terminal.rs", "pub struct TerminalSession;"),
+        ("src/ui/window.rs", "pub struct WindowGraph;"),
+    ];
+    let mut paths = BTreeSet::new();
+    for (path, source) in base.into_iter().chain(extra.iter().copied()) {
+        let path = fixture.path().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, source).unwrap();
+        paths.insert(path);
+    }
+    audit(fixture.path(), &paths.into_iter().collect::<Vec<_>>())
+}
+
+#[test]
+fn deterministic_editor_layers_reject_upward_authority_and_remount_laundering() {
+    let rejected = |extra: &[(&str, &str)]| {
+        let error = check_editor_ui(extra).unwrap_err();
+        assert!(
+            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("deterministic") && detail.contains("forbidden authority crate::files")),
+            "{error}"
+        );
+    };
+    for family in ["text", "state", "transaction", "command", "input"] {
+        let path = format!("src/editor/{family}/mod.rs");
+        rejected(&[(&path, "pub fn bad(_: &crate::files::VfsWorker) {}")]);
+    }
+    for source in [
+        "use crate::files::VfsWorker as Worker; pub fn bad(_: &Worker) {}",
+        "use crate::{files::{VfsWorker as Worker}}; pub fn bad(_: &Worker) {}",
+        "pub use crate::files::VfsWorker as Worker;",
+        "pub fn bad(_: &crate::facade::Worker) {}",
+        "type Worker = crate::facade::WorkerAlias; pub fn bad(_: Worker) {}",
+        "pub fn bad(_: fn(crate::files::VfsWorker)) {}",
+        "pub fn bad(_: *mut crate::files::VfsWorker) {}",
+        "pub fn bad(_: std::cell::RefCell<crate::files::VfsWorker>) {}",
+        "macro_rules! ty { ($t:ty) => { $t } } pub fn bad(_: ty!(crate::files::VfsWorker)) {}",
+        "pub mod nested { pub fn bad(_: &crate::files::VfsWorker) {} }",
+        "#[cfg(any(unix, test))] pub fn bad(_: &crate::files::VfsWorker) {}",
+        "pub fn bad(_: &::local_crate::files::VfsWorker) {}",
+    ] {
+        rejected(&[("src/editor/text/mod.rs", source)]);
+    }
+    rejected(&[
+        (
+            "src/editor/mod.rs",
+            "pub mod command; pub mod input; pub mod session; pub mod state; #[path = \"../shared.rs\"] pub mod text; pub mod transaction;",
+        ),
+        (
+            "src/shared.rs",
+            "pub fn bad(_: &crate::files::VfsWorker) {}",
+        ),
+    ]);
+    rejected(&[
+        (
+            "src/facade.rs",
+            "#[path = \"editor/text/remounted.rs\"] pub mod remounted;",
+        ),
+        (
+            "src/editor/text/remounted.rs",
+            "pub fn bad(_: &crate::files::VfsWorker) {}",
+        ),
+    ]);
+
+    check_editor_ui(&[
+        (
+            "src/editor/text/mod.rs",
+            "pub struct TextBuffer; pub fn text(_: &TextBuffer) {} #[cfg(test)] pub fn fixture(_: &crate::files::VfsWorker) {}",
+        ),
+        (
+            "src/editor/state/mod.rs",
+            "pub struct EditorState; pub fn state(_: &crate::editor::text::TextBuffer) {}",
+        ),
+        (
+            "src/editor/transaction/mod.rs",
+            "pub struct EditorTransaction; pub fn transaction(_: &crate::editor::state::EditorState, _: &crate::workspace::WorkspaceEditProposal) {}",
+        ),
+        (
+            "src/editor/command/mod.rs",
+            "pub struct CommandInvocation; pub fn command(_: &crate::editor::state::EditorState, _: &crate::editor::transaction::EditorTransaction) {}",
+        ),
+        (
+            "src/editor/input/mod.rs",
+            "pub struct KeyEvent; pub fn input(_: &crate::editor::command::CommandInvocation) {}",
+        ),
+    ])
+    .unwrap();
+}
+
+#[test]
+fn ui_rejects_effect_owners_and_mutable_foreign_authority_with_dto_controls() {
+    let effect_error = |extra: &[(&str, &str)]| {
+        let error = check_editor_ui(extra).unwrap_err();
+        assert!(
+            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("deterministic Ui") && detail.contains("forbidden authority crate::files")),
+            "{error}"
+        );
+    };
+    for source in [
+        "pub fn bad(_: &crate::files::VfsWorker) {}",
+        "use crate::files::VfsWorker as Worker; pub fn bad(_: &Worker) {}",
+        "pub fn bad(_: &crate::facade::Worker) {}",
+        "type Worker = crate::facade::WorkerAlias; pub fn bad(_: Worker) {}",
+        "pub fn bad(_: fn(crate::files::VfsWorker)) {}",
+        "macro_rules! ty { ($t:ty) => { $t } } pub fn bad(_: ty!(crate::files::VfsWorker)) {}",
+        "pub mod nested { pub fn bad(_: &crate::files::VfsWorker) {} }",
+        "#[cfg(any(unix, test))] pub fn bad(_: &crate::files::VfsWorker) {}",
+    ] {
+        effect_error(&[("src/ui/render.rs", source)]);
+    }
+    let config_loader = check_editor_ui(&[(
+        "src/ui/render.rs",
+        "pub fn bad() { let _ = crate::config::load_bundled_config(); }",
+    )])
+    .unwrap_err();
+    assert!(
+        matches!(&config_loader, ArchitectureError::Dependency { detail, .. } if detail.contains("forbidden authority crate::config") && detail.contains("load_bundled_config")),
+        "{config_loader}"
+    );
+    effect_error(&[
+        (
+            "src/ui/mod.rs",
+            "pub mod geometry; #[path = \"../shared_ui.rs\"] pub mod render; pub mod terminal; pub mod window;",
+        ),
+        (
+            "src/shared_ui.rs",
+            "pub fn bad(_: &crate::files::VfsWorker) {}",
+        ),
+    ]);
+    effect_error(&[
+        (
+            "src/facade.rs",
+            "#[path = \"ui/render/remounted.rs\"] pub mod remounted;",
+        ),
+        (
+            "src/ui/render/remounted.rs",
+            "pub fn bad(_: &crate::files::VfsWorker) {}",
+        ),
+    ]);
+
+    let mutable_error = |path: &str, source: &str, authority: &str| {
+        let error = check_editor_ui(&[(path, source)]).unwrap_err();
+        assert!(
+            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("UI owner") && detail.contains("mutable authority") && detail.contains(authority)),
+            "{source}: {error}"
+        );
+    };
+    for source in [
+        "pub fn bad(_: &mut crate::editor::state::EditorState) {}",
+        "use crate::editor::state::EditorState as State; pub fn bad(_: &mut State) {}",
+        "use crate::{editor::{state::EditorState as State}}; pub fn bad(_: &mut State) {}",
+        "pub fn bad(_: &mut crate::facade::MutableEditor) {}",
+        "type State = crate::facade::MutableEditor; pub fn bad(_: &mut State) {}",
+        "pub fn bad(_: fn(&mut crate::editor::state::EditorState)) {}",
+        "pub fn bad(_: *mut crate::editor::state::EditorState) {}",
+        "pub fn bad(_: std::cell::RefCell<crate::editor::state::EditorState>) {}",
+        "struct Local(crate::editor::state::EditorState); impl std::ops::Deref for Local { type Target = crate::editor::state::EditorState; fn deref(&self) -> &Self::Target { &self.0 } } impl std::ops::DerefMut for Local { fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 } }",
+        "macro_rules! ty { ($t:ty) => { $t } } pub fn bad(_: ty!(&mut crate::editor::state::EditorState)) {}",
+    ] {
+        mutable_error("src/ui/render.rs", source, "EditorState");
+    }
+    mutable_error(
+        "src/ui/render.rs",
+        "pub fn bad(_: &mut crate::ui::window::WindowGraph) {}",
+        "WindowGraph",
+    );
+    mutable_error(
+        "src/ui/window.rs",
+        "pub fn bad(_: &mut crate::ui::render::UiState) {}",
+        "UiState",
+    );
+    mutable_error(
+        "src/ui/geometry.rs",
+        "pub fn bad(_: &mut crate::config::Config) {}",
+        "Config",
+    );
+    mutable_error(
+        "src/ui/render.rs",
+        "pub mod nested { pub fn bad(_: &mut crate::editor::state::EditorState) {} }",
+        "EditorState",
+    );
+    mutable_error(
+        "src/ui/render.rs",
+        "#[cfg(any(unix, test))] pub fn bad(_: &mut crate::editor::state::EditorState) {}",
+        "EditorState",
+    );
+    let remounted_mutable = check_editor_ui(&[
+        (
+            "src/facade.rs",
+            "#[path = \"ui/render/remounted.rs\"] pub mod remounted;",
+        ),
+        (
+            "src/ui/render/remounted.rs",
+            "pub fn bad(_: &mut crate::ui::window::WindowGraph) {}",
+        ),
+    ])
+    .unwrap_err();
+    assert!(
+        matches!(&remounted_mutable, ArchitectureError::Dependency { detail, .. } if detail.contains("UI owner") && detail.contains("mutable authority") && detail.contains("WindowGraph")),
+        "{remounted_mutable}"
+    );
+
+    check_editor_ui(&[
+        (
+            "src/ui/render.rs",
+            "pub struct UiState; pub fn render(_: &mut UiState, _: &crate::editor::state::EditorState, _: &crate::config::Config, _: crate::language::syntax::SyntaxRole, _: crate::workspace::DiagnosticSeverity, _: crate::workspace::git::GitRepositoryId) {} #[cfg(test)] pub fn fixture(_: &crate::files::VfsWorker) {}",
+        ),
+        (
+            "src/ui/window.rs",
+            "pub struct WindowGraph; pub fn graph(_: &mut WindowGraph) {}",
+        ),
+        (
+            "src/ui/terminal.rs",
+            "pub struct TerminalSession; pub fn terminal(_: &mut TerminalSession, _: &crate::editor::input::KeyEvent) {}",
+        ),
+    ])
+    .unwrap();
+}
+
+#[test]
+fn deterministic_source_classification_uses_logical_and_physical_roots() {
+    let root = std::path::Path::new("/fixture");
+    for (logical, physical, expected) in [
+        (
+            "crate::editor::text",
+            "editor/text",
+            DeterministicSource::Text,
+        ),
+        (
+            "crate::editor::state",
+            "editor/state",
+            DeterministicSource::State,
+        ),
+        (
+            "crate::editor::transaction",
+            "editor/transaction",
+            DeterministicSource::Transaction,
+        ),
+        (
+            "crate::editor::command",
+            "editor/command",
+            DeterministicSource::Command,
+        ),
+        (
+            "crate::editor::input",
+            "editor/input",
+            DeterministicSource::Input,
+        ),
+        ("crate::ui", "ui", DeterministicSource::Ui),
+    ] {
+        let path = root.join("src").join(physical).join("child.rs");
+        assert_eq!(deterministic_source(root, logical, &path), Some(expected));
+        assert_eq!(
+            deterministic_source(root, "crate::facade::remounted", &path),
+            Some(expected)
+        );
+    }
+}
+
 #[test]
 fn session_owners_cannot_receive_or_expose_mutable_foreign_authority() {
     let library = "extern crate self as local_crate; pub mod editor; pub mod facade; pub mod language; pub mod ui;";

@@ -596,6 +596,176 @@ impl Graph {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DeterministicSource {
+    Text,
+    State,
+    Transaction,
+    Command,
+    Input,
+    Ui,
+}
+
+fn source_root(root: &Path, module: &str, file: &Path, logical: &str, physical: &str) -> bool {
+    let source = clean(&root.join("src").join(physical));
+    module == logical
+        || module.starts_with(&format!("{logical}::"))
+        || file == source.with_extension("rs")
+        || file.starts_with(source)
+}
+
+fn deterministic_source(root: &Path, module: &str, file: &Path) -> Option<DeterministicSource> {
+    [
+        (
+            "crate::editor::text",
+            "editor/text",
+            DeterministicSource::Text,
+        ),
+        (
+            "crate::editor::state",
+            "editor/state",
+            DeterministicSource::State,
+        ),
+        (
+            "crate::editor::transaction",
+            "editor/transaction",
+            DeterministicSource::Transaction,
+        ),
+        (
+            "crate::editor::command",
+            "editor/command",
+            DeterministicSource::Command,
+        ),
+        (
+            "crate::editor::input",
+            "editor/input",
+            DeterministicSource::Input,
+        ),
+        ("crate::ui", "ui", DeterministicSource::Ui),
+    ]
+    .into_iter()
+    .find_map(|(logical, physical, source)| {
+        source_root(root, module, file, logical, physical).then_some(source)
+    })
+}
+
+fn target_in(target: &str, root: &str) -> bool {
+    target == root || target.starts_with(&format!("{root}::"))
+}
+
+fn target_names(target: &str, root: &str, names: &[&str]) -> bool {
+    target_in(target, root) && target.split("::").any(|part| names.contains(&part))
+}
+
+fn deterministic_dependency_allowed(source: DeterministicSource, target: &str) -> bool {
+    if !target.starts_with("crate::") {
+        return true;
+    }
+    let editor = |family| target_in(target, &format!("crate::editor::{family}"));
+    let universal_limit = matches!(
+        target,
+        "crate::UNIVERSAL_LAYOUT_DEPTH_CEILING" | "crate::UNIVERSAL_LAYOUT_WINDOW_CEILING"
+    );
+    match source {
+        DeterministicSource::Text => editor("text"),
+        DeterministicSource::State => {
+            universal_limit
+                || ["text", "state", "transaction", "command"]
+                    .into_iter()
+                    .any(editor)
+        }
+        DeterministicSource::Transaction => {
+            ["text", "state", "transaction", "command"]
+                .into_iter()
+                .any(editor)
+                || [
+                    "crate::workspace::FileSnapshot",
+                    "crate::workspace::ProposalState",
+                    "crate::workspace::WorkspaceEditProposal",
+                    "crate::workspace::edit::FileSnapshot",
+                    "crate::workspace::edit::ProposalState",
+                    "crate::workspace::edit::WorkspaceEditProposal",
+                    "crate::persistence::PersistedLayout",
+                    "crate::persistence::PersistedSession",
+                    "crate::persistence::model::PersistedLayout",
+                    "crate::persistence::model::PersistedSession",
+                ]
+                .into_iter()
+                .any(|allowed| target_in(target, allowed))
+        }
+        DeterministicSource::Command => ["text", "state", "transaction", "command"]
+            .into_iter()
+            .any(editor),
+        DeterministicSource::Input => ["text", "state", "transaction", "command", "input"]
+            .into_iter()
+            .any(editor),
+        DeterministicSource::Ui => {
+            universal_limit
+                || target_in(target, "crate::ui")
+                || target_names(
+                    target,
+                    "crate::config",
+                    &[
+                        "AmbiguousWidth",
+                        "BorderStyle",
+                        "ColorMode",
+                        "CommandLineConfig",
+                        "Config",
+                        "CursorShape",
+                        "DashboardConfig",
+                        "EditorConfig",
+                        "KeyHintAnchor",
+                        "LineNumbers",
+                        "PromptTextConfig",
+                        "ThemeAttribute",
+                        "ThemeColor",
+                        "ThemeConfig",
+                    ],
+                )
+                || ["text", "state", "input"].into_iter().any(editor)
+                || [
+                    "crate::language::syntax::SyntaxRole",
+                    "crate::workspace::DiagnosticSeverity",
+                    "crate::workspace::diagnostics::DiagnosticSeverity",
+                    "crate::workspace::git::GitRepositoryId",
+                    "crate::workspace::git::status::GitRepositoryId",
+                ]
+                .into_iter()
+                .any(|allowed| target_in(target, allowed))
+        }
+    }
+}
+
+fn ui_authority_owner(root: &Path, module: &str, file: &Path) -> Option<&'static str> {
+    [
+        ("crate::ui::render", "ui/render", "render"),
+        ("crate::ui::window", "ui/window", "window"),
+        ("crate::ui::terminal", "ui/terminal", "terminal"),
+    ]
+    .into_iter()
+    .find_map(|(logical, physical, owner)| {
+        source_root(root, module, file, logical, physical).then_some(owner)
+    })
+}
+
+fn ui_mutable_authority(target: &str) -> Option<&'static str> {
+    [
+        ("EditorState", "editor-state"),
+        ("UiState", "render"),
+        ("WindowGraph", "window"),
+    ]
+    .into_iter()
+    .find_map(|(kind, owner)| target.ends_with(&format!("::{kind}")).then_some(owner))
+    .or_else(|| {
+        target_names(
+            target,
+            "crate::config",
+            &["Config", "ResolvedConfiguration"],
+        )
+        .then_some("configuration")
+    })
+}
+
 const SESSION_OWNERS: &[(&str, &str, &str)] = &[
     ("windows", "WindowSession", "windows"),
     ("input", "InputSession", "input"),
@@ -692,22 +862,57 @@ pub(super) fn audit(root: &Path, paths: &[PathBuf]) -> Result<(), ArchitectureEr
         return Err(failure(&wildcard.file, detail));
     }
     for (module, file, reference) in &graph.mutable_references {
-        let Some(source_owner) = session_owner(root, module, file) else {
+        let session_owner = session_owner(root, module, file);
+        let ui_owner = (deterministic_source(root, module, file) == Some(DeterministicSource::Ui))
+            .then(|| ui_authority_owner(root, module, file).unwrap_or("ui"));
+        if session_owner.is_none() && ui_owner.is_none() {
+            continue;
+        }
+        for target in graph.resolve(module, reference, &mut Lookup::default()) {
+            if target.starts_with("!resolution-limit") {
+                return Err(failure(file, "canonical alias resolution budget exceeded"));
+            }
+            if let Some(source_owner) = session_owner {
+                if let Some(target_owner) = mutable_authority_owner(&target) {
+                    if target_owner != source_owner {
+                        return Err(failure(
+                            file,
+                            format!(
+                                "session owner {module} must not receive or expose mutable authority {target} owned by {target_owner}"
+                            ),
+                        ));
+                    }
+                }
+            }
+            if let Some(source_owner) = ui_owner {
+                if let Some(target_owner) = ui_mutable_authority(&target) {
+                    if target_owner != source_owner {
+                        return Err(failure(
+                            file,
+                            format!(
+                                "UI owner {module} must not receive or expose mutable authority {target} owned by {target_owner}"
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    for (module, file, reference) in &graph.references {
+        let Some(source) = deterministic_source(root, module, file) else {
             continue;
         };
         for target in graph.resolve(module, reference, &mut Lookup::default()) {
             if target.starts_with("!resolution-limit") {
                 return Err(failure(file, "canonical alias resolution budget exceeded"));
             }
-            if let Some(target_owner) = mutable_authority_owner(&target) {
-                if target_owner != source_owner {
-                    return Err(failure(
-                        file,
-                        format!(
-                            "session owner {module} must not receive or expose mutable authority {target} owned by {target_owner}"
-                        ),
-                    ));
-                }
+            if !deterministic_dependency_allowed(source, &target) {
+                return Err(failure(
+                    file,
+                    format!(
+                        "deterministic {source:?} module {module} depends on forbidden authority {target}"
+                    ),
+                ));
             }
         }
     }

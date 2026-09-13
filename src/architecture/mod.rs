@@ -257,6 +257,7 @@ pub fn audit_source(root: &Path) -> Result<ArchitectureAudit, ArchitectureError>
             "single editor-session composition boundary",
             "explicit production imports and exports",
             "resource and configuration domains do not import higher authority",
+            "deterministic editor and UI dependencies stay inward",
             "session owners reject mutable foreign authority",
             "worker-owned bounded filesystem traversal",
             "worker-owned explorer metadata watching",
