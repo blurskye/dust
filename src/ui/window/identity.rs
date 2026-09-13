@@ -1,4 +1,4 @@
-use super::*;
+use super::{MAXIMUM_CONTENT_TYPE_ID_BYTES, error::WindowError};
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ContentTypeId(String);

@@ -1,4 +1,9 @@
-use super::*;
+use crate::{
+    config::{AmbiguousWidth, Config},
+    ui::{CellGrid, Style, geometry::text_width, window::WindowRect},
+};
+
+use super::{ExplorerSegmentRole, ExplorerUiState, Frame, UiState, editor::cursor_style};
 
 /// Width of the persistent explorer dock, leaving a usable editor pane.
 #[must_use]

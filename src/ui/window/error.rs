@@ -1,4 +1,6 @@
-use super::*;
+use std::fmt;
+
+use super::{MAXIMUM_OWNER_BYTES, MAXIMUM_TITLE_BYTES};
 
 pub(super) fn increment(value: &mut u64) -> Result<u64, WindowError> {
     *value = value

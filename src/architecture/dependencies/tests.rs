@@ -632,6 +632,96 @@ fn tools_globs_fail_by_logical_physical_and_block_scope_but_test_globs_do_not() 
 }
 
 #[test]
+fn ui_render_and_window_globs_fail_by_logical_physical_and_block_scope_but_tests_do_not() {
+    let library = "extern crate self as local_crate; pub mod editor; pub mod language; pub mod facade; pub mod ui;";
+    let rejected = |result: Result<(), ArchitectureError>| {
+        let error = result.unwrap_err();
+        assert!(
+            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("UI render/window") && detail.contains("imports and exports explicitly")),
+            "{error}"
+        );
+    };
+    for family in ["render", "window"] {
+        let primary = format!("src/ui/{family}.rs");
+        let other = if family == "render" {
+            "src/ui/window.rs"
+        } else {
+            "src/ui/render.rs"
+        };
+        for source in [
+            "use crate::*; pub fn invalid() {}",
+            "pub fn invalid() { use crate::*; }",
+            "pub mod nested { use crate::*; }",
+        ] {
+            rejected(check(
+                &[
+                    ("src/lib.rs", library),
+                    ("src/ui.rs", "pub mod render; pub mod window;"),
+                    (&primary, source),
+                    (other, "pub fn valid() {}"),
+                ],
+                "pub fn service() {}",
+            ));
+        }
+
+        let logical_ui = if family == "render" {
+            "#[path = \"remounted.rs\"] pub mod render; pub mod window;"
+        } else {
+            "pub mod render; #[path = \"remounted.rs\"] pub mod window;"
+        };
+        rejected(check(
+            &[
+                ("src/lib.rs", library),
+                ("src/ui.rs", logical_ui),
+                ("src/remounted.rs", "use crate::*;"),
+                (other, "pub fn valid() {}"),
+            ],
+            "pub fn service() {}",
+        ));
+
+        let physical = format!("src/ui/{family}/remounted.rs");
+        let physical_declaration =
+            format!("#[path = \"ui/{family}/remounted.rs\"] pub mod remounted;");
+        rejected(check(
+            &[
+                ("src/lib.rs", library),
+                ("src/ui.rs", "pub mod render; pub mod window;"),
+                (&primary, "pub fn valid() {}"),
+                (other, "pub fn valid() {}"),
+                ("src/facade.rs", &physical_declaration),
+                (&physical, "use crate::*;"),
+            ],
+            "pub fn service() {}",
+        ));
+
+        let facade_declaration = format!("#[path = \"ui/{family}.rs\"] pub mod remounted;");
+        rejected(check(
+            &[
+                ("src/lib.rs", library),
+                ("src/ui.rs", "pub fn valid() {}"),
+                ("src/facade.rs", &facade_declaration),
+                (&primary, "use crate::*;"),
+            ],
+            "pub fn service() {}",
+        ));
+
+        check(
+            &[
+                ("src/lib.rs", library),
+                ("src/ui.rs", "pub mod render; pub mod window;"),
+                (
+                    &primary,
+                    "use std::path::Path; #[cfg(test)] use crate::*; #[cfg(test)] mod tests { use super::*; } pub fn valid(_: &Path) {}",
+                ),
+                (other, "pub fn valid() {}"),
+            ],
+            "pub fn service() {}",
+        )
+        .unwrap();
+    }
+}
+
+#[test]
 fn production_wildcard_reexports_fail_globally_but_imports_and_test_code_remain_scoped() {
     for source in [
         "pub use crate::editor::*;",

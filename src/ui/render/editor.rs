@@ -1,4 +1,28 @@
-use super::*;
+use std::collections::BTreeMap;
+
+use crossterm::cursor::SetCursorStyle;
+use unicode_segmentation::UnicodeSegmentation;
+
+use crate::{
+    config::{AmbiguousWidth, Config, CursorShape, LineNumbers},
+    editor::{
+        EditorMode, EditorState, SelectionKind,
+        text::{
+            ByteOffset, ByteRange, DisplayWidthPolicy, PositionCodec,
+            byte_range_for_display_columns, display_column_at,
+        },
+    },
+    ui::{CellGrid, Style, geometry::text_width},
+};
+
+use super::{
+    Frame, UiDiagnostic, UiGitSignKind, UiState,
+    visual_rows::{
+        VisualRowAnchor, VisualRowModel, active_indent_guide, editor_line_number_digits,
+        editor_state_content_width, editor_state_gutter_width, git_sign_column,
+        is_indent_guide_column, leading_indentation_width, one_cell_symbol, syntax_role_style,
+    },
+};
 
 fn diagnostic_style(severity: crate::workspace::DiagnosticSeverity) -> Style {
     match severity {

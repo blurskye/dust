@@ -1,18 +1,28 @@
 mod terminal;
-use terminal::*;
+use terminal::{active_compositor, dock_terminal_panel, render_key_hints};
 mod explorer;
-use explorer::*;
+use explorer::{place_workspace_frame, render_explorer_window};
 mod overlays;
 use super::geometry::text_width;
-use overlays::*;
+use overlays::{
+    render_dashboard, render_documentation_popup, render_language_completion, render_lsp_progress,
+};
 mod workspace;
-use workspace::*;
-mod visual_rows;
-use visual_rows::*;
+use workspace::{
+    render_non_tiled_editor_window, render_non_tiled_editor_windows, render_workspace,
+};
 mod editor;
-use editor::*;
 mod surfaces;
-use surfaces::*;
+mod visual_rows;
+#[cfg(test)]
+use editor::render_editor_view;
+#[cfg(test)]
+use overlays::{content_tab_width, render_content_tab_line};
+use surfaces::{
+    render_picker, render_plugin_surface, render_private_surface, render_prompt, render_tool_menu,
+};
+#[cfg(test)]
+use visual_rows::{VisualRowSlice, editor_line_number_digits, git_sign_column};
 
 pub use editor::{snap_display_column, snap_display_column_forward};
 pub use explorer::explorer_panel_width;
@@ -22,31 +32,23 @@ pub(crate) use terminal::terminal_geometry_from_rect;
 pub use terminal::terminal_tab_at_column;
 pub use visual_rows::{
     VisualRowAnchor, VisualRowModel, editor_content_width, editor_gutter_width,
-    editor_line_number_digits, editor_state_content_width, editor_state_gutter_width,
+    editor_state_content_width, editor_state_gutter_width,
 };
 pub use workspace::{
     PaneViewport, active_editor_pane_viewport, active_pane_viewport, editor_pane_viewport_at,
     pane_viewports,
 };
 
-use std::{collections::BTreeMap, path::Path, time::Instant};
+use std::time::Instant;
 
-use crate::config::{
-    AmbiguousWidth, BorderStyle, CommandLineConfig, Config, CursorShape, DashboardConfig,
-    EditorConfig, KeyHintAnchor, LineNumbers, PromptTextConfig,
-};
-use crate::editor::text::{
-    ByteOffset, ByteRange, DisplayWidthPolicy, PositionCodec, byte_range_for_display_columns,
-    display_column_at,
-};
-use crate::editor::{EditorMode, EditorState, SelectionKind};
+use crate::config::{AmbiguousWidth, CommandLineConfig, Config, DashboardConfig, PromptTextConfig};
+use crate::editor::EditorState;
+use crate::editor::text::{ByteOffset, ByteRange};
 use crate::ui::window::{
-    CompositorProjection, ContentAdapterKind, ContentId, TileAxis, TiledLayoutSnapshot, WindowId,
-    WindowRect,
+    CompositorProjection, ContentAdapterKind, ContentId, TiledLayoutSnapshot, WindowId, WindowRect,
 };
 use crossterm::cursor::SetCursorStyle;
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
 
 use crate::ui::{CellGrid, Style};
 

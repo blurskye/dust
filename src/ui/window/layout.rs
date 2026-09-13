@@ -1,4 +1,12 @@
-use super::*;
+use super::{
+    MAXIMUM_PROTECTED_REGIONS,
+    error::WindowError,
+    identity::{WindowId, WorkspaceTabId},
+    projection::{
+        intersect_rect, project_dock, project_float, project_tiled_node, push_compositor_window,
+        rect_contains, spatial_score, tiled_contains,
+    },
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ContentAdapterKind {

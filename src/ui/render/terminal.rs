@@ -1,4 +1,15 @@
-use super::*;
+use unicode_width::UnicodeWidthStr;
+
+use crate::{
+    config::{AmbiguousWidth, BorderStyle, Config, KeyHintAnchor},
+    editor::EditorState,
+    ui::{CellGrid, Style, geometry::text_width, window::WindowRect},
+};
+
+use super::{
+    CompositorLayoutState, Frame, KeyHintUiState, TerminalPanelGeometry, TerminalPanelMode,
+    TerminalPanelState, TerminalPhase, TerminalTabState, UiState,
+};
 
 pub(super) fn active_compositor<'a>(
     state: &EditorState,

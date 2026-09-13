@@ -1,4 +1,14 @@
-use super::*;
+use crate::{
+    config::{AmbiguousWidth, BorderStyle, Config},
+    editor::EditorState,
+    ui::{CellGrid, Style, window::TileAxis},
+};
+
+use super::{
+    Frame, UiState,
+    editor::{render_editor_view, render_status_line},
+    overlays::render_content_tab_line,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PaneViewport {

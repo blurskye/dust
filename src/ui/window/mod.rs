@@ -5,11 +5,6 @@
 //! overlay, and hidden windows together; the bundled explorer and PTYs are
 //! ordinary graph resources, while editor layout mutation remains transitional.
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fmt,
-};
-
 const MAXIMUM_CONTENT_TYPE_ID_BYTES: usize = 128;
 const MAXIMUM_OWNER_BYTES: usize = 128;
 const MAXIMUM_TITLE_BYTES: usize = 4 * 1024;
@@ -34,12 +29,10 @@ pub use model::{
 };
 mod graph;
 pub use graph::WindowGraph;
-mod projection;
-use projection::*;
 mod error;
+mod projection;
 pub use error::WindowError;
 pub(crate) use error::validate_title;
-use error::{increment, validate_identity, validate_owner};
 
 #[cfg(test)]
 mod tests;

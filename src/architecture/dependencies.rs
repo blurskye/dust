@@ -547,6 +547,10 @@ pub(super) fn audit(root: &Path, paths: &[PathBuf]) -> Result<(), ArchitectureEr
     let extensions_root = clean(&root.join("src/extensions"));
     let language_lsp_root = clean(&root.join("src/language/lsp"));
     let tools_root = clean(&root.join("src/tools"));
+    let ui_render_facade = clean(&root.join("src/ui/render.rs"));
+    let ui_render_root = clean(&root.join("src/ui/render"));
+    let ui_window_facade = clean(&root.join("src/ui/window.rs"));
+    let ui_window_root = clean(&root.join("src/ui/window"));
     let dispatch_root = clean(&root.join("src/editor/session/dispatch"));
     if let Some(Wildcard { module, file, .. }) = graph.wildcards.iter().find(|wildcard| {
         let module = &wildcard.module;
@@ -607,6 +611,14 @@ pub(super) fn audit(root: &Path, paths: &[PathBuf]) -> Result<(), ArchitectureEr
             || file.starts_with(&tools_root)
             || module == "crate::tools"
             || module.starts_with("crate::tools::")
+            || file == &ui_render_facade
+            || file.starts_with(&ui_render_root)
+            || module == "crate::ui::render"
+            || module.starts_with("crate::ui::render::")
+            || file == &ui_window_facade
+            || file.starts_with(&ui_window_root)
+            || module == "crate::ui::window"
+            || module.starts_with("crate::ui::window::")
             || file.starts_with(&dispatch_root)
             || module == "crate::editor::session::dispatch"
             || module.starts_with("crate::editor::session::dispatch::")
@@ -614,7 +626,7 @@ pub(super) fn audit(root: &Path, paths: &[PathBuf]) -> Result<(), ArchitectureEr
         return Err(failure(
             file,
             format!(
-                "migrated owner, tools, language/LSP, extension host, editor command/state/transaction, configuration, filesystem, workspace, or composition module {module} must name its imports and exports explicitly ({} production wildcards remain globally)",
+                "migrated owner, UI render/window, tools, language/LSP, extension host, editor command/state/transaction, configuration, filesystem, workspace, or composition module {module} must name its imports and exports explicitly ({} production wildcards remain globally)",
                 graph.wildcards.len()
             ),
         ));

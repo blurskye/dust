@@ -1,4 +1,14 @@
-use super::*;
+use crossterm::cursor::SetCursorStyle;
+
+use crate::{
+    config::{BorderStyle, Config},
+    ui::{Style, geometry::text_width, window::WindowRect},
+};
+
+use super::{
+    Frame, PickerUiState, PluginSurfaceUiState, PrivateSurfaceUiState, PromptState, ToolMenuState,
+    editor::cursor_style,
+};
 
 pub(super) fn render_plugin_surface(
     frame: &mut Frame,

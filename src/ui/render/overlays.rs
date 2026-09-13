@@ -1,4 +1,18 @@
-use super::*;
+use std::path::Path;
+
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
+
+use crate::{
+    config::{AmbiguousWidth, BorderStyle, Config, DashboardConfig},
+    ui::{CellGrid, Style, geometry::text_width, window::WindowRect},
+};
+
+use super::{
+    ContentTabDiagnosticSeverity, ContentTabEntry, ContentTabIdentity, DashboardAction,
+    DocumentationPopupKind, DocumentationPopupState, Frame, LanguageCompletionState, UiLspProgress,
+    editor::cursor_style,
+};
 
 pub(super) fn render_documentation_popup(
     frame: &mut Frame,

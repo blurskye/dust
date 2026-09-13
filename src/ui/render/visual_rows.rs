@@ -1,4 +1,17 @@
-use super::*;
+use std::collections::BTreeMap;
+
+use unicode_segmentation::UnicodeSegmentation;
+
+use crate::{
+    config::{AmbiguousWidth, Config, EditorConfig, LineNumbers},
+    editor::{
+        EditorState,
+        text::{ByteOffset, ByteRange, DisplayWidthPolicy, display_column_at},
+    },
+    ui::{Style, geometry::text_width},
+};
+
+use super::{UiState, editor::display_column};
 
 pub(super) fn syntax_role_style(role: crate::language::syntax::SyntaxRole) -> Style {
     match role {
