@@ -1,4 +1,27 @@
-use super::*;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
+    },
+    thread,
+};
+
+use sha2::{Digest, Sha256};
+
+use crate::extensions::{PluginLimits, PluginManifest, activate_candidate};
+
+use super::{
+    package_lock::{
+        LockedPackage, PackageError, PackageLock, PackageManifest, PackageSource,
+        commit_store_bytes, read_bounded_regular, valid_digest, valid_source, verify_lock_store,
+        write_lock_atomic, write_protected_atomic,
+    },
+    registry::RegistryPackageMetadata,
+};
 
 pub struct PackageManager {
     root: PathBuf,

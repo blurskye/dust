@@ -2,17 +2,23 @@ use std::io::Write;
 
 use reqwest::Url;
 
-use super::catalog::{
-    managed_tool_installed_version_at, nix_lsp_launch_environment_at, nix_lsp_runtime_at,
-    nixos_os_release_at, tool_launch_environment_at,
-};
-use super::version::probe_tool_version;
 use super::{
-    ToolArchiveFormat, ToolInstall, ToolInstaller, ToolKind, ToolOperation, ToolVersionRequest,
-    archive_entry_matches, bundled_tool_catalog, discover_executable, elf_interpreter,
-    install_nix_lsp_profile, install_tool, mason_snapshot_counts, nix_lsp_shell,
-    prepare_nix_lsp_workspace_at, relative_catalog_path, runtime_artifact, uninstall_managed_tool,
-    uninstall_nix_lsp_profile, validate_tool_id, write_managed_tool_version,
+    catalog::{
+        ToolArchiveFormat, ToolInstall, ToolKind, bundled_tool_catalog, discover_executable,
+        managed_tool_installed_version_at, nix_lsp_launch_environment_at, nix_lsp_runtime_at,
+        nix_lsp_shell, nixos_os_release_at, tool_launch_environment_at, write_managed_tool_version,
+    },
+    compatibility::{elf_interpreter, runtime_artifact},
+    install::install_tool,
+    install_prepare::{
+        archive_entry_matches, prepare_nix_lsp_workspace_at, relative_catalog_path,
+        validate_tool_id,
+    },
+    installer_service::{ToolInstaller, ToolOperation},
+    mason_catalog::mason_snapshot_counts,
+    package_lock::valid_digest,
+    runtimes::{install_nix_lsp_profile, uninstall_managed_tool, uninstall_nix_lsp_profile},
+    version::{ToolVersionRequest, probe_tool_version},
 };
 
 #[test]
@@ -125,7 +131,7 @@ fn rust_analyzer_catalog_exposes_distinct_exact_installable_pins() {
         version.install,
         Some(ToolInstall::Archive { ref url, ref sha256, .. })
             if url.contains(version.release.as_deref().unwrap_or_default())
-                && super::valid_digest(sha256)
+                && valid_digest(sha256)
     )));
 }
 

@@ -1,4 +1,35 @@
-use super::*;
+use std::{
+    collections::BTreeMap,
+    env, fs,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+    sync::{atomic::Ordering, mpsc::Receiver},
+    thread,
+    time::{Duration, Instant},
+};
+
+use super::{
+    NIX_COMPATIBILITY_FLAKE_PACKAGE,
+    catalog::{
+        NixCompatibilityRuntime, ToolArchiveFormat, ToolDefinition, discover_executable,
+        nix_lsp_shell, parse_nix_runtime_environment, rust_analyzer_is_rustup_proxy,
+        write_managed_tool_version,
+    },
+    compatibility::{
+        MANAGED_RUNTIME_MARKER, patch_nix_compatibility_tree, patch_nix_compatible_executable,
+        runtime_artifact,
+    },
+    download::{
+        ToolProgressReporter, download_checked, extract_one, extract_tar_gzip_tree,
+        prepare_executable, replace_managed_directory,
+    },
+    install::install_tool,
+    install_prepare::{
+        TOOL_INSTALL_TIMEOUT, ensure_private_directory, prepare_nix_lsp_workspace_at,
+        validate_tool_id,
+    },
+    package_lock::NEXT_PACKAGE_TEMP,
+};
 
 pub(super) fn fhs_glibc_loader_available() -> bool {
     [

@@ -1,4 +1,26 @@
-use super::*;
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+    sync::{atomic::Ordering, mpsc::Receiver},
+};
+
+use thiserror::Error;
+
+use super::{
+    catalog::{NixCompatibilityRuntime, ToolDefinition, ToolInstall, write_managed_tool_version},
+    compatibility::patch_nix_compatibility_tree,
+    download::{
+        ToolProgressReporter, download_checked, extract_one, prepare_executable,
+        replace_managed_directory,
+    },
+    install_prepare::{ensure_private_directory, validate_tool_id},
+    package_lock::NEXT_PACKAGE_TEMP,
+    runtimes::{
+        install_javascript_package, install_rustup_component, install_uv_tool, managed_runtime,
+        probe_downloaded_tool, run_managed,
+    },
+};
 
 pub(super) fn install_tool(
     definition: &ToolDefinition,

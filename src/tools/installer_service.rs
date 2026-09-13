@@ -1,4 +1,21 @@
-use super::*;
+use std::{
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, Sender, SyncSender, TryRecvError, TrySendError},
+    },
+    thread::{self, JoinHandle},
+};
+
+use super::{
+    catalog::{ToolDefinition, nix_lsp_shell, tool_store_root},
+    install::{ToolInstallerError, install_tool},
+    runtimes::{
+        install_nix_lsp_profile, install_path_rustup_component, uninstall_managed_tool,
+        uninstall_nix_lsp_tool,
+    },
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ToolOperation {

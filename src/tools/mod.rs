@@ -6,29 +6,7 @@ pub use registry::{
     RegistryService,
 };
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    env, fs,
-    io::{Cursor, Read, Seek, SeekFrom, Write},
-    path::{Component, Path, PathBuf},
-    process::{Command, Stdio},
-    sync::{
-        Arc, OnceLock,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc::{self, Receiver, Sender, SyncSender, TryRecvError, TrySendError},
-    },
-    thread::{self, JoinHandle},
-    time::{Duration, Instant},
-};
-
-use crate::{
-    extensions::{PluginLimits, PluginManifest, activate_candidate},
-    files::ProjectRootStrategy,
-};
-use reqwest::{Url, blocking::Client, redirect::Policy};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use thiserror::Error;
+use std::sync::OnceLock;
 
 const BUNDLED_NIX_LSP_FLAKE: &str = include_str!("../../assets/tools/nix-workspace/flake.nix");
 const BUNDLED_NIX_LSP_LOCK: &str = include_str!("../../assets/tools/nix-workspace/flake.lock");
@@ -42,19 +20,12 @@ const MAXIMUM_NIX_RUNTIME_ENVIRONMENT_BYTES: u64 = 32 * 1024;
 const MAXIMUM_OS_RELEASE_BYTES: u64 = 16 * 1024;
 static NIXOS_HOST: OnceLock<bool> = OnceLock::new();
 mod package_lock;
-use package_lock::{
-    BUNDLED_TOOL_CATALOG, NEXT_PACKAGE_TEMP, read_bounded_regular, valid_digest, valid_source,
-    write_protected_atomic,
-};
 pub use package_lock::{
     LockedPackage, PackageDependency, PackageError, PackageLock, PackageManifest, PackageSource,
     commit_store_bytes, resolve_manifests, verify_lock_store, write_lock_atomic,
 };
 mod mason_catalog;
 pub use mason_catalog::mason_filetype_for_path;
-use mason_catalog::mason_lsp_definitions;
-#[cfg(test)]
-use mason_catalog::mason_snapshot_counts;
 mod catalog;
 pub(crate) use catalog::nix_lsp_launch_environment_for_workspace_at;
 pub use catalog::{
@@ -65,26 +36,18 @@ pub use catalog::{
     nix_lsp_workspace_root, rust_analyzer_is_rustup_proxy, tool_launch_environment,
     tool_store_root,
 };
-use catalog::{NixCompatibilityRuntime, parse_nix_runtime_environment, write_managed_tool_version};
 mod installer_service;
 pub use installer_service::{ToolInstallProgress, ToolInstallResult, ToolInstaller, ToolOperation};
 mod version;
-#[cfg(not(unix))]
-use version::probe_tool_version;
 pub use version::{ToolVersionRequest, ToolVersionResult, ToolVersionService};
 mod nix_workspace;
 pub use nix_workspace::{NixWorkspaceResult, NixWorkspaceService};
-mod install_prepare;
-use install_prepare::*;
-mod download;
-use download::*;
 mod compatibility;
-use compatibility::*;
-mod runtimes;
-use runtimes::*;
+mod download;
 mod install;
+mod install_prepare;
+mod runtimes;
 pub use install::ToolInstallerError;
-use install::install_tool;
 mod package_service;
 pub use package_service::{
     PackageManager, PackageOperation, PackageOperationResult, PackageService, PackageServiceEvent,

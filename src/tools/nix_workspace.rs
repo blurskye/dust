@@ -1,4 +1,12 @@
-use super::*;
+#[cfg(test)]
+use std::time::Duration;
+use std::{
+    path::PathBuf,
+    sync::mpsc::{self, Receiver, SyncSender, TrySendError},
+    thread::{self, JoinHandle},
+};
+
+use super::install_prepare::prepare_nix_lsp_workspace;
 
 #[derive(Clone, Debug)]
 pub struct NixWorkspaceResult {

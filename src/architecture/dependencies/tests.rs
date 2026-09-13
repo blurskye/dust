@@ -577,6 +577,61 @@ fn language_lsp_globs_fail_by_logical_physical_and_block_scope_but_test_globs_do
 }
 
 #[test]
+fn tools_globs_fail_by_logical_physical_and_block_scope_but_test_globs_do_not() {
+    let library = "extern crate self as local_crate; pub mod editor; pub mod language; pub mod facade; pub mod tools;";
+    let rejected = |result: Result<(), ArchitectureError>| {
+        let error = result.unwrap_err();
+        assert!(
+            matches!(&error, ArchitectureError::Dependency { detail, .. } if detail.contains("tools") && detail.contains("imports and exports explicitly")),
+            "{error}"
+        );
+    };
+    for source in [
+        "use crate::*; pub fn invalid() {}",
+        "pub fn invalid() { use crate::*; }",
+        "pub mod nested { use crate::*; }",
+    ] {
+        rejected(check(
+            &[("src/lib.rs", library), ("src/tools.rs", source)],
+            "pub fn service() {}",
+        ));
+    }
+    rejected(check(
+        &[
+            (
+                "src/lib.rs",
+                "extern crate self as local_crate; pub mod editor; pub mod language; pub mod facade; #[path = \"remounted.rs\"] pub mod tools;",
+            ),
+            ("src/remounted.rs", "use crate::*;"),
+        ],
+        "pub fn service() {}",
+    ));
+    rejected(check(
+        &[
+            ("src/lib.rs", library),
+            ("src/tools.rs", "pub fn valid() {}"),
+            (
+                "src/facade.rs",
+                "#[path = \"tools/remounted.rs\"] pub mod remounted;",
+            ),
+            ("src/tools/remounted.rs", "use crate::*;"),
+        ],
+        "pub fn service() {}",
+    ));
+    check(
+        &[
+            ("src/lib.rs", library),
+            (
+                "src/tools.rs",
+                "use std::path::Path; #[cfg(test)] use crate::*; #[cfg(test)] mod tests { use super::*; } pub fn valid(_: &Path) {}",
+            ),
+        ],
+        "pub fn service() {}",
+    )
+    .unwrap();
+}
+
+#[test]
 fn production_wildcard_reexports_fail_globally_but_imports_and_test_code_remain_scoped() {
     for source in [
         "pub use crate::editor::*;",
