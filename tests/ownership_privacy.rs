@@ -80,14 +80,16 @@ fn real_feature_fields_are_private_but_domain_operations_and_public_editor_api_c
         format!(
             r#"
 #![allow(dead_code, unused_imports)]
-use dust::{{config, editor, language, telemetry}};
+use dust::{{config, editor, extensions, language, telemetry}};
 mod session {{
     #[path = {notice:?}] mod notifications;
     #[path = {syntax:?}] mod syntax;
     mod dispatch {{ {body} }}
 }}
-// Positive control: public EditorState editing remains a legitimate client API.
+// Positive controls: public EditorState editing and independently constructed
+// provider-domain operations remain legitimate client APIs.
 fn public_client(state: &mut editor::EditorState) {{ state.workspace_root.clear(); }}
+fn provider_client(broker: &mut extensions::PluginProviderBroker) {{ broker.reset_runtime(); }}
 "#,
             notice = root.join("src/editor/session/notifications.rs"),
             syntax = root.join("src/editor/session/syntax.rs"),
@@ -106,6 +108,19 @@ fn domain_operations(notices: &mut super::notifications::NoticeSession, syntax: 
     assert!(
         success,
         "positive control did not compile; privacy is NOT proved: {diagnostic}"
+    );
+    let clone_bypass = r#"
+fn require_clone<T: Clone>() {}
+fn bypass() { require_clone::<dust::extensions::PluginProviderBroker>(); }
+"#;
+    let (success, diagnostic) =
+        compile_probe(fixture.path(), "provider_broker_clone", clone_bypass);
+    assert!(!success, "live provider authority became cloneable");
+    assert!(
+        diagnostic.contains("E0277")
+            && diagnostic.contains("PluginProviderBroker")
+            && diagnostic.contains("Clone"),
+        "wrong provider Clone failure: {diagnostic}"
     );
     for (name, body, field) in [
         (

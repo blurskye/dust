@@ -143,7 +143,7 @@ struct ProviderSession {
     revision: u64,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub struct PluginProviderBroker {
     owners: BTreeMap<(String, PluginLoadId, String), ProviderOwner>,
     sessions: BTreeMap<u64, ProviderSession>,
@@ -647,7 +647,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(broker.projection(request).unwrap().items[0].primary, "Beta");
-        let stable = broker.clone();
+        let stable = broker.projection(request);
         let rejected = broker.apply_chunk(
             "demo",
             PluginLoadId(7),
@@ -664,7 +664,7 @@ mod tests {
             rejected.unwrap_err().code,
             PluginProviderErrorCode::DuplicateItem
         );
-        assert_eq!(broker.projection(request), stable.projection(request));
+        assert_eq!(broker.projection(request), stable);
         assert!(broker.cancel(request));
         assert_eq!(
             broker
