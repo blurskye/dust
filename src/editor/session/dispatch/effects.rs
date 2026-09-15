@@ -10495,6 +10495,7 @@ impl InteractiveApplication {
                         )
                     })
                     .collect();
+                self.clear_notice();
                 self.install_picker("Notifications".into(), items);
             }
             AppEffect::NotificationDismiss => {

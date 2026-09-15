@@ -173,6 +173,25 @@ pub fn notification_geometry(config: &Config, width: u16, height: u16) -> Option
     })
 }
 
+pub(crate) fn error_notification_geometry(
+    config: &Config,
+    width: u16,
+    height: u16,
+) -> Option<WindowRect> {
+    let margin = 1_u16.min(width / 2);
+    let available = config
+        .ui
+        .notifications
+        .max_width
+        .min(width.saturating_sub(margin.saturating_mul(2)));
+    (available >= 4 && height >= 3).then_some(WindowRect {
+        x: width.saturating_sub(margin).saturating_sub(available),
+        y: 1.min(height.saturating_sub(3)),
+        width: available,
+        height: 3,
+    })
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct SurfaceContentGeometry {
     pub picker: Option<PickerContentGeometry>,

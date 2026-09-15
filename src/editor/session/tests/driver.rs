@@ -301,6 +301,9 @@ impl TestSession {
     pub(super) fn notice(&mut self, text: &str) {
         self.application.notify_message(text.into(), false);
     }
+    pub(super) fn error(&mut self, text: &str) {
+        self.application.notify_message(text.into(), true);
+    }
     pub(super) fn resize(&mut self, width: u16, height: u16) {
         self.application
             .handle_event(UiEvent::Resize(width, height));

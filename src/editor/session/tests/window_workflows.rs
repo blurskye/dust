@@ -461,6 +461,20 @@ fn wide_notice_text_stays_inside_its_configured_cell_rectangle() {
 }
 
 #[test]
+fn errors_render_as_top_right_bordered_notifications() {
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.ui.notifications.max_width = 20;
+    let mut session = TestSession::new(loaded);
+    session.resize(40, 12);
+    session.error("bad");
+    let frame = session.frame();
+    assert_eq!(frame.grid.get(32, 1).unwrap().symbol, "╭");
+    assert_eq!(frame.grid.get(34, 2).unwrap().symbol, "b");
+    assert_eq!(frame.grid.get(38, 3).unwrap().symbol, "╯");
+    assert_eq!(frame.grid.get(32, 1).unwrap().style, Style::Error);
+}
+
+#[test]
 fn stacked_picker_selected_row_and_late_preview_share_the_painted_capacity_after_resize() {
     let mut session = TestSession::new(crate::config::load_bundled_config());
     session.resize(100, 30);

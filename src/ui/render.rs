@@ -907,6 +907,51 @@ pub fn terminal_panel_geometry(
     })
 }
 
+fn render_error_notification(
+    frame: &mut Frame,
+    message: &str,
+    style: Style,
+    config: &Config,
+    width: u16,
+    height: u16,
+) {
+    let Some(mut rect) = super::geometry::error_notification_geometry(config, width, height) else {
+        return;
+    };
+    let content_width = u16::try_from(text_width(message, config.editor.ambiguous_width))
+        .unwrap_or(rect.width)
+        .saturating_add(4)
+        .clamp(4, rect.width);
+    rect.x = rect
+        .x
+        .saturating_add(rect.width.saturating_sub(content_width));
+    rect.width = content_width;
+    let right = rect.x.saturating_add(rect.width).saturating_sub(1);
+    let bottom = rect.y.saturating_add(rect.height).saturating_sub(1);
+    for y in rect.y..=bottom {
+        for x in rect.x..=right {
+            frame.grid.set_cell(x, y, " ", Style::Default);
+        }
+    }
+    for x in rect.x.saturating_add(1)..right {
+        frame.grid.set_cell(x, rect.y, "─", style);
+        frame.grid.set_cell(x, bottom, "─", style);
+    }
+    frame.grid.set_cell(rect.x, rect.y, "╭", style);
+    frame.grid.set_cell(right, rect.y, "╮", style);
+    frame.grid.set_cell(rect.x, bottom, "╰", style);
+    frame.grid.set_cell(right, bottom, "╯", style);
+    frame.grid.set_cell(rect.x, rect.y + 1, "│", style);
+    frame.grid.set_cell(right, rect.y + 1, "│", style);
+    frame.grid.put_text_clipped(
+        rect.x.saturating_add(2),
+        rect.y + 1,
+        message,
+        style,
+        right.saturating_sub(1),
+    );
+}
+
 #[must_use]
 pub fn render(
     state: &EditorState,
@@ -1214,35 +1259,36 @@ pub fn render(
             }),
         );
     }
-    let message = ui
-        .notification
-        .as_ref()
-        .map(|message| {
-            (
+    if let Some(message) = ui.notification.as_ref() {
+        if ui.notification_error {
+            render_error_notification(
+                &mut frame,
                 message,
-                if ui.notification_error {
-                    Style::Error
-                } else {
-                    Style::Accent
-                },
-            )
-        })
-        .or_else(|| {
-            ui.config_diagnostic
-                .as_ref()
-                .map(|message| (message, Style::Error))
-        });
-    if let Some((message, style)) = message {
-        if let Some(rect) = super::geometry::notification_geometry(config, width, workspace_height)
+                Style::Error,
+                config,
+                width,
+                workspace_height,
+            );
+        } else if let Some(rect) =
+            super::geometry::notification_geometry(config, width, workspace_height)
         {
             frame.grid.put_text_clipped(
                 rect.x,
                 rect.y,
                 message,
-                style,
+                Style::Accent,
                 rect.x.saturating_add(rect.width),
             );
         }
+    } else if let Some(message) = ui.config_diagnostic.as_ref() {
+        render_error_notification(
+            &mut frame,
+            message,
+            Style::Error,
+            config,
+            width,
+            workspace_height,
+        );
     }
     if let Some(prompt) = &ui.prompt {
         let prompt_height = compositor.map_or(height, |compositor| {
