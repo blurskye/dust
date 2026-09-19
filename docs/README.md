@@ -4,6 +4,10 @@
 
 Start with [specs/README.md](specs/README.md). Its index, seven owning contracts, delivery classification, target WIT and coverage ledger replace the former numbered specs and overlapping plans. [Delivery](specs/delivery.md) distinguishes target requirements from qualified, partial, target-only and unproven implementation scope. The root [architecture pointer](../ARCHITECTURE.md) routes to the same ownership contract; it is not another specification.
 
+## Experience design (non-normative)
+
+- [Complete experience](experience.md) — the intended flow of every surface, with `[now]` and `[target]` markers. It describes intent; it does not create requirements and it cannot override a registered command, bundled default or the production WIT.
+
 ## Current operational references
 
 - [Linux user guide](user-guide-linux.md)
