@@ -88,6 +88,26 @@ fn path_completion_is_bounded_async_and_rejects_stale_generations() {
 }
 
 #[test]
+fn typing_a_path_keeps_one_listing_in_flight_and_completes_the_latest_input() {
+    let mut app = app();
+    fs::write(app.state.workspace_root.join("alpha.txt"), b"a").expect("alpha");
+    fs::write(app.state.workspace_root.join("beta.txt"), b"b").expect("beta");
+    wait_vfs(&mut app);
+    app.open_prompt(crate::ui::PromptKind::Command, "e ".into());
+    for character in ["a", "l", "p", "h", "a"] {
+        app.prompt_insert(character);
+    }
+    assert!(
+        app.documents.pending_count() <= 1,
+        "keystrokes must not queue one directory listing each"
+    );
+    wait_vfs(&mut app);
+    let completions = &app.ui.prompt.as_ref().expect("prompt").completions;
+    assert!(completions.iter().any(|item| item.label == "alpha.txt"));
+    assert!(!completions.iter().any(|item| item.label == "beta.txt"));
+}
+
+#[test]
 fn command_completion_accepts_registry_items_and_preserves_invalid_input() {
     let mut app = app();
     {

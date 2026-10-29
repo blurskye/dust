@@ -85,6 +85,11 @@ impl InputSession {
     ) -> Option<PromptCompletionKey> {
         self.completion_reads.remove(&id)
     }
+    /// Path completion keeps one directory listing in flight; a slow directory such as
+    /// `/tmp` would otherwise fill the file worker queue with one listing per keystroke.
+    pub(in crate::editor::session) fn completion_read_pending(&self) -> bool {
+        !self.completion_reads.is_empty()
+    }
     pub(in crate::editor::session) fn retire_document_request(
         &mut self,
         id: crate::files::RequestId,

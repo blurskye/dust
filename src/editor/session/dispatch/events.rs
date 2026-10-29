@@ -1329,6 +1329,9 @@ impl InteractiveApplication {
                 } => {
                     let pending = self.input.take_completion_read(id);
                     match (pending, result) {
+                        (Some(key), _) if !self.input.completion_current(&key) => {
+                            self.refresh_completions();
+                        }
                         (Some(key), Ok(paths)) => {
                             self.input.accept_prompt_paths(
                                 &key,

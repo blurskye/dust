@@ -195,6 +195,13 @@ impl InputSession {
         }
         self.history_index = None;
     }
+    pub(in crate::editor::session) fn completion_current(&self, key: &PromptCompletionKey) -> bool {
+        key.generation == self.completion_generation
+            && self
+                .prompt
+                .as_ref()
+                .is_some_and(|prompt| prompt.input == key.prompt_input)
+    }
     pub(in crate::editor::session) fn accept_prompt_paths(
         &mut self,
         request: &PromptCompletionKey,

@@ -1,7 +1,7 @@
 use super::super::configuration::{configured_grapheme_width, configured_text_width};
 use super::{
     AdapterContext, AppEffect, ArgumentSchema, BTreeMap, BTreeSet, ByteOffset, ByteRange,
-    CommandId, CommandInvocation, CommandOutcome, CommandSource, CommandSpec, CommandValue,
+    CommandId, CommandInvocation, CommandOutcome, CommandSource, CommandSpec,
     ContextRequirement, DapControl, DapEvent, DapResponse, DapSourceBreakpoint, DeferredExecution,
     DiagnosticFilter, DiagnosticOwner, DisplayWidthPolicy, DockEdge, DocumentationPopupKind,
     EditorCloseSave, EditorCloseStep, EditorCloseTarget, EditorMode, EditorOperation, EditorState,
@@ -4915,7 +4915,8 @@ impl InteractiveApplication {
                 .values()
                 .filter_map(|buffer| buffer.path.as_deref()),
             self.commands.specs().map(|spec| spec.id.as_str()),
-        ) {
+        ) && !self.input.completion_read_pending()
+        {
             if let Ok(id) = self
                 .documents
                 .list_directory(request.directory, request.limit)
