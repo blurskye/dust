@@ -1,8 +1,9 @@
 //! The agent panel: ACP sessions as tabs. Each session has its own agent process, transcript,
-//! options (model, mode, thinking level) and permission requests. The panel is one read-only
-//! buffer in a split beside the code that shows the active session with its Markdown
-//! rendered, with a tab line on top. Questions go to the active session. A session keeps the worktree it started in;
-//! switching worktrees does not move it.
+//! options (model, mode, thinking level) and permission requests. The panel is a split beside
+//! the code with its own tab line, the active session's conversation with its Markdown
+//! rendered, an input box and a footer; `ui::render::agent` draws it in place of the pane's
+//! placeholder buffer. Questions go to the active session. A session keeps the worktree it
+//! started in; switching worktrees does not move it.
 
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -25,14 +26,14 @@ use crate::{
     language::syntax::SyntaxRole,
     tools::{ToolKind, ToolStatus},
     ui::{
-        ConfirmationChoice, PromptKind, UiSyntaxSpan,
+        AgentPanelUi, ConfirmationChoice, PromptKind,
         markdown::{self, Styled},
     },
     workspace::{PickerAction, PickerItem, PickerItemId, PickerItemKind},
 };
 
-/// Shown where a file would show its name.
-const TRANSCRIPT_OWNER: &str = "Agent";
+/// The owner of the placeholder buffer the panel's pane holds.
+pub(in crate::editor::session) const TRANSCRIPT_OWNER: &str = "Agent";
 /// Messages handled per session and tick, so a chatty agent cannot stall input.
 const MESSAGES_PER_TICK: usize = 256;
 /// Files larger than this are not read for the agent.
@@ -75,8 +76,16 @@ pub(super) struct AgentPanel {
     asking: Option<PermissionRequest>,
     /// Whether the tabs open when Dust last quit were brought back.
     restored: bool,
-    /// The styles of the rendered transcript, by byte range.
-    spans: Vec<(std::ops::Range<usize>, SyntaxRole)>,
+    /// The question being typed, and the cursor in it as a byte offset.
+    input: String,
+    cursor: usize,
+    /// Transcript rows scrolled up from the end, and how many rows there are.
+    scroll: usize,
+    lines: usize,
+    /// The width the transcript was wrapped to.
+    width: usize,
+    /// The pane Escape goes back to.
+    back: Option<crate::editor::PaneId>,
 }
 
 struct AgentSession {
@@ -307,7 +316,8 @@ impl InteractiveApplication {
             self.state.views[view].selection = None;
             self.set_mode(EditorMode::Normal);
         }
-        self.open_prompt(PromptKind::AgentAsk, String::new());
+        self.show_agent_panel();
+        self.refresh_agent_transcript();
     }
 
     pub(super) fn attach_agent_file(&mut self) {
@@ -316,7 +326,8 @@ impl InteractiveApplication {
             return;
         };
         self.agent.context.push(PromptPart::File { path, text: None });
-        self.open_prompt(PromptKind::AgentAsk, String::new());
+        self.show_agent_panel();
+        self.refresh_agent_transcript();
     }
 
     pub(super) fn attach_agent_diagnostics(&mut self) {
@@ -345,7 +356,12 @@ impl InteractiveApplication {
             path.display(),
             lines.join("\n")
         )));
-        self.open_prompt(PromptKind::AgentAsk, "Fix these diagnostics".into());
+        if self.agent.input.is_empty() {
+            self.agent.input = "Fix these diagnostics".into();
+            self.agent.cursor = self.agent.input.len();
+        }
+        self.show_agent_panel();
+        self.refresh_agent_transcript();
     }
 
     pub(super) fn agent_ask(&mut self, question: String) {
@@ -624,6 +640,7 @@ impl InteractiveApplication {
             AgentChoice::Session(number) => {
                 if let Some(index) = self.agent.sessions.iter().position(|s| s.number == number) {
                     self.agent.active = index;
+                    self.agent.scroll = 0;
                     self.show_agent_panel();
                 }
                 Ok(())
@@ -672,6 +689,7 @@ impl InteractiveApplication {
             return;
         }
         self.agent.active = (self.agent.active as isize + offset).rem_euclid(count as isize) as usize;
+        self.agent.scroll = 0;
         self.show_agent_panel();
         self.refresh_agent_transcript();
     }
@@ -1207,42 +1225,47 @@ impl InteractiveApplication {
                 let _ = self.state.focus_pane_id(previous);
             }
             self.reconcile_editor_windows();
+            self.ui.agent_panel = None;
             return;
         }
         self.show_agent_panel();
         self.refresh_agent_transcript();
     }
 
-    /// Show the transcript in a split on the right, keeping focus in the code.
+    /// Show the panel in a split on the right and put the cursor in its input.
     fn show_agent_panel(&mut self) {
-        if self.agent_pane().is_some() {
-            return;
-        }
         let previous = self.active_tab_focus();
-        if self.state.active_view.is_some() {
-            self.apply_layout_action(LayoutAction::Split(Axis::Horizontal));
-        }
-        let shown = match self.agent.buffer.filter(|id| self.state.buffers.contains_key(*id)) {
-            Some(buffer) => self.state.show_buffer(buffer).map(|_| ()),
-            None => {
-                let (buffer, _) = self.state.open_virtual_read_only(
-                    TextBuffer::from_text(""),
-                    TRANSCRIPT_OWNER.into(),
-                    0,
-                    0,
-                    1,
-                );
-                self.agent.buffer = Some(buffer);
-                Ok(())
+        if self.agent_pane().is_none() {
+            if self.state.active_view.is_some() {
+                self.apply_layout_action(LayoutAction::Split(Axis::Horizontal));
             }
+            let shown = match self.agent.buffer.filter(|id| self.state.buffers.contains_key(*id)) {
+                Some(buffer) => self.state.show_buffer(buffer).map(|_| ()),
+                None => {
+                    let (buffer, _) = self.state.open_virtual_read_only(
+                        TextBuffer::from_text(""),
+                        TRANSCRIPT_OWNER.into(),
+                        0,
+                        0,
+                        1,
+                    );
+                    self.agent.buffer = Some(buffer);
+                    Ok(())
+                }
+            };
+            match shown {
+                Ok(()) => self.set_dashboard_visibility(false),
+                Err(error) => self.show_error(error),
+            }
+        }
+        let Some(pane) = self.agent_pane() else {
+            return;
         };
-        match shown {
-            Ok(()) => self.set_dashboard_visibility(false),
-            Err(error) => self.show_error(error),
+        if let Some(previous) = previous.filter(|previous| *previous != pane) {
+            self.agent.back = Some(previous);
         }
-        if let Some(previous) = previous {
-            let _ = self.state.focus_pane_id(previous);
-        }
+        self.set_explorer_focus(false);
+        let _ = self.state.focus_pane_id(pane);
         self.reconcile_editor_windows();
     }
 
@@ -1272,147 +1295,317 @@ impl InteractiveApplication {
         self.state.buffers.get(buffer)?.path.clone()
     }
 
-    /// Rewrite the transcript buffer with the active session. Views that were at the end
-    /// follow the new end.
+    fn agent_view(&self) -> Option<crate::editor::ViewId> {
+        Some(self.state.panes.get(self.agent_pane()?)?.view)
+    }
+
+    /// Whether keys go to the panel's input.
+    pub(super) fn agent_input_focused(&self) -> bool {
+        self.ui
+            .agent_panel
+            .as_ref()
+            .is_some_and(|panel| Some(panel.view) == self.state.active_view)
+    }
+
+    /// Build what the panel draws from the active session.
     fn refresh_agent_transcript(&mut self) {
-        let Some(buffer) = self.agent.buffer.filter(|id| self.state.buffers.contains_key(*id))
-        else {
+        let Some(view) = self.agent_view() else {
+            self.ui.agent_panel = None;
             return;
         };
-        let views = self
-            .state
-            .views
-            .iter()
-            .filter(|(_, view)| view.buffer == buffer)
-            .map(|(id, _)| id)
-            .collect::<Vec<_>>();
-        let width = views
-            .iter()
-            .filter_map(|view| crate::ui::view_pane_viewport(&self.state, &self.ui, *view))
-            .map(|viewport| usize::from(viewport.width))
-            .min()
-            .unwrap_or(80)
-            .saturating_sub(8)
-            .max(20);
-        let styled = self.agent_transcript(width);
-        let (old_lines, revision) = {
-            let target = &self.state.buffers[buffer];
-            let revision = match &target.origin {
-                crate::editor::BufferOrigin::VirtualReadOnly { revision, .. } => *revision,
-                crate::editor::BufferOrigin::FileOrScratch => return,
-            };
-            (target.text.visible_lines(), revision)
-        };
-        let following = views
-            .iter()
-            .map(|view| {
-                let cursor = self.state.views[*view].cursor;
-                let line = self.state.buffers[buffer].text.byte_to_line(cursor).unwrap_or(0);
-                (*view, line + 2 >= old_lines)
-            })
-            .collect::<Vec<_>>();
-        if !self.state.replace_virtual_read_only(
-            buffer,
-            revision,
-            revision.saturating_add(1),
-            TextBuffer::from_text(&styled.text),
-        ) {
-            return;
-        }
-        self.agent.spans = styled.spans;
-        self.project_agent_spans();
-        let new_text = &self.state.buffers[buffer].text;
-        let last = new_text.visible_lines().saturating_sub(1);
-        let last_start = new_text.line_to_byte(last).map_or(0, |offset| offset.get());
-        let length = new_text.len_bytes();
-        for (view, follow) in following {
-            let height = crate::ui::view_pane_viewport(&self.state, &self.ui, view)
-                .map_or(20, |viewport| usize::from(viewport.height));
-            let target = &mut self.state.views[view];
-            target.selection = None;
-            if follow {
-                target.cursor = crate::editor::text::ByteOffset(last_start);
-                target.scroll_line = (last + 1).saturating_sub(height.saturating_sub(1));
-                target.scroll_wrap_row = 0;
-            } else if target.cursor.get() > length {
-                target.cursor = crate::editor::text::ByteOffset(last_start);
+        let width = crate::ui::view_pane_viewport(&self.state, &self.ui, view)
+            .map_or(80, |viewport| usize::from(viewport.width))
+            .saturating_sub(2)
+            .max(10);
+        self.agent.width = width;
+        let mut text = Styled::default();
+        let mut bands = Vec::new();
+        let (tabs, status, settings) = match self.active_agent() {
+            Some(session) => {
+                let working = match (session.process.is_some(), session.phase) {
+                    (true, Phase::Initializing(_) | Phase::Creating(_) | Phase::Rejoining(_)) => {
+                        "Starting…"
+                    }
+                    (true, Phase::Prompting(_)) => "Working…",
+                    _ => "",
+                };
+                transcript(&mut text, &mut bands, &session.name, &session.entries, working, width);
+                let status = match working {
+                    "Working…" => "Working…  esc to stop".to_owned(),
+                    "" => shown_root(&session.root, width / 2),
+                    starting => starting.to_owned(),
+                };
+                let settings = [("model", ""), ("mode", ""), (THINKING, "thinking ")]
+                    .into_iter()
+                    .filter_map(|(key, label)| {
+                        Some(format!("{label}{}", value_name(session.option(key)?)))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+                let tabs = self
+                    .agent
+                    .sessions
+                    .iter()
+                    .enumerate()
+                    .map(|(index, tab)| {
+                        let mark = match tab.status(self.agent_waiting(tab.number)) {
+                            "working" | "starting" => " …",
+                            "waiting for you" | "sign-in needed" => " ?",
+                            "stopped" => " ✗",
+                            _ => "",
+                        };
+                        (format!("{} {}{mark}", tab.number, tab.name), index == self.agent.active)
+                    })
+                    .collect();
+                (tabs, status, settings)
             }
+            None => {
+                let name = &self.configuration.settings().agents.default;
+                text.wrapped(
+                    &format!(
+                        "No agent session yet. Type below to ask {name}, ctrl-n picks another \
+                         agent and ctrl-r resumes a saved conversation."
+                    ),
+                    Some(SyntaxRole::Comment),
+                    ("", None),
+                    ("", None),
+                    width,
+                );
+                (vec![("Agent".to_owned(), true)], String::new(), String::new())
+            }
+        };
+        self.agent.lines = crate::ui::transcript_lines(&text.text).len();
+        self.agent.scroll = self.agent.scroll.min(self.agent.lines);
+        self.ui.agent_panel = Some(AgentPanelUi {
+            view,
+            tabs,
+            transcript: text,
+            bands,
+            scroll: self.agent.scroll,
+            context: Vec::new(),
+            input: String::new(),
+            cursor: 0,
+            placeholder: String::new(),
+            status,
+            settings,
+        });
+        self.sync_agent_input();
+    }
+
+    /// Copy the input and its context to the panel; cheaper than a rebuild, for keystrokes.
+    fn sync_agent_input(&mut self) {
+        let name = self.active_agent().map_or_else(
+            || self.configuration.settings().agents.default.clone(),
+            |session| session.name.clone(),
+        );
+        let Some(panel) = self.ui.agent_panel.as_mut() else {
+            return;
+        };
+        panel.input.clone_from(&self.agent.input);
+        panel.cursor = self.agent.cursor;
+        panel.scroll = self.agent.scroll;
+        panel.context = self.agent.context.iter().map(context_label).collect();
+        panel.placeholder = format!("Ask {name}…  enter sends, alt-enter adds a line");
+    }
+
+    /// The panel's width changed or it moved to another view: wrap the transcript again.
+    pub(super) fn follow_agent_pane(&mut self) {
+        let Some(view) = self.agent_view() else {
+            if self.ui.agent_panel.is_some() {
+                self.ui.agent_panel = None;
+            }
+            return;
+        };
+        let width = crate::ui::view_pane_viewport(&self.state, &self.ui, view)
+            .map_or(80, |viewport| usize::from(viewport.width))
+            .saturating_sub(2)
+            .max(10);
+        if self.ui.agent_panel.as_ref().is_none_or(|panel| panel.view != view)
+            || width != self.agent.width
+        {
+            self.refresh_agent_transcript();
         }
     }
 
-    /// The tab line, the active session's settings and its transcript.
-    fn agent_transcript(&self, width: usize) -> Styled {
-        let mut out = Styled::default();
-        let plain = ("", None);
-        let Some(session) = self.active_agent() else {
-            out.push("Agent", Some(SyntaxRole::Heading));
-            out.push("\n\n", None);
-            out.wrapped(
-                "No session yet. Ask with <leader>aa, or pick an agent with <leader>an.",
-                None,
-                plain,
-                plain,
-                width,
-            );
-            return out;
-        };
-        let mut tabs = Vec::new();
-        for (index, tab) in self.agent.sessions.iter().enumerate() {
-            let mark = match tab.status(self.agent_waiting(tab.number)) {
-                "working" | "starting" => " …",
-                "waiting for you" | "sign-in needed" => " ?",
-                "stopped" => " ✗",
-                _ => "",
-            };
-            if index > 0 {
-                tabs.push((" · ".to_owned(), Some(SyntaxRole::Comment)));
+    pub(super) fn agent_input_insert(&mut self, text: &str) {
+        let text = text.replace("\r\n", "\n").replace('\r', "\n");
+        self.agent.input.insert_str(self.agent.cursor, &text);
+        self.agent.cursor += text.len();
+        self.sync_agent_input();
+    }
+
+    /// Editing keys in the input: `submit`, `newline`, `backspace`, `delete`, `left`, `right`,
+    /// `home`, `end`, `up`, `down`, `delete_word`, `clear_line` and `clear`.
+    pub(super) fn agent_input_edit(&mut self, action: &str) {
+        let input = &mut self.agent.input;
+        let cursor = self.agent.cursor.min(input.len());
+        let line_start = input[..cursor].rfind('\n').map_or(0, |index| index + 1);
+        let line_end = input[cursor..].find('\n').map_or(input.len(), |index| cursor + index);
+        let before = input[..cursor].chars().next_back().map_or(0, char::len_utf8);
+        let after = input[cursor..].chars().next().map_or(0, char::len_utf8);
+        self.agent.cursor = match action {
+            "submit" => {
+                let question = std::mem::take(input);
+                self.agent.cursor = 0;
+                self.agent.scroll = 0;
+                self.agent_ask(question);
+                return;
             }
-            let label = format!("{} {}{mark}", tab.number, tab.name);
-            tabs.push(if index == self.agent.active {
-                (format!("[{label}]"), Some(SyntaxRole::Heading))
-            } else {
-                (label, Some(SyntaxRole::Comment))
+            "newline" => {
+                input.insert(cursor, '\n');
+                cursor + 1
+            }
+            "backspace" => {
+                input.replace_range(cursor - before..cursor, "");
+                cursor - before
+            }
+            "delete" => {
+                input.replace_range(cursor..cursor + after, "");
+                cursor
+            }
+            "left" => cursor - before,
+            "right" => cursor + after,
+            "home" => line_start,
+            "end" => line_end,
+            "delete_word" => {
+                let kept = input[..cursor].trim_end();
+                let start = kept
+                    .char_indices()
+                    .rev()
+                    .find(|(_, character)| character.is_whitespace())
+                    .map_or(0, |(index, character)| index + character.len_utf8());
+                input.replace_range(start..cursor, "");
+                start
+            }
+            "clear_line" => {
+                input.replace_range(line_start..cursor, "");
+                line_start
+            }
+            "clear" => {
+                input.clear();
+                0
+            }
+            "up" if input.is_empty() => {
+                // Up in an empty input brings back the last question.
+                let last = self.agent.sessions.get(self.agent.active).and_then(|session| {
+                    session.entries.iter().rev().find_map(|entry| match entry {
+                        Entry::User { text, .. } => Some(text.clone()),
+                        _ => None,
+                    })
+                });
+                *input = last.unwrap_or_default();
+                input.len()
+            }
+            "up" | "down" => {
+                let column = input[line_start..cursor].chars().count();
+                let target = if action == "up" {
+                    line_start
+                        .checked_sub(1)
+                        .map(|end| input[..end].rfind('\n').map_or(0, |index| index + 1))
+                } else {
+                    (line_end < input.len()).then_some(line_end + 1)
+                };
+                match target {
+                    Some(start) => {
+                        let end = input[start..].find('\n').map_or(input.len(), |index| start + index);
+                        input[start..end]
+                            .char_indices()
+                            .nth(column)
+                            .map_or(end, |(index, _)| start + index)
+                    }
+                    None if action == "up" => 0,
+                    None => input.len(),
+                }
+            }
+            other => {
+                self.show_error(format!("unknown agent input action {other}"));
+                return;
+            }
+        };
+        self.sync_agent_input();
+    }
+
+    /// Scroll the transcript; positive is up, toward older output.
+    pub(super) fn scroll_agent(&mut self, rows: i64) {
+        let rows = isize::try_from(rows).unwrap_or(0);
+        self.agent.scroll = self.agent.scroll.saturating_add_signed(rows).min(self.agent.lines);
+        self.sync_agent_input();
+    }
+
+    /// Escape stops a turn that is running, and otherwise goes back to the code.
+    pub(super) fn agent_escape(&mut self) {
+        if self
+            .active_agent()
+            .is_some_and(|session| matches!(session.phase, Phase::Prompting(_)))
+        {
+            self.cancel_agent_turn();
+            return;
+        }
+        let agent = self.agent_pane();
+        let shown = self.state.active_tab_views();
+        let back = self
+            .agent
+            .back
+            .filter(|pane| self.state.panes.contains_key(*pane) && Some(*pane) != agent)
+            .or_else(|| {
+                self.state
+                    .panes
+                    .iter()
+                    .find(|(id, pane)| Some(*id) != agent && shown.contains(&pane.view))
+                    .map(|(id, _)| id)
             });
+        if let Some(pane) = back {
+            let _ = self.state.focus_pane_id(pane);
+            self.reconcile_editor_windows();
         }
-        out.runs(&tabs, width);
-        let comment = Some(SyntaxRole::Comment);
-        out.wrapped(&shown_root(&session.root, width), comment, plain, plain, width);
-        let settings = [("model", ""), ("mode", "mode "), (THINKING, "thinking ")]
-            .into_iter()
-            .filter_map(|(key, label)| Some(format!("{label}{}", value_name(session.option(key)?))))
-            .collect::<Vec<_>>();
-        out.wrapped(&settings.join(" · "), comment, plain, plain, width);
-        let working = match (session.process.is_some(), session.phase) {
-            (true, Phase::Initializing(_) | Phase::Creating(_) | Phase::Rejoining(_)) => "Starting…",
-            (true, Phase::Prompting(_)) => "Working…",
-            _ => "",
-        };
-        transcript(&mut out, &session.name, &session.entries, working, width);
-        out
     }
 
-    /// Give the transcript buffer its styles, alongside the parsed files' syntax spans.
-    pub(super) fn project_agent_spans(&mut self) {
-        let Some(buffer) = self.agent.buffer else {
-            return;
+    /// The wheel scrolls the transcript, a click focuses the input, and a click on the tab
+    /// line shows that session. Returns whether the event was over the panel.
+    pub(super) fn agent_panel_mouse(
+        &mut self,
+        key: &crate::editor::input::KeyEvent,
+        column: u16,
+        row: u16,
+    ) -> bool {
+        use crate::editor::input::TerminalMouseInput;
+        let Some(view) = self.ui.agent_panel.as_ref().map(|panel| panel.view) else {
+            return false;
         };
-        self.ui.syntax_spans.retain(|span| span.buffer != buffer);
-        let Some(target) = self.state.buffers.get(buffer) else {
-            return;
+        let Some(viewport) = crate::ui::editor_pane_viewport_at(&self.state, &self.ui, column, row)
+            .filter(|viewport| viewport.view == view)
+        else {
+            return false;
         };
-        let revision = target.text.revision();
-        self.ui.syntax_spans.extend(self.agent.spans.iter().filter_map(|(range, role)| {
-            Some(UiSyntaxSpan {
-                buffer,
-                revision,
-                range: crate::editor::text::ByteRange::new(
-                    crate::editor::text::ByteOffset(range.start),
-                    crate::editor::text::ByteOffset(range.end),
-                )
-                .ok()?,
-                role: *role,
-            })
-        }));
+        match key.terminal_mouse() {
+            Some(TerminalMouseInput::ScrollUp) => self.scroll_agent(3),
+            Some(TerminalMouseInput::ScrollDown) => self.scroll_agent(-3),
+            Some(TerminalMouseInput::LeftDown) => {
+                self.show_agent_panel();
+                if row == viewport.y {
+                    let labels = self
+                        .ui
+                        .agent_panel
+                        .as_ref()
+                        .map(|panel| panel.tabs.iter().map(|(label, _)| label.clone()).collect())
+                        .unwrap_or_else(Vec::new);
+                    let mut right = usize::from(viewport.x);
+                    for (index, label) in labels.iter().enumerate() {
+                        right += crate::ui::geometry::text_width(label, self.configuration.settings().editor.ambiguous_width) + 2;
+                        if usize::from(column) < right {
+                            if index < self.agent.sessions.len() && index != self.agent.active {
+                                self.agent.active = index;
+                                self.agent.scroll = 0;
+                            }
+                            break;
+                        }
+                    }
+                }
+                self.refresh_agent_transcript();
+            }
+            _ => {}
+        }
+        true
     }
 }
 
@@ -1554,17 +1747,18 @@ fn selected_text(
     .unwrap_or_default()
 }
 
-/// One session's conversation as Markdown, hard-wrapped to `width` outside code blocks.
-/// The conversation, with the Markdown in questions and answers rendered.
-fn transcript(out: &mut Styled, name: &str, entries: &[Entry], working: &str, width: usize) {
+/// The conversation, with the Markdown in questions and answers rendered and wrapped to
+/// `width`. The byte ranges of the user's messages go to `bands`.
+fn transcript(
+    out: &mut Styled,
+    bands: &mut Vec<std::ops::Range<usize>>,
+    name: &str,
+    entries: &[Entry],
+    working: &str,
+    width: usize,
+) {
     let plain = ("", None);
     let quote = Some(SyntaxRole::Quote);
-    let heading = |out: &mut Styled, title: &str| {
-        out.push("\n", None);
-        out.push(title, Some(SyntaxRole::Heading));
-        out.push("\n\n", None);
-    };
-    let mut answered = true;
     for (index, entry) in entries.iter().enumerate() {
         // A blank line between tool lines and the prose around them.
         let previous = index.checked_sub(1).map(|previous| &entries[previous]);
@@ -1574,31 +1768,28 @@ fn transcript(out: &mut Styled, name: &str, entries: &[Entry], working: &str, wi
         ) {
             out.push("\n", None);
         }
-        let needs_heading = matches!(
-            entry,
-            Entry::Agent(_) | Entry::Thought(_) | Entry::Tool { .. } | Entry::Plan(_)
-        );
-        if needs_heading && !answered {
-            heading(out, name);
-            answered = true;
-        }
         match entry {
-            // The first start is described by the settings line; later ones are restarts.
+            // The first start is described by the footer; later ones are restarts.
             Entry::Started { root } => {
                 if index > 0 {
                     out.push("\n", None);
-                    out.rule(width);
                     let text = format!("{name} restarted in {}.", shown_root(root, width));
                     out.wrapped(&text, quote, plain, plain, width);
                 }
             }
             Entry::User { text, context } => {
-                heading(out, "You");
+                if !out.text.is_empty() {
+                    out.push("\n", None);
+                }
+                let start = out.text.len();
+                out.push("\n", None);
                 markdown::render(out, text, width);
                 for label in context {
-                    out.wrapped(&format!("+ {label}"), Some(SyntaxRole::Comment), plain, plain, width);
+                    out.wrapped(&format!("+ {label}"), None, plain, plain, width);
                 }
-                answered = false;
+                out.push("\n", None);
+                bands.push(start..out.text.len());
+                out.push("\n", None);
             }
             Entry::Agent(text) => markdown::render(out, text, width),
             Entry::Thought(text) => {
@@ -1665,7 +1856,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn transcript_groups_a_turn_under_headings() {
+    fn the_users_message_is_a_band_and_the_answer_follows() {
         let entries = vec![
             Entry::Started {
                 root: PathBuf::from("/work/repo"),
@@ -1682,15 +1873,11 @@ mod tests {
             Entry::Agent("Because.".into()),
         ];
         let mut out = Styled::default();
-        transcript(&mut out, "claude", &entries, "", 80);
-        assert_eq!(out.text, "\nYou\n\nwhy\n+ main.rs\n\nclaude\n\n✓ Read main.rs\n\nBecause.\n");
-        let headings = out
-            .spans
-            .iter()
-            .filter(|(_, role)| *role == SyntaxRole::Heading)
-            .map(|(range, _)| &out.text[range.clone()])
-            .collect::<Vec<_>>();
-        assert_eq!(headings, ["You", "claude"]);
+        let mut bands = Vec::new();
+        transcript(&mut out, &mut bands, "claude", &entries, "", 80);
+        assert_eq!(out.text, "\nwhy\n+ main.rs\n\n\n✓ Read main.rs\n\nBecause.\n");
+        let banded = bands.iter().map(|band| &out.text[band.clone()]).collect::<Vec<_>>();
+        assert_eq!(banded, ["\nwhy\n+ main.rs\n\n"]);
     }
 
     #[test]

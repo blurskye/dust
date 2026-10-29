@@ -14,6 +14,7 @@ mod workspace;
 use workspace::{
     render_non_tiled_editor_window, render_non_tiled_editor_windows, render_workspace,
 };
+mod agent;
 mod editor;
 mod surfaces;
 mod visual_rows;
@@ -27,6 +28,7 @@ use surfaces::{
 #[cfg(test)]
 use visual_rows::{VisualRowSlice, editor_line_number_digits, git_sign_column};
 
+pub use agent::{AgentPanelUi, transcript_lines};
 pub use editor::{snap_display_column, snap_display_column_forward};
 pub use explorer::explorer_panel_width;
 pub use overlays::content_tab_at_column;
@@ -69,7 +71,6 @@ pub enum PromptKind {
     DirtyClose,
     GitStageUnsaved,
     GitDestructive,
-    AgentAsk,
     AgentPermission,
     ReviewComment,
 }
@@ -90,7 +91,6 @@ impl PromptKind {
             Self::DirtyClose => "Close document",
             Self::GitStageUnsaved => "Stage unsaved changes",
             Self::GitDestructive => "Confirm Git change",
-            Self::AgentAsk => "Ask agent",
             Self::AgentPermission => "Agent permission",
             Self::ReviewComment => "Review comment",
         }
@@ -112,7 +112,7 @@ impl PromptKind {
             | Self::GitStageUnsaved
             | Self::GitDestructive
             | Self::AgentPermission => "",
-            Self::AgentAsk | Self::ReviewComment => ">",
+            Self::ReviewComment => ">",
         }
     }
 }
@@ -1291,6 +1291,8 @@ pub struct UiState {
     pub lsp_progress_frame: usize,
     pub syntax_folds: Vec<UiFold>,
     pub large_file_buffers: Vec<crate::editor::BufferId>,
+    /// The agent panel, drawn in place of the pane that shows its view.
+    pub agent_panel: Option<AgentPanelUi>,
 }
 
 #[derive(Clone, Debug)]

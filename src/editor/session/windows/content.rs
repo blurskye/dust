@@ -135,6 +135,14 @@ impl WindowSession {
                                 | "builtin.debug"
                         ))
                 })
+                // The agent panel has its own tab line.
+                .filter(|content| {
+                    bridge
+                        .buffer_for_content(content.id)
+                        .and_then(|buffer| state.buffers().get(buffer))
+                        .and_then(|buffer| buffer.virtual_owner())
+                        != Some(crate::editor::session::dispatch::agent::TRANSCRIPT_OWNER)
+                })
                 .collect::<Vec<_>>();
             let represented = snapshots
                 .iter()

@@ -4599,6 +4599,280 @@ keys = "<leader> a a"
 command = "agent.ask"
 desc = "Ask Agent About Selection"
 
+# The agent panel's input. Typed text goes in through [input.text_commands].
+[[keymap]]
+id = "builtin.agent.submit.enter"
+context = "agent"
+keys = "enter"
+command = "agent.input.edit"
+arguments = { action = "submit" }
+desc = "Send"
+
+[[keymap]]
+id = "builtin.agent.newline.alt-enter"
+context = "agent"
+keys = "alt-enter"
+command = "agent.input.edit"
+arguments = { action = "newline" }
+desc = "New Line"
+
+[[keymap]]
+id = "builtin.agent.newline.shift-enter"
+context = "agent"
+keys = "shift-enter"
+command = "agent.input.edit"
+arguments = { action = "newline" }
+
+[[keymap]]
+id = "builtin.agent.backspace"
+context = "agent"
+keys = "backspace"
+command = "agent.input.edit"
+arguments = { action = "backspace" }
+
+[[keymap]]
+id = "builtin.agent.delete"
+context = "agent"
+keys = "delete"
+command = "agent.input.edit"
+arguments = { action = "delete" }
+
+[[keymap]]
+id = "builtin.agent.left"
+context = "agent"
+keys = "left"
+command = "agent.input.edit"
+arguments = { action = "left" }
+
+[[keymap]]
+id = "builtin.agent.right"
+context = "agent"
+keys = "right"
+command = "agent.input.edit"
+arguments = { action = "right" }
+
+[[keymap]]
+id = "builtin.agent.up"
+context = "agent"
+keys = "up"
+command = "agent.input.edit"
+arguments = { action = "up" }
+
+[[keymap]]
+id = "builtin.agent.down"
+context = "agent"
+keys = "down"
+command = "agent.input.edit"
+arguments = { action = "down" }
+
+[[keymap]]
+id = "builtin.agent.home"
+context = "agent"
+keys = "home"
+command = "agent.input.edit"
+arguments = { action = "home" }
+
+[[keymap]]
+id = "builtin.agent.end"
+context = "agent"
+keys = "end"
+command = "agent.input.edit"
+arguments = { action = "end" }
+
+[[keymap]]
+id = "builtin.agent.home.ctrl-a"
+context = "agent"
+keys = "ctrl-a"
+command = "agent.input.edit"
+arguments = { action = "home" }
+
+[[keymap]]
+id = "builtin.agent.end.ctrl-e"
+context = "agent"
+keys = "ctrl-e"
+command = "agent.input.edit"
+arguments = { action = "end" }
+
+[[keymap]]
+id = "builtin.agent.delete-word.ctrl-w"
+context = "agent"
+keys = "ctrl-w"
+command = "agent.input.edit"
+arguments = { action = "delete_word" }
+
+[[keymap]]
+id = "builtin.agent.delete-word.alt-backspace"
+context = "agent"
+keys = "alt-backspace"
+command = "agent.input.edit"
+arguments = { action = "delete_word" }
+
+[[keymap]]
+id = "builtin.agent.clear-line.ctrl-u"
+context = "agent"
+keys = "ctrl-u"
+command = "agent.input.edit"
+arguments = { action = "clear_line" }
+
+[[keymap]]
+id = "builtin.agent.clear.ctrl-c"
+context = "agent"
+keys = "ctrl-c"
+command = "agent.input.edit"
+arguments = { action = "clear" }
+desc = "Clear Input"
+
+[[keymap]]
+id = "builtin.agent.escape"
+context = "agent"
+keys = "escape"
+command = "agent.escape"
+desc = "Stop Agent or Back to Code"
+
+[[keymap]]
+id = "builtin.agent.scroll-up.shift-up"
+context = "agent"
+keys = "shift-up"
+command = "agent.scroll"
+arguments = { rows = 3 }
+
+[[keymap]]
+id = "builtin.agent.scroll-down.shift-down"
+context = "agent"
+keys = "shift-down"
+command = "agent.scroll"
+arguments = { rows = -3 }
+
+[[keymap]]
+id = "builtin.agent.scroll-up.ctrl-b"
+context = "agent"
+keys = "ctrl-b"
+command = "agent.scroll"
+arguments = { rows = 20 }
+desc = "Scroll Up"
+
+[[keymap]]
+id = "builtin.agent.scroll-down.ctrl-f"
+context = "agent"
+keys = "ctrl-f"
+command = "agent.scroll"
+arguments = { rows = -20 }
+desc = "Scroll Down"
+
+[[keymap]]
+id = "builtin.agent.surface-focus-left.ctrl-h"
+context = "agent"
+keys = "ctrl-h"
+command = "surface.focus.left"
+
+[[keymap]]
+id = "builtin.agent.surface-focus-down.ctrl-j"
+context = "agent"
+keys = "ctrl-j"
+command = "surface.focus.down"
+
+[[keymap]]
+id = "builtin.agent.surface-focus-up.ctrl-k"
+context = "agent"
+keys = "ctrl-k"
+command = "surface.focus.up"
+
+[[keymap]]
+id = "builtin.agent.surface-focus-right.ctrl-l"
+context = "agent"
+keys = "ctrl-l"
+command = "surface.focus.right"
+
+[[keymap]]
+id = "builtin.agent.window-resize.ctrl-left"
+context = "agent"
+keys = "ctrl-left"
+command = "window.resize.directional"
+arguments = { direction = "left" }
+
+[[keymap]]
+id = "builtin.agent.window-resize.ctrl-down"
+context = "agent"
+keys = "ctrl-down"
+command = "window.resize.directional"
+arguments = { direction = "down" }
+
+[[keymap]]
+id = "builtin.agent.window-resize.ctrl-up"
+context = "agent"
+keys = "ctrl-up"
+command = "window.resize.directional"
+arguments = { direction = "up" }
+
+[[keymap]]
+id = "builtin.agent.window-resize.ctrl-right"
+context = "agent"
+keys = "ctrl-right"
+command = "window.resize.directional"
+arguments = { direction = "right" }
+
+[[keymap]]
+id = "builtin.agent.terminal-toggle.ctrl-slash"
+context = "agent"
+keys = "ctrl-/"
+command = "terminal.toggle"
+
+[[keymap]]
+id = "builtin.agent.session-next.alt-bracket-right"
+context = "agent"
+keys = "alt-]"
+command = "agent.session.next"
+desc = "Next Session"
+
+[[keymap]]
+id = "builtin.agent.session-previous.alt-bracket-left"
+context = "agent"
+keys = "alt-["
+command = "agent.session.previous"
+desc = "Previous Session"
+
+[[keymap]]
+id = "builtin.agent.new.ctrl-n"
+context = "agent"
+keys = "ctrl-n"
+command = "agent.new"
+desc = "New Session"
+
+[[keymap]]
+id = "builtin.agent.resume.ctrl-r"
+context = "agent"
+keys = "ctrl-r"
+command = "agent.resume"
+desc = "Resume Conversation"
+
+[[keymap]]
+id = "builtin.agent.close.alt-x"
+context = "agent"
+keys = "alt-x"
+command = "agent.session.close"
+desc = "Close Session"
+
+[[keymap]]
+id = "builtin.agent.model.ctrl-p"
+context = "agent"
+keys = "ctrl-p"
+command = "agent.model"
+desc = "Model"
+
+[[keymap]]
+id = "builtin.agent.thinking.shift-tab"
+context = "agent"
+keys = "shift-tab"
+command = "agent.thinking"
+desc = "Thinking Level"
+
+[[keymap]]
+id = "builtin.agent.options.ctrl-o"
+context = "agent"
+keys = "ctrl-o"
+command = "agent.options"
+desc = "Agent Options"
+
 [[keymap]]
 id = "builtin.global.git-pr-list"
 context = "global"

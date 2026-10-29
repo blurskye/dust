@@ -5073,10 +5073,6 @@ impl InteractiveApplication {
                     .map_or(crate::ui::ConfirmationChoice::No, |state| state.selected),
             ),
             PromptKind::ExplorerRename => self.submit_explorer_rename_prompt(&prompt.input),
-            PromptKind::AgentAsk => {
-                self.close_prompt();
-                self.agent_ask(prompt.input);
-            }
             PromptKind::ReviewComment => {
                 self.close_prompt();
                 self.submit_review_comment(prompt.input);
@@ -11801,6 +11797,10 @@ impl InteractiveApplication {
             AppEffect::AgentMode => self.open_agent_option_picker(Some("mode")),
             AppEffect::AgentThinking => self.open_agent_option_picker(Some("thought_level")),
             AppEffect::AgentOptions => self.open_agent_option_picker(None),
+            AppEffect::AgentInput(text) => self.agent_input_insert(&text),
+            AppEffect::AgentEdit(action) => self.agent_input_edit(&action),
+            AppEffect::AgentScroll(rows) => self.scroll_agent(rows),
+            AppEffect::AgentEscape => self.agent_escape(),
             AppEffect::PullRequestList => self.list_pull_requests(),
             AppEffect::PullRequestComments => self.list_review_comments(),
             AppEffect::PullRequestComment => self.begin_review_comment(),

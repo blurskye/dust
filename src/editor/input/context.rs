@@ -18,6 +18,7 @@ const BUILTIN_SURFACES: &[&str] = &[
     "workspace_edit",
     "explorer",
     "panel",
+    "agent",
     "terminal",
     "terminal_normal",
     "terminal_visual",

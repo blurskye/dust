@@ -1302,4 +1302,15 @@ fn the_agent_panel_opens_over_the_dashboard() {
     }
     assert!(!app.window_session.dashboard_visible());
     assert!(app.state.active_view.is_some());
+    // Keys now go to the panel's input, not to the placeholder buffer.
+    assert_eq!(app.active_input_context(), "agent");
+    for key in "hi ab".chars() {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Backspace));
+    app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Left));
+    app.handle_configured_key(KeyEvent::character('x'));
+    let panel = app.ui.agent_panel.as_ref().expect("the panel is drawn");
+    assert_eq!((panel.input.as_str(), panel.cursor), ("hi xa", 4));
+    assert!(app.ui.content_tabs.iter().all(|tab| tab.title != "Agent"));
 }

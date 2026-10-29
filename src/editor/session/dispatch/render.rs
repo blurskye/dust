@@ -84,6 +84,7 @@ impl InteractiveApplication {
         self.project_window_activation();
         self.ui.compositor_layout = self.window_session.layout().cloned();
         self.refresh_window_content();
+        self.follow_agent_pane();
     }
 
     pub(super) fn refresh_window_content(&mut self) {

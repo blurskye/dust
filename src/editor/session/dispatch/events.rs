@@ -385,6 +385,14 @@ impl InteractiveApplication {
                         }
                     }
                 }
+                if !over_terminal
+                    && !over_explorer
+                    && self.ui.picker.is_none()
+                    && self.input.prompt().is_none()
+                    && self.agent_panel_mouse(&key, column, row)
+                {
+                    return;
+                }
                 let plugin_context = self
                     .compositor_projection()
                     .and_then(|projection| projection.hit_test(column, row))
@@ -547,6 +555,9 @@ impl InteractiveApplication {
             .and_then(|window| self.extension.window_context(window))
         {
             return context;
+        }
+        if !self.window_session.dashboard_visible() && self.agent_input_focused() {
+            return "agent".into();
         }
         if self.window_session.dashboard_visible() || self.state.active_view.is_none() {
             return "dashboard".into();
@@ -1996,7 +2007,6 @@ impl InteractiveApplication {
         self.ui
             .syntax_spans
             .sort_unstable_by_key(|span| (span.range.start, span.range.end));
-        self.project_agent_spans();
     }
 }
 

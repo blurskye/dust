@@ -54,6 +54,10 @@ pub(super) fn render_editor_view(
     width: u16,
     height: u16,
 ) -> Frame {
+    if let Some(panel) = ui.agent_panel.as_ref().filter(|panel| panel.view == view_id) {
+        let focused = state.active_view == Some(view_id) && !ui.explorer_focused;
+        return super::agent::render_agent_panel(panel, focused, config, width, height);
+    }
     let mut grid = CellGrid::new_with_policy(
         width,
         height,
@@ -756,12 +760,17 @@ pub(super) fn render_status_line(
         return;
     };
     grid.fill_row(status_y, Style::Status);
-    let mode_label = config
-        .ui
-        .status_line
-        .mode_labels
-        .get(mode_name(view.mode))
-        .expect("resolved configuration validates mode labels");
+    let agent = ui.agent_panel.as_ref().is_some_and(|panel| panel.view == view_id);
+    let mode_label = if agent {
+        "AGENT"
+    } else {
+        config
+            .ui
+            .status_line
+            .mode_labels
+            .get(mode_name(view.mode))
+            .expect("resolved configuration validates mode labels")
+    };
     let mode = format!(
         "{}{}{}",
         config.ui.status_line.mode_padding, mode_label, config.ui.status_line.mode_padding
@@ -792,15 +801,19 @@ pub(super) fn render_status_line(
         ""
     };
     let current_line = buffer.text.byte_to_line(view.cursor).unwrap_or(0);
-    let position = config
-        .ui
-        .status_line
-        .position_format
-        .replace("{line}", &(current_line + 1).to_string())
-        .replace(
-            "{column}",
-            &(byte_column(&buffer.text, view.cursor) + 1).to_string(),
-        );
+    let position = if agent {
+        String::new()
+    } else {
+        config
+            .ui
+            .status_line
+            .position_format
+            .replace("{line}", &(current_line + 1).to_string())
+            .replace(
+                "{column}",
+                &(byte_column(&buffer.text, view.cursor) + 1).to_string(),
+            )
+    };
     let lsp_status = ui
         .lsp_server
         .as_ref()

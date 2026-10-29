@@ -182,7 +182,6 @@ impl InputSession {
             return Some(match prompt.kind {
                 crate::ui::PromptKind::Command
                 | crate::ui::PromptKind::ExplorerRename
-                | crate::ui::PromptKind::AgentAsk
                 | crate::ui::PromptKind::ReviewComment => {
                     "command_prompt"
                 }

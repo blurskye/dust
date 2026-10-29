@@ -12,7 +12,7 @@ use crate::language::syntax::{self, SyntaxRole};
 const HIGHLIGHT_BYTE_CEILING: usize = 64 * 1024;
 
 /// Text with the styled byte ranges in it.
-#[derive(Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Styled {
     pub text: String,
     pub spans: Vec<(Range<usize>, SyntaxRole)>,

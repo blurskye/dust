@@ -679,6 +679,7 @@ completion = "edit.insert_text"
 picker = "picker.insert"
 theme_picker = "picker.insert"
 terminal = "terminal.send"
+agent = "agent.input.insert"
 
 [input.paste_commands]
 "editor.insert" = "edit.insert_text"
@@ -690,6 +691,7 @@ completion = "edit.insert_text"
 picker = "picker.insert"
 theme_picker = "picker.insert"
 terminal = "terminal.send"
+agent = "agent.input.insert"
 
 [input.character_fallback_commands]
 register = "input.register.select"
@@ -1107,6 +1109,10 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "agent.mode" = "Agent Mode"
 "agent.thinking" = "Agent Thinking Level"
 "agent.options" = "Agent Options"
+"agent.input.insert" = "Type Into Agent Input"
+"agent.input.edit" = "Edit Agent Input"
+"agent.scroll" = "Scroll Agent Transcript"
+"agent.escape" = "Stop Agent or Back to Code"
 "editor.flash" = "Flash jump"
 "workspace.git.browse" = "Git Browse (open)"
 "workspace.git.browse.copy" = "Git Browse (copy)"

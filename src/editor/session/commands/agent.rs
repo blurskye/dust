@@ -1,4 +1,7 @@
-use super::{AppEffect, ArgumentSchema, CommandError, CommandRegistry, ContextRequirement, register};
+use super::{
+    AppEffect, ArgumentSchema, ArgumentType, CommandError, CommandRegistry, ContextRequirement,
+    integer_arg, register, string_arg,
+};
 
 pub(super) fn register_commands(
     registry: &mut CommandRegistry<AppEffect>,
@@ -36,5 +39,37 @@ pub(super) fn register_commands(
             move |_| effect(),
         )?;
     }
+    register(
+        registry,
+        "agent.input.insert",
+        "Type text into the agent panel's input",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default().field("text", ArgumentType::String, true),
+        |invocation| Ok(AppEffect::AgentInput(string_arg(invocation, "text")?.to_owned())),
+    )?;
+    register(
+        registry,
+        "agent.input.edit",
+        "Edit the agent panel's input",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default().field("action", ArgumentType::String, true),
+        |invocation| Ok(AppEffect::AgentEdit(string_arg(invocation, "action")?.to_owned())),
+    )?;
+    register(
+        registry,
+        "agent.scroll",
+        "Scroll the agent transcript up (positive) or down",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default().field("rows", ArgumentType::Integer, true),
+        |invocation| Ok(AppEffect::AgentScroll(integer_arg(invocation, "rows")?)),
+    )?;
+    register(
+        registry,
+        "agent.escape",
+        "Stop the agent's turn, or go back to the code",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::AgentEscape,
+    )?;
     Ok(())
 }
