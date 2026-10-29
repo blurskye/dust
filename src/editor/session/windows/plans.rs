@@ -22,6 +22,7 @@ pub enum LayoutAction {
     NewTab,
     CloseTab,
     FocusTab(isize),
+    Zoom,
 }
 
 /// Owner-created operations, not a caller-created replacement graph or editor.
@@ -725,6 +726,7 @@ impl WindowSession {
             },
             LayoutAction::NewTab => EditorOperation::NewTab,
             LayoutAction::CloseTab => EditorOperation::CloseTab,
+            LayoutAction::Zoom => EditorOperation::ToggleZoom,
             LayoutAction::FocusTab(offset) => EditorOperation::FocusTab {
                 offset,
                 wrap: policy.ui.tab_line.focus_wrap,

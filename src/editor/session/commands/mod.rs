@@ -366,6 +366,8 @@ pub enum AppEffect {
     LspAttach,
     LspDetach,
     LspInlayHintsToggle,
+    ViewToggle(crate::editor::session::ViewToggle),
+    Zen,
     LspRequest(crate::language::lsp::LspFeature),
     LspDocumentationScroll(isize),
     LspDocumentationClose,

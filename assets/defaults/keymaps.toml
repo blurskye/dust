@@ -4344,6 +4344,62 @@ command = "lsp.inlay_hints.toggle"
 desc = "Toggle Inlay Hints"
 
 [[keymap]]
+id = "builtin.global.ui-wrap"
+context = "global"
+keys = "<leader> u w"
+command = "view.wrap.toggle"
+desc = "Toggle Wrap"
+
+[[keymap]]
+id = "builtin.global.ui-line-numbers"
+context = "global"
+keys = "<leader> u l"
+command = "view.line_numbers.toggle"
+desc = "Toggle Line Numbers"
+
+[[keymap]]
+id = "builtin.global.ui-relative-numbers"
+context = "global"
+keys = "<leader> u L"
+command = "view.relative_numbers.toggle"
+desc = "Toggle Relative Number"
+
+[[keymap]]
+id = "builtin.global.ui-indent-guides"
+context = "global"
+keys = "<leader> u g"
+command = "view.indent_guides.toggle"
+desc = "Toggle Indent Guides"
+
+[[keymap]]
+id = "builtin.global.ui-git-signs"
+context = "global"
+keys = "<leader> u G"
+command = "view.git_signs.toggle"
+desc = "Toggle Git Signs"
+
+[[keymap]]
+id = "builtin.global.ui-zen"
+context = "global"
+keys = "<leader> u z"
+command = "view.zen.toggle"
+desc = "Toggle Zen Mode"
+
+[[keymap]]
+id = "builtin.global.ui-zoom"
+context = "global"
+keys = "<leader> u Z"
+command = "pane.zoom"
+desc = "Toggle Zoom Mode"
+
+[[keymap]]
+id = "builtin.global.window-zoom"
+context = "global"
+keys = "<leader> w m"
+command = "pane.zoom"
+desc = "Toggle Zoom Mode"
+
+[[keymap]]
 id = "builtin.global.window-close"
 context = "global"
 keys = "<leader> w d"

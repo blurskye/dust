@@ -1,3 +1,5 @@
+use crate::editor::session::ViewToggle;
+
 use super::{
     AppEffect, ArgumentSchema, ArgumentType, CommandError, CommandRegistry, ContextRequirement,
     FocusDirection, LayoutAction, bool_arg, one_character_arg, optional_bool_arg, register,
@@ -223,6 +225,7 @@ pub(super) fn register_commands(
         ),
         ("tab.new", "Open new tab", LayoutAction::NewTab),
         ("tab.close", "Close tab", LayoutAction::CloseTab),
+        ("pane.zoom", "Zoom the pane", LayoutAction::Zoom),
         ("tab.next", "Focus next tab", LayoutAction::FocusTab(1)),
         (
             "tab.previous",
@@ -239,6 +242,34 @@ pub(super) fn register_commands(
             move |_| AppEffect::Layout(action),
         )?;
     }
+    for (id, title, toggle) in [
+        ("view.wrap.toggle", "Toggle line wrap", ViewToggle::Wrap),
+        ("view.line_numbers.toggle", "Toggle line numbers", ViewToggle::LineNumbers),
+        (
+            "view.relative_numbers.toggle",
+            "Toggle relative line numbers",
+            ViewToggle::RelativeNumbers,
+        ),
+        ("view.indent_guides.toggle", "Toggle indent guides", ViewToggle::IndentGuides),
+        ("view.git_signs.toggle", "Toggle git signs", ViewToggle::GitSigns),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::Application,
+            ArgumentSchema::default(),
+            move |_| AppEffect::ViewToggle(toggle),
+        )?;
+    }
+    register(
+        registry,
+        "view.zen.toggle",
+        "Toggle zen mode",
+        ContextRequirement::View,
+        ArgumentSchema::default(),
+        |_| AppEffect::Zen,
+    )?;
     register(
         registry,
         "search.word",

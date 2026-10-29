@@ -12,8 +12,11 @@ mod undo;
 pub(crate) use paths::BufferPathChange;
 
 pub use undo::UndoTree;
+pub(crate) use undo::{load_undo_history, save_undo_history};
 
-use crate::editor::text::{Affinity, BufferRevision, ByteOffset, EditError, TextEditSet};
+use crate::editor::text::{
+    Affinity, BufferRevision, ByteOffset, ByteRange, EditError, TextEdit, TextEditSet,
+};
 use thiserror::Error;
 
 use crate::editor::{
@@ -106,6 +109,7 @@ pub enum EditorOperation {
         ratio: u16,
     },
     NewTab,
+    ToggleZoom,
     ClosePane,
     ResizePane {
         delta: i16,
@@ -290,12 +294,35 @@ fn apply_operation(
             if target.read_only {
                 return Err(TransactionError::ReadOnly);
             }
+            // The undo step holds the replaced text, taken before the edit, with each start
+            // shifted by the edits before it so the changes replay one after another.
+            let mut changes = Vec::new();
+            if undo_policy != UndoPolicy::Ignore {
+                let mut shift = 0isize;
+                for edit in target.text.validate_edits(edits)? {
+                    let removed = target
+                        .text
+                        .slice(edit.range())
+                        .map_err(|error| TransactionError::Position(error.to_string()))?;
+                    let start = edit.range().start.get().saturating_add_signed(shift);
+                    shift += edit.replacement().len() as isize - removed.len() as isize;
+                    changes.push(undo::Change {
+                        start,
+                        removed,
+                        inserted: edit.replacement().to_owned(),
+                    });
+                }
+            }
             let delta = target.text.apply_edits(edits)?;
             target.refresh_dirty();
-            if matches!(undo_policy, UndoPolicy::Record | UndoPolicy::Merge) {
+            if undo_policy == UndoPolicy::Ignore {
+                if !edits.edits().is_empty() {
+                    target.undo.reset();
+                }
+            } else {
                 target
                     .undo
-                    .record(target.text.to_string(), undo_policy == UndoPolicy::Merge);
+                    .record(changes, undo_policy == UndoPolicy::Merge);
             }
             for (_, view) in state
                 .views
@@ -441,7 +468,8 @@ fn apply_operation(
             state.policy.registers_enabled,
             state.policy.mirror_named_to_unnamed,
         ),
-        EditorOperation::Undo { buffer } => {
+        EditorOperation::Undo { buffer } | EditorOperation::Redo { buffer } => {
+            let undo = matches!(operation, EditorOperation::Undo { .. });
             let target = state
                 .buffers
                 .get_mut(*buffer)
@@ -449,37 +477,43 @@ fn apply_operation(
             if target.read_only {
                 return Err(TransactionError::ReadOnly);
             }
-            let text = target
-                .undo
-                .undo()
-                .map(str::to_owned)
-                .ok_or(TransactionError::NothingToUndo)?;
-            target
-                .text
-                .restore_text(&text)
+            let changes = if undo {
+                target.undo.undo().ok_or(TransactionError::NothingToUndo)?
+            } else {
+                target.undo.redo().ok_or(TransactionError::NothingToRedo)?
+            };
+            let first = changes.iter().map(|change| ByteOffset(change.start)).min();
+            for change in changes {
+                let range = ByteRange::new(
+                    ByteOffset(change.start),
+                    ByteOffset(change.start + change.removed.len()),
+                )
                 .map_err(|error| TransactionError::Position(error.to_string()))?;
-            target.refresh_dirty();
-            clamp_views(state, *buffer);
-        }
-        EditorOperation::Redo { buffer } => {
-            let target = state
-                .buffers
-                .get_mut(*buffer)
-                .ok_or(TransactionError::MissingBuffer)?;
-            if target.read_only {
-                return Err(TransactionError::ReadOnly);
+                if target.text.slice(range).ok().as_deref() != Some(change.removed.as_str()) {
+                    return Err(TransactionError::Position(
+                        "undo history no longer matches the text".into(),
+                    ));
+                }
+                let delta = target.text.apply_edits(&TextEditSet::new(
+                    target.text.revision(),
+                    vec![TextEdit::new(range, change.inserted)],
+                ))?;
+                for (_, view) in state
+                    .views
+                    .iter_mut()
+                    .filter(|(_, view)| view.buffer == *buffer)
+                {
+                    view.cursor = delta.map_offset(view.cursor, Affinity::Before);
+                }
             }
-            let text = target
-                .undo
-                .redo()
-                .map(str::to_owned)
-                .ok_or(TransactionError::NothingToRedo)?;
-            target
-                .text
-                .restore_text(&text)
-                .map_err(|error| TransactionError::Position(error.to_string()))?;
             target.refresh_dirty();
             clamp_views(state, *buffer);
+            // Like Vim, the cursor lands on the earliest changed text.
+            if let (Some(first), Some(view)) = (first, state.active_view) {
+                if let Some(view) = state.views.get_mut(view).filter(|v| v.buffer == *buffer) {
+                    view.cursor = first.min(ByteOffset(state.buffers[*buffer].text.len_bytes()));
+                }
+            }
         }
         EditorOperation::SplitPane { axis, ratio } => {
             state
@@ -496,6 +530,9 @@ fn apply_operation(
                 .new_tab()
                 .map_err(|error| TransactionError::Layout(error.into()))?;
         }
+        EditorOperation::ToggleZoom => state
+            .toggle_zoom()
+            .map_err(|error| TransactionError::Layout(error.into()))?,
         EditorOperation::ClosePane => state
             .close_active_pane()
             .map_err(|error| TransactionError::Layout(error.into()))?,
@@ -832,6 +869,83 @@ mod tests {
     use crate::editor::{
         EditorOperation, EditorState, EditorTransaction, Precondition, TransactionId,
     };
+
+    fn edit(state: &mut EditorState, buffer: crate::editor::BufferId, edits: &[(usize, usize, &str)]) {
+        let edits = edits
+            .iter()
+            .map(|&(start, end, text)| {
+                TextEdit::new(ByteRange::new(ByteOffset(start), ByteOffset(end)).unwrap(), text)
+            })
+            .collect();
+        let edits = TextEditSet::new(state.buffers[buffer].text.revision(), edits);
+        state
+            .apply_transaction(
+                &EditorTransaction::new(TransactionId(1))
+                    .with_operation(EditorOperation::ApplyEdits { buffer, edits }),
+            )
+            .unwrap();
+    }
+
+    fn history(state: &mut EditorState, buffer: crate::editor::BufferId, undo: bool) -> String {
+        let operation = if undo {
+            EditorOperation::Undo { buffer }
+        } else {
+            EditorOperation::Redo { buffer }
+        };
+        state
+            .apply_transaction(&EditorTransaction::new(TransactionId(1)).with_operation(operation))
+            .unwrap();
+        state.buffers[buffer].text.to_string()
+    }
+
+    #[test]
+    fn multi_edit_steps_undo_redo_and_survive_a_restart_while_the_file_is_unchanged() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = PathBuf::from("/workspace/notes.txt");
+        let mut state = EditorState::new(PathBuf::from("/workspace"));
+        state.undo_directory = Some(directory.path().to_path_buf());
+        state.undo_maximum_bytes = 1 << 20;
+        let (buffer, _) = state.open_text(TextBuffer::from_text("one two three"), Some(path.clone()));
+        edit(&mut state, buffer, &[(0, 3, "1"), (8, 13, "3!")]);
+        edit(&mut state, buffer, &[(2, 6, "")]);
+        assert_eq!(state.buffers[buffer].text.to_string(), "1 3!");
+        assert_eq!(history(&mut state, buffer, true), "1 two 3!");
+        assert_eq!(history(&mut state, buffer, true), "one two three");
+        assert!(!state.buffers[buffer].dirty);
+        assert_eq!(history(&mut state, buffer, false), "1 two 3!");
+
+        super::save_undo_history(
+            directory.path().to_path_buf(),
+            path.clone(),
+            state.buffers[buffer].text.clone(),
+            state.buffers[buffer].undo.clone(),
+            1 << 20,
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::fs::read_dir(directory.path())
+            .map_or(0, |entries| entries.filter(|entry| entry.as_ref().is_ok_and(|e| e.path().extension().is_some_and(|x| x == "json"))).count())
+            == 0
+        {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+
+        let restart = || {
+            let mut state = EditorState::new(PathBuf::from("/workspace"));
+            state.undo_directory = Some(directory.path().to_path_buf());
+            state.undo_maximum_bytes = 1 << 20;
+            state
+        };
+        let mut changed_on_disk = restart();
+        let (changed, _) =
+            changed_on_disk.open_text(TextBuffer::from_text("edited elsewhere"), Some(path.clone()));
+        assert!(changed_on_disk.buffers[changed].undo.is_empty());
+        let mut restarted = restart();
+        let (reopened, _) = restarted.open_text(TextBuffer::from_text("1 two 3!"), Some(path));
+        assert_eq!(history(&mut restarted, reopened, true), "one two three");
+        assert_eq!(history(&mut restarted, reopened, false), "1 two 3!");
+        assert_eq!(history(&mut restarted, reopened, false), "1 3!");
+    }
 
     #[test]
     fn failed_late_operation_rolls_back_earlier_edit() {

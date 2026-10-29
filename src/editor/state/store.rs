@@ -95,6 +95,14 @@ impl<'a> EditorTopology<'a> {
     }
 }
 
+/// A view zoomed into its own tab, and where it came from.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct Zoom {
+    tab: TabId,
+    origin_tab: TabId,
+    origin_view: ViewId,
+}
+
 #[cfg_attr(not(test), derive(Clone))]
 #[derive(Debug)]
 pub struct EditorState {
@@ -110,6 +118,10 @@ pub struct EditorState {
     pub active_view: Option<ViewId>,
     pub registers: RegisterStore,
     pub policy: EditingPolicy,
+    /// Where undo history is saved next to each file's text, when it is kept.
+    pub undo_directory: Option<PathBuf>,
+    pub undo_maximum_bytes: usize,
+    zoom: Option<Zoom>,
     pub(super) window_revision: u64,
     window_revision_exhausted: bool,
 }
@@ -133,6 +145,9 @@ impl Clone for EditorState {
             active_view: self.active_view,
             registers: self.registers.clone(),
             policy: self.policy,
+            undo_directory: self.undo_directory.clone(),
+            undo_maximum_bytes: self.undo_maximum_bytes,
+            zoom: self.zoom,
             window_revision: self.window_revision,
             window_revision_exhausted: self.window_revision_exhausted,
         }
@@ -155,6 +170,9 @@ impl EditorState {
             active_view: None,
             registers: RegisterStore::default(),
             policy: EditingPolicy::default(),
+            undo_directory: None,
+            undo_maximum_bytes: 0,
+            zoom: None,
             window_revision: 0,
             window_revision_exhausted: false,
         }
@@ -272,7 +290,7 @@ impl EditorState {
         {
             return buffer;
         }
-        let buffer = self.buffers.insert(Buffer::new(text, Some(path)));
+        let buffer = self.buffers.insert(self.file_buffer(text, path));
         self.mark_window_changed();
         buffer
     }
@@ -332,6 +350,14 @@ impl EditorState {
         true
     }
 
+    fn file_buffer(&self, text: TextBuffer, path: PathBuf) -> Buffer {
+        let mut buffer = Buffer::new(text, Some(path));
+        if let Some(directory) = &self.undo_directory {
+            buffer.restore_undo_history(directory, self.undo_maximum_bytes);
+        }
+        buffer
+    }
+
     pub fn open_text(&mut self, text: TextBuffer, path: Option<PathBuf>) -> (BufferId, ViewId) {
         if let Some(path) = path.as_ref() {
             if let Some((buffer, _)) = self
@@ -348,7 +374,11 @@ impl EditorState {
                 return (buffer, view);
             }
         }
-        let buffer = self.buffers.insert(Buffer::new(text, path));
+        let buffer = match path {
+            Some(path) => self.file_buffer(text, path),
+            None => Buffer::new(text, None),
+        };
+        let buffer = self.buffers.insert(buffer);
         let view = self.views.insert(View::new(buffer));
         self.show_view(view);
         (buffer, view)
@@ -501,6 +531,48 @@ impl EditorState {
         self.active_view = Some(view);
         self.mark_window_changed();
         Ok(tab)
+    }
+
+    /// LazyVim's zoom: show the active view alone in a tab of its own. Toggling again closes
+    /// that tab and puts the zoomed view back into the split it came from.
+    pub fn toggle_zoom(&mut self) -> Result<(), &'static str> {
+        if let Some(zoom) = self.zoom.take() {
+            let origin_pane = self.tabs.get(zoom.origin_tab).and_then(|tab| {
+                pane_ids(&tab.root)
+                    .into_iter()
+                    .find(|pane| self.panes.get(*pane).is_some_and(|p| p.view == zoom.origin_view))
+            });
+            if let (true, Some(pane)) = (self.active_tab == Some(zoom.tab), origin_pane) {
+                let zoomed = self.active_view.and_then(|view| self.views.get(view)).cloned();
+                self.close_active_tab()?;
+                if let Some(zoomed) = zoomed {
+                    self.views[zoom.origin_view] = zoomed;
+                }
+                self.active_tab = Some(zoom.origin_tab);
+                return self.set_focused_pane(zoom.origin_tab, pane);
+            }
+        }
+        let origin_tab = self.active_tab.ok_or("no active tab")?;
+        let origin_view = self.active_view.ok_or("no active view")?;
+        if self
+            .tabs
+            .get(origin_tab)
+            .is_some_and(|tab| matches!(tab.root, LayoutNode::Pane(_)))
+        {
+            return Ok(());
+        }
+        let tab = self.new_tab()?;
+        self.zoom = Some(Zoom {
+            tab,
+            origin_tab,
+            origin_view,
+        });
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn is_zoomed(&self) -> bool {
+        self.zoom.is_some_and(|zoom| self.active_tab == Some(zoom.tab))
     }
 
     #[must_use]
@@ -728,6 +800,9 @@ impl EditorState {
         let read_only = target.read_only;
         let origin = target.origin.clone();
         *target = Buffer::new(text, Some(path));
+        if let Some(directory) = &self.undo_directory {
+            target.restore_undo_history(directory, self.undo_maximum_bytes);
+        }
         target.read_only = read_only;
         target.origin = origin;
         let maximum = ByteOffset(target.text.len_bytes());

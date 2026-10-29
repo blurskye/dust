@@ -64,7 +64,7 @@ pub(in crate::editor::session) enum TrustedAction {
 }
 
 pub use configuration::{
-    ConfigurationSources, KeymapInspection, ResolvedConfiguration, ResolvedKeymaps,
+    ConfigurationSources, KeymapInspection, ResolvedConfiguration, ResolvedKeymaps, ViewToggle,
     compile_keymaps, compile_keymaps_with_plugin_catalog, compile_keymaps_with_plugin_index,
     reload_keymaps, validate_loaded_configuration,
 };

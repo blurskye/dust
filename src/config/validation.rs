@@ -789,6 +789,7 @@ impl Config {
             "tool_install_failed",
             "tool_no_installer",
             "lsp_stopped",
+            "lsp_install_hint",
             "lsp_failed",
             "lsp_status",
             "lsp_no_server",

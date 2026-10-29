@@ -271,6 +271,20 @@ mod tests {
     }
 
     #[test]
+    fn change_line_keeps_the_line_and_its_indent() {
+        let mut editor = HeadlessEditor::with_text("  one\ntwo\n");
+        for key in ['c', 'c', 'X'] {
+            editor.feed(KeyEvent::character(key)).expect("change line");
+        }
+        assert_eq!(editor.text(), "  X\ntwo\n");
+        editor
+            .feed(KeyEvent::plain(crate::editor::input::KeyCode::Escape))
+            .expect("normal mode");
+        editor.feed(KeyEvent::character('u')).expect("undo change");
+        assert_eq!(editor.text(), "  one\ntwo\n");
+    }
+
+    #[test]
     fn replace_mode_restores_replaced_text_and_undoes_as_one_session() {
         let mut editor = HeadlessEditor::with_text("abc");
         editor.feed(KeyEvent::character('R')).expect("replace mode");

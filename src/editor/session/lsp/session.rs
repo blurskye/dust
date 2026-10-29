@@ -25,7 +25,7 @@ use crate::{
     workspace::{RootId, WorkspaceTrust},
 };
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     path::PathBuf,
     time::{Duration, Instant},
 };
@@ -131,6 +131,8 @@ pub(super) struct LspSession {
     active: Option<String>,
     synced: HashMap<(String, BufferId), TextVersion>,
     autostart: Option<LspAutostartObservation>,
+    /// Languages already told which server to install, so the hint shows once per run.
+    install_hinted: HashSet<String>,
     errors: BTreeMap<String, String>,
     navigation_reads: HashMap<
         crate::files::RequestId,
@@ -517,6 +519,9 @@ impl LspSession {
         if let Some(state) = self.sessions.get_mut(key) {
             state.documents.remove(&buffer);
         }
+    }
+    pub(super) fn hint_install_once(&mut self, language: &str) -> bool {
+        self.install_hinted.insert(language.to_owned())
     }
     pub(super) fn reset_autostart(&mut self) {
         self.autostart = None;

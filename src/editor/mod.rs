@@ -27,7 +27,7 @@ pub use state::{
     TransactionId, View, ViewId,
 };
 pub(crate) use state::{EditorTopology, EditorVersion, EditorWindowVersion};
-pub(crate) use transaction::EditorDraft;
+pub(crate) use transaction::{EditorDraft, save_undo_history};
 pub use transaction::{
     EditorOperation, EditorTransaction, Precondition, TransactionError, UndoPolicy, UndoTree,
 };

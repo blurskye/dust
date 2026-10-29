@@ -11142,6 +11142,37 @@ impl InteractiveApplication {
                     && self.selected_lsp_runtime_available(&entry.definition)
             })
             .map(|entry| entry.definition.id.clone());
+        // Like mason-lspconfig, point at the server to install when none can start.
+        if launchable_server.is_none()
+            && !matching_session
+            && self.configuration.settings().lsp.enabled
+        {
+            let installable = self
+                .tooling
+                .entries()
+                .iter()
+                .filter(|entry| {
+                    entry.definition.kind == ToolKind::Lsp
+                        && entry
+                            .definition
+                            .automatically_supports_language(&document.language_id)
+                        && entry.status == ToolStatus::Available
+                })
+                // The most specific server: zls for Zig, not a spell checker that covers it.
+                .min_by_key(|entry| entry.definition.languages.len())
+                .map(|entry| entry.definition.name.clone());
+            if let Some(server) = installable {
+                if self.language.hint_install_once(&document.language_id) {
+                    self.notify_message(
+                        self.message(
+                            "lsp_install_hint",
+                            &[("server", server), ("language", document.language_id.clone())],
+                        ),
+                        false,
+                    );
+                }
+            }
+        }
         let observation = LspAutostartObservation {
             buffer,
             path: document.path.clone(),
@@ -11881,6 +11912,43 @@ impl InteractiveApplication {
             AppEffect::PlaceMouseCursor => self.apply_mouse_cursor(false),
             AppEffect::ExtendMouseSelection => self.apply_mouse_cursor(true),
             AppEffect::Layout(action) => self.apply_layout_action(action),
+            AppEffect::ViewToggle(toggle) => {
+                let enabled = self.configuration.toggle_view(toggle);
+                let name = match toggle {
+                    crate::editor::session::ViewToggle::Wrap => "wrap",
+                    crate::editor::session::ViewToggle::LineNumbers => "line numbers",
+                    crate::editor::session::ViewToggle::RelativeNumbers => "relative numbers",
+                    crate::editor::session::ViewToggle::IndentGuides => "indent guides",
+                    crate::editor::session::ViewToggle::GitSigns => "git signs",
+                };
+                self.ensure_cursor_visible();
+                self.notify_message(
+                    format!("{name} {}", if enabled { "enabled" } else { "disabled" }),
+                    false,
+                );
+            }
+            AppEffect::Zen => {
+                let explorer_open = self.ui.explorer.is_some();
+                match self.configuration.toggle_zen(explorer_open) {
+                    None => {
+                        if explorer_open {
+                            let _ = self.process_project_effect(AppEffect::ExplorerClose);
+                        }
+                        if !self.state.is_zoomed() {
+                            self.apply_layout_action(LayoutAction::Zoom);
+                        }
+                    }
+                    Some(reopen_explorer) => {
+                        if self.state.is_zoomed() {
+                            self.apply_layout_action(LayoutAction::Zoom);
+                        }
+                        if reopen_explorer {
+                            let _ = self.process_project_effect(AppEffect::ExplorerOpen);
+                        }
+                    }
+                }
+                self.ensure_cursor_visible();
+            }
             AppEffect::SurfaceFocus(direction) => self.focus_surface(direction),
             AppEffect::WindowClone { target, axis } => {
                 if let Err(error) = self.clone_graph_window(&target, axis) {
@@ -12363,6 +12431,15 @@ impl InteractiveApplication {
                 }
                 let buffer_state = &self.state.buffers[buffer];
                 let still_dirty = buffer_state.dirty;
+                if let (Some(directory), false) = (&self.state.undo_directory, still_dirty) {
+                    crate::editor::save_undo_history(
+                        directory.clone(),
+                        path.clone(),
+                        buffer_state.text.clone(),
+                        buffer_state.undo.clone(),
+                        self.state.undo_maximum_bytes,
+                    );
+                }
                 let lsp_document = buffer_state.path.clone().and_then(|path| {
                     Some(LspDocument {
                         language_id: language_id_for_path(&path)?.into(),

@@ -1,5 +1,6 @@
 use crate::config::{
-    ConfigurationWorker, ConfigurationWorkerError, ConfigurationWorkerResult, LoadedConfig,
+    ConfigurationWorker, ConfigurationWorkerError, ConfigurationWorkerResult, LineNumbers,
+    LoadedConfig,
 };
 use crate::editor::input::{
     InputContextLayer, InputContextRegistry, KeyEvent, KeymapBindings, KeymapLayer, KeymapSequence,
@@ -71,6 +72,27 @@ pub(super) struct ConfigurationSession {
     worker: ConfigurationWorker,
     generation: u64,
     binding_revision: u64,
+    /// The line numbers that `<leader>ul` hid.
+    hidden_line_numbers: Option<LineNumbers>,
+    zen: Option<ZenRestore>,
+}
+
+/// LazyVim's `<leader>u` toggles. Each flips an accepted setting until the next reload.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ViewToggle {
+    Wrap,
+    LineNumbers,
+    RelativeNumbers,
+    IndentGuides,
+    GitSigns,
+}
+
+/// What zen mode turned off, put back when it ends.
+struct ZenRestore {
+    line_numbers: LineNumbers,
+    git_signs: bool,
+    indent_guides: bool,
+    explorer_open: bool,
 }
 
 /// A fully resolved candidate; only this module can construct or modify it.
@@ -132,6 +154,8 @@ impl ConfigurationSession {
             worker,
             generation: 0,
             binding_revision: 0,
+            hidden_line_numbers: None,
+            zen: None,
         }
     }
     pub(super) fn settings(&self) -> &crate::config::Config {
@@ -269,6 +293,8 @@ impl ConfigurationSession {
         self.check_stamp(&candidate.stamp)?;
         Self::check_catalog(&candidate.catalog, catalog)?;
         self.accepted = candidate.resolved;
+        self.hidden_line_numbers = None;
+        self.zen = None;
         self.themes = themes::Themes::default();
         self.stamp = Arc::new(());
         self.binding_revision = self.binding_revision.saturating_add(1);
@@ -280,6 +306,64 @@ impl ConfigurationSession {
         self.accepted.deferred_plugin_keymaps = deferred;
         self.stamp = Arc::new(());
         self.binding_revision = self.binding_revision.saturating_add(1);
+    }
+    /// Flip one view setting and return whether it is now on.
+    pub(super) fn toggle_view(&mut self, toggle: ViewToggle) -> bool {
+        self.stamp = Arc::new(());
+        let editor = &mut self.accepted.settings.editor;
+        match toggle {
+            ViewToggle::Wrap => {
+                editor.wrap = !editor.wrap;
+                editor.wrap
+            }
+            ViewToggle::LineNumbers if editor.line_numbers == LineNumbers::Off => {
+                editor.line_numbers = self.hidden_line_numbers.take().unwrap_or_default();
+                true
+            }
+            ViewToggle::LineNumbers => {
+                self.hidden_line_numbers = Some(editor.line_numbers);
+                editor.line_numbers = LineNumbers::Off;
+                false
+            }
+            ViewToggle::RelativeNumbers => {
+                editor.line_numbers = if editor.line_numbers == LineNumbers::Absolute {
+                    LineNumbers::Relative
+                } else {
+                    LineNumbers::Absolute
+                };
+                editor.line_numbers == LineNumbers::Relative
+            }
+            ViewToggle::IndentGuides => {
+                editor.indent_guides.enabled = !editor.indent_guides.enabled;
+                editor.indent_guides.enabled
+            }
+            ViewToggle::GitSigns => {
+                editor.git_signs.enabled = !editor.git_signs.enabled;
+                editor.git_signs.enabled
+            }
+        }
+    }
+    /// Enter zen mode, hiding line numbers, git signs and indent guides, or leave it and put
+    /// them back. Leaving returns whether the explorer was open when zen mode began.
+    pub(super) fn toggle_zen(&mut self, explorer_open: bool) -> Option<bool> {
+        self.stamp = Arc::new(());
+        let editor = &mut self.accepted.settings.editor;
+        if let Some(zen) = self.zen.take() {
+            editor.line_numbers = zen.line_numbers;
+            editor.git_signs.enabled = zen.git_signs;
+            editor.indent_guides.enabled = zen.indent_guides;
+            return Some(zen.explorer_open);
+        }
+        self.zen = Some(ZenRestore {
+            line_numbers: editor.line_numbers,
+            git_signs: editor.git_signs.enabled,
+            indent_guides: editor.indent_guides.enabled,
+            explorer_open,
+        });
+        editor.line_numbers = LineNumbers::Off;
+        editor.git_signs.enabled = false;
+        editor.indent_guides.enabled = false;
+        None
     }
     pub(super) fn toggle_inlay_hints(&mut self) -> bool {
         self.stamp = Arc::new(());

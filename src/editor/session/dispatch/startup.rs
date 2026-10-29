@@ -50,6 +50,10 @@ impl InteractiveApplication {
                 == crate::config::AmbiguousWidth::Wide,
             autopairs: configuration.settings.editor.autopairs,
         };
+        let persistence = &configuration.settings.persistence;
+        state.undo_directory = (persistence.enabled && persistence.undo_history)
+            .then(|| state_directory.join("undo"));
+        state.undo_maximum_bytes = persistence.maximum_file_bytes;
         let dashboard_visible = matches!(startup, StartupTarget::Dashboard { .. })
             && configuration.settings.startup.show_dashboard;
         if matches!(startup, StartupTarget::Dashboard { .. }) && !dashboard_visible {

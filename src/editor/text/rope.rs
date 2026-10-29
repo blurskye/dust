@@ -236,6 +236,22 @@ impl TextBuffer {
         Ok(())
     }
 
+    /// The text in rope-sized pieces, for hashing or comparing without building a string.
+    pub fn chunks(&self) -> impl Iterator<Item = &str> {
+        self.rope.chunks()
+    }
+
+    #[must_use]
+    pub fn text_equals(&self, other: &str) -> bool {
+        let mut rest = other.as_bytes();
+        self.rope.len_bytes() == other.len()
+            && self.rope.chunks().all(|chunk| {
+                let (head, tail) = rest.split_at(chunk.len());
+                rest = tail;
+                head == chunk.as_bytes()
+            })
+    }
+
     /// Restore a historical snapshot while preserving monotonic revisions.
     pub fn restore_text(&mut self, text: &str) -> Result<(), PositionError> {
         self.bump_revision()?;

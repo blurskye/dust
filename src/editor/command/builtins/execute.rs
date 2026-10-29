@@ -578,6 +578,13 @@ pub(super) fn execute_builtin<E>(
                 text,
                 shape,
             });
+            // Like Vim's `cc` with autoindent, a linewise change keeps one line and its indent.
+            let (ranges, first_range) = if operator == "change" && shape == RegisterShape::Line {
+                let range = linewise_change_range(&buffer.text, whole_range).map_err(failed)?;
+                (vec![range], range)
+            } else {
+                (ranges, first_range)
+            };
             if operator != "yank" {
                 if operator == "change" {
                     transaction.undo_policy = UndoPolicy::Merge;
@@ -801,4 +808,17 @@ fn counted_motion<'a>(motion: &'a str, invocation: &CommandInvocation) -> &'a st
     } else {
         motion
     }
+}
+
+/// The part of whole lines that a linewise change replaces: from after the first line's
+/// indent to before the final newline.
+fn linewise_change_range(
+    text: &crate::editor::text::TextBuffer,
+    lines: ByteRange,
+) -> Result<ByteRange, crate::editor::text::PositionError> {
+    let covered = text.slice(lines)?;
+    let indent = covered.len() - covered.trim_start_matches([' ', '\t']).len();
+    let end = lines.end.get() - usize::from(covered.ends_with('\n'));
+    let start = (lines.start.get() + indent).min(end);
+    ByteRange::new(ByteOffset(start), ByteOffset(end))
 }

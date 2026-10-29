@@ -55,8 +55,8 @@ pub struct Buffer {
     pub origin: BufferOrigin,
     pub dirty: bool,
     pub saved_revision: BufferRevision,
-    pub(crate) saved_text: String,
-    persisted_bytes: Vec<u8>,
+    saved_text: std::sync::Arc<str>,
+    persisted_bytes: std::sync::Arc<[u8]>,
     pub undo: UndoTree,
     /// Tree-sitter text objects from the parse of `revision`, set by the syntax session.
     pub syntax_objects: Option<(
@@ -86,11 +86,11 @@ impl Buffer {
 
     #[must_use]
     pub fn new(text: TextBuffer, path: Option<PathBuf>) -> Self {
-        let saved_text = text.to_string();
+        let saved_text = text.to_string().into();
         let saved_revision = text.revision();
-        let persisted_bytes = text.to_bytes();
+        let persisted_bytes = text.to_bytes().into();
         Self {
-            undo: UndoTree::new(saved_text.clone()),
+            undo: UndoTree::default(),
             text,
             path,
             read_only: false,
@@ -109,7 +109,7 @@ impl Buffer {
     }
 
     pub fn refresh_dirty(&mut self) {
-        self.dirty = self.text.to_string() != self.saved_text;
+        self.dirty = !self.text.text_equals(&self.saved_text);
     }
 
     pub fn mark_saved(&mut self, revision: BufferRevision) {
@@ -125,12 +125,26 @@ impl Buffer {
         path: Option<PathBuf>,
     ) {
         self.path = path;
-        self.persisted_bytes = bytes.clone();
         self.saved_revision = revision;
         if let Ok(saved) = TextBuffer::from_bytes(&bytes) {
-            self.saved_text = saved.to_string();
+            self.saved_text = saved.to_string().into();
         }
+        self.persisted_bytes = bytes.into();
         self.refresh_dirty();
+    }
+
+    /// Pick up the history saved with this file, when the file still holds the saved text.
+    pub fn restore_undo_history(&mut self, directory: &std::path::Path, maximum_bytes: usize) {
+        if let Some(path) = &self.path {
+            if let Some(tree) = crate::editor::transaction::load_undo_history(
+                directory,
+                path,
+                &self.text,
+                maximum_bytes,
+            ) {
+                self.undo = tree;
+            }
+        }
     }
 
     #[must_use]

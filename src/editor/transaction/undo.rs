@@ -1,48 +1,113 @@
-#[derive(Clone, Debug)]
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+    thread,
+};
+
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+use crate::editor::text::TextBuffer;
+
+/// One replacement: at byte `start`, `removed` became `inserted`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct Change {
+    pub start: usize,
+    pub removed: String,
+    pub inserted: String,
+}
+
+impl Change {
+    fn inverse(&self) -> Self {
+        Self {
+            start: self.start,
+            removed: self.inserted.clone(),
+            inserted: self.removed.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 struct UndoNode {
     parent: Option<usize>,
     children: Vec<usize>,
-    text: String,
+    /// The changes from the parent's text to this node's, applied one after another.
+    changes: Vec<Change>,
 }
 
-/// Branch-preserving snapshot undo tree. Text storage can later be replaced by
-/// compact inverse deltas without changing its traversal contract.
-#[derive(Clone, Debug)]
+/// Branch-preserving undo tree. Each node stores the changes from its parent, so memory
+/// grows with what was typed rather than with the file size. Nodes sit behind `Arc` so
+/// cloning the editor state for a transaction does not copy the history.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(from = "SavedTree", into = "SavedTree")]
 pub struct UndoTree {
-    nodes: Vec<UndoNode>,
+    nodes: Vec<Arc<UndoNode>>,
     current: usize,
     merge_active: bool,
 }
 
-impl UndoTree {
-    #[must_use]
-    pub fn new(initial_text: String) -> Self {
+/// The tree as written to disk.
+#[derive(Deserialize, Serialize)]
+struct SavedTree {
+    nodes: Vec<UndoNode>,
+    current: usize,
+}
+
+impl From<SavedTree> for UndoTree {
+    fn from(saved: SavedTree) -> Self {
         Self {
-            nodes: vec![UndoNode {
+            nodes: saved.nodes.into_iter().map(Arc::new).collect(),
+            current: saved.current,
+            merge_active: false,
+        }
+    }
+}
+
+impl From<UndoTree> for SavedTree {
+    fn from(tree: UndoTree) -> Self {
+        Self {
+            nodes: tree.nodes.into_iter().map(Arc::unwrap_or_clone).collect(),
+            current: tree.current,
+        }
+    }
+}
+
+impl Default for UndoTree {
+    fn default() -> Self {
+        Self {
+            nodes: vec![Arc::new(UndoNode {
                 parent: None,
                 children: Vec::new(),
-                text: initial_text,
-            }],
+                changes: Vec::new(),
+            })],
             current: 0,
             merge_active: false,
         }
     }
+}
 
-    pub fn record(&mut self, text: String, merge: bool) {
-        if self.nodes[self.current].text == text {
+impl UndoTree {
+    pub fn record(&mut self, mut changes: Vec<Change>, merge: bool) {
+        changes.retain(|change| change.removed != change.inserted);
+        if changes.is_empty() {
             return;
         }
         if merge && self.merge_active && self.current != 0 {
-            self.nodes[self.current].text = text;
+            Arc::make_mut(&mut self.nodes[self.current])
+                .changes
+                .extend(changes);
             return;
         }
         let next = self.nodes.len();
-        self.nodes.push(UndoNode {
+        self.nodes.push(Arc::new(UndoNode {
             parent: Some(self.current),
             children: Vec::new(),
-            text,
-        });
-        self.nodes[self.current].children.push(next);
+            changes,
+        }));
+        Arc::make_mut(&mut self.nodes[self.current])
+            .children
+            .push(next);
         self.current = next;
         self.merge_active = merge;
     }
@@ -51,18 +116,27 @@ impl UndoTree {
         self.merge_active = false;
     }
 
-    pub fn undo(&mut self) -> Option<&str> {
-        let parent = self.nodes[self.current].parent?;
-        self.current = parent;
-        self.merge_active = false;
-        Some(&self.nodes[self.current].text)
+    /// Forget the history, for text that changed without being recorded.
+    pub fn reset(&mut self) {
+        *self = Self::default();
     }
 
-    pub fn redo(&mut self) -> Option<&str> {
+    /// Step to the parent and return the changes that turn the current text into its text.
+    pub fn undo(&mut self) -> Option<Vec<Change>> {
+        let node = &self.nodes[self.current];
+        let parent = node.parent?;
+        let changes = node.changes.iter().rev().map(Change::inverse).collect();
+        self.current = parent;
+        self.merge_active = false;
+        Some(changes)
+    }
+
+    /// Step to the newest child and return the changes that turn the current text into its text.
+    pub fn redo(&mut self) -> Option<Vec<Change>> {
         let child = *self.nodes[self.current].children.last()?;
         self.current = child;
         self.merge_active = false;
-        Some(&self.nodes[self.current].text)
+        Some(self.nodes[child].changes.clone())
     }
 
     #[must_use]
@@ -74,21 +148,153 @@ impl UndoTree {
     pub const fn current_node(&self) -> usize {
         self.current
     }
+
+    /// Whether anything was ever recorded.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.nodes.len() == 1
+    }
+
+    /// A tree read back from disk is only used when its links are consistent.
+    #[must_use]
+    pub fn is_well_formed(&self) -> bool {
+        self.current < self.nodes.len()
+            && self.nodes[0].parent.is_none()
+            && self.nodes.iter().enumerate().all(|(index, node)| {
+                node.children
+                    .iter()
+                    .all(|&child| child > index && child < self.nodes.len())
+                    && node.parent.is_none_or(|parent| {
+                        parent < index && self.nodes[parent].children.contains(&index)
+                    })
+                    && (index == 0 || node.parent.is_some())
+            })
+    }
+}
+
+/// The undo history kept on disk for a file, valid only while the file still holds the text
+/// it was saved with (like Vim's `undofile`).
+#[derive(Deserialize, Serialize)]
+struct UndoFile {
+    text_sha256: String,
+    tree: UndoTree,
+}
+
+fn undo_file(directory: &Path, path: &Path) -> PathBuf {
+    let name = Sha256::digest(path.as_os_str().as_encoded_bytes());
+    directory.join(format!("{name:x}.json"))
+}
+
+fn text_sha256(text: &TextBuffer) -> String {
+    let mut digest = Sha256::new();
+    for chunk in text.chunks() {
+        digest.update(chunk);
+    }
+    format!("{:x}", digest.finalize())
+}
+
+/// The saved history of `path`, when it was saved against exactly `text`.
+pub(crate) fn load_undo_history(
+    directory: &Path,
+    path: &Path,
+    text: &TextBuffer,
+    maximum_bytes: usize,
+) -> Option<UndoTree> {
+    let file = undo_file(directory, path);
+    if fs::metadata(&file).ok()?.len() > maximum_bytes as u64 {
+        return None;
+    }
+    let saved: UndoFile = serde_json::from_slice(&fs::read(file).ok()?).ok()?;
+    (saved.tree.is_well_formed() && saved.text_sha256 == text_sha256(text)).then_some(saved.tree)
+}
+
+/// Write the history of `path`, whose file now holds `text`, on a worker thread. A history
+/// larger than `maximum_bytes` is not kept.
+pub(crate) fn save_undo_history(
+    directory: PathBuf,
+    path: PathBuf,
+    text: TextBuffer,
+    tree: UndoTree,
+    maximum_bytes: usize,
+) {
+    thread::spawn(move || {
+        let file = undo_file(&directory, &path);
+        if tree.is_empty() {
+            let _ = fs::remove_file(file);
+            return;
+        }
+        let saved = UndoFile {
+            text_sha256: text_sha256(&text),
+            tree,
+        };
+        let Ok(json) = serde_json::to_vec(&saved) else {
+            return;
+        };
+        if json.len() > maximum_bytes {
+            let _ = fs::remove_file(file);
+            return;
+        }
+        let partial = file.with_extension(format!("{}.partial", std::process::id()));
+        let _ = fs::create_dir_all(&directory)
+            .and_then(|()| fs::write(&partial, json))
+            .and_then(|()| fs::rename(&partial, &file));
+    });
 }
 
 #[cfg(test)]
 mod tests {
-    use super::UndoTree;
+    use super::{Change, UndoTree};
+
+    fn apply(text: &mut String, changes: &[Change]) {
+        for change in changes {
+            let end = change.start + change.removed.len();
+            assert_eq!(&text[change.start..end], change.removed);
+            text.replace_range(change.start..end, &change.inserted);
+        }
+    }
+
+    fn insert(at: usize, text: &str) -> Vec<Change> {
+        vec![Change {
+            start: at,
+            removed: String::new(),
+            inserted: text.into(),
+        }]
+    }
 
     #[test]
     fn preserves_redo_branch_after_new_edit() {
-        let mut tree = UndoTree::new("a".into());
-        tree.record("ab".into(), false);
-        tree.record("abc".into(), false);
-        assert_eq!(tree.undo(), Some("ab"));
-        tree.record("abX".into(), false);
-        assert_eq!(tree.undo(), Some("ab"));
+        let mut text = String::from("a");
+        let mut tree = UndoTree::default();
+        for (at, typed) in [(1, "b"), (2, "c")] {
+            apply(&mut text, &insert(at, typed));
+            tree.record(insert(at, typed), false);
+        }
+        apply(&mut text, &tree.undo().unwrap());
+        apply(&mut text, &insert(2, "X"));
+        tree.record(insert(2, "X"), false);
+        assert_eq!(text, "abX");
+        apply(&mut text, &tree.undo().unwrap());
+        assert_eq!(text, "ab");
         assert_eq!(tree.redo_branch_count(), 2);
-        assert_eq!(tree.redo(), Some("abX"));
+        apply(&mut text, &tree.redo().unwrap());
+        assert_eq!(text, "abX");
+    }
+
+    #[test]
+    fn merged_changes_undo_together_and_round_trip_through_json() {
+        let mut text = String::from("x");
+        let mut tree = UndoTree::default();
+        for (at, typed) in [(1, "a"), (2, "b"), (3, "c")] {
+            apply(&mut text, &insert(at, typed));
+            tree.record(insert(at, typed), true);
+        }
+        let mut restored: UndoTree =
+            serde_json::from_str(&serde_json::to_string(&tree).unwrap()).unwrap();
+        assert!(restored.is_well_formed());
+        apply(&mut text, &restored.undo().unwrap());
+        assert_eq!(text, "x");
+        assert!(restored.undo().is_none());
+        apply(&mut text, &restored.redo().unwrap());
+        assert_eq!(text, "xabc");
     }
 }

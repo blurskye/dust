@@ -5044,3 +5044,57 @@ fn an_attached_session_names_the_target_it_was_given_in_its_status() {
         "an attach must not be described as a program the editor launched: {status:?}"
     );
 }
+
+#[test]
+fn zoom_and_zen_show_the_pane_alone_and_put_everything_back() {
+    let mut app = app();
+    app.window_session.observe_size((80, 24));
+    app.state.open_text(
+        TextBuffer::from_text("one\ntwo\n"),
+        Some(PathBuf::from("/workspace/zoom.rs")),
+    );
+    app.set_dashboard_visibility(false);
+    let origin_tab = app.state.active_tab.expect("editor tab");
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(
+        crate::editor::Axis::Horizontal,
+    )));
+    let origin_view = app.state.active_view.expect("split view");
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Zoom));
+    assert!(app.state.is_zoomed());
+    assert_ne!(app.state.active_tab, Some(origin_tab));
+    let zoomed = app.state.active_view.unwrap();
+    app.state.views[zoomed].cursor = crate::editor::text::ByteOffset(4);
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Zoom));
+    assert!(!app.state.is_zoomed());
+    assert_eq!(app.state.active_tab, Some(origin_tab));
+    assert_eq!(app.state.active_view, Some(origin_view));
+    assert_eq!(app.state.tabs.len(), 1);
+    assert_eq!(
+        app.state.views[origin_view].cursor,
+        crate::editor::text::ByteOffset(4)
+    );
+
+    let numbers = app.configuration.settings().editor.line_numbers;
+    app.process_effect(AppEffect::Zen);
+    assert!(app.state.is_zoomed());
+    assert_eq!(
+        app.configuration.settings().editor.line_numbers,
+        crate::config::LineNumbers::Off
+    );
+    assert!(!app.configuration.settings().editor.git_signs.enabled);
+    app.process_effect(AppEffect::Zen);
+    assert!(!app.state.is_zoomed());
+    assert_eq!(app.configuration.settings().editor.line_numbers, numbers);
+    assert!(app.configuration.settings().editor.git_signs.enabled);
+
+    let wrap = app.configuration.settings().editor.wrap;
+    app.process_effect(AppEffect::ViewToggle(crate::editor::session::ViewToggle::Wrap));
+    assert_eq!(app.configuration.settings().editor.wrap, !wrap);
+    app.process_effect(AppEffect::ViewToggle(
+        crate::editor::session::ViewToggle::LineNumbers,
+    ));
+    app.process_effect(AppEffect::ViewToggle(
+        crate::editor::session::ViewToggle::LineNumbers,
+    ));
+    assert_eq!(app.configuration.settings().editor.line_numbers, numbers);
+}

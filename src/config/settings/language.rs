@@ -69,6 +69,8 @@ pub struct PersistenceConfig {
     pub enabled: bool,
     pub restore_on_startup: bool,
     pub save_on_exit: bool,
+    /// Keep each file's undo history across restarts, like Vim's `undofile`.
+    pub undo_history: bool,
     pub state_file: String,
     pub maximum_file_bytes: usize,
     pub maximum_entries: usize,
@@ -86,6 +88,7 @@ impl Default for PersistenceConfig {
             enabled: true,
             restore_on_startup: true,
             save_on_exit: true,
+            undo_history: true,
             state_file: "session.json".into(),
             maximum_file_bytes: 4 * 1024 * 1024,
             maximum_entries: 10_000,
