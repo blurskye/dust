@@ -114,6 +114,9 @@ pub struct KeymapEntry {
     pub disable: bool,
     #[serde(default)]
     pub pass_through: bool,
+    /// Short label shown in key hints (which-key). Falls back to the command description.
+    #[serde(default)]
+    pub desc: Option<String>,
 }
 
 const fn current_config_schema() -> u32 {

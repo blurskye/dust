@@ -213,6 +213,7 @@ pub(in crate::editor::session) struct EffectiveKeymapDeclaration {
     command: Option<String>,
     arguments: BTreeMap<String, toml::Value>,
     operation: KeymapOperation,
+    desc: Option<String>,
     origin: KeymapContributionOrigin,
 }
 
@@ -242,6 +243,13 @@ pub(in crate::editor::session) fn regular_keymap_declaration(
         .as_ref()
         .filter(|keys| !keys.is_empty())
         .ok_or_else(|| "command/unmap/pass_through declaration requires `keys`".to_owned())?;
+    if entry.desc.as_ref().is_some_and(|desc| {
+        desc.is_empty()
+            || desc.chars().count() > 64
+            || desc.chars().any(char::is_control)
+    }) {
+        return Err("desc must contain 1..=64 non-control characters".into());
+    }
     Ok(EffectiveKeymapDeclaration {
         id: entry.id.clone(),
         context: context.clone(),
@@ -256,6 +264,7 @@ pub(in crate::editor::session) fn regular_keymap_declaration(
         } else {
             KeymapOperation::PassThrough
         },
+        desc: entry.desc.clone(),
         origin,
     })
 }
@@ -271,6 +280,7 @@ pub(in crate::editor::session) fn identity_disable_is_well_formed(
         && entry.mode.is_empty()
         && entry.keys.is_none()
         && entry.arguments.is_empty()
+        && entry.desc.is_none()
 }
 
 pub(in crate::editor::session) fn resolve_keymap_identities(
@@ -323,6 +333,7 @@ pub(in crate::editor::session) fn resolve_keymap_identities(
                     command: None,
                     arguments: BTreeMap::new(),
                     operation: KeymapOperation::Disable,
+                    desc: None,
                     origin,
                 };
                 continue;
@@ -675,6 +686,7 @@ pub fn compile_keymaps_with_plugin_index(
             unmap: false,
             disable: false,
             pass_through: false,
+            desc: None,
         })
         .collect::<Vec<_>>();
     let plugin_groups = index
@@ -797,6 +809,7 @@ pub fn compile_keymaps_with_plugin_catalog(
                 unmap: false,
                 disable: false,
                 pass_through: false,
+                desc: None,
             });
             entry_origins.push(KeymapContributionOrigin {
                 layer: InputContextLayer::Plugin,
@@ -991,6 +1004,7 @@ pub(in crate::editor::session) fn compile_typed_keymap_entries(
                 arguments: BTreeMap::new(),
                 source_keys: entry.keys.clone(),
                 keys: effective_keys,
+                desc: None,
                 source,
             });
             continue;
@@ -1008,6 +1022,7 @@ pub(in crate::editor::session) fn compile_typed_keymap_entries(
                 arguments: BTreeMap::new(),
                 source_keys: entry.keys.clone(),
                 keys: effective_keys,
+                desc: None,
                 source,
             });
             continue;
@@ -1059,6 +1074,7 @@ pub(in crate::editor::session) fn compile_typed_keymap_entries(
             arguments: invocation.arguments.clone(),
             source_keys: entry.keys.clone(),
             keys: effective_keys.clone(),
+            desc: entry.desc.clone(),
             source,
         });
         keymap.insert(&sequence, invocation);

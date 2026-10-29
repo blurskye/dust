@@ -456,6 +456,7 @@ fn user_keymaps_execute_typed_commands_and_unmap_defaults() {
             unmap: false,
             disable: false,
             pass_through: false,
+            desc: None,
         },
         crate::config::KeymapEntry {
             id: "user.test.user-keymaps-execute-typed-commands-and-unmap-defaults.case-2".into(),
@@ -467,6 +468,7 @@ fn user_keymaps_execute_typed_commands_and_unmap_defaults() {
             unmap: true,
             disable: false,
             pass_through: false,
+            desc: None,
         },
     ]);
     let (keymaps, diagnostic) = compile_keymaps(
@@ -485,7 +487,7 @@ fn user_keymaps_execute_typed_commands_and_unmap_defaults() {
     let inspection = app
         .configuration
         .keymaps()
-        .inspect("editor.normal", "editor.quit")
+        .inspect_id("user.test.user-keymaps-execute-typed-commands-and-unmap-defaults")
         .expect("inspect remap");
     assert_eq!(inspection.source_keys, "<leader> q");
     assert_eq!(inspection.keys, "space q");
@@ -524,6 +526,7 @@ fn symbolic_leaders_expand_before_dispatch_and_preserve_literal_space_actions() 
         unmap: false,
         disable: false,
         pass_through: false,
+        desc: None,
     });
     loaded.bundled_count = bundled_count;
     let policy = crate::config::KeymapPolicyConfig {
@@ -581,6 +584,7 @@ fn expanded_duplicate_sequences_are_rejected_with_symbolic_diagnostics() {
         unmap: false,
         disable: false,
         pass_through: false,
+        desc: None,
     };
     loaded.entries.extend([
         mapping("user.test.expanded-symbolic", "<leader> z"),
@@ -638,6 +642,7 @@ fn disabling_bundled_keymaps_keeps_only_explicit_user_declarations() {
         unmap: false,
         disable: false,
         pass_through: false,
+        desc: None,
     });
     let policy = crate::config::KeymapPolicyConfig {
         load_bundled_defaults: false,
@@ -657,7 +662,7 @@ fn disabling_bundled_keymaps_keeps_only_explicit_user_declarations() {
 #[test]
 fn identity_rebind_moves_a_bundled_mapping_without_leaving_the_old_sequence() {
     let app = app();
-    let target = "builtin.editor.normal.buffer-picker-open.leader-f-b";
+    let target = "builtin.global.files-buffers.editor-normal";
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.path = PathBuf::from("keymaps.toml");
     loaded.user_spans.clear();
@@ -671,6 +676,7 @@ fn identity_rebind_moves_a_bundled_mapping_without_leaving_the_old_sequence() {
         unmap: false,
         disable: false,
         pass_through: false,
+        desc: None,
     });
     let (keymaps, diagnostic) = compile_keymaps(
         &app.commands,
@@ -720,7 +726,7 @@ fn identity_rebind_moves_a_bundled_mapping_without_leaving_the_old_sequence() {
 #[test]
 fn identity_disable_inherits_symbolic_location_and_tracks_leader_changes() {
     let app = app();
-    let target = "builtin.editor.normal.explorer-open.leader-f-e";
+    let target = "builtin.global.files-explorer.editor-normal";
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.entries.push(crate::config::KeymapEntry {
         id: target.into(),
@@ -732,6 +738,7 @@ fn identity_disable_inherits_symbolic_location_and_tracks_leader_changes() {
         unmap: false,
         disable: true,
         pass_through: false,
+        desc: None,
     });
     for leader in [",", ";"] {
         let policy = crate::config::KeymapPolicyConfig {
@@ -741,10 +748,9 @@ fn identity_disable_inherits_symbolic_location_and_tracks_leader_changes() {
         };
         let (keymaps, diagnostic) = compile_keymaps(&app.commands, &loaded, &policy);
         assert!(diagnostic.is_none(), "{diagnostic:?}");
-        assert!(
-            keymaps
-                .binding_for("editor.normal", "explorer.panel.toggle")
-                .is_none()
+        assert_ne!(
+            keymaps.binding_for("editor.normal", "explorer.panel.toggle"),
+            Some(format!("{leader} f e").as_str())
         );
         let inspection = keymaps.inspect_id(target).expect("disable inspection");
         assert_eq!(inspection.operation, KeymapOperation::Disable);
@@ -775,7 +781,7 @@ fn identity_disable_inherits_symbolic_location_and_tracks_leader_changes() {
 #[test]
 fn identity_disable_rejects_unknown_omitted_and_overdeclared_targets() {
     let app = app();
-    let target = "builtin.editor.normal.explorer-open.leader-f-e";
+    let target = "builtin.global.files-explorer.editor-normal";
     for (load_bundled_defaults, id, context, expected) in [
         (
             true,
@@ -802,6 +808,7 @@ fn identity_disable_rejects_unknown_omitted_and_overdeclared_targets() {
             unmap: false,
             disable: true,
             pass_through: false,
+            desc: None,
         });
         let policy = crate::config::KeymapPolicyConfig {
             load_bundled_defaults,
@@ -843,6 +850,7 @@ fn malformed_keymap_identity_rejects_the_configuration_transactionally() {
             unmap: false,
             disable: false,
             pass_through: false,
+            desc: None,
         });
         let error = app
             .apply_configuration_candidate(candidate, false)
@@ -872,6 +880,7 @@ fn invalid_user_keymap_set_is_rejected_transactionally() {
         unmap: false,
         disable: false,
         pass_through: false,
+        desc: None,
     });
     let (keymaps, diagnostic) = compile_keymaps(
         &app.commands,
@@ -903,7 +912,7 @@ fn invalid_user_keymap_set_is_rejected_transactionally() {
 #[test]
 fn keymap_inspection_by_id_reports_identity_operation_sequences_and_source() {
     let mut app = app();
-    let id = "builtin.editor.normal.explorer-open.leader-f-e";
+    let id = "builtin.global.files-explorer.editor-normal";
     app.process_effect(crate::editor::AppEffect::InspectKeymap {
         id: Some(id.into()),
         context: None,
@@ -969,6 +978,7 @@ fn duplicate_user_ids_are_rejected_transactionally() {
         unmap: false,
         disable: false,
         pass_through: false,
+        desc: None,
     };
     loaded.entries.extend([mapping.clone(), mapping]);
     let (_, diagnostic) = compile_keymaps(
@@ -997,6 +1007,7 @@ fn configured_focus_loss_cancels_pending_mapping() {
         unmap: false,
         disable: false,
         pass_through: false,
+        desc: None,
     });
     let (keymaps, diagnostic) = compile_keymaps(
         &app.commands,
@@ -1026,6 +1037,7 @@ fn prompt_special_keys_are_remappable_from_configuration() {
             unmap: true,
             disable: false,
             pass_through: false,
+            desc: None,
         },
         crate::config::KeymapEntry {
             id: "user.test.prompt-special-keys-are-remappable-from-configuration.case-2".into(),
@@ -1037,6 +1049,7 @@ fn prompt_special_keys_are_remappable_from_configuration() {
             unmap: false,
             disable: false,
             pass_through: false,
+            desc: None,
         },
     ]);
     let (keymaps, diagnostic) = compile_keymaps(
@@ -1068,6 +1081,7 @@ fn confirmation_keys_and_hints_follow_accepted_remaps() {
             unmap: false,
             disable: false,
             pass_through: false,
+            desc: None,
         },
         crate::config::KeymapEntry {
             id: "user.test.confirmation.yes".into(),
@@ -1079,6 +1093,7 @@ fn confirmation_keys_and_hints_follow_accepted_remaps() {
             unmap: false,
             disable: false,
             pass_through: false,
+            desc: None,
         },
     ]);
     let (keymaps, diagnostic) = compile_keymaps(
@@ -1168,22 +1183,22 @@ fn the_documented_git_and_debugger_keys_each_reach_their_command() {
         ("<leader> g U", "workspace.git.remote.update"),
         ("<leader> g p", "workspace.git.remote.push"),
         ("<leader> g x", "workspace.git.conflicts.open"),
-        ("<leader> g b", "workspace.git.branches.open"),
+        ("<leader> g B", "workspace.git.branches.open"),
         ("<leader> g w", "workspace.git.worktrees.open"),
         ("<leader> g h p", "workspace.git.hunk.preview"),
         ("<leader> d s", "dap.session.start"),
         ("<leader> d c", "dap.session.continue"),
-        ("<leader> d n", "dap.session.next"),
+        ("<leader> d O", "dap.session.next"),
         ("<leader> d i", "dap.session.step_in"),
         ("<leader> d o", "dap.session.step_out"),
         ("<leader> d p", "dap.session.pause"),
-        ("<leader> d q", "dap.session.stop"),
+        ("<leader> d t", "dap.session.stop"),
         ("<leader> d R", "dap.session.restart"),
         ("<leader> d b", "dap.breakpoint.toggle"),
         ("<leader> d B", "dap.breakpoint.configure"),
         ("<leader> d l", "dap.breakpoints.states"),
         ("<leader> d D", "dap.detach"),
-        ("<leader> d C", "dap.console"),
+        ("<leader> d r", "dap.console"),
     ];
     for (keys, command) in cases {
         assert_eq!(

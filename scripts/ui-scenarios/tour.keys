@@ -3,34 +3,40 @@ wait 800
 shot 01-dashboard
 type trust this workspace
 key enter
-wait 500
-shot 01b-trusted
+wait 300
 key space
-wait 400
+wait 700
 shot 02-leader-hints
 key escape
 key space space
 wait 600
 type main.rs
-wait 500
+wait 600
 shot 03-file-picker
 key enter
-wait 800
+wait 1500
 shot 04-editor
-key space f e
+key space e
 wait 600
 shot 05-explorer
+key space
+wait 700
+shot 06-leader-from-explorer
+key escape
 key ctrl+l
+wait 300
 key ctrl+slash
 wait 800
-shot 06-terminal
+shot 07-terminal
 key ctrl+slash
+wait 300
 key space slash
 wait 300
 type fn run
-wait 900
-shot 07-grep
-key escape
+wait 1000
+shot 08-grep
+key escape escape
+wait 200
 key space g g
 wait 800
-shot 08-git
+shot 09-git

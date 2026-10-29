@@ -431,24 +431,20 @@ pub(super) fn parse_keymaps(source: &str, path: PathBuf) -> LoadedKeymaps {
         key_group: Vec<toml::Spanned<KeyGroupEntry>>,
     }
     match toml::from_str::<KeymapFile>(source) {
-        Ok(file) => LoadedKeymaps {
-            user_spans: file.keymap.iter().map(toml::Spanned::span).collect(),
-            user_group_spans: file.key_group.iter().map(toml::Spanned::span).collect(),
-            entries: file
-                .keymap
-                .into_iter()
-                .map(toml::Spanned::into_inner)
-                .collect(),
-            groups: file
-                .key_group
-                .into_iter()
-                .map(toml::Spanned::into_inner)
-                .collect(),
-            bundled_count: 0,
-            bundled_group_count: 0,
-            path,
-            diagnostic: None,
-        },
+        Ok(file) => {
+            let (entries, user_spans) = expand_global_keymaps(file.keymap);
+            let (groups, user_group_spans) = expand_global_groups(file.key_group);
+            LoadedKeymaps {
+                user_spans,
+                user_group_spans,
+                entries,
+                groups,
+                bundled_count: 0,
+                bundled_group_count: 0,
+                path,
+                diagnostic: None,
+            }
+        }
         Err(error) => LoadedKeymaps {
             diagnostic: Some(format!(
                 "invalid {}: {error}; ignoring keymaps",
@@ -1189,4 +1185,130 @@ pub(super) fn unknown_key_warning(source: &str) -> Option<String> {
         .cloned()
         .collect();
     (!unknown.is_empty()).then(|| format!("unknown configuration sections: {}", unknown.join(", ")))
+}
+
+/// Surfaces that receive `context = "global"` bindings: every place where keys are
+/// commands rather than typed text, so the leader and window keys work everywhere.
+const GLOBAL_KEYMAP_TARGETS: &[(&str, &str)] = &[
+    ("editor", "normal"),
+    ("explorer", ""),
+    ("dashboard", ""),
+    ("terminal_normal", ""),
+    ("tool_manager", ""),
+    ("panel", ""),
+];
+
+fn normalized_keys(keys: &Option<String>) -> Option<String> {
+    keys.as_ref()
+        .map(|keys| keys.split_whitespace().collect::<Vec<_>>().join(" "))
+}
+
+/// A user entry that names a bundled global binding by id alone (to rebind or disable it)
+/// applies to every surface copy of that binding.
+fn names_global_identity(id: &str, context: &Option<String>) -> bool {
+    context.is_none()
+        && id.starts_with("builtin.global.")
+        && !GLOBAL_KEYMAP_TARGETS
+            .iter()
+            .any(|(context, mode)| id.ends_with(&global_target_id("", context, mode)))
+}
+
+fn global_target_id(id: &str, context: &str, mode: &str) -> String {
+    if mode.is_empty() {
+        format!("{id}.{}", context.replace('_', "-"))
+    } else {
+        format!("{id}.{context}-{}", mode.replace('_', "-"))
+    }
+}
+
+/// Copies each `global` keymap into every target surface, unless that surface declares
+/// the same keys itself in this file.
+fn expand_global_keymaps(
+    keymaps: Vec<toml::Spanned<KeymapEntry>>,
+) -> (Vec<KeymapEntry>, Vec<std::ops::Range<usize>>) {
+    let declared = keymaps
+        .iter()
+        .map(|entry| entry.get_ref())
+        .filter(|entry| entry.context.as_deref() != Some("global"))
+        .filter_map(|entry| {
+            Some((
+                entry.context.clone()?,
+                entry.mode.clone(),
+                normalized_keys(&entry.keys)?,
+            ))
+        })
+        .collect::<BTreeSet<_>>();
+    let mut entries = Vec::with_capacity(keymaps.len());
+    let mut spans = Vec::with_capacity(keymaps.len());
+    for spanned in keymaps {
+        let span = spanned.span();
+        let entry = spanned.into_inner();
+        if names_global_identity(&entry.id, &entry.context) {
+            for (context, mode) in GLOBAL_KEYMAP_TARGETS {
+                entries.push(KeymapEntry {
+                    id: global_target_id(&entry.id, context, mode),
+                    ..entry.clone()
+                });
+                spans.push(span.clone());
+            }
+            continue;
+        }
+        if entry.context.as_deref() != Some("global") {
+            entries.push(entry);
+            spans.push(span);
+            continue;
+        }
+        let keys = normalized_keys(&entry.keys);
+        for (context, mode) in GLOBAL_KEYMAP_TARGETS {
+            if keys.as_ref().is_some_and(|keys| {
+                declared.contains(&((*context).into(), (*mode).into(), keys.clone()))
+            }) {
+                continue;
+            }
+            entries.push(KeymapEntry {
+                id: global_target_id(&entry.id, context, mode),
+                context: Some((*context).into()),
+                mode: (*mode).into(),
+                ..entry.clone()
+            });
+            spans.push(span.clone());
+        }
+    }
+    (entries, spans)
+}
+
+fn expand_global_groups(
+    groups: Vec<toml::Spanned<KeyGroupEntry>>,
+) -> (Vec<KeyGroupEntry>, Vec<std::ops::Range<usize>>) {
+    let mut entries = Vec::with_capacity(groups.len());
+    let mut spans = Vec::with_capacity(groups.len());
+    for spanned in groups {
+        let span = spanned.span();
+        let group = spanned.into_inner();
+        if names_global_identity(&group.id, &group.context) {
+            for (context, mode) in GLOBAL_KEYMAP_TARGETS {
+                entries.push(KeyGroupEntry {
+                    id: global_target_id(&group.id, context, mode),
+                    ..group.clone()
+                });
+                spans.push(span.clone());
+            }
+            continue;
+        }
+        if group.context.as_deref() != Some("global") {
+            entries.push(group);
+            spans.push(span);
+            continue;
+        }
+        for (context, mode) in GLOBAL_KEYMAP_TARGETS {
+            entries.push(KeyGroupEntry {
+                id: global_target_id(&group.id, context, mode),
+                context: Some((*context).into()),
+                mode: (*mode).into(),
+                ..group.clone()
+            });
+            spans.push(span.clone());
+        }
+    }
+    (entries, spans)
 }

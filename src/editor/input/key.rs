@@ -207,6 +207,7 @@ impl fmt::Display for KeyEvent {
 
 fn named_hyphenated_key(input: &str) -> Option<KeyCode> {
     match input.to_ascii_lowercase().as_str() {
+        "-" => Some(KeyCode::Char('-')),
         "focus-gained" => Some(KeyCode::FocusGained),
         "focus-lost" => Some(KeyCode::FocusLost),
         "mouse-left-down" => Some(KeyCode::MouseLeftDown),

@@ -35,6 +35,7 @@ pub struct KeymapInspection {
     pub arguments: BTreeMap<String, CommandValue>,
     pub source_keys: String,
     pub keys: String,
+    pub desc: Option<String>,
     pub source: String,
 }
 
@@ -325,15 +326,23 @@ impl ResolvedKeymaps {
 
     #[must_use]
     pub fn inspect(&self, context: &str, command: &str) -> Option<KeymapInspection> {
+        // A command can have several bindings; report the shortest so hints stay stable.
         self.reverse
             .iter()
-            .find(|((mapped_context, fingerprint), _)| {
+            .filter(|((mapped_context, fingerprint), _)| {
                 mapped_context == context
                     && fingerprint
                         .strip_prefix(command)
                         .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with('|'))
             })
-            .and_then(|(_, binding)| self.inspect_id(&binding.id))
+            .map(|(_, binding)| binding)
+            .min_by(|left, right| {
+                left.keys
+                    .len()
+                    .cmp(&right.keys.len())
+                    .then_with(|| left.keys.cmp(&right.keys))
+            })
+            .and_then(|binding| self.inspect_id(&binding.id))
     }
 
     #[must_use]
@@ -448,10 +457,15 @@ impl ResolvedKeymaps {
             let (label, group_id, icon, order) = group.map_or_else(
                 || {
                     let label = direct
-                        .command
-                        .as_ref()
-                        .and_then(|command| command_labels.get(command))
-                        .cloned()
+                        .desc
+                        .clone()
+                        .or_else(|| {
+                            direct
+                                .command
+                                .as_ref()
+                                .and_then(|command| command_labels.get(command))
+                                .cloned()
+                        })
                         .or_else(|| direct.command.clone())
                         .unwrap_or_else(|| direct.id.clone());
                     (label, None, None, i32::MAX)

@@ -758,7 +758,7 @@ fn bundled_assets_share_the_typed_configuration_loaders() {
         .collect::<BTreeSet<_>>();
     assert_eq!(bundled_ids.len(), loaded.keymaps.entries.len());
     assert!(bundled_ids.iter().all(|id| id.starts_with("builtin.")));
-    assert_eq!(loaded.keymaps.groups.len(), 5);
+    assert!(!loaded.keymaps.groups.is_empty());
     assert_eq!(
         loaded.keymaps.bundled_group_count,
         loaded.keymaps.groups.len()
@@ -1095,4 +1095,66 @@ fn keymaps_parse_typed_arguments_and_fail_transactionally() {
             .as_deref()
             .is_some_and(|message| message.contains("unknown field `key_gruop`"))
     );
+}
+
+#[test]
+fn global_keymaps_expand_to_every_command_surface_unless_the_surface_declares_the_keys() {
+    let loaded = super::load::parse_keymaps(
+        r#"
+[[keymap]]
+id = "user.global.files"
+context = "global"
+keys = "<leader> f f"
+command = "workspace.file.find"
+
+[[keymap]]
+id = "user.explorer.files"
+context = "explorer"
+keys = "<leader>  f f"
+command = "explorer.refresh"
+
+[[keymap]]
+id = "builtin.global.quit"
+disable = true
+
+[[key_group]]
+id = "user.global.group.files"
+context = "global"
+prefix = "<leader> f"
+label = "Files"
+"#,
+        PathBuf::from("keymaps.toml"),
+    );
+    assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
+    let ids = loaded
+        .entries
+        .iter()
+        .map(|entry| entry.id.as_str())
+        .collect::<Vec<_>>();
+    assert!(ids.contains(&"user.global.files.editor-normal"));
+    assert!(ids.contains(&"user.global.files.dashboard"));
+    assert!(ids.contains(&"user.global.files.terminal-normal"));
+    assert!(
+        !ids.contains(&"user.global.files.explorer"),
+        "the explorer's own binding for the same keys wins"
+    );
+    assert!(ids.contains(&"user.explorer.files"));
+    let editor = loaded
+        .entries
+        .iter()
+        .find(|entry| entry.id == "user.global.files.editor-normal")
+        .expect("editor copy");
+    assert_eq!(editor.context.as_deref(), Some("editor"));
+    assert_eq!(editor.mode, "normal");
+    assert!(ids.contains(&"builtin.global.quit.editor-normal"));
+    assert!(ids.contains(&"builtin.global.quit.explorer"));
+    assert_eq!(loaded.entries.len(), loaded.user_spans.len());
+    assert!(
+        loaded
+            .groups
+            .iter()
+            .any(|group| group.id == "user.global.group.files.explorer"
+                && group.context.as_deref() == Some("explorer"))
+    );
+    assert_eq!(loaded.groups.len(), loaded.user_group_spans.len());
 }

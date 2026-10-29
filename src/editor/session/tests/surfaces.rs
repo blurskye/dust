@@ -14,6 +14,7 @@ fn prompt_mouse_context_is_independently_configurable() {
         unmap: false,
         disable: false,
         pass_through: false,
+        desc: None,
     });
     let (keymaps, diagnostic) = compile_keymaps(
         &app.commands,

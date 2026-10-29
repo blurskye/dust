@@ -1,52 +1,6 @@
 # Every shipped logical key binding and key-hint group is declared here. Rust code
 # implements commands and projections, never a second default key or hint table.
 
-[[key_group]]
-id = "builtin.editor.normal.group.files"
-context = "editor"
-mode = "normal"
-prefix = "<leader> f"
-label = "Files"
-icon = "󰈞"
-order = 10
-
-[[key_group]]
-id = "builtin.editor.normal.group.search"
-context = "editor"
-mode = "normal"
-prefix = "<leader> s"
-label = "Search"
-icon = "󰍉"
-order = 15
-
-[[key_group]]
-id = "builtin.editor.normal.group.diagnostics"
-context = "editor"
-mode = "normal"
-prefix = "<leader> d"
-label = "Diagnostics"
-icon = "󰒡"
-order = 20
-
-[[key_group]]
-id = "builtin.editor.normal.group.language"
-context = "editor"
-mode = "normal"
-prefix = "<leader> l"
-label = "Language"
-icon = "󰅩"
-order = 30
-
-[[key_group]]
-id = "builtin.editor.normal.group.git"
-context = "editor"
-mode = "normal"
-prefix = "<leader> g"
-label = "Git"
-icon = "󰊢"
-order = 40
-
-# Normal mode motions.
 [[keymap]]
 id = "builtin.editor.normal.input-motion.h"
 context = "editor"
@@ -547,13 +501,6 @@ mode = "insert"
 keys = "escape"
 command = "input.cancel"
 [[keymap]]
-id = "builtin.editor.normal.help-contextual.leader-question"
-context = "editor"
-mode = "normal"
-keys = "<leader> ?"
-command = "overlay.help.contextual"
-
-[[keymap]]
 id = "builtin.editor.insert.edit-backspace.backspace"
 context = "editor"
 mode = "insert"
@@ -915,11 +862,6 @@ context = "dashboard"
 keys = "e"
 command = "workspace.file.find"
 [[keymap]]
-id = "builtin.dashboard.surface.explorer-open.leader-f-e"
-context = "dashboard"
-keys = "<leader> f e"
-command = "explorer.panel.toggle"
-[[keymap]]
 id = "builtin.dashboard.surface.explorer-open.shortcut-f"
 context = "dashboard"
 keys = "f"
@@ -1035,11 +977,6 @@ keys = "down"
 command = "command_line.history.next"
 
 # Explorer controls.
-[[keymap]]
-id = "builtin.explorer.surface.explorer-panel-toggle.leader-f-e"
-context = "explorer"
-keys = "<leader> f e"
-command = "explorer.panel.toggle"
 [[keymap]]
 id = "builtin.explorer.surface.explorer-close.escape"
 context = "explorer"
@@ -2670,97 +2607,6 @@ keys = "K"
 command = "lsp.hover"
 
 [[keymap]]
-id = "builtin.editor.normal.dap-session-start.leader-d-s"
-context = "editor"
-mode = "normal"
-keys = "<leader> d s"
-command = "dap.session.start"
-
-[[keymap]]
-id = "builtin.editor.normal.dap-session-continue.leader-d-c"
-context = "editor"
-mode = "normal"
-keys = "<leader> d c"
-command = "dap.session.continue"
-
-[[keymap]]
-id = "builtin.editor.normal.dap-session-next.leader-d-n"
-context = "editor"
-mode = "normal"
-keys = "<leader> d n"
-command = "dap.session.next"
-
-[[keymap]]
-id = "builtin.editor.normal.dap-session-step-in.leader-d-i"
-context = "editor"
-mode = "normal"
-keys = "<leader> d i"
-command = "dap.session.step_in"
-
-[[keymap]]
-id = "builtin.editor.normal.dap-session-step-out.leader-d-o"
-context = "editor"
-mode = "normal"
-keys = "<leader> d o"
-command = "dap.session.step_out"
-
-[[keymap]]
-id = "builtin.editor.normal.dap-session-stop.leader-d-q"
-context = "editor"
-mode = "normal"
-keys = "<leader> d q"
-command = "dap.session.stop"
-
-[[keymap]]
-id = "builtin.editor.normal.dap-session-pause.leader-d-p"
-context = "editor"
-mode = "normal"
-keys = "<leader> d p"
-command = "dap.session.pause"
-
-[[keymap]]
-id = "builtin.editor.normal.dap-session-restart.leader-d-upper-r"
-context = "editor"
-mode = "normal"
-keys = "<leader> d R"
-command = "dap.session.restart"
-
-[[keymap]]
-id = "builtin.editor.normal.dap-breakpoint-toggle.leader-d-b"
-context = "editor"
-mode = "normal"
-keys = "<leader> d b"
-command = "dap.breakpoint.toggle"
-
-[[keymap]]
-id = "builtin.editor.normal.dap-breakpoint-configure.leader-d-upper-b"
-context = "editor"
-mode = "normal"
-keys = "<leader> d B"
-command = "dap.breakpoint.configure"
-
-[[keymap]]
-id = "builtin.editor.normal.dap-breakpoints-states.leader-d-l"
-context = "editor"
-mode = "normal"
-keys = "<leader> d l"
-command = "dap.breakpoints.states"
-
-[[keymap]]
-id = "builtin.editor.normal.dap-detach.leader-d-upper-d"
-context = "editor"
-mode = "normal"
-keys = "<leader> d D"
-command = "dap.detach"
-
-[[keymap]]
-id = "builtin.editor.normal.dap-console.leader-d-upper-c"
-context = "editor"
-mode = "normal"
-keys = "<leader> d C"
-command = "dap.console"
-
-[[keymap]]
 id = "builtin.editor.normal.lsp-definition.g-d"
 context = "editor"
 mode = "normal"
@@ -2807,27 +2653,6 @@ id = "builtin.editor.normal.lsp-document-symbols.g-upper-o"
 context = "editor"
 mode = "normal"
 keys = "g O"
-command = "lsp.document_symbols"
-
-[[keymap]]
-id = "builtin.editor.normal.lsp-format.leader-l-f"
-context = "editor"
-mode = "normal"
-keys = "<leader> l f"
-command = "lsp.format"
-
-[[keymap]]
-id = "builtin.editor.normal.lsp-code-action.leader-l-a"
-context = "editor"
-mode = "normal"
-keys = "<leader> l a"
-command = "lsp.code_action"
-
-[[keymap]]
-id = "builtin.editor.normal.lsp-document-symbols.leader-l-s"
-context = "editor"
-mode = "normal"
-keys = "<leader> l s"
 command = "lsp.document_symbols"
 
 [[keymap]]
@@ -2948,69 +2773,6 @@ keys = "[ h"
 command = "workspace.git.hunk.previous"
 
 [[keymap]]
-id = "builtin.editor.normal.git-hunk-preview.leader-g-h-p"
-context = "editor"
-mode = "normal"
-keys = "<leader> g h p"
-command = "workspace.git.hunk.preview"
-
-[[keymap]]
-id = "builtin.editor.normal.git-status-open.leader-g-g"
-context = "editor"
-mode = "normal"
-keys = "<leader> g g"
-command = "workspace.git.status.open"
-
-[[keymap]]
-id = "builtin.editor.normal.git-commit.leader-g-c"
-context = "editor"
-mode = "normal"
-keys = "<leader> g c"
-command = "workspace.git.commit"
-
-[[keymap]]
-id = "builtin.editor.normal.git-remote-fetch.leader-g-f"
-context = "editor"
-mode = "normal"
-keys = "<leader> g f"
-command = "workspace.git.remote.fetch"
-
-[[keymap]]
-id = "builtin.editor.normal.git-remote-update.leader-g-upper-u"
-context = "editor"
-mode = "normal"
-keys = "<leader> g U"
-command = "workspace.git.remote.update"
-
-[[keymap]]
-id = "builtin.editor.normal.git-remote-push.leader-g-p"
-context = "editor"
-mode = "normal"
-keys = "<leader> g p"
-command = "workspace.git.remote.push"
-
-[[keymap]]
-id = "builtin.editor.normal.git-conflicts-open.leader-g-x"
-context = "editor"
-mode = "normal"
-keys = "<leader> g x"
-command = "workspace.git.conflicts.open"
-
-[[keymap]]
-id = "builtin.editor.normal.git-branches-open.leader-g-b"
-context = "editor"
-mode = "normal"
-keys = "<leader> g b"
-command = "workspace.git.branches.open"
-
-[[keymap]]
-id = "builtin.editor.normal.git-worktrees-open.leader-g-w"
-context = "editor"
-mode = "normal"
-keys = "<leader> g w"
-command = "workspace.git.worktrees.open"
-
-[[keymap]]
 id = "builtin.editor.insert.lsp-completion-trigger.ctrl-space"
 context = "editor"
 mode = "insert"
@@ -3052,13 +2814,6 @@ id = "builtin.theme-picker.backspace"
 context = "theme_picker"
 keys = "backspace"
 command = "picker.backspace"
-
-[[keymap]]
-id = "builtin.editor.normal.theme-select.leader-u-t"
-context = "editor"
-mode = "normal"
-keys = "<leader> u t"
-command = "theme.select"
 
 [[keymap]]
 id = "builtin.picker.surface.picker-next.j"
@@ -3217,126 +2972,6 @@ keys = "backspace"
 command = "picker.backspace"
 
 [[keymap]]
-id = "builtin.editor.normal.workspace-file-find.leader-leader"
-context = "editor"
-mode = "normal"
-keys = "<leader> <leader>"
-command = "workspace.file.find"
-
-[[keymap]]
-id = "builtin.editor.normal.workspace-search-prompt.leader-s"
-context = "editor"
-mode = "normal"
-keys = "<leader> /"
-command = "workspace.search.prompt"
-
-[[keymap]]
-id = "builtin.editor.normal.workspace-file-find.leader-f-f"
-context = "editor"
-mode = "normal"
-keys = "<leader> f f"
-command = "workspace.file.find"
-
-[[keymap]]
-id = "builtin.editor.normal.buffer-picker-open.leader-f-b"
-context = "editor"
-mode = "normal"
-keys = "<leader> f b"
-command = "buffer.picker.open"
-
-[[keymap]]
-id = "builtin.editor.normal.command-palette-open.leader-f-c"
-context = "editor"
-mode = "normal"
-keys = "<leader> f c"
-command = "command_palette.open"
-
-[[keymap]]
-id = "builtin.editor.normal.workspace-search-prompt.leader-f-g"
-context = "editor"
-mode = "normal"
-keys = "<leader> f g"
-command = "workspace.search.prompt"
-
-[[keymap]]
-id = "builtin.editor.normal.workspace-replace-prompt.leader-f-r"
-context = "editor"
-mode = "normal"
-keys = "<leader> f r"
-command = "workspace.replace.prompt"
-
-[[keymap]]
-id = "builtin.editor.normal.workspace-search-prompt.leader-s-g"
-context = "editor"
-mode = "normal"
-keys = "<leader> s g"
-command = "workspace.search.prompt"
-
-[[keymap]]
-id = "builtin.editor.normal.lsp-document-symbols.leader-s-s"
-context = "editor"
-mode = "normal"
-keys = "<leader> s s"
-command = "lsp.document_symbols"
-
-[[keymap]]
-id = "builtin.editor.normal.lsp-workspace-symbols.leader-s-upper-s"
-context = "editor"
-mode = "normal"
-keys = "<leader> s S"
-command = "lsp.workspace_symbols"
-arguments = { query = "" }
-
-[[keymap]]
-id = "builtin.editor.normal.diagnostic-open.leader-s-d"
-context = "editor"
-mode = "normal"
-keys = "<leader> s d"
-command = "diagnostic.open"
-
-[[keymap]]
-id = "builtin.editor.normal.navigation-jumps.leader-s-j"
-context = "editor"
-mode = "normal"
-keys = "<leader> s j"
-command = "navigation.jumps"
-
-[[keymap]]
-id = "builtin.editor.normal.navigation-marks.leader-s-m"
-context = "editor"
-mode = "normal"
-keys = "<leader> s m"
-command = "navigation.marks"
-
-[[keymap]]
-id = "builtin.editor.normal.navigation-recents.leader-s-r"
-context = "editor"
-mode = "normal"
-keys = "<leader> s r"
-command = "navigation.recents"
-
-[[keymap]]
-id = "builtin.editor.normal.workspace-root-list.leader-w-r"
-context = "editor"
-mode = "normal"
-keys = "<leader> w r"
-command = "workspace.root.list"
-
-[[keymap]]
-id = "builtin.editor.normal.explorer-open.leader-f-e"
-context = "editor"
-mode = "normal"
-keys = "<leader> f e"
-command = "explorer.panel.toggle"
-
-[[keymap]]
-id = "builtin.editor.normal.diagnostic-open.leader-x-x"
-context = "editor"
-mode = "normal"
-keys = "<leader> x x"
-command = "diagnostic.open"
-
-[[keymap]]
 id = "builtin.workspace-edit.surface.picker-next.j"
 context = "workspace_edit"
 keys = "j"
@@ -3377,3 +3012,574 @@ id = "builtin.workspace-edit.surface.workspace-edit-reject.escape"
 context = "workspace_edit"
 keys = "escape"
 command = "workspace.edit.reject"
+
+# Leader bindings, LazyVim layout. `context = "global"` applies them in the editor
+# (normal mode), explorer, dashboard, terminal normal mode, tool manager and panels.
+
+[[key_group]]
+id = "builtin.global.group.buffers"
+context = "global"
+prefix = "<leader> b"
+label = "Buffers"
+icon = "󰓩"
+order = 5
+
+[[key_group]]
+id = "builtin.global.group.code"
+context = "global"
+prefix = "<leader> c"
+label = "Code"
+icon = "󰅩"
+order = 10
+
+[[key_group]]
+id = "builtin.global.group.debug"
+context = "global"
+prefix = "<leader> d"
+label = "Debug"
+icon = "󰃤"
+order = 15
+
+[[key_group]]
+id = "builtin.global.group.files"
+context = "global"
+prefix = "<leader> f"
+label = "Files"
+icon = "󰈞"
+order = 20
+
+[[key_group]]
+id = "builtin.global.group.git"
+context = "global"
+prefix = "<leader> g"
+label = "Git"
+icon = "󰊢"
+order = 25
+
+[[key_group]]
+id = "builtin.global.group.hunks"
+context = "global"
+prefix = "<leader> g h"
+label = "Hunks"
+icon = "󰊢"
+order = 26
+
+[[key_group]]
+id = "builtin.global.group.quit"
+context = "global"
+prefix = "<leader> q"
+label = "Quit"
+icon = "󰗼"
+order = 30
+
+[[key_group]]
+id = "builtin.global.group.search"
+context = "global"
+prefix = "<leader> s"
+label = "Search"
+icon = "󰍉"
+order = 35
+
+[[key_group]]
+id = "builtin.global.group.ui"
+context = "global"
+prefix = "<leader> u"
+label = "UI"
+icon = "󰙵"
+order = 40
+
+[[key_group]]
+id = "builtin.global.group.windows"
+context = "global"
+prefix = "<leader> w"
+label = "Windows"
+icon = "󰖲"
+order = 45
+
+[[key_group]]
+id = "builtin.global.group.diagnostics"
+context = "global"
+prefix = "<leader> x"
+label = "Diagnostics"
+icon = "󰒡"
+order = 50
+
+[[key_group]]
+id = "builtin.global.group.tabs"
+context = "global"
+prefix = "<leader> tab"
+label = "Tabs"
+icon = "󰓩"
+order = 55
+
+[[keymap]]
+id = "builtin.global.help"
+context = "global"
+keys = "<leader> ?"
+command = "overlay.help.contextual"
+desc = "Keymaps"
+
+[[keymap]]
+id = "builtin.global.explorer"
+context = "global"
+keys = "<leader> e"
+command = "explorer.panel.toggle"
+desc = "Explorer"
+
+[[keymap]]
+id = "builtin.global.files-find-root"
+context = "global"
+keys = "<leader> space"
+command = "workspace.file.find"
+desc = "Find Files"
+
+[[keymap]]
+id = "builtin.global.grep"
+context = "global"
+keys = "<leader> /"
+command = "workspace.search.prompt"
+desc = "Grep"
+
+[[keymap]]
+id = "builtin.global.buffers"
+context = "global"
+keys = "<leader> ,"
+command = "buffer.picker.open"
+desc = "Buffers"
+
+[[keymap]]
+id = "builtin.global.commands"
+context = "global"
+keys = "<leader> :"
+command = "command_palette.open"
+desc = "Commands"
+
+[[keymap]]
+id = "builtin.global.notifications"
+context = "global"
+keys = "<leader> n"
+command = "application.notifications.open"
+desc = "Notifications"
+
+[[keymap]]
+id = "builtin.global.split-below"
+context = "global"
+keys = "<leader> -"
+command = "pane.split.vertical"
+desc = "Split Below"
+
+[[keymap]]
+id = "builtin.global.split-right"
+context = "global"
+keys = "<leader> |"
+command = "pane.split.horizontal"
+desc = "Split Right"
+
+[[keymap]]
+id = "builtin.global.files-explorer"
+context = "global"
+keys = "<leader> f e"
+command = "explorer.panel.toggle"
+desc = "Explorer"
+
+[[keymap]]
+id = "builtin.global.files-find"
+context = "global"
+keys = "<leader> f f"
+command = "workspace.file.find"
+desc = "Find Files"
+
+[[keymap]]
+id = "builtin.global.files-buffers"
+context = "global"
+keys = "<leader> f b"
+command = "buffer.picker.open"
+desc = "Buffers"
+
+[[keymap]]
+id = "builtin.global.files-recent"
+context = "global"
+keys = "<leader> f r"
+command = "navigation.recents"
+desc = "Recent"
+
+[[keymap]]
+id = "builtin.global.files-new"
+context = "global"
+keys = "<leader> f n"
+command = "file.new"
+desc = "New File"
+
+[[keymap]]
+id = "builtin.global.files-projects"
+context = "global"
+keys = "<leader> f p"
+command = "workspace.root.list"
+desc = "Projects"
+
+[[keymap]]
+id = "builtin.global.search-grep"
+context = "global"
+keys = "<leader> s g"
+command = "workspace.search.prompt"
+desc = "Grep"
+
+[[keymap]]
+id = "builtin.global.search-replace"
+context = "global"
+keys = "<leader> s r"
+command = "workspace.replace.prompt"
+desc = "Search and Replace"
+
+[[keymap]]
+id = "builtin.global.search-symbols"
+context = "global"
+keys = "<leader> s s"
+command = "lsp.document_symbols"
+desc = "Symbols"
+
+[[keymap]]
+id = "builtin.global.search-workspace-symbols"
+context = "global"
+keys = "<leader> s S"
+command = "lsp.workspace_symbols"
+desc = "Workspace Symbols"
+arguments = { query = "" }
+
+[[keymap]]
+id = "builtin.global.search-diagnostics"
+context = "global"
+keys = "<leader> s d"
+command = "diagnostic.open"
+desc = "Diagnostics"
+
+[[keymap]]
+id = "builtin.global.search-jumps"
+context = "global"
+keys = "<leader> s j"
+command = "navigation.jumps"
+desc = "Jumps"
+
+[[keymap]]
+id = "builtin.global.search-marks"
+context = "global"
+keys = "<leader> s m"
+command = "navigation.marks"
+desc = "Marks"
+
+[[keymap]]
+id = "builtin.global.search-commands"
+context = "global"
+keys = "<leader> s C"
+command = "command_palette.open"
+desc = "Commands"
+
+[[keymap]]
+id = "builtin.global.code-action"
+context = "global"
+keys = "<leader> c a"
+command = "lsp.code_action"
+desc = "Code Action"
+
+[[keymap]]
+id = "builtin.global.code-format"
+context = "global"
+keys = "<leader> c f"
+command = "lsp.format"
+desc = "Format"
+
+[[keymap]]
+id = "builtin.global.code-symbols"
+context = "global"
+keys = "<leader> c s"
+command = "lsp.document_symbols"
+desc = "Symbols"
+
+[[keymap]]
+id = "builtin.global.code-lsp-info"
+context = "global"
+keys = "<leader> c l"
+command = "lsp.server.status"
+desc = "LSP Info"
+
+[[keymap]]
+id = "builtin.global.code-tools"
+context = "global"
+keys = "<leader> c m"
+command = "tools.menu.open"
+desc = "Tools"
+
+[[keymap]]
+id = "builtin.global.diagnostics"
+context = "global"
+keys = "<leader> x x"
+command = "diagnostic.open"
+desc = "Diagnostics"
+
+[[keymap]]
+id = "builtin.global.debug-breakpoint"
+context = "global"
+keys = "<leader> d b"
+command = "dap.breakpoint.toggle"
+desc = "Toggle Breakpoint"
+
+[[keymap]]
+id = "builtin.global.debug-breakpoint-condition"
+context = "global"
+keys = "<leader> d B"
+command = "dap.breakpoint.configure"
+desc = "Breakpoint Condition"
+
+[[keymap]]
+id = "builtin.global.debug-continue"
+context = "global"
+keys = "<leader> d c"
+command = "dap.session.continue"
+desc = "Continue"
+
+[[keymap]]
+id = "builtin.global.debug-start"
+context = "global"
+keys = "<leader> d s"
+command = "dap.session.start"
+desc = "Start"
+
+[[keymap]]
+id = "builtin.global.debug-step-into"
+context = "global"
+keys = "<leader> d i"
+command = "dap.session.step_in"
+desc = "Step Into"
+
+[[keymap]]
+id = "builtin.global.debug-step-over"
+context = "global"
+keys = "<leader> d O"
+command = "dap.session.next"
+desc = "Step Over"
+
+[[keymap]]
+id = "builtin.global.debug-step-out"
+context = "global"
+keys = "<leader> d o"
+command = "dap.session.step_out"
+desc = "Step Out"
+
+[[keymap]]
+id = "builtin.global.debug-pause"
+context = "global"
+keys = "<leader> d p"
+command = "dap.session.pause"
+desc = "Pause"
+
+[[keymap]]
+id = "builtin.global.debug-terminate"
+context = "global"
+keys = "<leader> d t"
+command = "dap.session.stop"
+desc = "Terminate"
+
+[[keymap]]
+id = "builtin.global.debug-restart"
+context = "global"
+keys = "<leader> d R"
+command = "dap.session.restart"
+desc = "Restart"
+
+[[keymap]]
+id = "builtin.global.debug-repl"
+context = "global"
+keys = "<leader> d r"
+command = "dap.console"
+desc = "Console"
+
+[[keymap]]
+id = "builtin.global.debug-breakpoints"
+context = "global"
+keys = "<leader> d l"
+command = "dap.breakpoints.states"
+desc = "Breakpoints"
+
+[[keymap]]
+id = "builtin.global.debug-detach"
+context = "global"
+keys = "<leader> d D"
+command = "dap.detach"
+desc = "Detach"
+
+[[keymap]]
+id = "builtin.global.git-status"
+context = "global"
+keys = "<leader> g g"
+command = "workspace.git.status.open"
+desc = "Git Status"
+
+[[keymap]]
+id = "builtin.global.git-commit"
+context = "global"
+keys = "<leader> g c"
+command = "workspace.git.commit"
+desc = "Commit"
+
+[[keymap]]
+id = "builtin.global.git-fetch"
+context = "global"
+keys = "<leader> g f"
+command = "workspace.git.remote.fetch"
+desc = "Fetch"
+
+[[keymap]]
+id = "builtin.global.git-update"
+context = "global"
+keys = "<leader> g U"
+command = "workspace.git.remote.update"
+desc = "Pull"
+
+[[keymap]]
+id = "builtin.global.git-push"
+context = "global"
+keys = "<leader> g p"
+command = "workspace.git.remote.push"
+desc = "Push"
+
+[[keymap]]
+id = "builtin.global.git-conflicts"
+context = "global"
+keys = "<leader> g x"
+command = "workspace.git.conflicts.open"
+desc = "Conflicts"
+
+[[keymap]]
+id = "builtin.global.git-branches"
+context = "global"
+keys = "<leader> g B"
+command = "workspace.git.branches.open"
+desc = "Branches"
+
+[[keymap]]
+id = "builtin.global.git-worktrees"
+context = "global"
+keys = "<leader> g w"
+command = "workspace.git.worktrees.open"
+desc = "Worktrees"
+
+[[keymap]]
+id = "builtin.global.hunk-preview"
+context = "global"
+keys = "<leader> g h p"
+command = "workspace.git.hunk.preview"
+desc = "Preview Hunk"
+
+[[keymap]]
+id = "builtin.global.hunk-stage"
+context = "global"
+keys = "<leader> g h s"
+command = "workspace.git.hunk.stage"
+desc = "Stage Hunk"
+
+[[keymap]]
+id = "builtin.global.hunk-unstage"
+context = "global"
+keys = "<leader> g h u"
+command = "workspace.git.hunk.unstage"
+desc = "Unstage Hunk"
+
+[[keymap]]
+id = "builtin.global.hunk-reset"
+context = "global"
+keys = "<leader> g h r"
+command = "workspace.git.hunk.reset"
+desc = "Reset Hunk"
+
+[[keymap]]
+id = "builtin.global.ui-colorscheme"
+context = "global"
+keys = "<leader> u C"
+command = "theme.select"
+desc = "Colorscheme"
+
+[[keymap]]
+id = "builtin.global.ui-inlay-hints"
+context = "global"
+keys = "<leader> u h"
+command = "lsp.inlay_hints.toggle"
+desc = "Toggle Inlay Hints"
+
+[[keymap]]
+id = "builtin.global.window-close"
+context = "global"
+keys = "<leader> w d"
+command = "pane.close"
+desc = "Close Window"
+
+[[keymap]]
+id = "builtin.global.window-split-below"
+context = "global"
+keys = "<leader> w -"
+command = "pane.split.vertical"
+desc = "Split Below"
+
+[[keymap]]
+id = "builtin.global.window-split-right"
+context = "global"
+keys = "<leader> w |"
+command = "pane.split.horizontal"
+desc = "Split Right"
+
+[[keymap]]
+id = "builtin.global.window-next"
+context = "global"
+keys = "<leader> w w"
+command = "pane.focus.next"
+desc = "Next Window"
+
+[[keymap]]
+id = "builtin.global.buffer-close"
+context = "global"
+keys = "<leader> b d"
+command = "buffer.close"
+desc = "Delete Buffer"
+arguments = { force = false }
+
+[[keymap]]
+id = "builtin.global.buffer-pin"
+context = "global"
+keys = "<leader> b p"
+command = "buffer.pin.toggle"
+desc = "Toggle Pin"
+
+[[keymap]]
+id = "builtin.global.quit"
+context = "global"
+keys = "<leader> q q"
+command = "editor.quit"
+desc = "Quit All"
+arguments = { force = false }
+
+[[keymap]]
+id = "builtin.global.tab-new"
+context = "global"
+keys = "<leader> tab tab"
+command = "tab.new"
+desc = "New Tab"
+
+[[keymap]]
+id = "builtin.global.tab-close"
+context = "global"
+keys = "<leader> tab d"
+command = "tab.close"
+desc = "Close Tab"
+
+[[keymap]]
+id = "builtin.global.tab-next"
+context = "global"
+keys = "<leader> tab ]"
+command = "tab.next"
+desc = "Next Tab"
+
+[[keymap]]
+id = "builtin.global.tab-previous"
+context = "global"
+keys = "<leader> tab ["
+command = "tab.previous"
+desc = "Previous Tab"

@@ -200,6 +200,7 @@ fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
             unmap: false,
             disable: false,
             pass_through: false,
+            desc: None,
         },
         crate::config::KeymapEntry {
             id: "user.test.buffer-shadow".into(),
@@ -211,6 +212,7 @@ fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
             unmap: false,
             disable: false,
             pass_through: false,
+            desc: None,
         },
     ]);
     let mut catalog = crate::extensions::PluginContributionCatalog::default();
@@ -269,7 +271,7 @@ fn resolved_key_hints_follow_leaders_groups_and_configured_command_labels() {
     assert_eq!(files.label, "Files");
     assert_eq!(
         files.group_id.as_deref(),
-        Some("builtin.editor.normal.group.files")
+        Some("builtin.global.group.files.editor-normal")
     );
     assert_eq!(
         hints
@@ -277,7 +279,7 @@ fn resolved_key_hints_follow_leaders_groups_and_configured_command_labels() {
             .iter()
             .find(|row| row.next_key == "s")
             .and_then(|row| row.group_id.as_deref()),
-        Some("builtin.editor.normal.group.search")
+        Some("builtin.global.group.search.editor-normal")
     );
     assert!(files.mappings.iter().all(|mapping| {
         mapping.id.starts_with("builtin.")
@@ -285,6 +287,7 @@ fn resolved_key_hints_follow_leaders_groups_and_configured_command_labels() {
             && mapping.operation == KeymapOperation::Command
     }));
 
+    // A keymap `desc` names the binding in hints ahead of the command description.
     let mut custom_labels = labels.clone();
     custom_labels.insert("buffer.picker.open".into(), "Choose a buffer".into());
     let file_hints = app
@@ -298,13 +301,28 @@ fn resolved_key_hints_follow_leaders_groups_and_configured_command_labels() {
             .iter()
             .find(|row| row.next_key == "b")
             .map(|row| row.label.as_str()),
-        Some("Choose a buffer")
+        Some("Buffers")
     );
     let goto_hints = app
         .configuration
         .keymaps()
         .hints_for_prefix("editor.normal", "g", labels)
         .expect("goto continuations");
+    let definition_command = goto_hints
+        .rows
+        .iter()
+        .find(|row| row.next_key == "d")
+        .and_then(|row| row.mappings[0].command.clone())
+        .expect("g d command");
+    custom_labels.insert(definition_command, "Jump to definition".into());
+    assert_eq!(
+        app.configuration
+            .keymaps()
+            .hints_for_prefix("editor.normal", "g", &custom_labels)
+            .and_then(|hints| hints.rows.into_iter().find(|row| row.next_key == "d"))
+            .map(|row| row.label),
+        Some("Jump to definition".into())
+    );
     for key in ["d", "D", "I", "y", "r", "K", "O"] {
         assert!(
             goto_hints.rows.iter().any(|row| row.next_key == key),
@@ -326,6 +344,7 @@ fn resolved_key_hints_follow_leaders_groups_and_configured_command_labels() {
         unmap: false,
         disable: false,
         pass_through: false,
+        desc: None,
     });
     loaded.groups.push(crate::config::KeyGroupEntry {
         id: "user.test.local-leader-group".into(),
@@ -372,7 +391,7 @@ fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.path = PathBuf::from("keymaps.toml");
     loaded.groups.push(crate::config::KeyGroupEntry {
-        id: "builtin.editor.normal.group.files".into(),
+        id: "builtin.global.group.files.editor-normal".into(),
         context: Some("editor".into()),
         mode: "normal".into(),
         prefix: Some("<leader> f".into()),
@@ -383,7 +402,7 @@ fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
     });
     loaded.entries.extend([
         crate::config::KeymapEntry {
-            id: "builtin.editor.normal.buffer-picker-open.leader-f-b".into(),
+            id: "builtin.global.files-buffers.editor-normal".into(),
             context: Some("editor".into()),
             mode: "normal".into(),
             keys: Some("<leader> f z".into()),
@@ -392,6 +411,7 @@ fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
             unmap: false,
             disable: false,
             pass_through: false,
+            desc: None,
         },
         crate::config::KeymapEntry {
             id: "user.test.unmap-command-palette-hint".into(),
@@ -403,6 +423,7 @@ fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
             unmap: true,
             disable: false,
             pass_through: false,
+            desc: None,
         },
     ]);
     let (resolved, diagnostic) = compile_keymaps(
@@ -438,14 +459,14 @@ fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
     assert!(files.rows.iter().any(|row| {
         row.next_key == "z"
             && row.mappings.iter().any(|mapping| {
-                mapping.id == "builtin.editor.normal.buffer-picker-open.leader-f-b"
+                mapping.id == "builtin.global.files-buffers.editor-normal"
                     && mapping.remaining_keys == "z"
             })
     }));
 
     let mut disabled = crate::config::load_bundled_config().keymaps;
     disabled.groups.push(crate::config::KeyGroupEntry {
-        id: "builtin.editor.normal.group.files".into(),
+        id: "builtin.global.group.files.editor-normal".into(),
         context: None,
         mode: String::new(),
         prefix: None,
@@ -455,7 +476,7 @@ fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
         disable: true,
     });
     disabled.entries.push(crate::config::KeymapEntry {
-        id: "builtin.editor.normal.buffer-picker-open.leader-f-b".into(),
+        id: "builtin.global.files-buffers.editor-normal".into(),
         context: None,
         mode: String::new(),
         keys: None,
@@ -464,6 +485,7 @@ fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
         unmap: false,
         disable: true,
         pass_through: false,
+        desc: None,
     });
     let (disabled, diagnostic) = compile_keymaps(
         &app.commands,
@@ -475,7 +497,7 @@ fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
         !disabled
             .groups()
             .iter()
-            .any(|group| group.id == "builtin.editor.normal.group.files")
+            .any(|group| group.id == "builtin.global.group.files.editor-normal")
     );
     let files = disabled
         .hints_for_prefix(
@@ -639,7 +661,7 @@ fn invalid_key_groups_reject_compilation_and_reload_transactionally() {
         ),
         (
             crate::config::KeyGroupEntry {
-                id: "builtin.editor.normal.group.files".into(),
+                id: "builtin.global.group.files.editor-normal".into(),
                 context: Some("editor".into()),
                 mode: String::new(),
                 prefix: None,
@@ -835,6 +857,7 @@ fn effective_bindings_report_remaps_unbound_commands_and_the_asked_context() {
         unmap: true,
         disable: false,
         pass_through: false,
+        desc: None,
     });
     loaded.entries.push(crate::config::KeymapEntry {
         id: "user.test.remap-command-line-open".into(),
@@ -849,6 +872,7 @@ fn effective_bindings_report_remaps_unbound_commands_and_the_asked_context() {
         unmap: false,
         disable: false,
         pass_through: false,
+        desc: None,
     });
     let (remapped, diagnostic) = compile_keymaps(&app.commands, &loaded, &policy);
     assert!(diagnostic.is_none(), "{diagnostic:?}");

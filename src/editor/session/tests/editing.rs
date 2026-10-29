@@ -394,6 +394,7 @@ fn key_hint_timeout_reload_and_pass_through_never_leave_stale_actions() {
             unmap: false,
             disable: false,
             pass_through: false,
+            desc: None,
         },
         crate::config::KeymapEntry {
             id: "user.test.ambiguous-long".into(),
@@ -405,6 +406,7 @@ fn key_hint_timeout_reload_and_pass_through_never_leave_stale_actions() {
             unmap: false,
             disable: false,
             pass_through: false,
+            desc: None,
         },
         crate::config::KeymapEntry {
             id: "user.test.hidden-pass-through".into(),
@@ -416,6 +418,7 @@ fn key_hint_timeout_reload_and_pass_through_never_leave_stale_actions() {
             unmap: false,
             disable: false,
             pass_through: true,
+            desc: None,
         },
     ]);
     let (keymaps, diagnostic) = compile_keymaps(

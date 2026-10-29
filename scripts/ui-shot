@@ -37,13 +37,17 @@ def free_display():
     sys.exit("no free X display number")
 
 
+class StartupError(Exception):
+    pass
+
+
 def wait_for(predicate, timeout, what):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if predicate():
             return
         time.sleep(0.05)
-    sys.exit(f"timed out waiting for {what}")
+    raise StartupError(f"timed out waiting for {what}")
 
 
 class Terminal:
@@ -51,11 +55,22 @@ class Terminal:
         self.workdir = workdir
         self.display = free_display()
         self.socket = workdir / "kitty.sock"
+        self.kitty = None
         self.xvfb = subprocess.Popen(
             ["Xvfb", f":{self.display}", "-screen", "0", "3840x2160x24", "-nolisten", "tcp"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        try:
+            self.start(binary, cwd, columns, rows)
+        except StartupError as error:
+            self.close()
+            log = workdir / "kitty.log"
+            detail = log.read_text().strip() if log.exists() else ""
+            sys.exit(f"{error}\n{detail}".strip())
+
+    def start(self, binary, cwd, columns, rows):
+        workdir = self.workdir
         wait_for(
             lambda: pathlib.Path(f"/tmp/.X11-unix/X{self.display}").exists(), 5, "Xvfb"
         )
@@ -92,8 +107,8 @@ class Terminal:
             stdout=subprocess.DEVNULL,
             stderr=open(workdir / "kitty.log", "w"),
         )
-        wait_for(self.socket.exists, 10, "kitty")
-        wait_for(lambda: self.window_id() is not None, 10, "kitty window")
+        wait_for(self.socket.exists, 30, "kitty")
+        wait_for(lambda: self.window_id() is not None, 30, "kitty window")
 
     def remote(self, *args, capture=False):
         command = ["kitty", "@", "--to", f"unix:{self.socket}", *args]
@@ -128,6 +143,8 @@ class Terminal:
 
     def close(self):
         for process in (self.kitty, self.xvfb):
+            if process is None:
+                continue
             process.terminate()
             try:
                 process.wait(5)
@@ -139,9 +156,10 @@ def run(scenario, binary, cwd, size, out):
     columns, rows = (int(part) for part in size.split("x"))
     out.mkdir(parents=True, exist_ok=True)
     workdir = pathlib.Path(tempfile.mkdtemp(prefix="dust-ui-shot-"))
-    terminal = Terminal(binary, cwd, columns, rows, workdir)
     shots = []
+    terminal = None
     try:
+        terminal = Terminal(binary, cwd, columns, rows, workdir)
         time.sleep(0.5)
         for number, line in enumerate(scenario.read_text().splitlines(), 1):
             line = line.strip()
@@ -165,7 +183,8 @@ def run(scenario, binary, cwd, size, out):
             else:
                 sys.exit(f"{scenario}:{number}: unknown step '{step}'")
     finally:
-        terminal.close()
+        if terminal is not None:
+            terminal.close()
         shutil.rmtree(workdir, ignore_errors=True)
     return shots
 

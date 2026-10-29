@@ -1955,6 +1955,7 @@ fn deferred_user_plugin_move_compiles_after_index_then_falls_back_after_activati
             unmap: false,
             disable: false,
             pass_through: false,
+            desc: None,
         },
         crate::config::KeymapEntry {
             id: "user.test.demo-retained-next".into(),
@@ -1966,6 +1967,7 @@ fn deferred_user_plugin_move_compiles_after_index_then_falls_back_after_activati
             unmap: false,
             disable: false,
             pass_through: false,
+            desc: None,
         },
     ]);
     let (configuration, diagnostic) =
@@ -2067,6 +2069,7 @@ fn enabled_plugin_references_are_deferred_but_unknown_namespaces_still_reject() 
             unmap: false,
             disable: true,
             pass_through: false,
+            desc: None,
         },
         crate::config::KeymapEntry {
             id: "user.test.demo-command".into(),
@@ -2078,6 +2081,7 @@ fn enabled_plugin_references_are_deferred_but_unknown_namespaces_still_reject() 
             unmap: false,
             disable: false,
             pass_through: false,
+            desc: None,
         },
         crate::config::KeymapEntry {
             id: "user.test.demo-retained-context".into(),
@@ -2089,6 +2093,7 @@ fn enabled_plugin_references_are_deferred_but_unknown_namespaces_still_reject() 
             unmap: false,
             disable: false,
             pass_through: false,
+            desc: None,
         },
     ]);
     let (resolved, diagnostic) = super::resolve_configuration(&app.commands, loaded, true)
@@ -2135,6 +2140,7 @@ fn enabled_plugin_references_are_deferred_but_unknown_namespaces_still_reject() 
         unmap: false,
         disable: false,
         pass_through: false,
+        desc: None,
     });
     assert!(super::resolve_configuration(&app.commands, unknown, true).is_err());
     let mut unknown_window = crate::config::load_bundled_config();

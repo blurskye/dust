@@ -86,6 +86,7 @@ fn grep_letters_and_mode_survive_restarts_and_controls_are_remappable() {
         unmap: false,
         disable: false,
         pass_through: false,
+        desc: None,
     });
     let mut session = TestSession::new(loaded);
     session.start_files_fixture();
@@ -141,6 +142,7 @@ fn bindings(entries: &[(&str, &str)]) -> LoadedConfig {
             unmap: false,
             disable: false,
             pass_through: false,
+            desc: None,
         });
     }
     loaded
