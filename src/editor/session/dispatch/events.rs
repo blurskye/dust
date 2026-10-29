@@ -176,6 +176,9 @@ impl InteractiveApplication {
                             | PromptKind::PluginConfirmation
                             | PromptKind::TerminalClose
                             | PromptKind::DirtyClose
+                            | PromptKind::GitStageUnsaved
+                            | PromptKind::GitCommitMessage
+                            | PromptKind::GitDestructive
                     )
                 }) {
                     self.close_prompt();
@@ -2608,6 +2611,8 @@ impl InteractiveApplication {
                     .map(|(index, item)| {
                         (
                             PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("code-lens:{index}")),
                                 label: item.title,
                                 detail: item.command.unwrap_or_default(),

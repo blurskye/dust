@@ -761,6 +761,8 @@ impl TaskSession {
         self.statuses
             .iter()
             .map(|(name, status)| PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                 id: PickerItemId(format!("task:{name}")),
                 label: name.clone(),
                 detail: status.clone(),
@@ -776,6 +778,8 @@ impl TaskSession {
             .flatten()
             .enumerate()
             .map(|(index, row)| PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                 id: PickerItemId(format!("output:{name}:{index}")),
                 label: row.text.clone(),
                 detail: format!(
@@ -800,6 +804,8 @@ impl TaskSession {
             .map(|(index, case)| {
                 (
                     PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(format!("test:{name}:{index}")),
                         label: case.name.clone(),
                         detail: format!("{} {}", case.status, case.duration),

@@ -105,6 +105,14 @@ pub(super) struct WorkspaceSession {
     language_roots: discovery::Discovery,
     debugger_roots: discovery::Discovery,
     preflights: discovery::Preflights,
+    /// The tutor's disposable fixture, if an exercise surface is open. It is a sandbox, not a
+    /// workspace root: it is never entered into `Roots`, never trusted and never persisted.
+    tutor_service: crate::workspace::TutorService,
+    tutor_fixture: Option<crate::workspace::TutorFixture>,
+    tutor_generation: Option<crate::workspace::TutorGeneration>,
+    /// What the user has actually DONE in the sandbox, observed from real outcomes. Held here
+    /// rather than in InteractiveApplication, whose field count is asserted.
+    tutor_progress: crate::workspace::TutorProgress,
 }
 impl WorkspaceSession {
     pub(in crate::editor::session) fn edit_scope(&self) -> &WorkspaceState {
@@ -156,6 +164,10 @@ impl WorkspaceSession {
             language_roots: discovery::Discovery::default(),
             debugger_roots: discovery::Discovery::default(),
             preflights: discovery::Preflights::new(preflight_capacity),
+            tutor_service: crate::workspace::TutorService::start(capacity),
+            tutor_fixture: None,
+            tutor_generation: None,
+            tutor_progress: crate::workspace::TutorProgress::default(),
         }
     }
     pub(in crate::editor::session) fn debug_permit(
@@ -283,6 +295,85 @@ impl WorkspaceSession {
         self.version = WorkspaceVersion(Arc::new(()));
         self.confirmation = None;
         self.state.set_trust(WorkspaceTrust::Untrusted);
+    }
+    /// Ask for a disposable fixture outside every real root. The roots are passed in as they
+    /// are now, so the refusal is decided against the workspace the user actually has.
+    pub(in crate::editor::session) fn start_tutor_fixture(
+        &mut self,
+        deadline: std::time::Duration,
+    ) -> Result<(), crate::workspace::TutorError> {
+        let roots = self
+            .state
+            .roots()
+            .iter()
+            .map(|root| root.identity.canonical_path.clone())
+            .collect::<Vec<_>>();
+        let generation = self.tutor_service.create(roots, deadline)?;
+        self.tutor_generation = Some(generation);
+        Ok(())
+    }
+    /// One poll per call, exactly once: a second poll can consume and discard the event.
+    pub(in crate::editor::session) fn poll_tutor(&mut self) -> Option<crate::workspace::TutorEvent> {
+        let event = self.tutor_service.poll()?;
+        match &event {
+            crate::workspace::TutorEvent::Created { generation, result } => {
+                if self.tutor_generation == Some(*generation) {
+                    self.tutor_generation = None;
+                    if let Ok(path) = result {
+                        self.tutor_fixture = Some(crate::workspace::TutorFixture {
+                            generation: *generation,
+                            path: path.clone(),
+                        });
+                    }
+                }
+            }
+            crate::workspace::TutorEvent::Disposed { result, .. } => {
+                // The handle is dropped only when the worker reports the directory is GONE. A
+                // failed disposal keeps the handle, so the surface never claims a removal that
+                // did not happen and the user can try again.
+                if result.is_ok() {
+                    self.tutor_fixture = None;
+                }
+            }
+        }
+        Some(event)
+    }
+    pub(in crate::editor::session) fn tutor_fixture(&self) -> Option<&crate::workspace::TutorFixture> {
+        self.tutor_fixture.as_ref()
+    }
+    /// Record a real action. Progress only ever comes from here, and here is only called from
+    /// the outcome of an action that genuinely happened.
+    pub(in crate::editor::session) fn observe_tutor_action(
+        &mut self,
+        action: crate::workspace::TutorAction,
+    ) -> bool {
+        self.tutor_progress.observe(action)
+    }
+    pub(in crate::editor::session) fn tutor_progress(&self) -> &crate::workspace::TutorProgress {
+        &self.tutor_progress
+    }
+    /// The lessons this revision can actually teach. A gated lesson is returned with its missing
+    /// feature so the surface can say what is not available yet rather than hiding it.
+    pub(in crate::editor::session) fn tutor_lessons(
+        &self,
+    ) -> &'static [crate::workspace::TutorLesson] {
+        crate::workspace::LESSONS
+    }
+    pub(in crate::editor::session) fn tutor_pending(&self) -> bool {
+        self.tutor_generation.is_some()
+    }
+    /// Ask for the open fixture to be removed. The session drops its handle only when the
+    /// worker reports the directory is gone, so a caller never believes in a disposal that did
+    /// not happen.
+    pub(in crate::editor::session) fn dispose_tutor_fixture(
+        &mut self,
+        deadline: std::time::Duration,
+    ) -> Result<(), crate::workspace::TutorError> {
+        let Some(fixture) = self.tutor_fixture.as_ref() else {
+            return Ok(());
+        };
+        self.tutor_service.dispose(fixture.path.clone(), deadline)?;
+        Ok(())
     }
     pub(in crate::editor::session) fn add_root_request(
         &mut self,
@@ -734,6 +825,24 @@ impl WorkspaceSession {
     }
     pub(in crate::editor::session) fn state_path(&self) -> &Path {
         &self.state_path
+    }
+    /// Test-only: whether the real trust store would trust this identity. The sandbox must not
+    /// put its fixture in here, and a claim to that effect has to be observable.
+    #[cfg(test)]
+    pub(in crate::editor::session) fn fixture_is_trusted(
+        &self,
+        identity: &crate::workspace::RootIdentity,
+    ) -> bool {
+        self.store.is_trusted(identity)
+    }
+    /// Test-only: whether this identity has been SEEN by the trust store, which is a weaker
+    /// state than trusted but still evidence the fixture touched the store.
+    #[cfg(test)]
+    pub(in crate::editor::session) fn fixture_is_seen(
+        &self,
+        identity: &crate::workspace::RootIdentity,
+    ) -> bool {
+        self.store.is_seen(identity)
     }
     pub(in crate::editor::session) fn seen(&self, identity: &RootIdentity) -> bool {
         self.store.is_seen(identity)

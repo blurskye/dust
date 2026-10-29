@@ -65,7 +65,11 @@ pub(super) fn render_editor_view(
         return Frame { grid, cursor: None };
     };
     let buffer = &state.buffers[view.buffer];
-    let body_height = height.saturating_sub(u16::from(config.ui.status_line.enabled));
+    let body_height = height
+        .saturating_sub(u16::from(config.ui.status_line.enabled))
+        .saturating_sub(u16::from(
+            config.ui.status_line.enabled && ui.operation_bar.is_some() && height > 1,
+        ));
     let current_line = buffer.text.byte_to_line(view.cursor).unwrap_or(0);
     let digits = editor_line_number_digits(state);
     let gutter_width = editor_state_gutter_width(state, &buffer.text, &config.editor, width);
@@ -651,6 +655,12 @@ pub(super) fn render_editor_view(
         screen_row = screen_row.saturating_add(1);
     }
 
+    // The operation bar sits directly above the status line so a paused operation is visible
+    // without displacing the editor, and it is drawn ONLY when an operation is genuinely paused.
+    let bar_rows = u16::from(config.ui.status_line.enabled && ui.operation_bar.is_some() && height > 1);
+    if bar_rows == 1 {
+        render_operation_bar(&mut grid, ui, width, height - 2);
+    }
     if config.ui.status_line.enabled && height > 0 {
         render_status_line(&mut grid, state, view_id, ui, config, width, height - 1);
     }
@@ -682,6 +692,17 @@ pub(super) fn render_editor_view(
         (x, y, cursor_style(configured))
     });
     Frame { grid, cursor }
+}
+
+/// Draw the operation bar. At narrow widths the blockers are dropped and then the phase is
+/// shortened, because the operation and the cancellation are what must not be lost.
+fn render_operation_bar(grid: &mut CellGrid, ui: &UiState, width: u16, y: u16) {
+    let Some(bar) = ui.operation_bar.as_ref() else {
+        return;
+    };
+    grid.fill_row(y, Style::Status);
+    let row = bar.row(width);
+    grid.put_text_clipped(0, y, &row, Style::Status, width);
 }
 
 pub(super) fn render_status_line(
@@ -718,6 +739,13 @@ pub(super) fn render_status_line(
             || config.ui.status_line.scratch_label.clone(),
             |name| name.to_string_lossy().into_owned(),
         );
+    // The compact indicator of the same state, so the operation survives where the bar cannot be
+    // drawn in full.
+    let operation_indicator = ui
+        .operation_bar
+        .as_ref()
+        .map(|bar| format!(" {} ", bar.indicator()))
+        .unwrap_or_default();
     let dirty = if buffer.dirty {
         config.ui.status_line.dirty_marker.as_str()
     } else {
@@ -792,7 +820,13 @@ pub(super) fn render_status_line(
             .unwrap_or(state.workspace_root.as_os_str())
             .to_string_lossy(),
     );
-    let mut x = 0;
+    // The operation indicator is drawn FIRST, so it survives every configured component layout:
+    // a paused operation must not be hidden by a user's statusline choices.
+    let mut x = if operation_indicator.is_empty() {
+        0
+    } else {
+        grid.put_text_clipped(0, status_y, &operation_indicator, Style::StatusAccent, width)
+    };
     for component in &config.ui.status_line.components {
         let (text, style, right_aligned) = match component.as_str() {
             "mode" => (mode.as_str(), Style::StatusAccent, false),

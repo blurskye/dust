@@ -67,6 +67,33 @@ pub(super) struct Launch {
     phase: Phase,
     terminal: Option<TerminalPolicy>,
 }
+/// The target an ATTACH names, taken from the configuration's own adapter arguments. A launch
+/// returns nothing here: a program is not a target that was attached to.
+fn declared_target(arguments: &BTreeMap<String, serde_json::Value>) -> Option<String> {
+    ["processId", "pid", "name"].into_iter().find_map(|key| {
+        arguments.get(key).and_then(|value| match value {
+            serde_json::Value::Number(number) => Some(format!("{key} {number}")),
+            serde_json::Value::String(text) => Some(format!("{key} {text}")),
+            _ => None,
+        })
+    })
+}
+impl Launch {
+    /// The identity of what this session will be attached to or running, taken from the
+    /// CONFIGURATION rather than invented.
+    fn identity(&self) -> super::DapTargetIdentity {
+        super::DapTargetIdentity {
+            configuration: self.configuration.clone(),
+            adapter: self.session.adapter.clone(),
+            request: self.session.request.clone(),
+            program: self.program.clone(),
+            target: match self.session.request {
+                DebugRequestKind::Attach => declared_target(&self.session.arguments),
+                DebugRequestKind::Launch => None,
+            },
+        }
+    }
+}
 impl DebugSession {
     pub(in crate::editor::session) fn request_debug(
         &mut self,
@@ -426,6 +453,9 @@ impl DebugSession {
                 };
             }
             Phase::Start => {
+                // Read the identity FIRST: the request construction below moves fields out of the
+                // intent, and the identity must describe what was actually asked for.
+                let target = launch.identity();
                 let admission = self.service.admission().map_err(|e| e.to_string())?;
                 let mut paths = vec![launch.cwd.clone()];
                 if let Some(program) = &launch.program {
@@ -460,9 +490,12 @@ impl DebugSession {
                         }),
                     )
                     .map_err(|e| e.to_string())?;
+                // The session now KNOWS what it is attached to: retain that identity for as long
+                // as the session lives, rather than dropping it with the intent.
                 self.configuration = launch.configuration;
                 self.terminal_profile = launch.terminal;
                 self.scope = launch.scope;
+                self.target = Some(target);
                 self.choices = None;
                 self.source = None;
                 return Ok(Some(launch.name));
@@ -675,4 +708,137 @@ mod tests {
                 .is_err()
         );
     }
+
+    #[test]
+    fn attach_preserves_the_target_process_identity_it_was_given() {
+        use crate::editor::session::workspace::{DiscoveryKind, WorkspacePreflightEvent};
+        use std::time::{Duration, Instant};
+        let directory = tempfile::tempdir().unwrap();
+        let identity = RootIdentity::capture(directory.path()).unwrap();
+        let state = crate::workspace::WorkspaceState::new(
+            crate::workspace::WorkspaceId(1),
+            [("root".into(), identity.clone())],
+        )
+        .unwrap();
+        let mut workspace =
+            WorkspaceSession::new(state, directory.path().join("trust"), 2, false, false, 2);
+        workspace
+            .fixture_identity(RootId(1), identity.clone())
+            .unwrap();
+        workspace.fixture_trust_identity(identity);
+        workspace.reconcile_trust();
+        let mut policy = DebugConfig::default();
+        policy.adapters.insert(
+            "owned".into(),
+            DebugAdapterConfig {
+                program: std::env::current_exe().unwrap(),
+                arguments: vec!["original".into()],
+                environment: BTreeMap::new(),
+            },
+        );
+        // An ATTACH names the target it was given, and carries NO program: the editor did not
+        // start that process.
+        policy.sessions.insert(
+            "attached".into(),
+            DebugSessionConfig {
+                adapter: "owned".into(),
+                request: DebugRequestKind::Attach,
+                cwd: None,
+                program: None,
+                run_in_terminal_profile: None,
+                arguments: BTreeMap::from([(
+                    "processId".into(),
+                    serde_json::json!(4242),
+                )]),
+                path_maps: BTreeMap::new(),
+            },
+        );
+        let mut owner = DebugSession::new(&policy, workspace.version());
+        let terminals = crate::config::TerminalsConfig::default();
+        let intent = owner
+            .request_debug(
+                (Some("attached"), None),
+                None,
+                None,
+                (&policy, &terminals, 1),
+                &workspace,
+                &[],
+            )
+            .unwrap();
+        // A permit for the intent, the same way the fixture's own tests obtain one.
+        fn local_permit(workspace: &mut WorkspaceSession, intent: &DebugIntent) -> DebugPermit {
+            let id = workspace
+                .begin_validation()
+                .unwrap_or_else(|_| panic!("owned validation"));
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                for event in workspace.poll() {
+                    if let crate::editor::session::workspace::WorkspaceUpdate::Validated {
+                        id: actual,
+                        permit: Some(permit),
+                    } = event
+                    {
+                        assert_eq!(actual, id);
+                        return workspace.debug_permit(permit, id, intent.nonce()).unwrap();
+                    }
+                }
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+        let authorization = local_permit(&mut workspace, &intent);
+        owner.authorize_debug(intent, authorization, &workspace).unwrap();
+        owner
+            .advance_debug(
+                workspace.execution_lane(DiscoveryKind::Debugger),
+                &policy,
+                1,
+                &[],
+            )
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let events = workspace.preflight_events();
+            if !events.is_empty() {
+                for event in events {
+                    match event {
+                        WorkspacePreflightEvent::Ready(ready) => {
+                            owner.debug_preflight(ready).unwrap();
+                        }
+                        _ => panic!("the attach preflight failed"),
+                    }
+                }
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        // The request GOES OUT here, and the target's identity must survive it.
+        owner
+            .advance_debug(
+                workspace.execution_lane(DiscoveryKind::Debugger),
+                &policy,
+                1,
+                &[],
+            )
+            .unwrap();
+        let target = owner
+            .target()
+            .expect("the target identity is RETAINED once the request goes out");
+        assert_eq!(
+            target.request,
+            DebugRequestKind::Attach,
+            "the session knows it ATTACHED rather than launched"
+        );
+        assert_eq!(
+            target.target.as_deref(),
+            Some("processId 4242"),
+            "the target named is the one the configuration was GIVEN, not one the editor invented"
+        );
+        assert_eq!(
+            target.program, None,
+            "an attached target is NOT presented as a program the editor launched"
+        );
+    }
+
 }

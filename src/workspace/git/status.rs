@@ -25,10 +25,143 @@ pub enum GitFileStatus {
     Renamed,
     Conflicted,
 }
+/// What a change set is relative to. A caller never has to infer this: the reader that
+/// produced the data states it.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum GitChangeSource {
+    /// HEAD to index: what a commit would record.
+    Staged,
+    /// Index to disk: changed but not yet staged.
+    Unstaged,
+    /// Unsaved editor content relative to the index, at one exact document revision.
+    Unsaved { document_revision: u64 },
+}
+/// Which sources currently differ for one path. A false bit is not a claim that the source
+/// matches; it means the reader attributed no change to it.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct GitChangeSources {
+    pub staged: bool,
+    pub unstaged: bool,
+    pub unsaved_document_revision: Option<u64>,
+}
+impl GitChangeSource {
+    /// Plain-text label for this source, for a picker row's secondary text.
+    #[must_use]
+    pub const fn source_label(self) -> &'static str {
+        match self {
+            Self::Staged => "staged",
+            Self::Unstaged => "unstaged",
+            Self::Unsaved { .. } => "unsaved",
+        }
+    }
+}
+impl GitChangeSources {
+    /// Plain-text label naming every source that currently differs for one path. Returned as a
+    /// `&'static str` so composing a bounded row allocates nothing, and so a path that is both
+    /// staged and further modified is never described as only one of them.
+    #[must_use]
+    pub const fn source_label(&self) -> &'static str {
+        match (
+            self.staged,
+            self.unstaged,
+            self.unsaved_document_revision.is_some(),
+        ) {
+            (true, true, true) => "staged+unstaged+unsaved",
+            (true, true, false) => "staged+unstaged",
+            (true, false, true) => "staged+unsaved",
+            (false, true, true) => "unstaged+unsaved",
+            (true, false, false) => "staged",
+            (false, true, false) => "unstaged",
+            (false, false, true) => "unsaved",
+            (false, false, false) => "unchanged",
+        }
+    }
+    #[must_use]
+    pub const fn contains(&self, source: GitChangeSource) -> bool {
+        match source {
+            GitChangeSource::Staged => self.staged,
+            GitChangeSource::Unstaged => self.unstaged,
+            GitChangeSource::Unsaved { document_revision } => {
+                matches!(self.unsaved_document_revision, Some(held) if held == document_revision)
+            }
+        }
+    }
+    #[must_use]
+    pub const fn count(&self) -> u8 {
+        self.staged as u8 + self.unstaged as u8 + self.unsaved_document_revision.is_some() as u8
+    }
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.count() == 0
+    }
+}
+/// Unsaved editor content offered to a Git reader as data. The Git owner holds no editor
+/// state; a caller supplies the bounded list and the reader only attributes it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitUnsavedDocument {
+    pub relative_path: PathBuf,
+    pub document_revision: u64,
+}
+impl GitUnsavedDocument {
+    #[must_use]
+    pub fn new(relative_path: PathBuf, document_revision: u64) -> Self {
+        Self {
+            relative_path,
+            document_revision,
+        }
+    }
+}
+/// Resolve the unsaved revision for one workspace-relative path. The list is expected to be
+/// sorted and duplicate-free by the validator; a linear scan keeps the reader allocation-free.
+#[must_use]
+pub fn unsaved_document_revision(
+    documents: &[GitUnsavedDocument],
+    relative_path: &Path,
+) -> Option<u64> {
+    documents
+        .iter()
+        .find(|document| document.relative_path == relative_path)
+        .map(|document| document.document_revision)
+}
+/// Reject an unsaved list that is unsorted, duplicated, revision-zero, or beyond the
+/// already-bounded status policy. No new ceiling is introduced: the list is bounded by the
+/// same file and path-byte limits the caller already accepted.
+pub fn validate_unsaved_documents(
+    documents: &[GitUnsavedDocument],
+    maximum_files: usize,
+    maximum_path_bytes: usize,
+) -> Result<(), GitStatusError> {
+    if documents.len() > maximum_files || documents.len() > 100_000 {
+        return Err(GitStatusError::InvalidPolicy);
+    }
+    let mut bytes = 0usize;
+    let mut previous: Option<&Path> = None;
+    for document in documents {
+        if document.document_revision == 0
+            || document.relative_path.is_absolute()
+            || document
+                .relative_path
+                .components()
+                .any(|component| !matches!(component, std::path::Component::Normal(_)))
+        {
+            return Err(GitStatusError::InvalidPolicy);
+        }
+        if previous.is_some_and(|last| last >= document.relative_path.as_path()) {
+            return Err(GitStatusError::InvalidPolicy);
+        }
+        bytes = bytes.saturating_add(document.relative_path.as_os_str().len());
+        previous = Some(document.relative_path.as_path());
+    }
+    if bytes > maximum_path_bytes {
+        return Err(GitStatusError::InvalidPolicy);
+    }
+    Ok(())
+}
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct GitStatusEntry {
     pub relative_path: PathBuf,
     pub status: GitFileStatus,
+    pub sources: GitChangeSources,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitStatusSnapshot {
@@ -86,6 +219,16 @@ impl GitStatusService {
         &mut self,
         policy: GitStatusPolicy,
     ) -> Result<GitStatusGeneration, GitStatusError> {
+        self.start_with_unsaved(policy, Vec::new())
+    }
+
+    /// Start a status read that also attributes unsaved editor content. The list is bounded
+    /// by the policy's own file and path-byte limits and must be sorted by path.
+    pub fn start_with_unsaved(
+        &mut self,
+        policy: GitStatusPolicy,
+        unsaved: Vec<GitUnsavedDocument>,
+    ) -> Result<GitStatusGeneration, GitStatusError> {
         if policy.maximum_files == 0
             || policy.maximum_files > 100_000
             || policy.maximum_path_bytes == 0
@@ -95,6 +238,11 @@ impl GitStatusService {
         {
             return Err(GitStatusError::InvalidPolicy);
         }
+        validate_unsaved_documents(
+            &unsaved,
+            policy.maximum_files,
+            policy.maximum_path_bytes,
+        )?;
         self.cancel();
         self.next = self.next.saturating_add(1);
         let generation = GitStatusGeneration(self.next);
@@ -104,7 +252,7 @@ impl GitStatusService {
         thread::Builder::new()
             .name(format!("dust-git-status-{}", generation.0))
             .spawn(move || {
-                let result = read_status(generation, &policy, &worker);
+                let result = read_status(generation, &policy, &unsaved, &worker);
                 let _ = tx.send(Event::Complete(result));
             })
             .map_err(|_| GitStatusError::Stopped)?;
@@ -220,6 +368,7 @@ pub fn aggregate_git_status(
 pub(super) fn read_status(
     generation: GitStatusGeneration,
     p: &GitStatusPolicy,
+    unsaved: &[GitUnsavedDocument],
     cancel: &AtomicBool,
 ) -> Result<GitStatusSnapshot, GitStatusError> {
     let root = std::fs::canonicalize(&p.root).map_err(|e| backend(&e.to_string()))?;
@@ -270,7 +419,20 @@ pub(super) fn read_status(
         }
         bytes += cost;
         let s = item.status();
-        let status = if s.is_conflicted() {
+        let conflicted = s.is_conflicted();
+        let staged = conflicted
+            || s.is_index_new()
+            || s.is_index_modified()
+            || s.is_index_deleted()
+            || s.is_index_renamed()
+            || s.is_index_typechange();
+        let unstaged = conflicted
+            || s.is_wt_new()
+            || s.is_wt_modified()
+            || s.is_wt_deleted()
+            || s.is_wt_renamed()
+            || s.is_wt_typechange();
+        let status = if conflicted {
             GitFileStatus::Conflicted
         } else if s.is_wt_new() {
             GitFileStatus::Untracked
@@ -283,9 +445,42 @@ pub(super) fn read_status(
         } else {
             GitFileStatus::Modified
         };
+        let unsaved_document_revision = unsaved_document_revision(unsaved, &path);
         entries.push(GitStatusEntry {
             relative_path: path,
             status,
+            sources: GitChangeSources {
+                staged,
+                unstaged,
+                unsaved_document_revision,
+            },
+        });
+    }
+    entries.sort();
+    // Unsaved editor content is a third source. A path whose only change is in an unsaved
+    // buffer produces no repository status, so it is merged in here rather than being
+    // presented as either staged or unstaged.
+    for document in unsaved {
+        if entries
+            .binary_search_by(|entry| entry.relative_path.as_path().cmp(&document.relative_path))
+            .is_ok()
+        {
+            continue;
+        }
+        let cost = document.relative_path.as_os_str().len();
+        if entries.len() >= p.maximum_files || bytes.saturating_add(cost) > p.maximum_path_bytes {
+            truncated = true;
+            break;
+        }
+        bytes += cost;
+        entries.push(GitStatusEntry {
+            relative_path: document.relative_path.clone(),
+            status: GitFileStatus::Modified,
+            sources: GitChangeSources {
+                staged: false,
+                unstaged: false,
+                unsaved_document_revision: Some(document.document_revision),
+            },
         });
     }
     entries.sort();

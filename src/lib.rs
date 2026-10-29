@@ -19,6 +19,8 @@ pub mod editor;
 pub mod extensions;
 /// Bounded filesystem effects, checked atomic persistence, and recovery journals.
 pub mod files;
+/// Forge transport, account, repository authority and review workflows.
+pub mod forge;
 /// Language identification, syntax execution, and built-in Language Server Protocol support.
 pub mod language;
 /// Versioned bounded session, navigation, and history persistence.

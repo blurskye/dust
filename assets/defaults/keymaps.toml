@@ -547,6 +547,13 @@ mode = "insert"
 keys = "escape"
 command = "input.cancel"
 [[keymap]]
+id = "builtin.editor.normal.help-contextual.leader-question"
+context = "editor"
+mode = "normal"
+keys = "<leader> ?"
+command = "overlay.help.contextual"
+
+[[keymap]]
 id = "builtin.editor.insert.edit-backspace.backspace"
 context = "editor"
 mode = "insert"
@@ -920,6 +927,12 @@ command = "explorer.open"
 
 # Command/search prompt controls.
 [[keymap]]
+id = "builtin.command-prompt.surface.help-form.ctrl-g"
+context = "command_prompt"
+keys = "ctrl-g"
+command = "overlay.help.form"
+
+[[keymap]]
 id = "builtin.command-prompt.surface.command-line-cancel.escape"
 context = "command_prompt"
 keys = "escape"
@@ -1195,6 +1208,12 @@ context = "confirmation_prompt"
 keys = "right"
 command = "command_line.move_right"
 [[keymap]]
+id = "builtin.confirmation-prompt.surface.help-form.question"
+context = "confirmation_prompt"
+keys = "?"
+command = "overlay.help.form"
+
+[[keymap]]
 id = "builtin.confirmation-prompt.surface.confirmation-toggle.tab"
 context = "confirmation_prompt"
 keys = "tab"
@@ -1296,6 +1315,21 @@ context = "editor"
 mode = "operator_pending"
 keys = "\""
 command = "input.register.begin"
+
+# The commit composer composes on Enter and commits on an explicit key, so a message can
+# span lines. Both keys are ordinary configurable mappings; ctrl-s is bound as well because
+# a terminal may consume it as flow control.
+[[keymap]]
+id = "builtin.command-prompt.git-commit-submit.ctrl-s"
+context = "command_prompt"
+keys = "ctrl-s"
+command = "workspace.git.commit.submit"
+
+[[keymap]]
+id = "builtin.command-prompt.git-commit-submit.alt-enter"
+context = "command_prompt"
+keys = "alt-enter"
+command = "workspace.git.commit.submit"
 
 # Focus and mouse are independent configurable event contexts.
 [[keymap]]
@@ -2678,6 +2712,55 @@ keys = "<leader> d q"
 command = "dap.session.stop"
 
 [[keymap]]
+id = "builtin.editor.normal.dap-session-pause.leader-d-p"
+context = "editor"
+mode = "normal"
+keys = "<leader> d p"
+command = "dap.session.pause"
+
+[[keymap]]
+id = "builtin.editor.normal.dap-session-restart.leader-d-upper-r"
+context = "editor"
+mode = "normal"
+keys = "<leader> d R"
+command = "dap.session.restart"
+
+[[keymap]]
+id = "builtin.editor.normal.dap-breakpoint-toggle.leader-d-b"
+context = "editor"
+mode = "normal"
+keys = "<leader> d b"
+command = "dap.breakpoint.toggle"
+
+[[keymap]]
+id = "builtin.editor.normal.dap-breakpoint-configure.leader-d-upper-b"
+context = "editor"
+mode = "normal"
+keys = "<leader> d B"
+command = "dap.breakpoint.configure"
+
+[[keymap]]
+id = "builtin.editor.normal.dap-breakpoints-states.leader-d-l"
+context = "editor"
+mode = "normal"
+keys = "<leader> d l"
+command = "dap.breakpoints.states"
+
+[[keymap]]
+id = "builtin.editor.normal.dap-detach.leader-d-upper-d"
+context = "editor"
+mode = "normal"
+keys = "<leader> d D"
+command = "dap.detach"
+
+[[keymap]]
+id = "builtin.editor.normal.dap-console.leader-d-upper-c"
+context = "editor"
+mode = "normal"
+keys = "<leader> d C"
+command = "dap.console"
+
+[[keymap]]
 id = "builtin.editor.normal.lsp-definition.g-d"
 context = "editor"
 mode = "normal"
@@ -2872,6 +2955,62 @@ keys = "<leader> g h p"
 command = "workspace.git.hunk.preview"
 
 [[keymap]]
+id = "builtin.editor.normal.git-status-open.leader-g-g"
+context = "editor"
+mode = "normal"
+keys = "<leader> g g"
+command = "workspace.git.status.open"
+
+[[keymap]]
+id = "builtin.editor.normal.git-commit.leader-g-c"
+context = "editor"
+mode = "normal"
+keys = "<leader> g c"
+command = "workspace.git.commit"
+
+[[keymap]]
+id = "builtin.editor.normal.git-remote-fetch.leader-g-f"
+context = "editor"
+mode = "normal"
+keys = "<leader> g f"
+command = "workspace.git.remote.fetch"
+
+[[keymap]]
+id = "builtin.editor.normal.git-remote-update.leader-g-upper-u"
+context = "editor"
+mode = "normal"
+keys = "<leader> g U"
+command = "workspace.git.remote.update"
+
+[[keymap]]
+id = "builtin.editor.normal.git-remote-push.leader-g-p"
+context = "editor"
+mode = "normal"
+keys = "<leader> g p"
+command = "workspace.git.remote.push"
+
+[[keymap]]
+id = "builtin.editor.normal.git-conflicts-open.leader-g-x"
+context = "editor"
+mode = "normal"
+keys = "<leader> g x"
+command = "workspace.git.conflicts.open"
+
+[[keymap]]
+id = "builtin.editor.normal.git-branches-open.leader-g-b"
+context = "editor"
+mode = "normal"
+keys = "<leader> g b"
+command = "workspace.git.branches.open"
+
+[[keymap]]
+id = "builtin.editor.normal.git-worktrees-open.leader-g-w"
+context = "editor"
+mode = "normal"
+keys = "<leader> g w"
+command = "workspace.git.worktrees.open"
+
+[[keymap]]
 id = "builtin.editor.insert.lsp-completion-trigger.ctrl-space"
 context = "editor"
 mode = "insert"
@@ -2952,6 +3091,12 @@ keys = "enter"
 command = "picker.accept"
 
 [[keymap]]
+id = "builtin.picker.surface.help-reference.ctrl-o"
+context = "picker"
+keys = "ctrl-o"
+command = "overlay.help.reference"
+
+[[keymap]]
 id = "builtin.picker.surface.picker-cancel.escape"
 context = "picker"
 keys = "escape"
@@ -2998,6 +3143,72 @@ id = "builtin.picker.normal.picker-mode-insert.i"
 context = "picker_normal"
 keys = "i"
 command = "picker.mode.insert"
+[[keymap]]
+id = "builtin.picker.picker-results.ctrl-q"
+context = "picker"
+keys = "ctrl-q"
+command = "picker.results"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-results.ctrl-q"
+context = "picker_normal"
+keys = "ctrl-q"
+command = "picker.results"
+
+[[keymap]]
+id = "builtin.picker.normal.changes-layer-switch.tab"
+context = "picker_normal"
+keys = "tab"
+command = "workspace.git.diff.layer.switch"
+
+[[keymap]]
+id = "builtin.picker.normal.changes-stage-file.s"
+context = "picker_normal"
+keys = "s"
+command = "workspace.git.file.stage"
+
+[[keymap]]
+id = "builtin.picker.normal.changes-unstage-file.u"
+context = "picker_normal"
+keys = "u"
+command = "workspace.git.file.unstage"
+
+[[keymap]]
+id = "builtin.picker.normal.changes-fetch.f"
+context = "picker_normal"
+keys = "f"
+command = "workspace.git.remote.fetch"
+
+[[keymap]]
+id = "builtin.picker.normal.changes-update.upper-u"
+context = "picker_normal"
+keys = "U"
+command = "workspace.git.remote.update"
+
+[[keymap]]
+id = "builtin.picker.normal.changes-push.upper-p"
+context = "picker_normal"
+keys = "P"
+command = "workspace.git.remote.push"
+
+[[keymap]]
+id = "builtin.picker.normal.changes-history.upper-h"
+context = "picker_normal"
+keys = "H"
+command = "workspace.git.history.open"
+
+[[keymap]]
+id = "builtin.picker.normal.history-toggle.g"
+context = "picker_normal"
+keys = "g"
+command = "workspace.git.history.toggle"
+
+[[keymap]]
+id = "builtin.picker.normal.history-range.space"
+context = "picker_normal"
+keys = "space"
+command = "workspace.git.history.range"
+
 
 [[keymap]]
 id = "builtin.picker.surface.picker-backspace.backspace"

@@ -567,6 +567,14 @@ impl TestSession {
     pub(super) fn paste(&mut self, text: &str) {
         self.application.handle_event(UiEvent::Paste(text.into()));
     }
+    /// The application under test, so a test can ask the SESSION what it did rather than
+    /// infer it from the driver's surface.
+    pub(super) fn application(&self) -> &InteractiveApplication {
+        &self.application
+    }
+    pub(super) fn application_mut(&mut self) -> &mut InteractiveApplication {
+        &mut self.application
+    }
     pub(super) fn editor_mode(&self) -> crate::editor::EditorMode {
         self.application.state.views[self.application.state.active_view.unwrap()].mode
     }

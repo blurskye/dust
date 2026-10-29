@@ -463,6 +463,8 @@ mod tests {
         let p = plugin_item_adapter("a", "A", Some("B"));
         assert_eq!(p.action, SearchHostAction::InvokeDeclaredProviderCommand);
         let picker = PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
             id: super::super::PickerItemId("c".into()),
             label: "C".into(),
             detail: "D".into(),

@@ -133,7 +133,26 @@ impl SearchSession {
         self.cancel_files();
         self.cancel_grep();
     }
+    /// Move the current surface aside for a help page. Depth one by design: help is a page the
+    /// user reads and leaves, not a place to nest, so a second help page replaces the snapshot
+    /// rather than growing a stack.
+    pub(in crate::editor::session) fn suspend_for_help(&mut self) {
+        self.picker.suspend_for_help();
+    }
+    /// Whether the surface on screen is a help page.
+    pub(in crate::editor::session) fn help_is_open(&self) -> bool {
+        self.picker.help_is_open()
+    }
+    /// Mark the surface now on screen as a help page, so closing it resumes instead of closing.
+    pub(in crate::editor::session) fn mark_help_open(&mut self) {
+        self.picker.mark_help_open();
+    }
     pub(in crate::editor::session) fn close_picker(&mut self) -> Option<crate::files::RequestId> {
+        // Closing a help page returns the user to the surface help was opened over, with its
+        // query, rows and selected row intact. Closing anything else behaves exactly as before.
+        if self.picker.resume_after_help() {
+            return None;
+        }
         self.retire_picker();
         self.cancel_files();
         if self.live {

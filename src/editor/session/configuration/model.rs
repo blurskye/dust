@@ -201,6 +201,55 @@ impl ResolvedConfiguration {
     }
 }
 
+/// What a lesson may tell the user to press.
+///
+/// `Unbound` is a real answer, not an absence: a command the user has unmapped must be reported
+/// as unpressable rather than shown with a key the user cannot use.
+///
+/// `Bound` carries EVERY key that resolves in that context, sorted, because the resolved table
+/// stores bindings in a `HashMap` and a command such as `command_line.open` legitimately answers
+/// to more than one key. Naming a single arbitrary key would let a lesson teach a different key
+/// from run to run and would hide the others.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::editor::session) enum EffectiveBinding {
+    Bound { keys: Vec<String>, command: String },
+    Unbound { command: String },
+}
+
+impl EffectiveBinding {
+    /// Every key that resolves here, in a stable order. Test-facing: the reference page shows
+    /// `display`, and asserting the whole set is what makes the ordering checkable.
+    #[cfg(test)]
+    #[must_use]
+    pub(in crate::editor::session) fn keys(&self) -> &[String] {
+        match self {
+            Self::Bound { keys, .. } => keys,
+            Self::Unbound { .. } => &[],
+        }
+    }
+
+    /// The first resolvable key, for prose that must name one. Stable, because `keys` is sorted.
+    #[cfg(test)]
+    #[must_use]
+    pub(in crate::editor::session) fn primary(&self) -> Option<&str> {
+        self.keys().first().map(String::as_str)
+    }
+
+    #[must_use]
+    pub(in crate::editor::session) fn is_bound(&self) -> bool {
+        matches!(self, Self::Bound { .. })
+    }
+
+    /// What a lesson displays for this binding.
+    #[must_use]
+    pub(in crate::editor::session) fn display(&self) -> String {
+        match self {
+            Self::Bound { keys, command } => format!("{}  {command}", keys.join(" ")),
+            Self::Unbound { command } => format!("unbound  {command}"),
+        }
+    }
+}
+
 impl ResolvedKeymaps {
     pub(crate) fn resolve(
         &self,
@@ -220,17 +269,58 @@ impl ResolvedKeymaps {
         !self.bindings.is_empty()
     }
 
+    /// The effective binding a lesson must show: the key the user would actually press in this
+    /// context, or plainly unbound. It reads the SAME resolved table `binding_for` reads, so a
+    /// lesson can never teach a key the user cannot press and a second table cannot drift.
+    #[must_use]
+    pub(in crate::editor::session) fn effective_binding(
+        &self,
+        context: &str,
+        command: &str,
+    ) -> EffectiveBinding {
+        let mut keys = self
+            .reverse
+            .iter()
+            .filter(|((mapped_context, fingerprint), _)| {
+                mapped_context == context
+                    && fingerprint
+                        .strip_prefix(command)
+                        .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with('|'))
+            })
+            .map(|(_, binding)| binding.keys.clone())
+            .collect::<Vec<_>>();
+        keys.sort();
+        keys.dedup();
+        if keys.is_empty() {
+            EffectiveBinding::Unbound {
+                command: command.to_owned(),
+            }
+        } else {
+            EffectiveBinding::Bound {
+                keys,
+                command: command.to_owned(),
+            }
+        }
+    }
+
+    /// The key to SHOW for a command in a context.
+    ///
+    /// `reverse` is a `HashMap`, so a command with several bindings previously answered with
+    /// whichever key the iteration happened to reach first — meaning shipped hint text could
+    /// name a different key between runs. The smallest key is chosen so the answer is stable and
+    /// agrees with `EffectiveBinding::primary()`. Use `effective_binding` when every key matters.
     #[must_use]
     pub fn binding_for(&self, context: &str, command: &str) -> Option<&str> {
         self.reverse
             .iter()
-            .find(|((mapped_context, fingerprint), _)| {
+            .filter(|((mapped_context, fingerprint), _)| {
                 mapped_context == context
                     && fingerprint
                         .strip_prefix(command)
                         .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with('|'))
             })
             .map(|(_, binding)| binding.keys.as_str())
+            .min()
     }
 
     #[must_use]

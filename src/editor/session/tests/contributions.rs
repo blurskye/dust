@@ -356,6 +356,9 @@ fn resolved_key_hints_follow_leaders_groups_and_configured_command_labels() {
             .hints_for_prefix("editor.normal", ";", labels)
             .is_some_and(|projection| projection.rows.iter().any(|row| row.next_key == "a"))
     );
+    // `overlay.help.contextual` is bound to `<leader> ?` as a LEAF, and a hint is projected
+    // from a declared key group rather than from a binding, so the bundled keymap still
+    // resolves no leader hint under space. This pins that distinction.
     assert!(
         resolved
             .hints_for_prefix("editor.normal", "space", labels)
@@ -719,4 +722,193 @@ fn macros_record_replay_last_register_and_stop_at_limits() {
             .as_deref()
             .is_some_and(|message| message.contains("recursion limit"))
     );
+}
+
+#[test]
+fn question_mark_still_navigates_and_only_the_leader_opens_help() {
+    let app = app();
+    let keymaps = app.configuration.keymaps();
+
+    // `?` alone keeps its command-line binding in the editor normal context.
+    let plain = keymaps
+        .inspect_key("editor.normal", "?")
+        .expect("? resolves in the editor normal context");
+    assert_eq!(
+        plain.command.as_deref(),
+        Some("command_line.open"),
+        "? still opens the command line rather than help"
+    );
+    assert_ne!(
+        plain.command.as_deref(),
+        Some("overlay.help.contextual"),
+        "? must not have been rebound to help"
+    );
+
+    // The leader sequence is what opens contextual help, and the leader is space.
+    let leader = keymaps
+        .inspect_key("editor.normal", "<leader> ?")
+        .expect("the leader help binding resolves");
+    assert_eq!(
+        leader.command.as_deref(),
+        Some("overlay.help.contextual"),
+        "the leader sequence opens contextual help"
+    );
+    assert_eq!(
+        leader.keys, "space ?",
+        "the leader is space, so the sequence is literally `space ?`"
+    );
+
+    // And the two are different bindings, which is the whole point of the alias.
+    assert_ne!(plain.command, leader.command);
+}
+
+
+
+#[test]
+fn help_is_reachable_from_the_confirmation_and_from_a_form() {
+    let app = app();
+    let keymaps = app.configuration.keymaps();
+
+    // The confirmation context: `?` is the action, and it is not an answer to the question.
+    let confirmation = keymaps
+        .inspect_key("confirmation_prompt", "?")
+        .expect("? resolves in the confirmation context");
+    assert_eq!(
+        confirmation.command.as_deref(),
+        Some("overlay.help.form"),
+        "? in a confirmation opens help for the question"
+    );
+
+    // A form context: the commit composer is a form with no confirmation, and `ctrl-g` reaches
+    // help there. A character key cannot be used in a text prompt because it would be typed.
+    let form = keymaps
+        .inspect_key("command_prompt", "ctrl-g")
+        .expect("ctrl-g resolves in the command prompt context");
+    assert_eq!(
+        form.command.as_deref(),
+        Some("overlay.help.form"),
+        "a form reaches help without stealing a typing key"
+    );
+    assert_ne!(
+        form.command.as_deref(),
+        keymaps
+            .inspect_key("command_prompt", "enter")
+            .and_then(|enter| enter.command)
+            .as_deref(),
+        "the form's help key is not its submit key"
+    );
+}
+
+#[test]
+fn effective_bindings_report_remaps_unbound_commands_and_the_asked_context() {
+    let app = app();
+    let mut policy = app.configuration.settings().input.keymaps.clone();
+    policy.leader = ",".into();
+    policy.local_leader = ";".into();
+    let mut loaded = crate::config::load_bundled_config().keymaps;
+    loaded.path = PathBuf::from("keymaps.toml");
+
+    // The bundled defaults, read through the same resolved table the dispatcher uses.
+    // `command_line.open` answers to MORE THAN ONE key, and the resolved table is a HashMap, so
+    // the answer must be the whole sorted set: naming one arbitrary key would let a lesson teach
+    // a different key from run to run.
+    let (bundled, diagnostic) = compile_keymaps(&app.commands, &loaded, &policy);
+    assert!(diagnostic.is_none(), "{diagnostic:?}");
+    let default = bundled.effective_binding("editor.normal", "command_line.open");
+    assert_eq!(
+        default.keys(),
+        ["/".to_owned(), ":".to_owned(), "?".to_owned()],
+        "every key that resolves is reported, in a stable order"
+    );
+    assert_eq!(default.primary(), Some("/"), "the primary key is stable");
+    assert!(default.is_bound());
+    assert_eq!(default.display(), "/ : ?  command_line.open");
+
+    // A user remap: unmap `?` and bind a different key to the same command.
+    loaded.entries.push(crate::config::KeymapEntry {
+        id: "user.test.unmap-question".into(),
+        context: Some("editor".into()),
+        mode: "normal".into(),
+        keys: Some("?".into()),
+        command: None,
+        arguments: BTreeMap::new(),
+        unmap: true,
+        disable: false,
+        pass_through: false,
+    });
+    loaded.entries.push(crate::config::KeymapEntry {
+        id: "user.test.remap-command-line-open".into(),
+        context: Some("editor".into()),
+        mode: "normal".into(),
+        keys: Some("ctrl-p".into()),
+        command: Some("command_line.open".into()),
+        arguments: BTreeMap::from([(
+            "kind".to_owned(),
+            toml::Value::String("command".into()),
+        )]),
+        unmap: false,
+        disable: false,
+        pass_through: false,
+    });
+    let (remapped, diagnostic) = compile_keymaps(&app.commands, &loaded, &policy);
+    assert!(diagnostic.is_none(), "{diagnostic:?}");
+    let effective = remapped.effective_binding("editor.normal", "command_line.open");
+    assert_eq!(
+        effective.keys(),
+        ["/".to_owned(), "ctrl-p".to_owned()],
+        "the remapped key replaces the bundled binding for the same arguments, and the          unmapped key is gone"
+    );
+    assert!(
+        !effective.keys().contains(&"?".to_owned()),
+        "a key the user unmapped is never offered to a lesson"
+    );
+    assert_eq!(effective.display(), "/ ctrl-p  command_line.open");
+
+    // A command with no binding in the asked context is reported as unbound, never defaulted.
+    let unbound = remapped.effective_binding("editor.normal", "health.open");
+    assert_eq!(
+        unbound,
+        crate::editor::session::configuration::EffectiveBinding::Unbound {
+            command: "health.open".into(),
+        },
+        "a command with no binding here is UNBOUND rather than given a default"
+    );
+    assert_eq!(unbound.keys(), [] as [String; 0]);
+    assert_eq!(unbound.primary(), None);
+    assert!(!unbound.is_bound());
+    assert_eq!(unbound.display(), "unbound  health.open");
+
+    // The answer belongs to the context that was asked about: unmapping `?` in editor.normal
+    // says nothing about a context where the same command is bound elsewhere.
+    assert!(
+        !remapped
+            .effective_binding("editor.normal", "command_line.open")
+            .keys()
+            .contains(&"?".to_owned())
+    );
+}
+
+#[test]
+fn binding_for_names_the_same_key_every_time_for_a_multi_bound_command() {
+    let app = app();
+    let keymaps = app.configuration.keymaps();
+    // `command_line.open` answers to several keys and `reverse` is a HashMap, so before this was
+    // pinned the SHIPPED hint text could name a different key between runs.
+    let shown = keymaps
+        .binding_for("editor.normal", "command_line.open")
+        .expect("the command resolves in the editor");
+    assert_eq!(
+        shown, "/",
+        "the smallest matching key is named, not whichever the hash reached first"
+    );
+    for _ in 0..64 {
+        assert_eq!(
+            keymaps.binding_for("editor.normal", "command_line.open"),
+            Some("/"),
+            "the answer never varies between calls"
+        );
+    }
+    // It agrees with the sorted-first key of the full set, so the two accessors cannot disagree.
+    let effective = keymaps.effective_binding("editor.normal", "command_line.open");
+    assert_eq!(effective.primary(), Some(shown));
 }

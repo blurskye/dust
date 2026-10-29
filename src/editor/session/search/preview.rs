@@ -2,7 +2,7 @@ use super::SearchSession;
 use crate::editor::session::workspace::WorkspaceVersion;
 use crate::{
     files::{RequestId, VfsError},
-    ui::PickerPreview,
+    ui::{PickerPreview, PickerPreviewBody, PickerTextPreview},
 };
 use std::{path::PathBuf, sync::Arc};
 pub(in crate::editor::session) struct PreviewTicket(Arc<()>);
@@ -20,6 +20,17 @@ impl SearchSession {
         self.preview_scope = None;
         self.preview_epoch = Arc::new(());
         self.preview_read.take().map(|(id, _)| id)
+    }
+    /// Replace the preview with one the session already holds, such as a diff built from the
+    /// structured hunk read. Any in-flight file preview is retired first, so a late read can
+    /// never overwrite it with a different path's content.
+    pub(in crate::editor::session) fn set_preview(
+        &mut self,
+        preview: PickerPreview,
+    ) -> Option<RequestId> {
+        let retired = self.clear_preview();
+        self.preview = Some(preview);
+        retired
     }
     pub(in crate::editor::session) fn preview_match(
         &mut self,
@@ -39,7 +50,8 @@ impl SearchSession {
             && self
                 .preview
                 .as_ref()
-                .is_some_and(|preview| preview.highlight_line == Some(found.line))
+                .and_then(PickerPreview::as_text)
+                .is_some_and(|text| text.highlight_line == Some(found.line))
         {
             return None;
         }
@@ -68,7 +80,8 @@ impl SearchSession {
             && self
                 .preview
                 .as_ref()
-                .is_some_and(|preview| preview.highlight_line == Some(found.line))
+                .and_then(PickerPreview::as_text)
+                .is_some_and(|text| text.highlight_line == Some(found.line))
         {
             return None;
         }
@@ -96,9 +109,11 @@ impl SearchSession {
         self.preview_scope = Some((scope, configuration));
         self.preview = Some(PickerPreview {
             title,
-            lines: vec![loading],
-            first_line: 0,
-            highlight_line: None,
+            body: PickerPreviewBody::Text(PickerTextPreview {
+                lines: vec![loading],
+                first_line: 0,
+                highlight_line: None,
+            }),
         });
         (retired, Some(PreviewTicket(self.preview_epoch.clone())))
     }
@@ -120,8 +135,8 @@ impl SearchSession {
         error: String,
     ) {
         if Arc::ptr_eq(&ticket.0, &self.preview_epoch) {
-            if let Some(preview) = &mut self.preview {
-                preview.lines = vec![format!("preview unavailable: {error}")];
+            if let Some(text) = self.preview.as_mut().and_then(PickerPreview::as_text_mut) {
+                text.lines = vec![format!("preview unavailable: {error}")];
             }
         }
     }
@@ -143,8 +158,8 @@ impl SearchSession {
             self.clear_preview();
             return true;
         }
-        if let Some(preview) = &mut self.preview {
-            preview.lines = match result {
+        if let Some(text) = self.preview.as_mut().and_then(PickerPreview::as_text_mut) {
+            text.lines = match result {
                 Ok(bytes) if bytes.len() > maximum => {
                     vec!["preview exceeds admitted byte limit".into()]
                 }
@@ -199,9 +214,11 @@ pub(super) fn search_picker_preview(
     first_line = first_line.saturating_add(first_visible_offset);
     PickerPreview {
         title: found.relative_path.display().to_string(),
-        lines,
-        first_line,
-        highlight_line: Some(found.line),
+        body: PickerPreviewBody::Text(PickerTextPreview {
+            lines,
+            first_line,
+            highlight_line: Some(found.line),
+        }),
     }
 }
 

@@ -6,9 +6,182 @@ use crate::{
 };
 
 use super::{
-    Frame, PickerUiState, PluginSurfaceUiState, PrivateSurfaceUiState, PromptState, ToolMenuState,
-    editor::cursor_style,
+    CellAlign, DiffLayout, DiffPreview, DiffRow, DiffRowKind, DiffSideRow, Frame, PickerPreviewBody,
+    PickerRowKind, PickerUiState, PluginSurfaceUiState, PrivateSurfaceUiState, PromptState,
+    ToolMenuState, editor::cursor_style,
 };
+
+/// Draw a diff that was carried as structure rather than flattened text.
+///
+/// This is the base form: the provenance line, each hunk header, the exact count of any
+/// unchanged run collapsed before a hunk, and every line with both of its numbers and a
+/// classification glyph. Intra-line emphasis, side-by-side mode and syntax highlighting are
+/// the diff renderer's own work and are not claimed here.
+/// The style a diff row's own text is drawn in.
+fn diff_row_style(kind: DiffRowKind) -> Style {
+    match kind {
+        DiffRowKind::Provenance | DiffRowKind::Collapsed => Style::Muted,
+        DiffRowKind::Header => Style::Accent,
+        DiffRowKind::Added => Style::StatusAccent,
+        DiffRowKind::Removed => Style::Error,
+        DiffRowKind::Context => Style::Default,
+        DiffRowKind::Truncated => Style::Warning,
+    }
+}
+
+/// A footer legend shortened to whole entries that fit.
+///
+/// A narrow surface drops whole actions rather than clipping one, so a footer can never show
+/// half an action that reads as a different one.
+fn fitted_footer(text: &str, width: usize, ambiguous_width: crate::config::AmbiguousWidth) -> String {
+    if text_width(text, ambiguous_width) <= width {
+        return text.to_owned();
+    }
+    let mut fitted = String::new();
+    for entry in text.split(" · ") {
+        let candidate = if fitted.is_empty() {
+            entry.to_owned()
+        } else {
+            format!("{fitted} · {entry}")
+        };
+        if text_width(&candidate, ambiguous_width) > width {
+            break;
+        }
+        fitted = candidate;
+    }
+    fitted
+}
+
+fn text_width_u16(text: &str, config: &Config) -> u16 {
+    u16::try_from(text_width(text, config.editor.ambiguous_width)).unwrap_or(u16::MAX)
+}
+
+/// Draw one diff row, emphasising the spans that changed inside it.
+///
+/// The emphasis uses the theme's search style, which is the existing style for highlighted
+/// text. A dedicated diff-emphasis style would be a theme-schema change and U-16 does not
+/// ask for one.
+fn paint_diff_row(frame: &mut Frame, config: &Config, x: u16, y: u16, right: u16, row: &DiffRow) {
+    let style = diff_row_style(row.kind);
+    if row.spans.is_empty() {
+        frame.grid.put_text_clipped(x, y, &row.text, style, right);
+        return;
+    }
+    let mut cursor_x = x;
+    let mut cursor = 0usize;
+    for span in &row.spans {
+        let start = span.start.min(row.text.len());
+        let end = span.end.min(row.text.len());
+        if end < start
+            || !row.text.is_char_boundary(start)
+            || !row.text.is_char_boundary(end)
+        {
+            continue;
+        }
+        if start > cursor {
+            let piece = &row.text[cursor..start];
+            frame.grid.put_text_clipped(cursor_x, y, piece, style, right);
+            cursor_x = cursor_x.saturating_add(text_width_u16(piece, config));
+        }
+        if end > start {
+            let piece = &row.text[start..end];
+            frame
+                .grid
+                .put_text_clipped(cursor_x, y, piece, Style::Search, right);
+            cursor_x = cursor_x.saturating_add(text_width_u16(piece, config));
+        }
+        cursor = end;
+    }
+    if cursor < row.text.len() {
+        frame
+            .grid
+            .put_text_clipped(cursor_x, y, &row.text[cursor..], style, right);
+    }
+}
+
+fn render_diff_preview(
+    frame: &mut Frame,
+    diff: &DiffPreview,
+    side_scroll: (usize, usize),
+    config: &Config,
+    rect: WindowRect,
+) {
+    let (left, top) = (rect.x, rect.y);
+    let right = rect.x.saturating_add(rect.width);
+    let bottom = rect.y.saturating_add(rect.height);
+    match diff.layout {
+        DiffLayout::Unified => {
+            let mut y = top;
+            for row in diff.rows() {
+                if y >= bottom {
+                    break;
+                }
+                paint_diff_row(frame, config, left, y, right, &row);
+                y = y.saturating_add(1);
+            }
+        }
+        DiffLayout::SideBySide => {
+            // The divider takes one column and the two sides split what remains.
+            let width = right.saturating_sub(left);
+            let side = width.saturating_sub(1) / 2;
+            let divider = left.saturating_add(side);
+            let left_right = divider;
+            let right_left = divider.saturating_add(1);
+            // Each side has its own sequence and its own offset, so one side scrolls without
+            // moving the other. With equal offsets the two sides stay paired.
+            let rows = diff.side_by_side_rows();
+            let left_cells: Vec<&DiffSideRow> = rows.iter().collect();
+            let (left_offset, right_offset) = side_scroll;
+            let mut y = top;
+            for (position, row) in rows.iter().enumerate() {
+                if y >= bottom {
+                    break;
+                }
+                if let Some(text) = &row.spanning {
+                    let style = diff_row_style(row.kind);
+                    frame.grid.put_text_clipped(left, y, text, style, right);
+                    continue;
+                }
+                let left_row = left_cells.get(position.saturating_add(left_offset)).copied();
+                let right_row = rows.get(position.saturating_add(right_offset));
+                {
+                    frame.grid.set_cell(divider, y, "│", Style::Border);
+                    if let Some(cell) = left_row.and_then(|row| row.old.as_ref()) {
+                        let (text, spans) = diff.side_cell_text(cell);
+                        paint_diff_row(
+                            frame,
+                            config,
+                            left,
+                            y,
+                            left_right,
+                            &DiffRow {
+                                kind: DiffRowKind::Removed,
+                                text,
+                                spans,
+                            },
+                        );
+                    }
+                    if let Some(cell) = right_row.and_then(|row| row.new.as_ref()) {
+                        let (text, spans) = diff.side_cell_text(cell);
+                        paint_diff_row(
+                            frame,
+                            config,
+                            right_left,
+                            y,
+                            right,
+                            &DiffRow {
+                                kind: DiffRowKind::Added,
+                                text,
+                                spans,
+                            },
+                        );
+                    }
+                }
+                y = y.saturating_add(1);
+            }
+        }
+    }
+}
 
 pub(super) fn render_plugin_surface(
     frame: &mut Frame,
@@ -188,13 +361,14 @@ pub(super) fn render_picker(
         .preview
         .as_ref()
         .filter(|_| width >= 40 && height >= 12);
-    let preview_number_width = preview.map_or(1, |preview| {
-        preview
+    let preview_number_width = preview.map_or(1, |preview| match &preview.body {
+        PickerPreviewBody::Text(text) => text
             .first_line
-            .saturating_add(preview.lines.len())
+            .saturating_add(text.lines.len())
             .max(1)
             .to_string()
-            .len()
+            .len(),
+        PickerPreviewBody::Diff(diff) => diff.number_width(),
     });
     let Some(geometry) = geometry
         .filter(|geometry| geometry.outer == rect)
@@ -226,12 +400,25 @@ pub(super) fn render_picker(
         Style::Accent,
         list_right,
     );
+    // The footer spans the surface, not just the list column, because it describes the whole
+    // operation in front of the user rather than the list widget.
+    let footer_right = left.saturating_add(width).saturating_sub(1);
     frame.grid.put_text_clipped(
         left + 2,
         top + height - 1,
-        &format!(" {} ", picker.input_hint),
+        &format!(
+            " {} ",
+            match picker.footer.as_deref() {
+                Some(footer) => fitted_footer(
+                    footer,
+                    usize::from(footer_right.saturating_sub(left.saturating_add(2)).saturating_sub(2)),
+                    config.editor.ambiguous_width,
+                ),
+                None => picker.input_hint.clone(),
+            }
+        ),
         Style::Muted,
-        list_right,
+        footer_right,
     );
     if let Some(preview) = preview {
         let (title_x, title_y, title_right) = if let Some(divider) = divider {
@@ -343,6 +530,65 @@ pub(super) fn render_picker(
                 frame.grid.set_cell(x, y, " ", Style::Selection);
             }
         }
+        if row.kind == PickerRowKind::Section {
+            // A section header is drawn as a header: full width, no marker, and never the
+            // row a selection sits on because selection steps over it.
+            frame.grid.put_text_clipped(
+                content_left,
+                y,
+                &format!("── {} ", row.label),
+                Style::Accent,
+                list_right,
+            );
+            continue;
+        }
+        if !row.cells.is_empty() {
+            // A row with cells draws every column at its own declared width with its own
+            // style, so a status column, a lane and a badge are coloured independently.
+            // The marker keeps focus legible; a cell that carries a meaningful style keeps
+            // it on the selected row, and only the default style is promoted to the
+            // selection style so no lane or status colour is lost under the cursor.
+            frame
+                .grid
+                .put_text_clipped(content_left, y, marker, Style::Selection, list_right);
+            let mut cell_x = content_left.saturating_add(2);
+            for (position, cell) in row.cells.iter().enumerate() {
+                if cell_x >= list_right {
+                    break;
+                }
+                // A zero-width column takes what the fixed columns beside it leave.
+                let width = if cell.width == 0 {
+                    let fixed: u16 = row.cells[position + 1..]
+                        .iter()
+                        .map(|rest| rest.width)
+                        .sum();
+                    list_right
+                        .saturating_sub(cell_x)
+                        .saturating_sub(fixed)
+                } else {
+                    cell.width
+                };
+                let cell_right = cell_x.saturating_add(width).min(list_right);
+                let style = if selected && cell.style == Style::Default {
+                    Style::Selection
+                } else {
+                    cell.style
+                };
+                let text_x = match cell.align {
+                    CellAlign::Left => cell_x,
+                    CellAlign::Right => {
+                        let measured = text_width(&cell.text, config.editor.ambiguous_width);
+                        let measured = u16::try_from(measured).unwrap_or(u16::MAX);
+                        cell_x.saturating_add(width.saturating_sub(measured))
+                    }
+                };
+                frame
+                    .grid
+                    .put_text_clipped(text_x, y, &cell.text, style, cell_right);
+                cell_x = cell_x.saturating_add(width);
+            }
+            continue;
+        }
         frame.grid.put_text_clipped(
             content_left,
             y,
@@ -380,60 +626,80 @@ pub(super) fn render_picker(
         };
         let preview_right = left + width - 1;
         let preview_bottom = top + height - 1;
-        let available_rows = usize::from(preview_bottom.saturating_sub(preview_top));
-        let highlighted_offset = preview
-            .highlight_line
-            .and_then(|line| line.checked_sub(preview.first_line));
-        let first_visible_offset = highlighted_offset.map_or(0, |offset| {
-            offset.saturating_add(1).saturating_sub(available_rows)
-        });
-        for (visible_offset, (offset, line)) in preview
-            .lines
-            .iter()
-            .enumerate()
-            .skip(first_visible_offset)
-            .take(available_rows)
-            .enumerate()
-        {
-            let y = preview_top + u16::try_from(visible_offset).unwrap_or(u16::MAX);
-            if y >= preview_bottom {
-                break;
-            }
-            let line_index = preview.first_line.saturating_add(offset);
-            let highlighted = preview.highlight_line == Some(line_index);
-            if highlighted {
-                for x in preview_fill_left..preview_right {
-                    frame.grid.set_cell(x, y, " ", Style::Selection);
+        match &preview.body {
+            PickerPreviewBody::Text(text) => {
+                let available_rows =
+                    usize::from(preview_bottom.saturating_sub(preview_top));
+                let highlighted_offset = text
+                    .highlight_line
+                    .and_then(|line| line.checked_sub(text.first_line));
+                let first_visible_offset = highlighted_offset.map_or(0, |offset| {
+                    offset.saturating_add(1).saturating_sub(available_rows)
+                });
+                for (visible_offset, (offset, line)) in text
+                    .lines
+                    .iter()
+                    .enumerate()
+                    .skip(first_visible_offset)
+                    .take(available_rows)
+                    .enumerate()
+                {
+                    let y = preview_top + u16::try_from(visible_offset).unwrap_or(u16::MAX);
+                    if y >= preview_bottom {
+                        break;
+                    }
+                    let line_index = text.first_line.saturating_add(offset);
+                    let highlighted = text.highlight_line == Some(line_index);
+                    if highlighted {
+                        for x in preview_fill_left..preview_right {
+                            frame.grid.set_cell(x, y, " ", Style::Selection);
+                        }
+                    }
+                    let number =
+                        format!("{:>preview_number_width$} ", line_index.saturating_add(1));
+                    frame.grid.put_text_clipped(
+                        preview_left,
+                        y,
+                        &number,
+                        if highlighted {
+                            Style::Selection
+                        } else {
+                            Style::Muted
+                        },
+                        preview_right,
+                    );
+                    let text_left = preview_left.saturating_add(
+                        u16::try_from(preview_number_width)
+                            .unwrap_or(0)
+                            .saturating_add(1),
+                    );
+                    frame.grid.put_text_clipped(
+                        text_left,
+                        y,
+                        line,
+                        if highlighted {
+                            Style::Selection
+                        } else {
+                            Style::Default
+                        },
+                        preview_right,
+                    );
                 }
             }
-            let number = format!("{:>preview_number_width$} ", line_index.saturating_add(1));
-            frame.grid.put_text_clipped(
-                preview_left,
-                y,
-                &number,
-                if highlighted {
-                    Style::Selection
-                } else {
-                    Style::Muted
-                },
-                preview_right,
-            );
-            let text_left = preview_left.saturating_add(
-                u16::try_from(preview_number_width)
-                    .unwrap_or(0)
-                    .saturating_add(1),
-            );
-            frame.grid.put_text_clipped(
-                text_left,
-                y,
-                line,
-                if highlighted {
-                    Style::Selection
-                } else {
-                    Style::Default
-                },
-                preview_right,
-            );
+            PickerPreviewBody::Diff(diff) => {
+                render_diff_preview(
+                    frame,
+                    diff,
+                    picker.preview_side_scroll,
+                    config,
+                    WindowRect {
+                        x: preview_left,
+                        y: preview_top,
+                        width: preview_right.saturating_sub(preview_left),
+                        height: preview_bottom.saturating_sub(preview_top),
+                    },
+                );
+            }
         }
     }
     let cursor_x = content_left.saturating_add(
@@ -1183,6 +1449,66 @@ pub(super) fn render_prompt(
         Style::Accent,
         content_right,
     );
+    if prompt.multiline {
+        // A composer can hold more than one line. Draw a bounded window of them, keep the
+        // cursor on the row its own line occupies, and say plainly when lines are hidden.
+        let rows = usize::from(geometry.height.saturating_sub(2))
+            .saturating_sub(usize::from(show_help))
+            .max(1);
+        let lines: Vec<&str> = prompt.input.split('\n').collect();
+        let cursor = prompt.cursor.min(prompt.input.len());
+        let cursor_line = prompt.input[..cursor].matches('\n').count();
+        let first = cursor_line
+            .saturating_add(1)
+            .saturating_sub(rows)
+            .min(lines.len().saturating_sub(rows.min(lines.len())));
+        let hidden_above = first > 0;
+        let hidden_below = first + rows < lines.len();
+        let mut cursor_row = input_y;
+        let mut last_row = input_y;
+        for (offset, line) in lines.iter().skip(first).take(rows).enumerate() {
+            let y = input_y.saturating_add(u16::try_from(offset).unwrap_or(0));
+            // Text is clipped one column short of the inner edge, so the reserved column stays
+            // free for a hidden-line indicator whatever the marker is.
+            frame
+                .grid
+                .put_text_clipped(marker_end, y, line, Style::Default, content_right);
+            last_row = y;
+            if offset == cursor_line.saturating_sub(first) {
+                cursor_row = y;
+            }
+        }
+        // Clipped text stops before the last inner column, so an indicator always has room.
+        if hidden_above {
+            frame.grid.put_text_clipped(
+                content_right,
+                input_y,
+                "\u{2191}",
+                Style::Muted,
+                content_right.saturating_add(1),
+            );
+        }
+        if hidden_below {
+            frame.grid.put_text_clipped(
+                content_right,
+                last_row,
+                "\u{2193}",
+                Style::Muted,
+                content_right.saturating_add(1),
+            );
+        }
+        let line_start = prompt.input[..cursor].rfind('\n').map_or(0, |at| at + 1);
+        let prefix = prompt.input.get(line_start..cursor).unwrap_or("");
+        let cursor_x = marker_end.saturating_add(
+            u16::try_from(text_width(prefix, config.editor.ambiguous_width)).unwrap_or(0),
+        );
+        frame.cursor = Some((
+            cursor_x.min(geometry.left + geometry.width.saturating_sub(2)),
+            cursor_row,
+            cursor_style(config.ui.cursor.prompt),
+        ));
+        return;
+    }
     frame.grid.put_text_clipped(
         marker_end,
         input_y,

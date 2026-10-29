@@ -220,11 +220,16 @@ pub fn run_interactive(
         application.process_git_hunk_events();
         application.process_git_sign_events();
         application.process_git_mutation_events();
+        application.process_git_commit_events();
+        application.process_git_log_events();
+        application.process_git_branch_events();
+        application.process_git_remote_events();
         application.process_workspace_file_events();
         application.process_workspace_search_events();
         application.process_explorer_watch_events();
         application.process_explorer_result();
         application.process_trust_events();
+        application.process_tutor_events();
         application.maybe_prompt_for_unseen_workspace();
         application.process_configuration_result();
         application.process_theme_results();

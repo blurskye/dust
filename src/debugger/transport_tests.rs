@@ -479,3 +479,159 @@ while True:
     service.stop().unwrap();
     wait(|| service.pending() == 0);
 }
+
+/// An adapter that LOGS every request it receives, so a test can count requests rather than read
+/// code. The log is a file, exactly as the other fixtures record what they saw.
+pub(crate) const LOGGING_ADAPTER: &str = r#"
+import json,sys,pathlib
+seq=0
+log=pathlib.Path('requests.log')
+def send(value):
+ global seq
+ seq+=1
+ value['seq']=seq
+ data=json.dumps(value).encode()
+ sys.stdout.buffer.write(('Content-Length: %d\r\n\r\n'%len(data)).encode()+data)
+ sys.stdout.buffer.flush()
+def read():
+ headers={}
+ while True:
+  line=sys.stdin.buffer.readline()
+  if not line: return None
+  if line in (b'\r\n',b'\n'): break
+  k,v=line.decode().split(':',1); headers[k.lower()]=v.strip()
+ return json.loads(sys.stdin.buffer.read(int(headers['content-length'])))
+while True:
+ m=read()
+ if m is None: break
+ if m.get('type')!='request': continue
+ c=m['command']
+ args=m.get('arguments',{})
+ ref=args.get('variablesReference', args.get('frameId'))
+ with log.open('a') as f: f.write('%s %s\n'%(c, ref))
+ body={}
+ if c=='initialize': body={'supportsConfigurationDoneRequest':True,'supportsEvaluateForHovers':True}
+ if c=='threads': body={'threads':[{'id':1,'name':'logging-thread'}]}
+ if c=='stackTrace': body={'stackFrames':[{'id':1,'name':'logging-frame','line':1,'column':1}]}
+ if c=='configurationDone': body={}
+ if c=='scopes': body={'scopes':[{'name':'locals','variablesReference':42,'expensive':False}]}
+ if c=='variables':
+  if ref==42: body={'variables':[{'name':'child','value':'1','variablesReference':77}]}
+  if ref==77: body={'variables':[{'name':'grandchild','value':'2','variablesReference':0}]}
+ send({'type':'response','request_seq':m['seq'],'command':c,'success':True,'body':body})
+ if c in ('launch','attach'): send({'type':'event','event':'stopped','body':{'reason':'fixture','threadId':1}})
+"#;
+fn request_log(root: &Path) -> Vec<String> {
+    std::fs::read_to_string(root.join("requests.log"))
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+fn variables_requests(root: &Path) -> Vec<String> {
+    request_log(root)
+        .into_iter()
+        .filter(|line| line.starts_with("variables "))
+        .collect()
+}
+fn control_and_wait(service: &mut DapService, control: DapControl, expect: &str) {
+    service.control(control).unwrap();
+    wait(|| {
+        while let Some(event) = service.try_event() {
+            match event {
+                DapEvent::Response { response, .. } => {
+                    let name = match response {
+                        DapResponse::Scopes(_) => "scopes",
+                        DapResponse::Variables(_) => "variables",
+                        _ => "other",
+                    };
+                    if name == expect {
+                        return true;
+                    }
+                }
+                DapEvent::Failed { message, .. } => panic!("adapter failed: {message}"),
+                _ => {}
+            }
+        }
+        false
+    });
+}
+
+#[test]
+fn child_requests_happen_only_when_a_row_is_expanded() {
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("logging.py");
+    std::fs::write(&script, LOGGING_ADAPTER).unwrap();
+    let mut service = DapService::new();
+    service.start_absolute(launch(root.path(), &script)).unwrap();
+    wait(|| matches!(service.try_event(), Some(DapEvent::Stopped { .. })));
+
+    // OPENING A VIEW requests the scopes and STOPS THERE: the child request for the scope's
+    // variables is NOT made while the list is built.
+    control_and_wait(
+        &mut service,
+        DapControl::Scopes { frame_id: 1 },
+        "scopes",
+    );
+    assert!(
+        request_log(root.path())
+            .iter()
+            .any(|line| line.starts_with("scopes ")),
+        "the scopes request really reached the adapter: {:?}",
+        request_log(root.path())
+    );
+    assert_eq!(
+        variables_requests(root.path()).len(),
+        0,
+        "building the list must not request children: {:?}",
+        request_log(root.path())
+    );
+
+    // EXPANDING EXACTLY ONE ROW makes EXACTLY ONE child request, for THAT reference.
+    control_and_wait(
+        &mut service,
+        DapControl::Variables {
+            reference: 42,
+            start: 0,
+            count: 1000,
+        },
+        "variables",
+    );
+    assert_eq!(
+        variables_requests(root.path()),
+        vec!["variables 42".to_owned()],
+        "one expansion, one request, for the reference that was expanded"
+    );
+    // And that child did NOT drag its own children with it.
+    assert!(
+        !request_log(root.path())
+            .iter()
+            .any(|line| line.contains("77")),
+        "expanding a parent does not request the grandchild: {:?}",
+        request_log(root.path())
+    );
+}
+
+#[test]
+fn a_declared_attach_session_sends_attach_and_needs_no_program() {
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("logging.py");
+    std::fs::write(&script, LOGGING_ADAPTER).unwrap();
+    let mut service = DapService::new();
+    let mut configuration = launch(root.path(), &script);
+    // Declared as an ATTACH: the configuration says so, and there is no program to run.
+    configuration.request = "attach".into();
+    configuration.request_arguments = serde_json::json!({});
+    service.start_absolute(configuration).unwrap();
+    wait(|| matches!(service.try_event(), Some(DapEvent::Stopped { .. })));
+
+    let log = request_log(root.path());
+    assert!(
+        log.iter().any(|line| line.starts_with("attach")),
+        "an attach configuration really sends `attach`: {log:?}"
+    );
+    assert!(
+        !log.iter().any(|line| line.starts_with("launch")),
+        "and NOT `launch`, so the two are not the same request wearing different names: {log:?}"
+    );
+}

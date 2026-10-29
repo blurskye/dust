@@ -394,6 +394,14 @@ fn validate_ownership(spec: &CommandSpec) -> Result<(), CommandError> {
     Ok(())
 }
 
+/// Whether this requirement is satisfied right now, using the dispatcher's own check so help
+/// cannot advertise a command the dispatcher would refuse.
+impl ContextRequirement {
+    #[must_use]
+    pub fn satisfied(&self, state: &EditorState, invocation: &CommandInvocation) -> bool {
+        validate_context(state, invocation, *self).is_ok()
+    }
+}
 fn validate_context(
     state: &EditorState,
     invocation: &CommandInvocation,

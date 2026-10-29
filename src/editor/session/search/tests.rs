@@ -89,7 +89,7 @@ fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
         1
     ));
     assert_eq!(
-        owner.preview().as_ref().unwrap().lines,
+        owner.preview().as_ref().unwrap().as_text().expect("text preview").lines,
         ["preview exceeds admitted byte limit"]
     );
     assert!(!owner.accept_preview(
@@ -115,7 +115,10 @@ fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
         source.clone(),
         1
     ));
-    assert_eq!(owner.preview().as_ref().unwrap().lines, ["valid"]);
+    assert_eq!(
+        owner.preview().as_ref().unwrap().as_text().expect("text preview").lines,
+        ["valid"]
+    );
     let ticket = owner
         .prepare_preview(
             "fifth".into(),
@@ -172,11 +175,28 @@ fn completed_stream_and_idle_snapshot_have_one_accepted_lifetime() {
     let item = found();
     owner.preview_snapshot(&item, 64);
     let epoch = owner.preview_epoch.clone();
-    let lines = owner.preview().as_ref().unwrap().lines.as_ptr();
+    let lines = owner
+        .preview()
+        .as_ref()
+        .unwrap()
+        .as_text()
+        .expect("text preview")
+        .lines
+        .as_ptr();
     for _ in 0..256 {
         owner.preview_snapshot(&item, 64);
         assert!(Arc::ptr_eq(&epoch, &owner.preview_epoch));
-        assert_eq!(lines, owner.preview().as_ref().unwrap().lines.as_ptr());
+        assert_eq!(
+            lines,
+            owner
+                .preview()
+                .as_ref()
+                .unwrap()
+                .as_text()
+                .expect("text preview")
+                .lines
+                .as_ptr()
+        );
     }
     owner.poll(scope(directory.path()), 1);
     assert!(owner.matches().is_empty());
@@ -297,6 +317,8 @@ fn picker_epochs_scope_and_close_preserve_only_current_interaction() {
             .map(|n| {
                 (
                     PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(format!("row-{n:02}")),
                         label: format!("jk {n:02}"),
                         detail: String::new(),
@@ -373,6 +395,8 @@ fn streaming_picker_keeps_query_selection_and_epoch_but_not_foreign_actions() {
             .map(|id| {
                 (
                     PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId((*id).into()),
                         label: (*id).into(),
                         detail: String::new(),
@@ -452,6 +476,8 @@ fn picker_rows_and_actions_share_first_wins_bounds_and_replacement() {
     let row = |id: &str, value: &str| {
         (
             PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                 id: PickerItemId(id.into()),
                 label: value.into(),
                 detail: String::new(),

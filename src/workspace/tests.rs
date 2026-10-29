@@ -495,6 +495,8 @@ fn picker_rejects_stale_streams_deduplicates_and_filters_stably() {
     let mut picker = PickerState::new(4, "References".into(), 3);
     assert!(!picker.append(3, Vec::new(), true));
     let item = |id: &str, label: &str| PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
         id: PickerItemId(id.into()),
         label: label.into(),
         detail: String::new(),

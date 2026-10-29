@@ -280,6 +280,11 @@ pub(super) fn register_commands(
             "Show debug-session status",
             AppEffect::DapStatus,
         ),
+        (
+            "dap.inspector.next",
+            "Show the next debug inspector",
+            AppEffect::DapInspectorNext,
+        ),
     ] {
         register(
             registry,

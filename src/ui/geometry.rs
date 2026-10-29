@@ -79,15 +79,28 @@ pub fn picker_content_geometry(
         .unwrap_or(28)
         .clamp(28, 72);
     let preview_width = preview.map_or(0, |preview| {
-        let numbers = preview
-            .first_line
-            .saturating_add(preview.lines.len())
-            .max(1)
-            .to_string()
-            .len();
-        preview
-            .lines
-            .iter()
+        // Measurement reads the same rows the painter draws, so the two cannot disagree
+        // about how wide a preview is.
+        let (rows, numbers) = match &preview.body {
+            crate::ui::PickerPreviewBody::Text(text) => (
+                text.lines.clone(),
+                text.first_line
+                    .saturating_add(text.lines.len())
+                    .max(1)
+                    .to_string()
+                    .len(),
+            ),
+            crate::ui::PickerPreviewBody::Diff(diff) => {
+                let numbers = diff.number_width().saturating_mul(2).saturating_add(3);
+                // The diff's own width is measured from the same rows the painter reads.
+                let width = diff.content_width(config.editor.ambiguous_width);
+                (vec![], width.saturating_add(numbers).saturating_add(4))
+            }
+        };
+        if rows.is_empty() {
+            return numbers.clamp(32, 88);
+        }
+        rows.iter()
             .take(64)
             .map(|line| text_width(line, config.editor.ambiguous_width))
             .max()

@@ -127,6 +127,8 @@ fn compose_plugin_picker_items(
                 ));
                 (
                     PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                         id,
                         label: item.primary.clone(),
                         detail: item.secondary.clone().unwrap_or_default(),
@@ -1631,6 +1633,8 @@ impl InteractiveApplication {
             .map(|(index, (key, name, origin))| {
                 (
                     PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(format!("theme:{index}")),
                         label: name,
                         detail: if index == 0 {
@@ -1912,6 +1916,8 @@ impl InteractiveApplication {
                         };
                         (
                             PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("syntax:{index}:{}", info.id)),
                                 label: self.syntax_language_label(info.language),
                                 detail: self.message(
@@ -2087,13 +2093,17 @@ impl InteractiveApplication {
                     .debugger_session
                     .console()
                     .enumerate()
-                    .map(|(index, (adapter, line))| {
+                    .map(|(index, entry)| {
                         (
                             PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("dap-console:{index}")),
-                                label: line.clone(),
-                                detail: String::new(),
-                                source: adapter.clone(),
+                                label: entry.text.clone(),
+                                // The ORIGIN and the source are both shown, so a REPL result is
+                                // never read as program output.
+                                detail: format!("{} · {}", entry.origin.label(), entry.source),
+                                source: entry.origin.label().to_owned(),
                                 action: PickerAction::None,
                             },
                             PickerPayload::Command(String::new()),
@@ -2115,6 +2125,8 @@ impl InteractiveApplication {
                     .unwrap_or_default();
                 let items = vec![(
                     PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId("dap-session:active".into()),
                         label: adapter,
                         detail: configuration,
@@ -2161,6 +2173,9 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::DapEvaluate(expression) => {
+                // What the user typed is recorded as a COMMAND, distinct from what comes back.
+                self.debugger_session
+                    .record_console_command(expression.clone());
                 if let Err(error) = self.debugger_session.control(DapControl::Evaluate {
                     expression,
                     frame_id: None,
@@ -2258,20 +2273,45 @@ impl InteractiveApplication {
                 }
             }
 
+            AppEffect::DapInspectorNext => {
+                // Narrow terminals replace panes with SELECTABLE inspectors, one at a time: this
+                // is that selection. Without a session there are no panes to select.
+                if let Some(panes) = self.ui.debug_panes.as_mut() {
+                    let all = crate::ui::DebugPane::ALL;
+                    let index = all
+                        .iter()
+                        .position(|pane| *pane == panes.selected)
+                        .unwrap_or(0);
+                    panes.selected = all[(index + 1) % all.len()];
+                }
+            }
             AppEffect::DapStatus => {
-                self.notify_message(
-                    self.message(
-                        "dap_status",
-                        &[(
-                            "adapter",
-                            self.debugger_session
-                                .active_adapter()
-                                .unwrap_or("none")
-                                .to_owned(),
-                        )],
+                let adapter = self
+                    .debugger_session
+                    .active_adapter()
+                    .unwrap_or("none")
+                    .to_owned();
+                // An ATTACHED session names the TARGET it was given: the editor did not start that
+                // process, so it does not describe it as a program it launched.
+                let attached = self.debugger_session.target().and_then(|target| {
+                    match target.request {
+                        crate::config::DebugRequestKind::Attach => target.target.clone(),
+                        crate::config::DebugRequestKind::Launch => None,
+                    }
+                });
+                match attached {
+                    Some(target) => self.notify_message(
+                        self.message(
+                            "dap_status_attached",
+                            &[("adapter", adapter), ("target", target)],
+                        ),
+                        false,
                     ),
-                    false,
-                );
+                    None => self.notify_message(
+                        self.message("dap_status", &[("adapter", adapter)]),
+                        false,
+                    ),
+                }
             }
             effect => return Err(effect),
         }
@@ -2296,6 +2336,8 @@ impl InteractiveApplication {
                     .map(|(index, (id, status))| {
                         (
                             PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("plugin:{index}:{id}")),
                                 label: id.clone(),
                                 detail: format!("{status:?}"),
@@ -2508,6 +2550,8 @@ impl InteractiveApplication {
             .map(|(index, line)| {
                 (
                     PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(format!("lsp-log:{index}")),
                         label: line.clone(),
                         detail: String::new(),
@@ -2906,6 +2950,11 @@ impl InteractiveApplication {
             AppEffect::PickerInsert(text) => self.picker_insert(&text),
             AppEffect::PickerBackspace => self.picker_backspace(),
             AppEffect::PickerMove(direction) => self.picker_move(direction),
+            AppEffect::PickerResults => {
+                if self.search.set_picker_surface(PickerSurfaceKind::Problems) {
+                    self.sync_picker_ui();
+                }
+            }
             AppEffect::PickerAccept => self.accept_picker(),
             AppEffect::PickerCancel => self.close_picker(),
             AppEffect::PickerNormal | AppEffect::PickerInsertMode => {
@@ -3040,6 +3089,8 @@ impl InteractiveApplication {
             .map(|entry| {
                 (
                     PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(entry.id),
                         label: entry.relative_path.display().to_string(),
                         detail: String::new(),
@@ -3203,6 +3254,8 @@ impl InteractiveApplication {
             .filter_map(|item| matches.get(item.stable_key.as_str()).copied())
             .map(|found| {
                 let item = PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                     id: PickerItemId(found.id.clone()),
                     label: self.message(
                         "workspace_search_row",
@@ -3674,6 +3727,8 @@ impl InteractiveApplication {
                     .map(|(index, (key, label, detail))| {
                         (
                             PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("terminal:{index}")),
                                 label,
                                 detail,
@@ -4596,6 +4651,11 @@ impl InteractiveApplication {
         if let Some(key) = binding("command_line.cancel") {
             hints.push(format!("{key} cancel"));
         }
+        // Help is a focusable action of the confirmation itself, not a global key: it is
+        // advertised here through the same keymap lookup as every other action.
+        if let Some(key) = binding("overlay.help.form") {
+            hints.push(format!("{key} help"));
+        }
         let hint = hints.join(" · ");
         self.input.configure_confirmation_actions(
             title,
@@ -4612,6 +4672,14 @@ impl InteractiveApplication {
         self.close_prompt_with_editor_close(true);
     }
     fn close_prompt_with_editor_close(&mut self, cancel_editor_close: bool) {
+        // A composer that closes keeps its message, so cancelling does not discard what the
+        // user typed and the change surface can show what is about to be committed.
+        if let Some(prompt) = self.input.prompt() {
+            if prompt.kind == PromptKind::GitCommitMessage {
+                let draft = prompt.input.clone();
+                self.git.set_commit_draft(draft);
+            }
+        }
         if self
             .input
             .prompt()
@@ -4939,6 +5007,45 @@ impl InteractiveApplication {
                 self.close_prompt();
                 self.confirm_reset_selected_git_hunk(prompt.input);
             }
+            PromptKind::GitCommitMessage => {
+                // Enter composes the message; the explicit submit command commits it, so the
+                // message can span as many lines as the user needs.
+                self.input.prompt_insert_newline();
+            }
+            PromptKind::GitDestructive => {
+                let selected = prompt
+                    .confirmation
+                    .map_or(crate::ui::ConfirmationChoice::No, |state| state.selected);
+                self.close_prompt();
+                // A previewed whole-file replacement is answered by this same confirmation, and
+                // it is answered through the REBUILT plan rather than the previewed one.
+                if self.git.has_pending_replacement() {
+                    self.apply_git_replacement(selected);
+                    return;
+                }
+                if self.git.has_pending_pick() {
+                    self.apply_previewed_git_pick(selected);
+                    return;
+                }
+                let action = self.git.take_pending_destructive();
+                if selected == crate::ui::ConfirmationChoice::Yes {
+                    self.confirm_git_destructive(action);
+                } else if action.is_some() {
+                    self.notify_message("Nothing was removed".into(), false);
+                }
+            }
+            PromptKind::GitStageUnsaved => {
+                let selected = prompt
+                    .confirmation
+                    .map_or(crate::ui::ConfirmationChoice::No, |state| state.selected);
+                self.close_prompt();
+                if selected == crate::ui::ConfirmationChoice::Yes {
+                    self.confirm_stage_unsaved();
+                } else {
+                    self.input.clear_pending_stage();
+                    self.notify_message("Nothing was staged".into(), false);
+                }
+            }
             PromptKind::ExplorerDelete => {
                 let selected = prompt
                     .confirmation
@@ -5213,6 +5320,12 @@ impl InteractiveApplication {
                     crate::editor::session::debugger::DebugResponse::Result(response) => {
                         match response {
                             DapResponse::Evaluate(value) => {
+                                // The answer is recorded as an EVALUATION RESULT, which is a
+                                // different origin from the command that asked for it.
+                                self.debugger_session.record_console_evaluation(format!(
+                                    "{} = {}",
+                                    value.name, value.value
+                                ));
                                 self.notify_message(
                                     self.message(
                                         "dap_evaluate_result",
@@ -5319,6 +5432,10 @@ impl InteractiveApplication {
                 }
             }
         }
+    
+        // The arrangement APPEARS when the session does: the panes are projected on every pump, so
+        // starting, stopping and reporting all refresh what the layout shows.
+        self.project_debug_panes();
     }
 }
 
@@ -6321,14 +6438,582 @@ impl InteractiveApplication {
         self.start_git_hunks_with_action(None);
     }
     pub(in crate::editor::session) fn start_git_hunks_with_action(&mut self, action: Option<i8>) {
+        self.start_git_hunks_with_layer(action, crate::workspace::git::GitDiffLayer::Unstaged);
+    }
+    pub(in crate::editor::session) fn start_git_hunks_with_layer(
+        &mut self,
+        action: Option<i8>,
+        layer: crate::workspace::git::GitDiffLayer,
+    ) {
         let path = self
             .state
             .active_buffer_id()
             .and_then(|id| self.state.buffers[id].path.as_deref());
         if let Err(error) = self
             .git
-            .start_hunks(path, self.workspace.root_revision(), action)
+            .start_hunks(path, self.workspace.root_revision(), action, layer)
         {
+            self.show_error(error);
+        }
+    }
+    pub(in crate::editor::session) fn request_git_commit(&mut self, amend: bool) {
+        if self.workspace.trust() != WorkspaceTrust::Trusted {
+            self.show_error("Git commit requires a trusted workspace");
+            return;
+        }
+        // A HISTORY REWRITE PREVIEW: an amend replaces a revision, so it names which one before
+        // anything moves. The composer's submit then applies it against a HEAD the model PINNED,
+        // so a repository that moved in the meantime is refused rather than rewritten.
+        if amend {
+            if let Some(status) = self.git.status() {
+                let repository = status.repository.clone();
+                // The previewed revision is CARRIED to the apply, so the question the user
+                // answered and the write that follows cannot name different revisions.
+                let previewed = crate::workspace::git::git_head_id(&repository).ok().flatten();
+                self.git.set_previewed_rewrite(previewed);
+                let head = previewed
+                    .map(|id| {
+                        id.0.iter()
+                            .take(4)
+                            .map(|byte| format!("{byte:02x}"))
+                            .collect::<String>()
+                    })
+                    .unwrap_or_else(|| "(unborn)".to_owned());
+                let subject = crate::workspace::git::git_tip_message(&repository)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                self.notify_message(
+                    format!(
+                        "amend would replace {head} `{subject}` with a new revision built from the \
+                         staged set"
+                    ),
+                    false,
+                );
+            }
+        }
+        // An amend composer shows the message it will replace rather than starting blank.
+        let seed = if amend {
+            self.git.tip_message().unwrap_or_default()
+        } else {
+            String::new()
+        };
+        self.input.set_commit_amend(amend);
+        self.open_prompt(PromptKind::GitCommitMessage, seed);
+        self.input.mark_prompt_multiline();
+        // The renderer draws `ui.prompt`, which is projected from the input session, so the
+        // projection must happen after the composer is marked multiline or it would draw the
+        // single-row shape.
+        self.project_input_prompt();
+        // The form advertises its own Help action from the keymap, the same way every other
+        // prompt action is advertised, so the key shown is the key that dispatches.
+        let form_help_key = self
+            .configuration
+            .keymaps()
+            .binding_for("command_prompt", "overlay.help.form")
+            .unwrap_or_default();
+        self.prompt_help(
+            if amend {
+                format!("Enter amends the current commit; Escape cancels. {form_help_key} help.")
+            } else {
+                format!("Enter commits exactly the staged set; Escape cancels. {form_help_key} help.")
+            },
+        );
+    }
+    /// Commit the composed message. Reachable only from the composer's explicit submit key.
+    pub(in crate::editor::session) fn submit_git_commit_message(&mut self) {
+        let Some(prompt) = self.input.prompt().cloned() else {
+            return;
+        };
+        if prompt.kind != PromptKind::GitCommitMessage || !prompt.multiline {
+            return;
+        }
+        let amend = self.input.commit_amend();
+        let message = prompt.input.clone();
+        self.close_prompt();
+        if let Err(error) = self.git.start_commit(
+            message,
+            amend,
+            self.workspace.root_revision(),
+            self.workspace.trust() == WorkspaceTrust::Trusted,
+        ) {
+            self.show_error(error);
+        }
+    }
+    /// Open history as a bounded commit list in the shared picker. The rows carry stable
+    /// commit identities, and the title states the exact total and anything the view hid.
+    pub(in crate::editor::session) fn start_git_history(&mut self) {
+        let Some(status) = self.git.status().cloned() else {
+            self.show_error("Git status is unavailable; refresh first");
+            return;
+        };
+        if let Err(error) = self.git.start_log(&status.repository, None, 0, 100) {
+            self.show_error(error);
+        }
+    }
+    /// Flip the history presentation. The choice is remembered across re-opening, and the
+    /// graph is never the default.
+    pub(in crate::editor::session) fn toggle_git_history(&mut self) {
+        // Capture where the user was before the list is rebuilt.
+        let selected = self.ui.picker.as_ref().and_then(|picker| {
+            picker
+                .selected
+                .and_then(|index| picker.rows.get(index))
+                .filter(|row| row.id.starts_with("git-commit:"))
+                .map(|row| row.id.clone())
+        });
+        self.git.set_history_selection(selected);
+        // From the history surface this toggles the view; from the palette with nothing open
+        // it opens history with the new preference. Pressed while a DIFFERENT picker is on
+        // screen it does nothing, rather than replacing what the user is looking at.
+        if self.search.picker().is_some()
+            && self.search.picker_surface() != PickerSurfaceKind::History
+        {
+            return;
+        }
+        let graph = !self.git.history_graph();
+        self.git.set_history_graph(graph);
+        self.start_git_history();
+    }
+    /// Open one of the two lists. Both are read by the same request, so only the view differs.
+    pub(in crate::editor::session) fn start_git_branches(&mut self, branches: bool) {
+        let Some(status) = self.git.status().cloned() else {
+            self.show_error("Git status is unavailable; refresh first");
+            return;
+        };
+        if let Err(error) = self.git.start_branches(&status.repository, branches) {
+            self.show_error(error);
+        }
+    }
+    /// Delete the selected local branch. The confirmation names the operation and the target,
+    /// and the pending action records both, so an answer cannot apply to a different one.
+    pub(in crate::editor::session) fn request_git_branch_delete(&mut self) {
+        let Some(crate::editor::session::search::PickerPayload::GitBranch { name, remote }) =
+            self.search.selected_picker_payload().cloned()
+        else {
+            self.show_error("select a local branch first");
+            return;
+        };
+        if remote {
+            self.show_error("a remote branch cannot be deleted locally");
+            return;
+        }
+        self.git
+            .set_pending_destructive(crate::editor::session::git::GitDestructiveAction::DeleteBranch(name.clone()));
+        self.open_confirmation(
+            PromptKind::GitDestructive,
+            "Delete branch".into(),
+            format!(
+                "Delete branch `{name}`? Its commits stay reachable through the reflog until it expires. No worktree directory is removed."
+            ),
+            crate::ui::ConfirmationChoice::No,
+        );
+    }
+    /// Remove the selected worktree and its directory. This never deletes a branch.
+    pub(in crate::editor::session) fn request_git_worktree_remove(&mut self) {
+        let Some(crate::editor::session::search::PickerPayload::GitWorktree { name, .. }) =
+            self.search.selected_picker_payload().cloned()
+        else {
+            self.show_error("select a worktree first");
+            return;
+        };
+        self.git.set_pending_destructive(
+            crate::editor::session::git::GitDestructiveAction::RemoveWorktree(name.clone()),
+        );
+        self.open_confirmation(
+            PromptKind::GitDestructive,
+            "Remove worktree".into(),
+            format!("Remove worktree `{name}` and its directory? No branch is deleted."),
+            crate::ui::ConfirmationChoice::No,
+        );
+    }
+    fn git_repository(&mut self) -> Option<std::path::PathBuf> {
+        match self.git.status() {
+            Some(status) => Some(status.repository.clone()),
+            None => {
+                self.show_error("Git status is unavailable; refresh first");
+                None
+            }
+        }
+    }
+    fn report_branch_request(&mut self, result: Result<(), String>) {
+        if let Err(error) = result {
+            self.show_error(error);
+        }
+    }
+    pub(in crate::editor::session) fn create_git_branch(&mut self, name: String, start: Option<String>) {
+        let Some(repository) = self.git_repository() else {
+            return;
+        };
+        let result = self.git.start_branch_create(&repository, &name, start);
+        self.report_branch_request(result);
+    }
+    pub(in crate::editor::session) fn track_git_branch(&mut self, name: String, remote_branch: String) {
+        let Some(repository) = self.git_repository() else {
+            return;
+        };
+        let result = self.git.start_branch_track(&repository, &name, &remote_branch);
+        self.report_branch_request(result);
+    }
+    pub(in crate::editor::session) fn rename_git_branch(&mut self, to: String) {
+        let Some(crate::editor::session::search::PickerPayload::GitBranch { name, remote }) =
+            self.search.selected_picker_payload().cloned()
+        else {
+            self.show_error("select a local branch first");
+            return;
+        };
+        if remote {
+            self.show_error("a remote branch cannot be renamed locally");
+            return;
+        }
+        let Some(repository) = self.git_repository() else {
+            return;
+        };
+        let result = self.git.start_branch_rename(&repository, &name, &to);
+        self.report_branch_request(result);
+    }
+    pub(in crate::editor::session) fn create_git_worktree(
+        &mut self,
+        name: String,
+        path: std::path::PathBuf,
+        reference: String,
+    ) {
+        let Some(repository) = self.git_repository() else {
+            return;
+        };
+        let result = self
+            .git
+            .start_worktree_create(&repository, &name, &path, &reference);
+        self.report_branch_request(result);
+    }
+    fn confirm_git_destructive(&mut self, action: Option<crate::editor::session::git::GitDestructiveAction>) {
+        let Some(action) = action else {
+            return;
+        };
+        let Some(status) = self.git.status().cloned() else {
+            self.show_error("Git status is unavailable; refresh first");
+            return;
+        };
+        let result = match action {
+            crate::editor::session::git::GitDestructiveAction::DeleteBranch(name) => {
+                self.git.start_branch_delete(&status.repository, &name)
+            }
+            crate::editor::session::git::GitDestructiveAction::RemoveWorktree(name) => {
+                self.git.start_worktree_remove(&status.repository, &name)
+            }
+        };
+        if let Err(error) = result {
+            self.show_error(error);
+        }
+    }
+    pub(in crate::editor::session) fn process_git_branch_events(&mut self) {
+        // One poll per handler call: the service is one shot.
+        let outcome = match self.git.poll_branch_outcome() {
+            Ok(Some(outcome)) => Some(outcome),
+            Ok(None) => None,
+            Err(error) => {
+                self.show_error(error);
+                None
+            }
+        };
+        let list = match outcome {
+            Some(crate::editor::session::git::GitBranchOutcome::List(list)) => list,
+            Some(crate::editor::session::git::GitBranchOutcome::Changed) => {
+                self.start_git_status_refresh();
+                self.notify_message("Git branch or worktree updated".into(), false);
+                return;
+            }
+            None => return,
+        };
+        let branches_view = self.git.branch_view_is_branches();
+        if branches_view {
+            let items = list
+                .branches
+                .iter()
+                .map(|branch| {
+                    let mut detail = if branch.remote {
+                        "remote".to_string()
+                    } else {
+                        "local".to_string()
+                    };
+                    if let Some(upstream) = &branch.upstream {
+                        detail.push_str(&format!(" · upstream {upstream}"));
+                    }
+                    if branch.head {
+                        detail.push_str(" · HEAD");
+                    }
+                    if let Some(worktree) = &branch.checked_out {
+                        detail.push_str(&format!(" · checked out in {}", worktree.display()));
+                    }
+                    (
+                        PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
+                            // A branch can be renamed, so the row id carries the identity the
+                            // payload already carries rather than a position.
+                            id: PickerItemId(format!(
+                                "git-branch:{}:{}",
+                                if branch.remote { "remote" } else { "local" },
+                                branch.name
+                            )),
+                            label: branch.name.clone(),
+                            detail,
+                            source: "branches".into(),
+                            action: PickerAction::None,
+                        },
+                        crate::editor::session::search::PickerPayload::GitBranch {
+                            name: branch.name.clone(),
+                            remote: branch.remote,
+                        },
+                    )
+                })
+                .collect::<Vec<_>>();
+            let title = format!("Git branches · {}", list.branches.len());
+            self.install_picker(title, items);
+            return;
+        }
+        let items = list
+            .worktrees
+            .iter()
+            .map(|worktree| {
+                let mut detail = match &worktree.branch {
+                    Some(branch) => format!("branch {branch}"),
+                    None => "detached".to_string(),
+                };
+                if worktree.main {
+                    detail.push_str(" · main");
+                }
+                if worktree.dirty {
+                    detail.push_str(" · dirty");
+                }
+                if let Some(operation) = &worktree.operation {
+                    detail.push_str(&format!(" · {operation} in progress"));
+                }
+                if worktree.locked {
+                    detail.push_str(" · locked");
+                }
+                (
+                    PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
+                        id: PickerItemId(format!("git-worktree:{}", worktree.name)),
+                        label: worktree.name.clone(),
+                        detail,
+                        source: "worktrees".into(),
+                        action: PickerAction::None,
+                    },
+                    crate::editor::session::search::PickerPayload::GitWorktree {
+                        name: worktree.name.clone(),
+                        path: worktree.path.clone(),
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        let title = format!("Git worktrees · {}", list.worktrees.len());
+        self.install_picker(title, items);
+    }
+    pub(in crate::editor::session) fn preview_git_history_range(&mut self) {
+        // The range action belongs to the history surface: pressed while a different picker is
+        // on screen it does nothing rather than acting on an unrelated selection.
+        if self.search.picker_surface() != PickerSurfaceKind::History {
+            return;
+        }
+        let Some(payload) = self.search.selected_picker_payload().cloned() else {
+            self.show_error("select a commit first");
+            return;
+        };
+        let crate::editor::session::search::PickerPayload::GitCommit { repository, commit } = payload
+        else {
+            self.show_error("select a commit first");
+            return;
+        };
+        let Some(tip) = self.git.tip_commit() else {
+            self.show_error("Git HEAD is unavailable");
+            return;
+        };
+        if let Err(error) = self.git.start_log_range(&repository, commit, tip) {
+            self.show_error(error);
+        }
+    }
+    pub(in crate::editor::session) fn process_git_log_events(&mut self) {
+        match self.git.poll_log_outcome() {
+            Ok(Some(crate::editor::session::git::GitLogOutcome::Page(page))) => {
+                let note = page.omission_note();
+                let Some(repository) = self.git.status().map(|status| status.repository.clone())
+                else {
+                    self.show_error("Git status is unavailable; refresh first");
+                    return;
+                };
+                // The title names the branch and the EXACT counts the drawing shows, as
+                // `History · main · 100 of 4,182`.
+                let branch = crate::workspace::git::git_branch_name(&repository)
+                    .ok()
+                    .flatten();
+                let counts = format!("{} of {}", page.loaded, page.total);
+                let title = match (&branch, &note) {
+                    (Some(branch), Some(note)) => {
+                        format!("History · {branch} · {counts} · {note}")
+                    }
+                    (Some(branch), None) => format!("History · {branch} · {counts}"),
+                    (None, Some(note)) => format!("History · {counts} · {note}"),
+                    (None, None) => format!("History · {counts}"),
+                };
+                // The ancestry graph is drawn as its own columns when the graph toggle is on:
+                // the rows are structured rather than a string prefix, so the lane colours,
+                // the bends and the badges are real cells. With the toggle off nothing is
+                // attached and the list renders exactly as it did before.
+                let graph = self
+                    .git
+                    .history_graph()
+                    .then(|| crate::workspace::git::history_graph_rows(&page.entries));
+                // The age is relative to when the page was read, which is what a reader is
+                // reasoning about.
+                let now_seconds = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |elapsed| i64::try_from(elapsed.as_secs()).unwrap_or(i64::MAX));
+                let mut row_cells = std::collections::HashMap::new();
+                let items = page
+                    .entries
+                    .iter()
+                    .enumerate()
+                    .map(|(index, entry)| {
+                        // The row identity is the whole commit id: a truncated key could pair
+                        // one key with two different payloads.
+                        let identity = entry
+                            .id
+                            .0
+                            .iter()
+                            .map(|byte| format!("{byte:02x}"))
+                            .collect::<String>();
+                        let short = identity[..8].to_owned();
+                        let mut detail = format!("{short} · {}", entry.author);
+                        if entry.merge {
+                            detail.push_str(" · merge");
+                        }
+                        for name in &entry.refs {
+                            detail.push_str(&format!(" · {name}"));
+                        }
+                        let row_id = format!("git-commit:{identity}");
+                        // The graph columns when the graph is on, then the hash, the badges,
+                        // the subject, the age and the author - the subject flexible, so a
+                        // narrow surface truncates the message rather than the counts.
+                        let cells = crate::editor::session::git::history_row_cells(
+                            entry,
+                            graph.as_ref().map(|rows| rows[index].cells()),
+                            now_seconds,
+                        );
+                        row_cells.insert(row_id.clone(), cells);
+                        (
+                            PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
+                                id: PickerItemId(row_id),
+                                // The subject stays the label so the picker keeps filtering on
+                                // it; the graph rides the cells, not the text.
+                                label: entry.summary.clone(),
+                                detail,
+                                source: "history".into(),
+                                action: PickerAction::None,
+                            },
+                            crate::editor::session::search::PickerPayload::GitCommit {
+                                repository: repository.clone(),
+                                commit: entry.id,
+                            },
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                if items.is_empty() {
+                    self.notify_message("Git history has no matching commits".into(), false);
+                    return;
+                }
+                self.search.set_history_cells(row_cells);
+                self.install_surface_picker(PickerSurfaceKind::History, title, items);
+                // Only keys that EXIST are drawn. The drawing also names `R rewrite`,
+                // `d diff`, `b branch here` and a separate `p Inspect range`; none of those
+                // has a command, so none is advertised here, and the absence is recorded in
+                // the delivery row rather than papered over with a key that does nothing.
+                self.search.set_picker_footer(
+                    "enter open · g Graph · space range · Esc Return".to_owned(),
+                );
+                // The selected commit survives a toggle: the page is rebuilt, so the row is
+                // restored BY IDENTITY rather than by position - and BEFORE the projection,
+                // because the projection is what the renderer draws.
+                if let Some(identity) = self.git.take_history_selection() {
+                    self.search.restore_picker_view(
+                        Some((String::new(), Some(PickerItemId(identity)))),
+                        false,
+                    );
+                }
+                // The legend is set after the install, so the projection has to be refreshed
+                // or the surface keeps the legend it was installed with.
+                self.sync_picker_ui();
+            }
+            Ok(Some(crate::editor::session::git::GitLogOutcome::Patch(patch))) => {
+                let short = patch.commit.0[..4]
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>();
+                let header = if patch.truncated {
+                    format!("Commit {short} (patch truncated at the ceiling)")
+                } else {
+                    format!("Commit {short}")
+                };
+                let text = if patch.binary {
+                    format!("Binary change; no text patch is shown.\n{}", patch.text)
+                } else {
+                    patch.text.clone()
+                };
+                self.present_documentation_popup(
+                    DocumentationPopupKind::Git,
+                    header,
+                    "Git".into(),
+                    None,
+                    vec![LspMarkupContent {
+                        kind: LspMarkupKind::PlainText,
+                        value: text,
+                    }],
+                );
+            }
+            Ok(None) => {}
+            Err(error) => self.show_error(error),
+        }
+    }
+    pub(in crate::editor::session) fn process_git_commit_events(&mut self) {
+        match self.git.poll_commit() {
+            Ok(Some(result)) => {
+                self.ui.git_signs.clear();
+                // The message became a commit, so it is no longer a draft.
+                self.git.set_commit_draft(String::new());
+                let replaced = result
+                    .replaced_message
+                    .as_deref()
+                    .map(|message| message.lines().next().unwrap_or_default().to_owned());
+                self.start_git_status_refresh();
+                self.notify_message(
+                    match replaced {
+                        Some(previous) if result.amended => {
+                            format!("Amended the commit; it replaced \"{previous}\"")
+                        }
+                        _ => "Created a commit".to_string(),
+                    },
+                    false,
+                );
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.start_git_status_refresh();
+                self.show_error(error);
+            }
+        }
+    }
+    pub(in crate::editor::session) fn unstage_selected_git_hunk(&mut self) {
+        if let Err(error) = self.git.start_plan(
+            &self.state,
+            crate::workspace::git::GitMutationKind::UnstageHunk,
+            self.workspace.root_revision(),
+            self.workspace.trust() == WorkspaceTrust::Trusted,
+            Vec::new(),
+        ) {
             self.show_error(error);
         }
     }
@@ -6352,11 +7037,19 @@ impl InteractiveApplication {
                     .map(|hunk| {
                         (
                             PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("git-hunk:{}", hunk.id.0)),
                                 label: hunk.header.trim().to_owned(),
+                                // The layer is part of the identity: a staged hunk must never
+                                // be presented as an unstaged one.
                                 detail: format!(
-                                    "-{},{} +{},{}",
-                                    hunk.old_start, hunk.old_lines, hunk.new_start, hunk.new_lines
+                                    "-{},{} +{},{} · {}",
+                                    hunk.old_start,
+                                    hunk.old_lines,
+                                    hunk.new_start,
+                                    hunk.new_lines,
+                                    snapshot.source().source_label()
                                 ),
                                 source: "git-hunk".into(),
                                 action: PickerAction::None,
@@ -6440,6 +7133,7 @@ impl InteractiveApplication {
             return;
         }
         if let Err(error) = self.git.mutate(
+            &self.state,
             true,
             self.workspace.trust() == WorkspaceTrust::Trusted,
             self.workspace.root_revision(),
@@ -6449,6 +7143,7 @@ impl InteractiveApplication {
     }
     pub(in crate::editor::session) fn stage_selected_git_hunk(&mut self) {
         if let Err(error) = self.git.mutate(
+            &self.state,
             false,
             self.workspace.trust() == WorkspaceTrust::Trusted,
             self.workspace.root_revision(),
@@ -6458,22 +7153,56 @@ impl InteractiveApplication {
     }
     pub(in crate::editor::session) fn process_git_mutation_events(&mut self) {
         match self.git.poll_mutation() {
-            Ok(Some(reset)) => {
+            Ok(Some(crate::editor::session::git::GitMutationOutcome::Reset)) => {
+                self.input.clear_pending_stage();
                 self.ui.git_signs.clear();
                 self.start_git_status_refresh();
-                self.notify_message(
-                    if reset {
-                        "Git hunk reset"
-                    } else {
-                        "Git hunk staged"
-                    }
-                    .into(),
-                    false,
+                self.notify_message("Git hunk reset".into(), false);
+            }
+            Ok(Some(crate::editor::session::git::GitMutationOutcome::Staged)) => {
+                // A step completes because the change was really staged, not because a command
+                // was invoked or a question was answered.
+                if self
+                    .workspace
+                    .observe_tutor_action(crate::workspace::TutorAction::Staged)
+                {
+                    self.notify_message(
+                        "Tutor: step complete — you staged a change".into(),
+                        false,
+                    );
+                }
+                self.input.clear_pending_stage();
+                self.ui.git_signs.clear();
+                self.start_git_status_refresh();
+                self.notify_message("Git hunk staged".into(), false);
+            }
+            Ok(Some(crate::editor::session::git::GitMutationOutcome::UnsavedDocument)) => {
+                // A refusal, not a failure: the plan never wrote the index, so offer the
+                // explicit choice instead of reporting an error the user cannot act on.
+                let path = self
+                    .git
+                    .unsaved_refusal()
+                    .map_or_else(|| "the path".into(), |path| path.display().to_string());
+                self.open_confirmation(
+                    PromptKind::GitStageUnsaved,
+                    "Stage unsaved changes".into(),
+                    format!(
+                        "{path} has unsaved changes, so the index would record the version on disk rather than the version in the buffer. Save the buffer, then stage the saved revision?"
+                    ),
+                    crate::ui::ConfirmationChoice::No,
                 );
             }
             Ok(None) => {}
-            Err(error) => self.show_error(error),
+            Err(error) => {
+                self.input.clear_pending_stage();
+                self.show_error(error);
+            }
         }
+    }
+    /// Answer the save-and-stage choice. The staging effect is replayed only after the save
+    /// completes, so the plan is rebuilt against the saved bytes.
+    pub(in crate::editor::session) fn confirm_stage_unsaved(&mut self) {
+        self.start_save(false, None, false);
     }
     pub(in crate::editor::session) fn start_git_status_refresh(&mut self) {
         self.start_git_status_refresh_with_feedback(true);
@@ -6500,7 +7229,12 @@ impl InteractiveApplication {
         self.ui.git_signs.clear();
         if let Err(error) = self
             .git
-            .refresh(root, self.workspace.root_revision(), report_errors)
+            .refresh(
+                &self.state,
+                root,
+                self.workspace.root_revision(),
+                report_errors,
+            )
         {
             self.show_error(error);
         }
@@ -6517,6 +7251,10 @@ impl InteractiveApplication {
         if self.ui.explorer.is_some() {
             self.sync_explorer_ui();
         }
+        // A refreshed status is the bounded moment to re-read the operation bar, so a paused
+        // operation appears and disappears with the repository rather than with a guess.
+        self.project_operation_bar();
+        self.project_debug_panes();
     }
     pub(in crate::editor::session) fn open_git_status_picker(&mut self) {
         let root = self
@@ -6530,27 +7268,176 @@ impl InteractiveApplication {
             self.show_error("Git status is unavailable; refresh first");
             return;
         };
-        let items = snapshot
+        // The three sections, in the order the surface draws them. A conflicted path is listed
+        // only under Conflicts, so it never appears twice.
+        let conflicted: Vec<_> = snapshot
             .entries
             .iter()
-            .map(|entry| {
-                (
+            .filter(|entry| entry.status == crate::workspace::git::GitFileStatus::Conflicted)
+            .collect();
+        // The Unstaged section holds what is not staged. A path whose buffer has unsaved
+        // edits but nothing on disk is listed here too, because the document says such a path
+        // shows a badge and a path that is not listed cannot show one; its OWN provenance
+        // says `buffer -> disk`, so it is never read as an unstaged change.
+        let unstaged: Vec<_> = snapshot
+            .entries
+            .iter()
+            .filter(|entry| {
+                entry.status != crate::workspace::git::GitFileStatus::Conflicted
+                    && (entry.sources.unstaged
+                        || entry.sources.unsaved_document_revision.is_some())
+            })
+            .collect();
+        let staged: Vec<_> = snapshot
+            .entries
+            .iter()
+            .filter(|entry| entry.status != crate::workspace::git::GitFileStatus::Conflicted && entry.sources.staged)
+            .collect();
+        let total = conflicted.len() + unstaged.len() + staged.len();
+        let mut items: Vec<(PickerItem, PickerPayload)> = Vec::new();
+        for (title, entries, provenance) in [
+            ("Conflicts", &conflicted, "both changed"),
+            ("Unstaged", &unstaged, "index -> disk"),
+            ("Staged", &staged, "HEAD -> index"),
+        ] {
+            if entries.is_empty() {
+                continue;
+            }
+            items.push((
+                PickerItem {
+                    // Each header needs its own id: duplicate ids are rejected, so two
+                    // headers sharing one would silently drop the second section.
+                    id: PickerItemId(format!("section:{title}")),
+                    label: format!("{title} {}", entries.len()),
+                    detail: String::new(),
+                    source: String::new(),
+                    badge: String::new(),
+                    action: PickerAction::None,
+                    kind: crate::workspace::PickerItemKind::Section,
+                },
+                PickerPayload::Section,
+            ));
+            for entry in entries {
+                items.push((
                     PickerItem {
-                        id: PickerItemId(format!("git:{}", entry.relative_path.display())),
+                        // The id names the section as well, because one path can be both
+                        // staged and further modified and the two rows are different changes.
+                        id: PickerItemId(format!(
+                            "git:{title}:{}",
+                            entry.relative_path.display()
+                        )),
                         label: entry.relative_path.display().to_string(),
-                        detail: format!("{:?}", entry.status),
-                        source: "git".into(),
+                        // The provenance column names the comparison this row belongs to, so
+                        // an unstaged row is never read as unsaved and an unsaved buffer is
+                        // never read as an unstaged change.
+                        detail: if title == "Unstaged" && !entry.sources.unstaged {
+                            "buffer -> disk".to_owned()
+                        } else {
+                            provenance.to_owned()
+                        },
+                        // The status column carries the code: the glyph that keeps the meaning
+                        // readable when colour is unavailable.
+                        source: Self::change_code(entry),
+                        // A path whose buffer has unsaved edits carries a badge, and staging it
+                        // is blocked with an explicit choice rather than silently saving.
+                        badge: if entry.sources.unsaved_document_revision.is_some() {
+                            "unsaved".to_owned()
+                        } else {
+                            String::new()
+                        },
                         action: PickerAction::None,
+                        kind: crate::workspace::PickerItemKind::Entry,
                     },
                     PickerPayload::MatcherSource(MatcherSource {
                         path: snapshot.scope_root.join(&entry.relative_path),
                         line: 0,
                         column: 0,
                     }),
-                )
-            })
-            .collect();
-        self.install_picker("Git status".into(), items);
+                ));
+            }
+        }
+        // Re-listing must not move the cursor: the row the user was on is remembered by its
+        // identity and restored, so a refresh never reorders the list under them.
+        let previous = self.search.picker_bookmark();
+        // The fourth section the drawing shows: what is about to be committed. It is always
+        // drawn, because the document draws it as part of the surface's structure, and it says
+        // so plainly when there is no message rather than showing a blank.
+        let draft = self.git.commit_draft().trim().to_owned();
+        items.push((
+            PickerItem {
+                id: PickerItemId("section:Commit".to_owned()),
+                label: "Commit".to_owned(),
+                detail: String::new(),
+                source: String::new(),
+                badge: String::new(),
+                action: PickerAction::None,
+                kind: crate::workspace::PickerItemKind::Section,
+            },
+            PickerPayload::Section,
+        ));
+        items.push((
+            PickerItem {
+                id: PickerItemId("commit:draft".to_owned()),
+                label: if draft.is_empty() {
+                    "no commit message yet".to_owned()
+                } else {
+                    draft.lines().next().unwrap_or_default().to_owned()
+                },
+                detail: String::new(),
+                source: String::new(),
+                badge: String::new(),
+                // Accepting the draft row opens the composer rather than acting on it.
+                action: PickerAction::InvokeCommand {
+                    command: "workspace.git.commit".to_owned(),
+                },
+                kind: crate::workspace::PickerItemKind::Entry,
+            },
+            PickerPayload::Command("workspace.git.commit".to_owned()),
+        ));
+        // The title names the branch the changes are against, as the document draws it. A
+        // detached HEAD has no branch name, so the segment is simply absent rather than
+        // filled with something invented.
+        let branch = crate::workspace::git::git_branch_name(&snapshot.repository)
+            .ok()
+            .flatten();
+        let title = match branch {
+            Some(branch) => format!("Changes · {branch} ±{total}"),
+            None => format!("Changes · ±{total}"),
+        };
+        // Read the count before the surface is installed, so no borrow of the status snapshot
+        // outlives the mutable call.
+        let staged_count = staged.len();
+        self.install_surface_picker(PickerSurfaceKind::Changes, title, items);
+        // The legend carries the REAL staged count, as the drawing shows it, rather than a
+        // fixed number that would go stale the moment anything is staged.
+        self.search.set_picker_footer(format!(
+            "s Stage file · u Unstage file · Tab Switch diff · Enter Open · H History \
+             · Space g c Commit staged ({staged_count}) · f Fetch · U Update · P Push · Esc Return"
+        ));
+        self.search.restore_picker_view(previous, false);
+        self.sync_picker_ui();
+    }
+
+    /// The two-character index/worktree code a change row shows. Unmerged and untracked have
+    /// their own codes; everything else names which side differs.
+    fn change_code(entry: &crate::workspace::git::GitStatusEntry) -> String {
+        use crate::workspace::git::GitFileStatus;
+        if entry.status == crate::workspace::git::GitFileStatus::Conflicted {
+            return "UU".to_owned();
+        }
+        if entry.status == GitFileStatus::Untracked {
+            return "??".to_owned();
+        }
+        let letter = match entry.status {
+            GitFileStatus::Added => 'A',
+            GitFileStatus::Modified => 'M',
+            GitFileStatus::Deleted => 'D',
+            GitFileStatus::Renamed => 'R',
+            GitFileStatus::Conflicted | GitFileStatus::Untracked => unreachable!(),
+        };
+        let index = if entry.sources.staged { letter } else { ' ' };
+        let worktree = if entry.sources.unstaged { letter } else { ' ' };
+        format!("{index}{worktree}")
     }
 }
 
@@ -6827,6 +7714,15 @@ impl InteractiveApplication {
         self.install_surface_picker(PickerSurfaceKind::Generic, title, items);
     }
 
+    /// Show a help page without losing the surface the user was looking at. Help replaces the
+    /// picker while it is open, and closing it returns the suspended surface with its query,
+    /// its rows and its selected row exactly as they were.
+    fn install_help_page(&mut self, title: String, items: Vec<(PickerItem, PickerPayload)>) {
+        self.search.suspend_for_help();
+        self.install_surface_picker(PickerSurfaceKind::Generic, title, items);
+        self.search.mark_help_open();
+    }
+
     pub(in crate::editor::session) fn install_surface_picker(
         &mut self,
         surface: PickerSurfaceKind,
@@ -6931,6 +7827,8 @@ impl InteractiveApplication {
                 let id = PickerItemId(format!("location:{index}:{}", location.uri));
                 (
                     PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                         id,
                         label: path,
                         detail: format!(
@@ -6965,6 +7863,8 @@ impl InteractiveApplication {
                 );
                 (
                     PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                         id,
                         label: symbol.name,
                         detail: symbol.kind.map_or_else(String::new, |kind| {
@@ -7004,6 +7904,8 @@ impl InteractiveApplication {
             .map(|(index, choice)| {
                 (
                     PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(format!("code-action:{index}:{}", choice.title)),
                         label: choice.title,
                         detail: choice.detail,
@@ -7036,6 +7938,8 @@ impl InteractiveApplication {
             .map(|(index, row)| {
                 (
                     PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(format!("dap:{kind}:{index}")),
                         label: row.label,
                         detail: row.detail,
@@ -7066,6 +7970,8 @@ impl InteractiveApplication {
                             .map_or_else(|| problem.uri.clone(), |path| path.display().to_string());
                         (
                             PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                                 id,
                                 label: problem.message.clone(),
                                 detail: format!("{path} · {}", validity.label()),
@@ -7092,6 +7998,8 @@ impl InteractiveApplication {
                         let id = PickerItemId(format!("buffer:{index}"));
                         (
                             PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                                 id,
                                 label: state.path.as_ref().map_or_else(
                                     || {
@@ -7143,6 +8051,8 @@ impl InteractiveApplication {
                         };
                         (
                             PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("workspace-root:{}", root.id.0)),
                                 label: self.message(
                                     "workspace_root_row",
@@ -7180,6 +8090,8 @@ impl InteractiveApplication {
                         };
                         (
                             PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("recent:{index}")),
                                 label: path.display().to_string(),
                                 detail: String::new(),
@@ -7202,6 +8114,8 @@ impl InteractiveApplication {
                     .map(|(index, mark)| {
                         (
                             PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("mark:{index}:{}", mark.name)),
                                 label: mark.name,
                                 detail: format!(
@@ -7238,6 +8152,8 @@ impl InteractiveApplication {
                     .map(|(index, location)| {
                         (
                             PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("navigation:{index}")),
                                 label: location.path.display().to_string(),
                                 detail: location.byte.to_string(),
@@ -7260,6 +8176,8 @@ impl InteractiveApplication {
                         let id = PickerItemId(format!("command:{index}:{command}"));
                         (
                             PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                                 id,
                                 label: command.clone(),
                                 detail: self
@@ -7398,12 +8316,98 @@ impl InteractiveApplication {
         self.sync_picker_ui();
     }
 
+    /// Show the diff of the focused change row in the pane.
+    ///
+    /// The read is SYNCHRONOUS AND BOUNDED: `read_hunks` carries a deadline and maximum hunk,
+    /// line and byte counts, so it cannot hang the UI thread or read an unbounded file. It is
+    /// done here rather than through the hunk service because the service tracks the buffer's
+    /// own hunks and a second consumer would fight it for the accepted snapshot.
+    fn sync_changes_diff_preview(&mut self) {
+        let Some(crate::editor::session::search::PickerPayload::MatcherSource(source)) =
+            self.selected_picker_payload().cloned()
+        else {
+            self.clear_picker_preview();
+            return;
+        };
+        let Some(status) = self.git.status().cloned() else {
+            self.clear_picker_preview();
+            return;
+        };
+        let layer = self.search.changes_layer();
+        // A hunk policy takes a path RELATIVE to the scope root: it rejects an absolute one,
+        // and the status row carries an absolute path.
+        let Ok(relative) = source.path.strip_prefix(&status.scope_root) else {
+            self.clear_picker_preview();
+            return;
+        };
+        let policy =
+            crate::editor::session::git::GitSession::policy(&status, relative.to_owned(), layer);
+        match crate::workspace::git::read_hunks(&policy) {
+            Ok(snapshot) => {
+                // The pane names the comparison it is showing, so a diff is never read as
+                // another one.
+                let provenance = match layer {
+                    crate::workspace::git::GitDiffLayer::Staged => "HEAD -> index",
+                    crate::workspace::git::GitDiffLayer::Unstaged => "index -> disk",
+                };
+                let preview = crate::editor::session::git::diff_preview_from_hunks(
+                    &snapshot.hunks,
+                    provenance,
+                    false,
+                    0,
+                );
+                let retired = self.search.set_preview(crate::ui::PickerPreview {
+                    title: source
+                        .path
+                        .strip_prefix(&status.scope_root)
+                        .unwrap_or(&source.path)
+                        .display()
+                        .to_string(),
+                    body: crate::ui::PickerPreviewBody::Diff(preview),
+                });
+                if let Some(id) = retired {
+                    self.documents.cancel_request(id);
+                }
+            }
+            // A file whose diff cannot be read shows no diff rather than a stale one.
+            Err(_) => self.clear_picker_preview(),
+        }
+    }
+
     fn clear_picker_preview(&mut self) {
         if let Some(id) = self.search.clear_preview() {
             self.documents.cancel_request(id);
         }
     }
+
+    /// The change surface's focused row as a path RELATIVE to the scope root, when that
+    /// surface is open.
+    ///
+    /// `None` means the caller should act on the active buffer, which is what every other
+    /// surface wants. The change surface labels `s` and `u` by focus, so it stages the row
+    /// under the cursor rather than whatever buffer happens to be active.
+    fn changes_focused_relative(&self) -> Option<std::path::PathBuf> {
+        if self.search.picker_surface() != PickerSurfaceKind::Changes {
+            return None;
+        }
+        let crate::editor::session::search::PickerPayload::MatcherSource(source) =
+            self.selected_picker_payload()?
+        else {
+            return None;
+        };
+        let status = self.git.status()?;
+        source
+            .path
+            .strip_prefix(&status.scope_root)
+            .ok()
+            .map(std::path::Path::to_owned)
+    }
+
     fn sync_picker_preview(&mut self) {
+        if self.search.picker_surface() == PickerSurfaceKind::Changes {
+            self.sync_changes_diff_preview();
+            return;
+        }
         let Some((label, payload)) = self
             .search
             .picker()
@@ -7569,6 +8573,13 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn accept_picker(&mut self) {
+        // A help page documents; it does not act. Accepting inside help closes the page and
+        // returns the surface it was opened over, exactly like Escape, instead of running the
+        // row's command and resurrecting a surface underneath it.
+        if self.search.help_is_open() {
+            self.close_picker();
+            return;
+        }
         self.retire_stale_picker();
         if let Some(PickerPayload::Theme(key)) = self.search.selected_picker_payload() {
             match self.configuration.apply_theme(key) {
@@ -7724,6 +8735,23 @@ impl InteractiveApplication {
                     Err(error) => self.show_error(error),
                 }
             }
+            Some(PickerPayload::GitCommit { repository, commit }) => {
+                // Accepting a commit row shows that commit's real patch; a merge uses the
+                // combined patch so both sides appear.
+                let merge = self
+                    .git
+                    .history()
+                    .and_then(|page| {
+                        page.entries
+                            .iter()
+                            .find(|entry| entry.id == commit)
+                            .map(|entry| entry.merge)
+                    })
+                    .unwrap_or(false);
+                if let Err(error) = self.git.start_log_patch(&repository, commit, merge) {
+                    self.show_error(error);
+                }
+            }
             Some(PickerPayload::GitHunk {
                 path,
                 status_revision,
@@ -7797,6 +8825,1042 @@ impl InteractiveApplication {
         }
     }
 
+    /// The remote to act on, named rather than guessed: the argument when given, otherwise the
+    /// upstream configured for the checked-out branch, and refused plainly when neither exists.
+    fn current_git_remote(&mut self, named: Option<String>) -> Option<(std::path::PathBuf, String)> {
+        let Some(status) = self.git.status() else {
+            self.show_error("Git status is unavailable; refresh first");
+            return None;
+        };
+        let repository = status.repository.clone();
+        if let Some(named) = named {
+            if named.trim().is_empty() {
+                self.show_error("name a remote, or configure an upstream for this branch");
+                return None;
+            }
+            return Some((repository, named));
+        }
+        match git2::Repository::open(&repository)
+            .ok()
+            .and_then(|repo| {
+                let head = repo.head().ok()?;
+                let name = head.shorthand()?.to_owned();
+                let branch = repo.find_branch(&name, git2::BranchType::Local).ok()?;
+                let upstream = branch.upstream().ok()?;
+                let reference = upstream.into_reference();
+                let full = reference.name()?.to_owned();
+                // refs/remotes/<remote>/<branch>: the remote is the component after the prefix.
+                full.strip_prefix("refs/remotes/")
+                    .and_then(|rest| rest.split('/').next())
+                    .map(str::to_owned)
+            }) {
+            Some(remote) => Some((repository, remote)),
+            None => {
+                self.show_error(
+                    "this branch has no upstream: name the remote explicitly with remote=<name>",
+                );
+                None
+            }
+        }
+    }
+    pub(in crate::editor::session) fn fetch_git_remote(&mut self, named: Option<String>) {
+        let Some((repository, remote)) = self.current_git_remote(named) else {
+            return;
+        };
+        let result = self
+            .git
+            .start_fetch(&repository, &remote, std::time::Duration::from_secs(30));
+        if let Err(error) = result {
+            self.show_error(error);
+            return;
+        }
+        self.notify_message(format!("Fetching `{remote}`"), false);
+    }
+    /// Accept one side of the active conflict into the RESULT BUFFER, through an ordinary
+    /// transaction so the change is undoable by the editor's own undo.
+    ///
+    /// Saving and staging are deliberately NOT part of this: the buffer is left dirty and the
+    /// file on disk and the index are untouched until their own explicit actions run.
+    pub(in crate::editor::session) fn choose_git_conflict_side(&mut self, side: &str) {
+        let Some(choice) = crate::workspace::git::GitConflictChoice::parse(side) else {
+            self.show_error("choose base, ours or theirs");
+            return;
+        };
+        let Some(status) = self.git.status() else {
+            self.show_error("Git status is unavailable; refresh first");
+            return;
+        };
+        let repository = status.repository.clone();
+        let Some(view_id) = self.state.active_view else {
+            self.show_error("no view is active");
+            return;
+        };
+        let Some(view) = self.state.views.get(view_id) else {
+            self.show_error("no view is active");
+            return;
+        };
+        let buffer_id = view.buffer;
+        let Some(path) = self
+            .state
+            .buffers
+            .get(buffer_id)
+            .and_then(|buffer| buffer.path.clone())
+        else {
+            self.show_error("active buffer has no file path");
+            return;
+        };
+        // The content comes from the repository, and every refusal is decided before the edit.
+        let content = match crate::workspace::git::read_side_content(&repository, &path, choice) {
+            Ok(content) => content,
+            Err(error) => {
+                self.show_error(error.to_string());
+                return;
+            }
+        };
+        let Some(buffer) = self.state.buffers.get(buffer_id) else {
+            self.show_error("the buffer is gone");
+            return;
+        };
+        let revision = buffer.text.revision();
+        let length = ByteOffset(buffer.text.len_bytes());
+        let edits = crate::editor::text::TextEditSet::new(
+            revision,
+            vec![crate::editor::text::TextEdit::new(
+                crate::editor::text::ByteRange::new(ByteOffset(0), length).expect("whole buffer"),
+                content,
+            )],
+        );
+        let transaction = EditorTransaction::new(self.transaction_id())
+            .with_precondition(Precondition::BufferRevision {
+                buffer: buffer_id,
+                revision,
+            })
+            .with_precondition(Precondition::BufferWritable(buffer_id))
+            .with_operation(EditorOperation::ApplyEdits {
+                buffer: buffer_id,
+                edits,
+            });
+        if let Err(error) = self.state.apply_transaction(&transaction) {
+            self.show_error(error.to_string());
+            return;
+        }
+        self.notify_message(
+            format!(
+                "Accepted the {} side of {}; save and stage are separate steps",
+                choice.name(),
+                path.display()
+            ),
+            false,
+        );
+    }
+    /// Preview replacing whole files with one side, then ask. Nothing is written until the
+    /// confirmation is answered, and the plan is REBUILT when it is, so a preview taken against
+    /// one repository state is never applied to another.
+    pub(in crate::editor::session) fn preview_git_replacement(&mut self, side: &str, files: &str) {
+        let Some(choice) = crate::workspace::git::GitConflictChoice::parse(side) else {
+            self.show_error("choose base, ours or theirs");
+            return;
+        };
+        let Some(repository) = self.conflict_repository() else {
+            return;
+        };
+        let paths = files
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(|name| {
+                let path = std::path::Path::new(name);
+                if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    repository.join(path)
+                }
+            })
+            .collect::<Vec<_>>();
+        if paths.is_empty() {
+            self.show_error("name at least one file to replace");
+            return;
+        }
+        let plan = match crate::workspace::git::plan_replacement(&repository, &paths, choice) {
+            Ok(plan) => plan,
+            Err(error) => {
+                self.show_error(error.to_string());
+                return;
+            }
+        };
+        let preview = plan.preview();
+        self.git.set_pending_replacement(plan);
+        self.open_confirmation(
+            crate::ui::PromptKind::GitDestructive,
+            "Replace whole files".into(),
+            preview,
+            crate::ui::ConfirmationChoice::No,
+        );
+        self.project_input_prompt();
+    }
+    /// Apply the previewed replacement once it is confirmed. The plan is rebuilt from the same
+    /// list and side, so the write is decided by current repository state rather than by a plan
+    /// captured before the question was asked.
+    pub(in crate::editor::session) fn apply_git_replacement(
+        &mut self,
+        answer: crate::ui::ConfirmationChoice,
+    ) {
+        let Some(previewed) = self.git.take_pending_replacement() else {
+            return;
+        };
+        if answer != crate::ui::ConfirmationChoice::Yes {
+            self.notify_message("Replacement cancelled; nothing was written".into(), false);
+            return;
+        }
+        let Some(repository) = self.conflict_repository() else {
+            return;
+        };
+        let paths = previewed
+            .files
+            .iter()
+            .map(|(path, _)| path.clone())
+            .collect::<Vec<_>>();
+        let plan = match crate::workspace::git::plan_replacement(&repository, &paths, previewed.choice)
+        {
+            Ok(plan) => plan,
+            Err(error) => {
+                self.show_error(error.to_string());
+                return;
+            }
+        };
+        match crate::workspace::git::apply_replacement(&plan) {
+            Ok(written) => self.notify_message(
+                format!("Replaced {} file(s); saving and staging are separate steps", written.len()),
+                false,
+            ),
+            Err(error) => self.show_error(error.to_string()),
+        }
+    }
+    /// Show what is TRUE about each breakpoint. The rows carry the adapter's verdict, so a
+    /// request is never presented as a fact.
+    pub(in crate::editor::session) fn open_breakpoint_states(&mut self) {
+        let rows = self.debugger_session.persisted_breakpoints();
+        let items = rows
+            .into_iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let state = self
+                    .debugger_session
+                    .breakpoint_state(&row.path, row.line)
+                    .map(|state| state.label())
+                    .unwrap_or("not requested");
+                (
+                    PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
+                        id: PickerItemId(format!("breakpoint:{index}")),
+                        label: format!("{}:{}", row.path.display(), row.line),
+                        detail: state.to_owned(),
+                        source: "debugger".into(),
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::Command("dap.breakpoints.states".into()),
+                )
+            })
+            .collect::<Vec<_>>();
+        let title = format!("Breakpoints · {} (what is true, not what was asked)", items.len());
+        self.install_picker(title, items);
+    }
+    /// Enable or disable the breakpoint on the cursor line. Disabling is SESSION state, so it
+    /// survives whatever the adapter later says about that breakpoint.
+    pub(in crate::editor::session) fn toggle_breakpoint_disabled(&mut self) {
+        let Some(view) = self.state.active_view else {
+            self.show_error("no view is active");
+            return;
+        };
+        let Some(view_state) = self.state.views.get(view) else {
+            self.show_error("no view is active");
+            return;
+        };
+        let buffer = view_state.buffer;
+        let cursor = view_state.cursor;
+        let Some(path) = self
+            .state
+            .buffers
+            .get(buffer)
+            .and_then(|buffer| buffer.path.clone())
+        else {
+            self.show_error("active buffer has no file path");
+            return;
+        };
+        let Some(buffer) = self.state.buffers.get(buffer) else {
+            return;
+        };
+        let line = buffer.text.byte_to_line(cursor).unwrap_or(0) as u64 + 1;
+        let disabled = self
+            .debugger_session
+            .breakpoint_state(&path, line)
+            .is_some_and(|state| state == crate::debugger::DapBreakpointState::Disabled);
+        self.debugger_session
+            .set_breakpoint_disabled(&path, line, !disabled);
+        self.notify_message(
+            format!(
+                "breakpoint {}:{} is now {}",
+                path.display(),
+                line,
+                if disabled { "enabled" } else { "disabled" }
+            ),
+            false,
+        );
+    }
+    /// TERMINATE: ask for the debuggee to end with the session.
+    pub(in crate::editor::session) fn terminate_debug_session(&mut self) {
+        match self.debugger_session.terminate_debuggee() {
+            Ok(()) => {
+                let state = self.debugger_session.end_state();
+                self.notify_message(
+                    format!("debug session terminated ({state:?})"),
+                    false,
+                );
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+    /// DETACH: leave the session without asking the debuggee to stop. The report says the program
+    /// may still be running, because the adapter's side of that contract is not something this
+    /// editor can claim on the adapter's behalf.
+    pub(in crate::editor::session) fn detach_debug_session(&mut self) {
+        match self.debugger_session.detach_debuggee() {
+            Ok(()) => {
+                let state = self.debugger_session.end_state();
+                self.notify_message(
+                    format!(
+                        "debug session detached ({state:?}); the editor is no longer attached and \
+                         the program was NOT asked to stop"
+                    ),
+                    false,
+                );
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+    /// Report a handoff. This INFORMS and does nothing else: no exec lane is built, because
+    /// executing a terminal command is the decision the owner has not approved, and nothing here
+    /// touches the repository.
+    pub(in crate::editor::session) fn report_git_handoff(&mut self, operation: &str) {
+        let wanted = operation.trim().to_ascii_lowercase();
+        let Some(handoff) = crate::workspace::git::GitHandoff::ALL
+            .into_iter()
+            .find(|handoff| handoff.name() == wanted)
+        else {
+            self.show_error(format!(
+                "`{operation}` is not one of the handed-off operations: {}",
+                crate::workspace::git::GitHandoff::ALL
+                    .iter()
+                    .map(|handoff| handoff.name())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+            return;
+        };
+        self.notify_message(handoff.disposition(), false);
+    }
+    /// Reset HEAD, with the destructive mode gated exactly as abort is.
+    pub(in crate::editor::session) fn reset_git(&mut self, mode: &str, target: &str) {
+        let Some(mode) = crate::workspace::git::GitResetMode::parse(mode) else {
+            self.show_error("choose soft, mixed or hard");
+            return;
+        };
+        let Some(repository) = self.conflict_repository() else {
+            return;
+        };
+        match crate::workspace::git::reset_to(&repository, mode, target) {
+            Ok(outcome) => {
+                self.notify_message(
+                    format!(
+                        "reset --{} {} -> {}; {}",
+                        outcome.mode.name(),
+                        &outcome.from.to_string()[..8],
+                        &outcome.to.to_string()[..8],
+                        outcome.mode.recovery_limit()
+                    ),
+                    false,
+                );
+                self.after_conflict_recovery();
+            }
+            Err(refusal) => self.show_error(refusal.to_string()),
+        }
+    }
+    /// PREVIEW a cherry-pick or a revert: name the commit and what it would change, then ask.
+    /// Nothing moves until the answer, and the answer is applied against the HEAD the preview
+    /// named rather than against whatever HEAD happens to be by then.
+    pub(in crate::editor::session) fn preview_git_pick(&mut self, kind: &str, spec: &str) {
+        let kind = match kind {
+            "revert" => crate::workspace::git::GitPickKind::Revert,
+            _ => crate::workspace::git::GitPickKind::CherryPick,
+        };
+        let Some(repository) = self.conflict_repository() else {
+            return;
+        };
+        match crate::workspace::git::plan_pick(&repository, kind, spec) {
+            Ok(preview) => {
+                let summary = preview.summary();
+                self.git.set_pending_pick(preview);
+                self.open_confirmation(
+                    crate::ui::PromptKind::GitDestructive,
+                    format!("{} this commit?", kind.name()),
+                    summary,
+                    crate::ui::ConfirmationChoice::No,
+                );
+                self.project_input_prompt();
+            }
+            Err(refusal) => self.show_error(refusal.to_string()),
+        }
+    }
+    /// Apply the previewed pick once it is answered. The previewed HEAD is the value the write is
+    /// checked against, so a repository that moved is refused rather than acted on.
+    pub(in crate::editor::session) fn apply_previewed_git_pick(
+        &mut self,
+        answer: crate::ui::ConfirmationChoice,
+    ) {
+        let Some(preview) = self.git.take_pending_pick() else {
+            return;
+        };
+        if answer != crate::ui::ConfirmationChoice::Yes {
+            self.notify_message("Nothing was applied".into(), false);
+            return;
+        }
+        let Some(repository) = self.conflict_repository() else {
+            return;
+        };
+        match crate::workspace::git::apply_reviewed_pick(&repository, &preview) {
+            Ok(crate::workspace::git::GitPickOutcome::Applied { operation, commit }) => {
+                self.notify_message(
+                    format!("{} recorded as {}", operation.name(), &commit.to_string()[..8]),
+                    false,
+                );
+                self.after_conflict_recovery();
+            }
+            Ok(crate::workspace::git::GitPickOutcome::Conflicted {
+                operation,
+                conflicted,
+            }) => {
+                self.show_error(format!(
+                    "{} paused with {} conflicted path(s): {} — resolve them, then continue",
+                    operation.name(),
+                    conflicted.len(),
+                    conflicted.join(", ")
+                ));
+                self.after_conflict_recovery();
+            }
+            Ok(crate::workspace::git::GitPickOutcome::Refused(refusal)) => {
+                self.show_error(refusal.to_string());
+            }
+            Err(refusal) => self.show_error(refusal.to_string()),
+        }
+    }
+    /// Stage the resolved conflict in the active buffer, through the SAME file-staging plan the
+    /// ordinary staging surface uses rather than a second staging path.
+    pub(in crate::editor::session) fn stage_git_conflict(&mut self) {
+        self.input.set_pending_stage(AppEffect::GitConflictStage);
+        if let Err(error) = self.git.start_plan(
+            &self.state,
+            crate::workspace::git::GitMutationKind::StageFile,
+            self.workspace.root_revision(),
+            self.workspace.trust() == WorkspaceTrust::Trusted,
+            Vec::new(),
+        ) {
+            self.show_error(error);
+        }
+    }
+    /// Continue the paused operation. Refuses while any conflict remains, and refuses when no
+    /// operation is paused, both before any write.
+    pub(in crate::editor::session) fn continue_git_conflict(&mut self) {
+        let Some(repository) = self.conflict_repository() else {
+            return;
+        };
+        match crate::workspace::git::continue_operation(&repository, "") {
+            Ok(outcome) => {
+                self.notify_message(
+                    format!(
+                        "{} completed as {}",
+                        outcome.operation,
+                        outcome
+                            .commit
+                            .map(|oid| oid.to_string()[..8].to_owned())
+                            .unwrap_or_else(|| "a commit".to_owned())
+                    ),
+                    false,
+                );
+                self.after_conflict_recovery();
+            }
+            Err(refusal) => self.show_error(refusal.to_string()),
+        }
+    }
+    /// Abandon the paused operation. There is no hard-reset fallback: when the working tree holds
+    /// changes the abort would destroy, it is refused and names them.
+    pub(in crate::editor::session) fn abort_git_conflict(&mut self) {
+        let Some(repository) = self.conflict_repository() else {
+            return;
+        };
+        match crate::workspace::git::abort_operation(&repository) {
+            Ok(outcome) => {
+                self.notify_message(
+                    format!(
+                        "{} abandoned; the branch is back at {}",
+                        outcome.operation,
+                        outcome
+                            .restored_to
+                            .map(|oid| oid.to_string()[..8].to_owned())
+                            .unwrap_or_else(|| "where it started".to_owned())
+                    ),
+                    false,
+                );
+                self.after_conflict_recovery();
+            }
+            Err(refusal) => self.show_error(refusal.to_string()),
+        }
+    }
+    fn conflict_repository(&mut self) -> Option<std::path::PathBuf> {
+        match self.git.status() {
+            Some(status) => Some(status.repository.clone()),
+            None => {
+                self.show_error("Git status is unavailable; refresh first");
+                None
+            }
+        }
+    }
+    /// After a recovery the repository state changed underneath every open buffer, so the
+    /// status is refreshed rather than left stale.
+    fn after_conflict_recovery(&mut self) {
+        self.start_git_status_refresh();
+        // The operation may have finished, so the bar is re-read from the repository rather than
+        // left showing a state that no longer exists.
+        self.project_operation_bar();
+        self.project_debug_panes();
+    }
+    /// The conflict surface. The operation bar names the paused operation and its phase, and
+    /// each conflicted path reports its three sides with a side that does not exist shown as
+    /// ABSENT rather than as content.
+    pub(in crate::editor::session) fn open_git_conflicts(&mut self) {
+        let Some(status) = self.git.status() else {
+            self.show_error("Git status is unavailable; refresh first");
+            return;
+        };
+        let repository = status.repository.clone();
+        let state = match crate::workspace::git::read_conflict_state(&repository) {
+            Ok(state) => state,
+            Err(error) => {
+                self.show_error(error.to_string());
+                return;
+            }
+        };
+        let title = format!("Conflicts · {}", state.phase());
+        let mut items = Vec::new();
+        for (index, conflict) in state.conflicts.iter().enumerate() {
+            items.push((
+                PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
+                    id: PickerItemId(format!("conflict:{index}")),
+                    label: conflict.path.display().to_string(),
+                    detail: conflict.summary(),
+                    source: "conflict".into(),
+                    action: PickerAction::None,
+                },
+                PickerPayload::Command("workspace.git.conflicts.open".into()),
+            ));
+        }
+        self.install_picker(title, items);
+    }
+    /// Push the current branch to a named remote and destination.
+    ///
+    /// The refspec is NON-FORCED, and the push carries the remote value it was based on as a
+    /// lease: if the remote moved since it was last observed, the push is refused rather than
+    /// applied. Because libgit2's transport has no protocol-level force-with-lease this is a
+    /// check-then-act, with the same unavoidable window as git's own `--force-with-lease`.
+    pub(in crate::editor::session) fn push_git_remote(
+        &mut self,
+        named_remote: Option<String>,
+        named_destination: Option<String>,
+    ) {
+        let Some((repository, remote)) = self.current_git_remote(named_remote) else {
+            return;
+        };
+        let Some(branch) = self.current_branch_shorthand() else {
+            self.show_error("no branch is checked out");
+            return;
+        };
+        let source = format!("refs/heads/{branch}");
+        let destination = named_destination
+            .filter(|name| !name.trim().is_empty())
+            .map(|name| {
+                if name.starts_with("refs/") {
+                    name
+                } else {
+                    format!("refs/heads/{name}")
+                }
+            })
+            .unwrap_or_else(|| source.clone());
+        // The lease is the remote value observed for that destination, when one is known.
+        let lease = git2::Repository::open(&repository)
+            .ok()
+            .and_then(|repo| {
+                let tracking = destination
+                    .strip_prefix("refs/heads/")
+                    .map(|short| format!("refs/remotes/{remote}/{short}"))?;
+                repo.find_reference(&tracking).ok()?.target()
+            });
+        let result = self.git.start_push(
+            &repository,
+            &remote,
+            &source,
+            &destination,
+            lease,
+            std::time::Duration::from_secs(30),
+        );
+        match result {
+            Ok(()) => self.notify_message(
+                format!("Pushing `{branch}` to `{remote}` as `{destination}` (not forced)"),
+                false,
+            ),
+            Err(error) => self.show_error(error),
+        }
+    }
+    /// Review the update: what a fast-forward WOULD do, computed without moving anything.
+    pub(in crate::editor::session) fn review_git_update(&mut self) {
+        let Some((repository, remote)) = self.current_git_remote(None) else {
+            return;
+        };
+        let Some(branch) = self.current_branch_shorthand() else {
+            self.show_error("no branch is checked out");
+            return;
+        };
+        let result = self.git.start_update_review(
+            &repository,
+            &remote,
+            &branch,
+            std::time::Duration::from_secs(30),
+        );
+        if let Err(error) = result {
+            self.show_error(error);
+            return;
+        }
+        self.notify_message(format!("Reviewing `{branch}` against `{remote}`"), false);
+    }
+    fn current_branch_shorthand(&self) -> Option<String> {
+        let repository = self.git.status()?.repository.clone();
+        let repo = git2::Repository::open(&repository).ok()?;
+        let head = repo.head().ok()?;
+        head.shorthand().map(str::to_owned)
+    }
+    /// Apply the reviewed plan with a single keystroke. The plan is applied on the tips it was
+    /// built from or not at all.
+    pub(in crate::editor::session) fn apply_git_update(&mut self) {
+        if self.git.remote_review().is_none() {
+            self.show_error("review the update before applying it");
+            return;
+        }
+        if let Err(error) = self.git.apply_update(std::time::Duration::from_secs(30)) {
+            self.show_error(error);
+        }
+    }
+    /// One poll per call, exactly once.
+    pub(in crate::editor::session) fn process_git_remote_events(&mut self) {
+        let Some(event) = self.git.poll_remote() else {
+            return;
+        };
+        let crate::workspace::git::GitRemoteEvent::Fetched { outcome, .. } = event;
+        match outcome {
+            crate::workspace::git::GitRemoteOutcome::Fetched { remote, updated } => {
+                if updated.is_empty() {
+                    self.notify_message(format!("`{remote}` had nothing new"), false);
+                } else {
+                    self.notify_message(
+                        format!("`{remote}` updated {} remote-tracking ref(s)", updated.len()),
+                        false,
+                    );
+                }
+                self.start_git_status_refresh();
+            }
+            crate::workspace::git::GitRemoteOutcome::Reviewed(review) => {
+                self.notify_message(review.summary(), false);
+            }
+            crate::workspace::git::GitRemoteOutcome::Updated {
+                branch,
+                from,
+                to,
+                commits,
+            } => {
+                self.notify_message(
+                    format!(
+                        "Updated `{branch}` {} -> {} ({commits} commit(s))",
+                        &from.to_string()[..8],
+                        &to.to_string()[..8]
+                    ),
+                    false,
+                );
+                self.start_git_status_refresh();
+            }
+            crate::workspace::git::GitRemoteOutcome::Pushed {
+                remote,
+                destination,
+                to,
+                ..
+            } => {
+                self.notify_message(
+                    format!(
+                        "Pushed {} to `{remote}` as `{destination}`",
+                        &to.to_string()[..8]
+                    ),
+                    false,
+                );
+                self.start_git_status_refresh();
+            }
+            crate::workspace::git::GitRemoteOutcome::Merged {
+                branch,
+                from,
+                to,
+                merge,
+            } => {
+                self.notify_message(
+                    format!(
+                        "Merged `{branch}` {} with {} as {}",
+                        &from.to_string()[..8],
+                        &to.to_string()[..8],
+                        &merge.to_string()[..8]
+                    ),
+                    false,
+                );
+                self.start_git_status_refresh();
+            }
+            crate::workspace::git::GitRemoteOutcome::MergeConflicted {
+                branch,
+                conflicted,
+            } => {
+                // The merge is PAUSED: the resolver settles the conflict, never this path.
+                self.show_error(format!(
+                    "`{branch}` merged with {} conflicted path(s): {} — resolve them, then continue",
+                    conflicted.len(),
+                    conflicted.join(", ")
+                ));
+                self.start_git_status_refresh();
+            }
+            crate::workspace::git::GitRemoteOutcome::Refused(refusal) => self.show_error(refusal.message()),
+            crate::workspace::git::GitRemoteOutcome::Failed(error) => {
+                self.show_error(format!("remote operation failed: {error}"))
+            }
+            crate::workspace::git::GitRemoteOutcome::Unknown(error) => self.show_error(format!(
+                "remote operation outcome is unknown and will not be retried: {error}"
+            )),
+        }
+    }
+    /// Open the practice sandbox. This states its isolation where the user can read it: the
+    /// fixture is disposable, outside every workspace root, carries no credentials, executes no
+    /// hooks and cannot reach a network.
+    pub(in crate::editor::session) fn start_tutor_sandbox(&mut self) {
+        if self.workspace.tutor_pending() {
+            self.show_error("a practice fixture is already being prepared");
+            return;
+        }
+        match self
+            .workspace
+            .start_tutor_fixture(std::time::Duration::from_secs(10))
+        {
+            Ok(()) => {
+                let roots = self.workspace.roots().len();
+                self.notify_message(
+                    format!(
+                        "Practice sandbox: preparing a disposable fixture outside all {roots} workspace roots. \
+                         It holds no credentials, runs no hooks and has no network access."
+                    ),
+                    false,
+                );
+            }
+            Err(error) => self.show_error(error.to_string()),
+        }
+    }
+    /// The practice chapters. Each lesson says what it teaches, whether this revision can teach
+    /// it, which keys to press — the EFFECTIVE bindings, so no lesson names a key the user
+    /// cannot press — and which steps the user has actually completed.
+    pub(in crate::editor::session) fn open_tutor_lessons(&mut self) {
+        let progress = self.workspace.tutor_progress().clone();
+        let keymaps = self.configuration.keymaps();
+        let mut items = Vec::new();
+        for (index, lesson) in self.workspace.tutor_lessons().iter().enumerate() {
+            match lesson.missing_feature() {
+                // A lesson whose feature does not exist is NOT offered as teachable. It says
+                // which feature is missing, so the chapter is visibly gated rather than wrong.
+                Some(feature) => items.push((
+                    PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
+                        id: PickerItemId(format!("lesson:{index}")),
+                        label: lesson.title.to_owned(),
+                        detail: format!("not available yet: {} is not implemented", feature.name()),
+                        source: "tutor".into(),
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::Command("session.tutor.lessons".into()),
+                )),
+                None => {
+                    for (step_index, step) in lesson.steps.iter().enumerate() {
+                        let effective = keymaps.effective_binding("editor.normal", step.command());
+                        let done = if progress.is_complete(*step) { "done" } else { "todo" };
+                        items.push((
+                            PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
+                                id: PickerItemId(format!("lesson:{index}:{step_index}")),
+                                label: step.describe().to_owned(),
+                                detail: format!("{done} · {}", effective.display()),
+                                source: format!("chapter {}", lesson.chapter),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::Command(step.command().to_owned()),
+                        ));
+                    }
+                }
+            }
+        }
+        let completed = progress.completed();
+        let title = format!("Practice lessons · {completed} step(s) done");
+        self.install_picker(title, items);
+    }
+    /// Leave the practice sandbox and remove its fixture. The session keeps its handle until the
+    /// worker reports the directory is gone.
+    pub(in crate::editor::session) fn stop_tutor_sandbox(&mut self) {
+        match self
+            .workspace
+            .dispose_tutor_fixture(std::time::Duration::from_secs(10))
+        {
+            Ok(()) => {
+                if self.workspace.tutor_fixture().is_none() {
+                    self.notify_message("There is no practice sandbox open".into(), false);
+                } else {
+                    // Removal is confirmed by the worker's event, not by the request.
+                    self.notify_message("Practice sandbox: removing its fixture".into(), false);
+                }
+            }
+            Err(error) => self.show_error(error.to_string()),
+        }
+    }
+    /// One poll per call, exactly once, because a second poll can consume and discard the
+    /// event this handler was written to see.
+    pub(in crate::editor::session) fn process_tutor_events(&mut self) {
+        let Some(event) = self.workspace.poll_tutor() else {
+            return;
+        };
+        match event {
+            crate::workspace::TutorEvent::Created { result, .. } => match result {
+                Ok(path) => self.notify_message(
+                    format!("Practice fixture ready at {}", path.display()),
+                    false,
+                ),
+                Err(error) => self.show_error(error.to_string()),
+            },
+            crate::workspace::TutorEvent::Disposed { result, .. } => match result {
+                Ok(()) => self.notify_message(
+                    "Practice sandbox closed; its disposable fixture was removed".into(),
+                    false,
+                ),
+                Err(error) => self.show_error(error.to_string()),
+            },
+        }
+    }
+    /// Contextual help: what is available on the focused surface, read from the command
+    /// registry through the dispatcher's own context check, so help can never advertise a
+    /// command the dispatcher would refuse and can never drift from a renamed command.
+    pub(in crate::editor::session) fn open_contextual_help(&mut self) {
+        let invocation =
+            crate::editor::CommandInvocation::new("overlay.help.contextual", crate::editor::InvocationSource::Keymap)
+                .expect("static command id");
+        let items = self
+            .commands
+            .specs()
+            .filter(|spec| spec.context.satisfied(&self.state, &invocation))
+            .enumerate()
+            .map(|(index, spec)| {
+                let id = PickerItemId(format!("help:{index}:{}", spec.id.as_str()));
+                (
+                    PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
+                        id,
+                        label: spec.id.as_str().to_owned(),
+                        detail: spec.title.clone(),
+                        source: format!("{:?}", spec.context).to_lowercase(),
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::Command(spec.id.as_str().to_owned()),
+                )
+            })
+            .collect::<Vec<_>>();
+        let title = format!("Help · {} commands available here", items.len());
+        self.install_help_page(title, items);
+    }
+    /// Help for the form or confirmation in front of the user. It names the surface by its own
+    /// title and message, so the help is about the question actually being asked, and it leaves
+    /// that question untouched: opening help is not answering it.
+    pub(in crate::editor::session) fn open_form_help(&mut self) {
+        let Some(prompt) = self.input.prompt() else {
+            self.show_error("no form or confirmation is open");
+            return;
+        };
+        let kind = format!("{:?}", prompt.kind);
+        let mut rows = vec![
+            ("surface".to_owned(), kind.clone()),
+        ];
+        if let Some(confirmation) = prompt.confirmation.as_ref() {
+            rows.push(("asks".to_owned(), confirmation.title.clone()));
+            rows.push(("detail".to_owned(), confirmation.message.clone()));
+            rows.push((
+                "choices".to_owned(),
+                format!(
+                    "{} / {}",
+                    confirmation.positive_label, confirmation.negative_label
+                ),
+            ));
+            if !confirmation.hint.is_empty() {
+                rows.push(("keys".to_owned(), confirmation.hint.clone()));
+            }
+        } else if !prompt.input.is_empty() {
+            rows.push(("draft".to_owned(), prompt.input.clone()));
+        }
+        // The commands available on this surface come from the registry through the dispatcher's
+        // own context check, so the help can never list a command this form would refuse.
+        let invocation = crate::editor::CommandInvocation::new(
+            "overlay.help.form",
+            crate::editor::InvocationSource::Keymap,
+        )
+        .expect("static command id");
+        for spec in self
+            .commands
+            .specs()
+            .filter(|spec| spec.context.satisfied(&self.state, &invocation))
+        {
+            if spec.id.as_str() == "overlay.help.form" {
+                continue;
+            }
+            rows.push(("available".to_owned(), spec.id.as_str().to_owned()));
+        }
+        let items = rows
+            .into_iter()
+            .enumerate()
+            .map(|(index, (kind, value))| {
+                (
+                    PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
+                        id: PickerItemId(format!("form-help:{index}:{kind}")),
+                        label: value,
+                        detail: kind,
+                        source: String::new(),
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::Command("overlay.help.form".to_owned()),
+                )
+            })
+            .collect::<Vec<_>>();
+        let title = format!("Help · {kind}");
+        self.install_help_page(title, items);
+    }
+    /// The reference for the selected command, assembled from the registry entry itself: its
+    /// title, its description, where it is available and every argument the schema declares,
+    /// marked required or optional. Nothing here is a second copy of the truth.
+    pub(in crate::editor::session) fn open_command_reference(&mut self) {
+        let Some(PickerPayload::Command(command)) = self.search.selected_picker_payload().cloned()
+        else {
+            self.show_error("select a command first");
+            return;
+        };
+        let Some(spec) = self
+            .commands
+            .specs()
+            .find(|spec| spec.id.as_str() == command)
+        else {
+            self.show_error("that command is no longer registered");
+            return;
+        };
+        let mut rows = vec![
+            ("command".to_owned(), spec.id.as_str().to_owned()),
+            ("does".to_owned(), spec.title.clone()),
+        ];
+        if !spec.description.is_empty() {
+            rows.push(("detail".to_owned(), spec.description.clone()));
+        }
+        rows.push(("available".to_owned(), format!("{:?}", spec.context).to_lowercase()));
+        // The effective binding, read from the same resolved table the dispatcher uses, so the
+        // reference can never show a key the user cannot press: a remapped key is the key shown,
+        // an unmapped one is not offered, and a command with none here says so.
+        for (label, context) in [("binding", "editor.normal"), ("binding here", "picker")] {
+            let effective = self
+                .configuration
+                .keymaps()
+                .effective_binding(context, spec.id.as_str());
+            if effective.is_bound() || label == "binding" {
+                rows.push((label.to_owned(), effective.display()));
+            }
+        }
+        for (name, field) in &spec.arguments.fields {
+            rows.push((
+                if field.required { "argument" } else { "optional" }.to_owned(),
+                name.clone(),
+            ));
+        }
+        if spec.arguments.fields.is_empty() {
+            rows.push(("takes".to_owned(), "no arguments".to_owned()));
+        }
+        let items = rows
+            .into_iter()
+            .enumerate()
+            .map(|(index, (kind, value))| {
+                (
+                    PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
+                        id: PickerItemId(format!("reference:{index}:{kind}")),
+                        label: value,
+                        detail: kind,
+                        source: String::new(),
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::Command(spec.id.as_str().to_owned()),
+                )
+            })
+            .collect::<Vec<_>>();
+        let title = format!("Help · {}", spec.id.as_str());
+        self.install_help_page(title, items);
+    }
+    /// Open the selected worktree as a workspace root. This reuses the ordinary root flow, so
+    /// the worktree gets its own trust decision, discovery and per-root resource scoping
+    /// instead of borrowing the main checkout's.
+    pub(in crate::editor::session) fn open_git_worktree(&mut self) {
+        let Some(crate::editor::session::search::PickerPayload::GitWorktree { path, .. }) =
+            self.search.selected_picker_payload().cloned()
+        else {
+            self.show_error("select a worktree first");
+            return;
+        };
+        self.add_workspace_root(path);
+    }
+    /// Close the selected worktree as a workspace root WITHOUT removing the worktree: the
+    /// directory, its branch and its administrative data stay exactly as they were.
+    pub(in crate::editor::session) fn close_git_worktree(&mut self) {
+        let Some(crate::editor::session::search::PickerPayload::GitWorktree { path, .. }) =
+            self.search.selected_picker_payload().cloned()
+        else {
+            self.show_error("select a worktree first");
+            return;
+        };
+        let root = self.workspace.roots().iter().find(|root| {
+            let canonical = &root.identity.canonical_path;
+            canonical == &path
+                || path.starts_with(canonical)
+                || canonical.starts_with(&path)
+        });
+        let Some(root) = root else {
+            self.show_error("that worktree is not open as a workspace root");
+            return;
+        };
+        let id = root.id;
+        self.remove_workspace_root(id);
+    }
     pub(in crate::editor::session) fn root_removal_blocker(
         &self,
         root: crate::workspace::RootId,
@@ -9702,6 +11766,8 @@ impl InteractiveApplication {
                             .map(|(index, package)| {
                                 (
                                     PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                                         id: PickerItemId(format!(
                                             "registry:{index}:{}/{}",
                                             package.publisher, package.name
@@ -9731,6 +11797,8 @@ impl InteractiveApplication {
                             self.message("package_registry_show_title", &[]),
                             vec![(
                                 PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                                     id: PickerItemId(format!("registry-show:{label}")),
                                     label,
                                     detail,
@@ -9783,6 +11851,8 @@ impl InteractiveApplication {
                         .map(|(index, package)| {
                             (
                                 PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                                     id: PickerItemId(format!("package:{index}:{}", package.name)),
                                     label: package.name,
                                     detail: package.version,
@@ -10335,6 +12405,8 @@ impl InteractiveApplication {
             .map(|(key, session)| {
                 (
                     PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(format!("lsp-session:{key}")),
                         label: session.server_id.clone(),
                         detail: format!(
@@ -10438,12 +12510,134 @@ impl InteractiveApplication {
                 self.notify_message(self.message("new_scratch", &[]), false);
             }
             AppEffect::OpenWorkspaceFilePicker => self.start_workspace_file_picker(),
+            AppEffect::GitFileStage => {
+                self.input.set_pending_stage(AppEffect::GitFileStage);
+                // The plan itself refuses a path whose buffer has unsaved edits and reports
+                // `UnsavedDocument`, which the mutation handler turns into the explicit
+                // save-and-stage choice. The surface only has to name the right file.
+                let file = self.changes_focused_relative();
+                if let Err(error) = self.git.start_plan_for(
+                    &self.state,
+                    crate::workspace::git::GitMutationKind::StageFile,
+                    self.workspace.root_revision(),
+                    self.workspace.trust() == WorkspaceTrust::Trusted,
+                    Vec::new(),
+                    file,
+                ) {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::GitFileUnstage => {
+                self.input.set_pending_stage(AppEffect::GitFileUnstage);
+                let file = self.changes_focused_relative();
+                if let Err(error) = self.git.start_plan_for(
+                    &self.state,
+                    crate::workspace::git::GitMutationKind::UnstageFile,
+                    self.workspace.root_revision(),
+                    self.workspace.trust() == WorkspaceTrust::Trusted,
+                    Vec::new(),
+                    file,
+                ) {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::GitLinesStage { start, end } => {
+                self.input.set_pending_stage(AppEffect::GitLinesStage { start, end });
+                let range = u32::try_from(start)
+                    .ok()
+                    .zip(u32::try_from(end).ok())
+                    .filter(|(start, end)| end >= start);
+                match range {
+                    Some((start, end)) => {
+                        if let Err(error) = self.git.start_plan(
+                            &self.state,
+                            crate::workspace::git::GitMutationKind::StageLines,
+                            self.workspace.root_revision(),
+                            self.workspace.trust() == WorkspaceTrust::Trusted,
+                            (start..=end).collect(),
+                        ) {
+                            self.show_error(error);
+                        }
+                    }
+                    None => self.show_error(
+                        "line range must be two non-negative integers with end >= start",
+                    ),
+                }
+            }
+            AppEffect::GitHistoryOpen => self.start_git_history(),
+            AppEffect::GitBranchCreate { name, start } => self.create_git_branch(name, start),
+            AppEffect::GitBranchTrack { name, remote_branch } => {
+                self.track_git_branch(name, remote_branch);
+            }
+            AppEffect::GitBranchRename { to } => self.rename_git_branch(to),
+            AppEffect::GitWorktreeCreate {
+                name,
+                path,
+                reference,
+            } => self.create_git_worktree(name, path, reference),
+            AppEffect::HelpForForm => self.open_form_help(),
+            AppEffect::GitRemoteFetch { remote } => self.fetch_git_remote(remote),
+            AppEffect::GitRemoteUpdate => self.review_git_update(),
+            AppEffect::GitRemoteApply => self.apply_git_update(),
+            AppEffect::GitConflictsOpen => self.open_git_conflicts(),
+            AppEffect::GitConflictChoose { side } => self.choose_git_conflict_side(&side),
+            AppEffect::DebuggerBreakpointStates => self.open_breakpoint_states(),
+            AppEffect::DebuggerBreakpointDisable => self.toggle_breakpoint_disabled(),
+            AppEffect::DebuggerTerminate => self.terminate_debug_session(),
+            AppEffect::DebuggerDetach => self.detach_debug_session(),
+            AppEffect::GitHandoff { operation } => self.report_git_handoff(&operation),
+            AppEffect::GitReset { mode, target } => self.reset_git(&mode, &target),
+            AppEffect::GitPick { commit, kind } => self.preview_git_pick(kind, &commit),
+            AppEffect::GitConflictStage => self.stage_git_conflict(),
+            AppEffect::GitConflictContinue => self.continue_git_conflict(),
+            AppEffect::GitConflictAbort => self.abort_git_conflict(),
+            AppEffect::GitConflictReplace { side, files } => {
+                self.preview_git_replacement(&side, &files);
+            }
+            AppEffect::GitConflictReplaceSubmit => {}
+            AppEffect::GitRemotePush {
+                remote,
+                destination,
+            } => self.push_git_remote(remote, destination),
+            AppEffect::TutorStart => self.start_tutor_sandbox(),
+            AppEffect::TutorStop => self.stop_tutor_sandbox(),
+            AppEffect::TutorLessons => self.open_tutor_lessons(),
+            AppEffect::HelpContextual => self.open_contextual_help(),
+            AppEffect::HelpCommandReference => self.open_command_reference(),
+            AppEffect::GitWorktreeOpen => self.open_git_worktree(),
+            AppEffect::GitWorktreeClose => self.close_git_worktree(),
+            AppEffect::GitBranchDelete => self.request_git_branch_delete(),
+            AppEffect::GitWorktreeRemove => self.request_git_worktree_remove(),
+            AppEffect::GitBranchesOpen => self.start_git_branches(true),
+            AppEffect::GitWorktreesOpen => self.start_git_branches(false),
+            AppEffect::GitHistoryToggle => self.toggle_git_history(),
+            AppEffect::GitHistoryRange => self.preview_git_history_range(),
+            AppEffect::GitCommitSubmit => self.submit_git_commit_message(),
+            AppEffect::GitCommit => self.request_git_commit(false),
+            AppEffect::GitCommitAmend => self.request_git_commit(true),
+            AppEffect::GitHunksOpenStaged => {
+                self.start_git_hunks_with_layer(
+                    None,
+                    crate::workspace::git::GitDiffLayer::Staged,
+                );
+            }
+            AppEffect::GitHunkUnstage => self.unstage_selected_git_hunk(),
             AppEffect::GitStatusRefresh => self.start_git_status_refresh(),
             AppEffect::GitStatusOpen => self.open_git_status_picker(),
+            AppEffect::GitChangesLayerSwitch => {
+                // Only the change surface has a layer to switch; elsewhere this does nothing
+                // rather than reporting an error for a key that has no meaning there.
+                if self.search.switch_changes_layer().is_some() {
+                    self.sync_picker_ui();
+                }
+            }
             AppEffect::GitHunksOpen => self.start_git_hunks(),
             AppEffect::GitHunkNavigate(direction) => self.navigate_git_hunk(direction),
             AppEffect::GitHunkPreview => self.preview_selected_git_hunk(),
-            AppEffect::GitHunkStage => self.stage_selected_git_hunk(),
+            AppEffect::GitHunkStage => {
+                self.input.set_pending_stage(AppEffect::GitHunkStage);
+                self.stage_selected_git_hunk();
+            }
             AppEffect::GitHunkReset => self.request_reset_selected_git_hunk(),
             AppEffect::OpenFilePrompt => {
                 let alias = self
@@ -10481,6 +12675,8 @@ impl InteractiveApplication {
                     .map(|(index, (error, message))| {
                         (
                             PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("notification:{index}")),
                                 label: message.clone(),
                                 detail: if *error {
@@ -10533,6 +12729,8 @@ impl InteractiveApplication {
                         let content = graph.content_for_window(window.id)?;
                         Some((
                             PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("window:{}", window.id.0)),
                                 label: content.title.clone(),
                                 detail: format!(
@@ -10978,17 +13176,24 @@ impl InteractiveApplication {
                 close,
             } => {
                 if !candidate.save_document(buffer, &text, revision, bytes, path.clone()) {
+                    self.input.clear_pending_stage();
                     if let Some(token) = &close {
                         self.window_session.fail_editor_close_save(token);
                     }
                     return;
                 }
                 if let Err(e) = self.commit_editor_draft(candidate, None, false) {
+                    self.input.clear_pending_stage();
                     if let Some(token) = &close {
                         self.window_session.fail_editor_close_save(token);
                     }
                     self.show_error(e);
                     return;
+                }
+                // A staged save that was waiting on this completion replays now, against the
+                // saved bytes, using the exact effect that was refused.
+                if let Some(effect) = self.input.take_pending_stage() {
+                    self.process_effect(effect);
                 }
                 let buffer_state = &self.state.buffers[buffer];
                 let still_dirty = buffer_state.dirty;

@@ -141,6 +141,12 @@ pub enum DapControl {
         frame_id: Option<i64>,
         context: String,
     },
+    /// End the session, saying whether the debuggee should be ended with it. This is what makes
+    /// DETACH distinct from TERMINATE: the editor stops being attached either way, but only one
+    /// of them asks for the debuggee to die.
+    Disconnect {
+        terminate_debuggee: bool,
+    },
     SetBreakpoints {
         path: PathBuf,
         breakpoints: Vec<DapSourceBreakpoint>,
@@ -413,6 +419,11 @@ fn run_adapter(
                     (Some("source"), json!({"sourceReference":reference}))
                 }
                 DapControl::ReverseResponse { .. } => unreachable!("reverse control routed above"),
+                DapControl::Disconnect { terminate_debuggee } => {
+                    // The editor is leaving the session either way; whether the program dies is
+                    // exactly what the argument says, so a detach cannot be labelled a terminate.
+                    (Some("disconnect"), disconnect_arguments(terminate_debuggee))
+                }
                 DapControl::SetBreakpoints { path, breakpoints } => {
                     let path = map_path(&path, &path_maps, false);
                     (
@@ -723,6 +734,87 @@ fn run_adapter(
     drop(writer);
 }
 
+/// The arguments a `disconnect` request carries. Extracted so the value that distinguishes a
+/// detach from a terminate is directly testable rather than buried in the request builder.
+#[must_use]
+pub fn disconnect_arguments(terminate_debuggee: bool) -> Value {
+    json!({ "terminateDebuggee": terminate_debuggee })
+}
+
+/// Where a console entry came from. The distinction is the point: program output and a REPL
+/// result are different things, and a surface that cannot tell them apart misleads.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DapConsoleOrigin {
+    /// The debuggee wrote it.
+    ProgramOutput,
+    /// The adapter's answer to an evaluation the user asked for.
+    Evaluation,
+    /// What the user typed into the console.
+    Command,
+    /// The editor's own report, such as a failed submission.
+    Notice,
+}
+
+impl DapConsoleOrigin {
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ProgramOutput => "program output",
+            Self::Evaluation => "evaluation result",
+            Self::Command => "console command",
+            Self::Notice => "editor notice",
+        }
+    }
+}
+
+/// One console entry, carrying its ORIGIN as well as its source.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DapConsoleEntry {
+    pub origin: DapConsoleOrigin,
+    pub source: String,
+    pub text: String,
+    /// The adapter that produced this record, when the session knows it.
+    pub actor: Option<String>,
+    /// The STOP this record belongs to, when it belongs to one.
+    pub stop: Option<u64>,
+    /// The frame the submission was bound to, when one was selected.
+    pub frame: Option<i64>,
+    /// The submission this record belongs to. A late answer names the submission it answers.
+    pub submission: Option<u64>,
+    /// The answer attached to the submission's OWN record, once it arrives.
+    pub result: Option<String>,
+}
+impl DapConsoleEntry {
+    /// A record with no provenance yet: the session stamps what it knows at the console choke
+    /// point, so provenance is recorded in ONE place rather than re-derived at every site.
+    #[must_use]
+    pub fn new(
+        origin: DapConsoleOrigin,
+        source: impl Into<String>,
+        text: impl Into<String>,
+    ) -> Self {
+        Self {
+            origin,
+            source: source.into(),
+            text: text.into(),
+            actor: None,
+            stop: None,
+            frame: None,
+            submission: None,
+            result: None,
+        }
+    }
+}
+
+/// How a session ended, so a surface can distinguish leaving from killing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DapSessionEnd {
+    /// The editor detached: it is no longer attached, and it did NOT ask the debuggee to stop.
+    Detached,
+    /// The editor terminated: it asked for the debuggee to end with the session.
+    Terminated,
+}
+
 fn is_startup_request(command: &str) -> bool {
     matches!(command, "launch" | "attach")
 }
@@ -941,8 +1033,248 @@ pub(crate) fn terminal_reply_source_fixture() {
 }
 
 #[cfg(test)]
-pub(crate) use session::fixture as test_session;
+pub(crate) use session::{fixture as test_session, TestAdapter};
 #[cfg(test)]
 mod transport_tests;
 #[cfg(test)]
-pub(crate) use transport_tests::{ADAPTER as TEST_ADAPTER, python as test_python};
+pub(crate) use transport_tests::{
+    ADAPTER as TEST_ADAPTER, LOGGING_ADAPTER as TEST_LOGGING_ADAPTER, python as test_python,
+};
+
+/// What is TRUE about a breakpoint, as opposed to what was asked for.
+///
+/// The distinction is the whole point of this type: a breakpoint the adapter has not answered
+/// for is `Requested` and must never be shown as verified, because presenting a request as a
+/// fact is exactly the failure mode an optimistic UI produces.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DapBreakpointState {
+    /// Sent, and the adapter has not answered yet.
+    ///
+    /// Carries the adapter's own verdict when it has answered without verifying the breakpoint:
+    /// an ANSWERED but unverified request is still not a fact, which is why the two are one state
+    /// with the answer recorded rather than two states that a caller could confuse.
+    Requested { accepted: bool },
+    /// The adapter confirmed the breakpoint at this location.
+    Verified { line: u64 },
+    /// The user disabled it. Independent of what the adapter thinks.
+    Disabled,
+}
+
+impl DapBreakpointState {
+    /// Whether this breakpoint may be PRESENTED as verified. Only a real acknowledgement may.
+    #[must_use]
+    pub fn is_verified(self) -> bool {
+        matches!(self, Self::Verified { .. })
+    }
+
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Requested { accepted: false } => "requested (adapter did not verify it)",
+            Self::Requested { accepted: true } => "requested (awaiting acknowledgement)",
+            Self::Verified { .. } => "verified",
+            Self::Disabled => "disabled",
+        }
+    }
+}
+
+/// What the adapter answered for a `setBreakpoints` request, paired with what was asked for.
+///
+/// `requested` is the list the editor sent, in order; `answer` is the adapter's own list. A
+/// breakpoint the adapter did not answer for stays `Requested`: an unacknowledged request is
+/// never promoted to a fact.
+#[must_use]
+pub fn breakpoint_states(
+    requested: &[DapSourceBreakpoint],
+    disabled: &[bool],
+    answer: &DapResponse,
+) -> Vec<DapBreakpointState> {
+    let DapResponse::Breakpoints(rows) = answer else {
+        return requested
+            .iter()
+            .enumerate()
+            .map(|(index, _)| {
+                if disabled.get(index).copied().unwrap_or(false) {
+                    DapBreakpointState::Disabled
+                } else {
+                    DapBreakpointState::Requested { accepted: false }
+                }
+            })
+            .collect();
+    };
+    requested
+        .iter()
+        .enumerate()
+        .map(|(index, _)| {
+            if disabled.get(index).copied().unwrap_or(false) {
+                return DapBreakpointState::Disabled;
+            }
+            match rows.get(index) {
+                Some((true, line, _)) => DapBreakpointState::Verified {
+                    // The adapter may move a breakpoint; the VERIFIED line is its line, falling
+                    // back to the requested one when it reports none.
+                    line: line.unwrap_or(0),
+                },
+                Some((false, _, _)) => DapBreakpointState::Requested { accepted: false },
+                // No answer for this entry: still only a request.
+                None => DapBreakpointState::Requested { accepted: true },
+            }
+        })
+        .collect()
+}
+
+/// Where execution ACTUALLY stopped. This is a separate fact from any breakpoint's state: a
+/// verified breakpoint is not evidence that execution is there now.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DapExecutionPoint {
+    pub line: u64,
+    pub thread_id: Option<i64>,
+}
+
+impl DapExecutionPoint {
+    /// Whether execution is standing on the given verified line.
+    #[must_use]
+    pub fn is_at(self, state: DapBreakpointState, line: u64) -> bool {
+        matches!(state, DapBreakpointState::Verified { .. }) && self.line == line
+    }
+}
+
+#[cfg(test)]
+mod disconnect_tests {
+    use super::disconnect_arguments;
+
+    #[test]
+    fn detach_and_terminate_send_different_requests() {
+        // The editor-side distinction, asserted on the value that carries it: a detach must NOT
+        // ask for the debuggee to stop, and a terminate must.
+        assert_eq!(
+            disconnect_arguments(false)["terminateDebuggee"],
+            serde_json::json!(false),
+            "a detach leaves the debuggee alone"
+        );
+        assert_eq!(
+            disconnect_arguments(true)["terminateDebuggee"],
+            serde_json::json!(true),
+            "a terminate asks for it to end"
+        );
+        assert_ne!(
+            disconnect_arguments(false),
+            disconnect_arguments(true),
+            "the two are not the same request wearing different names"
+        );
+    }
+}
+
+#[cfg(test)]
+mod breakpoint_state_tests {
+    use super::{
+        DapBreakpointState, DapExecutionPoint, DapResponse, DapSourceBreakpoint, breakpoint_states,
+    };
+    use std::path::PathBuf;
+
+    fn requested(lines: &[u64]) -> Vec<DapSourceBreakpoint> {
+        lines
+            .iter()
+            .map(|line| DapSourceBreakpoint {
+                path: PathBuf::from("/workspace/main.rs"),
+                line: *line,
+                column: None,
+                condition: None,
+                hit_condition: None,
+                log_message: None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn breakpoint_states_never_present_a_request_as_verified() {
+        let asked = requested(&[10, 20, 30]);
+        let up_to_date = vec![false, false, false];
+
+        // NOTHING ACKNOWLEDGED: every breakpoint is only a request, and NONE is verified.
+        let pending = breakpoint_states(&asked, &up_to_date, &DapResponse::Breakpoints(Vec::new()));
+        assert!(
+            pending.iter().all(|state| !state.is_verified()),
+            "an unanswered request is never verified: {pending:?}"
+        );
+        assert!(
+            pending
+                .iter()
+                .all(|state| matches!(state, DapBreakpointState::Requested { .. })),
+            "and every one is reported as requested: {pending:?}"
+        );
+        assert_eq!(pending[0].label(), "requested (awaiting acknowledgement)");
+
+        // The adapter ANSWERS but declines to verify one of them: an answered request is still
+        // not a fact, so it stays unverified and says so.
+        let partial = breakpoint_states(
+            &asked,
+            &up_to_date,
+            &DapResponse::Breakpoints(vec![
+                (true, Some(10), None),
+                (false, None, Some("no code at line 20".into())),
+                (true, Some(31), None),
+            ]),
+        );
+        assert_eq!(partial[0], DapBreakpointState::Verified { line: 10 });
+        assert_eq!(partial[1], DapBreakpointState::Requested { accepted: false });
+        assert!(
+            !partial[1].is_verified(),
+            "an adapter that did NOT verify a breakpoint must not be shown as verifying it"
+        );
+        assert_eq!(
+            partial[1].label(),
+            "requested (adapter did not verify it)",
+            "and the state says which of the two it is"
+        );
+        assert_eq!(
+            partial[2],
+            DapBreakpointState::Verified { line: 31 },
+            "the VERIFIED line is the adapter's line, which it may have moved"
+        );
+
+        // DISABLED is the user's state and survives an adapter that verified everything.
+        let with_disabled = breakpoint_states(
+            &asked,
+            &[false, true, false],
+            &DapResponse::Breakpoints(vec![
+                (true, Some(10), None),
+                (true, Some(20), None),
+                (true, Some(30), None),
+            ]),
+        );
+        assert_eq!(with_disabled[1], DapBreakpointState::Disabled);
+        assert!(
+            !with_disabled[1].is_verified(),
+            "a disabled breakpoint is not verified even when the adapter accepted it"
+        );
+
+        // EXECUTION is a SEPARATE fact: a verified breakpoint is not evidence that execution is
+        // standing there.
+        let stopped = DapExecutionPoint {
+            line: 10,
+            thread_id: Some(1),
+        };
+        assert!(stopped.is_at(DapBreakpointState::Verified { line: 10 }, 10));
+        assert!(
+            !stopped.is_at(DapBreakpointState::Requested { accepted: true }, 10),
+            "an unacknowledged breakpoint is never the execution point"
+        );
+        assert!(
+            !stopped.is_at(DapBreakpointState::Disabled, 10),
+            "and neither is a disabled one"
+        );
+        assert!(
+            !DapExecutionPoint {
+                line: 99,
+                thread_id: None
+            }
+            .is_at(DapBreakpointState::Verified { line: 10 }, 10),
+            "a verified breakpoint away from the stopped line is not the execution point"
+        );
+
+        // A response that is NOT a breakpoint answer leaves everything a request.
+        let wrong = breakpoint_states(&asked, &up_to_date, &DapResponse::Threads(Vec::new()));
+        assert!(wrong.iter().all(|state| !state.is_verified()));
+    }
+}

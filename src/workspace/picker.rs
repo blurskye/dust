@@ -15,20 +15,45 @@ pub enum PickerAction {
     None,
 }
 
+/// What a picker row is. A section header groups the entries under it and is never an action
+/// candidate: selection moves over entries only, so a header can never be accepted.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum PickerItemKind {
+    #[default]
+    Entry,
+    Section,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PickerItem {
     pub id: PickerItemId,
     pub label: String,
     pub detail: String,
     pub source: String,
+    /// A short badge for a row that has one, such as a path whose buffer has unsaved edits.
+    /// Empty means no badge.
+    pub badge: String,
     pub action: PickerAction,
+    pub kind: PickerItemKind,
+}
+
+/// One row of a picker presentation: the item's identity, its three text fields and what kind
+/// of row it is.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PickerRowPresentation {
+    pub id: PickerItemId,
+    pub label: String,
+    pub detail: String,
+    pub source: String,
+    pub badge: String,
+    pub kind: PickerItemKind,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PickerPresentation {
     pub title: String,
     pub query: String,
-    pub rows: Vec<(PickerItemId, String, String, String)>,
+    pub rows: Vec<PickerRowPresentation>,
     pub selected: Option<usize>,
     pub scroll: usize,
     pub loading: bool,
@@ -107,7 +132,8 @@ impl PickerState {
     pub fn set_unfiltered_query(&mut self, query: String) {
         self.query = query;
         self.visible = (0..self.items.len()).collect();
-        self.selected = (!self.visible.is_empty()).then_some(0);
+        // The cursor opens on the first entry, never on a section header.
+        self.selected = self.first_entry();
         self.scroll = 0;
     }
 
@@ -131,17 +157,56 @@ impl PickerState {
             self.selected = None;
             return;
         }
-        let current = self.selected.unwrap_or(0).min(self.visible.len() - 1);
-        self.selected = Some(if direction < 0 {
-            if current == 0 && wrap {
-                self.visible.len() - 1
-            } else {
-                current.saturating_sub(1)
+        // A section header is never an action candidate, so selection steps over it. A
+        // picker whose every row is a header has nothing to select.
+        let entries: Vec<usize> = self
+            .visible
+            .iter()
+            .enumerate()
+            .filter(|(_, index)| {
+                self.items
+                    .get(**index)
+                    .is_some_and(|item| item.kind == PickerItemKind::Entry)
+            })
+            .map(|(position, _)| position)
+            .collect();
+        let Some(&first) = entries.first() else {
+            self.selected = None;
+            return;
+        };
+        let Some(&last) = entries.last() else {
+            self.selected = None;
+            return;
+        };
+        let position = self
+            .selected
+            .filter(|selected| entries.contains(selected))
+            .map_or_else(
+                || entries.iter().position(|entry| *entry > self.selected.unwrap_or(0)),
+                |selected| {
+                    let at = entries.iter().position(|entry| *entry == selected);
+                    at.map(|at| {
+                        if direction < 0 {
+                            at.checked_sub(1).unwrap_or(if wrap { entries.len() - 1 } else { at })
+                        } else if at + 1 < entries.len() {
+                            at + 1
+                        } else if wrap {
+                            0
+                        } else {
+                            at
+                        }
+                    })
+                },
+            );
+        self.selected = Some(match position {
+            Some(at) => entries[at],
+            None => {
+                if direction < 0 {
+                    last
+                } else {
+                    first
+                }
             }
-        } else if current + 1 == self.visible.len() && wrap {
-            0
-        } else {
-            (current + 1).min(self.visible.len() - 1)
         });
     }
 
@@ -195,19 +260,29 @@ impl PickerState {
                 .visible
                 .iter()
                 .filter_map(|index| self.items.get(*index))
-                .map(|item| {
-                    (
-                        item.id.clone(),
-                        item.label.clone(),
-                        item.detail.clone(),
-                        item.source.clone(),
-                    )
+                .map(|item| PickerRowPresentation {
+                    id: item.id.clone(),
+                    label: item.label.clone(),
+                    detail: item.detail.clone(),
+                    source: item.source.clone(),
+                    badge: item.badge.clone(),
+                    kind: item.kind,
                 })
                 .collect(),
             selected: self.selected,
             scroll: self.scroll,
             loading: self.loading,
         }
+    }
+
+    /// The first visible position whose row is an entry rather than a section header, so the
+    /// cursor never opens on a header and a header can never be accepted.
+    fn first_entry(&self) -> Option<usize> {
+        self.visible.iter().position(|index| {
+            self.items
+                .get(*index)
+                .is_some_and(|item| item.kind == PickerItemKind::Entry)
+        })
     }
 
     fn recompute(&mut self) {
@@ -220,7 +295,7 @@ impl PickerState {
                         .iter()
                         .position(|index| self.items[*index].id == id)
                 })
-                .or_else(|| (!self.visible.is_empty()).then_some(0));
+                .or_else(|| self.first_entry());
             self.scroll = self.scroll.min(self.visible.len().saturating_sub(1));
             return;
         }
@@ -250,7 +325,7 @@ impl PickerState {
                     .iter()
                     .position(|index| self.items[*index].id == id)
             })
-            .or_else(|| (!self.visible.is_empty()).then_some(0));
+            .or_else(|| self.first_entry());
         self.scroll = self.scroll.min(self.visible.len().saturating_sub(1));
     }
 }

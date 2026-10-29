@@ -13,6 +13,14 @@ pub use root::{
     ExecutionSource, RootId, RootIdentity, WorkspaceId, WorkspaceRoot, WorkspaceState,
     WorkspaceTrust,
 };
+mod lesson;
+pub use lesson::{
+    TutorAction, TutorFeature, TutorLesson, TutorProgress, TutorStep, LESSONS,
+};
+mod tutor;
+#[cfg(test)]
+mod tutor_tests;
+pub use tutor::{TutorError, TutorEvent, TutorFixture, TutorGeneration, TutorService};
 mod trust;
 pub use trust::{
     TRUST_STATE_VERSION, TrustDatabase, TrustEvent, TrustStateError, TrustStore,
@@ -28,7 +36,10 @@ pub use diagnostics::{
     Diagnostic, DiagnosticOwner, DiagnosticSeverity, DiagnosticStore, ProblemRow, RelatedDiagnostic,
 };
 mod picker;
-pub use picker::{PickerAction, PickerItem, PickerItemId, PickerPresentation, PickerState};
+pub use picker::{
+    PickerAction, PickerItem, PickerItemId, PickerItemKind, PickerPresentation,
+    PickerRowPresentation, PickerState,
+};
 mod edit;
 pub use edit::{
     FileSnapshot, ProposalId, ProposalState, ProposedFileEdit, WorkspaceEditDraft,

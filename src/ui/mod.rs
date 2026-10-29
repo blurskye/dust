@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod geometry;
+mod diff;
 mod grid;
 mod pty_screen;
 mod render;
@@ -14,14 +15,20 @@ pub use pty_screen::{
     encode_terminal_mouse_event,
 };
 pub use render::{
+    OperationBarState,
     CompletionItem, CompositorLayoutState, ConfirmationChoice, ConfirmationState,
     ContentTabDiagnostic, ContentTabDiagnosticSeverity, ContentTabEntry, ContentTabIdentity,
-    ContentTabKind, DashboardAction, DocumentationMarkupKind, DocumentationPopupKind,
+    ContentTabKind, CellAlign, DashboardAction, DiffHunk, DiffLayout, DiffLine, DiffLineKind,
+    DiffPreview,
+    DiffSideCell, DiffSideRow,
+    DiffSpan, DocumentationMarkupKind, DocumentationPopupKind,
     DocumentationPopupState, DocumentationSection, EditorWindowBinding, EditorWindowLayoutState,
     ExpandedDiagnosticState, ExplorerSegmentRole, ExplorerUiRow, ExplorerUiSegment,
     ExplorerUiState, ExplorerWindowUiState, Frame, KeyHintUiRow, KeyHintUiState,
-    LanguageCompletionState, NativeSurfaceWindowBinding, PaneViewport, PickerPreview, PickerRow,
-    PickerSurfaceKind, PickerUiState, PluginSurfaceRow, PluginSurfaceUiState, PrivateSurfaceCell,
+    LanguageCompletionState, NativeSurfaceWindowBinding, PaneViewport, PickerCell, PickerPreview,
+    PickerPreviewBody, PickerRow, PickerRowKind, PickerSurfaceKind, PickerTextPreview,
+    PickerUiState,
+    PluginSurfaceRow, PluginSurfaceUiState, PrivateSurfaceCell,
     PrivateSurfaceUiState, PromptGeometry, PromptKind, PromptState, TerminalPanelGeometry,
     TerminalPanelMode, TerminalPanelState, TerminalPhase, TerminalTabState, ToolMenuRow,
     ToolMenuState, ToolRuntimeOption, ToolRuntimePickerState, UiDiagnostic, UiFold, UiGitSign,
@@ -31,8 +38,9 @@ pub use render::{
     editor_state_content_width, editor_state_gutter_width, editor_workspace_insets,
     explorer_panel_width, pane_viewports, picker_geometry, prompt_geometry,
     prompt_geometry_for_state, prompt_surface_dimensions, render, snap_display_column,
-    snap_display_column_forward, terminal_panel_geometry, terminal_tab_at_column,
-};
+    snap_display_column_forward, terminal_panel_geometry, terminal_tab_at_column};
+pub use render::{DebugPane, DebugPanesUiState};
+pub use diff::{emphasise_changed_spans, parse_unified_patch};
 pub use terminal::{
     KeyInputKind, TerminalError, TerminalOptions, TerminalSession, UiEvent,
     install_panic_restore_hook, normalize_event,

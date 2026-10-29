@@ -1,6 +1,9 @@
 mod terminal;
 use terminal::{active_compositor, dock_terminal_panel, render_key_hints};
+mod debug;
 mod explorer;
+use debug::{debug_layout, render_debug_panes};
+pub use debug::{DebugPane, DebugPanesUiState};
 use explorer::{place_workspace_frame, render_explorer_window};
 mod overlays;
 use super::geometry::text_width;
@@ -64,6 +67,9 @@ pub enum PromptKind {
     PluginConfirmation,
     TerminalClose,
     DirtyClose,
+    GitStageUnsaved,
+    GitCommitMessage,
+    GitDestructive,
 }
 
 impl PromptKind {
@@ -80,6 +86,9 @@ impl PromptKind {
             Self::PluginConfirmation => "Plugin confirmation",
             Self::TerminalClose => "Close terminal",
             Self::DirtyClose => "Close document",
+            Self::GitStageUnsaved => "Stage unsaved changes",
+            Self::GitCommitMessage => "Commit staged changes",
+            Self::GitDestructive => "Confirm Git change",
         }
     }
 
@@ -93,7 +102,12 @@ impl PromptKind {
             Self::GitReset => &text.git_reset_marker,
             Self::ExplorerDelete => &text.explorer_delete_marker,
             Self::ExplorerRename => &text.explorer_rename_marker,
-            Self::PluginConfirmation | Self::TerminalClose | Self::DirtyClose => "",
+            Self::PluginConfirmation
+            | Self::TerminalClose
+            | Self::DirtyClose
+            | Self::GitStageUnsaved
+            | Self::GitCommitMessage
+            | Self::GitDestructive => "",
         }
     }
 }
@@ -123,6 +137,9 @@ pub struct ConfirmationState {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PromptState {
     pub kind: PromptKind,
+    /// Composer prompts accept newlines and draw more than one row. Every other
+    /// prompt keeps its single-row behaviour.
+    pub multiline: bool,
     pub confirmation: Option<ConfirmationState>,
     pub input: String,
     pub cursor: usize,
@@ -136,6 +153,7 @@ impl PromptState {
     #[must_use]
     pub fn new(kind: PromptKind) -> Self {
         Self {
+            multiline: false,
             kind,
             confirmation: None,
             input: String::new(),
@@ -305,12 +323,119 @@ pub struct LanguageCompletionState {
     pub scroll: usize,
 }
 
+/// What a picker row is. A section header groups the entries under it and is drawn as a
+/// header rather than as an entry.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum PickerRowKind {
+    #[default]
+    Entry,
+    Section,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PickerRow {
     pub id: String,
     pub label: String,
     pub detail: String,
     pub source: String,
+    pub kind: PickerRowKind,
+    /// Columns this row draws instead of the flattened label/detail/source text.
+    ///
+    /// Empty means the legacy rendering: `label` and `detail` concatenated with one style
+    /// and `source` right-aligned. A row with cells draws each one at its own declared
+    /// width with its own style, which is what lets a status column, a lane or a badge be
+    /// coloured independently of its neighbours.
+    pub cells: Vec<PickerCell>,
+}
+
+impl PickerRow {
+    /// A row rendered from its `label`, `detail` and `source` text, as every existing
+    /// surface does.
+    #[must_use]
+    pub fn text(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        detail: impl Into<String>,
+        source: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            detail: detail.into(),
+            source: source.into(),
+            kind: PickerRowKind::Entry,
+            cells: Vec::new(),
+        }
+    }
+
+    /// A section header: a group label that is never an action candidate.
+    #[must_use]
+    pub fn section(label: impl Into<String>) -> Self {
+        Self {
+            id: String::new(),
+            label: label.into(),
+            detail: String::new(),
+            source: String::new(),
+            kind: PickerRowKind::Section,
+            cells: Vec::new(),
+        }
+    }
+}
+
+/// How a cell's text sits inside its declared width.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum CellAlign {
+    #[default]
+    Left,
+    Right,
+}
+
+/// One column of a row: its own text, its own style and its own declared width.
+///
+/// Columns line up because the producer declares the width rather than leaving the column
+/// boundary to whatever the text happens to measure. A glyph cell is a one-wide cell whose
+/// text is a lane mark, a status marker or a breakpoint state.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PickerCell {
+    pub text: String,
+    pub style: Style,
+    pub width: u16,
+    pub align: CellAlign,
+}
+
+impl PickerCell {
+    #[must_use]
+    pub fn new(text: impl Into<String>, style: Style, width: u16) -> Self {
+        Self {
+            text: text.into(),
+            style,
+            width,
+            align: CellAlign::Left,
+        }
+    }
+
+    /// A one-cell glyph column.
+    #[must_use]
+    pub fn glyph(text: impl Into<String>, style: Style) -> Self {
+        Self::new(text, style, 1)
+    }
+
+    /// A column that takes whatever space is left after the fixed columns beside it, so a
+    /// narrow surface clips the flexible column rather than the fixed ones.
+    #[must_use]
+    pub fn flex(text: impl Into<String>, style: Style) -> Self {
+        Self::new(text, style, 0)
+    }
+
+    #[must_use]
+    pub fn right(text: impl Into<String>, style: Style, width: u16) -> Self {
+        Self {
+            text: text.into(),
+            style,
+            width,
+            align: CellAlign::Right,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -322,20 +447,419 @@ pub enum PickerSurfaceKind {
     Logs,
     Debug,
     Theme,
+    /// The change list: grouped sections whose entries draw status, path and provenance as
+    /// their own columns.
+    Changes,
+    /// The commit history, whose rows draw the ancestry graph, its badges and the subject as
+    /// their own columns when the graph toggle is on.
+    History,
+}
+
+/// What a preview pane draws.
+///
+/// A preview carries the structure of what it previews rather than flattened text, so a diff
+/// preview is a diff and a graph preview is a graph. `Text` is the plain-line rendering that
+/// existing surfaces use.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PickerPreviewBody {
+    Text(PickerTextPreview),
+    Diff(DiffPreview),
+}
+
+/// Plain preview lines with a starting line number and one emphasised line.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PickerTextPreview {
+    pub lines: Vec<String>,
+    pub first_line: usize,
+    pub highlight_line: Option<usize>,
+}
+
+/// How a diff line relates to the comparison.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DiffLineKind {
+    Context,
+    Added,
+    Removed,
+}
+
+/// A byte range inside a diff line's text that changed, for intra-line emphasis.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DiffSpan {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiffLine {
+    pub kind: DiffLineKind,
+    /// The line's number on the old side, absent for a line the old side does not have.
+    pub old_number: Option<u32>,
+    /// The line's number on the new side, absent for a line the new side does not have.
+    pub new_number: Option<u32>,
+    pub text: String,
+    pub spans: Vec<DiffSpan>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiffHunk {
+    /// The `@@` header, including the enclosing section where the language provides one.
+    pub header: String,
+    pub lines: Vec<DiffLine>,
+    /// Unchanged lines omitted immediately before this hunk, with the exact count.
+    pub collapsed_before: usize,
+}
+
+/// How a diff is laid out.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum DiffLayout {
+    /// One column, as a patch is written. This is the default.
+    #[default]
+    Unified,
+    /// Old and new side by side, paired line for line.
+    SideBySide,
+}
+
+/// One unified diff row, ready to paint: its text and the spans inside that text that
+/// changed, already in the text's own coordinates.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiffRow {
+    pub kind: DiffRowKind,
+    pub text: String,
+    pub spans: Vec<DiffSpan>,
+}
+
+/// One half of a side-by-side row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiffSideCell {
+    pub number: Option<u32>,
+    pub text: String,
+    pub spans: Vec<DiffSpan>,
+}
+
+/// One side-by-side row: what the old side shows and what the new side shows.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiffSideRow {
+    pub kind: DiffRowKind,
+    /// Text for a row that spans both sides, such as the provenance or a hunk header.
+    pub spanning: Option<String>,
+    pub old: Option<DiffSideCell>,
+    pub new: Option<DiffSideCell>,
+}
+
+/// A diff carried as structure: hunks of classified lines with both line numbers and the
+/// spans that changed inside a line.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiffPreview {
+    pub hunks: Vec<DiffHunk>,
+    /// The comparison this diff is relative to, e.g. `staged = HEAD -> index`.
+    pub provenance: String,
+    /// True when the patch was bounded and what is shown is a window onto a larger total.
+    pub truncated: bool,
+    /// The true number of changed lines, so a bounded view can state what it is not showing.
+    pub total_lines: usize,
+    pub layout: DiffLayout,
+}
+
+/// What a rendered diff row is, so painting and measurement read the same row set.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DiffRowKind {
+    Provenance,
+    Collapsed,
+    Header,
+    Context,
+    Added,
+    Removed,
+    Truncated,
+}
+
+impl DiffPreview {
+    /// The widest line number, so both numbers align in their own columns.
+    #[must_use]
+    pub fn number_width(&self) -> usize {
+        self.hunks
+            .iter()
+            .flat_map(|hunk| hunk.lines.iter())
+            .flat_map(|line| [line.old_number, line.new_number])
+            .flatten()
+            .map(|number| number.to_string().len())
+            .max()
+            .unwrap_or(1)
+    }
+
+    /// The row that states how many unchanged lines a hunk skipped.
+    #[must_use]
+    pub fn collapsed_text(&self, count: usize) -> String {
+        format!(
+            "{:>number_width$}   {count} unchanged lines",
+            "",
+            number_width = self.number_width()
+        )
+    }
+
+    /// The row that states a bounded patch is not the whole patch.
+    #[must_use]
+    pub fn truncated_text(&self) -> String {
+        format!(
+            "patch truncated; {} changed lines in total",
+            self.total_lines
+        )
+    }
+
+    /// The widest content this diff draws, so a surface sizes its pane from the same rows the
+    /// painter uses rather than from a re-derivation that could drift.
+    #[must_use]
+    pub fn content_width(&self, ambiguous_width: crate::config::AmbiguousWidth) -> usize {
+        let measure = |text: &str| {
+            crate::ui::geometry::text_width(text, ambiguous_width)
+        };
+        match self.layout {
+            DiffLayout::Unified => self
+                .rows()
+                .iter()
+                .take(64)
+                .map(|row| measure(&row.text))
+                .max()
+                .unwrap_or(28),
+            DiffLayout::SideBySide => {
+                let rows = self.side_by_side_rows();
+                let spanning = rows
+                    .iter()
+                    .filter_map(|row| row.spanning.as_deref())
+                    .take(64)
+                    .map(measure)
+                    .max()
+                    .unwrap_or(0);
+                let (left, right) = rows.iter().fold((0usize, 0usize), |(left, right), row| {
+                    let half = |cell: &DiffSideCell| measure(&self.side_cell_text(cell).0);
+                    (
+                        left.max(row.old.as_ref().map_or(0, half)),
+                        right.max(row.new.as_ref().map_or(0, half)),
+                    )
+                });
+                // The two halves and the divider between them share one row.
+                spanning.max(left.saturating_add(right).saturating_add(1))
+            }
+        }
+    }
+
+    /// The text of one unified diff line, with the changed spans moved into its coordinates.
+    #[must_use]
+    pub fn line_row(&self, line: &DiffLine) -> (String, Vec<DiffSpan>) {
+        let number_width = self.number_width();
+        let old = line.old_number.map_or_else(String::new, |n| n.to_string());
+        let new = line.new_number.map_or_else(String::new, |n| n.to_string());
+        let glyph = match line.kind {
+            DiffLineKind::Added => '+',
+            DiffLineKind::Removed => '-',
+            DiffLineKind::Context => ' ',
+        };
+        let prefix = format!("{old:>number_width$} {new:>number_width$} {glyph} ");
+        let offset = prefix.len();
+        let spans = line
+            .spans
+            .iter()
+            .map(|span| DiffSpan {
+                start: span.start.saturating_add(offset),
+                end: span.end.saturating_add(offset),
+            })
+            .collect();
+        (format!("{prefix}{}", line.text), spans)
+    }
+
+    /// The text of one side-by-side half, with its number column and its changed spans in the
+    /// returned text's coordinates.
+    #[must_use]
+    pub fn side_cell_text(&self, cell: &DiffSideCell) -> (String, Vec<DiffSpan>) {
+        let number = cell.number.map_or_else(String::new, |n| n.to_string());
+        let prefix = format!("{number:>width$} ", width = self.number_width());
+        let offset = prefix.len();
+        let spans = cell
+            .spans
+            .iter()
+            .map(|span| DiffSpan {
+                start: span.start.saturating_add(offset),
+                end: span.end.saturating_add(offset),
+            })
+            .collect();
+        (format!("{prefix}{}", cell.text), spans)
+    }
+
+    /// Every row this diff draws in the unified layout, in order.
+    ///
+    /// Measurement and painting both read this, so a preview's width cannot be computed from
+    /// one row set while a different one is drawn, and the spans a row carries are already in
+    /// that row's own coordinates so the painter cannot shift them wrongly.
+    #[must_use]
+    pub fn rows(&self) -> Vec<DiffRow> {
+        let mut rows = Vec::new();
+        let plain = |kind: DiffRowKind, text: String| DiffRow {
+            kind,
+            text,
+            spans: Vec::new(),
+        };
+        if !self.provenance.is_empty() {
+            rows.push(plain(DiffRowKind::Provenance, self.provenance.clone()));
+        }
+        for hunk in &self.hunks {
+            if hunk.collapsed_before > 0 {
+                rows.push(plain(
+                    DiffRowKind::Collapsed,
+                    self.collapsed_text(hunk.collapsed_before),
+                ));
+            }
+            rows.push(plain(DiffRowKind::Header, hunk.header.clone()));
+            for line in &hunk.lines {
+                let kind = match line.kind {
+                    DiffLineKind::Added => DiffRowKind::Added,
+                    DiffLineKind::Removed => DiffRowKind::Removed,
+                    DiffLineKind::Context => DiffRowKind::Context,
+                };
+                let (text, spans) = self.line_row(line);
+                rows.push(DiffRow { kind, text, spans });
+            }
+        }
+        if self.truncated {
+            rows.push(plain(DiffRowKind::Truncated, self.truncated_text()));
+        }
+        rows
+    }
+
+    /// Every row a side-by-side diff draws, paired line for line.
+    ///
+    /// The side-by-side layout reads this for both measurement and painting the same way the
+    /// unified layout reads `rows`, so neither layout can be measured from one row set while
+    /// a different one is drawn.
+    #[must_use]
+    pub fn side_by_side_rows(&self) -> Vec<DiffSideRow> {
+        let spanning = |kind: DiffRowKind, text: String| DiffSideRow {
+            kind,
+            spanning: Some(text),
+            old: None,
+            new: None,
+        };
+        let cell = |number: Option<u32>, line: &DiffLine| DiffSideCell {
+            number,
+            text: line.text.clone(),
+            spans: line.spans.clone(),
+        };
+        let mut rows = Vec::new();
+        if !self.provenance.is_empty() {
+            rows.push(spanning(DiffRowKind::Provenance, self.provenance.clone()));
+        }
+        for hunk in &self.hunks {
+            if hunk.collapsed_before > 0 {
+                rows.push(spanning(
+                    DiffRowKind::Collapsed,
+                    self.collapsed_text(hunk.collapsed_before),
+                ));
+            }
+            rows.push(spanning(DiffRowKind::Header, hunk.header.clone()));
+            let mut index = 0usize;
+            while index < hunk.lines.len() {
+                let line = &hunk.lines[index];
+                match line.kind {
+                    DiffLineKind::Context => {
+                        rows.push(DiffSideRow {
+                            kind: DiffRowKind::Context,
+                            spanning: None,
+                            old: Some(cell(line.old_number, line)),
+                            new: Some(cell(line.new_number, line)),
+                        });
+                        index += 1;
+                    }
+                    DiffLineKind::Removed => {
+                        let removed_start = index;
+                        while index < hunk.lines.len()
+                            && hunk.lines[index].kind == DiffLineKind::Removed
+                        {
+                            index += 1;
+                        }
+                        let added_start = index;
+                        while index < hunk.lines.len()
+                            && hunk.lines[index].kind == DiffLineKind::Added
+                        {
+                            index += 1;
+                        }
+                        let removed = &hunk.lines[removed_start..added_start];
+                        let added = &hunk.lines[added_start..index];
+                        // A change block pairs its removed and added lines so the two sides
+                        // stay in step; an unpaired line leaves the other side blank.
+                        for pair in 0..removed.len().max(added.len()) {
+                            rows.push(DiffSideRow {
+                                kind: DiffRowKind::Removed,
+                                spanning: None,
+                                old: removed.get(pair).map(|l| cell(l.old_number, l)),
+                                new: added.get(pair).map(|l| cell(l.new_number, l)),
+                            });
+                        }
+                    }
+                    DiffLineKind::Added => {
+                        rows.push(DiffSideRow {
+                            kind: DiffRowKind::Added,
+                            spanning: None,
+                            old: None,
+                            new: Some(cell(line.new_number, line)),
+                        });
+                        index += 1;
+                    }
+                }
+            }
+        }
+        if self.truncated {
+            rows.push(spanning(DiffRowKind::Truncated, self.truncated_text()));
+        }
+        rows
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PickerPreview {
     pub title: String,
-    pub lines: Vec<String>,
-    pub first_line: usize,
-    pub highlight_line: Option<usize>,
+    pub body: PickerPreviewBody,
+}
+
+impl PickerPreview {
+    /// A preview of plain text lines.
+    #[must_use]
+    pub fn text(title: impl Into<String>, text: PickerTextPreview) -> Self {
+        Self {
+            title: title.into(),
+            body: PickerPreviewBody::Text(text),
+        }
+    }
+
+    /// The plain text this preview carries, when it carries text rather than structure.
+    #[must_use]
+    pub fn as_text(&self) -> Option<&PickerTextPreview> {
+        match &self.body {
+            PickerPreviewBody::Text(text) => Some(text),
+            PickerPreviewBody::Diff(_) => None,
+        }
+    }
+
+    /// The plain text this preview carries, mutably, so a body can be replaced in place.
+    pub fn as_text_mut(&mut self) -> Option<&mut PickerTextPreview> {
+        match &mut self.body {
+            PickerPreviewBody::Text(text) => Some(text),
+            PickerPreviewBody::Diff(_) => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PickerUiState {
     /// Effective interaction mode and hints derived from the accepted keymaps.
     pub input_hint: String,
+    /// A surface's own footer legend, which describes the operation in front of the user
+    /// rather than the widget's mode. When present it is shown instead of `input_hint`, so a
+    /// surface can name what its keys do here.
+    pub footer: Option<String>,
+    /// How far each side of a side-by-side diff preview is scrolled, in rows.
+    ///
+    /// The two sides scroll INDEPENDENTLY: each offset moves its own side's sequence of
+    /// cells, so one side can be moved without disturbing the other. Equal offsets keep the
+    /// two sides paired.
+    pub preview_side_scroll: (usize, usize),
     pub surface: PickerSurfaceKind,
     pub title: String,
     pub query: String,
@@ -640,6 +1164,74 @@ pub struct UiLspProgress {
     pub(crate) completed_at: Option<Instant>,
 }
 
+/// What the operation bar shows. The actions are the ones VALID in the repository's real state,
+/// so a bar can never offer an action the repository would refuse.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OperationBarState {
+    pub operation: String,
+    pub phase: String,
+    pub blockers: Vec<String>,
+    pub actions: Vec<String>,
+}
+
+impl OperationBarState {
+    /// The compact indicator the statusline carries, so the state survives where the bar cannot
+    /// be drawn in full.
+    #[must_use]
+    pub fn indicator(&self) -> String {
+        format!("{} · {}", self.operation, self.phase)
+    }
+
+    /// The bar's row at the given width. Narrow widths DROP the blockers and then shorten the
+    /// phase, because the operation and the actions are what the user must not lose; if even the
+    /// actions cannot fit, the cancellation is kept and named.
+    #[must_use]
+    pub fn row(&self, width: u16) -> String {
+        let width = usize::from(width);
+        let actions = self.actions.join("/");
+        // Cancellation is the one thing that must survive every width, so it is reserved before
+        // anything else is allowed to occupy the row.
+        let tail = if self.actions.iter().any(|action| action == "abort") {
+            "esc cancel"
+        } else {
+            ""
+        };
+        let mut parts = vec![self.operation.clone(), self.phase.clone()];
+        if !self.blockers.is_empty() {
+            // Blockers are named by PATH, which is what tells the user what to go and fix.
+            parts.push(self.blockers.join(", "));
+        }
+        parts.push(actions);
+        let full = parts.join(" · ");
+        if full.chars().count() <= width {
+            return full;
+        }
+        // Drop the blockers first, then shorten the phase, and always keep the cancellation.
+        let brief = format!("{} · {}", self.operation, self.phase);
+        let tail_width = tail.chars().count();
+        let separator = usize::from(!tail.is_empty());
+        if brief.chars().count() + separator + tail_width <= width {
+            return if tail.is_empty() {
+                brief
+            } else {
+                format!("{brief} {tail}")
+            };
+        }
+        let budget = width
+            .saturating_sub(tail_width)
+            .saturating_sub(separator);
+        let mut head: String = brief.chars().take(budget).collect();
+        while head.ends_with(' ') {
+            head.pop();
+        }
+        if tail.is_empty() {
+            head
+        } else {
+            format!("{head} {tail}")
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct UiState {
     pub surface_content: crate::ui::geometry::SurfaceContentGeometry,
@@ -656,6 +1248,12 @@ pub struct UiState {
     pub diagnostics: Vec<UiDiagnostic>,
     pub expanded_diagnostic: Option<ExpandedDiagnosticState>,
     pub picker: Option<PickerUiState>,
+    /// The operation bar: present only while an operation with a lifecycle is paused, so its
+    /// presence is itself the statement that something is in progress.
+    pub operation_bar: Option<OperationBarState>,
+    /// The coordinated debug arrangement's content, when a debug session is active. Absent means
+    /// no session, which is what makes the panes appear and disappear as ONE decision.
+    pub debug_panes: Option<DebugPanesUiState>,
     pub plugin_surfaces: Vec<PluginSurfaceUiState>,
     pub private_surfaces: Vec<PrivateSurfaceUiState>,
     pub key_hints: Option<KeyHintUiState>,
@@ -834,7 +1432,17 @@ pub fn prompt_geometry_for_state(
     config: &Config,
     prompt: &PromptState,
 ) -> PromptGeometry {
-    confirmation_layout(terminal_width, terminal_height, config, prompt).geometry
+    let mut geometry =
+        confirmation_layout(terminal_width, terminal_height, config, prompt).geometry;
+    if prompt.multiline {
+        let rows = prompt.input.split('\n').count().clamp(1, 8) as u16;
+        let available = terminal_height.saturating_sub(geometry.top).max(1);
+        geometry.height = geometry
+            .height
+            .saturating_add(rows.saturating_sub(1))
+            .min(available);
+    }
+    geometry
 }
 
 #[must_use]
@@ -1003,7 +1611,23 @@ pub fn render(
             .window(window)
             .map(|window| window.rect)
     });
-    let content_bounds = if ui.dashboard || state.active_view.is_none() {
+    // ONE decision, so the regions cannot disagree: the source is whatever the inspectors leave,
+    // and the workspace is rendered at that size rather than being squeezed into it.
+    // The terminal panel is planned WITH the arrangement rather than after it: the panel's top row
+    // is what the arrangement has, so the two docks cannot collide.
+    let debug_height = ui
+        .terminal_panel
+        .as_ref()
+        .and(terminal_geometry.as_ref())
+        .map_or(height, |geometry| geometry.top);
+    let debug = ui
+        .debug_panes
+        .as_ref()
+        .filter(|_| !ui.dashboard && state.active_view.is_some())
+        .and_then(|_| debug_layout(width, debug_height));
+    let content_bounds = if let Some(layout) = debug {
+        Some(layout.source)
+    } else if ui.dashboard || state.active_view.is_none() {
         dashboard_rect.or(workspace)
     } else {
         workspace
@@ -1034,6 +1658,9 @@ pub fn render(
         width,
         height,
     );
+    if let (Some(layout), Some(panes)) = (debug, &ui.debug_panes) {
+        render_debug_panes(&mut workspace_frame, layout, panes);
+    }
     render_non_tiled_editor_windows(&mut workspace_frame, state, ui, config);
     let cloned_explorer_focused = ui.explorer_views.iter().any(|view| view.focused);
     if let (Some(rect), Some(explorer)) = (explorer_rect, &ui.explorer) {
@@ -1301,3 +1928,4 @@ pub fn render(
 
 #[cfg(test)]
 mod tests;
+

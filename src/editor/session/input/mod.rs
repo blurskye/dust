@@ -43,6 +43,12 @@ pub(super) struct InputSession {
     pending: Option<PendingKeymap>,
     hints: Option<KeyHintUiState>,
     prompt: Option<crate::ui::PromptState>,
+    /// The staging effect whose plan was refused for unsaved content. Held here rather
+    /// than on the coordinator, whose 26-field ownership census is a frozen boundary,
+    /// and because this is a prompt obligation: it is replayed when the answer is Yes.
+    pending_stage: Option<super::AppEffect>,
+    /// Whether the open commit composer is amending the tip rather than adding a child.
+    commit_amend: bool,
     picker_normal: bool,
     documentation: Option<crate::ui::DocumentationPopupState>,
     command_history: Vec<String>,
@@ -118,6 +124,8 @@ impl InputSession {
             pending: None,
             hints: None,
             prompt: None,
+            pending_stage: None,
+            commit_amend: false,
             picker_normal: false,
             documentation: None,
             command_history: Vec::new(),
@@ -153,6 +161,26 @@ impl InputSession {
             None
         }
     }
+    pub(in crate::editor::session) fn set_pending_stage(
+        &mut self,
+        effect: super::AppEffect,
+    ) {
+        self.pending_stage = Some(effect);
+    }
+    pub(in crate::editor::session) fn take_pending_stage(
+        &mut self,
+    ) -> Option<super::AppEffect> {
+        self.pending_stage.take()
+    }
+    pub(in crate::editor::session) fn set_commit_amend(&mut self, amend: bool) {
+        self.commit_amend = amend;
+    }
+    pub(in crate::editor::session) fn commit_amend(&self) -> bool {
+        self.commit_amend
+    }
+    pub(in crate::editor::session) fn clear_pending_stage(&mut self) {
+        self.pending_stage = None;
+    }
     pub(in crate::editor::session) fn capture_context(&self) -> Option<&'static str> {
         if let Some(prompt) = &self.prompt {
             return Some(match prompt.kind {
@@ -168,7 +196,10 @@ impl InputSession {
                 crate::ui::PromptKind::ExplorerDelete
                 | crate::ui::PromptKind::PluginConfirmation
                 | crate::ui::PromptKind::TerminalClose
-                | crate::ui::PromptKind::DirtyClose => "confirmation_prompt",
+                | crate::ui::PromptKind::DirtyClose
+                | crate::ui::PromptKind::GitStageUnsaved => "confirmation_prompt",
+                crate::ui::PromptKind::GitCommitMessage => "command_prompt",
+                crate::ui::PromptKind::GitDestructive => "confirmation_prompt",
             });
         }
         self.documentation

@@ -2078,6 +2078,8 @@ fn theme_geometry_is_compact_and_bounded_without_resizing_other_pickers() {
     use crate::ui::{PickerRow, PickerSurfaceKind, PickerUiState, window::WindowRect};
     let config = crate::config::load_bundled_config().config;
     let mut picker = PickerUiState {
+        preview_side_scroll: (0, 0),
+        footer: None,
         input_hint: String::new(),
         surface: PickerSurfaceKind::Theme,
         title: "Dust themes".into(),
@@ -2090,12 +2092,7 @@ fn theme_geometry_is_compact_and_bounded_without_resizing_other_pickers() {
     };
     for count in [0, 1, 7, 14, 46] {
         picker.rows = (0..count)
-            .map(|index| PickerRow {
-                id: index.to_string(),
-                label: "Theme".into(),
-                detail: String::new(),
-                source: String::new(),
-            })
+            .map(|index| PickerRow::text(index.to_string(), "Theme", String::new(), String::new()))
             .collect();
         for (width, height) in [(220, 70), (100, 30), (40, 12), (20, 8), (4, 6), (3, 5)] {
             let bounds = WindowRect {
@@ -2143,29 +2140,16 @@ fn picker_sources_share_a_right_column_and_do_not_overwrite_labels_or_borders() 
                 height: 8,
             };
             let picker = PickerUiState {
+                preview_side_scroll: (0, 0),
+                footer: None,
                 input_hint: String::new(),
                 surface,
                 title: "Choices".into(),
                 query: String::new(),
                 rows: vec![
-                    PickerRow {
-                        id: "one".into(),
-                        label: "Dust".into(),
-                        detail: "Current".into(),
-                        source: "Builtin".into(),
-                    },
-                    PickerRow {
-                        id: "two".into(),
-                        label: "Long 名称 ".repeat(12),
-                        detail: String::new(),
-                        source: "Builtin".into(),
-                    },
-                    PickerRow {
-                        id: "three".into(),
-                        label: "Other".into(),
-                        detail: String::new(),
-                        source: "插件".into(),
-                    },
+                    PickerRow::text("one", "Dust", "Current", "Builtin"),
+                    PickerRow::text("two", "Long 名称 ".repeat(12), String::new(), "Builtin"),
+                    PickerRow::text("three", "Other", String::new(), "插件"),
                 ],
                 selected: Some(1),
                 scroll: 0,
@@ -2203,25 +2187,17 @@ fn generic_picker_is_centered_filtered_presentation_with_configured_markers() {
     let ui = UiState {
         dashboard: true,
         picker: Some(super::PickerUiState {
+            preview_side_scroll: (0, 0),
+            footer: None,
             input_hint: "Insert · escape normal".into(),
             surface: super::PickerSurfaceKind::Generic,
             title: "Commands".into(),
             query: "health".into(),
-            rows: vec![super::PickerRow {
-                id: "health".into(),
-                label: "health.open".into(),
-                detail: "Show health".into(),
-                source: "core".into(),
-            }],
+            rows: vec![super::PickerRow::text("health", "health.open", "Show health", "core")],
             selected: Some(0),
             scroll: 0,
             loading: false,
-            preview: Some(super::PickerPreview {
-                title: "health.rs".into(),
-                lines: vec!["fn health() {}".into()],
-                first_line: 0,
-                highlight_line: Some(0),
-            }),
+            preview: Some(super::PickerPreview::text("health.rs", super::PickerTextPreview { lines: vec!["fn health() {}".to_string()], first_line: 0, highlight_line: Some(0) })),
         }),
         ..UiState::default()
     };
@@ -2240,27 +2216,19 @@ fn picker_stacks_preview_when_two_readable_columns_do_not_fit() {
     let ui = UiState {
         dashboard: true,
         picker: Some(super::PickerUiState {
+            preview_side_scroll: (0, 0),
+            footer: None,
             input_hint: "Insert · escape normal".into(),
             surface: super::PickerSurfaceKind::Generic,
             title: "Grep".into(),
             query: "needle".into(),
-            rows: vec![super::PickerRow {
-                id: "match".into(),
-                label: format!("src/long.rs:309:5 {long}"),
-                detail: long.clone(),
-                source: String::new(),
-            }],
+            rows: vec![super::PickerRow::text("match", format!("src/long.rs:309:5 {long}"), long.clone(), String::new())],
             selected: Some(0),
             scroll: 0,
             loading: false,
-            preview: Some(super::PickerPreview {
-                title: "src/long.rs".into(),
-                lines: (300..320)
+            preview: Some(super::PickerPreview::text("src/long.rs", super::PickerTextPreview { lines: (300..320)
                     .map(|line| format!("preview line {line} {long}"))
-                    .collect(),
-                first_line: 300,
-                highlight_line: Some(308),
-            }),
+                    .collect(), first_line: 300, highlight_line: Some(308) })),
         }),
         ..UiState::default()
     };
@@ -2977,3 +2945,892 @@ fn dashboard_and_prompt_render_at_multiple_sizes() {
         }
     }
 }
+
+#[test]
+fn the_operation_bar_renders_the_phase_at_width_and_never_loses_cancellation() {
+    use crate::ui::OperationBarState;
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    // The layout needs an open buffer, which is also the ordinary state a paused operation is
+    // seen in.
+    state.open_text(
+        crate::editor::text::TextBuffer::from_text("fn main() {}"),
+        Some(PathBuf::from("/workspace/main.rs")),
+    );
+    let loaded = crate::config::load_bundled_config();
+    let config = loaded.config.clone();
+    let dashboard = loaded.dashboard.clone();
+
+    let bar = OperationBarState {
+        operation: "merge".into(),
+        phase: "merge: 1 conflicted path(s)".into(),
+        blockers: vec!["shared.txt".into()],
+        actions: vec!["resolve".into(), "abort".into()],
+    };
+
+    // WIDE: the bar is drawn on its own row and names the operation, the phase and the actions.
+    let mut ui = UiState {
+        operation_bar: Some(bar.clone()),
+        ..UiState::default()
+    };
+    ui.editor_window_layout = Some(editor_layout(&state));
+    let frame = render(&state, &ui, &config, &dashboard, 80, 12);
+    let wide: Vec<String> = (0..12).map(|y| frame.grid.row_text(y)).collect();
+    assert!(
+        wide.iter().any(|row| row.contains("merge") && row.contains("conflicted")),
+        "the bar names the operation and its phase: {wide:?}"
+    );
+    assert!(
+        wide.iter().any(|row| row.contains("resolve") && row.contains("abort")),
+        "and only the actions valid in this state: {wide:?}"
+    );
+    assert!(
+        wide.iter().any(|row| row.contains("shared.txt")),
+        "and the blocker is named by PATH: {wide:?}"
+    );
+
+    // NARROW: the operation state SURVIVES, and the cancellation is still exposed.
+    let frame = render(&state, &ui, &config, &dashboard, 24, 12);
+    let narrow: Vec<String> = (0..12).map(|y| frame.grid.row_text(y)).collect();
+    assert!(
+        narrow.iter().any(|row| row.contains("merge")),
+        "at a narrow width the operation still shows: {narrow:?}"
+    );
+    assert!(
+        narrow.iter().any(|row| row.contains("cancel")),
+        "and a bar that cannot fit still exposes cancellation: {narrow:?}"
+    );
+    assert!(
+        !narrow.iter().any(|row| row.contains("conflicted path")),
+        "the lengthy phase is what gets shortened first: {narrow:?}"
+    );
+
+    // ABSENT: with nothing paused the bar is not drawn at all, so its presence means something.
+    let quiet = UiState {
+        operation_bar: None,
+        ..UiState::default()
+    };
+    let mut quiet = quiet;
+    quiet.editor_window_layout = Some(editor_layout(&state));
+    let frame = render(&state, &quiet, &config, &dashboard, 80, 12);
+    let none: Vec<String> = (0..12).map(|y| frame.grid.row_text(y)).collect();
+    assert!(
+        !none.iter().any(|row| row.contains("resolve") || row.contains("cancel")),
+        "with no operation paused there is no bar: {none:?}"
+    );
+}
+
+#[test]
+fn a_conflict_free_pause_still_shows_the_bar() {
+    use crate::ui::OperationBarState;
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    state.open_text(
+        crate::editor::text::TextBuffer::from_text("fn main() {}"),
+        Some(PathBuf::from("/workspace/main.rs")),
+    );
+    let loaded = crate::config::load_bundled_config();
+    let config = loaded.config.clone();
+    let dashboard = loaded.dashboard.clone();
+    // ui.md requires the bar for a paused operation even when NO textual conflict remains.
+    let mut ui = UiState {
+        operation_bar: Some(OperationBarState {
+            operation: "merge".into(),
+            phase: "merge: no textual conflicts remain".into(),
+            blockers: Vec::new(),
+            actions: vec!["continue".into(), "abort".into()],
+        }),
+        ..UiState::default()
+    };
+    ui.editor_window_layout = Some(editor_layout(&state));
+    let frame = render(&state, &ui, &config, &dashboard, 80, 12);
+    let rows: Vec<String> = (0..12).map(|y| frame.grid.row_text(y)).collect();
+    assert!(
+        rows.iter()
+            .any(|row| row.contains("no textual conflicts remain")),
+        "a conflict-free pause still shows the operation and its phase: {rows:?}"
+    );
+    assert!(
+        rows.iter().any(|row| row.contains("continue")),
+        "and offers the action that is now valid: {rows:?}"
+    );
+}
+
+#[test]
+fn the_operation_bar_takes_no_focus_and_opens_nothing_by_itself() {
+    use crate::ui::OperationBarState;
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    state.open_text(
+        crate::editor::text::TextBuffer::from_text("fn main() {}"),
+        Some(PathBuf::from("/workspace/main.rs")),
+    );
+    let loaded = crate::config::load_bundled_config();
+    let config = loaded.config.clone();
+    let dashboard = loaded.dashboard.clone();
+
+    // A frame with NO operation, for comparison.
+    let mut quiet = UiState {
+        editor_window_layout: Some(editor_layout(&state)),
+        ..UiState::default()
+    };
+    let quiet_frame = render(&state, &quiet, &config, &dashboard, 80, 12);
+    let quiet_cursor = quiet_frame.cursor;
+
+    // The same frame WITH a paused operation.
+    quiet.operation_bar = Some(OperationBarState {
+        operation: "rebase".into(),
+        phase: "rebase: no textual conflicts remain".into(),
+        blockers: Vec::new(),
+        actions: vec!["continue".into(), "abort".into()],
+    });
+    let frame = render(&state, &quiet, &config, &dashboard, 80, 12);
+
+    // NO FOCUS STEALING: the bar does not move the focus.
+    assert_eq!(
+        frame.cursor, quiet_cursor,
+        "the bar leaves the focus exactly where it was: {:?} vs {:?}",
+        frame.cursor, quiet_cursor
+    );
+    // NO AUTOMATIC EXPLANATORY CONTENT: rendering opened no prompt, popup or picker of its own.
+    assert!(
+        quiet.prompt.is_none(),
+        "rendering a paused operation opens no prompt"
+    );
+    assert!(
+        quiet.documentation_popup.is_none(),
+        "and no documentation popup"
+    );
+    assert!(quiet.picker.is_none(), "and no picker");
+
+    // The bar's own text carries NOTHING beyond the operation, phase, blockers and actions: the
+    // row is asserted exactly rather than by substring.
+    let bar_row = (0..12)
+        .map(|y| frame.grid.row_text(y))
+        .find(|row| row.contains("rebase"))
+        .expect("the bar row is drawn");
+    assert_eq!(
+        bar_row.trim_end(),
+        "rebase · rebase: no textual conflicts remain · continue/abort",
+        "the bar explains nothing unprompted: {bar_row:?}"
+    );
+}
+
+#[test]
+fn a_debug_view_survives_a_narrow_width_in_the_shared_picker() {
+    use crate::ui::PickerUiState;
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    state.open_text(
+        crate::editor::text::TextBuffer::from_text("fn main() {}"),
+        Some(PathBuf::from("/workspace/main.rs")),
+    );
+    let loaded = crate::config::load_bundled_config();
+    let config = loaded.config.clone();
+    let dashboard = loaded.dashboard.clone();
+
+    // The debug views are the shared picker, so what must survive a narrow width is the ROW.
+    let mut ui = UiState {
+        editor_window_layout: Some(editor_layout(&state)),
+        ..UiState::default()
+    };
+    ui.picker = Some(PickerUiState {
+        preview_side_scroll: (0, 0),
+        footer: None,
+        input_hint: String::new(),
+        surface: crate::ui::PickerSurfaceKind::Debug,
+        title: "Variables".into(),
+        query: String::new(),
+        rows: vec![crate::ui::render::PickerRow::text("variables:0", "count = 3", "i32", "locals")],
+        selected: Some(0),
+        scroll: 0,
+        loading: false,
+        preview: None,
+    });
+
+    // WIDE: the row is present.
+    let wide = render(&state, &ui, &config, &dashboard, 80, 12);
+    let wide_rows: Vec<String> = (0..12).map(|y| wide.grid.row_text(y)).collect();
+    assert!(
+        wide_rows.iter().any(|row| row.contains("count = 3")),
+        "the debug row is shown at a wide width: {wide_rows:?}"
+    );
+
+    // NARROW: the ROW still survives, which is what the clause asks the layout to preserve.
+    let narrow = render(&state, &ui, &config, &dashboard, 24, 12);
+    let narrow_rows: Vec<String> = (0..12).map(|y| narrow.grid.row_text(y)).collect();
+    assert!(
+        narrow_rows.iter().any(|row| row.contains("count = 3")),
+        "and the row survives a narrow width: {narrow_rows:?}"
+    );
+
+    // ABSENT: with no debug view open there is no row, so its presence means something.
+    let quiet = UiState {
+        editor_window_layout: Some(editor_layout(&state)),
+        ..UiState::default()
+    };
+    let frame = render(&state, &quiet, &config, &dashboard, 80, 12);
+    let none: Vec<String> = (0..12).map(|y| frame.grid.row_text(y)).collect();
+    assert!(
+        !none.iter().any(|row| row.contains("count = 3")),
+        "with no debug view open the row is not drawn: {none:?}"
+    );
+}
+
+#[test]
+fn the_debug_arrangement_is_coordinated_and_the_source_is_never_squeezed_out() {
+    // W-25: "sessions, threads, stack and breakpoints on one side, the dominant source in the
+    // centre, lazily loaded variables and watches on the other, and an interactive console bound
+    // to the selected frame. Narrow terminals replace panes with selectable inspectors rather
+    // than compressing the source below a readable minimum."
+    use super::debug::{
+        debug_layout, render_debug_panes, DebugLayoutMode, DebugPane, DebugPanesUiState,
+        DEBUG_SOURCE_MIN_WIDTH,
+    };
+    let panes = DebugPanesUiState {
+        selected: DebugPane::Watches,
+        target: "owned: attached to processId 4242".into(),
+        threads: vec!["main (1)".into()],
+        stack: vec!["main:1".into()],
+        breakpoints: vec!["src/main.rs:3".into()],
+        watches: vec!["count".into()],
+        console: vec!["count = 1".into()],
+    };
+
+    // WIDE: inspectors on BOTH sides, console BELOW, and the source dominant in the centre.
+    let layout = debug_layout(120, 40).expect("a wide terminal has room for the arrangement");
+    assert_eq!(layout.mode, DebugLayoutMode::Wide);
+    let left = layout.left.expect("sessions/threads/stack/breakpoints on one side");
+    let right = layout.right.expect("variables/watches on the other");
+    let console = layout.console.expect("the console below");
+    assert_eq!(left.x, 0, "the left inspector starts at the left edge");
+    assert_eq!(right.x, layout.source.x + layout.source.width, "the right inspector follows the source");
+    assert_eq!(console.y, layout.source.y + layout.source.height, "the console is BELOW the source");
+    assert_eq!((console.x, console.width), (0, 120), "the console spans the terminal");
+    assert!(
+        layout.source.width > left.width && layout.source.width > right.width,
+        "the source is the DOMINANT region: {} vs {} and {}",
+        layout.source.width,
+        left.width,
+        right.width
+    );
+    assert!(
+        layout.source.width >= DEBUG_SOURCE_MIN_WIDTH,
+        "the source keeps the readable minimum"
+    );
+
+    // And the panels are DRAWN in the regions the arrangement reserved, not over the source.
+    let mut frame = super::Frame {
+        grid: super::CellGrid::new(120, 40),
+        cursor: None,
+    };
+    render_debug_panes(&mut frame, layout, &panes);
+    assert!(frame.grid.row_text(0).contains("Debug"), "the left inspector is titled");
+    assert!(frame.grid.row_text(0).contains("Watches"), "the right inspector is titled");
+    assert!(
+        frame.grid.row_text(console.y).contains("Console"),
+        "the console is titled below the source"
+    );
+    let source_row = frame.grid.row_text(0);
+    let source_cell = source_row
+        .chars()
+        .nth(layout.source.x as usize)
+        .expect("the source region exists");
+    assert_eq!(
+        source_cell, ' ',
+        "the source region is empty of panel content: the panels cannot cover it"
+    );
+
+    // NARROW: the side panes are REPLACED, the source keeps its width, one inspector at a time.
+    let narrow = debug_layout(60, 24).expect("a narrow terminal still has a layout");
+    assert_eq!(narrow.mode, DebugLayoutMode::Narrow);
+    assert!(
+        narrow.left.is_none() && narrow.right.is_none(),
+        "panes are replaced rather than compressed in"
+    );
+    assert_eq!(narrow.source.width, 60, "the source keeps its FULL width");
+    assert!(narrow.source.width >= DEBUG_SOURCE_MIN_WIDTH);
+    let strip = narrow.console.expect("one selectable inspector remains");
+    let mut frame = super::Frame {
+        grid: super::CellGrid::new(60, 24),
+        cursor: None,
+    };
+    render_debug_panes(&mut frame, narrow, &panes);
+    // The selector may WRAP, so every row of the strip counts as the selector.
+    let selector: String = (strip.y..strip.y + strip.height)
+        .map(|y| frame.grid.row_text(y))
+        .collect::<Vec<_>>()
+        .join(" ");
+    for inspector in DebugPane::ALL {
+        assert!(
+            selector.contains(inspector.label()),
+            "narrow terminals make inspectors SELECTABLE: {} is missing from {selector:?}",
+            inspector.label()
+        );
+    }
+    assert!(
+        selector.contains("[Watches]"),
+        "the selected inspector is marked: {selector:?}"
+    );
+    assert!(
+        !frame.grid.row_text(0).contains("Debug"),
+        "no side pane is drawn in a narrow terminal"
+    );
+}
+
+#[test]
+fn the_selected_inspector_decides_the_narrow_strip_content_not_only_its_marker() {
+    // "Selectable inspectors" is only real if the CONTENT follows the selection: an assertion that
+    // the marker moved would pass even if the strip kept showing the previous inspector.
+    use super::debug::{debug_layout, render_debug_panes, DebugPane, DebugPanesUiState};
+    let layout = debug_layout(60, 24).expect("a narrow layout");
+    let strip = layout.console.expect("the narrow strip");
+    let base = DebugPanesUiState {
+        selected: DebugPane::Watches,
+        target: "owned: attached to processId 4242".into(),
+        threads: vec!["main (1)".into()],
+        stack: vec!["main:1".into()],
+        breakpoints: vec!["src/main.rs:3".into()],
+        watches: vec!["count".into()],
+        console: vec!["count = 1".into()],
+    };
+    let mut watches = super::Frame {
+        grid: super::CellGrid::new(60, 24),
+        cursor: None,
+    };
+    render_debug_panes(&mut watches, layout, &base);
+    let mut breakpoints = super::Frame {
+        grid: super::CellGrid::new(60, 24),
+        cursor: None,
+    };
+    render_debug_panes(
+        &mut breakpoints,
+        layout,
+        &DebugPanesUiState {
+            selected: DebugPane::Breakpoints,
+            ..base.clone()
+        },
+    );
+    let rows_of = |frame: &super::Frame| -> String {
+        (strip.y..strip.y + strip.height)
+            .map(|y| frame.grid.row_text(y))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let watches_rows = rows_of(&watches);
+    let breakpoint_rows = rows_of(&breakpoints);
+    assert_ne!(
+        watches_rows, breakpoint_rows,
+        "the CONTENT changes with the selection, not just the marker"
+    );
+    assert!(
+        watches_rows.contains("count"),
+        "the watches inspector shows the watch: {watches_rows:?}"
+    );
+    assert!(
+        breakpoint_rows.contains("src/main.rs:3"),
+        "the breakpoints inspector shows the breakpoint: {breakpoint_rows:?}"
+    );
+}
+
+#[test]
+fn the_debug_console_and_the_terminal_panel_are_planned_together_rather_than_colliding() {
+    // W-25 keeps the debug console and the program's terminal output as SEPARATE content; separate
+    // content also needs separate ROOM. This renders through the real path with BOTH a debug
+    // arrangement and a docked terminal panel, so the assertion can fail when the two docks are
+    // planned independently.
+    let loaded = crate::config::load_bundled_config();
+    let config = loaded.config.clone();
+    let dashboard = crate::config::DashboardConfig::default();
+    let (width, height) = (120u16, 40u16);
+    let mut state = EditorState::new(std::path::PathBuf::from("/tmp/dust-workspace"));
+    state.open_text(crate::editor::text::TextBuffer::from_text("fn main() {}\n"), None);
+    let mut ui = UiState {
+        editor_window_layout: Some(editor_layout(&state)),
+        ..UiState::default()
+    };
+    ui.debug_panes = Some(super::debug::DebugPanesUiState {
+        selected: super::debug::DebugPane::Sessions,
+        target: "owned: launched debuggee".into(),
+        threads: vec!["main (1)".into()],
+        stack: vec!["main:1".into()],
+        breakpoints: vec!["src/main.rs:3".into()],
+        watches: vec!["count".into()],
+        console: (1..=7).map(|n| format!("c{n}")).collect(),
+    });
+    ui.terminal_panel = Some(super::TerminalPanelState {
+        id: 1,
+        profile: "side".into(),
+        tabs: vec![super::TerminalTabState {
+            phase: super::TerminalPhase::Running,
+            id: 1,
+            profile: "side".into(),
+            running: true,
+            exit_code: None,
+        }],
+        mode: super::TerminalPanelMode::Input,
+        running: true,
+        exit_code: None,
+        truncated: false,
+        unsupported_sequences: 0,
+        focused: false,
+        columns: 40,
+        rows: 8,
+        cells: Vec::new(),
+        cells_start: 0,
+        cursor: None,
+        selection: None,
+        scrollback_lines: 0,
+        scroll_offset: 0,
+        requested_height: 5,
+    });
+
+    let frame = render(&state, &ui, &config, &dashboard, width, height);
+
+    // (b) The panel IS present: rendering no panel must not satisfy this test.
+    let panel_row = (0..height)
+        .find(|y| frame.grid.row_text(*y).contains("side"))
+        .expect("the terminal panel is docked and drawn");
+    // (a) The debug console is ABOVE it: the two docks do not intersect.
+    let console_row = (0..height)
+        .find(|y| frame.grid.row_text(*y).contains("Console"))
+        .expect("the debug console is drawn");
+    assert!(
+        console_row < panel_row,
+        "the console row {console_row} must be above the terminal panel row {panel_row}, not \
+         inside it"
+    );
+    for y in 0..height {
+        let row = frame.grid.row_text(y);
+        assert!(
+            !(row.contains("Console") && row.contains("side")),
+            "row {y} mixes the debug console with the program's terminal output: {row:?}"
+        );
+    }
+    // (c) The co-planning did not squeeze the source: it still keeps the readable minimum.
+    let available = super::debug::debug_layout(width, panel_row).expect("the arrangement still fits above the panel");
+    assert!(
+        available.source.width >= super::debug::DEBUG_SOURCE_MIN_WIDTH,
+        "the source keeps its minimum width above the panel: {}",
+        available.source.width
+    );
+    let console = available.console.expect("the arrangement has a console");
+    assert!(
+        console.y + console.height <= panel_row,
+        "the arrangement's console ends at or before the panel's top row"
+    );
+    // NOTHING THE CONSOLE HOLDS MAY BE HIDDEN BEHIND THE PANEL. The console body is filled to its
+    // whole height above the panel, so if the arrangement had been computed against the FULL
+    // height these lines would sit under the panel and disappear - which is exactly the defect
+    // this test exists to catch.
+    for n in 1..=7 {
+        let line = format!("c{n}");
+        assert!(
+            (0..height).any(|y| frame.grid.row_text(y).contains(&line)),
+            "console line {line} was not visible: it was covered by the terminal panel"
+        );
+    }
+    assert!(
+        frame.grid.row_text(panel_row - 1).contains("c7"),
+        "the console's LAST line sits immediately above the panel's first row: {:?}",
+        frame.grid.row_text(panel_row - 1)
+    );
+}
+
+/// The column at which `needle` starts on the row where it is drawn, and that row.
+fn drawn_at(frame: &super::Frame, needle: &str) -> Option<(u16, u16)> {
+    for y in 0..frame.grid.height() {
+        let text = frame.grid.row_text(y);
+        if let Some(byte) = text.find(needle) {
+            let column = u16::try_from(text[..byte].chars().count()).unwrap_or(u16::MAX);
+            return Some((column, y));
+        }
+    }
+    None
+}
+
+/// U-15: a row carries per-cell text, per-cell style and glyph cells, and the columns line
+/// up because each cell declares its own width rather than being concatenated into a string.
+///
+/// The assertions read the rendered grid: the text at each column position AND the style at
+/// each cell, so a rendering that drew the right characters in the wrong styles fails here.
+#[test]
+fn a_row_with_cells_draws_each_column_at_its_own_width_and_style() {
+    use crate::ui::{CellAlign, PickerCell, Style};
+
+    let state = EditorState::new(PathBuf::from("/tmp"));
+    let mut row = super::PickerRow::text("row", "", "", "");
+    row.cells = vec![
+        PickerCell::glyph("U", Style::Error),
+        PickerCell::new("src/main.rs", Style::Default, 16),
+        PickerCell::new("staged", Style::Muted, 10),
+        PickerCell {
+            text: "12".into(),
+            style: Style::Warning,
+            width: 6,
+            align: CellAlign::Right,
+        },
+    ];
+    let ui = UiState {
+        picker: Some(super::PickerUiState {
+            preview_side_scroll: (0, 0),
+            footer: None,
+            input_hint: "Insert · escape normal".into(),
+            surface: super::PickerSurfaceKind::Generic,
+            title: "Changes".into(),
+            query: String::new(),
+            rows: vec![row],
+            selected: None,
+            scroll: 0,
+            loading: false,
+            preview: None,
+        }),
+        ..UiState::default()
+    };
+    let loaded = crate::config::load_bundled_config();
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 100, 30);
+
+    let (glyph_x, y) = drawn_at(&frame, "U").expect("the glyph cell is drawn");
+    let (path_x, path_y) = drawn_at(&frame, "src/main.rs").expect("the path cell is drawn");
+    let (state_x, _) = drawn_at(&frame, "staged").expect("the provenance cell is drawn");
+    let (count_x, _) = drawn_at(&frame, "12").expect("the count cell is drawn");
+    assert_eq!(y, path_y, "every cell of one row is drawn on that row");
+
+    // Columns follow the declared widths, not the text that happens to be in them.
+    assert_eq!(path_x, glyph_x + 1, "the path column starts after the one-wide glyph");
+    assert_eq!(state_x, path_x + 16, "the provenance column follows a 16-wide path column");
+    assert_eq!(
+        count_x + 2,
+        state_x + 10 + 6,
+        "a right-aligned cell ends at its column edge"
+    );
+
+    // Each cell keeps its own style, so a status column and a lane can be coloured apart.
+    let style_at = |x: u16, y: u16| frame.grid.get(x, y).expect("a drawn cell").style;
+    assert_eq!(style_at(glyph_x, y), Style::Error, "the glyph cell carries its own style");
+    assert_eq!(style_at(path_x, y), Style::Default, "the path cell carries its own style");
+    assert_eq!(style_at(state_x, y), Style::Muted, "the provenance cell carries its own style");
+    assert_eq!(style_at(count_x, y), Style::Warning, "the count cell carries its own style");
+}
+
+/// U-15/U-16 (base form): a diff carried as structure renders its provenance, its hunk
+/// headers, the exact count of a collapsed run, and each line with both numbers and a
+/// classification glyph. Intra-line emphasis, side-by-side mode and syntax highlighting are
+/// the diff renderer's own work and are not claimed by this test.
+#[test]
+fn a_structured_diff_preview_draws_provenance_hunks_and_classified_lines() {
+    use crate::ui::{DiffHunk, DiffLine, DiffLineKind, DiffPreview, PickerPreviewBody, Style};
+
+    let line = |kind, old_number, new_number, text: &str| DiffLine {
+        kind,
+        old_number,
+        new_number,
+        text: text.to_string(),
+        spans: Vec::new(),
+    };
+    let diff = DiffPreview {
+        provenance: "staged = HEAD -> index".into(),
+        truncated: false,
+        total_lines: 0,
+        layout: crate::ui::DiffLayout::Unified,
+        hunks: vec![DiffHunk {
+            header: "@@ -31,6 +31,9 @@ impl Status {".into(),
+            collapsed_before: 4,
+            lines: vec![
+                line(DiffLineKind::Context, Some(31), Some(31), "let raw = read(path)?;"),
+                line(DiffLineKind::Added, None, Some(33), "ensure!(gen > self.gen);"),
+                line(DiffLineKind::Removed, Some(32), None, "let gen = self.gen;"),
+            ],
+        }],
+    };
+    let state = EditorState::new(PathBuf::from("/tmp"));
+    let ui = UiState {
+        picker: Some(super::PickerUiState {
+            preview_side_scroll: (0, 0),
+            footer: None,
+            input_hint: "Insert · escape normal".into(),
+            surface: super::PickerSurfaceKind::Generic,
+            title: "Changes".into(),
+            query: String::new(),
+            rows: vec![super::PickerRow::text("row", "src/main.rs", "unstaged", "git")],
+            selected: None,
+            scroll: 0,
+            loading: false,
+            preview: Some(super::PickerPreview {
+                title: "src/main.rs".into(),
+                body: PickerPreviewBody::Diff(diff),
+            }),
+        }),
+        ..UiState::default()
+    };
+    let loaded = crate::config::load_bundled_config();
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 120, 30);
+    let rendered: Vec<String> = (0..frame.grid.height()).map(|y| frame.grid.row_text(y)).collect();
+    let has = |needle: &str| {
+        rendered.iter().any(|row| row.contains(needle))
+    };
+
+    assert!(has("staged = HEAD -> index"), "the provenance names the comparison");
+    assert!(has("@@ -31,6 +31,9 @@ impl Status {"), "the hunk header is drawn");
+    assert!(has("4 unchanged lines"), "a collapsed run states its exact count");
+    // A line the other side does not have still occupies its number column, so the
+    // classification glyphs form one column instead of drifting with the text.
+    assert!(has("31 31   let raw = read(path)?;"), "a context line shows both numbers");
+    assert!(has("  33 + ensure!(gen > self.gen);"), "an added line keeps its old column blank");
+    assert!(has("32    - let gen = self.gen;"), "a removed line keeps its new column blank");
+    let (context_x, _) = drawn_at(&frame, "let raw = read(path)?;").expect("the context line");
+    let (added_x, _) = drawn_at(&frame, "ensure!(gen > self.gen);").expect("the added line");
+    let (removed_x, _) = drawn_at(&frame, "let gen = self.gen;").expect("the removed line");
+    assert_eq!(context_x, added_x, "the added line's text starts where the context line's does");
+    assert_eq!(context_x, removed_x, "the removed line's text starts where the context line's does");
+
+    // Classification is carried by style as well as by the glyph, so the two agree.
+    let (added_x, added_y) = drawn_at(&frame, "ensure!(gen > self.gen);")
+        .expect("the added line is drawn");
+    assert_eq!(frame.grid.get(added_x, added_y).expect("cell").style, Style::StatusAccent);
+    let (removed_x, removed_y) = drawn_at(&frame, "let gen = self.gen;")
+        .expect("the removed line is drawn");
+    assert_eq!(frame.grid.get(removed_x, removed_y).expect("cell").style, Style::Error);
+}
+
+/// Verbatim `git diff` output, the same real patch text the parser tests use, so these render
+/// tests exercise the whole chain: real patch text -> parser -> rendered cells.
+const RENDER_PATCH: &str = "\
+diff --git a/f.txt b/f.txt
+index 9792656..89d6f9e 100644
+--- a/f.txt
++++ b/f.txt
+@@ -1,6 +1,6 @@
+ line one
+ line two
+-line three
++line three changed
+ line four
+ line five
+ line six
+@@ -32,7 +32,7 @@ line thirty-one
+ line thirty-two
+ line thirty-three
+ line thirty-four
+-line thirty-five
++line thirty-five modified
+ line thirty-six
+ line thirty-seven
+ line thirty-eight
+";
+
+/// The same picker with the preview's two sides scrolled by their own offsets.
+fn diff_picker_scrolled(diff: super::DiffPreview, scroll: (usize, usize)) -> UiState {
+    let mut state = diff_picker(diff);
+    if let Some(picker) = state.picker.as_mut() {
+        picker.preview_side_scroll = scroll;
+    }
+    state
+}
+
+/// A picker whose preview carries a parsed diff.
+fn diff_picker(diff: super::DiffPreview) -> UiState {
+    UiState {
+        picker: Some(super::PickerUiState {
+            preview_side_scroll: (0, 0),
+            footer: None,
+            input_hint: "Insert · escape normal".into(),
+            surface: super::PickerSurfaceKind::Generic,
+            title: "Changes".into(),
+            query: String::new(),
+            rows: vec![super::PickerRow::text("row", "f.txt", "unstaged", "git")],
+            selected: None,
+            scroll: 0,
+            loading: false,
+            preview: Some(super::PickerPreview {
+                title: "f.txt".into(),
+                body: super::PickerPreviewBody::Diff(diff),
+            }),
+        }),
+        ..UiState::default()
+    }
+}
+
+/// U-16: every element the requirement names is drawn from real patch text.
+#[test]
+fn a_parsed_diff_renders_every_element_the_requirement_names() {
+    use crate::ui::parse_unified_patch;
+
+    let diff = parse_unified_patch(RENDER_PATCH, "unstaged = index -> disk");
+    let state = EditorState::new(PathBuf::from("/tmp"));
+    let ui = diff_picker(diff);
+    let loaded = crate::config::load_bundled_config();
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 120, 30);
+    let rendered: Vec<String> = (0..frame.grid.height()).map(|y| frame.grid.row_text(y)).collect();
+    let has = |needle: &str| rendered.iter().any(|row| row.contains(needle));
+
+    assert!(has("unstaged = index -> disk"), "the provenance names the comparison");
+    assert!(has("@@ -1,6 +1,6 @@"), "the first hunk header is drawn");
+    assert!(has("@@ -32,7 +32,7 @@ line thirty-one"), "the second hunk header is drawn");
+    assert!(has("25 unchanged lines"), "the collapsed run states its exact count");
+    // Both numbers are drawn in their own columns, and the side a line does not have is
+    // left blank so the classification glyphs form one column.
+    assert!(has(" 1  1   line one"), "a context line shows both of its numbers");
+    assert!(has("   3 + line three changed"), "an added line blanks its old-number column");
+    assert!(has(" 3    - line three"), "a removed line blanks its new-number column");
+    assert!(has("32 32   line thirty-two"), "the second hunk starts at the line its header names");
+    assert!(has("   35 + line thirty-five modified"), "the second hunk is numbered from its own header");
+    // Every classification glyph sits in one column.
+    let glyph_column = |needle: &str| {
+        let (x, _) = drawn_at(&frame, needle).expect("a drawn diff line");
+        x
+    };
+    assert_eq!(
+        glyph_column("line one"),
+        glyph_column("line three changed"),
+        "the context line's text and the added line's text start in the same column"
+    );
+
+}
+
+/// U-16: the changed span inside a modified line is emphasised, and the rest of that line is
+/// not, so a one-word change in a long line is visible.
+#[test]
+fn intra_line_emphasis_marks_the_changed_span_and_not_the_rest_of_the_line() {
+    use crate::ui::{parse_unified_patch, Style};
+
+    let diff = parse_unified_patch(RENDER_PATCH, "unstaged = index -> disk");
+    let state = EditorState::new(PathBuf::from("/tmp"));
+    let ui = diff_picker(diff);
+    let loaded = crate::config::load_bundled_config();
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 120, 30);
+
+    let (changed_x, y) = drawn_at(&frame, "changed").expect("the added line is drawn");
+    assert_eq!(
+        frame.grid.get(changed_x, y).expect("a drawn cell").style,
+        Style::Search,
+        "the changed word carries the emphasis style"
+    );
+    let (unchanged_x, same_y) = drawn_at(&frame, "line three changed").expect("the added line");
+    assert_eq!(same_y, y, "both probes read the same row");
+    assert_eq!(
+        frame.grid.get(unchanged_x, same_y).expect("a drawn cell").style,
+        Style::StatusAccent,
+        "the unchanged part of the added line keeps the addition style"
+    );
+}
+
+/// U-16: side by side, the old and new sides occupy their own columns with a divider between.
+#[test]
+fn side_by_side_puts_the_two_sides_in_their_own_columns() {
+    use crate::ui::{DiffLayout, parse_unified_patch, Style};
+
+    let mut diff = parse_unified_patch(RENDER_PATCH, "unstaged = index -> disk");
+    diff.layout = DiffLayout::SideBySide;
+    let state = EditorState::new(PathBuf::from("/tmp"));
+    let ui = diff_picker(diff);
+    let loaded = crate::config::load_bundled_config();
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 120, 30);
+
+    let (removed_x, y) = drawn_at(&frame, "line three").expect("the old side is drawn");
+    let (added_x, added_y) = drawn_at(&frame, "line three changed").expect("the new side is drawn");
+    assert_eq!(y, added_y, "both sides of one change are drawn on the same row");
+    assert!(
+        added_x > removed_x,
+        "the new side sits to the right of the old side: {removed_x} then {added_x}"
+    );
+    // The divider sits between the two sides.
+    let divider = (removed_x..added_x).find(|x| {
+        frame
+            .grid
+            .get(*x, y)
+            .is_some_and(|cell| cell.symbol == "│" && cell.style == Style::Border)
+    });
+    assert!(
+        divider.is_some(),
+        "a border divider separates the two sides on row {y}"
+    );
+}
+
+/// U-16: a bounded patch says what it is not showing, with the true total.
+#[test]
+fn a_bounded_patch_states_its_true_total() {
+    use crate::ui::{DiffHunk, DiffLine, DiffLineKind, DiffLayout, DiffPreview};
+
+    let diff = DiffPreview {
+        provenance: "staged = HEAD -> index".into(),
+        hunks: vec![DiffHunk {
+            header: "@@ -1 +1 @@".into(),
+            collapsed_before: 0,
+            lines: vec![DiffLine {
+                kind: DiffLineKind::Added,
+                old_number: None,
+                new_number: Some(1),
+                text: "visible".into(),
+                spans: Vec::new(),
+            }],
+        }],
+        truncated: true,
+        total_lines: 1_200,
+        layout: DiffLayout::Unified,
+    };
+    let state = EditorState::new(PathBuf::from("/tmp"));
+    let ui = diff_picker(diff);
+    let loaded = crate::config::load_bundled_config();
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 120, 30);
+    let rendered: Vec<String> = (0..frame.grid.height()).map(|y| frame.grid.row_text(y)).collect();
+    assert!(
+        rendered
+            .iter()
+            .any(|row| row.contains("1200 changed lines in total")),
+        "a bounded view states the true total: {rendered:?}"
+    );
+}
+
+/// U-16: the two halves of a side-by-side diff scroll INDEPENDENTLY — moving one side leaves
+/// the other side's content exactly where it was.
+#[test]
+fn side_by_side_halves_scroll_independently() {
+    use crate::ui::{DiffLayout, parse_unified_patch};
+
+    // Four changes, so each side has its own sequence to scroll through.
+    let patch = "@@ -1,4 +1,4 @@\n-old1\n+new1\n-old2\n+new2\n-old3\n+new3\n-old4\n+new4\n";
+    let mut diff = parse_unified_patch(patch, "index -> disk");
+    diff.layout = DiffLayout::SideBySide;
+    let state = EditorState::new(PathBuf::from("/tmp"));
+    let loaded = crate::config::load_bundled_config();
+    let render_at = |scroll: (usize, usize)| {
+        let ui = diff_picker_scrolled(diff.clone(), scroll);
+        let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 120, 30);
+        (0..frame.grid.height())
+            .map(|y| frame.grid.row_text(y))
+            .collect::<Vec<String>>()
+            .join("\n")
+    };
+
+    let at_top = render_at((0, 0));
+    assert!(at_top.contains("old1"), "the old side starts at its first line");
+    assert!(at_top.contains("new1"), "the new side starts at its first line");
+
+    // Move ONLY the new side down two rows.
+    let new_scrolled = render_at((0, 2));
+    assert!(
+        new_scrolled.contains("old1"),
+        "the old side did not move when the new side scrolled: {new_scrolled}"
+    );
+    assert!(
+        !new_scrolled.contains("new1"),
+        "the new side moved: {new_scrolled}"
+    );
+    assert!(
+        new_scrolled.contains("new3"),
+        "the new side now starts two rows further down: {new_scrolled}"
+    );
+
+    // And the other direction: move ONLY the old side, which must leave the new side alone.
+    let old_scrolled = render_at((2, 0));
+    assert!(
+        !old_scrolled.contains("old1"),
+        "the old side moved: {old_scrolled}"
+    );
+    assert!(
+        old_scrolled.contains("old3"),
+        "the old side now starts two rows further down: {old_scrolled}"
+    );
+    assert!(
+        old_scrolled.contains("new1"),
+        "the new side did not move when the old side scrolled: {old_scrolled}"
+    );
+}
+

@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use super::{
     mutation::{GitIndexFingerprint, git_index_fingerprint, worktree_hash},
-    status::GitRepositoryId,
+    status::{GitChangeSource, GitRepositoryId},
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -123,6 +123,21 @@ pub struct GitHunkSnapshot {
     pub index_fingerprint: GitIndexFingerprint,
     pub worktree_sha256: Option<[u8; 32]>,
     pub hunks: Vec<GitHunk>,
+}
+impl GitHunkSnapshot {
+    /// State what this snapshot is relative to. Staged is HEAD to index; unstaged is index to
+    /// disk; a snapshot computed from editor bytes is the unsaved source at that exact
+    /// document revision. A caller never has to infer this from the layer alone.
+    #[must_use]
+    pub fn source(&self) -> GitChangeSource {
+        match (self.layer, self.buffer_revision) {
+            (GitDiffLayer::Staged, _) => GitChangeSource::Staged,
+            (GitDiffLayer::Unstaged, Some(document_revision)) => {
+                GitChangeSource::Unsaved { document_revision }
+            }
+            (GitDiffLayer::Unstaged, None) => GitChangeSource::Unstaged,
+        }
+    }
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitHunkBufferInput {

@@ -1118,3 +1118,143 @@ fn confirmation_keys_and_hints_follow_accepted_remaps() {
     app.handle_configured_key("ctrl-c".parse().unwrap());
     assert!(app.input.prompt().is_none());
 }
+
+/// Compile the bundled keymaps exactly as application construction does.
+fn bundled_keymaps(app: &InteractiveApplication) -> crate::editor::session::ResolvedKeymaps {
+    let (keymaps, diagnostic) = compile_keymaps(
+        &app.commands,
+        &crate::config::load_bundled_config().keymaps,
+        &app.configuration.settings().input.keymaps,
+    );
+    assert!(diagnostic.is_none(), "{diagnostic:?}");
+    keymaps
+}
+
+/// Drive a documented key sequence through the same resolution path the dispatcher uses.
+///
+/// `<leader>` expands to the bundled leader and every key is fed as a real key event, so this
+/// proves what a keypress does rather than comparing strings in a configuration file.
+fn documented_key_reaches(
+    keymaps: &crate::editor::session::ResolvedKeymaps,
+    keys: &str,
+) -> Option<String> {
+    let mut sequence = crate::editor::input::KeymapSequence::default();
+    for token in keys.replace("<leader>", "space").split_whitespace() {
+        let character = match token {
+            "space" => ' ',
+            other => other.chars().next().expect("single-character key token"),
+        };
+        match keymaps.resolve(&mut sequence, "editor.normal", KeyEvent::character(character)) {
+            MappingResolution::Pending => {}
+            MappingResolution::Ready(invocation)
+            | MappingResolution::ReadyAndReplay(invocation, _) => {
+                return Some(invocation.id.as_str().to_owned())
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// E-09: a key the documented experience names must reach the command that surface requires.
+#[test]
+fn the_documented_git_and_debugger_keys_each_reach_their_command() {
+    let app = app();
+    let keymaps = bundled_keymaps(&app);
+    let cases = [
+        ("<leader> g g", "workspace.git.status.open"),
+        ("<leader> g c", "workspace.git.commit"),
+        ("<leader> g f", "workspace.git.remote.fetch"),
+        ("<leader> g U", "workspace.git.remote.update"),
+        ("<leader> g p", "workspace.git.remote.push"),
+        ("<leader> g x", "workspace.git.conflicts.open"),
+        ("<leader> g b", "workspace.git.branches.open"),
+        ("<leader> g w", "workspace.git.worktrees.open"),
+        ("<leader> g h p", "workspace.git.hunk.preview"),
+        ("<leader> d s", "dap.session.start"),
+        ("<leader> d c", "dap.session.continue"),
+        ("<leader> d n", "dap.session.next"),
+        ("<leader> d i", "dap.session.step_in"),
+        ("<leader> d o", "dap.session.step_out"),
+        ("<leader> d p", "dap.session.pause"),
+        ("<leader> d q", "dap.session.stop"),
+        ("<leader> d R", "dap.session.restart"),
+        ("<leader> d b", "dap.breakpoint.toggle"),
+        ("<leader> d B", "dap.breakpoint.configure"),
+        ("<leader> d l", "dap.breakpoints.states"),
+        ("<leader> d D", "dap.detach"),
+        ("<leader> d C", "dap.console"),
+    ];
+    for (keys, command) in cases {
+        assert_eq!(
+            documented_key_reaches(&keymaps, keys).as_deref(),
+            Some(command),
+            "{keys} must reach {command} through the real input path"
+        );
+    }
+    // `Space d w` names `dap.watch.add`, which requires an expression the user must type. No
+    // keymap entry can supply it and no prompting command exists, so the document records it
+    // as `no prompt command`. Binding it to something else would be a lie, and binding it to
+    // this command fails application construction outright.
+    assert_eq!(
+        documented_key_reaches(&keymaps, "<leader> d w"),
+        None,
+        "`Space d w` cannot reach an argument-requiring command from a bare key"
+    );
+}
+
+/// E-09: the document is the source of truth for which keys exist, so a key added to its
+/// prefix table without a binding fails here instead of shipping as a dead prefix entry, and
+/// a key it marks as having no command must not be bound to something else.
+#[test]
+fn every_key_the_experience_document_names_is_bound_or_marked_as_having_no_command() {
+    let app = app();
+    let keymaps = bundled_keymaps(&app);
+    let document = fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/docs/experience.md"
+    ))
+    .expect("the experience document is part of the checkout");
+    // Scope to the prefix table itself: section 2.2's leader table also names `Space g g`,
+    // and a row there says what the key opens rather than whether it is bound.
+    let table = document
+        .split("#### The Git and debugger prefixes")
+        .nth(1)
+        .and_then(|rest| rest.split("\nThe debug console is opened with").next())
+        .expect("the document's Git and debugger prefix table");
+
+    let mut checked = 0usize;
+    for line in table.lines() {
+        let Some(first_cell) = line.strip_prefix("| `") else {
+            continue;
+        };
+        let Some((named, _)) = first_cell.split_once("` |") else {
+            continue;
+        };
+        if !named.starts_with("Space g ") && !named.starts_with("Space d ") {
+            continue;
+        }
+        let keys = named.replacen("Space ", "<leader> ", 1);
+        let status = line.rsplit('|').nth(1).unwrap_or_default().trim();
+        checked += 1;
+        let reached = documented_key_reaches(&keymaps, &keys);
+        // The document's own status cell is the claim, and both directions are checked: a row
+        // that says `bound` must resolve, and a row that says anything else must not.
+        if status.contains("bound") {
+            assert!(
+                reached.is_some(),
+                "{keys} is marked `bound` by the document but reaches nothing; \
+                 the keymap must bind it or the document must record why it cannot be"
+            );
+        } else {
+            assert_eq!(
+                reached, None,
+                "{keys} is marked `{status}` by the document but resolves to {reached:?}"
+            );
+        }
+    }
+    assert!(
+        checked >= 26,
+        "the document's prefix table should name at least 26 keys, found {checked}"
+    );
+}

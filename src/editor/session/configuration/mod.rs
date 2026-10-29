@@ -26,6 +26,10 @@ pub use model::{
     ConfigurationSources, KeymapInspection, KeymapOperation, ResolvedConfiguration,
     ResolvedKeyGroup, ResolvedKeymaps,
 };
+/// The enum name is needed by tests and by prose; production reaches it through the method it
+/// returns from, so the alias is gated rather than left to warn as an unused import.
+#[cfg(test)]
+pub(in crate::editor::session) use model::EffectiveBinding;
 mod resolve;
 pub use resolve::validate_loaded_configuration;
 pub(in crate::editor::session) use resolve::{

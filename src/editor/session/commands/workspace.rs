@@ -166,6 +166,11 @@ pub(super) fn register_commands(
             AppEffect::PickerMove(-1),
         ),
         (
+            "picker.results",
+            "Send these results to the shared Results surface",
+            AppEffect::PickerResults,
+        ),
+        (
             "picker.accept",
             "Accept picker item",
             AppEffect::PickerAccept,

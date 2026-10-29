@@ -160,6 +160,79 @@ impl InteractiveApplication {
         self.ui.notification = current.map(|(_, message)| message.to_owned());
         self.ui.notification_error = current.is_some_and(|(error, _)| error);
     }
+    /// Project the operation bar from the repository's REAL state. It is projected whenever the
+    /// status is refreshed rather than per frame, and it is cleared when nothing is paused, so
+    /// its presence always means an operation is genuinely in progress.
+    /// Project the debug panes from the session's OWN state: what it is attached to or running,
+    /// the breakpoints it holds, its watches and its console. Absent when there is no session, so
+    /// the whole arrangement appears and disappears as ONE decision.
+    pub(in crate::editor::session) fn project_debug_panes(&mut self) {
+        let Some(target) = self.debugger_session.target() else {
+            self.ui.debug_panes = None;
+            return;
+        };
+        let selected = self
+            .ui
+            .debug_panes
+            .as_ref()
+            .map_or(crate::ui::DebugPane::Sessions, |panes| panes.selected);
+        let what = match target.request {
+            crate::config::DebugRequestKind::Attach => match &target.target {
+                Some(name) => format!("attached to {name}"),
+                None => "attached".to_owned(),
+            },
+            crate::config::DebugRequestKind::Launch => match &target.program {
+                Some(program) => format!("launched {}", program.display()),
+                None => "launched".to_owned(),
+            },
+        };
+        let adapter = target.adapter.clone();
+        let breakpoints = self
+            .debugger_session
+            .persisted_breakpoints()
+            .iter()
+            .map(|b| format!("{}:{}", b.path.display(), b.line))
+            .collect();
+        let threads = self.debugger_session.threads().to_vec();
+        let stack = self.debugger_session.stack().to_vec();
+        let watches = self.debugger_session.watches().to_vec();
+        let console = self
+            .debugger_session
+            .console()
+            .map(|entry| entry.text.clone())
+            .collect();
+        self.ui.debug_panes = Some(crate::ui::DebugPanesUiState {
+            selected,
+            target: format!("{adapter}: {what}"),
+            threads,
+            stack,
+            breakpoints,
+            watches,
+            console,
+        });
+    }
+    pub(in crate::editor::session) fn project_operation_bar(&mut self) {
+        let Some(status) = self.git.status() else {
+            self.ui.operation_bar = None;
+            return;
+        };
+        let repository = status.repository.clone();
+        let state = match crate::workspace::git::read_conflict_state(&repository) {
+            Ok(state) => state,
+            Err(_) => {
+                self.ui.operation_bar = None;
+                return;
+            }
+        };
+        self.ui.operation_bar = crate::workspace::git::GitOperationBar::of(&state).map(|bar| {
+            crate::ui::OperationBarState {
+                operation: bar.operation,
+                phase: bar.phase,
+                blockers: bar.blockers,
+                actions: bar.actions.iter().map(|a| a.name().to_owned()).collect(),
+            }
+        });
+    }
     pub(super) fn update_notification_timer(&mut self) {
         if self.notices.tick(self.clock.monotonic()) {
             self.project_notice();
@@ -969,6 +1042,8 @@ impl InteractiveApplication {
                 ));
                 (
                     PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                         id,
                         label: file.canonical_path.display().to_string(),
                         detail: self.message(
@@ -1003,6 +1078,8 @@ impl InteractiveApplication {
                     };
                     (
                         PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
                             id: PickerItemId(format!("resource-intent:{index}")),
                             label: intent.source.display().to_string(),
                             detail,

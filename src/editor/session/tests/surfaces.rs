@@ -60,6 +60,8 @@ fn dashboard_and_picker_are_stable_graph_overlays_with_projected_geometry() {
         .open_text(crate::editor::text::TextBuffer::from_text("editor"), None);
     app.set_dashboard_visibility(false);
     app.ui.picker = Some(crate::ui::PickerUiState {
+        preview_side_scroll: (0, 0),
+        footer: None,
         input_hint: String::new(),
         surface: crate::ui::PickerSurfaceKind::Generic,
         title: "Search".into(),
@@ -4730,4 +4732,306 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
         3
     );
     assert_eq!(app.persistence.recent_files()[0], live);
+}
+
+
+#[test]
+fn hiding_an_inspector_sends_no_disconnect_and_leaves_the_session_running() {
+    // W-25 acceptance, verbatim: "proof that hiding inspectors does not terminate a session".
+    // The stronger half is MEASURED: the adapter itself records every request it receives, so the
+    // test can show that hiding sent no disconnect and no terminate, which "still looks alive"
+    // could never distinguish.
+    use super::driver::TestSession;
+    let files = tempfile::tempdir().unwrap();
+    let adapter = files.path().join("logging-adapter.py");
+    // The adapter runs with the WORKSPACE as its working directory, so the log path is written
+    // into the script as an absolute path rather than left relative.
+    let log_path = files.path().join("requests.log");
+    let source = crate::debugger::TEST_LOGGING_ADAPTER.replace(
+        "'requests.log'",
+        &serde_json::to_string(&log_path).unwrap(),
+    );
+    std::fs::write(&adapter, source).unwrap();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.debug.adapters.insert(
+        "logging".into(),
+        crate::config::DebugAdapterConfig {
+            program: crate::debugger::test_python(),
+            arguments: vec!["-u".into(), adapter.display().to_string()],
+            environment: Default::default(),
+        },
+    );
+    loaded.config.debug.sessions.insert(
+        "logging".into(),
+        crate::config::DebugSessionConfig {
+            adapter: "logging".into(),
+            request: crate::config::DebugRequestKind::Launch,
+            cwd: None,
+            program: Some("debuggee".into()),
+            run_in_terminal_profile: None,
+            arguments: Default::default(),
+            path_maps: Default::default(),
+        },
+    );
+    let mut driver = TestSession::new(loaded);
+    driver.new_buffer();
+    driver.debug_program_fixture();
+    driver.trust_owned_terminal_fixture();
+
+    // The start sequence the passing debugger test uses: start, then PUMP until the adapter's
+    // answer arrives as a picker.
+    driver.debug_start("logging");
+    let deadline = Instant::now() + Duration::from_secs(6);
+    loop {
+        driver.pump_debug();
+        if driver.projection().picker.is_some() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the logging session never produced a view: {:?}",
+            driver.projection().notification
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(
+        driver.application().debugger_session.is_running(),
+        "the session is running before hiding"
+    );
+
+    // HIDE: close the surface, which runs the session's own dismiss_choices path.
+    driver.application_mut().close_picker();
+    while driver.projection().picker.is_some() {
+        driver.pump_debug();
+        assert!(Instant::now() < deadline, "the inspector never closed");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+
+    // The session SURVIVED hiding.
+    assert!(
+        driver.application().debugger_session.is_running(),
+        "hiding an inspector must not terminate the session"
+    );
+    // AND HIDING ASKED NOTHING TO STOP: a count of ZERO read from the adapter's own log.
+    driver.pump_debug();
+    std::thread::sleep(Duration::from_millis(20));
+    driver.pump_debug();
+    let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+    assert!(
+        log.contains("launch"),
+        "the adapter really ran and logged its requests: {log:?}"
+    );
+    let stopping: Vec<&str> = log
+        .lines()
+        .filter(|line| {
+            line.starts_with("disconnect") || line.starts_with("terminate")
+        })
+        .collect();
+    assert!(
+        stopping.is_empty(),
+        "hiding must send NO disconnect and NO terminate, but the adapter received {stopping:?}"
+    );
+}
+
+#[test]
+fn a_started_session_makes_the_debug_arrangement_appear_with_its_own_identity() {
+    // A layout that renders correctly when handed a state is not implemented until something shows
+    // it APPEARS when its trigger happens. This starts a real session through the app driver and
+    // asserts the projected panes are present and carry the session's OWN identity.
+    use super::driver::TestSession;
+    let files = tempfile::tempdir().unwrap();
+    let adapter = files.path().join("logging-adapter.py");
+    let log_path = files.path().join("requests.log");
+    let source = crate::debugger::TEST_LOGGING_ADAPTER.replace(
+        "'requests.log'",
+        &serde_json::to_string(&log_path).unwrap(),
+    );
+    std::fs::write(&adapter, source).unwrap();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.debug.adapters.insert(
+        "logging".into(),
+        crate::config::DebugAdapterConfig {
+            program: crate::debugger::test_python(),
+            arguments: vec!["-u".into(), adapter.display().to_string()],
+            environment: Default::default(),
+        },
+    );
+    loaded.config.debug.sessions.insert(
+        "logging".into(),
+        crate::config::DebugSessionConfig {
+            adapter: "logging".into(),
+            request: crate::config::DebugRequestKind::Launch,
+            cwd: None,
+            program: Some("debuggee".into()),
+            run_in_terminal_profile: None,
+            arguments: Default::default(),
+            path_maps: Default::default(),
+        },
+    );
+    let mut driver = TestSession::new(loaded);
+    driver.new_buffer();
+    driver.debug_program_fixture();
+    driver.trust_owned_terminal_fixture();
+
+    assert!(
+        driver.application().ui.debug_panes.is_none(),
+        "no session, no arrangement: the panes are absent before anything starts"
+    );
+
+    driver.debug_start("logging");
+    let deadline = Instant::now() + Duration::from_secs(6);
+    loop {
+        driver.pump_debug();
+        if driver.projection().picker.is_some() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the logging session never produced a view: {:?}",
+            driver.projection().notification
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+
+    // (1) THE ARRANGEMENT APPEARED, projected on the debug pump, naming the session's OWN identity.
+    let panes = driver
+        .application()
+        .ui
+        .debug_panes
+        .as_ref()
+        .expect("starting a session makes the arrangement appear");
+    assert!(
+        panes.target.contains("logging"),
+        "the panes name the adapter that is running: {}",
+        panes.target
+    );
+    assert!(
+        panes.target.contains("launched"),
+        "a LAUNCH is named as a launch, not as an attachment: {}",
+        panes.target
+    );
+
+    // (2) THE SELECTION IS SWITCHABLE by the command, which is what "selectable inspectors" means.
+    let before = panes.selected;
+    driver.application_mut().invoke_mapped(
+        crate::editor::CommandInvocation::new(
+            "dap.inspector.next",
+            crate::editor::InvocationSource::Test,
+        )
+        .expect("static command"),
+    );
+    let after = driver
+        .application()
+        .ui
+        .debug_panes
+        .as_ref()
+        .expect("the arrangement survives the switch")
+        .selected;
+    assert_ne!(before, after, "the command selects the NEXT inspector");
+
+    // THE LAUNCH COUNTER-CASE: this session LAUNCHED, so its status must not claim attachment.
+    driver.application_mut().invoke_mapped(
+        crate::editor::CommandInvocation::new(
+            "dap.session.status",
+            crate::editor::InvocationSource::Test,
+        )
+        .expect("static command"),
+    );
+    let status = driver
+        .application()
+        .ui
+        .notification
+        .clone()
+        .unwrap_or_default();
+    assert!(
+        status.contains("debug adapter: logging"),
+        "the launch status names the adapter: {status:?}"
+    );
+    assert!(
+        !status.contains("attached to"),
+        "a LAUNCH must not claim to be attached to anything: {status:?}"
+    );
+}
+
+#[test]
+fn an_attached_session_names_the_target_it_was_given_in_its_status() {
+    // W-24's residual: the attach status was wired but unasserted. The launch counter-case lives
+    // in `a_started_session_makes_the_debug_arrangement_appear_with_its_own_identity`, so a single
+    // branch cannot satisfy both.
+    use super::driver::TestSession;
+    let files = tempfile::tempdir().unwrap();
+    let adapter = files.path().join("logging-adapter.py");
+    let log_path = files.path().join("requests.log");
+    let source = crate::debugger::TEST_LOGGING_ADAPTER.replace(
+        "'requests.log'",
+        &serde_json::to_string(&log_path).unwrap(),
+    );
+    std::fs::write(&adapter, source).unwrap();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.debug.adapters.insert(
+        "logging".into(),
+        crate::config::DebugAdapterConfig {
+            program: crate::debugger::test_python(),
+            arguments: vec!["-u".into(), adapter.display().to_string()],
+            environment: Default::default(),
+        },
+    );
+    loaded.config.debug.sessions.insert(
+        "attached".into(),
+        crate::config::DebugSessionConfig {
+            adapter: "logging".into(),
+            request: crate::config::DebugRequestKind::Attach,
+            cwd: None,
+            program: None,
+            run_in_terminal_profile: None,
+            arguments: std::collections::BTreeMap::from([(
+                "processId".into(),
+                serde_json::json!(4242),
+            )]),
+            path_maps: Default::default(),
+        },
+    );
+    let mut driver = TestSession::new(loaded);
+    driver.new_buffer();
+    driver.trust_owned_terminal_fixture();
+    driver.debug_start("attached");
+    let deadline = Instant::now() + Duration::from_secs(6);
+    loop {
+        driver.pump_debug();
+        if driver.projection().picker.is_some() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the attach session never produced a view: {:?}",
+            driver.projection().notification
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+
+    driver.application_mut().invoke_mapped(
+        crate::editor::CommandInvocation::new(
+            "dap.session.status",
+            crate::editor::InvocationSource::Test,
+        )
+        .expect("static command"),
+    );
+    let status = driver
+        .application()
+        .ui
+        .notification
+        .clone()
+        .unwrap_or_default();
+    assert!(
+        status.contains("attached to processId 4242"),
+        "an attached session names the TARGET it was given: {status:?}"
+    );
+    assert!(
+        status.contains("debug adapter: logging"),
+        "and it still names the adapter: {status:?}"
+    );
+    assert!(
+        !status.contains("launched"),
+        "an attach must not be described as a program the editor launched: {status:?}"
+    );
 }

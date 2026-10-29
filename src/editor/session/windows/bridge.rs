@@ -800,6 +800,8 @@ impl NativeSurfaceBridge {
                 PickerSurfaceKind::Logs => "builtin.logs",
                 PickerSurfaceKind::Debug => "builtin.debug",
                 PickerSurfaceKind::Theme => "builtin.theme",
+                PickerSurfaceKind::Changes => "builtin.changes",
+                PickerSurfaceKind::History => "builtin.history",
             };
             let placement = self
                 .picker_placements
