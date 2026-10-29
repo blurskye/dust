@@ -1,4 +1,6 @@
 mod branches;
+mod browse;
+pub use browse::git_browse_url;
 mod conflict;
 pub use conflict::{
     GitConflictChoice, GitConflictEntry, GitConflictError, GitConflictResolveError,

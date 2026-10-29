@@ -1881,6 +1881,11 @@ pub fn render(
         } else if let Some(rect) =
             super::geometry::notification_geometry(config, width, workspace_height)
         {
+            // The message owns its row, like Vim's message line, so no editor text shows
+            // around it.
+            for x in 0..width {
+                frame.grid.set_cell(x, rect.y, " ", Style::Default);
+            }
             frame.grid.put_text_clipped(
                 rect.x,
                 rect.y,

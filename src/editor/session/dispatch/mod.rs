@@ -125,6 +125,8 @@ struct InteractiveApplication {
     documents: DocumentSession,
     search: super::search::SearchSession,
     should_quit: bool,
+    /// When the last key arrived, so automatic prompts wait until typing pauses.
+    last_key_at: Option<Instant>,
     window_session: WindowSession,
     tooling: super::tooling::ToolingSession,
     language: super::lsp::LspSession,

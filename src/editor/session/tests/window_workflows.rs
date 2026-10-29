@@ -448,7 +448,8 @@ fn wide_notice_text_stays_inside_its_configured_cell_rectangle() {
     let rect = crate::ui::geometry::notification_geometry(&policy, 40, 12).unwrap();
     for y in 0..12 {
         for x in 0..40 {
-            if y != rect.y || x < rect.x || x >= rect.x + rect.width {
+            // The notice owns its whole row; everything else is untouched.
+            if y != rect.y {
                 assert_eq!(
                     before.grid.get(x, y),
                     after.grid.get(x, y),

@@ -137,6 +137,9 @@ impl InteractiveApplication {
     }
 
     pub(super) fn handle_event(&mut self, event: UiEvent) {
+        if matches!(event, UiEvent::Key { .. }) {
+            self.last_key_at = Some(Instant::now());
+        }
         match event {
             UiEvent::Resize(width, height) => {
                 self.window_session.observe_size((width, height));

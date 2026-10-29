@@ -6593,6 +6593,9 @@ impl InteractiveApplication {
             .collect::<Vec<_>>();
         let title = format!("Git worktrees · {}", list.worktrees.len());
         self.install_picker(title, items);
+        self.search
+            .set_picker_footer("Enter Switch · Esc Close".to_owned());
+        self.sync_picker_ui();
     }
     pub(in crate::editor::session) fn unstage_selected_git_hunk(&mut self) {
         if let Err(error) = self.git.start_plan(
@@ -6969,6 +6972,56 @@ impl InteractiveApplication {
         );
         self.search.restore_picker_view(previous, false);
         self.sync_picker_ui();
+    }
+
+    /// Open the current line on the forge, or copy its URL, as LazyVim's `<leader>gB`/`gY`.
+    fn browse_git_line(&mut self, copy: bool) {
+        let file = self.state.active_view.and_then(|view| {
+            let view = &self.state.views[view];
+            let buffer = &self.state.buffers[view.buffer];
+            let line = buffer.text.byte_to_line(view.cursor).map_or(1, |line| line + 1);
+            buffer.path.clone().map(|path| (path, line))
+        });
+        let Some((path, line)) = file else {
+            self.show_error("this needs a file buffer");
+            return;
+        };
+        let url = match crate::workspace::git::git_browse_url(&path, line) {
+            Ok(url) => url,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        if copy {
+            self.state.registers.set(
+                '+',
+                RegisterValue {
+                    text: url.clone(),
+                    shape: RegisterShape::Character,
+                },
+                self.state.policy.registers_enabled,
+                true,
+            );
+            self.notify_message(format!("copied {url}"), false);
+            return;
+        }
+        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        match std::process::Command::new(opener)
+            .arg(&url)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            Ok(mut child) => {
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+                self.notify_message(format!("opened {url}"), false);
+            }
+            Err(error) => self.show_error(format!("{opener}: {error}")),
+        }
     }
 
     /// The two-character index/worktree code a change row shows. Unmerged and untracked have
@@ -8239,6 +8292,7 @@ impl InteractiveApplication {
                 }
             }
             Some(PickerPayload::WorkspaceRoot(root)) => self.activate_workspace_root(root),
+            Some(PickerPayload::GitWorktree { path, .. }) => self.switch_to_worktree(path),
             Some(PickerPayload::Terminal(key)) => {
                 if let Some(id) = self.terminal_session.resolve(&key) {
                     self.terminal_session.select(id);
@@ -8355,7 +8409,7 @@ impl InteractiveApplication {
         } else {
             self.state.workspace_root.join(path)
         };
-        match self.workspace.add_root_request(requested_path) {
+        match self.workspace.add_root_request(requested_path, None) {
             Ok(()) => self.notify_message(self.message("workspace_root_loading", &[]), false),
             Err(e) => self.show_workspace_failure(e),
         }
@@ -9015,9 +9069,9 @@ impl InteractiveApplication {
         let title = format!("Help · {}", spec.id.as_str());
         self.install_help_page(title, items);
     }
-    /// Open the selected worktree as a workspace root. This reuses the ordinary root flow, so
-    /// the worktree gets its own trust decision, discovery and per-root resource scoping
-    /// instead of borrowing the main checkout's.
+    /// Move the editor into the selected worktree: it replaces the current root, so the file
+    /// tree, pickers, LSP servers and git signs follow. The worktree gets its own trust
+    /// decision. Files with unsaved changes in the current root block the switch.
     pub(in crate::editor::session) fn open_git_worktree(&mut self) {
         let Some(crate::editor::session::search::PickerPayload::GitWorktree { path, .. }) =
             self.search.selected_picker_payload().cloned()
@@ -9025,29 +9079,86 @@ impl InteractiveApplication {
             self.show_error("select a worktree first");
             return;
         };
-        self.add_workspace_root(path);
+        self.switch_to_worktree(path);
     }
-    /// Close the selected worktree as a workspace root WITHOUT removing the worktree: the
-    /// directory, its branch and its administrative data stay exactly as they were.
-    pub(in crate::editor::session) fn close_git_worktree(&mut self) {
-        let Some(crate::editor::session::search::PickerPayload::GitWorktree { path, .. }) =
-            self.search.selected_picker_payload().cloned()
-        else {
-            self.show_error("select a worktree first");
-            return;
-        };
-        let root = self.workspace.roots().iter().find(|root| {
-            let canonical = &root.identity.canonical_path;
-            canonical == &path
-                || path.starts_with(canonical)
-                || canonical.starts_with(&path)
+
+    fn switch_to_worktree(&mut self, path: PathBuf) {
+        let current = self.workspace.active_root().and_then(|id| {
+            self.workspace
+                .roots()
+                .iter()
+                .find(|root| root.id == id)
+                .map(|root| (id, root.identity.canonical_path.clone()))
         });
-        let Some(root) = root else {
-            self.show_error("that worktree is not open as a workspace root");
+        let Some((id, current_path)) = current else {
+            self.add_workspace_root(path);
             return;
         };
-        let id = root.id;
-        self.remove_workspace_root(id);
+        let target = path.canonicalize().unwrap_or_else(|_| path.clone());
+        if target == current_path {
+            self.notify_message(format!("already in {}", target.display()), false);
+            return;
+        }
+        let unsaved = self
+            .state
+            .buffers
+            .values()
+            .filter(|buffer| {
+                buffer.dirty
+                    && buffer.path.as_ref().is_some_and(|file| {
+                        file.starts_with(&current_path) && !file.starts_with(&target)
+                    })
+            })
+            .count();
+        if unsaved > 0 {
+            self.show_error(format!(
+                "{unsaved} file(s) in {} have unsaved changes; save or close them first",
+                current_path.display()
+            ));
+            return;
+        }
+        self.close_picker();
+        match self.workspace.add_root_request(target, Some(id)) {
+            Ok(()) => self.notify_message("switching worktree…".to_owned(), false),
+            Err(e) => self.show_workspace_failure(e),
+        }
+    }
+
+    /// After a worktree switch: close the old root's clean buffers, move the editor's root and
+    /// reopen the file that was in front at the same place in the new worktree.
+    fn finish_root_switch(&mut self, path: PathBuf, old: &Path) {
+        let leaving = |file: &Path| file.starts_with(old) && !file.starts_with(&path);
+        let reopen = self.current_persisted_location().and_then(|mut location| {
+            let relative = location.path.strip_prefix(old).ok()?;
+            if !leaving(&location.path) {
+                return None;
+            }
+            location.path = path.join(relative);
+            location.path.is_file().then_some(location)
+        });
+        let views = self
+            .state
+            .views
+            .iter()
+            .filter_map(|(view, state)| {
+                let buffer = self.state.buffers.get(state.buffer)?;
+                (!buffer.dirty && buffer.path.as_deref().is_some_and(leaving))
+                    .then_some((view, state.buffer))
+            })
+            .collect::<Vec<_>>();
+        for (view, buffer) in views {
+            self.close_buffer_target(view, buffer);
+        }
+        self.state.workspace_root = path.clone();
+        self.invalidate_root_scoped_operations();
+        self.start_git_status_refresh_silent();
+        if let Some(location) = reopen {
+            self.navigate_persisted_location(location);
+        }
+        let name = path
+            .file_name()
+            .map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned());
+        self.notify_message(format!("switched to worktree {name}"), false);
     }
     pub(in crate::editor::session) fn root_removal_blocker(
         &self,
@@ -11643,7 +11754,6 @@ impl InteractiveApplication {
             AppEffect::HelpContextual => self.open_contextual_help(),
             AppEffect::HelpCommandReference => self.open_command_reference(),
             AppEffect::GitWorktreeOpen => self.open_git_worktree(),
-            AppEffect::GitWorktreeClose => self.close_git_worktree(),
             AppEffect::GitWorktreeRemove => self.request_git_worktree_remove(),
             AppEffect::GitWorktreesOpen => self.start_git_worktrees(),
             AppEffect::GitHunksOpenStaged => {
@@ -11655,6 +11765,7 @@ impl InteractiveApplication {
             AppEffect::GitHunkUnstage => self.unstage_selected_git_hunk(),
             AppEffect::GitStatusRefresh => self.start_git_status_refresh(),
             AppEffect::GitStatusOpen => self.open_git_status_picker(),
+            AppEffect::GitBrowse { copy } => self.browse_git_line(copy),
             AppEffect::GitChangesLayerSwitch => {
                 // Only the change surface has a layer to switch; elsewhere this does nothing
                 // rather than reporting an error for a key that has no meaning there.
@@ -12595,6 +12706,7 @@ impl InteractiveApplication {
                         false,
                     );
                 }
+                WorkspaceUpdate::RootSwitched { path, old } => self.finish_root_switch(path, &old),
                 WorkspaceUpdate::Validated { id, permit } => {
                     self.finish_execution_validation(id, permit)
                 }
@@ -12602,8 +12714,13 @@ impl InteractiveApplication {
         }
     }
     pub(in crate::editor::session) fn maybe_prompt_for_unseen_workspace(&mut self) {
+        // Never open under the user's fingers: keys typed a moment ago would answer it.
+        let typing = self
+            .last_key_at
+            .is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(800));
         if self.workspace.should_prompt(
-            self.input.prompt().is_some()
+            typing
+                || self.input.prompt().is_some()
                 || self.ui.picker.is_some()
                 || self.ui.tool_menu.is_some(),
         ) {

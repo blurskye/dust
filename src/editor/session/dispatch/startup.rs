@@ -138,6 +138,7 @@ impl InteractiveApplication {
             documents,
             search: super::super::search::SearchSession::default(),
             should_quit: false,
+            last_key_at: None,
             window_session: WindowSession::new(dashboard_visible, terminal_panel_height),
             tooling,
             language: super::super::lsp::LspSession::default(),

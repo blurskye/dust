@@ -2985,7 +2985,7 @@ fn a_buffer_stays_bound_to_the_worktree_it_was_opened_in() {
 }
 
 #[test]
-fn a_worktree_opens_and_closes_as_its_own_root_without_being_removed() {
+fn switching_to_a_worktree_moves_the_editor_there() {
     let mut app = app();
     let repo = history_fixture(&app.state.workspace_root, &["base", "tip"]);
     let head = repo.head().unwrap().peel_to_commit().unwrap();
@@ -3011,7 +3011,13 @@ fn a_worktree_opens_and_closes_as_its_own_root_without_being_removed() {
         assert!(Instant::now() < deadline);
         thread::yield_now()
     }
-    let roots_before = app.workspace.roots().len();
+    let main_root = std::fs::canonicalize(&app.state.workspace_root).unwrap();
+    let main_file = main_root.join("h0.txt");
+    let (main_buffer, main_view) = app.state.open_text(
+        crate::editor::text::TextBuffer::from_bytes(b"x\n").expect("text"),
+        Some(main_file.clone()),
+    );
+    app.state.active_view = Some(main_view);
 
     let invoke = |app: &mut InteractiveApplication, id: &str| {
         app.invoke(
@@ -3047,63 +3053,57 @@ fn a_worktree_opens_and_closes_as_its_own_root_without_being_removed() {
         }
     };
 
-    // Opening registers the worktree as its own root, so LSP, tasks and DAP scope to it.
+    let switch = |app: &mut InteractiveApplication| {
+        invoke(app, "workspace.git.worktree.open");
+        while app.workspace.root_operation_pending() {
+            app.process_trust_events();
+            assert!(Instant::now() < deadline);
+            thread::yield_now()
+        }
+    };
+
+    // Unsaved changes in the current root block the switch.
+    app.state.buffers[main_buffer].dirty = true;
     open_worktree_row(&mut app);
-    invoke(&mut app, "workspace.git.worktree.open");
-    while app.workspace.root_operation_pending() {
-        app.process_trust_events();
-        assert!(Instant::now() < deadline);
-        thread::yield_now()
-    }
+    switch(&mut app);
+    assert!(app.ui.notification_error, "unsaved changes block the switch");
+    assert_eq!(
+        app.workspace.roots()[0].identity.canonical_path, main_root,
+        "a blocked switch leaves the root alone"
+    );
+    app.state.buffers[main_buffer].dirty = false;
+
+    // The worktree replaces the root, and clean buffers from the old root close.
+    open_worktree_row(&mut app);
+    switch(&mut app);
     let canonical = std::fs::canonicalize(&worktree).unwrap();
-    assert_eq!(
-        app.workspace.roots().len(),
-        roots_before + 1,
-        "the worktree became a root of its own"
+    assert_eq!(app.workspace.roots().len(), 1, "a switch replaces the root");
+    assert_eq!(app.workspace.roots()[0].identity.canonical_path, canonical);
+    assert_eq!(app.state.workspace_root, canonical);
+    assert!(
+        !app.state
+            .buffers
+            .values()
+            .any(|buffer| buffer.path.as_deref() == Some(main_file.as_path())),
+        "clean buffers from the old root close"
     );
-    let opened = app
-        .workspace
-        .roots()
-        .iter()
-        .find(|root| root.identity.canonical_path == canonical)
-        .expect("a root names the worktree's own path");
-    // A root added this way is its own trusted decision, not an inheritance of the main root.
-    app.workspace.fixture_trust_identity(opened.identity.clone());
-    app.reconcile_workspace_trust();
-
-    // Closing removes the root, and only the root: the worktree stays on disk.
-    open_worktree_row(&mut app);
-    invoke(&mut app, "workspace.git.worktree.close");
-    assert_eq!(
-        app.workspace.roots().len(),
-        roots_before,
-        "closing removes the worktree's root"
+    wait_vfs(&mut app);
+    let reopened = canonical.join("h0.txt");
+    assert!(
+        app.state
+            .buffers
+            .values()
+            .any(|buffer| buffer.path.as_deref() == Some(reopened.as_path())),
+        "the file in front reopens in the new worktree"
     );
     assert!(
-        worktree.join(".git").exists() && worktree.join("note.txt").is_file(),
-        "closing a root never removes the worktree or its checkout"
+        worktree.join("note.txt").is_file() && main_file.is_file(),
+        "switching never touches either checkout"
     );
-    assert!(
-        repo.find_worktree("scoped").is_ok(),
-        "the worktree is still registered with the repository"
-    );
-    assert!(
-        repo.find_branch("scoped", git2::BranchType::Local).is_ok(),
-        "closing never deletes the branch"
-    );
-
-    // Closing a worktree that is not open is refused rather than silently ignored.
-    open_worktree_row(&mut app);
-    invoke(&mut app, "workspace.git.worktree.close");
-    assert!(
-        app.ui.notification_error,
-        "closing a worktree that is not an open root reports an error"
-    );
-    assert_eq!(app.workspace.roots().len(), roots_before);
 }
 
 #[test]
-fn a_locked_worktree_refuses_removal_but_still_closes_as_a_root() {
+fn a_locked_worktree_refuses_removal() {
     let mut app = app();
     let repo = history_fixture(&app.state.workspace_root, &["base", "tip"]);
     let head = repo.head().unwrap().peel_to_commit().unwrap();
@@ -3125,7 +3125,6 @@ fn a_locked_worktree_refuses_removal_but_still_closes_as_a_root() {
     }
     app.reconcile_workspace_trust();
     let deadline = Instant::now() + Duration::from_secs(10);
-    let roots_before = app.workspace.roots().len();
     let invoke = |app: &mut InteractiveApplication, id: &str| {
         app.invoke(
             crate::editor::CommandInvocation::new(id, InvocationSource::Test).expect("command id"),
@@ -3181,33 +3180,6 @@ fn a_locked_worktree_refuses_removal_but_still_closes_as_a_root() {
         "a refused removal leaves the worktree and its registration alone"
     );
     assert!(repo.find_branch("locked", git2::BranchType::Local).is_ok());
-
-    // Closing the same worktree as a root is NOT gated on the repository state: closing is
-    // not a Git write, so a lock must not stop it.
-    select_worktree_row(&mut app);
-    invoke(&mut app, "workspace.git.worktree.open");
-    while app.workspace.root_operation_pending() {
-        app.process_trust_events();
-        assert!(Instant::now() < deadline);
-        thread::yield_now()
-    }
-    assert_eq!(app.workspace.roots().len(), roots_before + 1);
-    select_worktree_row(&mut app);
-    invoke(&mut app, "workspace.git.worktree.close");
-    assert!(
-        !app.ui.notification_error,
-        "closing a locked worktree is allowed: {:?}",
-        app.ui.notification
-    );
-    assert_eq!(
-        app.workspace.roots().len(),
-        roots_before,
-        "the locked worktree's root closed"
-    );
-    assert!(
-        worktree.is_dir() && repo.find_worktree("locked").is_ok(),
-        "closing leaves the locked worktree exactly as it was"
-    );
 }
 
 

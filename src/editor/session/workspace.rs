@@ -38,6 +38,8 @@ pub(in crate::editor::session) enum WorkspaceUpdate {
     Message(&'static str),
     Failure(WorkspaceFailure),
     RootAdded(PathBuf),
+    /// The editor moved from the `old` root to the new `path`.
+    RootSwitched { path: PathBuf, old: PathBuf },
     ScopeInvalidated,
     Validated {
         id: ValidationId,
@@ -69,6 +71,8 @@ struct RootOperation {
     generation: u64,
     source: WorkspaceVersion,
     requested_path: PathBuf,
+    /// The root this one replaces when switching worktrees.
+    replaces: Option<RootId>,
 }
 struct Validation {
     id: ValidationId,
@@ -375,9 +379,11 @@ impl WorkspaceSession {
         self.tutor_service.dispose(fixture.path.clone(), deadline)?;
         Ok(())
     }
+    /// Add `path` as a root, or with `replaces`, move the editor from that root to `path`.
     pub(in crate::editor::session) fn add_root_request(
         &mut self,
         path: PathBuf,
+        replaces: Option<RootId>,
     ) -> Result<(), WorkspaceFailure> {
         if self.root_operation.is_some() {
             return Err(WorkspaceFailure::Message("workspace_root_operation_busy"));
@@ -390,8 +396,17 @@ impl WorkspaceSession {
             generation,
             source: self.version(),
             requested_path: path,
+            replaces,
         });
         Ok(())
+    }
+    /// Make `new` the active root and drop `old`; returns the old root's path.
+    fn switch_root(&mut self, old: RootId, new: RootId) -> Result<PathBuf, WorkspaceError> {
+        self.state.set_active_root(new)?;
+        let old = self.state.remove_root(old)?;
+        self.changed();
+        self.reconcile_trust();
+        Ok(old.identity.canonical_path)
     }
     pub(in crate::editor::session) fn remove_root(
         &mut self,
@@ -678,10 +693,20 @@ impl WorkspaceSession {
                             |n| n.to_string_lossy().into_owned(),
                         );
                         match self.state.add_root(name, identity.clone()) {
-                            Ok(_) => {
-                                self.changed();
-                                updates.push(WorkspaceUpdate::RootAdded(identity.canonical_path));
-                            }
+                            Ok(new) => match operation.replaces {
+                                Some(old) => match self.switch_root(old, new) {
+                                    Ok(old) => updates.push(WorkspaceUpdate::RootSwitched {
+                                        path: identity.canonical_path,
+                                        old,
+                                    }),
+                                    Err(e) => updates.push(WorkspaceUpdate::Failure(e.into())),
+                                },
+                                None => {
+                                    self.changed();
+                                    updates
+                                        .push(WorkspaceUpdate::RootAdded(identity.canonical_path));
+                                }
+                            },
                             Err(e) => updates.push(WorkspaceUpdate::Failure(e.into())),
                         }
                     }

@@ -185,18 +185,10 @@ pub(super) fn register_commands(
     register(
         registry,
         "workspace.git.worktree.open",
-        "Open the selected worktree as a workspace root",
+        "Switch the editor to the selected worktree",
         ContextRequirement::Workspace,
         ArgumentSchema::default(),
         |_invocation| Ok(AppEffect::GitWorktreeOpen),
-    )?;
-    register(
-        registry,
-        "workspace.git.worktree.close",
-        "Close the selected worktree as a workspace root without removing it",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default(),
-        |_invocation| Ok(AppEffect::GitWorktreeClose),
     )?;
     register(
         registry,
@@ -403,6 +395,22 @@ pub(super) fn register_commands(
         ContextRequirement::Workspace,
         ArgumentSchema::default(),
         |_| AppEffect::GitStatusOpen,
+    )?;
+    register(
+        registry,
+        "workspace.git.browse",
+        "Open the current line on the forge",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::GitBrowse { copy: false },
+    )?;
+    register(
+        registry,
+        "workspace.git.browse.copy",
+        "Copy the forge URL of the current line",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::GitBrowse { copy: true },
     )?;
     register(
         registry,

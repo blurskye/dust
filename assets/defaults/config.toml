@@ -412,6 +412,16 @@ rows = 24
 float = true
 close_on_exit = true
 
+[terminals.profiles.git_blame_line]
+program = "/bin/sh"
+arguments = ["-c", "git --no-pager log --color -n 3 -u -L \"$2,+1:$1\" 2>&1 | less -Rc", "git", "{file}", "{line}"]
+cwd = "{dir}"
+environment = {}
+columns = 80
+rows = 24
+float = true
+close_on_exit = true
+
 [terminals.profiles.lazygit_file]
 program = "/bin/sh"
 arguments = ["-c", "exec lazygit -f \"$1\"", "lazygit", "{file}"]
@@ -1015,6 +1025,8 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "health.open" = "Show health"
 "workspace.git.status.refresh" = "Refresh Git status"
 "workspace.git.status.open" = "Open Git status"
+"workspace.git.browse" = "Git Browse (open)"
+"workspace.git.browse.copy" = "Git Browse (copy)"
 "workspace.git.diff.layer.switch" = "Switch the diff between the unstaged and staged comparison"
 "workspace.git.hunks.open" = "Open Git hunks"
 "workspace.git.hunk.next" = "Go to next Git hunk"
@@ -1030,7 +1042,7 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "workspace.git.worktrees.open" = "Open the Git worktree list"
 "workspace.git.worktree.remove" = "Remove the selected worktree and its directory"
 "workspace.git.worktree.create" = "Create a worktree for a branch"
-"workspace.git.worktree.open" = "Open the selected worktree as a workspace root"
+"workspace.git.worktree.open" = "Switch to the selected worktree"
 "overlay.help.contextual" = "Show what is available on the focused surface"
 "overlay.help.reference" = "Show the reference for the selected command"
 "overlay.help.form" = "Show help for the form or confirmation in front of you"
@@ -1047,7 +1059,6 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "dap.detach" = "Leave the debug session without asking the debuggee to stop"
 "session.tutor.stop" = "Leave the practice sandbox and remove its disposable fixture"
 "session.tutor.lessons" = "Show the practice chapters: what each teaches and what you have done"
-"workspace.git.worktree.close" = "Close the selected worktree as a workspace root without removing it"
 "application.safe_mode.status" = "Show safe-mode status"
 "history.redo" = "Redo"
 "history.undo" = "Undo"

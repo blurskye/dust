@@ -46,6 +46,7 @@ pub enum AppEffect {
     OpenWorkspaceFilePicker,
     GitStatusRefresh,
     GitStatusOpen,
+    GitBrowse { copy: bool },
     /// Switch the change surface's diff pane between the unstaged and staged comparison.
     GitChangesLayerSwitch,
     GitHunksOpen,
@@ -58,7 +59,6 @@ pub enum AppEffect {
     GitWorktreesOpen,
     GitWorktreeRemove,
     GitWorktreeOpen,
-    GitWorktreeClose,
     GitConflictsOpen,
     GitConflictChoose {
         side: String,

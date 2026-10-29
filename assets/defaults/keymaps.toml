@@ -4111,6 +4111,28 @@ arguments = { profile = "lazygit_cwd" }
 desc = "Lazygit (file directory)"
 
 [[keymap]]
+id = "builtin.global.git-blame-line"
+context = "global"
+keys = "<leader> g b"
+command = "terminal.open"
+arguments = { profile = "git_blame_line" }
+desc = "Git Blame Line"
+
+[[keymap]]
+id = "builtin.global.git-browse"
+context = "global"
+keys = "<leader> g B"
+command = "workspace.git.browse"
+desc = "Git Browse (open)"
+
+[[keymap]]
+id = "builtin.global.git-browse-copy"
+context = "global"
+keys = "<leader> g Y"
+command = "workspace.git.browse.copy"
+desc = "Git Browse (copy)"
+
+[[keymap]]
 id = "builtin.global.lazygit-file"
 context = "global"
 keys = "<leader> g f"

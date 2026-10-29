@@ -319,7 +319,7 @@ pub(super) fn render_dashboard(
         center_text(
             &mut grid,
             top.saturating_add(configured.path_row),
-            &root.display().to_string(),
+            &dashboard_path(root, usize::from(content_width)),
             Style::Default,
             editor_config.editor.ambiguous_width,
         );
@@ -714,4 +714,20 @@ pub(super) fn render_content_tab_line(
             width,
         );
     }
+}
+
+/// The workspace path for the dashboard: home as `~`, and the end kept when it is too wide.
+fn dashboard_path(root: &Path, width: usize) -> String {
+    let mut text = root.display().to_string();
+    if let Some(home) = std::env::var_os("HOME").filter(|home| !home.is_empty())
+        && let Ok(rest) = root.strip_prefix(&home)
+    {
+        text = format!("~/{}", rest.display());
+    }
+    let count = text.chars().count();
+    if width > 1 && count > width {
+        let tail = text.chars().skip(count + 1 - width).collect::<String>();
+        text = format!("…{tail}");
+    }
+    text
 }
