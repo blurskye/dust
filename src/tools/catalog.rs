@@ -28,6 +28,8 @@ pub enum ToolKind {
     Dap,
     Formatter,
     Linter,
+    /// An ACP adapter for the agent panel.
+    Agent,
 }
 
 impl ToolKind {
@@ -38,6 +40,7 @@ impl ToolKind {
             Self::Dap => "DAP",
             Self::Formatter => "Formatter",
             Self::Linter => "Linter",
+            Self::Agent => "Agent",
         }
     }
 }

@@ -1,9 +1,11 @@
-//! The agent panel: one ACP session at a time, its transcript in a read-only Markdown buffer
-//! in a split beside the code, questions through a prompt and permission requests as yes/no
-//! prompts. A session keeps the worktree it started in; switching worktrees does not move it.
+//! The agent panel: ACP sessions as tabs. Each session has its own agent process, transcript,
+//! options (model, mode, thinking level) and permission requests. The panel is one read-only
+//! Markdown buffer in a split beside the code that shows the active session, with a tab line
+//! on top. Questions go to the active session. A session keeps the worktree it started in;
+//! switching worktrees does not move it.
 
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     path::{Path, PathBuf},
 };
 
@@ -11,25 +13,50 @@ use serde_json::{Value, json};
 
 use super::InteractiveApplication;
 use crate::{
-    agent::{self, AgentMessage, AgentProcess, PermissionOption, PromptPart, SessionUpdate},
-    editor::{Axis, BufferId, EditorMode, LayoutAction, text::TextBuffer},
+    agent::{
+        self, AgentMessage, AgentProcess, AuthMethod, PermissionOption, PromptPart,
+        SessionOption, SessionUpdate,
+    },
+    editor::{
+        Axis, BufferId, EditorMode, LayoutAction, session::search::PickerPayload,
+        text::TextBuffer,
+    },
+    tools::{ToolKind, ToolStatus},
     ui::{ConfirmationChoice, PromptKind},
+    workspace::{PickerAction, PickerItem, PickerItemId, PickerItemKind},
 };
 
 /// Shown where a file would show its name, and how the syntax session knows to use Markdown.
 pub(super) const TRANSCRIPT_OWNER: &str = "Agent";
-/// Messages handled per tick, so a chatty agent cannot stall input.
+/// Messages handled per session and tick, so a chatty agent cannot stall input.
 const MESSAGES_PER_TICK: usize = 256;
 /// Files larger than this are not read for the agent.
 const READ_BYTE_CEILING: u64 = 16 * 1024 * 1024;
+/// The option category ACP uses for reasoning effort.
+const THINKING: &str = "thought_level";
+
+/// What a row of one of the agent pickers stands for.
+#[derive(Clone, Debug)]
+pub(in crate::editor::session) enum AgentChoice {
+    /// Start a session of this profile in a new tab.
+    Profile(String),
+    /// Show the session with this tab number.
+    Session(u64),
+    /// List the values of this option of the active session.
+    Option(String),
+    /// Set an option of the active session.
+    Value { option: String, value: String },
+    /// Sign in to the active session's agent with this method.
+    Login(String),
+}
 
 #[derive(Default)]
 pub(super) struct AgentPanel {
-    /// The picked agent; `[agents] default` until one is picked.
-    picked: Option<String>,
-    session: Option<AgentSession>,
-    /// What the transcript shows, kept when a session ends so it can still be read.
-    entries: Vec<Entry>,
+    sessions: Vec<AgentSession>,
+    /// Index of the session the panel shows and questions go to.
+    active: usize,
+    /// Tab numbers are never reused, so a late permission answer cannot reach the wrong tab.
+    started: u64,
     buffer: Option<BufferId>,
     /// Files, selections and diagnostics to send with the next question.
     context: Vec<PromptPart>,
@@ -40,26 +67,44 @@ pub(super) struct AgentPanel {
 }
 
 struct AgentSession {
+    number: u64,
     name: String,
     root: PathBuf,
-    process: AgentProcess,
+    /// `None` once the agent exited; the transcript stays readable and the next question
+    /// starts the agent again in the same tab.
+    process: Option<AgentProcess>,
     phase: Phase,
     id: Option<String>,
     /// Questions asked before the session was ready, sent in order.
     queued: VecDeque<Vec<PromptPart>>,
     /// The agent's last stderr line, shown if it exits.
     last_log: String,
+    entries: Vec<Entry>,
+    options: Vec<SessionOption>,
+    auth_methods: Vec<AuthMethod>,
+    /// Requests outside the session's own start and prompt flow.
+    requests: Vec<(u64, Pending)>,
+    /// Option values from the profile, set once the session exists.
+    preferred: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Phase {
     Initializing(u64),
     Creating(u64),
+    /// The agent asked for a sign-in before it creates the session.
+    SigningIn,
     Ready,
     Prompting(u64),
 }
 
+enum Pending {
+    SetOption { option: String, value: String },
+    Authenticate,
+}
+
 struct PermissionRequest {
+    session: u64,
     id: Value,
     title: String,
     options: Vec<PermissionOption>,
@@ -67,7 +112,8 @@ struct PermissionRequest {
 
 #[derive(Clone, Debug)]
 enum Entry {
-    Header { name: String, root: PathBuf },
+    /// The agent (re)started.
+    Started { root: PathBuf },
     User { text: String, context: Vec<String> },
     Agent(String),
     Thought(String),
@@ -76,12 +122,91 @@ enum Entry {
     Notice(String),
 }
 
+impl AgentSession {
+    fn status(&self, waiting: bool) -> &'static str {
+        match (self.process.is_some(), self.phase) {
+            (false, _) => "stopped",
+            _ if waiting => "waiting for you",
+            (true, Phase::Initializing(_) | Phase::Creating(_)) => "starting",
+            (true, Phase::SigningIn) => "sign-in needed",
+            (true, Phase::Prompting(_)) => "working",
+            (true, Phase::Ready) => "ready",
+        }
+    }
+
+    fn option(&self, key: &str) -> Option<&SessionOption> {
+        self.options
+            .iter()
+            .find(|option| option.id == key)
+            .or_else(|| self.options.iter().find(|option| option.category == key))
+    }
+
+    fn request(&mut self, method: &str, params: Value) -> Result<u64, String> {
+        self.process
+            .as_mut()
+            .ok_or_else(|| format!("{} is not running", self.name))?
+            .request(method, params)
+    }
+
+    fn respond(&mut self, id: Value, result: Result<Value, String>) {
+        if let Some(process) = &mut self.process {
+            let _ = process.respond(id, result);
+        }
+    }
+
+    fn send_next_prompt(&mut self) {
+        let Some(id) = self.id.clone() else {
+            return;
+        };
+        let Some(parts) = self.queued.pop_front() else {
+            return;
+        };
+        match self.request("session/prompt", agent::prompt_params(&id, &parts)) {
+            Ok(request) => self.phase = Phase::Prompting(request),
+            Err(error) => self.entries.push(Entry::Notice(error)),
+        }
+    }
+
+    fn set_option(&mut self, key: &str, value: &str) -> Result<(), String> {
+        let session = self.id.clone().ok_or("the session is still starting")?;
+        let option = self
+            .option(key)
+            .ok_or_else(|| format!("{} has no option `{key}`", self.name))?
+            .clone();
+        if !option.values.iter().any(|candidate| candidate.value == value) {
+            return Err(format!("{} has no {} `{value}`", self.name, option.name));
+        }
+        let (method, params) = agent::set_option_request(&session, &option, value);
+        let id = self.request(method, params)?;
+        self.requests.push((
+            id,
+            Pending::SetOption {
+                option: option.id,
+                value: value.to_owned(),
+            },
+        ));
+        Ok(())
+    }
+
+    /// Profile preferences such as `model = "…"`, applied once the session exists.
+    fn apply_preferred(&mut self) {
+        for (key, value) in std::mem::take(&mut self.preferred) {
+            if self.option(&key).is_some_and(|option| option.current != value)
+                && let Err(error) = self.set_option(&key, &value)
+            {
+                self.entries.push(Entry::Notice(error));
+            }
+        }
+    }
+}
+
 impl InteractiveApplication {
-    pub(super) fn agent_name(&self) -> String {
-        self.agent
-            .picked
-            .clone()
-            .unwrap_or_else(|| self.configuration.settings().agents.default.clone())
+    fn active_agent(&self) -> Option<&AgentSession> {
+        self.agent.sessions.get(self.agent.active)
+    }
+
+    fn active_agent_mut(&mut self) -> Option<&mut AgentSession> {
+        self.agent.sessions.get_mut(self.agent.active)
     }
 
     /// `<leader>aa`: in Visual mode the selection goes along with the question.
@@ -149,128 +274,443 @@ impl InteractiveApplication {
             self.agent.context.clear();
             return;
         }
-        if self.agent.session.is_none() {
-            let name = self.agent_name();
-            if let Err(error) = self.start_agent(&name) {
+        if self.agent.sessions.is_empty() {
+            let name = self.configuration.settings().agents.default.clone();
+            if let Err(error) = self.start_agent_session(&name) {
                 self.show_error(error);
                 return;
             }
+        } else if self.active_agent().is_some_and(|session| session.process.is_none())
+            && let Err(error) = self.restart_active_agent()
+        {
+            self.show_error(error);
+            return;
         }
         let mut parts = std::mem::take(&mut self.agent.context);
         let context = parts.iter().map(context_label).collect();
         parts.push(PromptPart::Text(question.clone()));
-        self.agent.entries.push(Entry::User {
-            text: question,
-            context,
-        });
-        if let Some(session) = &mut self.agent.session {
+        let signing_in = if let Some(session) = self.active_agent_mut() {
+            session.entries.push(Entry::User {
+                text: question,
+                context,
+            });
             session.queued.push_back(parts);
             if session.phase == Phase::Ready {
-                send_next_prompt(session, &mut self.agent.entries);
+                session.send_next_prompt();
             }
-        }
+            session.phase == Phase::SigningIn
+        } else {
+            false
+        };
         self.show_agent_panel();
         self.refresh_agent_transcript();
+        if signing_in {
+            self.open_agent_login_picker();
+        }
     }
 
     pub(super) fn cancel_agent_turn(&mut self) {
-        let Some(session) = &mut self.agent.session else {
+        let Some(session) = self.agent.sessions.get_mut(self.agent.active) else {
             self.notify_message("no agent session".into(), false);
             return;
         };
         session.queued.clear();
-        if let (Phase::Prompting(_), Some(id)) = (session.phase, &session.id) {
-            let _ = session
-                .process
-                .notify("session/cancel", json!({"sessionId": id}));
-            // The protocol asks the client to answer open permission requests as cancelled.
-            for request in self.agent.permissions.drain(..).chain(self.agent.asking.take()) {
-                let _ = session
-                    .process
-                    .respond(request.id, Ok(agent::permission_cancelled()));
-            }
-            if self
-                .input
-                .prompt()
-                .is_some_and(|prompt| prompt.kind == PromptKind::AgentPermission)
-            {
-                self.close_prompt();
-            }
-            self.notify_message("stopping the agent…".into(), false);
+        let (Phase::Prompting(_), Some(id)) = (session.phase, session.id.clone()) else {
+            return;
+        };
+        if let Some(process) = &mut session.process {
+            let _ = process.notify("session/cancel", json!({"sessionId": id}));
         }
+        // The protocol asks the client to answer open permission requests as cancelled.
+        let number = session.number;
+        let (cancelled, kept): (Vec<_>, Vec<_>) = self
+            .agent
+            .permissions
+            .drain(..)
+            .partition(|request| request.session == number);
+        self.agent.permissions = kept.into();
+        let asking = self.agent.asking.take_if(|request| request.session == number);
+        let prompt_open = asking.is_some();
+        for request in cancelled.into_iter().chain(asking) {
+            self.agent.sessions[self.agent.active]
+                .respond(request.id, Ok(agent::permission_cancelled()));
+        }
+        if prompt_open {
+            self.close_prompt();
+        }
+        self.notify_message("stopping the agent…".into(), false);
     }
 
-    /// `<leader>an` and the agent picker: end the current session and start a new one in the
-    /// current worktree.
-    pub(super) fn restart_agent(&mut self, name: Option<String>) {
-        if let Some(name) = name {
-            self.agent.picked = Some(name);
+    /// `<leader>an`: pick an agent to start in a new tab.
+    pub(super) fn open_agent_picker(&mut self) {
+        let agents = &self.configuration.settings().agents;
+        let items = agents
+            .profiles
+            .iter()
+            .map(|(name, profile)| {
+                let command = std::iter::once(profile.program.display().to_string())
+                    .chain(profile.arguments.iter().cloned())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let badge = if self.agent_program(&profile.program).is_none() {
+                    "not installed".into()
+                } else if *name == agents.default {
+                    "default".into()
+                } else {
+                    String::new()
+                };
+                (
+                    picker_row(format!("agent:{name}"), name.clone(), command, badge),
+                    PickerPayload::Agent(AgentChoice::Profile(name.clone())),
+                )
+            })
+            .collect();
+        self.install_picker("New Agent Session".to_owned(), items);
+        self.search
+            .set_picker_footer("Enter Start in a new tab · Esc Close".to_owned());
+        self.sync_picker_ui();
+    }
+
+    /// `<leader>as`: the open sessions.
+    pub(super) fn open_agent_sessions_picker(&mut self) {
+        if self.agent.sessions.is_empty() {
+            self.notify_message("no agent sessions; start one with <leader>an".into(), false);
+            return;
         }
-        self.agent.session = None;
-        self.agent.permissions.clear();
-        self.agent.asking = None;
-        self.agent.entries.clear();
-        let name = self.agent_name();
-        if let Err(error) = self.start_agent(&name) {
+        let items = self
+            .agent
+            .sessions
+            .iter()
+            .enumerate()
+            .map(|(index, session)| {
+                let waiting = self.agent_waiting(session.number);
+                let model = session
+                    .option("model")
+                    .map(|option| format!(" · {}", value_name(option)))
+                    .unwrap_or_default();
+                (
+                    picker_row(
+                        format!("agent-session:{}", session.number),
+                        format!("{} {}", session.number, session.name),
+                        format!("{}{model} · {}", session.status(waiting), session.root.display()),
+                        if index == self.agent.active { "shown".into() } else { String::new() },
+                    ),
+                    PickerPayload::Agent(AgentChoice::Session(session.number)),
+                )
+            })
+            .collect();
+        self.install_picker("Agent Sessions".to_owned(), items);
+        self.search.set_picker_footer("Enter Show · Esc Close".to_owned());
+        self.sync_picker_ui();
+    }
+
+    /// `<leader>am`, `<leader>aM`, `<leader>ar` and `<leader>ao`: the active session's
+    /// model, mode, thinking level, or all of its options.
+    pub(super) fn open_agent_option_picker(&mut self, key: Option<&str>) {
+        let Some(session) = self.active_agent() else {
+            self.notify_message("no agent session; start one with <leader>an".into(), false);
+            return;
+        };
+        if session.id.is_none() {
+            self.notify_message(format!("{} is still starting", session.name), false);
+            return;
+        }
+        let Some(key) = key else {
+            if session.options.is_empty() {
+                self.notify_message(format!("{} offers no options", session.name), false);
+                return;
+            }
+            let items = session
+                .options
+                .iter()
+                .map(|option| {
+                    (
+                        picker_row(
+                            format!("agent-option:{}", option.id),
+                            option.name.clone(),
+                            value_name(option),
+                            String::new(),
+                        ),
+                        PickerPayload::Agent(AgentChoice::Option(option.id.clone())),
+                    )
+                })
+                .collect();
+            let title = format!("{} Options", session.name);
+            self.install_picker(title, items);
+            self.search.set_picker_footer("Enter Change · Esc Close".to_owned());
+            self.sync_picker_ui();
+            return;
+        };
+        let Some(option) = session.option(key).cloned() else {
+            let what = match key {
+                THINKING => "thinking level",
+                other => other,
+            };
+            self.notify_message(format!("{} offers no {what} choice", session.name), false);
+            return;
+        };
+        let items = option
+            .values
+            .iter()
+            .map(|value| {
+                (
+                    picker_row(
+                        format!("agent-value:{}", value.value),
+                        value.name.clone(),
+                        value.description.clone(),
+                        if value.value == option.current { "current".into() } else { String::new() },
+                    ),
+                    PickerPayload::Agent(AgentChoice::Value {
+                        option: option.id.clone(),
+                        value: value.value.clone(),
+                    }),
+                )
+            })
+            .collect();
+        self.install_picker(format!("{} {}", session.name, option.name), items);
+        self.search.set_picker_footer("Enter Use · Esc Close".to_owned());
+        self.sync_picker_ui();
+    }
+
+    fn open_agent_login_picker(&mut self) {
+        let Some(session) = self.active_agent() else {
+            return;
+        };
+        let items = session
+            .auth_methods
+            .iter()
+            .map(|method| {
+                (
+                    picker_row(
+                        format!("agent-login:{}", method.id),
+                        method.name.clone(),
+                        method.description.clone(),
+                        String::new(),
+                    ),
+                    PickerPayload::Agent(AgentChoice::Login(method.id.clone())),
+                )
+            })
+            .collect();
+        let title = format!("Sign In to {}", session.name);
+        self.install_picker(title, items);
+        self.search.set_picker_footer("Enter Sign in · Esc Close".to_owned());
+        self.sync_picker_ui();
+    }
+
+    pub(super) fn accept_agent_choice(&mut self, choice: AgentChoice) {
+        let result = match choice {
+            AgentChoice::Profile(name) => self.start_agent_session(&name).map(|()| {
+                self.show_agent_panel();
+            }),
+            AgentChoice::Session(number) => {
+                if let Some(index) = self.agent.sessions.iter().position(|s| s.number == number) {
+                    self.agent.active = index;
+                    self.show_agent_panel();
+                }
+                Ok(())
+            }
+            AgentChoice::Option(option) => {
+                self.open_agent_option_picker(Some(&option));
+                return;
+            }
+            AgentChoice::Value { option, value } => self
+                .active_agent_mut()
+                .ok_or_else(|| "no agent session".to_owned())
+                .and_then(|session| session.set_option(&option, &value)),
+            AgentChoice::Login(method) => self
+                .active_agent_mut()
+                .ok_or_else(|| "no agent session".to_owned())
+                .and_then(|session| {
+                    let id = session.request("authenticate", json!({"methodId": method}))?;
+                    session.requests.push((id, Pending::Authenticate));
+                    session.entries.push(Entry::Notice("Signing in…".into()));
+                    Ok(())
+                }),
+        };
+        if let Err(error) = result {
             self.show_error(error);
         }
+        self.refresh_agent_transcript();
+    }
+
+    /// `<leader>a]` and `<leader>a[`.
+    pub(super) fn cycle_agent_session(&mut self, offset: isize) {
+        let count = self.agent.sessions.len();
+        if count == 0 {
+            self.notify_message("no agent sessions; start one with <leader>an".into(), false);
+            return;
+        }
+        self.agent.active = (self.agent.active as isize + offset).rem_euclid(count as isize) as usize;
         self.show_agent_panel();
         self.refresh_agent_transcript();
     }
 
-    fn start_agent(&mut self, name: &str) -> Result<(), String> {
+    /// `<leader>ax`: stop the active session and close its tab.
+    pub(super) fn close_agent_session(&mut self) {
+        if self.agent.sessions.is_empty() {
+            self.notify_message("no agent session".into(), false);
+            return;
+        }
+        let session = self.agent.sessions.remove(self.agent.active);
+        self.agent.permissions.retain(|request| request.session != session.number);
+        if self.agent.asking.take_if(|request| request.session == session.number).is_some() {
+            self.close_prompt();
+        }
+        self.agent.active = self.agent.active.min(self.agent.sessions.len().saturating_sub(1));
+        drop(session);
+        if self.agent.sessions.is_empty() && self.agent_pane().is_some() {
+            self.toggle_agent_panel();
+        }
+        self.refresh_agent_transcript();
+    }
+
+    /// Starting an installed adapter from the tool manager opens a session of the profile
+    /// that runs it.
+    pub(super) fn start_agent_for_program(&mut self, executable: &str) {
+        let profile = self
+            .configuration
+            .settings()
+            .agents
+            .profiles
+            .iter()
+            .find(|(_, profile)| profile.program == Path::new(executable))
+            .map(|(name, _)| name.clone());
+        let Some(name) = profile else {
+            self.show_error(format!("no profile in [agents.profiles] runs {executable}"));
+            return;
+        };
+        match self.start_agent_session(&name) {
+            Ok(()) => {
+                self.show_agent_panel();
+                self.refresh_agent_transcript();
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+
+    fn start_agent_session(&mut self, name: &str) -> Result<(), String> {
+        let root = self.state.workspace_root.clone();
+        let (process, phase, preferred) = self.spawn_agent(name, &root)?;
+        self.agent.started += 1;
+        self.agent.sessions.push(AgentSession {
+            number: self.agent.started,
+            name: name.to_owned(),
+            entries: vec![Entry::Started { root: root.clone() }],
+            root,
+            process: Some(process),
+            phase,
+            id: None,
+            queued: VecDeque::new(),
+            last_log: String::new(),
+            options: Vec::new(),
+            auth_methods: Vec::new(),
+            requests: Vec::new(),
+            preferred,
+        });
+        self.agent.active = self.agent.sessions.len() - 1;
+        Ok(())
+    }
+
+    /// Start the active tab's agent again after it exited, in the tab's own worktree.
+    fn restart_active_agent(&mut self) -> Result<(), String> {
+        let Some(session) = self.active_agent() else {
+            return Ok(());
+        };
+        let (name, root) = (session.name.clone(), session.root.clone());
+        let (process, phase, preferred) = self.spawn_agent(&name, &root)?;
+        let session = &mut self.agent.sessions[self.agent.active];
+        session.entries.push(Entry::Started { root });
+        session.process = Some(process);
+        session.phase = phase;
+        session.id = None;
+        session.options.clear();
+        session.requests.clear();
+        session.preferred = preferred;
+        Ok(())
+    }
+
+    fn spawn_agent(
+        &self,
+        name: &str,
+        root: &Path,
+    ) -> Result<(AgentProcess, Phase, BTreeMap<String, String>), String> {
         let profile = self
             .configuration
             .settings()
             .agents
             .profiles
             .get(name)
-            .ok_or_else(|| format!("no agent named `{name}` in [agents.profiles]"))?
-            .clone();
-        let root = self.state.workspace_root.clone();
-        let mut process = AgentProcess::spawn(
-            &profile.program,
-            &profile.arguments,
-            &profile.environment,
-            &root,
-        )
-        .map_err(|error| format!("could not start agent {name}: {error}"))?;
+            .ok_or_else(|| format!("no agent named `{name}` in [agents.profiles]"))?;
+        let Some(program) = self.agent_program(&profile.program) else {
+            let installable = self.tooling.entries().iter().any(|entry| {
+                entry.definition.kind == ToolKind::Agent
+                    && Path::new(&entry.definition.executable) == profile.program
+            });
+            return Err(if installable {
+                format!(
+                    "{} is not installed; install it in the tool manager (<leader>cm, Agent)",
+                    profile.program.display()
+                )
+            } else {
+                format!("{} is not installed", profile.program.display())
+            });
+        };
+        let mut process =
+            AgentProcess::spawn(&program, &profile.arguments, &profile.environment, root)
+                .map_err(|error| format!("could not start agent {name}: {error}"))?;
         let id = process.request("initialize", agent::initialize_params())?;
-        self.agent.entries.push(Entry::Header {
-            name: name.to_owned(),
-            root: root.clone(),
+        Ok((process, Phase::Initializing(id), profile.options.clone()))
+    }
+
+    /// The program to run: a path as given, a Dust-installed adapter, or one on `PATH`.
+    fn agent_program(&self, program: &Path) -> Option<PathBuf> {
+        if program.components().count() > 1 {
+            return program.is_file().then(|| program.to_path_buf());
+        }
+        let installed = self.tooling.entries().iter().find_map(|entry| match &entry.status {
+            ToolStatus::Installed(path)
+                if entry.definition.kind == ToolKind::Agent
+                    && Path::new(&entry.definition.executable) == program =>
+            {
+                Some(path.clone())
+            }
+            _ => None,
         });
-        self.agent.session = Some(AgentSession {
-            name: name.to_owned(),
-            root,
-            process,
-            phase: Phase::Initializing(id),
-            id: None,
-            queued: VecDeque::new(),
-            last_log: String::new(),
-        });
-        Ok(())
+        installed.or_else(|| self.tooling.path_executable(&program.to_string_lossy()).map(|(path, _)| path))
+    }
+
+    fn agent_waiting(&self, number: u64) -> bool {
+        self.agent.asking.as_ref().is_some_and(|request| request.session == number)
+            || self.agent.permissions.iter().any(|request| request.session == number)
     }
 
     pub(super) fn process_agent_events(&mut self) {
         let mut changed = false;
-        for _ in 0..MESSAGES_PER_TICK {
-            let Some(message) = self
-                .agent
-                .session
-                .as_ref()
-                .and_then(|session| session.process.try_message())
-            else {
-                break;
-            };
-            changed = true;
-            self.handle_agent_message(message);
+        for index in 0..self.agent.sessions.len() {
+            for _ in 0..MESSAGES_PER_TICK {
+                let Some(message) = self.agent.sessions[index]
+                    .process
+                    .as_ref()
+                    .and_then(AgentProcess::try_message)
+                else {
+                    break;
+                };
+                changed = true;
+                self.handle_agent_message(index, message);
+            }
         }
         if self.agent.asking.is_none()
             && self.input.prompt().is_none()
             && let Some(request) = self.agent.permissions.pop_front()
         {
-            let name = self.agent_name();
+            let name = self
+                .agent
+                .sessions
+                .iter()
+                .find(|session| session.number == request.session)
+                .map_or_else(|| "The agent".to_owned(), |session| {
+                    format!("{} {}", session.number, session.name)
+                });
             let title = request.title.clone();
             self.agent.asking = Some(request);
             self.open_confirmation_actions(
@@ -281,64 +721,55 @@ impl InteractiveApplication {
                 "Allow",
                 "Deny",
             );
+            changed = true;
         }
         if changed {
             self.refresh_agent_transcript();
         }
     }
 
-    fn handle_agent_message(&mut self, message: AgentMessage) {
-        let Some(session) = &mut self.agent.session else {
-            return;
-        };
-        let entries = &mut self.agent.entries;
+    fn handle_agent_message(&mut self, index: usize, message: AgentMessage) {
+        let session = &mut self.agent.sessions[index];
         match message {
-            AgentMessage::Response { id, result } => match (session.phase, result) {
-                (Phase::Initializing(expected), Ok(_)) if id == expected => {
-                    match session
-                        .process
-                        .request("session/new", agent::new_session_params(&session.root))
-                    {
-                        Ok(id) => session.phase = Phase::Creating(id),
-                        Err(error) => entries.push(Entry::Notice(error)),
-                    }
-                }
-                (Phase::Creating(expected), Ok(result)) if id == expected => {
-                    session.id = result["sessionId"].as_str().map(str::to_owned);
-                    session.phase = Phase::Ready;
-                    send_next_prompt(session, entries);
-                }
-                (Phase::Prompting(expected), Ok(result)) if id == expected => {
-                    match result["stopReason"].as_str().unwrap_or_default() {
-                        "cancelled" => entries.push(Entry::Notice("Stopped.".into())),
-                        "refusal" => entries.push(Entry::Notice("The agent refused.".into())),
-                        "max_tokens" | "max_turn_requests" => {
-                            entries.push(Entry::Notice("The agent hit its turn limit.".into()))
+            AgentMessage::Response { id, result } => {
+                if let Some(position) = session.requests.iter().position(|(request, _)| *request == id) {
+                    let (_, pending) = session.requests.remove(position);
+                    match (pending, result) {
+                        (Pending::SetOption { option, value }, Ok(result)) => {
+                            if result["configOptions"].is_array() {
+                                session.options = agent::session_options(&result);
+                            } else if let Some(option) =
+                                session.options.iter_mut().find(|candidate| candidate.id == option)
+                            {
+                                option.current = value;
+                            }
                         }
-                        _ => {}
+                        (Pending::Authenticate, Ok(_)) => {
+                            let params = agent::new_session_params(&session.root);
+                            match session.request("session/new", params) {
+                                Ok(id) => session.phase = Phase::Creating(id),
+                                Err(error) => session.entries.push(Entry::Notice(error)),
+                            }
+                        }
+                        (_, Err(error)) => session.entries.push(Entry::Notice(error)),
                     }
-                    session.phase = Phase::Ready;
-                    send_next_prompt(session, entries);
+                    return;
                 }
-                (phase, Err(error)) => {
-                    entries.push(Entry::Notice(error));
-                    if matches!(phase, Phase::Prompting(expected) if expected == id) {
-                        session.phase = Phase::Ready;
-                        send_next_prompt(session, entries);
-                    } else if matches!(phase, Phase::Initializing(_) | Phase::Creating(_)) {
-                        self.agent.session = None;
-                    }
+                let signing_in = self.handle_agent_response(index, id, result);
+                if signing_in && index == self.agent.active && self.ui.picker.is_none() {
+                    self.open_agent_login_picker();
                 }
-                _ => {}
-            },
+            }
             AgentMessage::Notification { method, params } => {
                 if method == "session/update" {
-                    apply_update(entries, agent::session_update(&params));
+                    apply_update(session, agent::session_update(&params));
                 }
             }
             AgentMessage::Request { id, method, params } => match method.as_str() {
                 "session/request_permission" => {
+                    let number = session.number;
                     self.agent.permissions.push_back(PermissionRequest {
+                        session: number,
                         id,
                         title: params["toolCall"]["title"]
                             .as_str()
@@ -349,23 +780,15 @@ impl InteractiveApplication {
                 }
                 "fs/read_text_file" => {
                     let result = self.agent_read_file(&params);
-                    if let Some(session) = &mut self.agent.session {
-                        let _ = session
-                            .process
-                            .respond(id, result.map(|content| json!({"content": content})));
-                    }
+                    self.agent.sessions[index]
+                        .respond(id, result.map(|content| json!({"content": content})));
                 }
                 "fs/write_text_file" => {
-                    let result = self.agent_write_file(&params);
-                    if let Some(session) = &mut self.agent.session {
-                        let _ = session.process.respond(id, result.map(|()| Value::Null));
-                    }
+                    let root = session.root.clone();
+                    let result = self.agent_write_file(&root, &params);
+                    self.agent.sessions[index].respond(id, result.map(|()| Value::Null));
                 }
-                _ => {
-                    let _ = session
-                        .process
-                        .respond(id, Err(format!("{method} is not supported by Dust")));
-                }
+                _ => session.respond(id, Err(format!("{method} is not supported by Dust"))),
             },
             AgentMessage::Log(line) => session.last_log = line,
             AgentMessage::Exited(reason) => {
@@ -374,11 +797,78 @@ impl InteractiveApplication {
                 } else {
                     format!("{reason}: {}", session.last_log)
                 };
-                entries.push(Entry::Notice(format!("{} stopped ({detail}).", session.name)));
-                self.agent.session = None;
-                self.agent.permissions.clear();
+                session
+                    .entries
+                    .push(Entry::Notice(format!("{} stopped ({detail}).", session.name)));
+                session.process = None;
+                session.queued.clear();
+                session.requests.clear();
+                let number = session.number;
+                self.agent.permissions.retain(|request| request.session != number);
+                if self.agent.asking.take_if(|request| request.session == number).is_some() {
+                    self.close_prompt();
+                }
             }
         }
+    }
+
+    /// The reply to the session's start or prompt requests. Returns whether the agent now
+    /// waits for a sign-in.
+    fn handle_agent_response(&mut self, index: usize, id: u64, result: Result<Value, String>) -> bool {
+        let session = &mut self.agent.sessions[index];
+        match (session.phase, result) {
+            (Phase::Initializing(expected), Ok(result)) if id == expected => {
+                session.auth_methods = agent::auth_methods(&result);
+                let params = agent::new_session_params(&session.root);
+                match session.request("session/new", params) {
+                    Ok(id) => session.phase = Phase::Creating(id),
+                    Err(error) => session.entries.push(Entry::Notice(error)),
+                }
+            }
+            (Phase::Creating(expected), Ok(result)) if id == expected => {
+                session.id = result["sessionId"].as_str().map(str::to_owned);
+                session.options = agent::session_options(&result);
+                session.phase = Phase::Ready;
+                session.apply_preferred();
+                session.send_next_prompt();
+            }
+            (Phase::Creating(expected), Err(error))
+                if id == expected
+                    && !session.auth_methods.is_empty()
+                    && error.to_lowercase().contains("auth") =>
+            {
+                session.phase = Phase::SigningIn;
+                session.entries.push(Entry::Notice(format!(
+                    "{} needs you to sign in. Pick a method, or ask again later with <leader>aa.",
+                    session.name
+                )));
+                return true;
+            }
+            (Phase::Prompting(expected), Ok(result)) if id == expected => {
+                match result["stopReason"].as_str().unwrap_or_default() {
+                    "cancelled" => session.entries.push(Entry::Notice("Stopped.".into())),
+                    "refusal" => session.entries.push(Entry::Notice("The agent refused.".into())),
+                    "max_tokens" | "max_turn_requests" => session
+                        .entries
+                        .push(Entry::Notice("The agent hit its turn limit.".into())),
+                    _ => {}
+                }
+                session.phase = Phase::Ready;
+                session.send_next_prompt();
+            }
+            (phase, Err(error)) => {
+                session.entries.push(Entry::Notice(error));
+                if matches!(phase, Phase::Prompting(expected) if expected == id) {
+                    session.phase = Phase::Ready;
+                    session.send_next_prompt();
+                } else if matches!(phase, Phase::Initializing(_) | Phase::Creating(_)) {
+                    session.process = None;
+                    session.queued.clear();
+                }
+            }
+            _ => {}
+        }
+        false
     }
 
     /// Open buffers are read from memory, so the agent sees unsaved edits.
@@ -411,17 +901,11 @@ impl InteractiveApplication {
 
     /// Writes stay inside the session's worktree and never overwrite unsaved edits; an open,
     /// clean buffer is reloaded so it shows the agent's change.
-    fn agent_write_file(&mut self, params: &Value) -> Result<(), String> {
-        let root = self
-            .agent
-            .session
-            .as_ref()
-            .map(|session| session.root.clone())
-            .ok_or("no agent session")?;
+    fn agent_write_file(&mut self, root: &Path, params: &Value) -> Result<(), String> {
         let path = PathBuf::from(params["path"].as_str().ok_or("path is missing")?);
         let content = params["content"].as_str().ok_or("content is missing")?;
         if !path.is_absolute()
-            || !path.starts_with(&root)
+            || !path.starts_with(root)
             || path
                 .components()
                 .any(|part| matches!(part, std::path::Component::ParentDir))
@@ -458,7 +942,15 @@ impl InteractiveApplication {
     pub(super) fn answer_agent_permission(&mut self, choice: ConfirmationChoice) {
         let request = self.agent.asking.take();
         self.close_prompt();
-        let (Some(request), Some(session)) = (request, &mut self.agent.session) else {
+        let Some(request) = request else {
+            return;
+        };
+        let Some(session) = self
+            .agent
+            .sessions
+            .iter_mut()
+            .find(|session| session.number == request.session)
+        else {
             return;
         };
         let wanted = if choice == ConfirmationChoice::Yes {
@@ -475,15 +967,18 @@ impl InteractiveApplication {
         let result = option.map_or_else(agent::permission_cancelled, |option| {
             agent::permission_selected(&option.id)
         });
-        let _ = session.process.respond(request.id, Ok(result));
+        session.respond(request.id, Ok(result));
     }
 
     pub(super) fn cancel_agent_permission(&mut self) {
-        if let (Some(request), Some(session)) = (self.agent.asking.take(), &mut self.agent.session)
+        if let Some(request) = self.agent.asking.take()
+            && let Some(session) = self
+                .agent
+                .sessions
+                .iter_mut()
+                .find(|session| session.number == request.session)
         {
-            let _ = session
-                .process
-                .respond(request.id, Ok(agent::permission_cancelled()));
+            session.respond(request.id, Ok(agent::permission_cancelled()));
         }
     }
 
@@ -561,7 +1056,8 @@ impl InteractiveApplication {
         self.state.buffers.get(buffer)?.path.clone()
     }
 
-    /// Rewrite the transcript buffer. Views that were at the end follow the new end.
+    /// Rewrite the transcript buffer with the active session. Views that were at the end
+    /// follow the new end.
     fn refresh_agent_transcript(&mut self) {
         let Some(buffer) = self.agent.buffer.filter(|id| self.state.buffers.contains_key(*id))
         else {
@@ -582,17 +1078,7 @@ impl InteractiveApplication {
             .unwrap_or(80)
             .saturating_sub(8)
             .max(20);
-        let working = self
-            .agent
-            .session
-            .as_ref()
-            .map(|session| match session.phase {
-                Phase::Initializing(_) | Phase::Creating(_) => "_Starting…_",
-                Phase::Prompting(_) => "_Working…_",
-                Phase::Ready => "",
-            })
-            .unwrap_or("");
-        let text = transcript(&self.agent.entries, working, width);
+        let text = self.agent_transcript(width);
         let (old_lines, revision) = {
             let target = &self.state.buffers[buffer];
             let revision = match &target.origin {
@@ -635,25 +1121,72 @@ impl InteractiveApplication {
             }
         }
     }
-}
 
-fn send_next_prompt(session: &mut AgentSession, entries: &mut Vec<Entry>) {
-    let Some(id) = session.id.clone() else {
-        return;
-    };
-    let Some(parts) = session.queued.pop_front() else {
-        return;
-    };
-    match session
-        .process
-        .request("session/prompt", agent::prompt_params(&id, &parts))
-    {
-        Ok(request) => session.phase = Phase::Prompting(request),
-        Err(error) => entries.push(Entry::Notice(error)),
+    /// The tab line, the active session's settings and its transcript, as Markdown.
+    fn agent_transcript(&self, width: usize) -> String {
+        let Some(session) = self.active_agent() else {
+            return "# Agent\n\nNo session yet. Ask with <leader>aa, or pick an agent with <leader>an.\n"
+                .into();
+        };
+        let tabs = self
+            .agent
+            .sessions
+            .iter()
+            .enumerate()
+            .map(|(index, tab)| {
+                let mark = match tab.status(self.agent_waiting(tab.number)) {
+                    "working" | "starting" => " …",
+                    "waiting for you" | "sign-in needed" => " ?",
+                    "stopped" => " ✗",
+                    _ => "",
+                };
+                let label = format!("{} {}{mark}", tab.number, tab.name);
+                if index == self.agent.active { format!("[{label}]") } else { label }
+            })
+            .collect::<Vec<_>>()
+            .join(" · ");
+        let settings = [("model", ""), ("mode", "mode "), (THINKING, "thinking ")]
+            .into_iter()
+            .filter_map(|(key, label)| Some(format!("{label}{}", value_name(session.option(key)?))))
+            .collect::<Vec<_>>();
+        let working = match (session.process.is_some(), session.phase) {
+            (true, Phase::Initializing(_) | Phase::Creating(_)) => "_Starting…_",
+            (true, Phase::Prompting(_)) => "_Working…_",
+            _ => "",
+        };
+        format!(
+            "{}\n`{}`\n{}{}",
+            wrap(&tabs, width),
+            shown_root(&session.root, width),
+            wrap(&settings.join(" · "), width),
+            transcript(&session.name, &session.entries, working, width)
+        )
     }
 }
 
-fn apply_update(entries: &mut Vec<Entry>, update: SessionUpdate) {
+fn picker_row(id: String, label: String, detail: String, badge: String) -> PickerItem {
+    PickerItem {
+        badge,
+        kind: PickerItemKind::Entry,
+        id: PickerItemId(id),
+        label,
+        detail,
+        source: String::new(),
+        action: PickerAction::None,
+    }
+}
+
+/// The display name of an option's current value.
+fn value_name(option: &SessionOption) -> String {
+    option
+        .values
+        .iter()
+        .find(|value| value.value == option.current)
+        .map_or_else(|| option.current.clone(), |value| value.name.clone())
+}
+
+fn apply_update(session: &mut AgentSession, update: SessionUpdate) {
+    let entries = &mut session.entries;
     match update {
         SessionUpdate::AgentText(text) => {
             if let Some(Entry::Agent(current)) = entries.last_mut() {
@@ -700,6 +1233,12 @@ fn apply_update(entries: &mut Vec<Entry>, update: SessionUpdate) {
                 *current = steps;
             } else {
                 entries.push(Entry::Plan(steps));
+            }
+        }
+        SessionUpdate::Options(options) => session.options = options,
+        SessionUpdate::Mode(mode) => {
+            if let Some(option) = session.options.iter_mut().find(|option| option.category == "mode") {
+                option.current = mode;
             }
         }
         SessionUpdate::Other => {}
@@ -753,10 +1292,9 @@ fn selected_text(
     .unwrap_or_default()
 }
 
-/// The Markdown the panel shows, hard-wrapped to `width` outside code blocks.
-fn transcript(entries: &[Entry], working: &str, width: usize) -> String {
+/// One session's conversation as Markdown, hard-wrapped to `width` outside code blocks.
+fn transcript(name: &str, entries: &[Entry], working: &str, width: usize) -> String {
     let mut out = String::new();
-    let mut agent_heading = None::<&str>;
     let mut answered = true;
     let push = |out: &mut String, text: &str| {
         let mut fenced = false;
@@ -786,16 +1324,15 @@ fn transcript(entries: &[Entry], working: &str, width: usize) -> String {
             Entry::Agent(_) | Entry::Thought(_) | Entry::Tool { .. } | Entry::Plan(_)
         );
         if needs_heading && !answered {
-            out.push_str(&format!("\n## {}\n\n", agent_heading.unwrap_or("Agent")));
+            out.push_str(&format!("\n## {name}\n\n"));
             answered = true;
         }
         match entry {
-            Entry::Header { name, root } => {
-                agent_heading = Some(name.as_str());
-                if !out.is_empty() {
-                    out.push_str("\n---\n\n");
+            // The first start is described by the settings line; later ones are restarts.
+            Entry::Started { root } => {
+                if index > 0 {
+                    out.push_str(&format!("\n---\n\n_{name} restarted in `{}`._\n", shown_root(root, width)));
                 }
-                out.push_str(&format!("# {name}\n\n`{}`\n", shown_root(root, width)));
             }
             Entry::User { text, context } => {
                 out.push_str("\n## You\n\n");
@@ -837,9 +1374,6 @@ fn transcript(entries: &[Entry], working: &str, width: usize) -> String {
             }
             Entry::Notice(text) => out.push_str(&format!("\n_{text}_\n")),
         }
-    }
-    if entries.is_empty() {
-        out.push_str("# Agent\n\nNo session yet. Ask with <leader>aa.\n");
     }
     if !working.is_empty() {
         out.push_str(&format!("\n{working}\n"));
@@ -890,8 +1424,7 @@ mod tests {
     #[test]
     fn transcript_groups_a_turn_under_headings() {
         let entries = vec![
-            Entry::Header {
-                name: "claude".into(),
+            Entry::Started {
                 root: PathBuf::from("/work/repo"),
             },
             Entry::User {
@@ -906,18 +1439,34 @@ mod tests {
             Entry::Agent("Because.".into()),
         ];
         assert_eq!(
-            transcript(&entries, "", 80),
-            "# claude\n\n`/work/repo`\n\n## You\n\nwhy\n> + main.rs\n\n## claude\n\n- ✓ Read main.rs\n\nBecause.\n"
+            transcript("claude", &entries, "", 80),
+            "\n## You\n\nwhy\n> + main.rs\n\n## claude\n\n- ✓ Read main.rs\n\nBecause.\n"
         );
     }
 
     #[test]
-    fn streamed_chunks_join_and_tool_updates_land_on_their_call() {
-        let mut entries = Vec::new();
-        apply_update(&mut entries, SessionUpdate::AgentText("Hel".into()));
-        apply_update(&mut entries, SessionUpdate::AgentText("lo".into()));
+    fn streamed_chunks_join_and_option_updates_replace_the_list() {
+        let mut session = AgentSession {
+            number: 1,
+            name: "claude".into(),
+            root: PathBuf::from("/r"),
+            process: None,
+            phase: Phase::Ready,
+            id: Some("s".into()),
+            queued: VecDeque::new(),
+            last_log: String::new(),
+            entries: Vec::new(),
+            options: agent::session_options(&json!({
+                "modes": {"currentModeId": "default", "availableModes": [{"id": "default", "name": "Default"}, {"id": "plan", "name": "Plan"}]}
+            })),
+            auth_methods: Vec::new(),
+            requests: Vec::new(),
+            preferred: BTreeMap::new(),
+        };
+        apply_update(&mut session, SessionUpdate::AgentText("Hel".into()));
+        apply_update(&mut session, SessionUpdate::AgentText("lo".into()));
         apply_update(
-            &mut entries,
+            &mut session,
             SessionUpdate::ToolCall {
                 id: "1".into(),
                 title: "Edit".into(),
@@ -925,15 +1474,18 @@ mod tests {
             },
         );
         apply_update(
-            &mut entries,
+            &mut session,
             SessionUpdate::ToolCallUpdate {
                 id: "1".into(),
                 title: None,
                 status: Some("completed".into()),
             },
         );
-        assert!(matches!(&entries[0], Entry::Agent(text) if text == "Hello"));
-        assert!(matches!(&entries[1], Entry::Tool { status, .. } if status == "completed"));
+        assert!(matches!(&session.entries[0], Entry::Agent(text) if text == "Hello"));
+        assert!(matches!(&session.entries[1], Entry::Tool { status, .. } if status == "completed"));
+        apply_update(&mut session, SessionUpdate::Mode("plan".into()));
+        assert_eq!(value_name(session.option("mode").unwrap()), "Plan");
+        assert!(session.set_option("mode", "missing").is_err());
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use std::{
+    cell::Cell,
     fs::File,
     io::{self, IsTerminal, Stdout, Write},
     os::fd::AsFd,
@@ -79,6 +80,8 @@ pub struct TerminalSession {
     stdout: Stdout,
     /// The terminal crossterm reads keys from when stdin is not one.
     input: Option<File>,
+    /// crossterm may still hold keys it parsed in its last read.
+    buffered: Cell<bool>,
     previous: Option<Frame>,
     options: TerminalOptions,
     theme: ThemeConfig,
@@ -125,6 +128,7 @@ impl TerminalSession {
             } else {
                 File::open("/dev/tty").ok()
             },
+            buffered: Cell::new(false),
             previous: None,
             options,
             theme,
@@ -199,19 +203,22 @@ impl TerminalSession {
 
     pub fn poll_event(&self, timeout: Duration) -> Result<Option<UiEvent>, TerminalError> {
         // crossterm waits in whole milliseconds and then spins on zero-timeout polls for the
-        // rest of the timeout, about a millisecond of busy work on every idle wake. So the
-        // wait happens here and crossterm only reads what is already there. A timeout this
-        // short still makes crossterm hand out events it parsed but has not returned yet.
-        const READY: Duration = Duration::from_micros(1);
-        if !event::poll(READY)? && !(self.wait_for_input(timeout)? && event::poll(READY)?) {
+        // rest of the timeout, so the idle wait happens here on the terminal. crossterm also
+        // hands out keys it already parsed only while its timeout has time left, so it gets a
+        // full millisecond, and is asked again after every key: several keys can arrive in
+        // one read, and the rest would otherwise wait for the next keypress.
+        const READ: Duration = Duration::from_millis(1);
+        if !self.buffered.get() && !self.wait_for_input(timeout)? {
             return Ok(None);
         }
         loop {
+            if !event::poll(READ)? {
+                self.buffered.set(false);
+                return Ok(None);
+            }
+            self.buffered.set(true);
             if let Some(event) = normalize_event(event::read()?) {
                 return Ok(Some(event));
-            }
-            if !event::poll(READY)? {
-                return Ok(None);
             }
         }
     }

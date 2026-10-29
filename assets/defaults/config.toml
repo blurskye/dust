@@ -244,7 +244,7 @@ border = "single"
 row_marker = " "
 selected_marker = ">"
 language_separator = ", "
-category_order = ["all", "lsp", "dap", "linter", "formatter"]
+category_order = ["all", "lsp", "dap", "linter", "formatter", "agent"]
 
 [ui.tool_manager.categories]
 all = "All"
@@ -252,6 +252,7 @@ lsp = "LSP"
 dap = "DAP"
 linter = "Linter"
 formatter = "Formatter"
+agent = "Agent"
 
 [ui.picker]
 width_percent = 88
@@ -469,25 +470,42 @@ rows = 24
 float = true
 close_on_exit = true
 
-# ACP agents for `<leader>a`. Each runs in the worktree that was open when its session
-# started. Install the adapter you want, e.g. `npm i -g @zed-industries/claude-code-acp`.
+# ACP agents for `<leader>a`. Each session runs in the worktree that was open when it
+# started. The Claude, Codex and pi adapters can be installed from the tool manager
+# (`<leader>cm`, Agent); OpenCode and Gemini speak ACP themselves. `options` picks a model,
+# mode or thinking level at start, e.g. `options = { model = "…", thought_level = "high" }`.
 [agents]
 default = "claude"
 
 [agents.profiles.claude]
-program = "claude-code-acp"
+program = "claude-agent-acp"
 arguments = []
 environment = {}
-
-[agents.profiles.gemini]
-program = "gemini"
-arguments = ["--experimental-acp"]
-environment = {}
+options = {}
 
 [agents.profiles.codex]
 program = "codex-acp"
 arguments = []
 environment = {}
+options = {}
+
+[agents.profiles.pi]
+program = "pi-acp"
+arguments = []
+environment = {}
+options = {}
+
+[agents.profiles.opencode]
+program = "opencode"
+arguments = ["acp"]
+environment = {}
+options = {}
+
+[agents.profiles.gemini]
+program = "gemini"
+arguments = ["--experimental-acp"]
+environment = {}
+options = {}
 
 [packages.registry]
 base_url = "https://dust.blurskye.dev/registry/v1"
@@ -1079,8 +1097,15 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "agent.add_file" = "Ask About File"
 "agent.add_diagnostics" = "Ask About Diagnostics"
 "agent.new" = "New Agent Session"
+"agent.sessions" = "Agent Sessions"
+"agent.session.next" = "Next Agent Session"
+"agent.session.previous" = "Previous Agent Session"
+"agent.session.close" = "Close Agent Session"
 "agent.cancel" = "Stop Agent"
-"agent.pick" = "Pick Agent"
+"agent.model" = "Agent Model"
+"agent.mode" = "Agent Mode"
+"agent.thinking" = "Agent Thinking Level"
+"agent.options" = "Agent Options"
 "editor.flash" = "Flash jump"
 "workspace.git.browse" = "Git Browse (open)"
 "workspace.git.browse.copy" = "Git Browse (copy)"

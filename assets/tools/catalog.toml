@@ -430,3 +430,39 @@ probe_args = ["--version"]
 [tool.install]
 method = "rustup_component"
 component = "clippy"
+
+[[tool]]
+id = "claude-agent-acp"
+name = "Claude Code (ACP adapter)"
+kind = "agent"
+languages = []
+executable = "claude-agent-acp"
+version = "0.99.0"
+
+[tool.install]
+method = "npm_package"
+packages = ["@agentclientprotocol/claude-agent-acp@0.99.0"]
+
+[[tool]]
+id = "codex-acp"
+name = "Codex (ACP adapter)"
+kind = "agent"
+languages = []
+executable = "codex-acp"
+version = "2.5.0"
+
+[tool.install]
+method = "npm_package"
+packages = ["@agentclientprotocol/codex-acp@2.5.0"]
+
+[[tool]]
+id = "pi-acp"
+name = "pi (ACP adapter)"
+kind = "agent"
+languages = []
+executable = "pi-acp"
+version = "0.0.34"
+
+[tool.install]
+method = "npm_package"
+packages = ["pi-acp@0.0.34"]

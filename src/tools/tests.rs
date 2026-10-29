@@ -46,7 +46,13 @@ fn bundled_catalog_is_typed_and_has_real_language_and_debug_tools() {
     let catalog = bundled_tool_catalog();
     assert!(catalog.iter().any(|tool| tool.id == "rust-analyzer"));
     assert!(catalog.iter().any(|tool| tool.kind == ToolKind::Dap));
-    assert!(catalog.iter().all(|tool| !tool.languages.is_empty()));
+    // Agent adapters serve the agent panel, not a language.
+    assert!(
+        catalog
+            .iter()
+            .all(|tool| (tool.kind == ToolKind::Agent) == tool.languages.is_empty())
+    );
+    assert_eq!(catalog.iter().filter(|tool| tool.kind == ToolKind::Agent).count(), 3);
     assert!(
         catalog
             .iter()

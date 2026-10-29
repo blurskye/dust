@@ -1173,6 +1173,26 @@ fn documented_key_reaches(
 }
 
 
+#[test]
+fn the_agent_keys_each_reach_their_command() {
+    let app = app();
+    let keymaps = bundled_keymaps(&app);
+    for (keys, command) in [
+        ("<leader> a a", "agent.ask"),
+        ("<leader> a n", "agent.new"),
+        ("<leader> a s", "agent.sessions"),
+        ("<leader> a ]", "agent.session.next"),
+        ("<leader> a [", "agent.session.previous"),
+        ("<leader> a x", "agent.session.close"),
+        ("<leader> a m", "agent.model"),
+        ("<leader> a M", "agent.mode"),
+        ("<leader> a r", "agent.thinking"),
+        ("<leader> a o", "agent.options"),
+    ] {
+        assert_eq!(documented_key_reaches(&keymaps, keys).as_deref(), Some(command), "{keys}");
+    }
+}
+
 /// E-09: the document is the source of truth for which keys exist, so a key added to its
 /// prefix table without a binding fails here instead of shipping as a dead prefix entry, and
 /// a key it marks as having no command must not be bound to something else.

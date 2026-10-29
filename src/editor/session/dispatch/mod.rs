@@ -27,7 +27,7 @@ use super::windows::{
 #[path = "../commands/mod.rs"]
 pub(super) mod commands;
 use crate::editor::session::debugger::DebugSession;
-mod agent;
+pub(super) mod agent;
 mod effects;
 mod events;
 mod pull_requests;

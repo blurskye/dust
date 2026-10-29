@@ -1,8 +1,9 @@
 #![forbid(unsafe_code)]
 
-//! Agent Client Protocol (ACP) client. An agent such as Claude Code (`claude-code-acp`),
-//! Gemini CLI (`gemini --experimental-acp`) or Codex (`codex-acp`) runs as a child process
-//! and speaks JSON-RPC 2.0 as one JSON object per line on stdin/stdout.
+//! Agent Client Protocol (ACP) client. An agent such as Claude Code (`claude-agent-acp`),
+//! Codex (`codex-acp`), pi (`pi-acp`), OpenCode (`opencode acp`) or Gemini CLI
+//! (`gemini --experimental-acp`) runs as a child process and speaks JSON-RPC 2.0 as one
+//! JSON object per line on stdin/stdout.
 
 use serde_json::{Value, json};
 use std::{
@@ -243,6 +244,10 @@ pub enum SessionUpdate {
         status: Option<String>,
     },
     Plan(Vec<(String, String)>),
+    /// The full list of session options, after the agent changed one.
+    Options(Vec<SessionOption>),
+    /// The agent switched its mode (the older mode API).
+    Mode(String),
     Other,
 }
 
@@ -264,6 +269,8 @@ pub fn session_update(params: &Value) -> SessionUpdate {
             title: string("title"),
             status: string("status"),
         },
+        "config_option_update" => SessionUpdate::Options(config_options(update)),
+        "current_mode_update" => SessionUpdate::Mode(string("currentModeId").unwrap_or_default()),
         "plan" => SessionUpdate::Plan(
             update["entries"]
                 .as_array()
@@ -282,6 +289,143 @@ pub fn session_update(params: &Value) -> SessionUpdate {
         ),
         _ => SessionUpdate::Other,
     }
+}
+
+/// A setting of the session the user can change, such as its model, mode or thinking level.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionOption {
+    pub id: String,
+    pub name: String,
+    /// `model`, `mode`, `thought_level` or an agent's own category.
+    pub category: String,
+    pub current: String,
+    pub values: Vec<OptionValue>,
+    pub source: OptionSource,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OptionValue {
+    pub value: String,
+    pub name: String,
+    pub description: String,
+}
+
+/// Which request changes the option: agents that predate session config options offer
+/// the mode and model through their own methods.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OptionSource {
+    Config,
+    Mode,
+    Model,
+}
+
+/// The options in a `session/new` (or `session/set_config_option`) result. When the agent
+/// sends `configOptions`, the older `modes` and `models` fields are ignored, as the
+/// protocol asks.
+#[must_use]
+pub fn session_options(result: &Value) -> Vec<SessionOption> {
+    if result["configOptions"].is_array() {
+        return config_options(result);
+    }
+    let mut options = Vec::new();
+    let legacy = [
+        ("modes", "mode", "Mode", "currentModeId", "availableModes", "id", OptionSource::Mode),
+        ("models", "model", "Model", "currentModelId", "availableModels", "modelId", OptionSource::Model),
+    ];
+    for (field, id, name, current, available, key, source) in legacy {
+        let Some(values) = result[field][available].as_array() else {
+            continue;
+        };
+        options.push(SessionOption {
+            id: id.into(),
+            name: name.into(),
+            category: id.into(),
+            current: result[field][current].as_str().unwrap_or_default().to_owned(),
+            values: values
+                .iter()
+                .map(|value| OptionValue {
+                    value: value[key].as_str().unwrap_or_default().to_owned(),
+                    name: value["name"].as_str().unwrap_or_default().to_owned(),
+                    description: value["description"].as_str().unwrap_or_default().to_owned(),
+                })
+                .collect(),
+            source,
+        });
+    }
+    options
+}
+
+fn config_options(value: &Value) -> Vec<SessionOption> {
+    let text = |value: &Value, key: &str| value[key].as_str().unwrap_or_default().to_owned();
+    value["configOptions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|option| option["type"].as_str().is_none_or(|kind| kind == "select"))
+        .map(|option| {
+            let mut values = Vec::new();
+            for entry in option["options"].as_array().into_iter().flatten() {
+                // Values may come in named groups; the group goes into the description.
+                match entry["options"].as_array() {
+                    Some(group) => values.extend(group.iter().map(|value| OptionValue {
+                        value: text(value, "value"),
+                        name: text(value, "name"),
+                        description: text(entry, "name"),
+                    })),
+                    None => values.push(OptionValue {
+                        value: text(entry, "value"),
+                        name: text(entry, "name"),
+                        description: text(entry, "description"),
+                    }),
+                }
+            }
+            SessionOption {
+                id: text(option, "id"),
+                name: text(option, "name"),
+                category: option["category"].as_str().unwrap_or("other").to_owned(),
+                current: option["currentValue"]
+                    .as_str()
+                    .map_or_else(|| option["currentValue"].to_string(), str::to_owned),
+                values,
+                source: OptionSource::Config,
+            }
+        })
+        .collect()
+}
+
+/// The request that sets `option` to `value` in `session`.
+#[must_use]
+pub fn set_option_request(session: &str, option: &SessionOption, value: &str) -> (&'static str, Value) {
+    match option.source {
+        OptionSource::Config => (
+            "session/set_config_option",
+            json!({"sessionId": session, "configId": option.id, "value": value}),
+        ),
+        OptionSource::Mode => ("session/set_mode", json!({"sessionId": session, "modeId": value})),
+        OptionSource::Model => ("session/set_model", json!({"sessionId": session, "modelId": value})),
+    }
+}
+
+/// A way to sign in that the agent offers in its `initialize` result.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuthMethod {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+}
+
+#[must_use]
+pub fn auth_methods(initialize: &Value) -> Vec<AuthMethod> {
+    initialize["authMethods"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|method| AuthMethod {
+            id: method["id"].as_str().unwrap_or_default().to_owned(),
+            name: method["name"].as_str().unwrap_or_default().to_owned(),
+            description: method["description"].as_str().unwrap_or_default().to_owned(),
+        })
+        .collect()
 }
 
 /// A permission option the agent offers: `allow_once`, `allow_always`, `reject_once` or
@@ -368,6 +512,33 @@ mod tests {
                 status: "in_progress".into()
             }
         );
+    }
+
+    #[test]
+    fn options_come_from_config_options_or_the_older_mode_and_model_fields() {
+        let config = json!({"configOptions": [
+            {"id": "model", "name": "Model", "category": "model", "type": "select",
+             "currentValue": "a", "options": [{"value": "a", "name": "A"}, {"value": "b", "name": "B"}]},
+            {"id": "effort", "name": "Thinking", "category": "thought_level", "type": "select",
+             "currentValue": "high", "options": [{"group": "g", "name": "Levels",
+                 "options": [{"value": "low", "name": "Low"}, {"value": "high", "name": "High"}]}]}
+        ], "modes": {"currentModeId": "x", "availableModes": [{"id": "x", "name": "X"}]}});
+        let options = session_options(&config);
+        assert_eq!(options.len(), 2);
+        assert_eq!(options[0].values.len(), 2);
+        assert_eq!(options[1].category, "thought_level");
+        assert_eq!(options[1].values[1].value, "high");
+        assert_eq!(set_option_request("s", &options[1], "low").0, "session/set_config_option");
+
+        let legacy = json!({
+            "modes": {"currentModeId": "default", "availableModes": [{"id": "default", "name": "Default"}, {"id": "plan", "name": "Plan"}]},
+            "models": {"currentModelId": "m1", "availableModels": [{"modelId": "m1", "name": "One"}]}
+        });
+        let options = session_options(&legacy);
+        assert_eq!(options[0].current, "default");
+        assert_eq!(options[1].values[0].value, "m1");
+        let (method, params) = set_option_request("s", &options[0], "plan");
+        assert_eq!((method, params["modeId"].as_str()), ("session/set_mode", Some("plan")));
     }
 
     #[test]

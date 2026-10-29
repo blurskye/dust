@@ -55,8 +55,15 @@ pub enum AppEffect {
     AgentAddFile,
     AgentAddDiagnostics,
     AgentNew,
+    AgentSessions,
+    AgentNextSession,
+    AgentPreviousSession,
+    AgentCloseSession,
     AgentCancel,
-    AgentPick,
+    AgentModel,
+    AgentMode,
+    AgentThinking,
+    AgentOptions,
     PullRequestList,
     PullRequestComments,
     PullRequestComment,
@@ -440,7 +447,6 @@ pub enum PickerKind {
     Marks,
     Jumps,
     Changes,
-    Agents,
 }
 
 pub use crate::editor::session::windows::LayoutAction;

@@ -79,6 +79,7 @@ pub(in crate::editor::session) const fn tool_kind_key(kind: ToolKind) -> &'stati
         ToolKind::Dap => "dap",
         ToolKind::Formatter => "formatter",
         ToolKind::Linter => "linter",
+        ToolKind::Agent => "agent",
     }
 }
 
@@ -472,7 +473,7 @@ impl ToolingSession {
             .flatten()
     }
 
-    fn path_executable(&self, executable: &str) -> Option<(PathBuf, bool)> {
+    pub(in crate::editor::session) fn path_executable(&self, executable: &str) -> Option<(PathBuf, bool)> {
         self.path_lookups
             .borrow_mut()
             .entry(executable.to_owned())

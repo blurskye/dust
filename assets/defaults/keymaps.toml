@@ -4521,11 +4521,60 @@ command = "agent.cancel"
 desc = "Stop Agent"
 
 [[keymap]]
-id = "builtin.global.agent-pick"
+id = "builtin.global.agent-sessions"
 context = "global"
-keys = "<leader> a p"
-command = "agent.pick"
-desc = "Pick Agent"
+keys = "<leader> a s"
+command = "agent.sessions"
+desc = "Agent Sessions"
+
+[[keymap]]
+id = "builtin.global.agent-next"
+context = "global"
+keys = "<leader> a ]"
+command = "agent.session.next"
+desc = "Next Agent Session"
+
+[[keymap]]
+id = "builtin.global.agent-previous"
+context = "global"
+keys = "<leader> a ["
+command = "agent.session.previous"
+desc = "Previous Agent Session"
+
+[[keymap]]
+id = "builtin.global.agent-close"
+context = "global"
+keys = "<leader> a x"
+command = "agent.session.close"
+desc = "Close Agent Session"
+
+[[keymap]]
+id = "builtin.global.agent-model"
+context = "global"
+keys = "<leader> a m"
+command = "agent.model"
+desc = "Agent Model"
+
+[[keymap]]
+id = "builtin.global.agent-mode"
+context = "global"
+keys = "<leader> a M"
+command = "agent.mode"
+desc = "Agent Mode"
+
+[[keymap]]
+id = "builtin.global.agent-thinking"
+context = "global"
+keys = "<leader> a r"
+command = "agent.thinking"
+desc = "Agent Thinking Level"
+
+[[keymap]]
+id = "builtin.global.agent-options"
+context = "global"
+keys = "<leader> a o"
+command = "agent.options"
+desc = "Agent Options"
 
 [[keymap]]
 id = "builtin.editor.visual-char.agent-ask"

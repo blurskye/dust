@@ -11,6 +11,10 @@ pub struct AgentProfileConfig {
     pub arguments: Vec<String>,
     #[serde(default)]
     pub environment: BTreeMap<String, String>,
+    /// Session options to choose once the agent starts, by option id or category, such as
+    /// `model`, `mode` or `thought_level`. Values the agent does not offer are reported.
+    #[serde(default)]
+    pub options: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]

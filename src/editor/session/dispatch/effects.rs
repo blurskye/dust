@@ -7680,38 +7680,6 @@ impl InteractiveApplication {
                     .set_picker_footer("Enter Switch · Esc Close".to_owned());
                 self.sync_picker_ui();
             }
-            PickerKind::Agents => {
-                let current = self.agent_name();
-                let items = self
-                    .configuration
-                    .settings()
-                    .agents
-                    .profiles
-                    .iter()
-                    .map(|(name, profile)| {
-                        let command = std::iter::once(profile.program.display().to_string())
-                            .chain(profile.arguments.iter().cloned())
-                            .collect::<Vec<_>>()
-                            .join(" ");
-                        (
-                            PickerItem {
-                                badge: if *name == current { "current".into() } else { String::new() },
-                                kind: crate::workspace::PickerItemKind::Entry,
-                                id: PickerItemId(format!("agent:{name}")),
-                                label: name.clone(),
-                                detail: command,
-                                source: String::new(),
-                                action: PickerAction::None,
-                            },
-                            PickerPayload::Agent(name.clone()),
-                        )
-                    })
-                    .collect();
-                self.install_picker("Agents".to_owned(), items);
-                self.search
-                    .set_picker_footer("Enter Start · Esc Close".to_owned());
-                self.sync_picker_ui();
-            }
             PickerKind::Recents => {
                 let items = self
                     .persistence
@@ -8327,7 +8295,7 @@ impl InteractiveApplication {
             Some(PickerPayload::GitWorktree { path, .. } | PickerPayload::Project(path)) => {
                 self.switch_workspace_root(path)
             }
-            Some(PickerPayload::Agent(name)) => self.restart_agent(Some(name)),
+            Some(PickerPayload::Agent(choice)) => self.accept_agent_choice(choice),
             Some(PickerPayload::PullRequest(number)) => self.checkout_pull_request(number),
             Some(PickerPayload::Terminal(key)) => {
                 if let Some(id) = self.terminal_session.resolve(&key) {
@@ -10465,6 +10433,7 @@ impl InteractiveApplication {
             match definition.kind {
                 ToolKind::Lsp => unreachable!("handled before installed-tool dispatch"),
                 ToolKind::Dap => self.start_dap(Some(id.into()), None),
+                ToolKind::Agent => self.start_agent_for_program(&definition.executable),
                 ToolKind::Formatter | ToolKind::Linter => {
                     self.notify_message(
                         self.message(
@@ -11821,9 +11790,16 @@ impl InteractiveApplication {
             AppEffect::AgentToggle => self.toggle_agent_panel(),
             AppEffect::AgentAddFile => self.attach_agent_file(),
             AppEffect::AgentAddDiagnostics => self.attach_agent_diagnostics(),
-            AppEffect::AgentNew => self.restart_agent(None),
+            AppEffect::AgentNew => self.open_agent_picker(),
+            AppEffect::AgentSessions => self.open_agent_sessions_picker(),
+            AppEffect::AgentNextSession => self.cycle_agent_session(1),
+            AppEffect::AgentPreviousSession => self.cycle_agent_session(-1),
+            AppEffect::AgentCloseSession => self.close_agent_session(),
             AppEffect::AgentCancel => self.cancel_agent_turn(),
-            AppEffect::AgentPick => self.open_builtin_picker(PickerKind::Agents),
+            AppEffect::AgentModel => self.open_agent_option_picker(Some("model")),
+            AppEffect::AgentMode => self.open_agent_option_picker(Some("mode")),
+            AppEffect::AgentThinking => self.open_agent_option_picker(Some("thought_level")),
+            AppEffect::AgentOptions => self.open_agent_option_picker(None),
             AppEffect::PullRequestList => self.list_pull_requests(),
             AppEffect::PullRequestComments => self.list_review_comments(),
             AppEffect::PullRequestComment => self.begin_review_comment(),

@@ -352,6 +352,7 @@ impl Default for ToolManagerConfig {
                 ("dap".into(), "DAP".into()),
                 ("linter".into(), "Linter".into()),
                 ("formatter".into(), "Formatter".into()),
+                ("agent".into(), "Agent".into()),
             ]
             .into_iter()
             .collect(),
@@ -361,6 +362,7 @@ impl Default for ToolManagerConfig {
                 "dap".into(),
                 "linter".into(),
                 "formatter".into(),
+                "agent".into(),
             ],
             width_percent: 82,
             height_percent: 84,
