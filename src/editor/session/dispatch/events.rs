@@ -114,11 +114,13 @@ impl InteractiveApplication {
     }
 
     pub(super) fn sync_status_summary_ui(&mut self) {
-        self.ui.git_changed_files = self
+        let changed_files = self
             .git
             .status()
             .map_or(0, |snapshot| snapshot.entries.len());
-        self.ui.running_tasks = self.tasks.running_count();
+        self.ui.set(changed_files, |ui| &mut ui.git_changed_files);
+        let running = self.tasks.running_count();
+        self.ui.set(running, |ui| &mut ui.running_tasks);
     }
 
     pub(super) fn toggle_buffer_pin(&mut self, buffer: crate::editor::BufferId) {
@@ -1545,7 +1547,7 @@ impl InteractiveApplication {
             };
             if let Err(error) = self
                 .window_session
-                .check_editor_admission(&(&self.state).into())
+                .check_editor_admission(&(&*self.state).into())
             {
                 self.show_error(error);
                 return;
@@ -1636,7 +1638,7 @@ impl InteractiveApplication {
             MutationUpdate::Complete { operation, change } => {
                 let reconciliation = (|| -> Result<(), String> {
                     self.window_session
-                        .check_editor_admission(&(&self.state).into())?;
+                        .check_editor_admission(&(&*self.state).into())?;
                     if let Some(change) = change {
                         let target = match &operation {
                             ExplorerMutation::Rename { target, .. } => Some(target.as_path()),
@@ -1933,6 +1935,33 @@ impl InteractiveApplication {
             self.clock.monotonic(),
             &too_large,
         );
+        for (buffer, result) in self.syntax.results() {
+            let revision = BufferRevision(result.revision);
+            let stale = self.state.buffers.get(*buffer).is_some_and(|target| {
+                target.syntax_objects.as_ref().map(|(at, _)| *at) != Some(revision)
+            });
+            if stale {
+                self.state.buffers[*buffer].syntax_objects =
+                    Some((revision, result.objects.clone()));
+            }
+        }
+        // Folds and spans are rebuilt only when a parse result or the views changed, not on
+        // every tick.
+        let source = (
+            self.syntax
+                .results()
+                .map(|(buffer, result)| (*buffer, result.generation, result.revision))
+                .collect::<Vec<_>>(),
+            self.state
+                .views
+                .iter()
+                .map(|(view_id, view)| (view_id, view.buffer))
+                .collect::<Vec<_>>(),
+        );
+        if source == self.syntax_spans_source {
+            return;
+        }
+        self.syntax_spans_source = source;
         let collapsed = self
             .ui
             .syntax_folds
@@ -1953,25 +1982,7 @@ impl InteractiveApplication {
                 }
             }
         }
-        self.ui.syntax_folds = syntax_folds;
-        for (buffer, result) in self.syntax.results() {
-            let revision = BufferRevision(result.revision);
-            if let Some(target) = self.state.buffers.get_mut(*buffer)
-                && target.syntax_objects.as_ref().map(|(at, _)| *at) != Some(revision)
-            {
-                target.syntax_objects = Some((revision, result.objects.clone()));
-            }
-        }
-        // Spans are copied only when a parse result changed, not on every tick.
-        let source = self
-            .syntax
-            .results()
-            .map(|(buffer, result)| (*buffer, result.generation, result.revision))
-            .collect::<Vec<_>>();
-        if source == self.syntax_spans_source {
-            return;
-        }
-        self.syntax_spans_source = source;
+        self.ui.set(syntax_folds, |ui| &mut ui.syntax_folds);
         self.ui.syntax_spans = self
             .syntax
             .results()
@@ -2001,19 +2012,21 @@ impl InteractiveApplication {
         self.ui.expanded_diagnostic = self.diagnostics.expanded(&self.state);
     }
     fn clear_lsp_ui_rows(&mut self) {
-        self.ui.language_completion = None;
+        if self.ui.language_completion.is_some() {
+            self.ui.language_completion = None;
+        }
         self.close_documentation();
-        self.ui.lsp_semantic_spans.clear();
-        self.ui.lsp_highlight_spans.clear();
-        self.ui.lsp_inlay_hints.clear();
-        self.ui.lsp_folds.clear();
+        self.ui.set(Vec::new(), |ui| &mut ui.lsp_semantic_spans);
+        self.ui.set(Vec::new(), |ui| &mut ui.lsp_highlight_spans);
+        self.ui.set(Vec::new(), |ui| &mut ui.lsp_inlay_hints);
+        self.ui.set(Vec::new(), |ui| &mut ui.lsp_folds);
     }
     pub(in crate::editor::session) fn clear_lsp_ui_projection(&mut self) {
         self.language.clear_projection();
         self.clear_lsp_ui_rows();
     }
     pub(in crate::editor::session) fn refresh_lsp_projection_owner(&mut self) {
-        let document = self.active_lsp_document();
+        let document = self.active_lsp_document_without_text();
         if self.language.refresh_projection(
             &self.state,
             document
@@ -2118,7 +2131,7 @@ impl InteractiveApplication {
         if self.ui.lsp_progress != rows {
             self.ui.lsp_progress = rows.to_vec();
         }
-        self.ui.lsp_progress_frame = frame;
+        self.ui.set(frame, |ui| &mut ui.lsp_progress_frame);
     }
     pub(in crate::editor::session) fn update_lsp_progress_animation(&mut self) {
         self.language.animate_progress(
@@ -2234,7 +2247,7 @@ impl InteractiveApplication {
                     version,
                     result,
                 } => {
-                    let current = self.active_lsp_document();
+                    let current = self.active_lsp_document_without_text();
                     if !current.as_ref().is_some_and(|(_, document)| {
                         document.uri() == uri && document.version == version
                     }) {

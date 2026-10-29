@@ -1827,7 +1827,7 @@ fn invalid_configured_regex_keeps_search_prompt_input() {
     }
     app.open_prompt(crate::ui::PromptKind::SearchForward, "[".into());
     app.submit_prompt();
-    let prompt = app.ui.prompt.expect("invalid regex prompt remains open");
+    let prompt = app.ui.prompt.clone().expect("invalid regex prompt remains open");
     assert_eq!(prompt.input, "[");
     assert!(prompt.error.is_some());
 }

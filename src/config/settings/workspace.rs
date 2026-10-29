@@ -106,7 +106,7 @@ impl Default for ConfigWatchConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            poll_interval_ms: 250,
+            poll_interval_ms: 1000,
             debounce_ms: 100,
         }
     }

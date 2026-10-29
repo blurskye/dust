@@ -129,7 +129,7 @@ impl InteractiveApplication {
                 .unwrap_or_else(|_| crate::tools::inspect_tools()),
         );
         let mut application = InteractiveApplication {
-            state,
+            state: super::Tracked::new(state),
             extension: super::super::extensions::ExtensionSession::new(
                 plugin_storage_root,
                 plugin_queue_capacity,
@@ -142,10 +142,10 @@ impl InteractiveApplication {
             commands,
             input: InputSession::new(configuration.settings.input.count_limit),
             configuration: ConfigurationSession::new(configuration, use_user_configuration),
-            ui: UiState {
+            ui: super::Tracked::new(UiState {
                 config_diagnostic,
                 ..UiState::default()
-            },
+            }),
             documents,
             search: super::super::search::SearchSession::default(),
             should_quit: false,
@@ -153,7 +153,7 @@ impl InteractiveApplication {
             flash: None,
             agent: super::agent::AgentPanel::default(),
             pull_requests: super::pull_requests::PullRequests::default(),
-            syntax_spans_source: Vec::new(),
+            syntax_spans_source: (Vec::new(), Vec::new()),
             window_session: WindowSession::new(dashboard_visible, terminal_panel_height),
             tooling,
             language: super::super::lsp::LspSession::default(),
@@ -197,7 +197,7 @@ impl InteractiveApplication {
         path: PathBuf,
     ) -> Result<crate::editor::BufferId, String> {
         self.window_session
-            .check_editor_admission(&(&self.state).into())?;
+            .check_editor_admission(&(&*self.state).into())?;
         let mut candidate = self.state.draft();
         let (buffer, _) = candidate.open_document(text, path);
         self.commit_editor_draft(candidate, None, true)?;
@@ -211,7 +211,7 @@ impl InteractiveApplication {
             if self.state.buffers.contains_key(buffer) {
                 if let Err(error) = self
                     .window_session
-                    .check_editor_admission(&(&self.state).into())
+                    .check_editor_admission(&(&*self.state).into())
                 {
                     self.show_error(error);
                     return;

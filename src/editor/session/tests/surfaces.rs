@@ -644,7 +644,7 @@ fn accepted_virtual_snapshot_publishes_through_the_tiled_editor_bridge() {
         .extension
         .fixture_virtual_publish(&mut draft, &snapshot)
         .expect("publish");
-    app.state = draft.accept(&app.state.version()).unwrap();
+    *app.state = draft.accept(&app.state.version()).unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     assert!(
@@ -669,7 +669,7 @@ fn accepted_virtual_snapshot_publishes_through_the_tiled_editor_bridge() {
             .unwrap(),
         buffer
     );
-    app.state = draft.accept(&app.state.version()).unwrap();
+    *app.state = draft.accept(&app.state.version()).unwrap();
     app.reconcile_editor_windows();
     assert_eq!(
         (app.state.active_view, app.window_session.graph().focused()),

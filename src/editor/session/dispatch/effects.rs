@@ -491,7 +491,7 @@ impl InteractiveApplication {
             });
         match result {
             Ok(Some(state)) => {
-                self.state = state;
+                *self.state = state;
                 if self.state.active_view.is_none() {
                     self.set_dashboard_visibility(true);
                 }
@@ -1015,7 +1015,7 @@ impl InteractiveApplication {
                     });
                 match result {
                     Ok(state) => {
-                        self.state = state;
+                        *self.state = state;
                         self.set_dashboard_visibility(false);
                         self.reconcile_editor_windows();
                     }
@@ -1581,7 +1581,7 @@ impl InteractiveApplication {
             );
         match result {
             Ok((state, paths)) => {
-                self.state = state;
+                *self.state = state;
                 let retired_confirmation = self.extension.reset_runtime();
                 if retired_confirmation
                     && self
@@ -2386,7 +2386,7 @@ impl InteractiveApplication {
                     });
                 match result {
                     Ok(state) => {
-                        self.state = state;
+                        *self.state = state;
                         self.set_dashboard_visibility(false);
                         self.reconcile_editor_windows();
                     }
@@ -4110,7 +4110,7 @@ impl InteractiveApplication {
             )?;
         }
         self.window_session
-            .check_editor_admission(&(&self.state).into())?;
+            .check_editor_admission(&(&*self.state).into())?;
         let candidate = self
             .state
             .prepare_transaction(transaction)
@@ -4124,14 +4124,14 @@ impl InteractiveApplication {
         activate_document: bool,
     ) -> Result<(), String> {
         self.window_session
-            .check_editor_admission(&(&self.state).into())?;
+            .check_editor_admission(&(&*self.state).into())?;
         let current = self.state.version();
         candidate.check_current(&current)?;
         if !activate_document
             && plan.is_none()
             && candidate.window_version() == self.state.window_version()
         {
-            self.state = candidate.accept(&current)?;
+            *self.state = candidate.accept(&current)?;
             return Ok(());
         }
 
@@ -4177,7 +4177,7 @@ impl InteractiveApplication {
                 Some(descriptions),
             )?
         };
-        self.state = self
+        *self.state = self
             .window_session
             .accept_editor_transition(transition, &current, &catalog)?;
         self.reconcile_editor_windows();
@@ -4218,7 +4218,7 @@ impl InteractiveApplication {
         if matches!(action, LayoutAction::ClosePane | LayoutAction::CloseTab) {
             match self
                 .window_session
-                .begin_layout_close(action, &(&self.state).into())
+                .begin_layout_close(action, &(&*self.state).into())
             {
                 Ok(step) => self.handle_editor_close_step(step),
                 Err(error) => self.show_error(error),
@@ -4227,7 +4227,7 @@ impl InteractiveApplication {
         }
         let plan = match self.window_session.plan_layout(
             action,
-            &(&self.state).into(),
+            &(&*self.state).into(),
             self.configuration.settings(),
             self.extension.contributions().version(),
         ) {
@@ -4826,7 +4826,7 @@ impl InteractiveApplication {
     fn submit_dirty_close(&mut self, selected: crate::ui::ConfirmationChoice) {
         let step = self.window_session.choose_editor_close(
             selected == crate::ui::ConfirmationChoice::Yes,
-            &(&self.state).into(),
+            &(&*self.state).into(),
         );
         self.close_prompt_with_editor_close(false);
         match step {
@@ -4851,7 +4851,7 @@ impl InteractiveApplication {
                 let plan = self.window_session.plan_accepted_editor_close(
                     target,
                     discarded,
-                    &(&self.state).into(),
+                    &(&*self.state).into(),
                     self.configuration.settings(),
                     self.extension.contributions().version(),
                 );
@@ -5830,6 +5830,7 @@ impl InteractiveApplication {
         let Some((text, linewise)) = self.terminal_session.yank_terminal_text(id, line) else {
             return;
         };
+        let policy = self.state.policy;
         self.state.registers.set(
             '"',
             RegisterValue {
@@ -5840,8 +5841,8 @@ impl InteractiveApplication {
                     RegisterShape::Character
                 },
             },
-            self.state.policy.registers_enabled,
-            self.state.policy.mirror_named_to_unnamed,
+            policy.registers_enabled,
+            policy.mirror_named_to_unnamed,
         );
         self.state.mark_editor_changed();
         self.notify_message(self.message("terminal_yanked", &[]), false);
@@ -6992,13 +6993,14 @@ impl InteractiveApplication {
             }
         };
         if copy {
+            let policy = self.state.policy;
             self.state.registers.set(
                 '+',
                 RegisterValue {
                     text: url.clone(),
                     shape: RegisterShape::Character,
                 },
-                self.state.policy.registers_enabled,
+                policy.registers_enabled,
                 true,
             );
             self.notify_message(format!("copied {url}"), false);
@@ -9510,7 +9512,7 @@ impl InteractiveApplication {
         // unrelated adapter.
         let selected = (category == "lsp")
             .then(|| {
-                self.active_lsp_document()
+                self.active_lsp_document_without_text()
                     .map(|(_, document)| document.language_id)
             })
             .flatten()
@@ -9839,7 +9841,7 @@ impl InteractiveApplication {
             "all".into()
         };
         let active_language = self
-            .active_lsp_document()
+            .active_lsp_document_without_text()
             .map(|(_, document)| document.language_id);
         let mut entries = self
             .tooling
@@ -10424,7 +10426,7 @@ impl InteractiveApplication {
         );
         if definition.kind == ToolKind::Lsp {
             if self.selected_lsp_runtime_available(&definition) {
-                if self.active_lsp_document().is_some_and(|(_, document)| {
+                if self.active_lsp_document_without_text().is_some_and(|(_, document)| {
                     !definition.supports_language(&document.language_id)
                 }) {
                     self.notify_message(
@@ -11077,7 +11079,7 @@ impl InteractiveApplication {
 impl InteractiveApplication {
     pub(in crate::editor::session) fn sync_lsp_status_ui(&mut self) {
         let running = self.language.running_servers();
-        self.ui.lsp_server = self
+        let server = self
             .language
             .active()
             .and_then(|server| {
@@ -11099,6 +11101,7 @@ impl InteractiveApplication {
                     format!("stopped {}", session.server_id)
                 }
             });
+        self.ui.set(server, |ui| &mut ui.lsp_server);
         let refresh = self.ui.tool_menu.as_ref().is_some_and(|menu| {
             menu.rows.iter().any(|row| {
                 self.tooling
@@ -11197,7 +11200,8 @@ impl InteractiveApplication {
             self.language.reset_autostart();
             return;
         };
-        let Some((_, document)) = self.active_lsp_document() else {
+        // The text is copied only for a server that needs it, not on every pass.
+        let Some((_, mut document)) = self.active_lsp_document_without_text() else {
             let stale = self
                 .language
                 .sessions()
@@ -11265,6 +11269,9 @@ impl InteractiveApplication {
             if self.language.synced(server, buffer, &revision) {
                 continue;
             }
+            if document.text.is_empty() {
+                document.text = self.state.buffers[buffer].text.to_string();
+            }
             if self
                 .language
                 .sync_owned(server, document.clone(), (buffer, revision.clone()))
@@ -11298,6 +11305,13 @@ impl InteractiveApplication {
     pub(in crate::editor::session) fn active_lsp_document(
         &self,
     ) -> Option<(crate::editor::BufferId, LspDocument)> {
+        let (buffer_id, mut document) = self.active_lsp_document_without_text()?;
+        document.text = self.state.buffers[buffer_id].text.to_string();
+        Some((buffer_id, document))
+    }
+
+    /// The active document's path, language and version, with empty text.
+    pub(in crate::editor::session) fn active_lsp_document_without_text(&self) -> Option<(crate::editor::BufferId, LspDocument)> {
         let buffer_id = self.state.active_buffer_id()?;
         let buffer = self.state.buffers.get(buffer_id)?;
         let path = buffer.path.clone()?;
@@ -11308,7 +11322,7 @@ impl InteractiveApplication {
                 path,
                 language_id,
                 version: buffer.text.revision().0,
-                text: buffer.text.to_string(),
+                text: String::new(),
             },
         ))
     }
@@ -11384,8 +11398,13 @@ impl InteractiveApplication {
                         LspRuntimeSource::Path,
                         Some(&executable),
                     );
+                    const CHECKING: &str = "checking rust-analyzer in the active rustup toolchain…";
                     match self.tooling.version(&key) {
-                        Some(Ok(_)) => {}
+                        Some(Ok(_)) => {
+                            if self.notices.current().is_some_and(|(_, notice)| notice == CHECKING) {
+                                self.clear_notice();
+                            }
+                        }
                         Some(Err(_)) => {
                             self.show_error(Self::unavailable_rust_analyzer_message());
                             return;
@@ -11396,10 +11415,7 @@ impl InteractiveApplication {
                                 LspRuntimeSource::Path,
                                 executable,
                             );
-                            self.notify_message(
-                                "checking rust-analyzer in the active rustup toolchain…".into(),
-                                false,
-                            );
+                            self.notify_message(CHECKING.into(), false);
                             return;
                         }
                     }
@@ -12228,7 +12244,7 @@ impl InteractiveApplication {
             self.reconcile_editor_windows();
             match self
                 .window_session
-                .begin_buffer_close(&(&self.state).into(), view, buffer)
+                .begin_buffer_close(&(&*self.state).into(), view, buffer)
             {
                 Ok(step) => self.handle_editor_close_step(step),
                 Err(error) => self.show_error(error),
@@ -12249,7 +12265,7 @@ impl InteractiveApplication {
             .and_then(|buffer| buffer.path.clone());
         if let Err(error) = self
             .window_session
-            .check_editor_admission(&(&self.state).into())
+            .check_editor_admission(&(&*self.state).into())
         {
             self.show_error(error);
             return;
@@ -12316,7 +12332,7 @@ impl InteractiveApplication {
         let close_save = reply.close_save().cloned();
         if let Err(error) = self
             .window_session
-            .check_editor_admission(&(&self.state).into())
+            .check_editor_admission(&(&*self.state).into())
         {
             if let Some(token) = &close_save {
                 self.window_session.fail_editor_close_save(token);
@@ -12482,7 +12498,7 @@ impl InteractiveApplication {
                     } else {
                         match self
                             .window_session
-                            .finish_editor_close_save(&token, &(&self.state).into())
+                            .finish_editor_close_save(&token, &(&*self.state).into())
                         {
                             Ok(step) => self.handle_editor_close_step(step),
                             Err(error) => self.show_error(error),

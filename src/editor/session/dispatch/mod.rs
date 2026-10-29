@@ -112,10 +112,48 @@ use crate::ui::window::{
     CompositorProjection, DockEdge, SpatialDirection, WindowPlacement, WindowRect,
 };
 
+/// A value that counts how often it was borrowed mutably. The main loop rebuilds the frame
+/// only when the editor or UI state was touched (or input arrived), so an idle editor does
+/// no rendering work at all.
+struct Tracked<T> {
+    value: T,
+    revision: u64,
+}
+
+impl<T> Tracked<T> {
+    const fn new(value: T) -> Self {
+        Self { value, revision: 0 }
+    }
+
+    /// Store `value` in the field `slot` picks, counting a change only when it differs. Steps
+    /// that run on every main loop pass write through this so an idle pass changes nothing.
+    fn set<V: PartialEq>(&mut self, value: V, slot: impl FnOnce(&mut T) -> &mut V) {
+        let slot = slot(&mut self.value);
+        if *slot != value {
+            *slot = value;
+            self.revision = self.revision.wrapping_add(1);
+        }
+    }
+}
+
+impl<T> std::ops::Deref for Tracked<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.value
+    }
+}
+
+impl<T> std::ops::DerefMut for Tracked<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        self.revision = self.revision.wrapping_add(1);
+        &mut self.value
+    }
+}
+
 struct InteractiveApplication {
     notices: super::notifications::NoticeSession,
     clock: std::sync::Arc<dyn crate::clock::Clock>,
-    state: EditorState,
+    state: Tracked<EditorState>,
     extension: super::extensions::ExtensionSession,
     workspace: super::workspace::WorkspaceSession,
     diagnostics: super::diagnostics::DiagnosticSession,
@@ -123,7 +161,7 @@ struct InteractiveApplication {
     commands: CommandRegistry<AppEffect>,
     input: InputSession,
     configuration: ConfigurationSession,
-    ui: UiState,
+    ui: Tracked<UiState>,
     documents: DocumentSession,
     search: super::search::SearchSession,
     should_quit: bool,
@@ -134,8 +172,11 @@ struct InteractiveApplication {
     /// The ACP agent session and its transcript panel.
     agent: agent::AgentPanel,
     pull_requests: pull_requests::PullRequests,
-    /// The parse results `ui.syntax_spans` was built from.
-    syntax_spans_source: Vec<(crate::editor::BufferId, u64, u64)>,
+    /// The parse results and views `ui.syntax_spans` and `ui.syntax_folds` were built from.
+    syntax_spans_source: (
+        Vec<(crate::editor::BufferId, u64, u64)>,
+        Vec<(crate::editor::ViewId, crate::editor::BufferId)>,
+    ),
     window_session: WindowSession,
     tooling: super::tooling::ToolingSession,
     language: super::lsp::LspSession,
@@ -232,6 +273,8 @@ pub fn run_interactive(
     const IDLE_AFTER: u32 = 60;
     const IDLE_POLL: Duration = Duration::from_millis(250);
     let mut still_polls = 0u32;
+    let mut drawn = None;
+    let mut input_arrived = true;
     while !application.should_quit {
         application.process_vfs_results();
         application.process_git_status_events();
@@ -286,21 +329,35 @@ pub fn run_interactive(
         {
             terminal.copy_to_clipboard(&text)?;
         }
-        let frame = render(
-            &application.state,
-            &application.ui,
-            application.configuration.settings(),
-            application.configuration.dashboard(),
-            application.window_session.width(),
-            application.window_session.height(),
-        );
         terminal.set_mouse(application.configuration.settings().ui.mouse)?;
         terminal.set_color_mode(application.configuration.settings().ui.color_mode);
         terminal.set_theme(application.configuration.theme());
         application
             .notices
             .set_terminal_capabilities(terminal.capability_summary());
-        let painted = terminal.draw(&frame)?;
+        // The frame is a pure function of these, so it is only rebuilt when one moved.
+        let inputs = (
+            application.state.revision,
+            application.ui.revision,
+            application.configuration.binding_revision(),
+            application.window_session.width(),
+            application.window_session.height(),
+        );
+        let painted = if input_arrived || terminal.needs_full_draw() || drawn != Some(inputs) {
+            drawn = Some(inputs);
+            let frame = render(
+                &application.state,
+                &application.ui,
+                application.configuration.settings(),
+                application.configuration.dashboard(),
+                application.window_session.width(),
+                application.window_session.height(),
+            );
+            terminal.draw(&frame)?
+        } else {
+            false
+        };
+        input_arrived = false;
         application.queue_startup_reads();
         application.schedule_recovery_work();
         still_polls = if painted { 0 } else { still_polls.saturating_add(1) };
@@ -308,6 +365,7 @@ pub fn run_interactive(
         let poll = if still_polls < IDLE_AFTER { poll } else { poll.max(IDLE_POLL) };
         if let Some(event) = terminal.poll_event(poll)? {
             still_polls = 0;
+            input_arrived = true;
             if matches!(
                 event,
                 UiEvent::Resize(_, _) | UiEvent::FocusGained | UiEvent::FocusLost

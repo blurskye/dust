@@ -1,5 +1,7 @@
 use std::{
-    io::{self, Stdout, Write},
+    fs::File,
+    io::{self, IsTerminal, Stdout, Write},
+    os::fd::AsFd,
     panic,
     sync::Once,
     time::Duration,
@@ -20,6 +22,11 @@ use crossterm::{
         self, BeginSynchronizedUpdate, Clear, ClearType, EndSynchronizedUpdate,
         EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
     },
+};
+
+use nix::{
+    errno::Errno,
+    poll::{PollFd, PollFlags, PollTimeout, poll},
 };
 
 use crate::config::{ColorMode, ThemeAttribute, ThemeColor, ThemeConfig};
@@ -70,6 +77,8 @@ pub struct TerminalOptions {
 
 pub struct TerminalSession {
     stdout: Stdout,
+    /// The terminal crossterm reads keys from when stdin is not one.
+    input: Option<File>,
     previous: Option<Frame>,
     options: TerminalOptions,
     theme: ThemeConfig,
@@ -111,6 +120,11 @@ impl TerminalSession {
         let (color_tier, color_source) = configured_color_tier(options.color_mode);
         Ok(Self {
             stdout,
+            input: if io::stdin().is_terminal() {
+                None
+            } else {
+                File::open("/dev/tty").ok()
+            },
             previous: None,
             options,
             theme,
@@ -173,21 +187,49 @@ impl TerminalSession {
         }
     }
 
+    /// Whether the next frame must be drawn in full (first frame, theme, colors or resize).
+    #[must_use]
+    pub const fn needs_full_draw(&self) -> bool {
+        self.previous.is_none()
+    }
+
     pub fn size(&self) -> Result<(u16, u16), TerminalError> {
         terminal::size().map_err(TerminalError::Io)
     }
 
     pub fn poll_event(&self, timeout: Duration) -> Result<Option<UiEvent>, TerminalError> {
-        if !event::poll(timeout)? {
+        // crossterm waits in whole milliseconds and then spins on zero-timeout polls for the
+        // rest of the timeout, about a millisecond of busy work on every idle wake. So the
+        // wait happens here and crossterm only reads what is already there. A timeout this
+        // short still makes crossterm hand out events it parsed but has not returned yet.
+        const READY: Duration = Duration::from_micros(1);
+        if !event::poll(READY)? && !(self.wait_for_input(timeout)? && event::poll(READY)?) {
             return Ok(None);
         }
         loop {
             if let Some(event) = normalize_event(event::read()?) {
                 return Ok(Some(event));
             }
-            if !event::poll(Duration::ZERO)? {
+            if !event::poll(READY)? {
                 return Ok(None);
             }
+        }
+    }
+
+    /// Wait until the terminal has input or a signal arrives; a resize comes as SIGWINCH,
+    /// which crossterm turns into an event.
+    fn wait_for_input(&self, timeout: Duration) -> io::Result<bool> {
+        let stdin = io::stdin();
+        let terminal = match &self.input {
+            Some(tty) => tty.as_fd(),
+            None => stdin.as_fd(),
+        };
+        let timeout =
+            PollTimeout::try_from(timeout.as_micros().div_ceil(1000)).unwrap_or(PollTimeout::MAX);
+        match poll(&mut [PollFd::new(terminal, PollFlags::POLLIN)], timeout) {
+            Ok(ready) => Ok(ready > 0),
+            Err(Errno::EINTR) => Ok(true),
+            Err(error) => Err(error.into()),
         }
     }
 

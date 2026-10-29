@@ -18,6 +18,8 @@ pub(super) struct NoticeSession {
     logs: StructuredLogs,
     crash_snapshot: CrashSnapshotWriter,
     next_crash_snapshot: Instant,
+    /// The last snapshot written, without its timestamp: an unchanged one is not rewritten.
+    written_crash_snapshot: Option<LiveCrashSnapshot>,
     terminal_capabilities: String,
 }
 
@@ -30,6 +32,7 @@ impl NoticeSession {
             logs: make_logs(config, persist),
             crash_snapshot: CrashSnapshotWriter::start(crash_path),
             next_crash_snapshot: now,
+            written_crash_snapshot: None,
             terminal_capabilities: "pending".into(),
         }
     }
@@ -116,6 +119,10 @@ impl NoticeSession {
             return;
         }
         self.next_crash_snapshot = now + Duration::from_secs(1);
+        if self.written_crash_snapshot.as_ref() == Some(&snapshot) {
+            return;
+        }
+        self.written_crash_snapshot = Some(snapshot.clone());
         snapshot.timestamp_ms = wall_time
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()

@@ -73,7 +73,7 @@ impl InteractiveApplication {
     pub(super) fn project_window_content_tabs(&mut self) {
         self.sync_ui_diagnostics();
         self.window_session.project_content_tabs(
-            &(&self.state).into(),
+            &(&*self.state).into(),
             self.diagnostics.counts(),
             self.configuration.settings(),
             self.configuration.generation(),
@@ -102,7 +102,8 @@ impl InteractiveApplication {
         self.ui.surface_content = self.window_session.content().clone();
     }
     pub(super) fn project_input_documentation(&mut self) {
-        self.ui.documentation_popup = self.input.documentation().cloned();
+        let popup = self.input.documentation().cloned();
+        self.ui.set(popup, |ui| &mut ui.documentation_popup);
     }
     pub(super) fn restore_input_focus(&mut self) {
         let Some(capture) = self.input.released_focus() else {
@@ -125,7 +126,8 @@ impl InteractiveApplication {
     }
 
     pub(super) fn project_input_prompt(&mut self) {
-        self.ui.prompt = self.input.prompt().cloned();
+        let prompt = self.input.prompt().cloned();
+        self.ui.set(prompt, |ui| &mut ui.prompt);
     }
     pub(super) fn prompt_help(&mut self, help: String) {
         self.input.prompt_help(help);
@@ -140,7 +142,8 @@ impl InteractiveApplication {
         self.ui.dashboard_actions = self.configuration.dashboard_actions();
     }
     pub(super) fn project_input_hints(&mut self) {
-        self.ui.key_hints = self.input.hints().cloned();
+        let hints = self.input.hints().cloned();
+        self.ui.set(hints, |ui| &mut ui.key_hints);
     }
     pub(super) fn notify_message(&mut self, message: String, error: bool) {
         self.notices.notify(
@@ -168,7 +171,7 @@ impl InteractiveApplication {
     /// the whole arrangement appears and disappears as ONE decision.
     pub(in crate::editor::session) fn project_debug_panes(&mut self) {
         let Some(target) = self.debugger_session.target() else {
-            self.ui.debug_panes = None;
+            self.ui.set(None, |ui| &mut ui.debug_panes);
             return;
         };
         let selected = self
@@ -279,7 +282,7 @@ impl InteractiveApplication {
 
 impl InteractiveApplication {
     pub(super) fn project_large_file_modes(&mut self, buffers: Vec<crate::editor::BufferId>) {
-        self.ui.large_file_buffers = buffers;
+        self.ui.set(buffers, |ui| &mut ui.large_file_buffers);
     }
 }
 
@@ -476,7 +479,7 @@ impl InteractiveApplication {
             .window_session
             .plan_window_command(
                 WindowCommand::CloneExplorer(target, source, explorer.id().0, axis),
-                &(&self.state).into(),
+                &(&*self.state).into(),
                 CommandPolicy {
                     selected_terminal,
                     pane_step: self.configuration.settings().ui.panes.resize_step,
@@ -575,7 +578,7 @@ impl InteractiveApplication {
                 .map_err(|error| self.window_target_error(error))?;
             let step = self
                 .window_session
-                .begin_window_close(window, &(&self.state).into())?;
+                .begin_window_close(window, &(&*self.state).into())?;
             self.handle_editor_close_step(step);
             Ok(())
         } else {
@@ -612,7 +615,7 @@ impl InteractiveApplication {
             .window_session
             .plan_window_command(
                 command,
-                &(&self.state).into(),
+                &(&*self.state).into(),
                 CommandPolicy {
                     selected_terminal: self.terminal_session.selected().map(|id| id.0),
                     pane_step: self.configuration.settings().ui.panes.resize_step,
@@ -955,14 +958,15 @@ impl InteractiveApplication {
             return;
         };
         let text = node.path.display().to_string();
+        let policy = self.state.policy;
         self.state.registers.set(
             '"',
             RegisterValue {
                 text: text.clone(),
                 shape: RegisterShape::Character,
             },
-            self.state.policy.registers_enabled,
-            self.state.policy.mirror_named_to_unnamed,
+            policy.registers_enabled,
+            policy.mirror_named_to_unnamed,
         );
         self.state.mark_editor_changed();
         self.notify_message(format!("yanked `{text}`"), false);
@@ -1339,8 +1343,8 @@ impl InteractiveApplication {
             )
         });
         NativeSurfaceSignature {
-            editor_tab: editor.active_tab(&(&self.state).into()),
-            editor_window: editor.focused_window(&(&self.state).into()),
+            editor_tab: editor.active_tab(&(&*self.state).into()),
+            editor_window: editor.focused_window(&(&*self.state).into()),
             explorer_visible: self.ui.explorer.is_some(),
             explorer_views: self
                 .explorer
@@ -1397,7 +1401,7 @@ impl InteractiveApplication {
         let editor_current = self
             .window_session
             .editor_ids()
-            .is_current(&(&self.state).into(), scratch_label);
+            .is_current(&(&*self.state).into(), scratch_label);
         let signature = self.native_surface_signature(self.window_session.editor_ids());
         if editor_current
             && self.window_session.native_ids().is_current(&signature)
@@ -1415,7 +1419,7 @@ impl InteractiveApplication {
             let terminals = self.terminal_session.descriptions();
             self.window_session
                 .prepare_reconcile(
-                    &(&self.state).into(),
+                    &(&*self.state).into(),
                     scratch_label,
                     NativeDescriptions {
                         signature: self.native_surface_signature(self.window_session.editor_ids()),
@@ -1442,7 +1446,7 @@ impl InteractiveApplication {
                 let surfaces = self.window_session.native_ids();
                 self.ui.editor_window_layout = self.state.window_revision().and_then(|revision| {
                     bridge
-                        .active_layout(&(&self.state).into(), graph)
+                        .active_layout(&(&*self.state).into(), graph)
                         .map(|active| EditorWindowLayoutState {
                             source_revision: revision,
                             layout: active.layout,
@@ -1461,7 +1465,7 @@ impl InteractiveApplication {
                 let projection = self.state.window_revision().and_then(|revision| {
                     let graph_revision = graph.revision()?;
                     let tab = bridge
-                        .active_tab(&(&self.state).into())
+                        .active_tab(&(&*self.state).into())
                         .or_else(|| surfaces.workspace_tab())?;
                     let snapshot = graph.compositor_snapshot(tab)?;
                     let preliminary = snapshot.project(

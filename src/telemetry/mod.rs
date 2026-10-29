@@ -129,7 +129,7 @@ fn write_record(path: &PathBuf, record: &LogRecord, policy: &LogPolicy) -> std::
     serde_json::to_writer(&mut file, record)?;
     file.write_all(b"\n")
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct LiveCrashSnapshot {
     pub timestamp_ms: u64,
     pub roots: usize,

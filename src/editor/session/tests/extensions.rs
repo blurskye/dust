@@ -2316,7 +2316,7 @@ fn virtual_publication_keeps_original_request_until_checked_window_acceptance() 
         .window_session
         .accept_editor_transition(candidate, source.before(), source.catalog())
         .unwrap();
-    app.state = source.finish(accepted).unwrap();
+    *app.state = source.finish(accepted).unwrap();
     let virtual_buffer = app.state.active_buffer_id().unwrap();
     assert_eq!(
         app.state.buffers[virtual_buffer].text.to_string(),

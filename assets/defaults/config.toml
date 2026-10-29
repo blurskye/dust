@@ -635,7 +635,7 @@ maximum_age_days = 30
 
 [config_watch]
 enabled = true
-poll_interval_ms = 250
+poll_interval_ms = 1000
 debounce_ms = 100
 
 [input]

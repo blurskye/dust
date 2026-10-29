@@ -919,7 +919,7 @@ fn keymap_inspection_by_id_reports_identity_operation_sequences_and_source() {
         key: None,
         command: None,
     });
-    let message = app.ui.notification.expect("inspection notification");
+    let message = app.ui.notification.clone().expect("inspection notification");
     assert!(message.contains(id));
     assert!(message.contains("<leader> f e => space f e"));
     assert!(message.contains("[command] explorer.panel.toggle"));

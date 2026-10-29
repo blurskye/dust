@@ -6,13 +6,18 @@ use crate::tools::{
     nix_lsp_shell, nix_lsp_tool_installed, tool_launch_environment,
 };
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    cell::RefCell,
+    collections::{BTreeMap, BTreeSet, HashMap},
     path::{Path, PathBuf},
     time::Duration,
 };
 
 pub(super) struct ToolingSession {
     entries: Vec<ToolEntry>,
+    /// Each executable's PATH location and whether it is rustup's proxy, kept until the tool
+    /// list is inspected again. The language server autostart check asks on every main loop
+    /// pass, and a PATH search costs dozens of `stat` calls.
+    path_lookups: RefCell<HashMap<String, Option<(PathBuf, bool)>>>,
     nix_preferred: BTreeSet<String>,
     managed_preferred: BTreeSet<String>,
     managed_versions: BTreeMap<String, String>,
@@ -128,6 +133,7 @@ impl ToolingSession {
     pub(super) fn new(entries: Vec<ToolEntry>) -> Self {
         Self {
             entries,
+            path_lookups: RefCell::default(),
             nix_preferred: BTreeSet::new(),
             managed_preferred: BTreeSet::new(),
             managed_versions: BTreeMap::new(),
@@ -152,6 +158,7 @@ impl ToolingSession {
     }
     pub(super) fn refresh(&mut self) {
         self.entries = inspect_tools();
+        self.path_lookups.get_mut().clear();
         self.replace_probe_worker();
         self.versions.clear();
     }
@@ -161,19 +168,26 @@ impl ToolingSession {
         self.version_pending.clear();
     }
     pub(super) fn poll_versions(&mut self) -> (bool, bool) {
-        let rustup_key = self
-            .entries
-            .iter()
-            .find(|e| e.definition.id == "rust-analyzer")
-            .and_then(|entry| {
-                let path = discover_executable(&entry.definition.executable)?;
-                Self::rust_analyzer_is_rustup_proxy(&path).then(|| {
-                    Self::tool_version_key(&entry.definition, LspRuntimeSource::Path, Some(&path))
-                })
-            });
         let mut changed = false;
         let mut unavailable = false;
+        let mut rustup_key = None;
         while let Some(result) = self.version_service.try_result() {
+            // Looked up only when a result arrives: this runs every main loop pass.
+            let rustup_key = rustup_key.get_or_insert_with(|| {
+                self.entries
+                    .iter()
+                    .find(|e| e.definition.id == "rust-analyzer")
+                    .and_then(|entry| {
+                        let path = discover_executable(&entry.definition.executable)?;
+                        Self::rust_analyzer_is_rustup_proxy(&path).then(|| {
+                            Self::tool_version_key(
+                                &entry.definition,
+                                LspRuntimeSource::Path,
+                                Some(&path),
+                            )
+                        })
+                    })
+            });
             self.version_pending.remove(&result.id);
             unavailable |= rustup_key.as_ref() == Some(&result.id) && result.result.is_err();
             self.versions.insert(result.id, result.result);
@@ -343,6 +357,7 @@ impl ToolingSession {
             .find(|e| e.definition.id == result.id)
             .map_or_else(|| result.id.clone(), |e| e.definition.name.clone());
         self.entries = inspect_tools();
+        self.path_lookups.get_mut().clear();
         if let Err(error) = &result.result {
             if let Some(entry) = self
                 .entries
@@ -392,7 +407,7 @@ impl ToolingSession {
     ) -> LspRuntimeSource {
         self.explicit_lsp_runtime_source(definition)
             .unwrap_or_else(|| {
-                if discover_executable(&definition.executable).is_some() {
+                if self.path_executable(&definition.executable).is_some() {
                     LspRuntimeSource::Path
                 } else if is_nixos_host() {
                     if self.nix_workspace_available_for(definition, nix_fallback) {
@@ -457,6 +472,19 @@ impl ToolingSession {
             .flatten()
     }
 
+    fn path_executable(&self, executable: &str) -> Option<(PathBuf, bool)> {
+        self.path_lookups
+            .borrow_mut()
+            .entry(executable.to_owned())
+            .or_insert_with(|| {
+                discover_executable(executable).map(|path| {
+                    let rustup_proxy = Self::rust_analyzer_is_rustup_proxy(&path);
+                    (path, rustup_proxy)
+                })
+            })
+            .clone()
+    }
+
     pub(in crate::editor::session) fn selected_lsp_runtime_available(
         &self,
         definition: &ToolDefinition,
@@ -464,10 +492,8 @@ impl ToolingSession {
     ) -> bool {
         match self.selected_lsp_runtime_source(definition, nix_fallback) {
             LspRuntimeSource::Path => {
-                discover_executable(&definition.executable).is_some_and(|path| {
-                    if definition.id != "rust-analyzer"
-                        || !Self::rust_analyzer_is_rustup_proxy(&path)
-                    {
+                self.path_executable(&definition.executable).is_some_and(|(path, rustup_proxy)| {
+                    if definition.id != "rust-analyzer" || !rustup_proxy {
                         return true;
                     }
                     let key =

@@ -104,9 +104,9 @@ class Editor:
             if not self.read(quiet):
                 return
 
-    def processes(self):
-        """The editor and its descendants with the same name (nvim's `--embed` server does
-        the real work), but not language servers or other tools it starts."""
+    def descendants(self, same_name=False):
+        """The editor and its descendants; with `same_name`, only those named like it
+        (nvim's `--embed` server does the real work), not language servers it starts."""
         name = pathlib.Path(f"/proc/{self.pid}/comm").read_text()
         parents = {}
         for entry in pathlib.Path("/proc").iterdir():
@@ -121,17 +121,24 @@ class Editor:
         while frontier:
             parent = frontier.pop()
             for pid, (ppid, comm) in parents.items():
-                if ppid == parent and comm == name:
+                if ppid == parent and (comm == name or not same_name):
                     found.append(pid)
                     frontier.append(pid)
         return found
 
+    def processes(self):
+        return self.descendants(same_name=True)
+
     def cpu_seconds(self):
+        # schedstat counts nanoseconds per thread; /proc/<pid>/stat ticks are too coarse for idle.
         total = 0
         for pid in self.processes():
-            fields = pathlib.Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
-            total += int(fields[11]) + int(fields[12])
-        return total / os.sysconf("SC_CLK_TCK")
+            for task in pathlib.Path(f"/proc/{pid}/task").iterdir():
+                try:
+                    total += int((task / "schedstat").read_text().split()[0])
+                except OSError:
+                    pass
+        return total / 1e9
 
     def rss_mb(self):
         total = 0
@@ -142,10 +149,15 @@ class Editor:
         return total / 1024
 
     def close(self):
+        # Killing only the editor would orphan nvim's server and the language servers.
+        for pid in self.descendants():
+            try:
+                os.kill(pid, 9)
+            except ProcessLookupError:
+                pass
         try:
-            os.kill(self.pid, 9)
             os.waitpid(self.pid, 0)
-        except (ProcessLookupError, ChildProcessError):
+        except ChildProcessError:
             pass
         os.close(self.fd)
 
@@ -188,7 +200,7 @@ def measure(name, command, environment, cwd, path, runs, keys):
         p99 = latencies[min(len(latencies) - 1, int(len(latencies) * 0.99))]
         print(f"  key to echo               p50 {statistics.median(latencies):7.2f} ms"
               f"   p99 {p99:.2f} ms")
-    print(f"  idle cpu                       {statistics.median(idle):7.2f} %")
+    print(f"  idle cpu                       {statistics.median(idle):7.3f} %")
     print(f"  memory after startup           {statistics.median(memory):7.1f} MB")
 
 
