@@ -1,7 +1,7 @@
 # Target 0.3 clone Component fixture
 
 This is an explicitly **test-only, non-production** Component fixture for the
-normative target ABI in `docs/specs/api-next.wit`. Dust production loading,
+normative target ABI in `docs/plugin-abi-next.wit`. Dust production loading,
 manifests, the SDK, and `wit/dust-plugin.wit` remain on 0.2. The matching host
 lane is behind `cfg(test)` and cannot be selected by a production manifest,
 configuration entry or CLI flag.

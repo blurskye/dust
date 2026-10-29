@@ -1,15 +1,13 @@
 # Dust
 
-A keyboard-first terminal IDE with modal editing, native workspace/LSP/DAP workflows and sandboxed Component extensions. Unreleased; implemented slices are not full product conformance.
+A terminal IDE in one Rust binary that feels like LazyVim out of the box: Vim
+editing, file tree, LSP, DAP, Git signs, lazygit, an ACP agent panel and a tool
+installer built in, all rebindable in TOML. Unreleased.
 
-- [Authoritative specification](docs/specs/README.md)
-- [Delivery status and qualification](docs/specs/delivery.md)
-- [Complete experience (non-normative)](docs/experience.md)
-- [Architecture and ownership](ARCHITECTURE.md)
-- [Current Linux user guide](docs/user-guide-linux.md)
-- [Current plugin SDK (ABI 0.2)](docs/plugin-sdk.md)
-- [Documentation map](docs/README.md)
+- [Product plan](docs/product-plan.md) — what Dust is for and what gets built next
+- [Architecture](ARCHITECTURE.md)
+- [Linux user guide](docs/user-guide-linux.md)
+- [Plugin SDK (ABI 0.2)](docs/plugin-sdk.md)
+- Bundled defaults: [config](assets/defaults/config.toml), [keymaps](assets/defaults/keymaps.toml), [dashboard](assets/defaults/dashboard.toml)
 
-Build against the Cargo dependency lock with `cargo build --locked`. `rust-toolchain.toml` selects `stable`; use an already installed compiler rather than allowing an implicit toolchain install or update. The declared Rust 1.85 floor currently has a locked-dependency incompatibility; see delivery status before claiming minimum-version or release support.
-
-Documentation validation: `python3 scripts/check-specs.py`. Proposed ABI validation: `cargo test --locked --test spec_contract`. Neither enables the target 0.3 API.
+Build with `cargo build --locked`, test with `cargo test --locked`.

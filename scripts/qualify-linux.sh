@@ -7,7 +7,6 @@ case "$mode" in
     cargo fmt --all -- --check
     cargo check --locked
     cargo run --quiet --locked -- --check-config
-    cargo run --quiet --locked -- --architecture-check
     cargo run --quiet --locked -- --check-api-compatibility api/compat-v1.json
     ;;
   test)
@@ -22,9 +21,6 @@ case "$mode" in
     ;;
   release)
     cargo build --release --locked
-    rm -f target/dust-linux.tar.zst
-    target/release/dust --release-archive target/release/dust --output "$PWD/target/dust-linux.tar.zst"
-    target/release/dust --release-manifest target/release/dust --output "$PWD/target/release-manifest.json"
     ;;
   bun-runtime)
     scripts/qualify-bun-runtime.sh

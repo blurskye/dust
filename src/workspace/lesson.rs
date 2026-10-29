@@ -1,7 +1,7 @@
 //! Tutor lessons: what a lesson teaches, and how it knows the user actually did it.
 //!
-//! Contract: U-12 in `docs/specs/ui.md`. Two clauses live here. Progress is derived from REAL
-//! OBSERVED EVENTS in the exercise rather than from a quiz, so nothing a user merely answers can
+//! Progress is derived from real
+//! observed events in the exercise rather than from a quiz, so nothing a user merely answers can
 //! complete a step. And a lesson that depends on a feature is available only once that feature
 //! exists, so no chapter teaches something the editor cannot do.
 use std::collections::BTreeSet;

@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 pub(crate) mod api {
     wasmtime::component::bindgen!({
-        path: "docs/specs/api-next.wit",
+        path: "docs/plugin-abi-next.wit",
         world: "editor-plugin",
     });
 }

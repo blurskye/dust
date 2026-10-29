@@ -5,8 +5,6 @@ pub(crate) const UNIVERSAL_LAYOUT_WINDOW_CEILING: usize = 1_024;
 
 /// Public command, configuration, persistence, tool, and WIT API versions.
 pub mod api;
-/// Source-owned architecture and ambient-authority audit.
-pub mod architecture;
 /// Injectable production and deterministic clock/ID providers.
 pub mod clock;
 /// Bundled/user TOML settings, keymaps, dashboard declarations, and platform paths.
@@ -27,8 +25,6 @@ pub mod language;
 pub mod persistence;
 /// Bounded process supervision and protocol framing shared by built-in features.
 pub mod process;
-/// Canonical Linux release manifest generation.
-pub mod release;
 /// Structured bounded redacted logs and health snapshots.
 pub mod telemetry;
 /// Headless fixtures exercising production editing and input paths.

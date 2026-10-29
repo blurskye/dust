@@ -1313,7 +1313,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
         "2b74a38adc00bfad1f32da7f5c369c42359edace5c40765a25aeab20cfff05a6"
     );
     assert_eq!(
-        include_str!("../../../../../docs/specs/api-next.wit"),
+        include_str!("../../../../../docs/plugin-abi-next.wit"),
         include_str!("../../../../../tests/fixtures/target03-clone-guest/wit/dust-plugin.wit")
     );
 

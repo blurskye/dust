@@ -1,8 +1,6 @@
-> **Current-interface reference, not the target specification.** This guide describes the production interface in the checkout being used; registered commands, bundled defaults and `dust --help` prevail over a prose mismatch. Future requirements and delivery classification live in [specs/README.md](specs/README.md).
-
 # Dust on Linux
 
-This guide covers everyday editing. For current scope and qualification limits, see [delivery status](specs/delivery.md); [older Linux receipts](progress/linux-phase-status.md) are historical evidence.
+This guide covers everyday editing.
 
 ## Start
 
@@ -86,7 +84,7 @@ Pickers open in **Insert** mode: every letter (including `j` and `k`) types into
 
 Controls are configurable in the `picker` (Insert) and `picker_normal` contexts. The existing `j`/`k` mapping IDs now belong to `picker_normal`; the existing Insert-context Escape mapping invokes `picker.mode.normal`. `picker.cancel` remains the direct-close command. Workspace-edit review is deliberately separate: its existing toggle/apply/reject controls are not query editing.
 
-`Space f r` opens checked workspace replacement. Remaining search/provider workflows are tracked in [delivery status](specs/delivery.md). The comparison stack is LazyVim with Snacks/blink, not assumed Telescope.
+`Space f r` opens checked workspace replacement. The comparison stack is LazyVim with Snacks/blink, not assumed Telescope.
 
 ## Diagnostics and LSP
 

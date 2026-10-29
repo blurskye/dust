@@ -1,6 +1,6 @@
 //! Disposable fixture sandboxes for the tutor surface.
 //!
-//! Contract: U-12 in `docs/specs/ui.md` — practice is an explicitly entered surface, and its
+//! Practice is an explicitly entered surface, and its
 //! exercises run against disposable fixtures isolated from the user's repositories, working
 //! trees, credentials, hooks, network and any authenticated provider.
 //!

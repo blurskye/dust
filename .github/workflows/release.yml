@@ -15,9 +15,7 @@ jobs:
       - run: cargo build --release --locked
       - name: Build deterministic tar.zst
         run: |
-          target/release/dust --release-archive "$PWD/target/release/dust" \
-            --output "$PWD/target/dust-linux-x86_64.tar.zst" \
-            > "$PWD/target/dust-linux-x86_64.archive.json"
+          tar --zstd -cf target/dust-linux-x86_64.tar.zst -C target/release dust
           sha256sum target/dust-linux-x86_64.tar.zst > target/dust-linux-x86_64.tar.zst.sha256
       - uses: sigstore/cosign-installer@v3
       - name: Keyless sign archive
@@ -33,6 +31,5 @@ jobs:
             target/dust-linux-x86_64.tar.zst
             target/dust-linux-x86_64.tar.zst.sha256
             target/dust-linux-x86_64.tar.zst.sigstore.json
-            target/dust-linux-x86_64.archive.json
 # Promotion to https://dust.blurskye.dev/ is intentionally a separate,
 # credentialed release-operator step. This workflow does not claim publication.

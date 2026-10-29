@@ -1,10 +1,7 @@
 //! Conflict provenance, read from the repository on demand.
 //!
-//! Contract: `docs/specs/workspace.md` W-08 — "Conflict views show base/ours/theirs/result with
-//! explicit accepted source versions; choosing a side edits the result buffer through ordinary
-//! transactions. Saving/staging is separate." And `docs/specs/ui.md`'s operation bar: an
-//! operation with a lifecycle names itself, its phase and its blockers, and an unknown state is
-//! shown as unknown rather than as completion or as zero.
+//! Conflict views show base/ours/theirs/result; choosing a side edits the result buffer through
+//! ordinary transactions. Saving and staging are separate steps.
 //!
 //! Nothing here is cached. A conflict is a state of the repository that changes underneath the
 //! editor, so every read goes back to the index and to the repository's own operation state.

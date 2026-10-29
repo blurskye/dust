@@ -51,37 +51,9 @@ struct Cli {
     #[arg(long)]
     api_manifest: bool,
 
-    /// Audit source-owned architecture and ambient-authority rules.
-    #[arg(long)]
-    architecture_check: bool,
-
-    /// Generate a canonical release manifest for a built binary.
-    #[arg(long, value_name = "BINARY")]
-    release_manifest: Option<PathBuf>,
-
-    /// Build a deterministic Linux tar archive for a built binary.
-    #[arg(long, value_name = "BINARY")]
-    release_archive: Option<PathBuf>,
-
     /// Check a saved API manifest against this build.
     #[arg(long, value_name = "MANIFEST")]
     check_api_compatibility: Option<PathBuf>,
-
-    /// Atomically install or update this Dust binary under --install-prefix.
-    #[arg(long, value_name = "BINARY", requires = "install_prefix")]
-    install_binary: Option<PathBuf>,
-    #[arg(long, value_name = "DIR")]
-    install_prefix: Option<PathBuf>,
-    #[arg(long, value_name = "SHA256", requires = "install_binary")]
-    install_sha256: Option<String>,
-    #[arg(long, requires = "install_prefix")]
-    rollback_install: bool,
-    #[arg(long, requires = "install_prefix")]
-    uninstall: bool,
-
-    /// Output path for generated metadata.
-    #[arg(long, value_name = "PATH")]
-    output: Option<PathBuf>,
 
     /// Preview migration of a configuration TOML file.
     #[arg(long, value_name = "PATH")]
@@ -102,12 +74,6 @@ struct Cli {
     /// Package manager state root for transactional package operations.
     #[arg(long, value_name = "DIR")]
     package_root: Option<PathBuf>,
-    /// Install a verified local component described by this JSON manifest.
-    #[arg(long, value_name = "MANIFEST", requires = "package_root")]
-    package_install: Option<PathBuf>,
-    /// Component bytes for --package-install.
-    #[arg(long, value_name = "COMPONENT", requires = "package_install")]
-    package_component: Option<PathBuf>,
     /// Remove a package from the active lock.
     #[arg(long, value_name = "NAME", requires = "package_root")]
     package_remove: Option<String>,
@@ -159,11 +125,6 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
-    if cli.architecture_check {
-        let audit = dust::architecture::audit_source(Path::new(env!("CARGO_MANIFEST_DIR")))?;
-        println!("{}", serde_json::to_string_pretty(&audit)?);
-        return Ok(());
-    }
     if let Some(path) = &cli.check_api_compatibility {
         let report = dust::api::check_compatibility(path, 1024 * 1024)?;
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -172,57 +133,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         return Ok(());
     }
-    if let Some(binary) = &cli.release_archive {
-        let output = cli
-            .output
-            .as_ref()
-            .ok_or("--output is required with --release-archive")?;
-        let archive = dust::release::write_deterministic_archive(
-            binary,
-            Path::new(env!("CARGO_MANIFEST_DIR")),
-            output,
-        )?;
-        println!("{}", serde_json::to_string_pretty(&archive)?);
-        return Ok(());
-    }
-    if let Some(prefix) = &cli.install_prefix {
-        if let Some(binary) = &cli.install_binary {
-            let target =
-                dust::release::install_binary(binary, prefix, cli.install_sha256.as_deref())?;
-            println!("installed {}", target.display());
-            return Ok(());
-        }
-        if cli.rollback_install {
-            let target = dust::release::rollback_install(prefix)?;
-            println!("restored {}", target.display());
-            return Ok(());
-        }
-        if cli.uninstall {
-            dust::release::uninstall(prefix)?;
-            println!("uninstalled Dust from {}", prefix.display());
-            return Ok(());
-        }
-    }
     if let Some(root) = &cli.package_root {
         let manager =
             dust::tools::PackageManager::new(root.clone(), 16 * 1024 * 1024, 64 * 1024 * 1024)?;
-        if let Some(path) = &cli.package_install {
-            let source = fs::read(path)?;
-            if source.len() > 1024 * 1024 {
-                return Err("package manifest exceeds ceiling".into());
-            }
-            let manifest: dust::tools::PackageManifest = serde_json::from_slice(&source)?;
-            let component_path = cli
-                .package_component
-                .as_ref()
-                .ok_or("--package-component is required")?;
-            if fs::metadata(component_path)?.len() > 64 * 1024 * 1024 {
-                return Err("package component exceeds ceiling".into());
-            }
-            let component = fs::read(component_path)?;
-            let _ = (manifest, component);
-            return Err("headless local package installation cannot prove persistent runtime activation; use the trusted in-app package.install workflow".into());
-        }
         if let Some(name) = &cli.package_remove {
             let lock = manager.remove(name)?;
             println!("removed {name}; {} package(s) remain", lock.packages.len());
@@ -275,16 +188,6 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     }
     if cli.api_manifest {
         println!("{}", serde_json::to_string_pretty(&dust::api::manifest()?)?);
-        return Ok(());
-    }
-    if let Some(binary) = &cli.release_manifest {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let manifest = dust::release::build(binary, root)?;
-        if let Some(output) = &cli.output {
-            dust::release::write_canonical(output, &manifest)?;
-        } else {
-            println!("{}", serde_json::to_string_pretty(&manifest)?);
-        }
         return Ok(());
     }
     if cli.verbose_version {

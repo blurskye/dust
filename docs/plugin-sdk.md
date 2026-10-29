@@ -1,5 +1,3 @@
-> **Current-interface reference, not the target specification.** This document describes the production interface in the checkout being used. Source and [`wit/dust-plugin.wit`](../wit/dust-plugin.wit) prevail over a prose mismatch. Future requirements and delivery classification live in [specs/README.md](specs/README.md).
-
 # Dust Component Plugin SDK 0.2
 
 The public WIT ABI and this SDK contract are licensed Apache-2.0; see
@@ -12,7 +10,7 @@ The authoritative ABI is [`wit/dust-plugin.wit`](../wit/dust-plugin.wit), packag
 
 The checkout ships the production WIT, generated host bindings, strict manifest loader and a maintained no-WASI Rust guest fixture. It does **not** ship a separate published Rust SDK crate, package-schema generator, dev runner or mock-host/simulator. The fixture is the current buildable example; its pinned `wit-bindgen` dependency is not a promise of a generally published SDK package.
 
-The incompatible target is [`specs/api-next.wit`](specs/api-next.wit), package `dust:plugin@0.3.0`. It is not imported by production and cannot be selected through a manifest or command-line flag. Production has no 0.3 `features`, `limits`, `handle-events`, `deactivate`, interaction, snapshot-token, grant, service, cancellation or handle-release path. A future promotion requires a replacement host, rebuilt maintained guest/SDK/fixtures and explicit ABI/unsupported-feature tests; changing a version string, reusing the world name, adapting integers or structurally matching types is not compatibility.
+The incompatible target is [`docs/plugin-abi-next.wit`](plugin-abi-next.wit), package `dust:plugin@0.3.0`. It is not imported by production and cannot be selected through a manifest or command-line flag. Production has no 0.3 `features`, `limits`, `handle-events`, `deactivate`, interaction, snapshot-token, grant, service, cancellation or handle-release path. A future promotion requires a replacement host, rebuilt maintained guest/SDK/fixtures and explicit ABI/unsupported-feature tests; changing a version string, reusing the world name, adapting integers or structurally matching types is not compatibility.
 
 The production fixture mirrors the authoritative WIT byte-for-byte and is wrapped and instantiated by tests. The separate `target03-clone-guest` and `src/extensions/target03.rs` lane is compiled only under `cfg(test)`: it exercises a partial target UI protocol with an ad hoc fixture admission record. It is not an accepted production Component, a schema-2 package, a complete target host or X-08 promotion evidence.
 
