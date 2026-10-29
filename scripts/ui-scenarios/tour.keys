@@ -1,0 +1,36 @@
+# A walk through the main surfaces, from startup.
+wait 800
+shot 01-dashboard
+type trust this workspace
+key enter
+wait 500
+shot 01b-trusted
+key space
+wait 400
+shot 02-leader-hints
+key escape
+key space space
+wait 600
+type main.rs
+wait 500
+shot 03-file-picker
+key enter
+wait 800
+shot 04-editor
+key space f e
+wait 600
+shot 05-explorer
+key ctrl+l
+key ctrl+slash
+wait 800
+shot 06-terminal
+key ctrl+slash
+key space slash
+wait 300
+type fn run
+wait 900
+shot 07-grep
+key escape
+key space g g
+wait 800
+shot 08-git
