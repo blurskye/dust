@@ -177,7 +177,6 @@ impl InteractiveApplication {
                             | PromptKind::TerminalClose
                             | PromptKind::DirtyClose
                             | PromptKind::GitStageUnsaved
-                            | PromptKind::GitCommitMessage
                             | PromptKind::GitDestructive
                     )
                 }) {

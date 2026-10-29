@@ -1449,66 +1449,6 @@ pub(super) fn render_prompt(
         Style::Accent,
         content_right,
     );
-    if prompt.multiline {
-        // A composer can hold more than one line. Draw a bounded window of them, keep the
-        // cursor on the row its own line occupies, and say plainly when lines are hidden.
-        let rows = usize::from(geometry.height.saturating_sub(2))
-            .saturating_sub(usize::from(show_help))
-            .max(1);
-        let lines: Vec<&str> = prompt.input.split('\n').collect();
-        let cursor = prompt.cursor.min(prompt.input.len());
-        let cursor_line = prompt.input[..cursor].matches('\n').count();
-        let first = cursor_line
-            .saturating_add(1)
-            .saturating_sub(rows)
-            .min(lines.len().saturating_sub(rows.min(lines.len())));
-        let hidden_above = first > 0;
-        let hidden_below = first + rows < lines.len();
-        let mut cursor_row = input_y;
-        let mut last_row = input_y;
-        for (offset, line) in lines.iter().skip(first).take(rows).enumerate() {
-            let y = input_y.saturating_add(u16::try_from(offset).unwrap_or(0));
-            // Text is clipped one column short of the inner edge, so the reserved column stays
-            // free for a hidden-line indicator whatever the marker is.
-            frame
-                .grid
-                .put_text_clipped(marker_end, y, line, Style::Default, content_right);
-            last_row = y;
-            if offset == cursor_line.saturating_sub(first) {
-                cursor_row = y;
-            }
-        }
-        // Clipped text stops before the last inner column, so an indicator always has room.
-        if hidden_above {
-            frame.grid.put_text_clipped(
-                content_right,
-                input_y,
-                "\u{2191}",
-                Style::Muted,
-                content_right.saturating_add(1),
-            );
-        }
-        if hidden_below {
-            frame.grid.put_text_clipped(
-                content_right,
-                last_row,
-                "\u{2193}",
-                Style::Muted,
-                content_right.saturating_add(1),
-            );
-        }
-        let line_start = prompt.input[..cursor].rfind('\n').map_or(0, |at| at + 1);
-        let prefix = prompt.input.get(line_start..cursor).unwrap_or("");
-        let cursor_x = marker_end.saturating_add(
-            u16::try_from(text_width(prefix, config.editor.ambiguous_width)).unwrap_or(0),
-        );
-        frame.cursor = Some((
-            cursor_x.min(geometry.left + geometry.width.saturating_sub(2)),
-            cursor_row,
-            cursor_style(config.ui.cursor.prompt),
-        ));
-        return;
-    }
     frame.grid.put_text_clipped(
         marker_end,
         input_y,

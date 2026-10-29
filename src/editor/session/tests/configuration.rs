@@ -1175,7 +1175,10 @@ fn documented_key_reaches(
     None
 }
 
-/// E-09: a key the documented experience names must reach the command that surface requires.
+
+/// E-09: the document is the source of truth for which keys exist, so a key added to its
+/// prefix table without a binding fails here instead of shipping as a dead prefix entry, and
+/// a key it marks as having no command must not be bound to something else.
 #[test]
 fn the_documented_git_and_debugger_keys_each_reach_their_command() {
     let app = app();
@@ -1183,12 +1186,11 @@ fn the_documented_git_and_debugger_keys_each_reach_their_command() {
     let cases = [
         ("<leader> g g", "terminal.open"),
         ("<leader> g s", "workspace.git.status.open"),
-        ("<leader> g c", "workspace.git.commit"),
-        ("<leader> g f", "workspace.git.remote.fetch"),
-        ("<leader> g U", "workspace.git.remote.update"),
-        ("<leader> g p", "workspace.git.remote.push"),
+        ("<leader> g G", "terminal.open"),
+        ("<leader> g c", "terminal.open"),
+        ("<leader> g f", "terminal.open"),
+        ("<leader> g l", "terminal.open"),
         ("<leader> g x", "workspace.git.conflicts.open"),
-        ("<leader> g B", "workspace.git.branches.open"),
         ("<leader> g w", "workspace.git.worktrees.open"),
         ("<leader> g h p", "workspace.git.hunk.preview"),
         ("<leader> d s", "dap.session.start"),
@@ -1223,9 +1225,6 @@ fn the_documented_git_and_debugger_keys_each_reach_their_command() {
     );
 }
 
-/// E-09: the document is the source of truth for which keys exist, so a key added to its
-/// prefix table without a binding fails here instead of shipping as a dead prefix entry, and
-/// a key it marks as having no command must not be bound to something else.
 #[test]
 fn every_key_the_experience_document_names_is_bound_or_marked_as_having_no_command() {
     let app = app();
@@ -1271,7 +1270,7 @@ fn every_key_the_experience_document_names_is_bound_or_marked_as_having_no_comma
         }
     }
     assert!(
-        checked >= 26,
-        "the document's prefix table should name at least 26 keys, found {checked}"
+        checked >= 25,
+        "the document's prefix table should name at least 25 keys, found {checked}"
     );
 }

@@ -55,29 +55,6 @@ impl InputSession {
         self.history_index = None;
         mode
     }
-    /// Mark the open prompt as a composer so it accepts newlines and draws several rows.
-    pub(in crate::editor::session) fn mark_prompt_multiline(&mut self) {
-        if let Some(prompt) = self.prompt.as_mut() {
-            prompt.multiline = true;
-        }
-    }
-    /// Insert a newline at the prompt cursor. Returns false when the prompt is not a composer,
-    /// so Enter keeps submitting every ordinary prompt.
-    pub(in crate::editor::session) fn prompt_insert_newline(&mut self) -> bool {
-        let Some(prompt) = self.prompt.as_mut() else {
-            return false;
-        };
-        if !prompt.multiline {
-            return false;
-        }
-        let cursor = prompt.cursor.min(prompt.input.len());
-        if !prompt.input.is_char_boundary(cursor) {
-            return false;
-        }
-        prompt.input.insert(cursor, '\n');
-        prompt.cursor = cursor + 1;
-        true
-    }
     pub(in crate::editor::session) fn configure_confirmation_actions(
         &mut self,
         title: String,
@@ -323,7 +300,6 @@ impl InputSession {
                 | PromptKind::TerminalClose
                 | PromptKind::DirtyClose
                 | PromptKind::GitStageUnsaved
-                | PromptKind::GitCommitMessage
                 | PromptKind::GitDestructive
         ) {
             return;

@@ -63,31 +63,6 @@ pub struct GitBranchListRequest {
 #[derive(Clone, Debug)]
 pub enum GitBranchRequest {
     List(GitBranchListRequest),
-    Create {
-        repository: PathBuf,
-        name: String,
-        /// Starting point; `None` means the current HEAD.
-        start: Option<String>,
-        deadline: Duration,
-    },
-    /// Create a local branch at a remote branch's tip and set it as the upstream.
-    TrackRemote {
-        repository: PathBuf,
-        name: String,
-        remote_branch: String,
-        deadline: Duration,
-    },
-    Rename {
-        repository: PathBuf,
-        name: String,
-        to: String,
-        deadline: Duration,
-    },
-    Delete {
-        repository: PathBuf,
-        name: String,
-        deadline: Duration,
-    },
     CreateWorktree {
         repository: PathBuf,
         name: String,
@@ -152,8 +127,6 @@ pub enum GitBranchError {
     UnknownBranch(String),
     #[error("worktree `{0}` does not exist")]
     UnknownWorktree(String),
-    #[error("branch `{0}` is not merged into the current HEAD")]
-    RefusedUnmerged(String),
     #[error("branch `{0}` is checked out in another worktree")]
     RefusedCheckedOut(String),
     #[error("worktree `{0}` has uncommitted changes")]
@@ -253,52 +226,6 @@ impl Drop for GitBranchService {
 fn valid_request(request: &GitBranchRequest) -> bool {
     let (repository, deadline) = match request {
         GitBranchRequest::List(request) => (&request.repository, request.deadline),
-        GitBranchRequest::Create {
-            repository,
-            name,
-            deadline,
-            ..
-        } => {
-            if name.trim().is_empty() || name.len() > 1024 || !git2::Branch::name_is_valid(name).unwrap_or(false) {
-                return false;
-            }
-            (repository, *deadline)
-        }
-        GitBranchRequest::TrackRemote {
-            repository,
-            name,
-            remote_branch,
-            deadline,
-        } => {
-            if name.trim().is_empty() || remote_branch.trim().is_empty() {
-                return false;
-            }
-            (repository, *deadline)
-        }
-        GitBranchRequest::Rename {
-            repository,
-            name,
-            to,
-            deadline,
-        } => {
-            if name.trim().is_empty()
-                || to.trim().is_empty()
-                || !git2::Branch::name_is_valid(to).unwrap_or(false)
-            {
-                return false;
-            }
-            (repository, *deadline)
-        }
-        GitBranchRequest::Delete {
-            repository,
-            name,
-            deadline,
-        } => {
-            if name.trim().is_empty() {
-                return false;
-            }
-            (repository, *deadline)
-        }
         GitBranchRequest::CreateWorktree {
             repository,
             name,
@@ -507,24 +434,6 @@ fn checked_out_path(
         .map(|linked| linked.path))
 }
 
-fn merged_into_head(repository: &git2::Repository, branch: &git2::Branch<'_>) -> Result<bool, GitBranchError> {
-    let branch_oid = branch
-        .get()
-        .target()
-        .ok_or(GitBranchError::Backend)?;
-    let head_oid = repository
-        .head()
-        .ok()
-        .and_then(|head| head.target())
-        .ok_or(GitBranchError::Backend)?;
-    if branch_oid == head_oid {
-        return Ok(true);
-    }
-    Ok(repository
-        .graph_descendant_of(head_oid, branch_oid)
-        .unwrap_or(false))
-}
-
 fn run(
     generation: GitBranchGeneration,
     request: &GitBranchRequest,
@@ -535,87 +444,6 @@ fn run(
     }
     match request {
         GitBranchRequest::List(request) => read_list(generation, request, cancel),
-        GitBranchRequest::Create {
-            repository,
-            name,
-            start,
-            deadline,
-        } => {
-            let repository = open(repository)?;
-            let start = match start {
-                Some(start) => repository
-                    .revparse_single(start)
-                    .and_then(|object| object.peel_to_commit())
-                    .map_err(|_| GitBranchError::UnknownBranch(start.clone()))?,
-                None => repository
-                    .head()
-                    .and_then(|head| head.peel_to_commit())
-                    .map_err(|_| GitBranchError::Backend)?,
-            };
-            let _ = deadline;
-            repository
-                .branch(name, &start, false)
-                .map_err(|_| GitBranchError::Backend)?;
-            Ok(GitBranchResult::Changed)
-        }
-        GitBranchRequest::TrackRemote {
-            repository,
-            name,
-            remote_branch,
-            deadline,
-        } => {
-            let repository = open(repository)?;
-            let _ = deadline;
-            let remote = repository
-                .find_branch(remote_branch, git2::BranchType::Remote)
-                .map_err(|_| GitBranchError::UnknownBranch(remote_branch.clone()))?;
-            let target = remote
-                .get()
-                .peel_to_commit()
-                .map_err(|_| GitBranchError::Backend)?;
-            let mut created = repository
-                .branch(name, &target, false)
-                .map_err(|_| GitBranchError::Backend)?;
-            created
-                .set_upstream(Some(remote_branch))
-                .map_err(|_| GitBranchError::Backend)?;
-            Ok(GitBranchResult::Changed)
-        }
-        GitBranchRequest::Rename {
-            repository,
-            name,
-            to,
-            deadline,
-        } => {
-            let repository = open(repository)?;
-            let _ = deadline;
-            if checked_out_path(&repository, name)?.is_some() {
-                return Err(GitBranchError::RefusedCheckedOut(name.clone()));
-            }
-            let mut branch = local_branch(&repository, name)?;
-            branch
-                .rename(to, false)
-                .map_err(|_| GitBranchError::Backend)?;
-            Ok(GitBranchResult::Changed)
-        }
-        GitBranchRequest::Delete {
-            repository,
-            name,
-            deadline,
-        } => {
-            let repository = open(repository)?;
-            let _ = deadline;
-            // Every refusal is decided before the delete.
-            let mut branch = local_branch(&repository, name)?;
-            if branch.is_head() || checked_out_path(&repository, name)?.is_some() {
-                return Err(GitBranchError::RefusedCheckedOut(name.clone()));
-            }
-            if !merged_into_head(&repository, &branch)? {
-                return Err(GitBranchError::RefusedUnmerged(name.clone()));
-            }
-            branch.delete().map_err(|_| GitBranchError::Backend)?;
-            Ok(GitBranchResult::Changed)
-        }
         GitBranchRequest::CreateDetachedWorktree {
             repository,
             name,

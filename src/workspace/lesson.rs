@@ -14,20 +14,13 @@ pub enum TutorFeature {
     Editing,
     /// Staging a change: present in this revision.
     Staging,
-    /// Writing a commit: present in this revision.
-    Commit,
-    /// Remote fetch, update and push. Not implemented in this revision (todo 10).
-    Remotes,
-    /// Conflict resolution and recovery. Not implemented in this revision (todo 11).
-    Conflicts,
 }
 
 impl TutorFeature {
     #[must_use]
     pub fn exists(self) -> bool {
         match self {
-            Self::Editing | Self::Staging | Self::Commit => true,
-            Self::Remotes | Self::Conflicts => false,
+            Self::Editing | Self::Staging => true,
         }
     }
 
@@ -36,9 +29,6 @@ impl TutorFeature {
         match self {
             Self::Editing => "editing",
             Self::Staging => "staging",
-            Self::Commit => "commit",
-            Self::Remotes => "remotes",
-            Self::Conflicts => "conflicts",
         }
     }
 }
@@ -49,10 +39,6 @@ impl TutorFeature {
 pub enum TutorStep {
     /// Completes when a change is really staged, observed from the mutation outcome.
     StageAChange,
-    /// Completes when a commit is really created.
-    WriteACommit,
-    /// Completes when a remote update really runs. Gated with `TutorFeature::Remotes`.
-    UpdateFromRemote,
 }
 
 impl TutorStep {
@@ -62,8 +48,6 @@ impl TutorStep {
     pub fn command(self) -> &'static str {
         match self {
             Self::StageAChange => "workspace.git.hunk.stage",
-            Self::WriteACommit => "workspace.git.commit.submit",
-            Self::UpdateFromRemote => "workspace.git.remote.update",
         }
     }
 
@@ -71,8 +55,6 @@ impl TutorStep {
     pub fn describe(self) -> &'static str {
         match self {
             Self::StageAChange => "Stage one change",
-            Self::WriteACommit => "Write a commit",
-            Self::UpdateFromRemote => "Update from the remote",
         }
     }
 }
@@ -82,7 +64,6 @@ impl TutorStep {
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum TutorAction {
     Staged,
-    Committed,
 }
 
 impl TutorAction {
@@ -90,7 +71,6 @@ impl TutorAction {
     pub fn completes(self) -> TutorStep {
         match self {
             Self::Staged => TutorStep::StageAChange,
-            Self::Committed => TutorStep::WriteACommit,
         }
     }
 }
@@ -117,8 +97,7 @@ impl TutorLesson {
     }
 }
 
-/// The chapters, in order. Chapters 1 and 2 teach what this revision can do; chapter 3 teaches
-/// remotes and is therefore gated rather than shipped, which the surface states outright.
+/// The chapters, in order.
 pub const LESSONS: &[TutorLesson] = &[
     TutorLesson {
         id: "chapter1.stage",
@@ -126,20 +105,6 @@ pub const LESSONS: &[TutorLesson] = &[
         chapter: 1,
         features: &[TutorFeature::Staging],
         steps: &[TutorStep::StageAChange],
-    },
-    TutorLesson {
-        id: "chapter2.commit",
-        title: "Chapter 2 · Write a commit",
-        chapter: 2,
-        features: &[TutorFeature::Commit],
-        steps: &[TutorStep::WriteACommit],
-    },
-    TutorLesson {
-        id: "chapter3.remote",
-        title: "Chapter 3 · Update from a remote",
-        chapter: 3,
-        features: &[TutorFeature::Remotes],
-        steps: &[TutorStep::UpdateFromRemote],
     },
 ];
 

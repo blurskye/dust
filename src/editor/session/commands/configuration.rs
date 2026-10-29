@@ -151,38 +151,6 @@ pub(super) fn register_commands(
     )?;
     register(
         registry,
-        "workspace.git.commit",
-        "Compose and create a commit from the staged set",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default(),
-        |_| AppEffect::GitCommit,
-    )?;
-    register(
-        registry,
-        "workspace.git.commit.amend",
-        "Compose an amend of the current commit",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default(),
-        |_| AppEffect::GitCommitAmend,
-    )?;
-    register(
-        registry,
-        "workspace.git.history.open",
-        "Open Git history as a bounded commit list",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default(),
-        |_| AppEffect::GitHistoryOpen,
-    )?;
-    register(
-        registry,
-        "workspace.git.branches.open",
-        "Open the Git branch list",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default(),
-        |_| AppEffect::GitBranchesOpen,
-    )?;
-    register(
-        registry,
         "workspace.git.worktrees.open",
         "Open the Git worktree list",
         ContextRequirement::Workspace,
@@ -191,61 +159,11 @@ pub(super) fn register_commands(
     )?;
     register(
         registry,
-        "workspace.git.branch.delete",
-        "Delete the selected local branch",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default(),
-        |_| AppEffect::GitBranchDelete,
-    )?;
-    register(
-        registry,
         "workspace.git.worktree.remove",
         "Remove the selected worktree and its directory",
         ContextRequirement::Workspace,
         ArgumentSchema::default(),
         |_| AppEffect::GitWorktreeRemove,
-    )?;
-    register(
-        registry,
-        "workspace.git.branch.create",
-        "Create a branch, optionally from a start point",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default()
-            .field("name", ArgumentType::String, true)
-            .field("start", ArgumentType::String, false),
-        |invocation| {
-            Ok(AppEffect::GitBranchCreate {
-                name: string_arg(invocation, "name")?.into(),
-                start: optional_string_arg(invocation, "start").map(str::to_owned),
-            })
-        },
-    )?;
-    register(
-        registry,
-        "workspace.git.branch.track",
-        "Create a local branch tracking a remote branch",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default()
-            .field("name", ArgumentType::String, true)
-            .field("remote_branch", ArgumentType::String, true),
-        |invocation| {
-            Ok(AppEffect::GitBranchTrack {
-                name: string_arg(invocation, "name")?.into(),
-                remote_branch: string_arg(invocation, "remote_branch")?.into(),
-            })
-        },
-    )?;
-    register(
-        registry,
-        "workspace.git.branch.rename",
-        "Rename the selected branch",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default().field("to", ArgumentType::String, true),
-        |invocation| {
-            Ok(AppEffect::GitBranchRename {
-                to: string_arg(invocation, "to")?.into(),
-            })
-        },
     )?;
     register(
         registry,
@@ -279,49 +197,6 @@ pub(super) fn register_commands(
         ContextRequirement::Workspace,
         ArgumentSchema::default(),
         |_invocation| Ok(AppEffect::GitWorktreeClose),
-    )?;
-    register(
-        registry,
-        "workspace.git.remote.fetch",
-        "Fetch the named remote and report what moved",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default().field("remote", ArgumentType::String, false),
-        |invocation| {
-            Ok(AppEffect::GitRemoteFetch {
-                remote: optional_string_arg(invocation, "remote").map(str::to_owned),
-            })
-        },
-    )?;
-    register(
-        registry,
-        "workspace.git.remote.update",
-        "Review a fast-forward update from the remote",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default(),
-        |_invocation| Ok(AppEffect::GitRemoteUpdate),
-    )?;
-    register(
-        registry,
-        "workspace.git.remote.update.apply",
-        "Apply the reviewed fast-forward update",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default(),
-        |_invocation| Ok(AppEffect::GitRemoteApply),
-    )?;
-    register(
-        registry,
-        "workspace.git.remote.push",
-        "Push the current branch to a named remote and destination, without forcing",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default()
-            .field("remote", ArgumentType::String, false)
-            .field("destination", ArgumentType::String, false),
-        |invocation| {
-            Ok(AppEffect::GitRemotePush {
-                remote: optional_string_arg(invocation, "remote").map(str::to_owned),
-                destination: optional_string_arg(invocation, "destination").map(str::to_owned),
-            })
-        },
     )?;
     register(
         registry,
@@ -379,59 +254,6 @@ pub(super) fn register_commands(
             Ok(AppEffect::GitConflictReplace {
                 side: string_arg(invocation, "side")?.to_owned(),
                 files: string_arg(invocation, "files")?.to_owned(),
-            })
-        },
-    )?;
-    register(
-        registry,
-        "workspace.git.cherry.pick",
-        "Cherry-pick a named commit onto the current branch",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default().field("commit", ArgumentType::String, true),
-        |invocation| {
-            Ok(AppEffect::GitPick {
-                commit: string_arg(invocation, "commit")?.to_owned(),
-                kind: "cherry-pick",
-            })
-        },
-    )?;
-    register(
-        registry,
-        "workspace.git.revert",
-        "Revert a named commit on the current branch",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default().field("commit", ArgumentType::String, true),
-        |invocation| {
-            Ok(AppEffect::GitPick {
-                commit: string_arg(invocation, "commit")?.to_owned(),
-                kind: "revert",
-            })
-        },
-    )?;
-    register(
-        registry,
-        "workspace.git.reset",
-        "Reset HEAD to a named revision, in the named mode",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default()
-            .field("mode", ArgumentType::String, true)
-            .field("target", ArgumentType::String, true),
-        |invocation| {
-            Ok(AppEffect::GitReset {
-                mode: string_arg(invocation, "mode")?.to_owned(),
-                target: string_arg(invocation, "target")?.to_owned(),
-            })
-        },
-    )?;
-    register(
-        registry,
-        "workspace.git.handoff",
-        "Show why an operation is not native, and the command to run yourself",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default().field("operation", ArgumentType::String, true),
-        |invocation| {
-            Ok(AppEffect::GitHandoff {
-                operation: string_arg(invocation, "operation")?.to_owned(),
             })
         },
     )?;
@@ -514,30 +336,6 @@ pub(super) fn register_commands(
         ContextRequirement::Application,
         ArgumentSchema::default(),
         |_invocation| Ok(AppEffect::HelpCommandReference),
-    )?;
-    register(
-        registry,
-        "workspace.git.history.toggle",
-        "Toggle Git history between the list and the ancestry graph",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default(),
-        |_| AppEffect::GitHistoryToggle,
-    )?;
-    register(
-        registry,
-        "workspace.git.history.range",
-        "Show the combined patch from the selected commit to the tip",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default(),
-        |_| AppEffect::GitHistoryRange,
-    )?;
-    register(
-        registry,
-        "workspace.git.commit.submit",
-        "Create the commit from the composed message",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default(),
-        |_| AppEffect::GitCommitSubmit,
     )?;
     register(
         registry,

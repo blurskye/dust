@@ -1994,19 +1994,6 @@ command = "input.register.begin"
 # span lines. Both keys are ordinary configurable mappings; ctrl-s is bound as well because
 # a terminal may consume it as flow control.
 [[keymap]]
-id = "builtin.command-prompt.git-commit-submit.ctrl-s"
-context = "command_prompt"
-keys = "ctrl-s"
-command = "workspace.git.commit.submit"
-
-[[keymap]]
-id = "builtin.command-prompt.git-commit-submit.alt-enter"
-context = "command_prompt"
-keys = "alt-enter"
-command = "workspace.git.commit.submit"
-
-# Focus and mouse are independent configurable event contexts.
-[[keymap]]
 id = "builtin.focus.surface.input-mapping-cancel.focus-lost"
 context = "focus"
 keys = "focus-lost"
@@ -3666,43 +3653,6 @@ keys = "u"
 command = "workspace.git.file.unstage"
 
 [[keymap]]
-id = "builtin.picker.normal.changes-fetch.f"
-context = "picker_normal"
-keys = "f"
-command = "workspace.git.remote.fetch"
-
-[[keymap]]
-id = "builtin.picker.normal.changes-update.upper-u"
-context = "picker_normal"
-keys = "U"
-command = "workspace.git.remote.update"
-
-[[keymap]]
-id = "builtin.picker.normal.changes-push.upper-p"
-context = "picker_normal"
-keys = "P"
-command = "workspace.git.remote.push"
-
-[[keymap]]
-id = "builtin.picker.normal.changes-history.upper-h"
-context = "picker_normal"
-keys = "H"
-command = "workspace.git.history.open"
-
-[[keymap]]
-id = "builtin.picker.normal.history-toggle.g"
-context = "picker_normal"
-keys = "g"
-command = "workspace.git.history.toggle"
-
-[[keymap]]
-id = "builtin.picker.normal.history-range.space"
-context = "picker_normal"
-keys = "space"
-command = "workspace.git.history.range"
-
-
-[[keymap]]
 id = "builtin.picker.surface.picker-backspace.backspace"
 context = "picker"
 keys = "backspace"
@@ -4153,6 +4103,38 @@ arguments = { profile = "lazygit" }
 desc = "Lazygit"
 
 [[keymap]]
+id = "builtin.global.lazygit-cwd"
+context = "global"
+keys = "<leader> g G"
+command = "terminal.open"
+arguments = { profile = "lazygit_cwd" }
+desc = "Lazygit (file directory)"
+
+[[keymap]]
+id = "builtin.global.lazygit-file"
+context = "global"
+keys = "<leader> g f"
+command = "terminal.open"
+arguments = { profile = "lazygit_file" }
+desc = "Git Current File History"
+
+[[keymap]]
+id = "builtin.global.lazygit-log"
+context = "global"
+keys = "<leader> g l"
+command = "terminal.open"
+arguments = { profile = "lazygit_log" }
+desc = "Git Log"
+
+[[keymap]]
+id = "builtin.global.lazygit-log-commits"
+context = "global"
+keys = "<leader> g c"
+command = "terminal.open"
+arguments = { profile = "lazygit_log" }
+desc = "Git Log"
+
+[[keymap]]
 id = "builtin.global.git-status"
 context = "global"
 keys = "<leader> g s"
@@ -4160,46 +4142,11 @@ command = "workspace.git.status.open"
 desc = "Git Status"
 
 [[keymap]]
-id = "builtin.global.git-commit"
-context = "global"
-keys = "<leader> g c"
-command = "workspace.git.commit"
-desc = "Commit"
-
-[[keymap]]
-id = "builtin.global.git-fetch"
-context = "global"
-keys = "<leader> g f"
-command = "workspace.git.remote.fetch"
-desc = "Fetch"
-
-[[keymap]]
-id = "builtin.global.git-update"
-context = "global"
-keys = "<leader> g U"
-command = "workspace.git.remote.update"
-desc = "Pull"
-
-[[keymap]]
-id = "builtin.global.git-push"
-context = "global"
-keys = "<leader> g p"
-command = "workspace.git.remote.push"
-desc = "Push"
-
-[[keymap]]
 id = "builtin.global.git-conflicts"
 context = "global"
 keys = "<leader> g x"
 command = "workspace.git.conflicts.open"
 desc = "Conflicts"
-
-[[keymap]]
-id = "builtin.global.git-branches"
-context = "global"
-keys = "<leader> g B"
-command = "workspace.git.branches.open"
-desc = "Branches"
 
 [[keymap]]
 id = "builtin.global.git-worktrees"

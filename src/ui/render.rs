@@ -68,7 +68,6 @@ pub enum PromptKind {
     TerminalClose,
     DirtyClose,
     GitStageUnsaved,
-    GitCommitMessage,
     GitDestructive,
 }
 
@@ -87,7 +86,6 @@ impl PromptKind {
             Self::TerminalClose => "Close terminal",
             Self::DirtyClose => "Close document",
             Self::GitStageUnsaved => "Stage unsaved changes",
-            Self::GitCommitMessage => "Commit staged changes",
             Self::GitDestructive => "Confirm Git change",
         }
     }
@@ -106,7 +104,6 @@ impl PromptKind {
             | Self::TerminalClose
             | Self::DirtyClose
             | Self::GitStageUnsaved
-            | Self::GitCommitMessage
             | Self::GitDestructive => "",
         }
     }
@@ -137,9 +134,6 @@ pub struct ConfirmationState {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PromptState {
     pub kind: PromptKind,
-    /// Composer prompts accept newlines and draw more than one row. Every other
-    /// prompt keeps its single-row behaviour.
-    pub multiline: bool,
     pub confirmation: Option<ConfirmationState>,
     pub input: String,
     pub cursor: usize,
@@ -153,7 +147,6 @@ impl PromptState {
     #[must_use]
     pub fn new(kind: PromptKind) -> Self {
         Self {
-            multiline: false,
             kind,
             confirmation: None,
             input: String::new(),
@@ -450,9 +443,6 @@ pub enum PickerSurfaceKind {
     /// The change list: grouped sections whose entries draw status, path and provenance as
     /// their own columns.
     Changes,
-    /// The commit history, whose rows draw the ancestry graph, its badges and the subject as
-    /// their own columns when the graph toggle is on.
-    History,
 }
 
 /// What a preview pane draws.
@@ -1432,17 +1422,7 @@ pub fn prompt_geometry_for_state(
     config: &Config,
     prompt: &PromptState,
 ) -> PromptGeometry {
-    let mut geometry =
-        confirmation_layout(terminal_width, terminal_height, config, prompt).geometry;
-    if prompt.multiline {
-        let rows = prompt.input.split('\n').count().clamp(1, 8) as u16;
-        let available = terminal_height.saturating_sub(geometry.top).max(1);
-        geometry.height = geometry
-            .height
-            .saturating_add(rows.saturating_sub(1))
-            .min(available);
-    }
-    geometry
+    confirmation_layout(terminal_width, terminal_height, config, prompt).geometry
 }
 
 #[must_use]

@@ -19,14 +19,6 @@ pub(in crate::editor::session) enum PickerPayload {
     /// A row that groups others and is not an action: accepting it does nothing, and
     /// selection steps over it.
     Section,
-    /// Carries the branch identity a destructive command needs, so a row never has to
-    /// re-derive it from display text. Read by the branch and worktree commands.
-    GitBranch {
-        #[allow(dead_code)]
-        name: String,
-        #[allow(dead_code)]
-        remote: bool,
-    },
     GitWorktree {
         #[allow(dead_code)]
         name: String,
@@ -34,10 +26,6 @@ pub(in crate::editor::session) enum PickerPayload {
         /// re-deriving a path from display text.
         #[allow(dead_code)]
         path: std::path::PathBuf,
-    },
-    GitCommit {
-        repository: std::path::PathBuf,
-        commit: crate::workspace::git::GitHeadId,
     },
     Theme(crate::editor::session::configuration::ThemeKey),
     WorkspaceSearch(String),
@@ -107,10 +95,6 @@ struct PickerInteraction {
 }
 #[derive(Default)]
 pub(super) struct PickerSession {
-    /// The ancestry graph cells for the history page on screen, keyed by the commit identity
-    /// the row carries. Keyed rather than indexed because the visible rows are filtered, so a
-    /// position would point at the wrong commit as soon as a query narrows the list.
-    history_cells: std::collections::HashMap<String, Vec<PickerCell>>,
     interaction: Option<PickerInteraction>,
     generation: u64,
     /// The surface that help was opened over, kept so closing help returns the user to the
@@ -365,15 +349,6 @@ impl SearchSession {
         picker.backspace_query();
         Some(picker.query().to_owned())
     }
-    /// Remember the columns for the history page now on screen, keyed by commit identity. The
-    /// graph cells are part of them when the graph is on and absent when it is off; the hash,
-    /// subject, age and author columns are always there.
-    pub(in crate::editor::session) fn set_history_cells(
-        &mut self,
-        graph: std::collections::HashMap<String, Vec<PickerCell>>,
-    ) {
-        self.picker.history_cells = graph;
-    }
 
     /// Re-present the open picker on another surface, keeping its rows, query and selection.
     /// This is how a picker sends its results to the shared Results surface.
@@ -491,14 +466,6 @@ impl SearchSession {
                             && row.id.0.starts_with("git:")
                         {
                             changes_row_cells(&row)
-                        } else if picker.surface == PickerSurfaceKind::History {
-                            // The history rows carry the graph columns when the graph is on,
-                            // and nothing when it is off, so the list renders as before.
-                            self.picker
-                                .history_cells
-                                .get(&row.id.0)
-                                .cloned()
-                                .unwrap_or_default()
                         } else {
                             Vec::new()
                         };
@@ -534,8 +501,8 @@ fn surface_footer(surface: PickerSurfaceKind) -> Option<String> {
     }
 }
 
-/// The columns a change row draws: the two-character status code, the path, and the comparison
-/// the row belongs to.
+/// The columns a change row draws: the two-character status code, the path, and an unsaved
+/// badge when the buffer has edits.
 ///
 /// The status code is its own glyph column rather than a colour, so the meaning survives a
 /// terminal without colour. The path column is flexible, so a narrow picker clips the path
@@ -554,21 +521,15 @@ fn changes_row_cells(source: &crate::workspace::PickerRowPresentation) -> Vec<Pi
         Some('R') => Style::Warning,
         _ => Style::Warning,
     };
-    vec![
-        PickerCell::new(code, status_style, 2),
+    let mut cells = vec![
+        PickerCell::new(code, status_style, 3),
         PickerCell::flex(source.label.clone(), Style::Default),
-        // Always present, empty when there is no badge, so the columns to its right stay in
-        // the same place on every row. The leading space is the gap that keeps a squeezed
-        // path column from running into the badge.
-        PickerCell::new(
-            if source.badge.is_empty() {
-                String::new()
-            } else {
-                format!(" {}", source.badge)
-            },
-            Style::Warning,
-            9,
-        ),
-        PickerCell::new(format!(" {}", source.detail), Style::Muted, 15),
-    ]
+    ];
+    // The section header already names the comparison, so only an unsaved buffer gets a badge.
+    if !source.badge.is_empty() {
+        let badge = format!(" {}", source.badge);
+        let width = u16::try_from(badge.chars().count()).unwrap_or(u16::MAX);
+        cells.push(PickerCell::new(badge, Style::Warning, width));
+    }
+    cells
 }

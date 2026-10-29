@@ -404,6 +404,36 @@ rows = 24
 float = true
 close_on_exit = true
 
+# `{root}`, `{file}`, `{dir}` and `{line}` are filled from the workspace root and the current
+# buffer. Paths go in as separate arguments ("$1"), never into the shell string.
+[terminals.profiles.lazygit_cwd]
+program = "/bin/sh"
+arguments = ["-c", "exec lazygit"]
+cwd = "{dir}"
+environment = {}
+columns = 80
+rows = 24
+float = true
+close_on_exit = true
+
+[terminals.profiles.lazygit_file]
+program = "/bin/sh"
+arguments = ["-c", "exec lazygit -f \"$1\"", "lazygit", "{file}"]
+environment = {}
+columns = 80
+rows = 24
+float = true
+close_on_exit = true
+
+[terminals.profiles.lazygit_log]
+program = "/bin/sh"
+arguments = ["-c", "exec lazygit log"]
+environment = {}
+columns = 80
+rows = 24
+float = true
+close_on_exit = true
+
 [packages.registry]
 base_url = "https://dust.blurskye.dev/registry/v1"
 offline = false
@@ -1001,39 +1031,20 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "workspace.git.lines.stage" = "Stage a line range inside the current Git hunk"
 "workspace.git.hunks.open_staged" = "Open staged Git hunks"
 "workspace.git.hunk.unstage" = "Unstage selected staged Git hunk"
-"workspace.git.commit" = "Compose and create a commit from the staged set"
-"workspace.git.commit.amend" = "Compose an amend of the current commit"
-"workspace.git.commit.submit" = "Create the commit from the composed message"
-"workspace.git.history.open" = "Open Git history as a bounded commit list"
-"workspace.git.history.range" = "Show the combined patch from the selected commit to the tip"
-"workspace.git.history.toggle" = "Toggle Git history between the list and the ancestry graph"
-"workspace.git.branches.open" = "Open the Git branch list"
 "workspace.git.worktrees.open" = "Open the Git worktree list"
-"workspace.git.branch.delete" = "Delete the selected local branch"
 "workspace.git.worktree.remove" = "Remove the selected worktree and its directory"
-"workspace.git.branch.create" = "Create a branch, optionally from a start point"
-"workspace.git.branch.track" = "Create a local branch tracking a remote branch"
-"workspace.git.branch.rename" = "Rename the selected branch"
 "workspace.git.worktree.create" = "Create a worktree for a branch"
 "workspace.git.worktree.open" = "Open the selected worktree as a workspace root"
 "overlay.help.contextual" = "Show what is available on the focused surface"
 "overlay.help.reference" = "Show the reference for the selected command"
 "overlay.help.form" = "Show help for the form or confirmation in front of you"
 "session.tutor.start" = "Open the practice sandbox: a disposable fixture isolated from your work"
-"workspace.git.remote.fetch" = "Fetch the named remote and report what moved"
-"workspace.git.remote.update" = "Review a fast-forward update from the remote"
-"workspace.git.remote.update.apply" = "Apply the reviewed fast-forward update"
-"workspace.git.remote.push" = "Push the current branch to a named remote and destination, without forcing"
 "workspace.git.conflicts.open" = "Show the paused operation and each conflicted path's base, ours and theirs"
 "workspace.git.conflict.choose" = "Accept one side of the active conflict into the result buffer"
 "workspace.git.conflict.stage" = "Stage the resolved conflict in the active buffer"
 "workspace.git.conflict.continue" = "Finish the paused operation by recording its merge commit"
 "workspace.git.conflict.abort" = "Abandon the paused operation and return to where it started"
 "workspace.git.conflict.replace" = "Preview replacing whole files with one side, then confirm it"
-"workspace.git.cherry.pick" = "Cherry-pick a named commit onto the current branch"
-"workspace.git.revert" = "Revert a named commit on the current branch"
-"workspace.git.reset" = "Reset HEAD to a named revision, in the named mode"
-"workspace.git.handoff" = "Show why an operation is not native, and the command to run yourself"
 "dap.breakpoints.states" = "Show what is true about each breakpoint rather than what was asked for"
 "dap.breakpoint.disable" = "Enable or disable the breakpoint on the cursor line"
 "dap.terminate" = "End the debug session and ask the debuggee to end with it"

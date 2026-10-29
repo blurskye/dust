@@ -134,17 +134,22 @@ Terminal processes are never restored as fake live sessions. Zero-exit terminals
 
 ## Git
 
-Dust provides a bounded local Git subset without invoking the Git CLI:
+Dust does what needs the buffer natively and runs lazygit for the rest:
 
-- file and explorer status decorations;
-- active-buffer hunk signs;
-- `]h` / `[h` hunk navigation;
-- `Space g h p` hunk preview;
-- `:workspace.git.hunks.open` hunk picker;
-- exact stage and protected reset of the selected unstaged hunk;
-- an explicit `Git N files` changed-file count in the status line.
+- file and explorer status decorations, and gutter signs for the active buffer;
+- `]h` / `[h` move between hunks; `Space g h p` previews, `Space g h s` stages, `Space g h u`
+  unstages and `Space g h r` resets the hunk at the cursor (reset asks for the phrase
+  `reset this hunk`);
+- `Space g s` lists changed files with the diff beside them (`s` / `u` stage and unstage);
+- `Space g x` shows conflicts and lets you pick a side; `Space g w` lists worktrees;
+- `Space g g` opens lazygit at the workspace root, `Space g G` in the current file's
+  directory, `Space g f` on the current file's history, and `Space g l` / `Space g c` on the
+  log. Commit, branch, stash, rebase, push and pull all happen there.
 
-Reset requires the exact protected phrase `reset this hunk`; an ordinary Yes/No confirmation cannot authorize it. More advanced branch, history, blame, conflict, remote, and staged-hunk workflows remain delegated to LazyGit until their native Dust workflows are complete.
+The lazygit commands are ordinary terminal profiles in `[terminals.profiles]`. A profile's
+arguments and `cwd` may use `{root}`, `{file}`, `{dir}` and `{line}`; for example
+`arguments = ["-c", "exec lazygit -f \"$1\"", "lazygit", "{file}"]` passes the path as a
+separate argument instead of splicing it into the shell string.
 
 ## Recovery and health
 

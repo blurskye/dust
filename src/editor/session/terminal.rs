@@ -306,6 +306,7 @@ impl TerminalSession {
         &mut self,
         name: &str,
         workspace: &WorkspaceSession,
+        file: Option<(&std::path::Path, usize)>,
         navigation: super::windows::NavigationStamp,
         capture: Arc<()>,
     ) -> Result<TerminalIntent, String> {
@@ -341,6 +342,7 @@ impl TerminalSession {
             .iter()
             .find(|r| Some(r.id) == workspace.active_root())
             .ok_or("terminal has no active workspace root")?;
+        let config = &expand_placeholders(config, &root.identity.canonical_path, file)?;
         let cwd = config.cwd.as_ref().map_or_else(
             || root.identity.canonical_path.clone(),
             |p| {
@@ -1157,4 +1159,41 @@ mod tests {
         assert!(pending.is_empty());
         assert_eq!(screen.dimensions(), (40, 10));
     }
+}
+
+/// Fills `{root}`, `{file}`, `{dir}` and `{line}` in a profile's arguments and working
+/// directory, so one profile can open a tool on the current file (`lazygit -f {file}`).
+fn expand_placeholders(
+    config: &crate::config::TerminalProfileConfig,
+    root: &std::path::Path,
+    file: Option<(&std::path::Path, usize)>,
+) -> Result<crate::config::TerminalProfileConfig, String> {
+    let expand = |value: &str| -> Result<String, String> {
+        let mut value = value.replace("{root}", &root.to_string_lossy());
+        for placeholder in ["{file}", "{dir}", "{line}"] {
+            if !value.contains(placeholder) {
+                continue;
+            }
+            let (path, line) = file.ok_or("this terminal profile needs a file buffer")?;
+            let replacement = match placeholder {
+                "{file}" => path.to_string_lossy().into_owned(),
+                "{dir}" => path
+                    .parent()
+                    .unwrap_or(root)
+                    .to_string_lossy()
+                    .into_owned(),
+                _ => line.to_string(),
+            };
+            value = value.replace(placeholder, &replacement);
+        }
+        Ok(value)
+    };
+    let mut expanded = config.clone();
+    for argument in &mut expanded.arguments {
+        *argument = expand(argument)?;
+    }
+    if let Some(cwd) = &expanded.cwd {
+        expanded.cwd = Some(expand(&cwd.to_string_lossy())?.into());
+    }
+    Ok(expanded)
 }
