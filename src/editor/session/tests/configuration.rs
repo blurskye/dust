@@ -1184,6 +1184,7 @@ fn the_agent_keys_each_reach_their_command() {
         ("<leader> a ]", "agent.session.next"),
         ("<leader> a [", "agent.session.previous"),
         ("<leader> a x", "agent.session.close"),
+        ("<leader> a R", "agent.resume"),
         ("<leader> a m", "agent.model"),
         ("<leader> a M", "agent.mode"),
         ("<leader> a r", "agent.thinking"),
@@ -1290,4 +1291,15 @@ fn every_key_the_experience_document_names_is_bound_or_marked_as_having_no_comma
         checked >= 25,
         "the document's prefix table should name at least 25 keys, found {checked}"
     );
+}
+
+#[test]
+fn the_agent_panel_opens_over_the_dashboard() {
+    let mut app = app();
+    assert!(app.window_session.dashboard_visible());
+    for key in [' ', 'a', 't'] {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    assert!(!app.window_session.dashboard_visible());
+    assert!(app.state.active_view.is_some());
 }

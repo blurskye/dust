@@ -1101,6 +1101,7 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "agent.session.next" = "Next Agent Session"
 "agent.session.previous" = "Previous Agent Session"
 "agent.session.close" = "Close Agent Session"
+"agent.resume" = "Resume Agent Conversation"
 "agent.cancel" = "Stop Agent"
 "agent.model" = "Agent Model"
 "agent.mode" = "Agent Mode"

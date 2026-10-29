@@ -4549,6 +4549,13 @@ command = "agent.session.close"
 desc = "Close Agent Session"
 
 [[keymap]]
+id = "builtin.global.agent-resume"
+context = "global"
+keys = "<leader> a R"
+command = "agent.resume"
+desc = "Resume Agent Conversation"
+
+[[keymap]]
 id = "builtin.global.agent-model"
 context = "global"
 keys = "<leader> a m"

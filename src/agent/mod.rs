@@ -15,6 +15,8 @@ use std::{
     thread,
 };
 
+pub mod history;
+
 pub const PROTOCOL_VERSION: u64 = 1;
 const LINE_BYTE_CEILING: usize = 16 * 1024 * 1024;
 
@@ -191,6 +193,30 @@ pub fn initialize_params() -> Value {
 #[must_use]
 pub fn new_session_params(cwd: &Path) -> Value {
     json!({"cwd": cwd, "mcpServers": []})
+}
+
+/// How an agent can pick up one of its earlier sessions, from its `initialize` reply.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct Rejoin {
+    /// `session/resume`: reconnect without replaying the conversation.
+    pub resume: bool,
+    /// `session/load`: reconnect and replay the conversation as updates.
+    pub load: bool,
+}
+
+#[must_use]
+pub fn rejoin_support(initialize: &Value) -> Rejoin {
+    let capabilities = &initialize["agentCapabilities"];
+    Rejoin {
+        resume: capabilities["sessionCapabilities"]["resume"].is_object(),
+        load: capabilities["loadSession"].as_bool() == Some(true),
+    }
+}
+
+/// Parameters of `session/resume` and `session/load`.
+#[must_use]
+pub fn rejoin_params(session: &str, cwd: &Path) -> Value {
+    json!({"sessionId": session, "cwd": cwd, "mcpServers": []})
 }
 
 /// One piece of a prompt: text, or a file the agent should look at.

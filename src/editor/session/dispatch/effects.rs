@@ -11795,6 +11795,7 @@ impl InteractiveApplication {
             AppEffect::AgentNextSession => self.cycle_agent_session(1),
             AppEffect::AgentPreviousSession => self.cycle_agent_session(-1),
             AppEffect::AgentCloseSession => self.close_agent_session(),
+            AppEffect::AgentResume => self.open_agent_resume_picker(),
             AppEffect::AgentCancel => self.cancel_agent_turn(),
             AppEffect::AgentModel => self.open_agent_option_picker(Some("model")),
             AppEffect::AgentMode => self.open_agent_option_picker(Some("mode")),

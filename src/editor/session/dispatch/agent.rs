@@ -14,8 +14,9 @@ use serde_json::{Value, json};
 use super::InteractiveApplication;
 use crate::{
     agent::{
-        self, AgentMessage, AgentProcess, AuthMethod, PermissionOption, PromptPart,
+        self, AgentMessage, AgentProcess, AuthMethod, PermissionOption, PromptPart, Rejoin,
         SessionOption, SessionUpdate,
+        history::{self, Conversation, Entry},
     },
     editor::{
         Axis, BufferId, EditorMode, LayoutAction, session::search::PickerPayload,
@@ -34,6 +35,8 @@ const MESSAGES_PER_TICK: usize = 256;
 const READ_BYTE_CEILING: u64 = 16 * 1024 * 1024;
 /// The option category ACP uses for reasoning effort.
 const THINKING: &str = "thought_level";
+/// How much of a saved conversation goes to an agent that starts fresh, in characters.
+const RECAP_CHARACTERS: usize = 60_000;
 
 /// What a row of one of the agent pickers stands for.
 #[derive(Clone, Debug)]
@@ -48,6 +51,8 @@ pub(in crate::editor::session) enum AgentChoice {
     Value { option: String, value: String },
     /// Sign in to the active session's agent with this method.
     Login(String),
+    /// Open a saved conversation in a tab.
+    Resume(String),
 }
 
 #[derive(Default)]
@@ -64,6 +69,8 @@ pub(super) struct AgentPanel {
     permissions: VecDeque<PermissionRequest>,
     /// The request the open permission prompt answers.
     asking: Option<PermissionRequest>,
+    /// Whether the tabs open when Dust last quit were brought back.
+    restored: bool,
 }
 
 struct AgentSession {
@@ -86,16 +93,29 @@ struct AgentSession {
     requests: Vec<(u64, Pending)>,
     /// Option values from the profile, set once the session exists.
     preferred: BTreeMap<String, String>,
+    /// The history file this tab saves to.
+    history: String,
+    /// What the agent offered for picking up an earlier session.
+    rejoin: Rejoin,
+    /// An earlier agent session to pick up on the next start, and the one being picked up.
+    earlier: Option<String>,
+    /// The conversation so far goes with the next question, because the agent started
+    /// fresh instead of picking up its earlier session.
+    recap: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Phase {
     Initializing(u64),
     Creating(u64),
+    /// Picking up `earlier` with `session/resume` or `session/load`.
+    Rejoining(u64),
     /// The agent asked for a sign-in before it creates the session.
     SigningIn,
     Ready,
     Prompting(u64),
+    /// The agent exited; a tab restored from history has no process but is not stopped.
+    Stopped,
 }
 
 enum Pending {
@@ -110,27 +130,16 @@ struct PermissionRequest {
     options: Vec<PermissionOption>,
 }
 
-#[derive(Clone, Debug)]
-enum Entry {
-    /// The agent (re)started.
-    Started { root: PathBuf },
-    User { text: String, context: Vec<String> },
-    Agent(String),
-    Thought(String),
-    Tool { id: String, title: String, status: String },
-    Plan(Vec<(String, String)>),
-    Notice(String),
-}
-
 impl AgentSession {
     fn status(&self, waiting: bool) -> &'static str {
         match (self.process.is_some(), self.phase) {
-            (false, _) => "stopped",
+            (false, Phase::Stopped) => "stopped",
+            (false, _) => "saved",
             _ if waiting => "waiting for you",
-            (true, Phase::Initializing(_) | Phase::Creating(_)) => "starting",
+            (true, Phase::Initializing(_) | Phase::Creating(_) | Phase::Rejoining(_)) => "starting",
             (true, Phase::SigningIn) => "sign-in needed",
             (true, Phase::Prompting(_)) => "working",
-            (true, Phase::Ready) => "ready",
+            (true, Phase::Ready | Phase::Stopped) => "ready",
         }
     }
 
@@ -158,9 +167,17 @@ impl AgentSession {
         let Some(id) = self.id.clone() else {
             return;
         };
-        let Some(parts) = self.queued.pop_front() else {
+        let Some(mut parts) = self.queued.pop_front() else {
             return;
         };
+        if std::mem::take(&mut self.recap) {
+            let before = self
+                .entries
+                .iter()
+                .rposition(|entry| matches!(entry, Entry::User { .. }))
+                .unwrap_or(self.entries.len());
+            parts.insert(0, PromptPart::Text(history::recap(&self.entries[..before], RECAP_CHARACTERS)));
+        }
         match self.request("session/prompt", agent::prompt_params(&id, &parts)) {
             Ok(request) => self.phase = Phase::Prompting(request),
             Err(error) => self.entries.push(Entry::Notice(error)),
@@ -186,6 +203,63 @@ impl AgentSession {
             },
         ));
         Ok(())
+    }
+
+    /// Ask for a session: the earlier one if the agent can pick it up, otherwise a new one
+    /// that gets the conversation so far with the next question.
+    fn open_session(&mut self) {
+        let method = match &self.earlier {
+            Some(_) if self.rejoin.resume => "session/resume",
+            Some(_) if self.rejoin.load => "session/load",
+            Some(_) => {
+                self.earlier = None;
+                self.recap = true;
+                "session/new"
+            }
+            None => "session/new",
+        };
+        let params = match &self.earlier {
+            Some(earlier) => agent::rejoin_params(earlier, &self.root),
+            None => agent::new_session_params(&self.root),
+        };
+        match self.request(method, params) {
+            Ok(id) if method == "session/new" => self.phase = Phase::Creating(id),
+            Ok(id) => self.phase = Phase::Rejoining(id),
+            Err(error) => self.entries.push(Entry::Notice(error)),
+        }
+    }
+
+    fn attach(&mut self, (process, phase, preferred): (AgentProcess, Phase, BTreeMap<String, String>)) {
+        self.entries.push(Entry::Started { root: self.root.clone() });
+        self.earlier = self.id.take().or_else(|| self.earlier.take());
+        self.process = Some(process);
+        self.phase = phase;
+        self.options.clear();
+        self.requests.clear();
+        self.preferred = preferred;
+        self.recap = false;
+    }
+
+    fn conversation(&self, open: bool) -> Conversation {
+        let title = self
+            .entries
+            .iter()
+            .find_map(|entry| match entry {
+                Entry::User { text, .. } => text.lines().next(),
+                _ => None,
+            })
+            .unwrap_or_default();
+        Conversation {
+            id: self.history.clone(),
+            agent: self.name.clone(),
+            root: self.root.clone(),
+            session: self.id.clone().or_else(|| self.earlier.clone()),
+            title: title.chars().take(100).collect(),
+            updated: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_secs()),
+            open,
+        }
     }
 
     /// Profile preferences such as `model = "…"`, applied once the session exists.
@@ -269,6 +343,7 @@ impl InteractiveApplication {
     }
 
     pub(super) fn agent_ask(&mut self, question: String) {
+        self.restore_agent_tabs();
         let question = question.trim().to_owned();
         if question.is_empty() {
             self.agent.context.clear();
@@ -373,6 +448,7 @@ impl InteractiveApplication {
 
     /// `<leader>as`: the open sessions.
     pub(super) fn open_agent_sessions_picker(&mut self) {
+        self.restore_agent_tabs();
         if self.agent.sessions.is_empty() {
             self.notify_message("no agent sessions; start one with <leader>an".into(), false);
             return;
@@ -472,6 +548,43 @@ impl InteractiveApplication {
         self.sync_picker_ui();
     }
 
+    /// `<leader>aR`: saved conversations, newest first.
+    pub(super) fn open_agent_resume_picker(&mut self) {
+        self.restore_agent_tabs();
+        let saved = history::list(&history::directory());
+        if saved.is_empty() {
+            self.notify_message("no saved agent conversations".into(), false);
+            return;
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs());
+        let items = saved
+            .into_iter()
+            .map(|conversation| {
+                let open = self.agent.sessions.iter().any(|session| session.history == conversation.id);
+                (
+                    picker_row(
+                        format!("agent-history:{}", conversation.id),
+                        conversation.title,
+                        format!(
+                            "{} · {} · {}",
+                            conversation.agent,
+                            age(now.saturating_sub(conversation.updated)),
+                            shown_root(&conversation.root, 60)
+                        ),
+                        if open { "open".into() } else { String::new() },
+                    ),
+                    PickerPayload::Agent(AgentChoice::Resume(conversation.id)),
+                )
+            })
+            .collect();
+        self.install_picker("Resume Agent Conversation".to_owned(), items);
+        self.search
+            .set_picker_footer("Enter Resume in a tab · Esc Close".to_owned());
+        self.sync_picker_ui();
+    }
+
     fn open_agent_login_picker(&mut self) {
         let Some(session) = self.active_agent() else {
             return;
@@ -509,6 +622,17 @@ impl InteractiveApplication {
                 }
                 Ok(())
             }
+            AgentChoice::Resume(id) => match self.reopen_conversation(&id) {
+                Some(index) if self.agent.sessions[index].process.is_none() => {
+                    self.show_agent_panel();
+                    self.restart_active_agent()
+                }
+                Some(_) => {
+                    self.show_agent_panel();
+                    Ok(())
+                }
+                None => Err("that conversation could not be read".to_owned()),
+            },
             AgentChoice::Option(option) => {
                 self.open_agent_option_picker(Some(&option));
                 return;
@@ -535,6 +659,7 @@ impl InteractiveApplication {
 
     /// `<leader>a]` and `<leader>a[`.
     pub(super) fn cycle_agent_session(&mut self, offset: isize) {
+        self.restore_agent_tabs();
         let count = self.agent.sessions.len();
         if count == 0 {
             self.notify_message("no agent sessions; start one with <leader>an".into(), false);
@@ -551,6 +676,8 @@ impl InteractiveApplication {
             self.notify_message("no agent session".into(), false);
             return;
         }
+        // Closed tabs stay in the history and can be resumed with <leader>aR.
+        self.save_agent_history(self.agent.active, false);
         let session = self.agent.sessions.remove(self.agent.active);
         self.agent.permissions.retain(|request| request.session != session.number);
         if self.agent.asking.take_if(|request| request.session == session.number).is_some() {
@@ -590,42 +717,61 @@ impl InteractiveApplication {
 
     fn start_agent_session(&mut self, name: &str) -> Result<(), String> {
         let root = self.state.workspace_root.clone();
-        let (process, phase, preferred) = self.spawn_agent(name, &root)?;
-        self.agent.started += 1;
-        self.agent.sessions.push(AgentSession {
-            number: self.agent.started,
-            name: name.to_owned(),
-            entries: vec![Entry::Started { root: root.clone() }],
-            root,
-            process: Some(process),
-            phase,
-            id: None,
-            queued: VecDeque::new(),
-            last_log: String::new(),
-            options: Vec::new(),
-            auth_methods: Vec::new(),
-            requests: Vec::new(),
-            preferred,
-        });
-        self.agent.active = self.agent.sessions.len() - 1;
+        let spawned = self.spawn_agent(name, &root)?;
+        let index = self.add_agent_tab(name.to_owned(), root, Vec::new(), None, None);
+        self.agent.active = index;
+        self.agent.sessions[index].attach(spawned);
         Ok(())
     }
 
-    /// Start the active tab's agent again after it exited, in the tab's own worktree.
+    /// A stopped tab; its agent starts with `attach`.
+    fn add_agent_tab(
+        &mut self,
+        name: String,
+        root: PathBuf,
+        entries: Vec<Entry>,
+        earlier: Option<String>,
+        history: Option<String>,
+    ) -> usize {
+        self.agent.started += 1;
+        let number = self.agent.started;
+        let history = history.unwrap_or_else(|| {
+            let millis = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_millis());
+            format!("{millis}-{}-{number}", std::process::id())
+        });
+        self.agent.sessions.push(AgentSession {
+            number,
+            name,
+            root,
+            process: None,
+            phase: Phase::Ready,
+            id: None,
+            queued: VecDeque::new(),
+            last_log: String::new(),
+            entries,
+            options: Vec::new(),
+            auth_methods: Vec::new(),
+            requests: Vec::new(),
+            preferred: BTreeMap::new(),
+            history,
+            rejoin: Rejoin::default(),
+            earlier,
+            recap: false,
+        });
+        self.agent.sessions.len() - 1
+    }
+
+    /// Start the active tab's agent again after it exited, in the tab's own worktree. It
+    /// picks up the tab's earlier session when it can.
     fn restart_active_agent(&mut self) -> Result<(), String> {
         let Some(session) = self.active_agent() else {
             return Ok(());
         };
         let (name, root) = (session.name.clone(), session.root.clone());
-        let (process, phase, preferred) = self.spawn_agent(&name, &root)?;
-        let session = &mut self.agent.sessions[self.agent.active];
-        session.entries.push(Entry::Started { root });
-        session.process = Some(process);
-        session.phase = phase;
-        session.id = None;
-        session.options.clear();
-        session.requests.clear();
-        session.preferred = preferred;
+        let spawned = self.spawn_agent(&name, &root)?;
+        self.agent.sessions[self.agent.active].attach(spawned);
         Ok(())
     }
 
@@ -696,7 +842,11 @@ impl InteractiveApplication {
                     break;
                 };
                 changed = true;
+                let save = matches!(message, AgentMessage::Response { .. } | AgentMessage::Exited(_));
                 self.handle_agent_message(index, message);
+                if save {
+                    self.save_agent_history(index, true);
+                }
             }
         }
         if self.agent.asking.is_none()
@@ -728,6 +878,53 @@ impl InteractiveApplication {
         }
     }
 
+    /// Keep the tab's history file current; tabs nobody asked anything are not kept.
+    fn save_agent_history(&self, index: usize, open: bool) {
+        let session = &self.agent.sessions[index];
+        if self.configuration.settings().persistence.enabled
+            && session.entries.iter().any(|entry| matches!(entry, Entry::User { .. }))
+        {
+            history::save(history::directory(), session.conversation(open), session.entries.clone());
+        }
+    }
+
+    /// Bring back the tabs that were open when Dust last quit, stopped until asked again.
+    fn restore_agent_tabs(&mut self) {
+        if std::mem::replace(&mut self.agent.restored, true)
+            || !self.configuration.settings().persistence.enabled
+        {
+            return;
+        }
+        let mut open = history::list(&history::directory())
+            .into_iter()
+            .filter(|conversation| conversation.open)
+            .collect::<Vec<_>>();
+        // Oldest first, so the tabs keep their order.
+        open.reverse();
+        for conversation in open {
+            self.reopen_conversation(&conversation.id);
+        }
+        self.agent.active = 0;
+    }
+
+    /// Put a saved conversation in a tab, or show the tab it is already in.
+    fn reopen_conversation(&mut self, id: &str) -> Option<usize> {
+        if let Some(index) = self.agent.sessions.iter().position(|session| session.history == id) {
+            self.agent.active = index;
+            return Some(index);
+        }
+        let (conversation, entries) = history::load(&history::directory(), id)?;
+        let index = self.add_agent_tab(
+            conversation.agent,
+            conversation.root,
+            entries,
+            conversation.session,
+            Some(conversation.id),
+        );
+        self.agent.active = index;
+        Some(index)
+    }
+
     fn handle_agent_message(&mut self, index: usize, message: AgentMessage) {
         let session = &mut self.agent.sessions[index];
         match message {
@@ -744,13 +941,7 @@ impl InteractiveApplication {
                                 option.current = value;
                             }
                         }
-                        (Pending::Authenticate, Ok(_)) => {
-                            let params = agent::new_session_params(&session.root);
-                            match session.request("session/new", params) {
-                                Ok(id) => session.phase = Phase::Creating(id),
-                                Err(error) => session.entries.push(Entry::Notice(error)),
-                            }
-                        }
+                        (Pending::Authenticate, Ok(_)) => session.open_session(),
                         (_, Err(error)) => session.entries.push(Entry::Notice(error)),
                     }
                     return;
@@ -761,7 +952,8 @@ impl InteractiveApplication {
                 }
             }
             AgentMessage::Notification { method, params } => {
-                if method == "session/update" {
+                // `session/load` replays the conversation, which the tab already shows.
+                if method == "session/update" && !matches!(session.phase, Phase::Rejoining(_)) {
                     apply_update(session, agent::session_update(&params));
                 }
             }
@@ -801,6 +993,7 @@ impl InteractiveApplication {
                     .entries
                     .push(Entry::Notice(format!("{} stopped ({detail}).", session.name)));
                 session.process = None;
+                session.phase = Phase::Stopped;
                 session.queued.clear();
                 session.requests.clear();
                 let number = session.number;
@@ -819,11 +1012,26 @@ impl InteractiveApplication {
         match (session.phase, result) {
             (Phase::Initializing(expected), Ok(result)) if id == expected => {
                 session.auth_methods = agent::auth_methods(&result);
-                let params = agent::new_session_params(&session.root);
-                match session.request("session/new", params) {
-                    Ok(id) => session.phase = Phase::Creating(id),
-                    Err(error) => session.entries.push(Entry::Notice(error)),
-                }
+                session.rejoin = agent::rejoin_support(&result);
+                session.open_session();
+            }
+            (Phase::Rejoining(expected), Ok(result)) if id == expected => {
+                session.id = session.earlier.take();
+                session.options = agent::session_options(&result);
+                session.phase = Phase::Ready;
+                session
+                    .entries
+                    .push(Entry::Notice(format!("{} picked up its earlier session.", session.name)));
+                session.send_next_prompt();
+            }
+            (Phase::Rejoining(expected), Err(error)) if id == expected => {
+                session.entries.push(Entry::Notice(format!(
+                    "{} could not pick up its earlier session ({error}); it starts fresh with the conversation so far.",
+                    session.name
+                )));
+                session.earlier = None;
+                session.open_session();
+                session.recap = true;
             }
             (Phase::Creating(expected), Ok(result)) if id == expected => {
                 session.id = result["sessionId"].as_str().map(str::to_owned);
@@ -983,6 +1191,7 @@ impl InteractiveApplication {
     }
 
     pub(super) fn toggle_agent_panel(&mut self) {
+        self.restore_agent_tabs();
         if let Some(pane) = self.agent_pane() {
             let previous = self.active_tab_focus();
             if self.state.focus_pane_id(pane).is_ok() {
@@ -1021,8 +1230,9 @@ impl InteractiveApplication {
                 Ok(())
             }
         };
-        if let Err(error) = shown {
-            self.show_error(error);
+        match shown {
+            Ok(()) => self.set_dashboard_visibility(false),
+            Err(error) => self.show_error(error),
         }
         if let Some(previous) = previous {
             let _ = self.state.focus_pane_id(previous);
@@ -1150,7 +1360,7 @@ impl InteractiveApplication {
             .filter_map(|(key, label)| Some(format!("{label}{}", value_name(session.option(key)?))))
             .collect::<Vec<_>>();
         let working = match (session.process.is_some(), session.phase) {
-            (true, Phase::Initializing(_) | Phase::Creating(_)) => "_Starting…_",
+            (true, Phase::Initializing(_) | Phase::Creating(_) | Phase::Rejoining(_)) => "_Starting…_",
             (true, Phase::Prompting(_)) => "_Working…_",
             _ => "",
         };
@@ -1161,6 +1371,16 @@ impl InteractiveApplication {
             wrap(&settings.join(" · "), width),
             transcript(&session.name, &session.entries, working, width)
         )
+    }
+}
+
+/// How long ago, roughly.
+fn age(seconds: u64) -> String {
+    match seconds {
+        0..60 => "just now".into(),
+        60..3_600 => format!("{}m ago", seconds / 60),
+        3_600..86_400 => format!("{}h ago", seconds / 3_600),
+        _ => format!("{}d ago", seconds / 86_400),
     }
 }
 
@@ -1462,7 +1682,14 @@ mod tests {
             auth_methods: Vec::new(),
             requests: Vec::new(),
             preferred: BTreeMap::new(),
+            history: "1".into(),
+            rejoin: Rejoin::default(),
+            earlier: None,
+            recap: false,
         };
+        assert_eq!(session.status(false), "saved");
+        session.phase = Phase::Stopped;
+        assert_eq!(session.status(false), "stopped");
         apply_update(&mut session, SessionUpdate::AgentText("Hel".into()));
         apply_update(&mut session, SessionUpdate::AgentText("lo".into()));
         apply_update(
@@ -1486,6 +1713,11 @@ mod tests {
         apply_update(&mut session, SessionUpdate::Mode("plan".into()));
         assert_eq!(value_name(session.option("mode").unwrap()), "Plan");
         assert!(session.set_option("mode", "missing").is_err());
+
+        // An agent that cannot pick up its earlier session gets the conversation instead.
+        session.earlier = Some("old".into());
+        session.open_session();
+        assert!(session.recap && session.earlier.is_none());
     }
 
     #[test]

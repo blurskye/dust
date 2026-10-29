@@ -3,7 +3,7 @@ use super::{AppEffect, ArgumentSchema, CommandError, CommandRegistry, ContextReq
 pub(super) fn register_commands(
     registry: &mut CommandRegistry<AppEffect>,
 ) -> Result<(), CommandError> {
-    let commands: [(&str, &str, fn() -> AppEffect); 14] = [
+    let commands: [(&str, &str, fn() -> AppEffect); 15] = [
         ("agent.ask", "Ask the agent, with the selection if there is one", || AppEffect::AgentAsk),
         ("agent.toggle", "Show or hide the agent panel", || AppEffect::AgentToggle),
         ("agent.add_file", "Ask the agent about the current file", || AppEffect::AgentAddFile),
@@ -19,6 +19,7 @@ pub(super) fn register_commands(
         ("agent.session.close", "Stop the shown agent session and close its tab", || {
             AppEffect::AgentCloseSession
         }),
+        ("agent.resume", "Resume a saved agent conversation in a tab", || AppEffect::AgentResume),
         ("agent.cancel", "Stop the agent's current turn", || AppEffect::AgentCancel),
         ("agent.model", "Choose the agent's model", || AppEffect::AgentModel),
         ("agent.mode", "Choose the agent's mode", || AppEffect::AgentMode),

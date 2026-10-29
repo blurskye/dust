@@ -59,6 +59,7 @@ pub enum AppEffect {
     AgentNextSession,
     AgentPreviousSession,
     AgentCloseSession,
+    AgentResume,
     AgentCancel,
     AgentModel,
     AgentMode,
