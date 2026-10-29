@@ -75,6 +75,21 @@ pub enum ExecutionSource {
     PluginCapability,
 }
 
+impl ExecutionSource {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::SystemTool => "System tools",
+            Self::UserConfigured => "Configured tools",
+            Self::ProjectLocal => "Project tools",
+            Self::WorkspaceTask => "Tasks",
+            Self::ToolInstall => "Tool installs",
+            Self::DebugProgram => "Debug sessions",
+            Self::PluginCapability => "Plugins",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct WorkspaceState {
     pub id: WorkspaceId,

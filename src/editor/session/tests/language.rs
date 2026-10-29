@@ -766,8 +766,8 @@ fn failed_rustup_proxy_probe_is_not_a_launchable_path_runtime() {
         .expect("PATH runtime");
     assert!(!path_runtime.installed);
     assert!(path_runtime.installable);
-    assert_eq!(path_runtime.status, "unavailable");
-    assert!(path_runtime.note.contains("press i"));
+    assert_eq!(path_runtime.status, "not working");
+    assert!(path_runtime.note.contains("i installs"));
     let message = InteractiveApplication::unavailable_rust_analyzer_message();
     assert!(message.contains("Press i in :lsp"));
     assert!(!message.contains("version probe exited"));
@@ -914,8 +914,8 @@ fn lsp_tool_menu_reports_real_path_version_executable_and_lifecycle() {
             assert_eq!(row.version, "path-1.2.3");
             assert_eq!(row.runtime, "PATH");
             assert_eq!(row.executable, echo.display().to_string());
-            assert_eq!(row.lifecycle, "stopped");
-            assert!(row.note.contains("uninstall"));
+            assert_eq!(row.lifecycle, "installed");
+            assert!(row.note.contains("Found on PATH"));
             break;
         }
         assert!(Instant::now() < deadline, "version probe timed out");
@@ -951,9 +951,10 @@ fn installed_path_server_without_a_qualified_probe_never_says_not_probed() {
 
     app.open_tool_menu("lsp".into());
     let row = &app.ui.tool_menu.as_ref().expect("menu").rows[0];
-    assert_eq!(row.version, "version unavailable");
+    assert_eq!(row.version, "—");
     assert_eq!(row.release, "—");
-    assert!(row.note.contains("Installed on PATH"));
+    assert_eq!(row.lifecycle, "installed");
+    assert!(row.note.contains("Found on PATH"));
 }
 
 #[test]
@@ -1128,7 +1129,7 @@ fn lsp_tool_menu_is_registry_driven_filterable_and_configurable() {
         );
         assert_eq!(
             app.ui.tool_menu.as_ref().expect("tool menu").rows[rust].runtime,
-            "Dust via Nix"
+            "Dust (Nix)"
         );
     } else {
         assert!(picker.options.iter().all(|option| option.source != "nix"));
@@ -1184,7 +1185,7 @@ fn lsp_tool_menu_is_registry_driven_filterable_and_configurable() {
         );
         assert_eq!(
             app.ui.tool_menu.as_ref().expect("tool menu").rows[rust].runtime,
-            "Dust download"
+            "Dust"
         );
     }
     app.handle_configured_key(KeyEvent::character('j'));

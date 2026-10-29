@@ -82,10 +82,9 @@ use crate::persistence::{
 use crate::process::PtyId;
 use crate::telemetry::{LiveCrashSnapshot, LogLevel};
 use crate::tools::{
-    NIX_LSP_NIXPKGS_REVISION, PackageOperation, RegistryRequest, RegistryResult, RegistryService,
-    ToolDefinition, ToolKind, ToolOperation, ToolStatus, discover_executable, is_nixos_host,
-    managed_tool_executable, managed_tool_installed_version, nix_lsp_launch_environment,
-    nix_lsp_profile_installed, nix_lsp_workspace_root,
+    PackageOperation, RegistryRequest, RegistryResult, RegistryService, ToolDefinition, ToolKind,
+    ToolOperation, ToolStatus, discover_executable, is_nixos_host, managed_tool_executable,
+    nix_lsp_launch_environment, nix_lsp_profile_installed,
 };
 use crate::ui::{
     CompletionItem, DocumentationMarkupKind, DocumentationPopupKind,

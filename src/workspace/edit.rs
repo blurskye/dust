@@ -169,7 +169,7 @@ pub enum WorkspaceError {
     LastRoot,
     #[error("path is outside every workspace root: {0}")]
     PathOutsideRoots(PathBuf),
-    #[error("workspace trust is required for {0:?}")]
+    #[error("{} need a trusted workspace; run :trust", .0.label())]
     TrustRequired(ExecutionSource),
     #[error("invalid diagnostic owner")]
     InvalidDiagnosticOwner,

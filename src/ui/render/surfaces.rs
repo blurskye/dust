@@ -804,36 +804,16 @@ pub(super) fn render_tool_menu(
             .take(usize::from(content_width.saturating_sub(2)))
             .collect::<String>()
     };
-    let field = |text: &str, width: usize| {
-        let text = text.chars().take(width).collect::<String>();
-        format!("{text:<width$}")
-    };
     let mut y = top + 1;
 
     if let Some(picker) = &menu.runtime_picker {
         frame.grid.put_text(
             content_left,
             y,
-            &clip("Choose between PATH and this host's Dust fallback; only ACTIVE is used."),
+            &clip("j/k move · Enter use this build · i install · u uninstall · r refresh · Esc back"),
             Style::Muted,
         );
-        y += 1;
-        let source_help = if picker.options.iter().any(|option| option.source == "nix") {
-            "PATH: external  Dust via Nix: verified artifact + private compatibility"
-        } else {
-            "PATH: external  Dust download: portable non-NixOS copy"
-        };
-        frame
-            .grid
-            .put_text(content_left, y, &clip(source_help), Style::Muted);
-        y += 1;
-        frame.grid.put_text(
-            content_left,
-            y,
-            &clip("j/k choose  Enter select  i install  u remove Dust copy  r refresh  Esc back"),
-            Style::Muted,
-        );
-        y += 1;
+        y += 2;
         let picker_version_x = content_left.saturating_add(2);
         let picker_release_x = content_left.saturating_add(content_width.saturating_mul(22) / 100);
         let picker_source_x = content_left.saturating_add(content_width.saturating_mul(46) / 100);
@@ -844,7 +824,7 @@ pub(super) fn render_tool_menu(
             .put_text(picker_version_x, y, "VERSION", Style::Muted);
         frame
             .grid
-            .put_text(picker_release_x, y, "BUILD / RELEASE", Style::Muted);
+            .put_text(picker_release_x, y, "RELEASE", Style::Muted);
         frame
             .grid
             .put_text(picker_source_x, y, "SOURCE", Style::Muted);
@@ -853,7 +833,7 @@ pub(super) fn render_tool_menu(
             .put_text(picker_state_x, y, "STATE", Style::Muted);
         frame
             .grid
-            .put_text(picker_active_x, y, "ACTIVE", Style::Muted);
+            .put_text(picker_active_x, y, "IN USE", Style::Muted);
         y += 1;
 
         let detail_top = top.saturating_add(height).saturating_sub(5);
@@ -871,7 +851,7 @@ pub(super) fn render_tool_menu(
             } else {
                 &configured.row_marker
             };
-            let active = if option.selected { "yes" } else { "" };
+            let active = if option.selected && option.installed { "●" } else { "" };
             let style = if focused {
                 Style::Selection
             } else if option.selected {
@@ -890,9 +870,12 @@ pub(super) fn render_tool_menu(
             frame
                 .grid
                 .put_text(picker_version_x, y, &option.version, style);
-            frame
-                .grid
-                .put_text(picker_release_x, y, &option.release, style);
+            let release = if option.release == "catalog build" {
+                "—"
+            } else {
+                option.release.as_str()
+            };
+            frame.grid.put_text(picker_release_x, y, release, style);
             frame
                 .grid
                 .put_text(picker_source_x, y, &option.label, style);
@@ -901,16 +884,14 @@ pub(super) fn render_tool_menu(
                 .put_text(picker_state_x, y, &option.status, style);
             frame.grid.put_text(picker_active_x, y, active, style);
             y += 1;
-            frame.grid.put_text(
-                content_left + 2,
-                y,
-                &clip_indented(&option.location),
-                if option.installed {
-                    Style::Accent
-                } else {
-                    Style::Muted
-                },
-            );
+            if option.installed {
+                frame.grid.put_text(
+                    content_left + 2,
+                    y,
+                    &clip_indented(&option.location),
+                    Style::Muted,
+                );
+            }
             y += 1;
         }
 
@@ -923,14 +904,22 @@ pub(super) fn render_tool_menu(
                 Style::Border,
             );
             y += 1;
-            let action = if option.source == "path" && option.installed {
-                "Enter: use this external PATH build"
+            let action = if option.selected && option.installed {
+                if option.uninstallable {
+                    "In use · u uninstall"
+                } else {
+                    "In use"
+                }
             } else if option.installed {
-                "Enter: make this build ACTIVE   u: uninstall this copy"
+                if option.uninstallable {
+                    "Enter use this build · u uninstall"
+                } else {
+                    "Enter use this build"
+                }
             } else if option.installable {
-                "Enter: make this build ACTIVE   i: install this build"
+                "Enter or i install this build"
             } else {
-                "This version is unavailable on the current host"
+                "Not available on this system"
             };
             frame
                 .grid
@@ -944,63 +933,35 @@ pub(super) fn render_tool_menu(
         return;
     }
 
-    let mut help_lines = Vec::new();
-    let mut help_line = String::new();
-    for word in configured.help.split_whitespace() {
-        let extra = usize::from(!help_line.is_empty()) + word.chars().count();
-        if !help_line.is_empty()
-            && help_line.chars().count().saturating_add(extra) > usize::from(content_width)
-        {
-            help_lines.push(std::mem::take(&mut help_line));
-        }
-        if !help_line.is_empty() {
-            help_line.push(' ');
-        }
-        help_line.push_str(word);
-    }
-    if !help_line.is_empty() {
-        help_lines.push(help_line);
-    }
-    for line in help_lines.into_iter().take(2) {
-        frame
-            .grid
-            .put_text(content_left, y, &clip(&line), Style::Muted);
-        y += 1;
-    }
-    y += 1;
-    let category_count = u16::try_from(configured.category_order.len())
-        .unwrap_or(1)
-        .max(1);
-    let category_slot = content_width / category_count;
-    for (index, category) in configured.category_order.iter().enumerate() {
+    frame
+        .grid
+        .put_text(content_left, y, &clip(&configured.help), Style::Muted);
+    y += 2;
+    let mut tab_x = content_left;
+    for category in &configured.category_order {
         let label = configured
             .categories
             .get(category)
             .map(String::as_str)
             .unwrap_or(category);
         let text = format!(" {label} ");
-        let slot_left = content_left.saturating_add(
-            u16::try_from(index)
-                .unwrap_or(u16::MAX)
-                .saturating_mul(category_slot),
-        );
-        let text_width = u16::try_from(text.chars().count()).unwrap_or(u16::MAX);
-        let x = slot_left.saturating_add(category_slot.saturating_sub(text_width) / 2);
         let style = if category == &menu.category {
             Style::StatusAccent
         } else {
             Style::Status
         };
-        frame.grid.put_text(x, y, &text, style);
+        frame.grid.put_text(tab_x, y, &text, style);
+        tab_x = tab_x.saturating_add(u16::try_from(text.chars().count()).unwrap_or(0) + 1);
     }
     y += 2;
-    let server_x = content_left.saturating_add(2);
-    let version_x = content_left.saturating_add(content_width.saturating_mul(42) / 100);
-    let runtime_x = content_left.saturating_add(content_width.saturating_mul(62) / 100);
-    let state_x = content_left.saturating_add(content_width.saturating_mul(82) / 100);
-    frame.grid.put_text(server_x, y, "SERVER", Style::Muted);
+    let name_x = content_left.saturating_add(2);
+    let version_x = content_left.saturating_add(content_width.saturating_mul(50) / 100);
+    let runtime_x = content_left.saturating_add(content_width.saturating_mul(64) / 100);
+    let state_x = content_left.saturating_add(content_width.saturating_mul(78) / 100);
+    let right = content_left.saturating_add(content_width);
+    frame.grid.put_text(name_x, y, "NAME", Style::Muted);
     frame.grid.put_text(version_x, y, "VERSION", Style::Muted);
-    frame.grid.put_text(runtime_x, y, "RUNTIME", Style::Muted);
+    frame.grid.put_text(runtime_x, y, "SOURCE", Style::Muted);
     frame.grid.put_text(state_x, y, "STATE", Style::Muted);
     y += 1;
 
@@ -1008,7 +969,7 @@ pub(super) fn render_tool_menu(
         .saturating_add(height)
         .saturating_sub(1)
         .saturating_sub(y);
-    let detail_rows = 10u16.min(remaining.saturating_sub(1));
+    let detail_rows = 9u16.min(remaining.saturating_sub(1));
     let list_bottom = top + height - 1 - detail_rows;
     let visible_rows = usize::from(list_bottom.saturating_sub(y));
     for (index, row) in menu
@@ -1019,11 +980,6 @@ pub(super) fn render_tool_menu(
         .take(visible_rows)
     {
         let selected = index == menu.selected;
-        let marker = if selected {
-            &configured.selected_marker
-        } else {
-            &configured.row_marker
-        };
         let style = if selected {
             Style::Selection
         } else if row.installed {
@@ -1032,41 +988,43 @@ pub(super) fn render_tool_menu(
             Style::Muted
         };
         if selected {
-            for x in content_left..content_left.saturating_add(content_width) {
+            for x in content_left..right {
                 frame.grid.set_cell(x, y, " ", Style::Selection);
             }
         }
-        frame.grid.put_text(content_left, y, marker, style);
-        frame.grid.put_text(
-            server_x,
-            y,
-            &field(
-                &row.name,
-                usize::from(version_x.saturating_sub(server_x).saturating_sub(1)),
-            ),
-            style,
-        );
-        frame.grid.put_text(
-            version_x,
-            y,
-            &field(
-                &row.version,
-                usize::from(runtime_x.saturating_sub(version_x).saturating_sub(1)),
-            ),
-            style,
-        );
-        frame.grid.put_text(
-            runtime_x,
-            y,
-            &field(
-                &row.runtime,
-                usize::from(state_x.saturating_sub(runtime_x).saturating_sub(1)),
-            ),
-            style,
-        );
+        let (glyph, glyph_style) = tool_state_glyph(row);
+        frame.grid.put_text(content_left, y, glyph, glyph_style);
+        let name_right = version_x.saturating_sub(2);
         frame
             .grid
-            .put_text(state_x, y, &clip(&row.lifecycle), style);
+            .put_text_clipped(name_x, y, &row.name, style, name_right);
+        let languages_x = name_x
+            .saturating_add(u16::try_from(text_width(&row.name, config.editor.ambiguous_width)).unwrap_or(0))
+            .saturating_add(2);
+        if !row.languages.is_empty() && languages_x < name_right {
+            frame.grid.put_text_clipped(
+                languages_x,
+                y,
+                &row.languages,
+                if selected { Style::Selection } else { Style::Muted },
+                name_right,
+            );
+        }
+        frame
+            .grid
+            .put_text_clipped(version_x, y, &row.version, style, runtime_x.saturating_sub(1));
+        frame
+            .grid
+            .put_text_clipped(runtime_x, y, &row.runtime, style, state_x.saturating_sub(1));
+        // The list shows the short state; byte counts stay in the detail pane.
+        let state = row.lifecycle.split(" (").next().unwrap_or_default();
+        frame.grid.put_text_clipped(
+            state_x,
+            y,
+            state,
+            if selected { Style::Selection } else { glyph_style },
+            right,
+        );
         y += 1;
     }
 
@@ -1079,91 +1037,124 @@ pub(super) fn render_tool_menu(
             Style::Border,
         );
         y += 1;
-        let status = row.lifecycle.to_uppercase();
-        let status_x = content_left
-            .saturating_add(content_width)
-            .saturating_sub(u16::try_from(status.chars().count()).unwrap_or(u16::MAX));
-        frame.grid.put_text(
-            content_left,
-            y,
-            &clip(&format!("{}  ·  {}", row.name, row.languages)),
-            Style::Accent,
-        );
-        frame.grid.put_text(status_x, y, &status, Style::Accent);
+        let (_, state_style) = tool_state_glyph(row);
+        let status_x = right
+            .saturating_sub(u16::try_from(row.lifecycle.chars().count()).unwrap_or(u16::MAX));
+        frame
+            .grid
+            .put_text_clipped(content_left, y, &row.name, Style::Accent, status_x);
+        if !row.languages.is_empty() {
+            let x = content_left
+                .saturating_add(u16::try_from(text_width(&row.name, config.editor.ambiguous_width)).unwrap_or(0))
+                .saturating_add(2);
+            frame
+                .grid
+                .put_text_clipped(x, y, &row.languages, Style::Muted, status_x.saturating_sub(1));
+        }
+        frame.grid.put_text(status_x, y, &row.lifecycle, state_style);
         y += 2;
-
-        let right_x = content_left.saturating_add(content_width / 2);
-        let action = if row.installed && row.lifecycle.starts_with("running") {
-            if row.can_uninstall {
-                "x stop  R restart  u remove"
+        let mut details = Vec::new();
+        if row.installed {
+            let location = if row.executable.is_empty() {
+                row.runtime.clone()
             } else {
-                "x stop  R restart"
-            }
-        } else if row.installed && !row.can_start {
-            "Open a supported file to start"
-        } else if row.installed {
-            if row.can_uninstall {
-                "Enter start  u remove"
-            } else {
-                "Enter start"
-            }
-        } else if row.can_install {
-            "Enter or i install"
-        } else {
-            "Manual install required"
-        };
-        let sessions = if row.sessions.is_empty() {
-            "none".into()
-        } else {
-            row.sessions.join(" · ")
-        };
-        for (left_detail, right_detail) in [
-            (
-                format!("Runtime   {}", row.runtime),
-                format!("Action    {action}"),
-            ),
-            (
-                format!("Version   {}", row.version),
-                format!("Sessions  {sessions}"),
-            ),
-            (
-                format!("Build     {}", row.release),
-                if row.can_uninstall {
-                    "Owned by   Dust".into()
-                } else if row.installed {
-                    "Owned by   PATH".into()
-                } else {
-                    "Owned by   not installed".into()
-                },
-            ),
-        ] {
-            if y >= top + height - 1 {
+                format!("{}  {}", row.runtime, row.executable)
+            };
+            details.push(format!("Source    {location}"));
+        } else if row.runtime != "—" {
+            details.push(format!("Source    {} (not installed)", row.runtime));
+        }
+        if row.version != "—" {
+            let release = match row.release.as_str() {
+                "—" | "catalog build" | "reported by executable" | "" => String::new(),
+                release => format!("  ({release})"),
+            };
+            details.push(format!("Version   {}{release}", row.version));
+        }
+        if !row.sessions.is_empty() {
+            details.push(format!("Sessions  {}", row.sessions.join(" · ")));
+        }
+        let bottom = top + height - 1;
+        for line in details {
+            if y >= bottom {
                 break;
             }
-            frame
-                .grid
-                .put_text(content_left, y, &clip(&left_detail), Style::Muted);
-            frame
-                .grid
-                .put_text(right_x, y, &clip(&right_detail), Style::Muted);
+            frame.grid.put_text(content_left, y, &clip(&line), Style::Muted);
             y += 1;
         }
-        if y < top + height - 1 {
-            frame.grid.put_text(
-                content_left,
-                y,
-                &clip(&format!("Binary    {}", row.executable)),
-                Style::Muted,
-            );
+        y += 1;
+        if y < bottom {
+            let note_style = if state_style == Style::Error {
+                Style::Error
+            } else {
+                Style::Default
+            };
+            frame.grid.put_text(content_left, y, &clip(&row.note), note_style);
             y += 1;
         }
-        if y < top + height - 1 {
-            frame
-                .grid
-                .put_text(content_left, y, &clip(&row.note), Style::Muted);
+        let keys = tool_row_keys(row).join(" · ");
+        if y < bottom && !keys.is_empty() {
+            frame.grid.put_text(content_left, y, &clip(&keys), Style::Accent);
         }
     }
     frame.cursor = None;
+}
+
+/// Whether the state is a transient install phase (downloading, verifying, installing 40%…).
+fn tool_busy(state: &str) -> bool {
+    !matches!(
+        state,
+        "installed" | "not installed" | "install failed" | "not working" | "crashed" | "starting"
+            | "restarting"
+    ) && !state.starts_with("running")
+}
+
+/// The glyph and colour for a tool's state: filled when installed, half while busy, a cross
+/// when broken, hollow when not installed.
+fn tool_state_glyph(row: &crate::ui::ToolMenuRow) -> (&'static str, Style) {
+    match row.lifecycle.as_str() {
+        "install failed" | "not working" | "crashed" => ("✗", Style::Error),
+        "not installed" => ("○", Style::Muted),
+        "starting" | "restarting" => ("◐", Style::Warning),
+        state if tool_busy(state) => ("◐", Style::Warning),
+        _ => ("●", Style::GitSignAdded),
+    }
+}
+
+/// The keys that do something for this row right now.
+fn tool_row_keys(row: &crate::ui::ToolMenuRow) -> Vec<&'static str> {
+    let state = row.lifecycle.as_str();
+    let mut keys = Vec::new();
+    if tool_busy(state) {
+        return keys;
+    }
+    if row.installed {
+        if row.lsp {
+            if state == "installed" || state == "crashed" {
+                keys.push(if row.can_start {
+                    "Enter start"
+                } else {
+                    "open a matching file to start"
+                });
+            } else {
+                keys.push("x stop");
+                keys.push("R restart");
+            }
+        }
+        if row.can_uninstall {
+            keys.push("u uninstall");
+        }
+    } else if row.can_install {
+        keys.push(if state == "install failed" {
+            "i retry install"
+        } else {
+            "i install"
+        });
+    }
+    if row.lsp {
+        keys.push("p versions");
+    }
+    keys
 }
 
 pub(super) fn render_prompt(

@@ -336,12 +336,6 @@ impl Default for TabLineConfig {
 pub struct ToolManagerConfig {
     pub title: String,
     pub help: String,
-    pub installed_heading: String,
-    pub available_heading: String,
-    pub installing_label: String,
-    pub installed_label: String,
-    pub available_label: String,
-    pub unavailable_installer_label: String,
     pub categories: BTreeMap<String, String>,
     pub category_order: Vec<String>,
     pub width_percent: u8,
@@ -357,14 +351,8 @@ pub struct ToolManagerConfig {
 impl Default for ToolManagerConfig {
     fn default() -> Self {
         Self {
-            title: "Dust tools".into(),
-            help: "j/k select  Enter start  p versions  i install  u uninstall  x stop  R restart  r probe  Esc close".into(),
-            installed_heading: "Installed".into(),
-            available_heading: "Available".into(),
-            installing_label: "installing".into(),
-            installed_label: "installed".into(),
-            available_label: "available".into(),
-            unavailable_installer_label: "manual install required".into(),
+            title: "Tools".into(),
+            help: "j/k move · Tab category · Enter install or start · r refresh · Esc close".into(),
             categories: [
                 ("all".into(), "All".into()),
                 ("lsp".into(), "LSP".into()),

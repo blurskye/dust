@@ -231,21 +231,15 @@ normal_mode_label = "NORMAL"
 visual_mode_label = "VISUAL"
 
 [ui.tool_manager]
-title = "Dust tool manager"
-help = "j/k select  Enter install/start  i install  p versions  x stop  R restart  u remove Dust copy  r refresh  Esc close"
-installed_heading = "Installed"
-available_heading = "Available"
-installing_label = "installing"
-installed_label = "installed"
-available_label = "available"
-unavailable_installer_label = "manual install required"
+title = "Tools"
+help = "j/k move · Tab category · Enter install or start · r refresh · Esc close"
 width_percent = 82
 height_percent = 84
 minimum_width = 48
 minimum_height = 14
 border = "single"
-row_marker = "○"
-selected_marker = "●"
+row_marker = " "
+selected_marker = ">"
 language_separator = ", "
 category_order = ["all", "lsp", "dap", "linter", "formatter"]
 
@@ -990,8 +984,8 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "application.notification.dismiss" = "Dismiss current notification"
 "command_line.open" = "Open command line"
 "command_line.submit" = "Submit prompt"
-"surface.confirmation.select_yes" = "Select Yes"
-"surface.confirmation.select_no" = "Select No"
+"surface.confirmation.select_yes" = "Answer yes"
+"surface.confirmation.select_no" = "Answer no"
 "surface.confirmation.toggle" = "Toggle confirmation choice"
 "config.explain" = "Explain a resolved configuration value"
 "config.reload" = "Reload configuration transactionally"

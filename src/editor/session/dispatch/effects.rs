@@ -10,7 +10,7 @@ use super::{
     InvocationSource, LargeFileOverride, LayoutAction, LayoutPlanError, LogLevel,
     LspAutostartObservation, LspDocument, LspFeature, LspLaunchRequest, LspLaunchSource,
     LspMarkupContent, LspMarkupKind, LspRuntimeSource, LspWorkspaceEdit, MatcherSource,
-    NIX_LSP_NIXPKGS_REVISION, NativeDescriptions, NativeSurfaceTarget, PackageOperation, Path,
+    NativeDescriptions, NativeSurfaceTarget, PackageOperation, Path,
     PathBuf, PendingLspProjectRoot, PersistedLargeFileOverride, PersistedLocation,
     PersistedSession, PersistedState, PersistedWindowRule, PersistencePolicy, PickerAction,
     PickerContent, PickerItem, PickerItemId, PickerKind, PickerOrigin, PickerPayload, PickerState,
@@ -25,8 +25,8 @@ use super::{
     active_editor_pane_viewport, builtin_languages, discover_executable, editor_pane_viewport_at,
     editor_state_content_width, editor_state_gutter_width, file_uri, is_nixos_host,
     language_for_path, language_id_for_path, lsp_runtime_source_allowed_on_host,
-    managed_tool_executable, managed_tool_installed_version, mode_name_large,
-    nix_lsp_launch_environment, nix_lsp_profile_installed, nix_lsp_workspace_root,
+    managed_tool_executable, mode_name_large,
+    nix_lsp_launch_environment, nix_lsp_profile_installed,
     nix_workspace_shell_for_host, parse_ex, path_from_file_uri, tool_kind_key,
 };
 use crate::editor::session::extensions::{VirtualContext, VirtualOpen, VirtualPublication};
@@ -4638,7 +4638,7 @@ impl InteractiveApplication {
         .join("/");
         let mut hints = Vec::new();
         if !selections.is_empty() {
-            hints.push(format!("{selections} select"));
+            hints.push(format!("{selections} answer"));
         }
         if let Some(key) = binding("command_line.submit") {
             hints.push(format!("{key} confirm"));
@@ -9408,10 +9408,10 @@ impl InteractiveApplication {
                     "running"
                 } else if session.circuit_open {
                     failed = true;
-                    "failed"
+                    "crashed"
                 } else if session.restart_due.is_some() {
                     backoff = true;
-                    "backoff"
+                    "restarting"
                 } else if running_servers.contains(key) {
                     starting = true;
                     "starting"
@@ -9432,9 +9432,9 @@ impl InteractiveApplication {
         } else if starting {
             "starting".into()
         } else if backoff {
-            "backoff".into()
+            "restarting".into()
         } else if failed || self.language.errors().contains_key(id) {
-            "failed".into()
+            "crashed".into()
         } else {
             "stopped".into()
         };
@@ -9502,46 +9502,29 @@ impl InteractiveApplication {
                 "—".into()
             },
             location: path.as_ref().map_or_else(
-                || "not installed on PATH".into(),
+                || "not on PATH".into(),
                 |path| path.display().to_string(),
             ),
             status: if path.is_none() {
                 "not installed"
             } else if path_error.is_some() {
-                "unavailable"
+                "not working"
             } else if selected_source == LspRuntimeSource::Path {
                 "in use"
             } else {
-                "available"
+                "installed"
             }
             .into(),
             note: if path.is_none() {
-                "No external executable is installed on PATH; Dust cannot install or uninstall PATH-owned software."
-                    .into()
+                "Nothing on PATH. Install it with your package manager to use this build.".into()
             } else if rustup_installable {
-                "The rustup proxy has no rust-analyzer component for the active toolchain; press i to install it with rustup."
-                    .into()
-            } else if path_version == "version unavailable" {
-                "Installed on PATH; this compatibility entry has no qualified version command."
-                    .into()
+                "rustup has no rust-analyzer for this toolchain; i installs it with rustup.".into()
+            } else if let Some(error) = path_error {
+                error
+            } else if path_version_reported {
+                format!("Found on PATH ({path_version}). Dust never changes or removes it.")
             } else {
-                path_error.unwrap_or_else(|| {
-                    if definition.id == "rust-analyzer" {
-                        if rustup_bundled {
-                            format!(
-                                "The PATH executable is a rustup proxy reporting `{path_version}`. VERSION identifies it as rustup bundled; BUILD / RELEASE shows its reported date."
-                            )
-                        } else {
-                            format!(
-                                "The PATH executable reports `{path_version}`. VERSION shows its executable version and BUILD / RELEASE shows its reported date."
-                            )
-                        }
-                    } else {
-                        format!(
-                            "The external PATH executable reports `{path_version}`; Dust can select it but never replaces or removes it."
-                        )
-                    }
-                })
+                "Found on PATH. Dust never changes or removes it.".into()
             },
             selected: selected_source == LspRuntimeSource::Path,
             installed: path_usable,
@@ -9553,7 +9536,7 @@ impl InteractiveApplication {
             for variant in definition.managed_versions() {
                 let version = variant.version.clone().unwrap_or_else(|| "unknown".into());
                 let installed = self.managed_variant_installed(definition, &variant);
-                let (observed_version, probe_error) = if installed {
+                let (_, probe_error) = if installed {
                     {
                         self.observed_tool_version(
                             &variant,
@@ -9583,36 +9566,16 @@ impl InteractiveApplication {
                 {
                     "in use"
                 } else if installed {
-                    "installed copy"
-                } else if selected_source == LspRuntimeSource::Managed
-                    && selected_managed.version.as_deref() == Some(version.as_str())
-                {
-                    "selected, not installed"
+                    "installed"
                 } else {
-                    "available to install"
+                    "not installed"
                 }
                 .into(),
                 note: probe_error.unwrap_or_else(|| {
-                    if installed && !observed_version.is_empty() && observed_version != "probing…" {
-                        format!(
-                            "{} {version} is an installed Dust download; the executable reports {observed_version}.",
-                            definition.name
-                        )
-                    } else if installed {
-                        format!(
-                            "{} {version} is installed as a separate Dust-owned copy.",
-                            definition.name
-                        )
-                    } else if managed_path.is_some() {
-                        format!(
-                            "{} {version} is available; i replaces the other Dust-download version only. PATH is untouched.",
-                            definition.name
-                        )
+                    if installed {
+                        format!("{} {version}, installed by Dust.", definition.name)
                     } else {
-                        format!(
-                            "{} {version} is available as a verified Dust download; press i to install it.",
-                            definition.name
-                        )
+                        "A verified download from the Dust catalog.".to_owned()
                     }
                 }),
                 selected: selected_source == LspRuntimeSource::Managed
@@ -9630,9 +9593,9 @@ impl InteractiveApplication {
                     label: LspRuntimeSource::Managed.label().into(),
                     version: "none".into(),
                     release: "none".into(),
-                    location: "no Dust download available".into(),
+                    location: "—".into(),
                     status: "unavailable".into(),
-                    note: "No portable managed artifact is published for this server.".into(),
+                    note: "Dust has no download for this server.".into(),
                     selected: selected_source == LspRuntimeSource::Managed,
                     installed: false,
                     installable: false,
@@ -9646,7 +9609,7 @@ impl InteractiveApplication {
                 let version = variant.version.clone().unwrap_or_else(|| "unknown".into());
                 let installed =
                     nix_profile_installed && self.managed_variant_installed(definition, &variant);
-                let (observed_version, probe_error) = if installed {
+                let (_, probe_error) = if installed {
                     {
                         self.observed_tool_version(
                             &variant,
@@ -9664,19 +9627,9 @@ impl InteractiveApplication {
                     version: version.clone(),
                     release: variant.release.clone().unwrap_or_else(|| "catalog build".into()),
                     location: if installed {
-                        managed_path.as_ref().map_or_else(
-                            || "installed artifact path unavailable".into(),
-                            |path| {
-                                format!(
-                                    "{} · compatibility {}",
-                                    path.display(),
-                                    nix_lsp_workspace_root()
-                                        .join("profiles")
-                                        .join(&definition.id)
-                                        .display()
-                                )
-                            },
-                        )
+                        managed_path
+                            .as_ref()
+                            .map_or_else(String::new, |path| path.display().to_string())
                     } else {
                         "not installed".into()
                     },
@@ -9686,30 +9639,18 @@ impl InteractiveApplication {
                     {
                         "in use"
                     } else if installed {
-                        "installed copy"
-                    } else if nix_available
-                        && selected_source == LspRuntimeSource::Nix
-                        && selected_managed.version.as_deref() == Some(version.as_str())
-                    {
-                        "selected, not installed"
+                        "installed"
                     } else if nix_available {
-                        "available to install"
+                        "not installed"
                     } else {
                         "unavailable"
                     }
                     .into(),
                     note: probe_error.unwrap_or_else(|| {
-                        if installed && !observed_version.is_empty() && observed_version != "probing…" {
-                            format!(
-                                "Verified upstream {} {version} runs through Dust's private Nix compatibility environment and reports {observed_version}.",
-                                definition.name
-                            )
+                        if installed {
+                            format!("{} {version}, installed by Dust through Nix.", definition.name)
                         } else {
-                            format!(
-                                "The same checksum-pinned upstream {} {version} is processed by Dust's private Nix runtime at snapshot {}.",
-                                definition.name,
-                                &NIX_LSP_NIXPKGS_REVISION[..8]
-                            )
+                            "Built through Nix from the Dust catalog.".to_owned()
                         }
                     }),
                     selected: selected_source == LspRuntimeSource::Nix
@@ -9858,20 +9799,12 @@ impl InteractiveApplication {
                         .clone()
                         .unwrap_or_else(|| "catalog build".into()),
                 };
-                let (mut lifecycle, sessions) = if is_lsp {
+                let (session_state, sessions) = if is_lsp {
                     self.lsp_menu_lifecycle(&definition.id)
                 } else {
-                    ("idle".into(), Vec::new())
+                    (String::new(), Vec::new())
                 };
-                if let ToolStatus::Installing {
-                    phase,
-                    completed,
-                    total,
-                } = &entry.status
-                {
-                    lifecycle = tool_install_progress_label(phase, *completed, *total);
-                }
-                let source_installed = match source {
+                let installed = match source {
                     LspRuntimeSource::Path => path.is_some(),
                     LspRuntimeSource::Managed => managed.is_some(),
                     LspRuntimeSource::Nix => {
@@ -9879,153 +9812,87 @@ impl InteractiveApplication {
                             && self.managed_variant_installed(definition, &managed_definition)
                     },
                 };
-                if source == LspRuntimeSource::Path
-                    && probe_error.is_some()
-                    && lifecycle == "stopped"
-                {
-                    lifecycle = "unavailable".into();
-                }
-                let runtime = if source_installed {
-                    source.label().into()
+                let can_install = if is_lsp && nixos_host {
+                    self.nix_workspace_available_for(definition)
                 } else {
-                    match source {
-                        LspRuntimeSource::Path => {
-                            version = "—".into();
-                            release = "—".into();
-                            if lifecycle == "stopped" {
-                                lifecycle = "not installed".into();
-                            }
-                            "Not installed".into()
-                        }
-                        LspRuntimeSource::Managed | LspRuntimeSource::Nix => {
-                            if lifecycle == "stopped" {
-                                lifecycle = "not installed".into();
-                            }
-                            source.label().into()
-                        }
-                    }
+                    !definition.managed_versions().is_empty()
                 };
-                let executable = match source {
-                    LspRuntimeSource::Path => path.as_ref().map_or_else(
-                        || "not installed on PATH".into(),
-                        |path| path.display().to_string(),
-                    ),
-                    LspRuntimeSource::Managed => managed.as_ref().map_or_else(
-                        || "not installed in Dust state".into(),
-                        |path| path.display().to_string(),
-                    ),
-                    LspRuntimeSource::Nix => managed.as_ref().map_or_else(
-                        || "verified upstream artifact is not installed".into(),
-                        |path| {
-                            format!(
-                                "{} · Nix compatibility {}",
-                                path.display(),
-                                nix_lsp_workspace_root()
-                                    .join("profiles")
-                                    .join(&definition.id)
-                                    .display()
-                            )
-                        },
-                    ),
-                };
-                let installed_managed_version = managed_tool_installed_version(definition)
-                    .map(|installed| {
-                        definition
-                            .managed_version(&installed)
-                            .and_then(|version| version.version)
-                            .unwrap_or(installed)
-                    })
-                    .or_else(|| {
-                        managed_tool_executable(definition).and_then(|_| definition.version.clone())
-                    });
-                let managed_status = if is_lsp && nixos_host {
-                    String::new()
+                let can_uninstall = if is_lsp && nixos_host {
+                    installed
                 } else {
-                    installed_managed_version.map_or_else(
-                        || {
-                            format!(
-                                "{} · selected · not installed · {} available version(s)",
-                                managed_definition
-                                    .version
-                                    .as_deref()
-                                    .unwrap_or("version unknown"),
-                                definition.managed_versions().len()
-                            )
-                        },
-                        |version| {
-                            format!(
-                                "{version} · installed copy · {} available version(s)",
-                                definition.managed_versions().len()
-                            )
-                        },
-                    )
+                    managed.is_some()
                 };
-                let nix_status = if !is_lsp || !nixos_host {
-                    String::new()
-                } else if !self.nix_workspace_available_for(definition) {
-                    "unavailable on this host".into()
-                } else {
-                    format!(
-                        "{} · release {} · {} · compatibility {}",
-                        managed_definition.version.as_deref().unwrap_or("unknown"),
-                        managed_definition.release.as_deref().unwrap_or("catalog"),
-                        if nix_lsp_profile_installed(definition)
-                            && self.managed_variant_installed(definition, &managed_definition)
-                        {
-                            "installed upstream artifact"
-                        } else {
-                            "not installed"
-                        },
-                        &NIX_LSP_NIXPKGS_REVISION[..8]
-                    )
-                };
-                let note = self.language.errors()
+                let error = self
+                    .language
+                    .errors()
                     .get(&definition.id)
                     .cloned()
-                    .or(probe_error)
+                    .or_else(|| probe_error.clone())
                     .or_else(|| match &entry.status {
                         ToolStatus::Failed(error) | ToolStatus::Unavailable(error) => {
                             Some(error.clone())
                         }
                         _ => None,
-                    })
-                    .unwrap_or_else(|| match source {
-                        LspRuntimeSource::Path
-                            if path.is_some() && reported_version == "version unavailable" =>
-                        {
-                            "Installed on PATH; this compatibility entry has no qualified version command."
-                                .into()
-                        }
-                        LspRuntimeSource::Path if path.is_some() => {
-                            "PATH has priority; Dust will not modify or uninstall this executable."
-                                .into()
-                        }
-                        LspRuntimeSource::Path => {
-                            "Not installed. This compatibility entry appears only when an external executable or Dust installer is available."
-                                .into()
-                        }
-                        LspRuntimeSource::Managed if managed.is_some() => format!(
-                            "Dust download {} is ACTIVE; u removes this private copy.",
-                            managed_definition.version.as_deref().unwrap_or("unknown")
-                        ),
-                        LspRuntimeSource::Managed => format!(
-                            "Dust download {} is ACTIVE but not installed; press i.",
-                            managed_definition.version.as_deref().unwrap_or("unknown")
-                        ),
-                        LspRuntimeSource::Nix
-                            if nix_lsp_profile_installed(definition)
-                                && self.managed_variant_installed(
-                                    definition,
-                                    &managed_definition,
-                                ) =>
-                        {
-                            "The verified upstream artifact is ACTIVE through Dust's private Nix compatibility environment.".into()
-                        }
-                        LspRuntimeSource::Nix => {
-                            "The Dust via Nix artifact is ACTIVE but not installed; press i."
-                                .into()
-                        }
                     });
+                // One state per row, from a fixed set, so the column always reads the same way.
+                let lifecycle = if let ToolStatus::Installing {
+                    phase,
+                    completed,
+                    total,
+                } = &entry.status
+                {
+                    tool_install_progress_label(phase, *completed, *total)
+                } else if !installed {
+                    if matches!(entry.status, ToolStatus::Failed(_)) {
+                        "install failed".into()
+                    } else {
+                        "not installed".into()
+                    }
+                } else if source == LspRuntimeSource::Path && probe_error.is_some() {
+                    "not working".into()
+                } else if is_lsp && session_state != "stopped" {
+                    session_state.clone()
+                } else {
+                    "installed".into()
+                };
+                if !installed && source == LspRuntimeSource::Path {
+                    version = "—".into();
+                    release = "—".into();
+                }
+                let version = short_tool_version(&version);
+                let runtime = if installed || can_install {
+                    source.label().into()
+                } else {
+                    "—".into()
+                };
+                let executable = match (&source, installed) {
+                    (_, false) => String::new(),
+                    (LspRuntimeSource::Path, true) => path
+                        .as_ref()
+                        .map_or_else(String::new, |path| path.display().to_string()),
+                    (LspRuntimeSource::Managed | LspRuntimeSource::Nix, true) => managed
+                        .as_ref()
+                        .map_or_else(String::new, |path| path.display().to_string()),
+                };
+                let note = if let Some(error) = error {
+                    error
+                } else if matches!(entry.status, ToolStatus::Installing { .. }) {
+                    format!("Installing {} {version}.", definition.name)
+                } else if installed {
+                    match source {
+                        LspRuntimeSource::Path => {
+                            "Found on PATH. Dust uses it as is and never removes it.".into()
+                        }
+                        LspRuntimeSource::Managed => "Installed by Dust.".into(),
+                        LspRuntimeSource::Nix => "Installed by Dust through Nix.".into(),
+                    }
+                } else if can_install {
+                    format!("Not installed. Press i to install {version}.")
+                } else {
+                    "Dust has no installer for this tool. Install it with your package manager \
+                     so it is on PATH."
+                        .into()
+                };
                 ToolMenuRow {
                     id: definition.id.clone(),
                     name: definition.name.clone(),
@@ -10039,28 +9906,19 @@ impl InteractiveApplication {
                     release,
                     runtime,
                     lifecycle,
+                    session_state,
                     executable,
                     note,
                     sessions,
-                    managed_status,
-                    nix_status,
-                    installed: source_installed,
-                    can_start: source_installed
+                    lsp: is_lsp,
+                    installed,
+                    can_start: installed
                         && (!is_lsp
                             || active_language.as_ref().is_none_or(|language| {
                                 definition.supports_language(language)
                             })),
-                    can_install: if is_lsp && nixos_host {
-                        self.nix_workspace_available_for(definition)
-                    } else {
-                        !definition.managed_versions().is_empty()
-                    },
-                    can_uninstall: if is_lsp && nixos_host {
-                        nix_lsp_profile_installed(definition)
-                            && self.managed_variant_installed(definition, &managed_definition)
-                    } else {
-                        managed.is_some()
-                    },
+                    can_install,
+                    can_uninstall,
                 }
             })
             .collect::<Vec<_>>();
@@ -10315,13 +10173,13 @@ impl InteractiveApplication {
         self.notify_message(
             match source {
                 LspRuntimeSource::Managed => format!(
-                    "{id} ACTIVE build: Dust download {}",
+                    "{id} now uses Dust {}",
                     self.tooling
                         .managed_version(&id)
                         .map(String::as_str)
                         .unwrap_or("unknown")
                 ),
-                _ => format!("{id} ACTIVE installation: {}", source.label()),
+                _ => format!("{id} now uses {}", source.label()),
             },
             false,
         );
@@ -10477,6 +10335,13 @@ impl InteractiveApplication {
             self.show_error(diagnostic.clone());
             return;
         }
+        if definition.managed_versions().is_empty() {
+            self.show_error(format!(
+                "{} is not installed and Dust has no installer for it",
+                definition.name
+            ));
+            return;
+        }
         self.install_tool_by_id(id, None);
     }
 
@@ -10629,7 +10494,7 @@ impl InteractiveApplication {
         }
         if let Err(error) = self
             .workspace
-            .authorize_execution(ExecutionSource::ProjectLocal)
+            .authorize_execution(ExecutionSource::ToolInstall)
         {
             self.show_error(error);
             return;
@@ -10677,21 +10542,13 @@ impl InteractiveApplication {
         match operation {
             Ok(()) => {
                 self.notify_message(
-                    format!(
-                        "installing {} {} {}…",
-                        definition.name,
-                        source.label(),
-                        if source == LspRuntimeSource::Path {
-                            "component"
-                        } else if matches!(
-                            source,
-                            LspRuntimeSource::Managed | LspRuntimeSource::Nix
-                        ) {
-                            definition.version.as_deref().unwrap_or("unknown")
-                        } else {
-                            "runtime"
+                    match (source, definition.version.as_deref()) {
+                        (LspRuntimeSource::Path, _) => {
+                            format!("installing {} with rustup…", definition.name)
                         }
-                    ),
+                        (_, Some(version)) => format!("installing {} {version}…", definition.name),
+                        (_, None) => format!("installing {}…", definition.name),
+                    },
                     false,
                 );
                 let category = self
@@ -10879,6 +10736,14 @@ impl InteractiveApplication {
     }
 }
 
+/// The first word of a reported version, so `0.1.99 (58cf8f9 2025-01-01)` reads `0.1.99`.
+fn short_tool_version(version: &str) -> String {
+    match version {
+        "version unavailable" | "probe failed" | "unknown" | "" => "—".into(),
+        _ => version.split_whitespace().next().unwrap_or("—").to_owned(),
+    }
+}
+
 pub(in crate::editor::session) fn tool_install_progress_label(
     phase: &str,
     completed: u64,
@@ -10891,12 +10756,13 @@ pub(in crate::editor::session) fn tool_install_progress_label(
             format!("{} KiB", value / 1024)
         }
     };
+    // The percentage comes first so a narrow column still shows progress.
     match total.filter(|total| *total > 0) {
         Some(total) => format!(
-            "{phase} {} / {} ({}%)",
+            "{phase} {}% ({} / {})",
+            completed.saturating_mul(100).min(total.saturating_mul(100)) / total,
             bytes(completed),
             bytes(total),
-            completed.saturating_mul(100).min(total.saturating_mul(100)) / total
         ),
         None => phase.into(),
     }
@@ -11108,7 +10974,7 @@ impl InteractiveApplication {
                     })
                     .is_some_and(|entry| {
                         !matches!(entry.status, ToolStatus::Installing { .. })
-                            && self.lsp_menu_lifecycle(&row.id).0 != row.lifecycle
+                            && self.lsp_menu_lifecycle(&row.id).0 != row.session_state
                     })
             })
         });
@@ -11821,9 +11687,10 @@ impl InteractiveApplication {
             AppEffect::PromptMove(movement) => self.prompt_move(movement),
             AppEffect::PromptHistory(direction) => self.prompt_history(direction),
             AppEffect::PromptComplete(direction) => self.prompt_complete(direction),
+            // y and n answer at once, like Vim's own confirm prompts.
             AppEffect::PromptConfirmationSelect(choice) => {
                 self.input.select_confirmation(choice);
-                self.project_input_prompt();
+                self.submit_prompt();
             }
             AppEffect::PromptConfirmationToggle => {
                 self.input.toggle_confirmation();

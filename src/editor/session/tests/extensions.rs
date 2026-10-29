@@ -53,22 +53,9 @@ fn plugin_confirmation_is_typed_one_shot_and_source_owned() {
     let initial = fixture.take();
     fixture.reply_confirmation_request(&initial, request(8));
     app.process_plugin_events();
+    // y answers at once, without Enter.
     app.handle_configured_key("y".parse().unwrap());
-    assert_eq!(
-        app.input
-            .prompt()
-            .unwrap()
-            .confirmation
-            .as_ref()
-            .unwrap()
-            .selected,
-        crate::ui::ConfirmationChoice::Yes
-    );
-    app.handle_configured_key("n".parse().unwrap());
-    app.handle_configured_key("tab".parse().unwrap());
-    app.handle_configured_key("right".parse().unwrap());
-    app.handle_configured_key("left".parse().unwrap());
-    app.handle_configured_key("enter".parse().unwrap());
+    assert!(app.input.prompt().is_none());
     let yes = fixture.take();
     assert!(matches!(
         yes.confirmation_results()[0].outcome,

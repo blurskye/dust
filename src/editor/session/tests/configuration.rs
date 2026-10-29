@@ -1119,19 +1119,16 @@ fn confirmation_keys_and_hints_follow_accepted_remaps() {
             .hint
             .contains("ctrl-c")
     );
-    app.handle_configured_key(KeyEvent::character('z'));
-    assert_eq!(
-        app.input
-            .prompt()
-            .unwrap()
-            .confirmation
-            .as_ref()
-            .unwrap()
-            .selected,
-        crate::ui::ConfirmationChoice::Yes
-    );
     app.handle_configured_key("ctrl-c".parse().unwrap());
-    assert!(app.input.prompt().is_none());
+    assert!(app.input.prompt().is_none(), "the remapped cancel key closes it");
+    app.open_confirmation(
+        crate::ui::PromptKind::PluginConfirmation,
+        "Delete?".into(),
+        "target".into(),
+        crate::ui::ConfirmationChoice::No,
+    );
+    app.handle_configured_key(KeyEvent::character('z'));
+    assert!(app.input.prompt().is_none(), "the remapped yes key answers at once");
 }
 
 /// Compile the bundled keymaps exactly as application construction does.

@@ -553,12 +553,12 @@ pub(super) fn register_commands(
     for (id, title, effect) in [
         (
             "surface.confirmation.select_yes",
-            "Select Yes",
+            "Answer yes",
             AppEffect::PromptConfirmationSelect(crate::ui::ConfirmationChoice::Yes),
         ),
         (
             "surface.confirmation.select_no",
-            "Select No",
+            "Answer no",
             AppEffect::PromptConfirmationSelect(crate::ui::ConfirmationChoice::No),
         ),
         (

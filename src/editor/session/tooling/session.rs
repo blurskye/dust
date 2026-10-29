@@ -79,8 +79,8 @@ impl LspRuntimeSource {
     pub(in crate::editor::session) const fn label(self) -> &'static str {
         match self {
             Self::Path => "PATH",
-            Self::Managed => "Dust download",
-            Self::Nix => "Dust via Nix",
+            Self::Managed => "Dust",
+            Self::Nix => "Dust (Nix)",
         }
     }
 }

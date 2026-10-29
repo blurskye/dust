@@ -175,12 +175,14 @@ pub struct ToolMenuRow {
     pub version: String,
     pub release: String,
     pub runtime: String,
+    /// What the row shows: installed, running, installing 40%, not installed, …
     pub lifecycle: String,
+    /// The language-server session state the row was built from, to notice when it changes.
+    pub session_state: String,
     pub executable: String,
     pub note: String,
     pub sessions: Vec<String>,
-    pub managed_status: String,
-    pub nix_status: String,
+    pub lsp: bool,
     pub installed: bool,
     pub can_start: bool,
     pub can_install: bool,
