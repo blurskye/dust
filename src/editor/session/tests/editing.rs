@@ -580,3 +580,37 @@ fn expired_shutdown_does_not_admit_or_report_an_exit_snapshot() {
     super::driver::TestSession::new(crate::config::load_bundled_config())
         .verify_expired_shutdown_does_not_write();
 }
+
+#[test]
+fn the_line_after_a_final_newline_is_never_a_normal_mode_line() {
+    let mut app = app();
+    let (buffer, _) = app.state.open_text(
+        crate::editor::text::TextBuffer::from_text("one\n  two\n"),
+        None,
+    );
+    app.set_dashboard_visibility(false);
+    let view = app.state.active_view.expect("view");
+    let line = |app: &InteractiveApplication| {
+        app.state.buffers[buffer]
+            .text
+            .byte_to_line(app.state.views[view].cursor)
+            .unwrap()
+    };
+    assert_eq!(app.state.buffers[buffer].text.visible_lines(), 2);
+    for _ in 0..3 {
+        app.handle_configured_key(KeyEvent::character('j'));
+    }
+    assert_eq!(line(&app), 1, "j stops at the last real line");
+    app.handle_configured_key(KeyEvent::character('g'));
+    app.handle_configured_key(KeyEvent::character('g'));
+    app.handle_configured_key(KeyEvent::character('G'));
+    assert_eq!(
+        app.state.views[view].cursor.get(),
+        6,
+        "G lands on the last line's first non-blank"
+    );
+    app.handle_configured_key(KeyEvent::character('d'));
+    app.handle_configured_key(KeyEvent::character('d'));
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "one\n");
+    assert_eq!(line(&app), 0, "dd on the last line lands on the line above");
+}

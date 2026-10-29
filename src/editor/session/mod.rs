@@ -1,4 +1,5 @@
 //! Live editor composition and feature-private owners.
+mod clipboard;
 mod configuration;
 mod debugger;
 mod diagnostics;

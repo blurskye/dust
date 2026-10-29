@@ -147,6 +147,7 @@ impl InteractiveApplication {
             ),
             next_transaction: 1_000_000,
             git: super::super::git::GitSession::default(),
+            clipboard: super::super::clipboard::ClipboardSession::default(),
             explorer: super::super::explorer::ExplorerSession::new(explorer_watch),
             syntax: SyntaxSession::new(syntax_queue_capacity),
             persistence: super::super::persistence::PersistenceSession::new(

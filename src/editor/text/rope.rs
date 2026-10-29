@@ -124,6 +124,19 @@ impl TextBuffer {
         self.rope.len_lines()
     }
 
+    /// Lines as Vim counts them: a final newline ends the last line rather than starting an
+    /// empty one.
+    #[must_use]
+    pub fn visible_lines(&self) -> usize {
+        let lines = self.rope.len_lines();
+        let chars = self.rope.len_chars();
+        if lines > 1 && self.rope.char(chars - 1) == '\n' {
+            lines - 1
+        } else {
+            lines
+        }
+    }
+
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.rope.len_bytes() == 0

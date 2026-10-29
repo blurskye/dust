@@ -172,6 +172,8 @@ pub struct RegisterValue {
 pub struct RegisterStore {
     values: HashMap<char, RegisterValue>,
     macros: HashMap<char, Vec<CommandInvocation>>,
+    /// Bumped on every stored value, so the clipboard sync notices a yank cheaply.
+    generation: u64,
 }
 
 impl RegisterStore {
@@ -185,10 +187,16 @@ impl RegisterStore {
         if !enabled || name == '_' {
             return;
         }
+        self.generation = self.generation.wrapping_add(1);
         self.values.insert(name, value.clone());
         if mirror_named_to_unnamed && name != '"' {
             self.values.insert('"', value);
         }
+    }
+
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.generation
     }
 
     #[must_use]

@@ -4,7 +4,7 @@ mod editor;
 pub use editor::{
     AmbiguousWidth, BomPolicy, ColorMode, CursorShape, EditorConfig, EditorViewportConfig,
     FinalNewlinePolicy, GitSignsConfig, IndentGuideConfig, LargeFileConfig, LineEndingPolicy,
-    LineNumbers, RegisterConfig, RegisterStorage,
+    LineNumbers, RegisterConfig, ClipboardSync, RegisterStorage,
 };
 mod ui;
 pub use ui::{

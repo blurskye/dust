@@ -133,6 +133,7 @@ struct InteractiveApplication {
     recovery: super::recovery::RecoverySession,
     next_transaction: u64,
     git: super::git::GitSession,
+    clipboard: super::clipboard::ClipboardSession,
     explorer: super::explorer::ExplorerSession,
     syntax: SyntaxSession,
     persistence: super::persistence::PersistenceSession,
@@ -212,6 +213,7 @@ pub fn run_interactive(
         .notices
         .set_terminal_capabilities(terminal.capability_summary());
     application.window_session.observe_size(terminal.size()?);
+    application.clipboard.enable(&application.state.registers);
 
     while !application.should_quit {
         application.process_vfs_results();
@@ -260,6 +262,11 @@ pub fn run_interactive(
         application.reconcile_editor_windows();
         application.reconcile_git_signs();
         application.refresh_plugin_host_events();
+        if application.clipboard_shared()
+            && let Some(text) = application.clipboard.push(&application.state.registers)
+        {
+            terminal.copy_to_clipboard(&text)?;
+        }
         let frame = render(
             &application.state,
             &application.ui,

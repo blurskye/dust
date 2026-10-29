@@ -234,7 +234,9 @@ pub(super) fn render_editor_view(
     let mut inlay_cursor = 0usize;
     let mut screen_row = 0_u16;
     let mut line_index = start_anchor.line;
-    while screen_row < body_height && line_index < buffer.text.len_lines() {
+    // The empty line after a final newline is drawn only while the cursor is on it.
+    let drawn_lines = buffer.text.visible_lines().max(current_line + 1);
+    while screen_row < body_height && line_index < drawn_lines {
         if let Some(fold) = ui
             .lsp_folds
             .iter()

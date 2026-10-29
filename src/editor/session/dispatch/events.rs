@@ -669,6 +669,39 @@ impl InteractiveApplication {
         self.project_input_hints();
     }
 
+    /// Vim never leaves the Normal-mode cursor on the empty line after a final newline; `dd`
+    /// on the last line lands on the line above instead.
+    fn keep_cursor_off_final_newline(&mut self) {
+        let Some(view_id) = self.state.active_view else {
+            return;
+        };
+        let Some(view) = self.state.views.get(view_id) else {
+            return;
+        };
+        if view.mode != EditorMode::Normal {
+            return;
+        }
+        let text = &self.state.buffers[view.buffer].text;
+        let last = text.visible_lines().saturating_sub(1);
+        if text.byte_to_line(view.cursor).unwrap_or(0) <= last {
+            return;
+        }
+        let Ok(start) = text.line_to_byte(last) else {
+            return;
+        };
+        let indent = text.line(last).map_or(0, |line| {
+            line.find(|character: char| !character.is_whitespace())
+                .unwrap_or(0)
+        });
+        self.state.views[view_id].cursor = ByteOffset(start.get() + indent);
+    }
+
+    /// Whether yanks and pastes go through the system clipboard (`clipboard = "unnamedplus"`).
+    pub(super) fn clipboard_shared(&self) -> bool {
+        self.configuration.settings().editor.registers.clipboard
+            == crate::config::ClipboardSync::Unnamedplus
+    }
+
     pub(super) fn invoke(&mut self, mut invocation: CommandInvocation) {
         if !invocation.id.as_str().starts_with("lsp.documentation.") {
             self.close_documentation();
@@ -678,6 +711,13 @@ impl InteractiveApplication {
         }
         if invocation.target.buffer.is_none() {
             invocation.target.buffer = self.state.active_buffer_id();
+        }
+        if invocation.id.as_str() == "edit.put"
+            && matches!(invocation.register, None | Some('"' | '+' | '*'))
+            && self.clipboard_shared()
+        {
+            let enabled = self.state.policy.registers_enabled;
+            self.clipboard.pull(&mut self.state.registers, enabled);
         }
         if invocation.id.as_str() == "edit.operator"
             && invocation.arguments.get("operator") == Some(&CommandValue::String("comment".into()))
@@ -753,6 +793,7 @@ impl InteractiveApplication {
                 }
 
                 if changed {
+                    self.keep_cursor_off_final_newline();
                     self.push_change_location();
                 }
                 self.input.record_successful_invocation(

@@ -31,7 +31,7 @@ pub use settings::{
     LspProgressConfig, NotificationConfig, ObservabilityConfig, PackageRegistryConfig,
     PackagesConfig, PaneConfig, PersistenceConfig, PickerConfig, PluginEntryConfig, PluginsConfig,
     ProblemMatcherConfig, ProcessConfig, PromptTextConfig, RecoveryConfig, RegisterConfig,
-    RegisterStorage, RuntimeConfig, SearchConfig, StartupConfig, StatusLineConfig, SyntaxConfig,
+    ClipboardSync, RegisterStorage, RuntimeConfig, SearchConfig, StartupConfig, StatusLineConfig, SyntaxConfig,
     TabLineConfig, TaskConfig, TaskKind, TerminalPanelConfig, TerminalProfileConfig,
     TerminalsConfig, ThemeAttribute, ThemeColor, ThemeConfig, ThemeStyle, ThemeStyles,
     ToolManagerConfig, UiConfig, WindowPlacementConfig, WindowRuleConfig, WindowsConfig,

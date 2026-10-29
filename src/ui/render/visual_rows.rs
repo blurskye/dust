@@ -715,7 +715,7 @@ pub(super) fn active_indent_guide(
 }
 
 pub(super) fn line_number_digits(text: &crate::editor::text::TextBuffer) -> usize {
-    text.len_lines().max(1).to_string().len()
+    text.visible_lines().max(1).to_string().len()
 }
 
 #[must_use]

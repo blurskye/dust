@@ -42,6 +42,10 @@ Dust uses Vim-style Normal, Insert, Visual, and command-line modes.
 | File picker | `Space Space` |
 | Workspace grep | `Space /` or `Space s g` |
 
+Yank and paste share the system clipboard, as in LazyVim (`clipboard = "unnamedplus"` under
+`[editor.registers]`; set `"off"` to keep them internal). Dust uses `wl-copy`/`wl-paste`,
+`xclip` or `xsel`; without them, yanks reach the terminal clipboard through OSC 52.
+
 `Ctrl-h/j/k/l` moves between editor panes and the explorer. `H`/`L` and `[b`/`]b` switch buffers. The cursor remains visible through wrapping, folds, Unicode text, splits, resize, and explorer/terminal layout changes. During repaint, Dust hides the hardware cursor and publishes its final position within a synchronized terminal update; unchanged frames send no cursor commands. This keeps internal painting movements from appearing as cursor jumps or trails.
 
 ## Explorer

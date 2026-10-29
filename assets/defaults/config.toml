@@ -49,6 +49,8 @@ status_label = "LARGE"
 [editor.registers]
 storage = "internal"
 mirror_named_to_unnamed = true
+# "unnamedplus" shares yanks and pastes with the system clipboard; "off" keeps them internal.
+clipboard = "unnamedplus"
 
 # Line comment string per file extension for `gc`/`gcc`.
 [editor.comments]

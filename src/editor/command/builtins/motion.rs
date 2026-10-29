@@ -79,7 +79,7 @@ pub(super) fn motion_target(
                 line.saturating_sub(count)
             } else {
                 line.saturating_add(count)
-                    .min(text.len_lines().saturating_sub(1))
+                    .min(text.visible_lines().saturating_sub(1).max(line))
             };
             let destination_start = text.line_to_byte(destination).map_err(failed)?;
             let destination_line = text.line(destination).map_err(failed)?;
@@ -144,12 +144,9 @@ pub(super) fn motion_target(
         }
         "matching_pair" => target = matching_pair(text, target)?,
         "document_start" => target = ByteOffset(0),
+        // `G` lands on the last line's first non-blank character, as in Vim.
         "document_end" => {
-            if text.is_empty() {
-                target = ByteOffset(0);
-            } else {
-                target = previous_grapheme_boundary(text, ByteOffset(text.len_bytes()));
-            }
+            target = first_nonblank(text, text.visible_lines().saturating_sub(1))?;
         }
         _ => {
             return Err(CommandError::InvalidArguments(format!(

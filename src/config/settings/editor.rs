@@ -81,6 +81,15 @@ pub enum RegisterStorage {
 pub struct RegisterConfig {
     pub storage: RegisterStorage,
     pub mirror_named_to_unnamed: bool,
+    pub clipboard: ClipboardSync,
+}
+
+/// `unnamedplus` shares the unnamed register with the system clipboard, as LazyVim does.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipboardSync {
+    Unnamedplus,
+    Off,
 }
 
 impl Default for RegisterConfig {
@@ -88,6 +97,7 @@ impl Default for RegisterConfig {
         Self {
             storage: RegisterStorage::Internal,
             mirror_named_to_unnamed: true,
+            clipboard: ClipboardSync::Unnamedplus,
         }
     }
 }

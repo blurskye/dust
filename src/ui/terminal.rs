@@ -30,6 +30,25 @@ use crate::ui::{Frame, Style};
 
 static PANIC_HOOK: Once = Once::new();
 
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let value = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |value, (index, byte)| value | u32::from(*byte) << (16 - 8 * index));
+        for index in 0..4 {
+            if index <= chunk.len() {
+                out.push(char::from(ALPHABET[(value >> (18 - 6 * index) & 63) as usize]));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
 pub fn install_panic_restore_hook() {
     PANIC_HOOK.call_once(|| {
         let previous = panic::take_hook();
@@ -98,6 +117,18 @@ impl TerminalSession {
             color_tier,
             color_source,
         })
+    }
+
+    /// Put text on the system clipboard through the terminal (OSC 52), for when no clipboard
+    /// program is installed, such as over SSH.
+    pub fn copy_to_clipboard(&mut self, text: &str) -> Result<(), TerminalError> {
+        // Terminals cap the sequence; very large yanks stay internal.
+        if text.len() > 1024 * 1024 {
+            return Ok(());
+        }
+        write!(self.stdout, "\x1b]52;c;{}\x07", base64(text.as_bytes()))?;
+        self.stdout.flush()?;
+        Ok(())
     }
 
     pub fn invalidate(&mut self) {
@@ -631,6 +662,15 @@ mod tests {
     use super::{
         ColorTier, KeyInputKind, UiEvent, configured_color_tier, normalize_event, queue_style,
     };
+
+    #[test]
+    fn base64_matches_the_standard_alphabet_and_padding() {
+        assert_eq!(super::base64(b""), "");
+        assert_eq!(super::base64(b"f"), "Zg==");
+        assert_eq!(super::base64(b"fo"), "Zm8=");
+        assert_eq!(super::base64(b"foo"), "Zm9v");
+        assert_eq!(super::base64(b"hello\n"), "aGVsbG8K");
+    }
 
     #[test]
     fn frame_painting_hides_intermediate_cursor_moves_and_publishes_one_final_cursor() {
