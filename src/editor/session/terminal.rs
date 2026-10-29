@@ -13,7 +13,7 @@ use crate::{
 pub(in crate::editor::session) use input::TerminalInput;
 use input::{clamp_terminal_cursor, keep_terminal_cursor_visible};
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     sync::Arc,
 };
 
@@ -83,8 +83,14 @@ pub(super) struct TerminalSession {
     retired: HashSet<PtyId>,
     close_intent: Option<TerminalCloseSource>,
     closed: bool,
+    /// Set for every terminal under the profile's own variables, such as `DUST_SERVER`.
+    environment: BTreeMap<String, String>,
 }
 impl TerminalSession {
+    pub(in crate::editor::session) fn set_environment(&mut self, environment: BTreeMap<String, String>) {
+        self.environment = environment;
+    }
+
     pub(in crate::editor::session) fn new(policy: &TerminalsConfig) -> Self {
         Self {
             service: PtyService::start(policy.queue_capacity),
@@ -101,6 +107,7 @@ impl TerminalSession {
             retired: HashSet::new(),
             close_intent: None,
             closed: false,
+            environment: BTreeMap::new(),
         }
     }
     pub(in crate::editor::session) fn selected(&self) -> Option<PtyId> {
@@ -488,7 +495,12 @@ impl TerminalSession {
             program: result.executable,
             arguments: open.config.arguments.clone(),
             cwd: open.request.cwd.clone(),
-            environment: open.config.environment.clone(),
+            environment: self
+                .environment
+                .iter()
+                .chain(&open.config.environment)
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
             columns: tab.requested_size.0,
             rows: tab.requested_size.1,
             root_revision: result.root_revision,

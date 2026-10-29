@@ -25,6 +25,8 @@ pub mod forge;
 pub mod language;
 /// Versioned bounded session, navigation, and history persistence.
 pub mod persistence;
+/// Opening files in a running Dust from programs it starts.
+pub mod remote;
 /// Bounded process supervision and protocol framing shared by built-in features.
 pub mod process;
 /// Structured bounded redacted logs and health snapshots.

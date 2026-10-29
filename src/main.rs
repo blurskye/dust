@@ -83,6 +83,14 @@ struct Cli {
     /// Print the active package lock.
     #[arg(long, requires = "package_root")]
     package_list: bool,
+
+    /// Open files in the Dust that started this program (lazygit's edit key does this).
+    #[arg(long, value_name = "FILE", num_args = 1..)]
+    remote: Vec<PathBuf>,
+
+    /// The line to open the first --remote file at.
+    #[arg(long, value_name = "LINE", requires = "remote")]
+    line: Option<usize>,
 }
 
 fn external_tui_fixture() -> ExitCode {
@@ -125,6 +133,12 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    if !cli.remote.is_empty() {
+        let server = std::env::var_os(dust::remote::SERVER_VARIABLE)
+            .ok_or("--remote only works from a terminal started by Dust")?;
+        dust::remote::send(Path::new(&server), &cli.remote, cli.line)?;
+        return Ok(());
+    }
     if let Some(path) = &cli.check_api_compatibility {
         let report = dust::api::check_compatibility(path, 1024 * 1024)?;
         println!("{}", serde_json::to_string_pretty(&report)?);

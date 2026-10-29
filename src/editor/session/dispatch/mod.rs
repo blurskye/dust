@@ -31,6 +31,7 @@ pub(super) mod agent;
 mod effects;
 mod events;
 mod pull_requests;
+mod remote;
 
 #[cfg(test)]
 use super::persistence::capture_persisted_layout;
@@ -172,6 +173,8 @@ struct InteractiveApplication {
     /// The ACP agent session and its transcript panel.
     agent: agent::AgentPanel,
     pull_requests: pull_requests::PullRequests,
+    /// Where `dust --remote` from Dust's own terminals reaches this session.
+    remote: Option<crate::remote::RemoteServer>,
     /// The parse results and views `ui.syntax_spans` and `ui.syntax_folds` were built from.
     syntax_spans_source: (
         Vec<(crate::editor::BufferId, u64, u64)>,
@@ -221,6 +224,7 @@ pub fn run_interactive(
         application.notify_message(application.message("previous_crash", &[]), true);
     }
     application.rebuild_matcher_cache();
+    application.start_remote_server();
     if !application.workspace.safe_mode() {
         application.load_configured_plugins();
         application.extension.start_packages();
@@ -304,6 +308,7 @@ pub fn run_interactive(
         application.process_pty_events();
         application.process_agent_events();
         application.process_pull_request_events();
+        application.process_remote_opens();
         application.process_plugin_storage_events();
         application.process_plugin_events();
         application.process_registry_events();
