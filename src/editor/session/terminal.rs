@@ -60,6 +60,7 @@ pub(in crate::editor::session) struct TerminalOpen {
     pub(in crate::editor::session) request: ExecutionPreflightRequest,
     pub(in crate::editor::session) navigation: super::windows::NavigationStamp,
     pub(in crate::editor::session) capture: Arc<()>,
+    pub(in crate::editor::session) float: bool,
 }
 struct Open {
     request: ExecutionPreflightRequest,
@@ -165,6 +166,9 @@ impl TerminalSession {
     }
     pub(in crate::editor::session) fn contains(&self, id: PtyId) -> bool {
         self.tabs.contains_key(&id)
+    }
+    pub(in crate::editor::session) fn closes_on_exit(&self, id: PtyId) -> bool {
+        self.tabs.get(&id).is_some_and(|tab| tab.close_on_exit)
     }
     pub(in crate::editor::session) fn select(&mut self, id: PtyId) -> bool {
         if !self.contains(id) {
@@ -407,10 +411,12 @@ impl TerminalSession {
         let key = source.token.key;
         let config = &source.open.config;
         let request = source.open.request.clone();
+        let float = config.float;
         self.tabs.insert(
             key.id,
             TerminalRuntime {
                 profile: source.token.profile,
+                close_on_exit: config.close_on_exit,
                 pty: None,
                 scope: source.scope,
                 epoch: source.epoch,
@@ -448,6 +454,7 @@ impl TerminalSession {
             request,
             navigation: source.navigation,
             capture: source.capture,
+            float,
         })
     }
     pub(in crate::editor::session) fn preflight_count(&self) -> usize {
@@ -902,6 +909,7 @@ fn acknowledge_resize(
 
 struct TerminalRuntime {
     profile: String,
+    close_on_exit: bool,
     pty: Option<PtyId>,
     scope: WorkspaceVersion,
     epoch: Arc<()>,
@@ -960,6 +968,7 @@ impl TerminalSession {
             id,
             TerminalRuntime {
                 profile: fixture.profile,
+                close_on_exit: false,
                 pty: None,
                 scope,
                 epoch: self.epoch.clone(),

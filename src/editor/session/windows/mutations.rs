@@ -368,6 +368,14 @@ impl WindowSession {
         self.invalidate();
         self.epoch = self.epoch.saturating_add(1);
     }
+    pub(in crate::editor::session) fn prefer_terminal_placement(
+        &mut self,
+        id: u64,
+        placement: WindowPlacement,
+    ) {
+        self.core.native.prefer_terminal_placement(id, placement);
+        self.invalidate_native();
+    }
     pub(in crate::editor::session) fn allow_explorer(&mut self) {
         self.core.native.allow_explorer();
         self.invalidate_native();

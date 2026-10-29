@@ -13,6 +13,12 @@ pub struct TerminalProfileConfig {
     pub environment: BTreeMap<String, String>,
     pub columns: u16,
     pub rows: u16,
+    /// Open as a centered float instead of the bottom dock (lazygit and similar tools).
+    #[serde(default)]
+    pub float: bool,
+    /// Close the window when the program exits successfully.
+    #[serde(default)]
+    pub close_on_exit: bool,
 }
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -42,6 +48,8 @@ impl Default for TerminalsConfig {
                     environment: BTreeMap::new(),
                     columns: 80,
                     rows: 24,
+                    float: false,
+                    close_on_exit: false,
                 },
             )]),
         }

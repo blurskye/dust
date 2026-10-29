@@ -1427,6 +1427,14 @@ impl NativeSurfaceBridge {
         rules
     }
 
+    /// Records where a terminal's window goes before the window exists; the next reconcile
+    /// creates it there.
+    pub(super) fn prefer_terminal_placement(&mut self, id: u64, placement: WindowPlacement) {
+        self.terminal_placements.insert(id, placement);
+        self.terminal_restore_placements.insert(id, placement);
+        self.signature = None;
+    }
+
     pub(super) fn place_terminal(
         &mut self,
         id: u64,

@@ -3684,6 +3684,8 @@ fn live_pty_clone_refusal_preserves_process_screen_geometry_focus_and_sources() 
             environment: Default::default(),
             columns: 47,
             rows: 9,
+            float: false,
+            close_on_exit: false,
         },
     );
     let mut driver = TestSession::new(loaded);
@@ -3758,6 +3760,8 @@ fn real_pty_geometry_ack_focus_placement_and_cross_tab_keep_one_process() {
             environment: Default::default(),
             columns: 47,
             rows: 9,
+            float: false,
+            close_on_exit: false,
         },
     );
     let mut driver = TestSession::new(loaded);
@@ -3993,7 +3997,7 @@ fn real_pty_geometry_ack_focus_placement_and_cross_tab_keep_one_process() {
 fn terminal_preflight_close_and_capture_keep_original_pty_and_geometry() {
     use super::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
-    loaded.config.terminals.profiles.insert("owned-terminal".into(),crate::config::TerminalProfileConfig {program:"/bin/sh".into(),arguments:vec!["-c".into(),"printf x >> starts; printf 'READY\n'; read value; printf 'ACK:%s\n' \"$value\"; read end".into()],cwd:None,environment:Default::default(),columns:80,rows:8});
+    loaded.config.terminals.profiles.insert("owned-terminal".into(),crate::config::TerminalProfileConfig {program:"/bin/sh".into(),arguments:vec!["-c".into(),"printf x >> starts; printf 'READY\n'; read value; printf 'ACK:%s\n' \"$value\"; read end".into()],cwd:None,environment:Default::default(),columns:80,rows:8,float:false,close_on_exit:false});
     let mut driver = TestSession::new(loaded);
     driver.new_buffer();
     driver.trust_owned_terminal_fixture();
@@ -4156,6 +4160,8 @@ fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
             environment: Default::default(),
             columns: 40,
             rows: 8,
+            float: false,
+            close_on_exit: false,
         },
     );
     let mut driver = TestSession::new(loaded.clone());
@@ -4190,6 +4196,8 @@ fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
             environment: Default::default(),
             columns: 40,
             rows: 8,
+            float: false,
+            close_on_exit: false,
         },
     );
     let mut failed = TestSession::new(loaded.clone());
@@ -4226,6 +4234,8 @@ fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
             environment: Default::default(),
             columns: 40,
             rows: 8,
+            float: false,
+            close_on_exit: false,
         },
     );
     let mut stale = TestSession::new(loaded.clone());
@@ -4264,6 +4274,8 @@ fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
             environment: Default::default(),
             columns: 40,
             rows: 8,
+            float: false,
+            close_on_exit: false,
         },
     );
     let mut unknown = TestSession::new(loaded);

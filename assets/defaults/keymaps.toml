@@ -3408,9 +3408,17 @@ command = "dap.detach"
 desc = "Detach"
 
 [[keymap]]
-id = "builtin.global.git-status"
+id = "builtin.global.lazygit"
 context = "global"
 keys = "<leader> g g"
+command = "terminal.open"
+arguments = { profile = "lazygit" }
+desc = "Lazygit"
+
+[[keymap]]
+id = "builtin.global.git-status"
+context = "global"
+keys = "<leader> g s"
 command = "workspace.git.status.open"
 desc = "Git Status"
 

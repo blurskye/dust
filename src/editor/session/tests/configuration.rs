@@ -1177,7 +1177,8 @@ fn the_documented_git_and_debugger_keys_each_reach_their_command() {
     let app = app();
     let keymaps = bundled_keymaps(&app);
     let cases = [
-        ("<leader> g g", "workspace.git.status.open"),
+        ("<leader> g g", "terminal.open"),
+        ("<leader> g s", "workspace.git.status.open"),
         ("<leader> g c", "workspace.git.commit"),
         ("<leader> g f", "workspace.git.remote.fetch"),
         ("<leader> g U", "workspace.git.remote.update"),

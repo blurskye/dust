@@ -5758,6 +5758,21 @@ impl InteractiveApplication {
         self.debugger_session.reject_terminals(reason);
     }
 
+    /// Shows the terminal as a centered float covering most of the screen, like LazyVim's
+    /// lazygit window.
+    fn float_terminal(&mut self, id: PtyId) {
+        self.terminal_session.display(id);
+        let (width, height) = (self.window_session.width(), self.window_session.height());
+        let rect = WindowRect {
+            x: width / 20,
+            y: height / 20,
+            width: width - width / 10,
+            height: height - height / 10,
+        };
+        self.window_session
+            .prefer_terminal_placement(id.0, WindowPlacement::Floating(rect));
+    }
+
     pub(super) fn retire_terminal(&mut self, id: PtyId, request_close: bool) {
         let focused = self.window_session.focused_terminal() == Some(id.0);
         if request_close {
@@ -5935,6 +5950,9 @@ impl InteractiveApplication {
                             && self.ui.tool_menu.is_none()
                         {
                             self.terminal_session.select(id);
+                            if open.float {
+                                self.float_terminal(id);
+                            }
                             self.set_terminal_focus(true);
                         }
                         self.resize_active_terminal_to_panel();
@@ -6125,6 +6143,10 @@ impl InteractiveApplication {
                             self.show_error(error);
                         }
                     }
+                }
+                TerminalUpdate::Exited(id, Some(0)) if self.terminal_session.closes_on_exit(id) => {
+                    self.retire_terminal(id, false);
+                    self.set_terminal_focus(false);
                 }
                 TerminalUpdate::Exited(_, _) | TerminalUpdate::IoComplete(_) => {}
                 TerminalUpdate::StopUnknown(id, message) => {

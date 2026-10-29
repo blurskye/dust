@@ -354,6 +354,17 @@ arguments = []
 environment = {}
 columns = 80
 rows = 24
+float = false
+close_on_exit = false
+
+[terminals.profiles.lazygit]
+program = "/bin/sh"
+arguments = ["-c", "exec lazygit"]
+environment = {}
+columns = 80
+rows = 24
+float = true
+close_on_exit = true
 
 [packages.registry]
 base_url = "https://dust.blurskye.dev/registry/v1"
