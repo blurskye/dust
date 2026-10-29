@@ -385,6 +385,15 @@ impl Config {
         {
             return Err("terminal policy is invalid");
         }
+        if (!self.agents.default.is_empty() && !self.agents.profiles.contains_key(&self.agents.default))
+            || self.agents.profiles.iter().any(|(name, profile)| {
+                name.is_empty()
+                    || profile.program.as_os_str().is_empty()
+                    || profile.arguments.len() > 4096
+            })
+        {
+            return Err("agent policy is invalid");
+        }
         if self
             .plugins
             .store
@@ -823,10 +832,6 @@ impl Config {
             "workspace_root_activated",
             "workspace_root_dirty_blocker",
             "workspace_root_service_blocker",
-            "workspace_root_picker_title",
-            "workspace_root_active",
-            "workspace_root_inactive",
-            "workspace_root_row",
             "workspace_root_status",
             "session_save_queued",
             "session_load_queued",

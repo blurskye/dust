@@ -144,6 +144,10 @@ pub(super) fn motion_target(
         }
         "matching_pair" => target = matching_pair(text, target)?,
         "document_start" => target = ByteOffset(0),
+        "line_number" => {
+            let last = text.visible_lines().saturating_sub(1);
+            target = first_nonblank(text, count.saturating_sub(1).min(last))?;
+        }
         // `G` lands on the last line's first non-blank character, as in Vim.
         "document_end" => {
             target = first_nonblank(text, text.visible_lines().saturating_sub(1))?;
@@ -361,6 +365,7 @@ pub(super) fn visual_ranges(
 
 pub(super) fn operator_range(
     text: &TextBuffer,
+    objects: &[crate::language::syntax::SyntaxObject],
     cursor: ByteOffset,
     motion: &str,
     count: usize,
@@ -368,7 +373,7 @@ pub(super) fn operator_range(
     character: Option<char>,
     policy: EditingPolicy,
 ) -> Result<ByteRange, CommandError> {
-    if let Some(range) = text_object(text, cursor, motion, count)? {
+    if let Some(range) = text_object(text, objects, cursor, motion, count)? {
         return Ok(range);
     }
     if linewise {
@@ -390,6 +395,23 @@ pub(super) fn operator_range(
         };
         return ByteRange::new(start, end).map_err(failed);
     }
+    if motion == "right" {
+        // `l` is exclusive, but `dl` on the last character still takes it, as in Vim.
+        let mut end = cursor;
+        for _ in 0..count {
+            let next = next_grapheme_boundary(text, end);
+            if next == end
+                || text
+                    .slice(ByteRange::new(end, next).map_err(failed)?)
+                    .map_err(failed)?
+                    == "\n"
+            {
+                break;
+            }
+            end = next;
+        }
+        return ByteRange::new(cursor, end).map_err(failed);
+    }
     let target = motion_target(text, cursor, motion, count, character, policy)?;
     let (start, mut end) = if target < cursor {
         (target, cursor)
@@ -399,8 +421,7 @@ pub(super) fn operator_range(
     if target >= cursor
         && matches!(
             motion,
-            "right"
-                | "word_end"
+            "word_end"
                 | "big_word_end"
                 | "line_end"
                 | "matching_pair"

@@ -3120,11 +3120,25 @@ impl InteractiveApplication {
             Err(error) => self.show_error(error.to_string()),
         }
     }
+    /// `<leader>st`: every TODO-style comment keyword in the workspace, as todo-comments.nvim.
+    fn start_todo_search(&mut self) {
+        self.start_search(
+            r"\b(TODO|FIXME|FIX|HACK|BUG|PERF|WARN|WARNING|NOTE|XXX)\b".to_owned(),
+            None,
+            true,
+        );
+    }
+
     pub(in crate::editor::session) fn start_workspace_search(
         &mut self,
         query: String,
         replacement: Option<String>,
     ) {
+        let regex = self.configuration.settings().workspace.search.regex;
+        self.start_search(query, replacement, regex);
+    }
+
+    fn start_search(&mut self, query: String, replacement: Option<String>, regex: bool) {
         let configured = &self.configuration.settings().workspace.search;
         let policy = WorkspaceSearchPolicy {
             roots: self
@@ -3134,7 +3148,7 @@ impl InteractiveApplication {
                 .map(|root| root.identity.canonical_path.clone())
                 .collect(),
             query,
-            regex: configured.regex,
+            regex,
             smart_case: configured.smart_case,
             whole_word: configured.whole_word,
             include_globs: configured.include_globs.clone(),
@@ -4675,6 +4689,13 @@ impl InteractiveApplication {
             self.extension
                 .answer_confirmation(crate::extensions::PluginConfirmationAnswer::Cancelled);
         }
+        if self
+            .input
+            .prompt()
+            .is_some_and(|prompt| prompt.kind == PromptKind::AgentPermission)
+        {
+            self.cancel_agent_permission();
+        }
         self.cancel_explorer_rename_prompt();
         if self
             .input
@@ -5052,6 +5073,19 @@ impl InteractiveApplication {
                     .map_or(crate::ui::ConfirmationChoice::No, |state| state.selected),
             ),
             PromptKind::ExplorerRename => self.submit_explorer_rename_prompt(&prompt.input),
+            PromptKind::AgentAsk => {
+                self.close_prompt();
+                self.agent_ask(prompt.input);
+            }
+            PromptKind::ReviewComment => {
+                self.close_prompt();
+                self.submit_review_comment(prompt.input);
+            }
+            PromptKind::AgentPermission => self.answer_agent_permission(
+                prompt
+                    .confirmation
+                    .map_or(crate::ui::ConfirmationChoice::No, |state| state.selected),
+            ),
             PromptKind::SearchForward | PromptKind::SearchBackward => {
                 if prompt.input.is_empty() {
                     let message = self.message("search_empty", &[]);
@@ -7638,46 +7672,79 @@ impl InteractiveApplication {
                 self.install_picker(self.message("picker_buffers_title", &[]), items);
             }
             PickerKind::Roots => {
-                let active = self.workspace.active_root();
-                let trusted = self.workspace.trust() == WorkspaceTrust::Trusted;
-                let items = self
+                // Every workspace Dust has opened on this machine; choosing one moves the
+                // editor there like a worktree switch.
+                let current = self.state.workspace_root.clone();
+                let mut projects = self
                     .workspace
-                    .roots()
-                    .iter()
-                    .map(|root| {
-                        let state = if active == Some(root.id) {
-                            self.message("workspace_root_active", &[])
-                        } else {
-                            self.message("workspace_root_inactive", &[])
-                        };
-                        let trust = if trusted {
-                            self.message("workspace_trust_trusted", &[])
-                        } else {
-                            self.message("workspace_trust_untrusted", &[])
+                    .seen_roots()
+                    .into_iter()
+                    .filter(|path| path.is_dir())
+                    .collect::<Vec<_>>();
+                projects.sort();
+                projects.dedup();
+                let home = std::env::var_os("HOME").map(PathBuf::from);
+                let items = projects
+                    .into_iter()
+                    .map(|path| {
+                        let name = path.file_name().map_or_else(
+                            || path.display().to_string(),
+                            |name| name.to_string_lossy().into_owned(),
+                        );
+                        let shown = match home.as_deref().and_then(|home| path.strip_prefix(home).ok()) {
+                            Some(rest) => format!("~/{}", rest.display()),
+                            None => path.display().to_string(),
                         };
                         (
                             PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
-                                id: PickerItemId(format!("workspace-root:{}", root.id.0)),
-                                label: self.message(
-                                    "workspace_root_row",
-                                    &[
-                                        ("id", root.id.0.to_string()),
-                                        ("name", root.name.clone()),
-                                        ("state", state),
-                                        ("trust", trust),
-                                    ],
-                                ),
-                                detail: root.identity.canonical_path.display().to_string(),
+                                badge: if path == current { "current".into() } else { String::new() },
+                                kind: crate::workspace::PickerItemKind::Entry,
+                                id: PickerItemId(format!("project:{}", path.display())),
+                                label: name,
+                                detail: shown,
                                 source: String::new(),
                                 action: PickerAction::None,
                             },
-                            PickerPayload::WorkspaceRoot(root.id),
+                            PickerPayload::Project(path),
                         )
                     })
                     .collect();
-                self.install_picker(self.message("workspace_root_picker_title", &[]), items);
+                self.install_picker("Projects".to_owned(), items);
+                self.search
+                    .set_picker_footer("Enter Switch · Esc Close".to_owned());
+                self.sync_picker_ui();
+            }
+            PickerKind::Agents => {
+                let current = self.agent_name();
+                let items = self
+                    .configuration
+                    .settings()
+                    .agents
+                    .profiles
+                    .iter()
+                    .map(|(name, profile)| {
+                        let command = std::iter::once(profile.program.display().to_string())
+                            .chain(profile.arguments.iter().cloned())
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        (
+                            PickerItem {
+                                badge: if *name == current { "current".into() } else { String::new() },
+                                kind: crate::workspace::PickerItemKind::Entry,
+                                id: PickerItemId(format!("agent:{name}")),
+                                label: name.clone(),
+                                detail: command,
+                                source: String::new(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::Agent(name.clone()),
+                        )
+                    })
+                    .collect();
+                self.install_picker("Agents".to_owned(), items);
+                self.search
+                    .set_picker_footer("Enter Start · Esc Close".to_owned());
+                self.sync_picker_ui();
             }
             PickerKind::Recents => {
                 let items = self
@@ -8291,8 +8358,11 @@ impl InteractiveApplication {
                     self.show_error(error);
                 }
             }
-            Some(PickerPayload::WorkspaceRoot(root)) => self.activate_workspace_root(root),
-            Some(PickerPayload::GitWorktree { path, .. }) => self.switch_to_worktree(path),
+            Some(PickerPayload::GitWorktree { path, .. } | PickerPayload::Project(path)) => {
+                self.switch_workspace_root(path)
+            }
+            Some(PickerPayload::Agent(name)) => self.restart_agent(Some(name)),
+            Some(PickerPayload::PullRequest(number)) => self.checkout_pull_request(number),
             Some(PickerPayload::Terminal(key)) => {
                 if let Some(id) = self.terminal_session.resolve(&key) {
                     self.terminal_session.select(id);
@@ -9079,10 +9149,10 @@ impl InteractiveApplication {
             self.show_error("select a worktree first");
             return;
         };
-        self.switch_to_worktree(path);
+        self.switch_workspace_root(path);
     }
 
-    fn switch_to_worktree(&mut self, path: PathBuf) {
+    pub(super) fn switch_workspace_root(&mut self, path: PathBuf) {
         let current = self.workspace.active_root().and_then(|id| {
             self.workspace
                 .roots()
@@ -9119,7 +9189,7 @@ impl InteractiveApplication {
         }
         self.close_picker();
         match self.workspace.add_root_request(target, Some(id)) {
-            Ok(()) => self.notify_message("switching worktree…".to_owned(), false),
+            Ok(()) => self.notify_message("switching…".to_owned(), false),
             Err(e) => self.show_workspace_failure(e),
         }
     }
@@ -9158,7 +9228,7 @@ impl InteractiveApplication {
         let name = path
             .file_name()
             .map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned());
-        self.notify_message(format!("switched to worktree {name}"), false);
+        self.notify_message(format!("switched to {name}"), false);
     }
     pub(in crate::editor::session) fn root_removal_blocker(
         &self,
@@ -11766,6 +11836,18 @@ impl InteractiveApplication {
             AppEffect::GitStatusRefresh => self.start_git_status_refresh(),
             AppEffect::GitStatusOpen => self.open_git_status_picker(),
             AppEffect::GitBrowse { copy } => self.browse_git_line(copy),
+            AppEffect::FlashBegin => self.begin_flash(),
+            AppEffect::TodoSearch => self.start_todo_search(),
+            AppEffect::AgentAsk => self.begin_agent_question(),
+            AppEffect::AgentToggle => self.toggle_agent_panel(),
+            AppEffect::AgentAddFile => self.attach_agent_file(),
+            AppEffect::AgentAddDiagnostics => self.attach_agent_diagnostics(),
+            AppEffect::AgentNew => self.restart_agent(None),
+            AppEffect::AgentCancel => self.cancel_agent_turn(),
+            AppEffect::AgentPick => self.open_builtin_picker(PickerKind::Agents),
+            AppEffect::PullRequestList => self.list_pull_requests(),
+            AppEffect::PullRequestComments => self.list_review_comments(),
+            AppEffect::PullRequestComment => self.begin_review_comment(),
             AppEffect::GitChangesLayerSwitch => {
                 // Only the change surface has a layer to switch; elsewhere this does nothing
                 // rather than reporting an error for a key that has no meaning there.
@@ -12033,7 +12115,7 @@ impl InteractiveApplication {
 }
 
 impl InteractiveApplication {
-    fn document_view(
+    pub(super) fn document_view(
         id: crate::editor::BufferId,
         buffer: &crate::editor::Buffer,
     ) -> crate::editor::session::documents::DocumentView<'_> {

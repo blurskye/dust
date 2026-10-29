@@ -19,6 +19,12 @@ pub(in crate::editor::session) enum PickerPayload {
     /// A row that groups others and is not an action: accepting it does nothing, and
     /// selection steps over it.
     Section,
+    /// A workspace from the project list.
+    Project(std::path::PathBuf),
+    /// An agent profile from `[agents.profiles]`.
+    Agent(String),
+    /// A pull request number from `gh pr list`.
+    PullRequest(u64),
     GitWorktree {
         #[allow(dead_code)]
         name: String,
@@ -35,7 +41,6 @@ pub(in crate::editor::session) enum PickerPayload {
     Buffer(crate::editor::BufferId),
     Command(String),
     ProposalFile(usize),
-    WorkspaceRoot(crate::workspace::RootId),
     Terminal(crate::editor::session::terminal::TerminalKey),
     Window(crate::ui::window::WindowId),
     LspSession(String),

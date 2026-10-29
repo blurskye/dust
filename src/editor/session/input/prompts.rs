@@ -301,6 +301,9 @@ impl InputSession {
                 | PromptKind::DirtyClose
                 | PromptKind::GitStageUnsaved
                 | PromptKind::GitDestructive
+                | PromptKind::AgentAsk
+                | PromptKind::AgentPermission
+                | PromptKind::ReviewComment
         ) {
             return;
         }
@@ -515,7 +518,10 @@ impl InputSession {
         }
         if matches!(
             kind,
-            PromptKind::WorkspaceTrust | PromptKind::ExplorerRename
+            PromptKind::WorkspaceTrust
+                | PromptKind::ExplorerRename
+                | PromptKind::AgentAsk
+                | PromptKind::ReviewComment
         ) {
             return;
         }

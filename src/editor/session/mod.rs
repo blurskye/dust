@@ -8,6 +8,7 @@ mod documents;
 mod explorer;
 #[path = "extensions/session.rs"]
 mod extensions;
+mod flash;
 mod git;
 mod input;
 #[path = "lsp/session.rs"]

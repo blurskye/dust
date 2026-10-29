@@ -323,11 +323,28 @@ mode = "normal"
 keys = "X"
 command = "edit.delete_backward"
 [[keymap]]
-id = "builtin.editor.normal.edit-substitute.s"
+id = "builtin.editor.normal.flash.s"
 context = "editor"
 mode = "normal"
 keys = "s"
-command = "edit.substitute"
+command = "editor.flash"
+desc = "Flash"
+
+[[keymap]]
+id = "builtin.editor.visual-char.flash.s"
+context = "editor"
+mode = "visual_char"
+keys = "s"
+command = "editor.flash"
+desc = "Flash"
+
+[[keymap]]
+id = "builtin.editor.visual-line.flash.s"
+context = "editor"
+mode = "visual_line"
+keys = "s"
+command = "editor.flash"
+desc = "Flash"
 [[keymap]]
 id = "builtin.editor.normal.edit-operator.upper-s"
 context = "editor"
@@ -1452,6 +1469,90 @@ mode = "visual_char"
 keys = "a `"
 command = "input.motion"
 arguments = { motion = "a_backtick", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-f"
+context = "editor"
+mode = "operator_pending"
+keys = "i f"
+command = "input.motion"
+arguments = { motion = "inner_function", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-f"
+context = "editor"
+mode = "operator_pending"
+keys = "a f"
+command = "input.motion"
+arguments = { motion = "a_function", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-c"
+context = "editor"
+mode = "operator_pending"
+keys = "i c"
+command = "input.motion"
+arguments = { motion = "inner_class", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-c"
+context = "editor"
+mode = "operator_pending"
+keys = "a c"
+command = "input.motion"
+arguments = { motion = "a_class", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-a"
+context = "editor"
+mode = "operator_pending"
+keys = "i a"
+command = "input.motion"
+arguments = { motion = "inner_argument", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-a"
+context = "editor"
+mode = "operator_pending"
+keys = "a a"
+command = "input.motion"
+arguments = { motion = "a_argument", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-f"
+context = "editor"
+mode = "visual_char"
+keys = "i f"
+command = "input.motion"
+arguments = { motion = "inner_function", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-f"
+context = "editor"
+mode = "visual_char"
+keys = "a f"
+command = "input.motion"
+arguments = { motion = "a_function", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-c"
+context = "editor"
+mode = "visual_char"
+keys = "i c"
+command = "input.motion"
+arguments = { motion = "inner_class", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-c"
+context = "editor"
+mode = "visual_char"
+keys = "a c"
+command = "input.motion"
+arguments = { motion = "a_class", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-a"
+context = "editor"
+mode = "visual_char"
+keys = "i a"
+command = "input.motion"
+arguments = { motion = "inner_argument", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-a"
+context = "editor"
+mode = "visual_char"
+keys = "a a"
+command = "input.motion"
+arguments = { motion = "a_argument", linewise = false }
 [[keymap]]
 id = "builtin.editor.normal.edit-operator.g-c-c"
 context = "editor"
@@ -3704,6 +3805,22 @@ command = "workspace.edit.reject"
 # (normal mode), explorer, dashboard, terminal normal mode, tool manager and panels.
 
 [[key_group]]
+id = "builtin.global.group.ai"
+context = "global"
+prefix = "<leader> a"
+label = "AI"
+icon = "󰚩"
+order = 3
+
+[[key_group]]
+id = "builtin.global.group.git-pull-requests"
+context = "global"
+prefix = "<leader> g p"
+label = "Pull Requests"
+icon = ""
+order = 27
+
+[[key_group]]
 id = "builtin.global.group.buffers"
 context = "global"
 prefix = "<leader> b"
@@ -3903,6 +4020,13 @@ context = "global"
 keys = "<leader> f p"
 command = "workspace.root.list"
 desc = "Projects"
+
+[[keymap]]
+id = "builtin.global.search-todo"
+context = "global"
+keys = "<leader> s t"
+command = "workspace.search.todo"
+desc = "Todo"
 
 [[keymap]]
 id = "builtin.global.search-grep"
@@ -4297,3 +4421,113 @@ context = "global"
 keys = "<leader> tab ["
 command = "tab.previous"
 desc = "Previous Tab"
+
+[[keymap]]
+id = "builtin.global.agent-ask"
+context = "global"
+keys = "<leader> a a"
+command = "agent.ask"
+desc = "Ask Agent"
+
+[[keymap]]
+id = "builtin.global.agent-toggle"
+context = "global"
+keys = "<leader> a t"
+command = "agent.toggle"
+desc = "Toggle Agent Panel"
+
+[[keymap]]
+id = "builtin.global.agent-file"
+context = "global"
+keys = "<leader> a f"
+command = "agent.add_file"
+desc = "Ask About File"
+
+[[keymap]]
+id = "builtin.global.agent-diagnostics"
+context = "global"
+keys = "<leader> a d"
+command = "agent.add_diagnostics"
+desc = "Ask About Diagnostics"
+
+[[keymap]]
+id = "builtin.global.agent-new"
+context = "global"
+keys = "<leader> a n"
+command = "agent.new"
+desc = "New Agent Session"
+
+[[keymap]]
+id = "builtin.global.agent-cancel"
+context = "global"
+keys = "<leader> a c"
+command = "agent.cancel"
+desc = "Stop Agent"
+
+[[keymap]]
+id = "builtin.global.agent-pick"
+context = "global"
+keys = "<leader> a p"
+command = "agent.pick"
+desc = "Pick Agent"
+
+[[keymap]]
+id = "builtin.editor.visual-char.agent-ask"
+context = "editor"
+mode = "visual_char"
+keys = "<leader> a a"
+command = "agent.ask"
+desc = "Ask Agent About Selection"
+
+[[keymap]]
+id = "builtin.editor.visual-line.agent-ask"
+context = "editor"
+mode = "visual_line"
+keys = "<leader> a a"
+command = "agent.ask"
+desc = "Ask Agent About Selection"
+
+[[keymap]]
+id = "builtin.global.git-pr-list"
+context = "global"
+keys = "<leader> g p p"
+command = "workspace.git.pr.list"
+desc = "Pull Requests"
+
+[[keymap]]
+id = "builtin.global.git-pr-view"
+context = "global"
+keys = "<leader> g p v"
+command = "terminal.open"
+arguments = { profile = "gh_pr_view" }
+desc = "View Pull Request"
+
+[[keymap]]
+id = "builtin.global.git-pr-diff"
+context = "global"
+keys = "<leader> g p d"
+command = "terminal.open"
+arguments = { profile = "gh_pr_diff" }
+desc = "Pull Request Diff"
+
+[[keymap]]
+id = "builtin.global.git-pr-review"
+context = "global"
+keys = "<leader> g p r"
+command = "terminal.open"
+arguments = { profile = "gh_pr_review" }
+desc = "Submit Review"
+
+[[keymap]]
+id = "builtin.global.git-pr-comments"
+context = "global"
+keys = "<leader> g p c"
+command = "workspace.git.pr.comments"
+desc = "Review Comments"
+
+[[keymap]]
+id = "builtin.global.git-pr-comment"
+context = "global"
+keys = "<leader> g p a"
+command = "workspace.git.pr.comment"
+desc = "Comment on Line"

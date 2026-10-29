@@ -493,7 +493,7 @@ fn health_virtual_dogfood_opens_refreshes_and_remains_read_only() {
     );
     assert!(app.state.buffers[buffer].is_virtual_read_only());
     app.reconcile_editor_windows();
-    assert!(app.ui.content_tabs.iter().any(|entry| entry.icon == "V"
+    assert!(app.ui.content_tabs.iter().any(|entry| entry.icon == app.configuration.settings().ui.buffer_line.virtual_icon
         && entry.closeable
         && entry.kind == ContentTabKind::VirtualDocument));
     let virtual_content = app
@@ -1703,7 +1703,7 @@ fn content_line_pins_reorder_middle_mouse_and_survive_bridge_reset() {
         app.ui
             .content_tabs
             .iter()
-            .any(|entry| entry.icon == "S" && entry.kind == ContentTabKind::Text)
+            .any(|entry| entry.icon == app.configuration.settings().ui.buffer_line.scratch_icon && entry.kind == ContentTabKind::Text)
     );
     app.state.show_buffer(b).unwrap();
     app.reconcile_editor_windows();
@@ -1860,7 +1860,7 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
         .iter()
         .find(|entry| entry.kind == ContentTabKind::Text)
         .unwrap();
-    assert_eq!(text.icon, "R");
+    assert_eq!(text.icon, crate::files::file_icon("a.rs").unwrap().glyph);
     assert_eq!(
         text.diagnostic,
         Some(ContentTabDiagnostic {
@@ -1877,7 +1877,10 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
         .unwrap();
     assert_eq!(
         (custom_entry.icon.as_str(), custom_entry.closeable),
-        ("C", false)
+        (
+            app.configuration.settings().ui.buffer_line.custom_icon.as_str(),
+            false
+        )
     );
     app.window_session
         .observe_size((300, app.window_session.height()));

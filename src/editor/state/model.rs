@@ -58,9 +58,32 @@ pub struct Buffer {
     pub(crate) saved_text: String,
     persisted_bytes: Vec<u8>,
     pub undo: UndoTree,
+    /// Tree-sitter text objects from the parse of `revision`, set by the syntax session.
+    pub syntax_objects: Option<(
+        BufferRevision,
+        std::sync::Arc<Vec<crate::language::syntax::SyntaxObject>>,
+    )>,
 }
 
 impl Buffer {
+    /// The owner of a virtual document, shown where a file would show its name.
+    #[must_use]
+    pub fn virtual_owner(&self) -> Option<&str> {
+        match &self.origin {
+            BufferOrigin::VirtualReadOnly { owner, .. } => Some(owner),
+            BufferOrigin::FileOrScratch => None,
+        }
+    }
+
+    /// The tree-sitter text objects, when the last parse matches the current text.
+    #[must_use]
+    pub fn current_syntax_objects(&self) -> &[crate::language::syntax::SyntaxObject] {
+        self.syntax_objects
+            .as_ref()
+            .filter(|(revision, _)| *revision == self.text.revision())
+            .map_or(&[], |(_, objects)| objects.as_slice())
+    }
+
     #[must_use]
     pub fn new(text: TextBuffer, path: Option<PathBuf>) -> Self {
         let saved_text = text.to_string();
@@ -76,6 +99,7 @@ impl Buffer {
             saved_revision,
             saved_text,
             persisted_bytes,
+            syntax_objects: None,
         }
     }
 

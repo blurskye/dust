@@ -17,6 +17,14 @@ pub(super) fn register_commands(
     )?;
     register(
         registry,
+        "editor.flash",
+        "Jump to a visible match by its label",
+        ContextRequirement::View,
+        ArgumentSchema::default(),
+        |_| AppEffect::FlashBegin,
+    )?;
+    register(
+        registry,
         "edit.repeat_last",
         "Repeat last change",
         ContextRequirement::View,

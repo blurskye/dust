@@ -142,11 +142,12 @@ pin_marker = "P"
 close_marker = "x"
 diagnostic_error_marker = "E"
 diagnostic_warning_marker = "W"
-scratch_icon = "S"
-virtual_icon = "V"
-terminal_icon = "T"
-custom_icon = "C"
-extension_icons = { rs = "R", md = "M", toml = "T", json = "J", ts = "T", go = "G" }
+scratch_icon = "󰎚"
+virtual_icon = "󰈙"
+terminal_icon = ""
+custom_icon = "󰈔"
+# Per-extension overrides; otherwise the explorer's file icons are used.
+extension_icons = {}
 hide_when_single = true
 active_format = " {title}{dirty} "
 inactive_format = " {title}{dirty} "
@@ -439,6 +440,54 @@ columns = 80
 rows = 24
 float = true
 close_on_exit = true
+
+# Pull request review through `gh`, for the branch checked out in this worktree.
+[terminals.profiles.gh_pr_view]
+program = "/bin/sh"
+arguments = ["-c", "GH_PAGER='less -Rc' gh pr view --comments"]
+environment = {}
+columns = 80
+rows = 24
+float = true
+close_on_exit = true
+
+[terminals.profiles.gh_pr_diff]
+program = "/bin/sh"
+arguments = ["-c", "gh pr diff --color=always | less -Rc"]
+environment = {}
+columns = 80
+rows = 24
+float = true
+close_on_exit = true
+
+[terminals.profiles.gh_pr_review]
+program = "/bin/sh"
+arguments = ["-c", "gh pr review || { echo; echo 'Press Enter to close'; read _; }"]
+environment = {}
+columns = 80
+rows = 24
+float = true
+close_on_exit = true
+
+# ACP agents for `<leader>a`. Each runs in the worktree that was open when its session
+# started. Install the adapter you want, e.g. `npm i -g @zed-industries/claude-code-acp`.
+[agents]
+default = "claude"
+
+[agents.profiles.claude]
+program = "claude-code-acp"
+arguments = []
+environment = {}
+
+[agents.profiles.gemini]
+program = "gemini"
+arguments = ["--experimental-acp"]
+environment = {}
+
+[agents.profiles.codex]
+program = "codex-acp"
+arguments = []
+environment = {}
 
 [packages.registry]
 base_url = "https://dust.blurskye.dev/registry/v1"
@@ -829,10 +878,6 @@ workspace_root_removed = "removed workspace root {path}; workspace is untrusted"
 workspace_root_activated = "active workspace root is {path}"
 workspace_root_dirty_blocker = "cannot remove workspace root containing dirty buffers"
 workspace_root_service_blocker = "cannot remove workspace root while a workspace service or effect is pending"
-workspace_root_picker_title = "Workspace roots"
-workspace_root_active = "active"
-workspace_root_inactive = "inactive"
-workspace_root_row = "#{id} {name} · {state} · {trust}"
 workspace_root_status = "active root #{id}: {path}"
 session_save_queued = "session save queued"
 session_load_queued = "session load queued"
@@ -1025,6 +1070,18 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "health.open" = "Show health"
 "workspace.git.status.refresh" = "Refresh Git status"
 "workspace.git.status.open" = "Open Git status"
+"workspace.search.todo" = "Todo"
+"agent.ask" = "Ask Agent"
+"workspace.git.pr.list" = "Pull Requests"
+"workspace.git.pr.comments" = "Review Comments"
+"workspace.git.pr.comment" = "Comment on Line"
+"agent.toggle" = "Toggle Agent Panel"
+"agent.add_file" = "Ask About File"
+"agent.add_diagnostics" = "Ask About Diagnostics"
+"agent.new" = "New Agent Session"
+"agent.cancel" = "Stop Agent"
+"agent.pick" = "Pick Agent"
+"editor.flash" = "Flash jump"
 "workspace.git.browse" = "Git Browse (open)"
 "workspace.git.browse.copy" = "Git Browse (copy)"
 "workspace.git.diff.layer.switch" = "Switch the diff between the unstaged and staged comparison"
@@ -1199,7 +1256,7 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "workspace.replace.prompt" = "Open workspace replacement prompt"
 "workspace.replace" = "Replace across workspace"
 "workspace.root.add" = "Add workspace root"
-"workspace.root.list" = "List workspace roots"
+"workspace.root.list" = "Projects"
 "navigation.recents" = "Open recent files"
 "navigation.marks" = "Open marks"
 "navigation.mark.set" = "Set navigation mark"

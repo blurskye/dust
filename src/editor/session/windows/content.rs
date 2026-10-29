@@ -196,6 +196,11 @@ impl WindowSession {
                                     .extension_icons
                                     .get(&extension)
                                     .cloned()
+                                    .or_else(|| {
+                                        let name = state.path.as_ref()?.file_name()?.to_str()?;
+                                        crate::files::file_icon(name)
+                                            .map(|icon| icon.glyph.to_owned())
+                                    })
                                     .unwrap_or_else(|| config.ui.buffer_line.custom_icon.clone())
                             } else {
                                 config.ui.buffer_line.scratch_icon.clone()

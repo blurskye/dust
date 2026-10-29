@@ -85,6 +85,38 @@ pub(super) fn register_commands(
     )?;
     register(
         registry,
+        "workspace.git.pr.list",
+        "Pick a pull request and check it out in its own worktree",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::PullRequestList,
+    )?;
+    register(
+        registry,
+        "workspace.git.pr.comments",
+        "List the review comments of this branch's pull request",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::PullRequestComments,
+    )?;
+    register(
+        registry,
+        "workspace.git.pr.comment",
+        "Comment on the current line in this branch's pull request",
+        ContextRequirement::View,
+        ArgumentSchema::default(),
+        |_| AppEffect::PullRequestComment,
+    )?;
+    register(
+        registry,
+        "workspace.search.todo",
+        "Search TODO, FIXME, HACK and NOTE comments",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::TodoSearch,
+    )?;
+    register(
+        registry,
         "workspace.search.cancel",
         "Cancel workspace search",
         ContextRequirement::Workspace,
@@ -124,7 +156,7 @@ pub(super) fn register_commands(
         ),
         (
             "workspace.root.list",
-            "List workspace roots",
+            "List projects",
             PickerKind::Roots,
         ),
         (

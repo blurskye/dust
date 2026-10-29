@@ -48,7 +48,7 @@ pub(super) fn execute_builtin<E>(
 
     match invocation.id.as_str() {
         "view.cursor.move" => {
-            let motion = string_argument(invocation, "motion")?;
+            let motion = counted_motion(string_argument(invocation, "motion")?, invocation);
             transaction.undo_policy =
                 if matches!(view.mode, EditorMode::Insert | EditorMode::Replace) {
                     UndoPolicy::Boundary
@@ -57,7 +57,7 @@ pub(super) fn execute_builtin<E>(
                 };
             // In Visual mode a text object selects its range.
             if let Some(mut selection) = view.selection {
-                if let Some(range) = text_object(&buffer.text, view.cursor, motion, count)? {
+                if let Some(range) = text_object(&buffer.text, buffer.current_syntax_objects(), view.cursor, motion, count)? {
                     let head = if range.is_empty() {
                         range.start
                     } else {
@@ -469,7 +469,7 @@ pub(super) fn execute_builtin<E>(
             let (ranges, shape) = if invocation.id.as_str() == "edit.repeat_visual" {
                 repeat_visual_ranges(&buffer.text, view, invocation, state.policy)?
             } else {
-                let motion = string_argument(invocation, "motion")?;
+                let motion = counted_motion(string_argument(invocation, "motion")?, invocation);
                 let requested_linewise = bool_argument(invocation, "linewise")?;
                 if motion == "visual" {
                     visual_ranges(&buffer.text, view, state.policy)?
@@ -477,6 +477,7 @@ pub(super) fn execute_builtin<E>(
                     (
                         vec![operator_range(
                             &buffer.text,
+                            buffer.current_syntax_objects(),
                             view.cursor,
                             motion,
                             count,
@@ -790,5 +791,14 @@ fn character_argument(
         _ => Err(CommandError::InvalidArguments(format!(
             "`{name}` must be one character"
         ))),
+    }
+}
+
+/// `3G` and `3gg` go to line 3; without a count they go to the end or start.
+fn counted_motion<'a>(motion: &'a str, invocation: &CommandInvocation) -> &'a str {
+    if invocation.count.is_some() && matches!(motion, "document_start" | "document_end") {
+        "line_number"
+    } else {
+        motion
     }
 }

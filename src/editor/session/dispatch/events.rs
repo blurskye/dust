@@ -16,6 +16,103 @@ use super::{
 };
 
 impl InteractiveApplication {
+    pub(super) fn begin_flash(&mut self) {
+        let Some(view) = self.state.active_view else {
+            return;
+        };
+        self.flash = Some(super::super::flash::FlashState {
+            view,
+            query: String::new(),
+            targets: Vec::new(),
+        });
+        self.sync_flash_ui();
+    }
+
+    /// While flash is active every key goes here: characters extend the query or pick a
+    /// label, Backspace edits, and anything else cancels.
+    fn handle_flash_key(&mut self, key: &KeyEvent) {
+        let Some(mut flash) = self.flash.take() else {
+            return;
+        };
+        match key.code {
+            crate::editor::input::KeyCode::Char(character)
+                if !key.modifiers.control && !key.modifiers.alt =>
+            {
+                if let Some(target) = flash
+                    .targets
+                    .iter()
+                    .find(|target| target.label == Some(character))
+                {
+                    self.flash_jump(flash.view, target.range.start);
+                    return;
+                }
+                flash.query.push(character);
+            }
+            crate::editor::input::KeyCode::Backspace if !flash.query.is_empty() => {
+                flash.query.pop();
+            }
+            _ => {
+                self.sync_flash_ui();
+                return;
+            }
+        }
+        let Some(view) = self.state.views.get(flash.view) else {
+            self.sync_flash_ui();
+            return;
+        };
+        let height = crate::ui::active_editor_pane_viewport(&self.state, &self.ui)
+            .map_or(100, |viewport| usize::from(viewport.height));
+        flash.targets = super::super::flash::flash_targets(
+            &self.state.buffers[view.buffer].text,
+            view.scroll_line,
+            view.scroll_line + height,
+            view.cursor,
+            &flash.query,
+        );
+        match flash.targets.as_slice() {
+            [] if !flash.query.is_empty() => {
+                self.sync_flash_ui();
+                self.notify_message(format!("no match for {}", flash.query), false);
+            }
+            [only] => self.flash_jump(flash.view, only.range.start),
+            _ => {
+                self.flash = Some(flash);
+                self.sync_flash_ui();
+            }
+        }
+    }
+
+    fn flash_jump(&mut self, view: crate::editor::ViewId, target: ByteOffset) {
+        if let Some(current) = self.current_persisted_location() {
+            self.persistence.record_location(
+                current,
+                false,
+                self.configuration.settings().persistence.jumps,
+            );
+        }
+        if let Some(view) = self.state.views.get_mut(view) {
+            view.cursor = target;
+            if let Some(selection) = view.selection.as_mut() {
+                selection.head = target;
+            }
+        }
+        self.state.mark_editor_changed();
+        self.sync_flash_ui();
+        self.ensure_cursor_visible();
+    }
+
+    fn sync_flash_ui(&mut self) {
+        self.ui.flash = self.flash.as_ref().map(|flash| crate::ui::FlashOverlay {
+            view: flash.view,
+            matches: flash.targets.iter().map(|target| target.range).collect(),
+            labels: flash
+                .targets
+                .iter()
+                .filter_map(|target| Some((target.range.start, target.label?)))
+                .collect(),
+        });
+    }
+
     pub(super) fn sync_status_summary_ui(&mut self) {
         self.ui.git_changed_files = self
             .git
@@ -159,6 +256,9 @@ impl InteractiveApplication {
                 }
             }
             UiEvent::Key { key, kind } => match kind {
+                KeyInputKind::Press | KeyInputKind::Repeat if self.flash.is_some() => {
+                    self.handle_flash_key(&key);
+                }
                 KeyInputKind::Press | KeyInputKind::Repeat => self.handle_configured_key(key),
                 KeyInputKind::Release => self.handle_key_in_context("key_release", key),
             },
@@ -1812,7 +1912,11 @@ impl InteractiveApplication {
             .map(|(buffer, state)| SyntaxDocument {
                 buffer,
                 text: &state.text,
-                language: state.path.as_deref().and_then(language_for_path),
+                language: state.path.as_deref().and_then(language_for_path).or_else(|| {
+                    (state.virtual_owner() == Some(super::agent::TRANSCRIPT_OWNER))
+                        .then(|| language_for_path(std::path::Path::new("agent.md")))
+                        .flatten()
+                }),
                 enabled: !(self.effective_large_file(buffer)
                     && self
                         .configuration
@@ -1850,6 +1954,24 @@ impl InteractiveApplication {
             }
         }
         self.ui.syntax_folds = syntax_folds;
+        for (buffer, result) in self.syntax.results() {
+            let revision = BufferRevision(result.revision);
+            if let Some(target) = self.state.buffers.get_mut(*buffer)
+                && target.syntax_objects.as_ref().map(|(at, _)| *at) != Some(revision)
+            {
+                target.syntax_objects = Some((revision, result.objects.clone()));
+            }
+        }
+        // Spans are copied only when a parse result changed, not on every tick.
+        let source = self
+            .syntax
+            .results()
+            .map(|(buffer, result)| (*buffer, result.generation, result.revision))
+            .collect::<Vec<_>>();
+        if source == self.syntax_spans_source {
+            return;
+        }
+        self.syntax_spans_source = source;
         self.ui.syntax_spans = self
             .syntax
             .results()
@@ -1864,6 +1986,9 @@ impl InteractiveApplication {
                 })
             })
             .collect();
+        self.ui
+            .syntax_spans
+            .sort_unstable_by_key(|span| (span.range.start, span.range.end));
     }
 }
 

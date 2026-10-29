@@ -34,6 +34,7 @@ pub use settings::{
     ClipboardSync, RegisterStorage, RuntimeConfig, SearchConfig, StartupConfig, StatusLineConfig, SyntaxConfig,
     TabLineConfig, TaskConfig, TaskKind, TerminalPanelConfig, TerminalProfileConfig,
     TerminalsConfig, ThemeAttribute, ThemeColor, ThemeConfig, ThemeStyle, ThemeStyles,
+    AgentProfileConfig, AgentsConfig,
     ToolManagerConfig, UiConfig, WindowPlacementConfig, WindowRuleConfig, WindowsConfig,
     WorkspaceConfig, WorkspaceSearchConfig,
 };
@@ -67,6 +68,8 @@ pub struct Config {
     pub tasks: BTreeMap<String, TaskConfig>,
     pub syntax: SyntaxConfig,
     pub terminals: TerminalsConfig,
+    #[serde(default)]
+    pub agents: AgentsConfig,
     #[serde(default)]
     pub windows: WindowsConfig,
     pub workspace: WorkspaceConfig,

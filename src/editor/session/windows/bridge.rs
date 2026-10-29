@@ -1623,7 +1623,10 @@ fn editor_buffer_titles(
 ) -> HashMap<BufferId, String> {
     let mut bases = HashMap::<String, usize>::new();
     for (_, buffer) in state.buffers() {
-        let base = editor_buffer_base(buffer.path.as_deref(), scratch_label);
+        let base = editor_buffer_base(
+            buffer.path.as_deref(),
+            buffer.virtual_owner().unwrap_or(scratch_label),
+        );
         *bases.entry(base).or_default() += 1;
     }
     let mut occurrences = HashMap::<String, usize>::new();
@@ -1631,7 +1634,10 @@ fn editor_buffer_titles(
         .buffers()
         .iter()
         .map(|(id, buffer)| {
-            let base = editor_buffer_base(buffer.path.as_deref(), scratch_label);
+            let base = editor_buffer_base(
+                buffer.path.as_deref(),
+                buffer.virtual_owner().unwrap_or(scratch_label),
+            );
             let duplicate = bases.get(&base).copied().unwrap_or(0) > 1;
             let occurrence = occurrences.entry(base.clone()).or_default();
             *occurrence = occurrence.saturating_add(1);

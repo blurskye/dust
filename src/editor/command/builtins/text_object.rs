@@ -2,12 +2,14 @@
 //! range rather than a cursor target, so operators and Visual mode share them.
 
 use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
+use crate::language::syntax::{SyntaxObject, SyntaxObjectKind};
 
 use super::{super::CommandError, motion::word_class, transaction::failed};
 
 /// Returns `None` when `motion` is not a text object.
 pub(super) fn text_object(
     text: &TextBuffer,
+    objects: &[SyntaxObject],
     cursor: ByteOffset,
     motion: &str,
     count: usize,
@@ -28,11 +30,39 @@ pub(super) fn text_object(
         "double_quote" => quote(text, cursor, '"', around)?,
         "single_quote" => quote(text, cursor, '\'', around)?,
         "backtick" => quote(text, cursor, '`', around)?,
+        "function" => syntax(objects, SyntaxObjectKind::Function, cursor, around, count),
+        "class" => syntax(objects, SyntaxObjectKind::Class, cursor, around, count),
+        "argument" => syntax(objects, SyntaxObjectKind::Argument, cursor, around, count),
         _ => return Ok(None),
     };
     range
         .map(Some)
         .ok_or_else(|| CommandError::Unavailable("no matching text object at the cursor".into()))
+}
+
+/// The `count`-th smallest tree-sitter object of `kind` around the cursor, or the next one
+/// after it when none surrounds it, like mini.ai.
+fn syntax(
+    objects: &[SyntaxObject],
+    kind: SyntaxObjectKind,
+    cursor: ByteOffset,
+    around: bool,
+    count: usize,
+) -> Option<ByteRange> {
+    let cursor = cursor.get();
+    let mut enclosing = objects
+        .iter()
+        .filter(|object| object.kind == kind && object.outer.0 <= cursor && cursor < object.outer.1)
+        .collect::<Vec<_>>();
+    enclosing.sort_by_key(|object| object.outer.1 - object.outer.0);
+    let object = enclosing.get(count.max(1) - 1).copied().or_else(|| {
+        objects
+            .iter()
+            .filter(|object| object.kind == kind && object.outer.0 > cursor)
+            .min_by_key(|object| object.outer.0)
+    })?;
+    let (start, end) = if around { object.outer } else { object.inner };
+    ByteRange::new(ByteOffset(start), ByteOffset(end)).ok()
 }
 
 /// The pair characters a surround or text-object key names, `b`/`B` included.

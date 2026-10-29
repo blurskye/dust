@@ -421,6 +421,19 @@ mod tests {
     }
 
     #[test]
+    fn a_count_sends_g_and_gg_to_that_line() {
+        let mut editor = HeadlessEditor::with_text("a\nb\nc\nd\n");
+        for key in ['3', 'G', 'd', 'd'] {
+            editor.feed(KeyEvent::character(key)).expect("3G dd");
+        }
+        assert_eq!(editor.text(), "a\nb\nd\n");
+        for key in ['1', 'g', 'g', 'd', 'd'] {
+            editor.feed(KeyEvent::character(key)).expect("1gg dd");
+        }
+        assert_eq!(editor.text(), "b\nd\n");
+    }
+
+    #[test]
     fn direct_change_family_and_indent_are_transactional() {
         let mut editor = HeadlessEditor::with_text("ab\n  cd\n");
         editor
@@ -451,7 +464,9 @@ mod tests {
             .feed(KeyEvent::character('<'))
             .expect("unindent line");
         assert_eq!(editor.text(), "z cd\n");
-        editor.feed(KeyEvent::character('s')).expect("substitute");
+        // `s` is flash in LazyVim; `cl` substitutes.
+        editor.feed(KeyEvent::character('c')).expect("change operator");
+        editor.feed(KeyEvent::character('l')).expect("substitute");
         editor
             .feed(KeyEvent::character('Q'))
             .expect("insert replacement");

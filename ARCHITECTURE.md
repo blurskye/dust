@@ -13,7 +13,8 @@ library.
 | `language/` | Tree-sitter syntax (`syntax`) and the LSP client (`lsp`) |
 | `debugger/` | DAP client |
 | `workspace/` | Roots, trust, diagnostics, pickers, search, Git (signs, hunks, conflicts, worktrees), tutor |
-| `forge/` | GitHub/GitLab HTTPS client for PR review (not yet wired into the UI) |
+| `forge/` | Pull requests through `gh`: list, check out into a worktree, review comments |
+| `agent/` | ACP client: agent process, JSON-RPC lines, protocol messages |
 | `process/` | Child processes, PTYs and JSON-RPC framing shared by LSP, DAP and terminals |
 | `tools/` | Tool catalog, installer, registry client, Nix runtimes, package lock |
 | `extensions/` | Wasm component plugins (ABI in `wit/dust-plugin.wit`) |

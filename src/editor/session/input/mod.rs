@@ -180,7 +180,10 @@ impl InputSession {
     pub(in crate::editor::session) fn capture_context(&self) -> Option<&'static str> {
         if let Some(prompt) = &self.prompt {
             return Some(match prompt.kind {
-                crate::ui::PromptKind::Command | crate::ui::PromptKind::ExplorerRename => {
+                crate::ui::PromptKind::Command
+                | crate::ui::PromptKind::ExplorerRename
+                | crate::ui::PromptKind::AgentAsk
+                | crate::ui::PromptKind::ReviewComment => {
                     "command_prompt"
                 }
                 crate::ui::PromptKind::SearchForward | crate::ui::PromptKind::SearchBackward => {
@@ -193,7 +196,9 @@ impl InputSession {
                 | crate::ui::PromptKind::TerminalClose
                 | crate::ui::PromptKind::DirtyClose
                 | crate::ui::PromptKind::GitStageUnsaved => "confirmation_prompt",
-                crate::ui::PromptKind::GitDestructive => "confirmation_prompt",
+                crate::ui::PromptKind::GitDestructive | crate::ui::PromptKind::AgentPermission => {
+                    "confirmation_prompt"
+                }
             });
         }
         self.documentation

@@ -147,7 +147,7 @@ fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
                     id: "plugin.demo.keymap.action".into(),
                     context: "editor".into(),
                     mode: "normal".into(),
-                    keys: "<leader> a x".into(),
+                    keys: "<leader> j x".into(),
                     command: "plugin.demo.run".into(),
                     arguments: BTreeMap::new(),
                 },
@@ -172,7 +172,7 @@ fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
                 id: "plugin.demo.group.action".into(),
                 context: "editor".into(),
                 mode: "normal".into(),
-                prefix: "<leader> a".into(),
+                prefix: "<leader> j".into(),
                 label: "Demo".into(),
                 icon: None,
                 order: 1,
@@ -194,7 +194,7 @@ fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
             id: "plugin.demo.keymap.action".into(),
             context: Some("editor".into()),
             mode: "normal".into(),
-            keys: Some("<leader> a z".into()),
+            keys: Some("<leader> j z".into()),
             command: Some("plugin.demo.run".into()),
             arguments: BTreeMap::new(),
             unmap: false,
@@ -228,9 +228,9 @@ fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
         resolved
             .inspect_id("plugin.demo.keymap.action")
             .map(|inspection| inspection.keys),
-        Some("space a z".into())
+        Some("space j z".into())
     );
-    assert!(resolved.inspect_key("editor.normal", "space a x").is_none());
+    assert!(resolved.inspect_key("editor.normal", "space j x").is_none());
     assert_eq!(
         resolved
             .inspect_key("editor.normal", "space f b")
@@ -250,7 +250,7 @@ fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
         resolved
             .groups()
             .iter()
-            .any(|group| { group.id == "plugin.demo.group.action" && group.prefix == "space a" })
+            .any(|group| { group.id == "plugin.demo.group.action" && group.prefix == "space j" })
     );
 }
 

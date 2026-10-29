@@ -262,6 +262,14 @@ impl WorkspaceSession {
     pub(in crate::editor::session) fn root_revision(&self) -> u64 {
         self.state.root_revision()
     }
+    /// Every workspace root this machine has opened, for the project list.
+    pub(in crate::editor::session) fn seen_roots(&self) -> Vec<PathBuf> {
+        self.store
+            .seen_identities()
+            .into_iter()
+            .map(|identity| identity.canonical_path)
+            .collect()
+    }
     pub(in crate::editor::session) fn active_root(&self) -> Option<RootId> {
         self.state.active_root()
     }

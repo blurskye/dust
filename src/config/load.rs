@@ -1176,6 +1176,7 @@ pub(super) fn unknown_key_warning(source: &str) -> Option<String> {
                     | "tasks"
                     | "syntax"
                     | "terminals"
+                    | "agents"
                     | "windows"
                     | "workspace"
                     | "messages"

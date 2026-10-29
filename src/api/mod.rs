@@ -124,6 +124,7 @@ pub fn manifest() -> Result<ApiManifest, String> {
             "tasks",
             "syntax",
             "terminals",
+            "agents",
             "windows",
             "workspace",
             "messages",

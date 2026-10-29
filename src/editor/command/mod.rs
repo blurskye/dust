@@ -14,6 +14,7 @@ const BUILTIN_NAMESPACES: &[&str] = &[
     "startup",
     "session",
     "workspace",
+    "agent",
     "file",
     "buffer",
     "view",

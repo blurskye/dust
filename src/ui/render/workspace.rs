@@ -111,6 +111,18 @@ pub fn editor_pane_viewport_at(
         .find(|viewport| viewport.pane == binding.pane)
 }
 
+/// Where `view` is shown, if any pane shows it.
+#[must_use]
+pub fn view_pane_viewport(
+    state: &EditorState,
+    ui: &UiState,
+    view: crate::editor::ViewId,
+) -> Option<PaneViewport> {
+    global_editor_pane_viewports(state, ui)
+        .into_iter()
+        .find(|viewport| viewport.view == view)
+}
+
 #[must_use]
 pub fn active_editor_pane_viewport(state: &EditorState, ui: &UiState) -> Option<PaneViewport> {
     let tab = state.tabs.get(state.active_tab?)?;

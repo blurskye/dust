@@ -29,6 +29,8 @@ mod tools;
 pub use tools::{PackageRegistryConfig, PackagesConfig, PluginEntryConfig, PluginsConfig};
 mod debugger;
 pub use debugger::{DebugAdapterConfig, DebugConfig, DebugRequestKind, DebugSessionConfig};
+mod agents;
+pub use agents::{AgentProfileConfig, AgentsConfig};
 mod terminal;
 pub use terminal::{TerminalProfileConfig, TerminalsConfig};
 mod windows;

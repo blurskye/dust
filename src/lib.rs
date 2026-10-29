@@ -9,6 +9,8 @@ pub mod api;
 pub mod clock;
 /// Bundled/user TOML settings, keymaps, dashboard declarations, and platform paths.
 pub mod config;
+/// Agent Client Protocol client for AI coding agents.
+pub mod agent;
 /// Built-in Debug Adapter Protocol transport and session control.
 pub mod debugger;
 /// Editing state, text, commands, input, transactions, startup, and live session composition.
@@ -17,7 +19,7 @@ pub mod editor;
 pub mod extensions;
 /// Bounded filesystem effects, checked atomic persistence, and recovery journals.
 pub mod files;
-/// Forge transport, account, repository authority and review workflows.
+/// Pull requests through the GitHub CLI.
 pub mod forge;
 /// Language identification, syntax execution, and built-in Language Server Protocol support.
 pub mod language;

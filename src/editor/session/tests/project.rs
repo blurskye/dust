@@ -1041,7 +1041,7 @@ fn wait_root_operation(app: &mut InteractiveApplication) {
 }
 
 #[test]
-fn async_root_add_picker_activation_and_dirty_removal_preflight_are_real() {
+fn async_root_add_activation_and_dirty_removal_preflight_are_real() {
     let mut app = app();
     let first = app.workspace.active_root().expect("first root");
     let second_directory = tempdir().expect("second root");
@@ -1055,9 +1055,7 @@ fn async_root_add_picker_activation_and_dirty_removal_preflight_are_real() {
     );
     let second = app.workspace.active_root().expect("added root active");
     app.activate_workspace_root(first);
-    app.open_builtin_picker(crate::editor::PickerKind::Roots);
-    app.picker_insert(second_path.file_name().unwrap().to_str().unwrap());
-    app.accept_picker();
+    app.activate_workspace_root(second);
     assert_eq!(app.workspace.active_root(), Some(second));
 
     let dirty_path = second_path.join("dirty.txt");

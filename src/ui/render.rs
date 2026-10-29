@@ -38,7 +38,7 @@ pub use visual_rows::{
     editor_state_content_width, editor_state_gutter_width,
 };
 pub use workspace::{
-    PaneViewport, active_editor_pane_viewport, active_pane_viewport, editor_pane_viewport_at,
+    PaneViewport, view_pane_viewport, active_editor_pane_viewport, active_pane_viewport, editor_pane_viewport_at,
     pane_viewports,
 };
 
@@ -69,6 +69,9 @@ pub enum PromptKind {
     DirtyClose,
     GitStageUnsaved,
     GitDestructive,
+    AgentAsk,
+    AgentPermission,
+    ReviewComment,
 }
 
 impl PromptKind {
@@ -87,6 +90,9 @@ impl PromptKind {
             Self::DirtyClose => "Close document",
             Self::GitStageUnsaved => "Stage unsaved changes",
             Self::GitDestructive => "Confirm Git change",
+            Self::AgentAsk => "Ask agent",
+            Self::AgentPermission => "Agent permission",
+            Self::ReviewComment => "Review comment",
         }
     }
 
@@ -104,7 +110,9 @@ impl PromptKind {
             | Self::TerminalClose
             | Self::DirtyClose
             | Self::GitStageUnsaved
-            | Self::GitDestructive => "",
+            | Self::GitDestructive
+            | Self::AgentPermission => "",
+            Self::AgentAsk | Self::ReviewComment => ">",
         }
     }
 }
@@ -1224,6 +1232,13 @@ impl OperationBarState {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct FlashOverlay {
+    pub view: crate::editor::ViewId,
+    pub matches: Vec<crate::editor::text::ByteRange>,
+    pub labels: Vec<(crate::editor::text::ByteOffset, char)>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct UiState {
     pub surface_content: crate::ui::geometry::SurfaceContentGeometry,
@@ -1232,6 +1247,8 @@ pub struct UiState {
     pub notification: Option<String>,
     pub notification_error: bool,
     pub search_query: Option<String>,
+    /// The `s` jump's matches and labels while it is active.
+    pub flash: Option<FlashOverlay>,
     pub config_diagnostic: Option<String>,
     pub dashboard_actions: Vec<DashboardAction>,
     pub tool_menu: Option<ToolMenuState>,

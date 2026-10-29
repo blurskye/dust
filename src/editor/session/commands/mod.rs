@@ -1,3 +1,4 @@
+mod agent;
 mod configuration;
 mod debugger;
 mod editing;
@@ -47,6 +48,18 @@ pub enum AppEffect {
     GitStatusRefresh,
     GitStatusOpen,
     GitBrowse { copy: bool },
+    FlashBegin,
+    TodoSearch,
+    AgentAsk,
+    AgentToggle,
+    AgentAddFile,
+    AgentAddDiagnostics,
+    AgentNew,
+    AgentCancel,
+    AgentPick,
+    PullRequestList,
+    PullRequestComments,
+    PullRequestComment,
     /// Switch the change surface's diff pane between the unstaged and staged comparison.
     GitChangesLayerSwitch,
     GitHunksOpen,
@@ -425,6 +438,7 @@ pub enum PickerKind {
     Marks,
     Jumps,
     Changes,
+    Agents,
 }
 
 pub use crate::editor::session::windows::LayoutAction;
@@ -451,6 +465,7 @@ pub fn register_app_commands(
     workspace::register_commands(registry)?;
     configuration::register_commands(registry)?;
     editing::register_commands(registry)?;
+    agent::register_commands(registry)?;
     Ok(())
 }
 

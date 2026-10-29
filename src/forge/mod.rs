@@ -1,394 +1,261 @@
-//! Forge transport, account and repository authority (W-22).
-//!
-//! The contract: "Forge access uses one bounded HTTPS transport. Requests are refused before
-//! transmission when they would leave the configured API origin, and credentials are never
-//! forwarded across a host redirect. Response bodies are bounded and error text is redacted.
-//! Authentication uses an approved credential store, an explicitly session-only entry, or a named
-//! environment variable; there is no plaintext fallback and no silent downgrade." and "Every
-//! account binds an explicit provider, host, API base, account and repository, and every write
-//! names both account and repository before sending; a mismatch between the bound repository and
-//! the target is refused."
-//!
-//! Everything here is a DECISION made before anything is transmitted, so it is testable without a
-//! socket and without a network: the transport that carries out an admitted request is a separate
-//! concern.
+//! Pull requests through the GitHub CLI (`gh`), which already owns sign-in, hosts and paging.
+//! Each request runs `gh` (and `git`) on a worker thread; replies arrive on a channel.
 
-/// The redirect chain is bounded: a server cannot walk the client across hosts without limit.
-pub const MAX_REDIRECTS: usize = 3;
-/// Response bodies are bounded, so a forge cannot exhaust the editor's memory.
-pub const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+use serde_json::Value;
+use std::{
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+    sync::mpsc::{self, Receiver, Sender},
+    thread,
+};
 
-/// Why a request was refused BEFORE it was transmitted.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ForgeRefusal {
-    /// The address could not be read as a bounded HTTPS origin.
-    UnreadableAddress(String),
-    /// The transport is HTTPS-only: plaintext is refused rather than used as a fallback.
-    InsecureScheme,
-    /// The address carried credentials inline, which is a plaintext fallback.
-    InlineCredential,
-    /// The request would leave the configured API origin.
-    OriginEscape,
-    /// A redirect would leave the hosts this operation is allowed to follow.
-    RedirectNotAllowed(String),
-    /// The redirect chain exceeded its bound.
-    RedirectLimit,
-    /// A write named no account, no repository, or neither.
-    UnboundWrite,
-    /// The write's account or repository is not the one bound.
-    BindingMismatch,
-    /// The credential source is not one the contract approves.
-    UnapprovedCredential,
-    /// The response body exceeded its bound.
-    ResponseTooLarge,
-    /// The provider's reported identity is not the identity expected.
-    IdentityMismatch,
-    /// The transport could not complete, carrying a REDACTED message.
-    Transport(String),
-    /// The request method is not one a forge request may use.
-    UnsupportedMethod(String),
-    /// The provider does not support this operation, so it is refused rather than approximated.
-    UnsupportedOperation(&'static str),
+pub struct PullRequest {
+    pub number: u64,
+    pub title: String,
+    pub author: String,
+    pub branch: String,
+    pub draft: bool,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Scheme {
-    Https,
-    /// Reachable ONLY through the `#[cfg(test)]` `ApiOrigin::fixture` seam, so a local fixture can
-    /// be addressed without weakening the production rule that a forge origin is HTTPS.
-    Http,
-}
-
-/// Where a forge's API lives. Requests outside it are refused before transmission.
+/// A review comment on a line of the pull request's head.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ApiOrigin {
-    scheme: Scheme,
-    host: String,
-    port: Option<u16>,
+pub struct ReviewComment {
+    pub path: PathBuf,
+    /// 1-based; `None` when the line no longer exists in the head.
+    pub line: Option<u64>,
+    pub author: String,
+    pub body: String,
 }
 
-impl ApiOrigin {
-    /// Read an API base as a bounded HTTPS origin. Plaintext, inline credentials and anything
-    /// unreadable are refused here, once, rather than remembered as a fallback.
-    pub fn parse(address: &str) -> Result<Self, ForgeRefusal> {
-        Self::read(address, false)
-    }
+#[derive(Debug)]
+pub enum ForgeReply {
+    List(Result<Vec<PullRequest>, String>),
+    /// The worktree the pull request was checked out into.
+    CheckedOut(Result<PathBuf, String>),
+    Comments(Result<Vec<ReviewComment>, String>),
+    Commented(Result<(), String>),
+}
 
-    /// A local fixture's origin. `#[cfg(test)]` only, so production code cannot construct a
-    /// plaintext forge origin: `read(address, false)` refuses one.
-    #[cfg(test)]
-    pub(crate) fn fixture(address: &str) -> Result<Self, ForgeRefusal> {
-        Self::read(address, true)
-    }
+pub struct ForgeJobs {
+    sender: Sender<ForgeReply>,
+    replies: Receiver<ForgeReply>,
+}
 
-    fn read(address: &str, allow_plaintext: bool) -> Result<Self, ForgeRefusal> {
-        let (scheme, rest) = address
-            .split_once("://")
-            .ok_or_else(|| ForgeRefusal::UnreadableAddress(address.to_owned()))?;
-        let scheme = if scheme.eq_ignore_ascii_case("https") {
-            Scheme::Https
-        } else if allow_plaintext && scheme.eq_ignore_ascii_case("http") {
-            Scheme::Http
-        } else {
-            return Err(ForgeRefusal::InsecureScheme);
-        };
-        let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-        if authority.contains('@') {
-            return Err(ForgeRefusal::InlineCredential);
-        }
-        if authority.is_empty() {
-            return Err(ForgeRefusal::UnreadableAddress(address.to_owned()));
-        }
-        let (host, port) = match authority.rsplit_once(':') {
-            Some((host, port)) => {
-                let port = port
-                    .parse::<u16>()
-                    .map_err(|_| ForgeRefusal::UnreadableAddress(address.to_owned()))?;
-                (host, Some(port))
-            }
-            None => (authority, None),
-        };
-        if host.is_empty() {
-            return Err(ForgeRefusal::UnreadableAddress(address.to_owned()));
-        }
-        Ok(Self {
-            scheme,
-            host: host.to_ascii_lowercase(),
-            port,
-        })
-    }
-
-    #[must_use]
-    pub fn host(&self) -> &str {
-        &self.host
-    }
-
-    /// The origin as an address prefix, so an account's OWN api base can carry its addresses - a
-    /// self-hosted forge is the reason the binding names a host and an API base separately.
-    #[must_use]
-    pub fn base(&self) -> String {
-        let scheme = match self.scheme {
-            Scheme::Https => "https",
-            Scheme::Http => "http",
-        };
-        match self.port {
-            Some(port) => format!("{scheme}://{}:{port}", self.host),
-            None => format!("{scheme}://{}", self.host),
-        }
-    }
-
-    /// Does this address stay inside the API origin? Compared on scheme, host AND port.
-    pub fn contains(&self, address: &str) -> Result<Self, ForgeRefusal> {
-        // A candidate is read with THIS origin's own allowance: a production origin is HTTPS and
-        // therefore can never contain a plaintext candidate, while a `#[cfg(test)]` fixture origin
-        // (the only kind that is plaintext) can contain its own fixture addresses.
-        let other = Self::read(address, matches!(self.scheme, Scheme::Http))?;
-        if other.scheme != self.scheme || other.host != self.host || other.port != self.port {
-            return Err(ForgeRefusal::OriginEscape);
-        }
-        Ok(other)
+impl Default for ForgeJobs {
+    fn default() -> Self {
+        let (sender, replies) = mpsc::channel();
+        Self { sender, replies }
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Provider {
-    GitHub,
-    GitLab,
-    Gitea,
-    Forgejo,
-}
-
-/// The authentication sources the contract approves. Nothing else is a credential source.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CredentialSource {
-    /// An approved credential store.
-    Store,
-    /// An entry that lives only for this session.
-    Session,
-    /// A named environment variable.
-    Environment,
-}
-
-/// A credential whose secret is never printed, logged or serialised with its text.
-#[derive(Clone, Eq, PartialEq)]
-pub struct Credential {
-    source: CredentialSource,
-    name: String,
-    secret: String,
-}
-
-impl Credential {
-    #[must_use]
-    pub fn new(source: CredentialSource, name: impl Into<String>, secret: impl Into<String>) -> Self {
-        Self {
-            source,
-            name: name.into(),
-            secret: secret.into(),
-        }
+impl ForgeJobs {
+    pub fn try_reply(&self) -> Option<ForgeReply> {
+        self.replies.try_recv().ok()
     }
 
-    #[must_use]
-    pub fn source(&self) -> CredentialSource {
-        self.source
-    }
-
-    #[must_use]
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    /// The secret, for the one place that builds a header. Never for a message.
-    #[must_use]
-    pub fn expose(&self) -> &str {
-        &self.secret
-    }
-}
-
-impl std::fmt::Debug for Credential {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("Credential")
-            .field("source", &self.source)
-            .field("name", &self.name)
-            .field("secret", &"<redacted>")
-            .finish()
-    }
-}
-
-/// Redact every secret from a message before it can be stored, shown or logged.
-#[must_use]
-pub fn redact(message: &str, secrets: &[&str]) -> String {
-    let mut redacted = message.to_owned();
-    for secret in secrets {
-        if secret.is_empty() {
-            continue;
-        }
-        redacted = redacted.replace(secret, "<redacted>");
-    }
-    redacted
-}
-
-/// A response body is only usable up to its bound.
-pub fn bound_response(body: &str, bound: usize) -> Result<&str, ForgeRefusal> {
-    if body.len() > bound {
-        return Err(ForgeRefusal::ResponseTooLarge);
-    }
-    Ok(body)
-}
-
-/// A provider identity, as the provider itself reports it.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Identity {
-    pub host: String,
-    pub account: String,
-}
-
-/// An account is only saved once the provider has CONFIRMED the identity it was asked about.
-pub fn verify_identity(expected: &Identity, reported: &Identity) -> Result<(), ForgeRefusal> {
-    if expected != reported {
-        return Err(ForgeRefusal::IdentityMismatch);
-    }
-    Ok(())
-}
-
-/// What an account binds: provider, host, API base, account and repository.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AccountBinding {
-    pub provider: Provider,
-    pub host: String,
-    pub api_base: ApiOrigin,
-    pub account: String,
-    pub repository: String,
-}
-
-/// A write that names the account and repository it targets.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct WriteTarget<'a> {
-    pub address: &'a str,
-    pub account: Option<&'a str>,
-    pub repository: Option<&'a str>,
-}
-
-/// A request that passed every pre-transmission rule, with the credential it may carry.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PlannedRequest {
-    pub address: String,
-    pub credential: Option<Credential>,
-}
-
-/// Decide whether a WRITE may be sent. Every write names both account and repository before
-/// sending, the binding must match, and the address must stay inside the API origin.
-pub fn plan_write(
-    binding: &AccountBinding,
-    target: &WriteTarget<'_>,
-    credential: Option<&Credential>,
-) -> Result<PlannedRequest, ForgeRefusal> {
-    let (Some(account), Some(repository)) = (target.account, target.repository) else {
-        return Err(ForgeRefusal::UnboundWrite);
-    };
-    if account != binding.account || repository != binding.repository {
-        return Err(ForgeRefusal::BindingMismatch);
-    }
-    binding.api_base.contains(target.address)?;
-    if let Some(credential) = credential {
-        ensure_approved(credential.source)?;
-    }
-    Ok(PlannedRequest {
-        address: target.address.to_owned(),
-        credential: credential.cloned(),
-    })
-}
-
-/// Resolve a redirect `Location` against the address that produced it. Servers routinely send a
-/// RELATIVE location, and a relative location is the same origin by definition, so it must not be
-/// mistaken for a cross-host escape or an unreadable address.
-pub(crate) fn resolve_location(base: &str, location: &str) -> Result<String, ForgeRefusal> {
-    if location.contains("://") {
-        return Ok(location.to_owned());
-    }
-    let scheme_end =
-        base.find("://").ok_or_else(|| ForgeRefusal::UnreadableAddress(base.to_owned()))?;
-    let scheme = &base[..scheme_end];
-    let after_scheme = &base[scheme_end + 3..];
-    let authority_end = after_scheme.find('/').unwrap_or(after_scheme.len());
-    let authority = &after_scheme[..authority_end];
-    if let Some(rest) = location.strip_prefix("//") {
-        return Ok(format!("{scheme}://{rest}"));
-    }
-    if location.starts_with('/') {
-        return Ok(format!("{scheme}://{authority}{location}"));
-    }
-    let path = &after_scheme[authority_end..];
-    let directory = match path.rfind('/') {
-        Some(index) => &path[..=index],
-        None => "/",
-    };
-    Ok(format!("{scheme}://{authority}{directory}{location}"))
-}
-
-/// Decide what a redirect may carry. A credential is NEVER forwarded across a host change, and a
-/// host this operation is not allowed to follow is refused outright.
-pub fn redirect(
-    from: &ApiOrigin,
-    to: &str,
-    credentialed: Option<&Credential>,
-    allowed_hosts: &[&str],
-    redirects_so_far: usize,
-) -> Result<PlannedRequest, ForgeRefusal> {
-    if redirects_so_far >= MAX_REDIRECTS {
-        return Err(ForgeRefusal::RedirectLimit);
-    }
-    // Read the target with THIS origin's own allowance, so a fixture origin can be redirected
-    // within itself while a production origin still refuses a plaintext target outright.
-    let target = ApiOrigin::read(to, matches!(from.scheme, Scheme::Http))?;
-    if target.host == from.host && target.port == from.port {
-        // Same host: the origin still contains it, so the credential stays with the request.
-        return Ok(PlannedRequest {
-            address: to.to_owned(),
-            credential: credentialed.cloned(),
+    fn spawn(&self, job: impl FnOnce() -> ForgeReply + Send + 'static) {
+        let sender = self.sender.clone();
+        thread::spawn(move || {
+            let _ = sender.send(job());
         });
     }
-    let allowed = allowed_hosts
+
+    pub fn list(&self, root: PathBuf) {
+        self.spawn(move || {
+            ForgeReply::List(
+                run(
+                    &root,
+                    "gh",
+                    &[
+                        "pr",
+                        "list",
+                        "--limit",
+                        "200",
+                        "--json",
+                        "number,title,author,headRefName,isDraft",
+                    ],
+                )
+                .and_then(|output| parse_list(&output)),
+            )
+        });
+    }
+
+    /// Check the pull request out into `<parent>/<repo>-pr-<number>` on branch `pr-<number>`,
+    /// so the current worktree and its branch are left alone. An existing one is updated.
+    pub fn checkout(&self, root: PathBuf, number: u64) {
+        self.spawn(move || {
+            ForgeReply::CheckedOut((|| {
+                let target = pr_worktree(&root, number)?;
+                if !target.is_dir() {
+                    let path = target.to_string_lossy().into_owned();
+                    run(&root, "git", &["worktree", "add", "--detach", &path])?;
+                }
+                let branch = format!("pr-{number}");
+                run(
+                    &target,
+                    "gh",
+                    &["pr", "checkout", &number.to_string(), "--branch", &branch],
+                )?;
+                Ok(target)
+            })())
+        });
+    }
+
+    /// Review comments of the pull request for the current branch.
+    pub fn comments(&self, root: PathBuf) {
+        self.spawn(move || {
+            ForgeReply::Comments((|| {
+                let number = current_number(&root)?;
+                let output = run(
+                    &root,
+                    "gh",
+                    &[
+                        "api",
+                        &format!("repos/{{owner}}/{{repo}}/pulls/{number}/comments"),
+                        "--paginate",
+                        "--jq",
+                        ".[]",
+                    ],
+                )?;
+                parse_comments(&output, &root)
+            })())
+        });
+    }
+
+    /// Comment on `line` (1-based) of `path` in the pull request for the current branch.
+    pub fn comment(&self, root: PathBuf, path: PathBuf, line: usize, body: String) {
+        self.spawn(move || {
+            ForgeReply::Commented((|| {
+                let view = run(&root, "gh", &["pr", "view", "--json", "number,headRefOid"])?;
+                let view: Value = serde_json::from_str(&view).map_err(|error| error.to_string())?;
+                let number = view["number"].as_u64().ok_or("no pull request for this branch")?;
+                let commit = view["headRefOid"].as_str().unwrap_or_default();
+                let relative = path.strip_prefix(&root).unwrap_or(&path).to_string_lossy();
+                run(
+                    &root,
+                    "gh",
+                    &[
+                        "api",
+                        "--method",
+                        "POST",
+                        &format!("repos/{{owner}}/{{repo}}/pulls/{number}/comments"),
+                        "-f",
+                        &format!("body={body}"),
+                        "-f",
+                        &format!("commit_id={commit}"),
+                        "-f",
+                        &format!("path={relative}"),
+                        "-F",
+                        &format!("line={line}"),
+                        "-f",
+                        "side=RIGHT",
+                    ],
+                )
+                .map(|_| ())
+            })())
+        });
+    }
+}
+
+fn current_number(root: &Path) -> Result<u64, String> {
+    run(root, "gh", &["pr", "view", "--json", "number", "--jq", ".number"])?
+        .trim()
+        .parse()
+        .map_err(|_| "no pull request for this branch".to_owned())
+}
+
+fn pr_worktree(root: &Path, number: u64) -> Result<PathBuf, String> {
+    let name = root
+        .file_name()
+        .ok_or("the workspace has no directory name")?
+        .to_string_lossy();
+    let parent = root.parent().ok_or("the workspace has no parent directory")?;
+    Ok(parent.join(format!("{name}-pr-{number}")))
+}
+
+fn run(cwd: &Path, program: &str, arguments: &[&str]) -> Result<String, String> {
+    let output = Command::new(program)
+        .args(arguments)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .env("GH_PROMPT_DISABLED", "1")
+        .output()
+        .map_err(|error| format!("{program}: {error}"))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        let error = String::from_utf8_lossy(&output.stderr);
+        let error = error.trim();
+        Err(if error.is_empty() {
+            format!("{program} failed ({})", output.status)
+        } else {
+            error.lines().last().unwrap_or(error).to_owned()
+        })
+    }
+}
+
+fn parse_list(output: &str) -> Result<Vec<PullRequest>, String> {
+    let items: Vec<Value> = serde_json::from_str(output).map_err(|error| error.to_string())?;
+    Ok(items
         .iter()
-        .any(|host| host.eq_ignore_ascii_case(&target.host));
-    if !allowed {
-        return Err(ForgeRefusal::RedirectNotAllowed(target.host));
-    }
-    // Allowed to follow, and the credential is DROPPED rather than forwarded to another host.
-    Ok(PlannedRequest {
-        address: to.to_owned(),
-        credential: None,
-    })
+        .map(|item| PullRequest {
+            number: item["number"].as_u64().unwrap_or_default(),
+            title: item["title"].as_str().unwrap_or_default().to_owned(),
+            author: item["author"]["login"].as_str().unwrap_or_default().to_owned(),
+            branch: item["headRefName"].as_str().unwrap_or_default().to_owned(),
+            draft: item["isDraft"].as_bool().unwrap_or_default(),
+        })
+        .collect())
 }
 
-fn ensure_approved(source: CredentialSource) -> Result<(), ForgeRefusal> {
-    match source {
-        CredentialSource::Store | CredentialSource::Session | CredentialSource::Environment => Ok(()),
-    }
+/// `gh api --jq '.[]'` prints one comment object per line.
+fn parse_comments(output: &str, root: &Path) -> Result<Vec<ReviewComment>, String> {
+    output
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            let item: Value = serde_json::from_str(line).map_err(|error| error.to_string())?;
+            Ok(ReviewComment {
+                path: root.join(item["path"].as_str().unwrap_or_default()),
+                line: item["line"].as_u64(),
+                author: item["user"]["login"].as_str().unwrap_or_default().to_owned(),
+                body: item["body"].as_str().unwrap_or_default().to_owned(),
+            })
+        })
+        .collect()
 }
 
-pub mod accounts;
-pub mod download;
-pub mod providers;
-pub mod review;
-pub mod surface;
-pub mod worktree;
-mod transport;
-pub use transport::{ForgeResponse, ForgeTransport};
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[cfg(test)]
-mod tests;
-#[cfg(test)]
-mod transport_tests;
-#[cfg(test)]
-mod provider_tests;
-#[cfg(test)]
-mod account_tests;
-#[cfg(test)]
-mod review_tests;
-#[cfg(test)]
-mod worktree_tests;
-#[cfg(test)]
-mod download_tests;
-#[cfg(test)]
-mod surface_tests;
+    #[test]
+    fn gh_output_is_parsed() {
+        let list = r#"[{"number":7,"title":"Fix it","author":{"login":"ana"},"headRefName":"fix","isDraft":false}]"#;
+        assert_eq!(
+            parse_list(list).unwrap(),
+            vec![PullRequest {
+                number: 7,
+                title: "Fix it".into(),
+                author: "ana".into(),
+                branch: "fix".into(),
+                draft: false,
+            }]
+        );
+        let comments = "{\"path\":\"src/a.rs\",\"line\":3,\"user\":{\"login\":\"bo\"},\"body\":\"nit\"}\n\
+                        {\"path\":\"b.rs\",\"line\":null,\"user\":{\"login\":\"cy\"},\"body\":\"old\"}\n";
+        let parsed = parse_comments(comments, Path::new("/r")).unwrap();
+        assert_eq!(parsed[0].path, PathBuf::from("/r/src/a.rs"));
+        assert_eq!(parsed[0].line, Some(3));
+        assert_eq!(parsed[1].line, None);
+    }
+
+    #[test]
+    fn pull_requests_get_a_sibling_worktree() {
+        assert_eq!(
+            pr_worktree(Path::new("/src/dust"), 12).unwrap(),
+            PathBuf::from("/src/dust-pr-12")
+        );
+    }
+}

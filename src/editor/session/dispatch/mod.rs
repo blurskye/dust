@@ -27,8 +27,10 @@ use super::windows::{
 #[path = "../commands/mod.rs"]
 pub(super) mod commands;
 use crate::editor::session::debugger::DebugSession;
+mod agent;
 mod effects;
 mod events;
+mod pull_requests;
 
 #[cfg(test)]
 use super::persistence::capture_persisted_layout;
@@ -127,6 +129,13 @@ struct InteractiveApplication {
     should_quit: bool,
     /// When the last key arrived, so automatic prompts wait until typing pauses.
     last_key_at: Option<Instant>,
+    /// The `s` jump while its labels are shown.
+    flash: Option<super::flash::FlashState>,
+    /// The ACP agent session and its transcript panel.
+    agent: agent::AgentPanel,
+    pull_requests: pull_requests::PullRequests,
+    /// The parse results `ui.syntax_spans` was built from.
+    syntax_spans_source: Vec<(crate::editor::BufferId, u64, u64)>,
     window_session: WindowSession,
     tooling: super::tooling::ToolingSession,
     language: super::lsp::LspSession,
@@ -244,6 +253,8 @@ pub fn run_interactive(
         application.process_dap_events();
         application.process_execution_preflight();
         application.process_pty_events();
+        application.process_agent_events();
+        application.process_pull_request_events();
         application.process_plugin_storage_events();
         application.process_plugin_events();
         application.process_registry_events();

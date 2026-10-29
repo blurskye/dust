@@ -157,12 +157,30 @@ pub(super) fn render_editor_view(
     } else {
         configured_start
     };
+    let flash = ui.flash.as_ref().filter(|flash| flash.view == view_id);
     let search_ranges = if config.search.highlight && !large_file {
         ui.search_query
             .as_deref()
             .filter(|query| !query.is_empty())
             .map_or_else(Vec::new, |query| {
-                let source = buffer.text.to_string();
+                // Only the lines on screen are searched, so a large file costs nothing extra.
+                let last_line = visual_rows
+                    .forward(start_anchor, usize::from(body_height))
+                    .line
+                    .saturating_add(1)
+                    .min(buffer.text.len_lines());
+                let first = buffer
+                    .text
+                    .line_to_byte(start_anchor.line)
+                    .map_or(0, ByteOffset::get);
+                let end = buffer
+                    .text
+                    .line_to_byte(last_line)
+                    .map_or(buffer.text.len_bytes(), ByteOffset::get);
+                let source = ByteRange::new(ByteOffset(first), ByteOffset(end.max(first)))
+                    .ok()
+                    .and_then(|range| buffer.text.slice(range).ok())
+                    .unwrap_or_default();
                 crate::editor::input::search_matches(
                     &source,
                     query,
@@ -172,7 +190,11 @@ pub(super) fn render_editor_view(
                 .unwrap_or_default()
                 .into_iter()
                 .filter_map(|range| {
-                    ByteRange::new(ByteOffset(range.start), ByteOffset(range.end)).ok()
+                    ByteRange::new(
+                        ByteOffset(first + range.start),
+                        ByteOffset(first + range.end),
+                    )
+                    .ok()
                 })
                 .collect()
             })
@@ -407,7 +429,9 @@ pub(super) fn render_editor_view(
                 },
             ) {
                 Style::Selection
-            } else if search_ranges.iter().any(|range| range.contains(global)) {
+            } else if search_ranges.iter().any(|range| range.contains(global))
+                || flash.is_some_and(|flash| flash.matches.iter().any(|range| range.contains(global)))
+            {
                 Style::Search
             } else if let Some(style) = diagnostic_lines.get(&line_index).and_then(|diagnostics| {
                 diagnostics
@@ -513,7 +537,16 @@ pub(super) fn render_editor_view(
                     x = x.saturating_add(1);
                 }
             } else if x < width {
-                if can_wrap && cells > content_width {
+                if let Some(label) = flash.and_then(|flash| {
+                    flash
+                        .labels
+                        .iter()
+                        .find(|(at, _)| *at == global)
+                        .map(|(_, label)| *label)
+                }) {
+                    let mut bytes = [0; 4];
+                    grid.set_cell(x, screen_row, label.encode_utf8(&mut bytes), Style::StatusAccent);
+                } else if can_wrap && cells > content_width {
                     let replacement = if text_width(
                         &config.editor.control_character_replacement,
                         config.editor.ambiguous_width,
@@ -738,7 +771,12 @@ pub(super) fn render_status_line(
         .as_ref()
         .and_then(|path| path.file_name())
         .map_or_else(
-            || config.ui.status_line.scratch_label.clone(),
+            || {
+                buffer
+                    .virtual_owner()
+                    .unwrap_or(&config.ui.status_line.scratch_label)
+                    .to_owned()
+            },
             |name| name.to_string_lossy().into_owned(),
         );
     // The compact indicator of the same state, so the operation survives where the bar cannot be

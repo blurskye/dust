@@ -12,6 +12,9 @@ use std::{
 use thiserror::Error;
 use tree_sitter::{Language, Parser, Query, QueryCursor, StreamingIterator};
 
+mod objects;
+pub use objects::{SyntaxObject, SyntaxObjectKind};
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct SyntaxDocumentId(pub u64);
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -217,6 +220,8 @@ pub struct SyntaxResult {
     pub spans: Vec<SyntaxSpan>,
     pub folds: Vec<SyntaxFold>,
     pub indents: Vec<SyntaxIndent>,
+    /// Functions, classes and arguments for the tree-sitter text objects.
+    pub objects: Arc<Vec<SyntaxObject>>,
     pub highlights_truncated: bool,
     pub folds_truncated: bool,
     pub indents_truncated: bool,
@@ -456,6 +461,7 @@ fn parse(request: Request) -> SyntaxEvent {
             .collect::<Vec<_>>(),
         Err(error) => return failed(&request, format!("indent query: {error}")),
     };
+    let objects = Arc::new(objects::collect(&tree, &request.source, 50_000));
     SyntaxEvent::Parsed(SyntaxResult {
         document: request.document,
         generation: request.generation,
@@ -471,6 +477,7 @@ fn parse(request: Request) -> SyntaxEvent {
         spans,
         folds,
         indents,
+        objects,
     })
 }
 fn query_rows(
