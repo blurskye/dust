@@ -644,6 +644,11 @@ impl Config {
         {
             return Err("editor.indent_guides.character must occupy one narrow display cell");
         }
+        if self.editor.comments.values().any(|token| {
+            token.is_empty() || token.len() > 16 || token.chars().any(char::is_whitespace)
+        }) {
+            return Err("editor.comments values must be 1 to 16 characters without spaces");
+        }
         if self.editor.viewport.horizontal_margin > 100 {
             return Err("editor.viewport.horizontal_margin must not exceed 100");
         }

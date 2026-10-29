@@ -11,9 +11,12 @@ use crate::editor::{
 
 use super::{
     super::{CommandError, CommandId, CommandInvocation, CommandOutcome},
+    comment::build_comment_toggle,
     motion::{
         block_start_column, motion_target, operator_range, repeat_visual_ranges, visual_ranges,
     },
+    pairs::{AutoPair, auto_pair, build_surround_add, build_surround_change, empty_pair_end},
+    text_object::text_object,
     transaction::{
         bool_argument, build_indent, build_insert_transition, build_join_lines, build_toggle_case,
         failed, string_argument, transaction_for,
@@ -46,13 +49,46 @@ pub(super) fn execute_builtin<E>(
     match invocation.id.as_str() {
         "view.cursor.move" => {
             let motion = string_argument(invocation, "motion")?;
-            let target = motion_target(&buffer.text, view.cursor, motion, count, state.policy)?;
             transaction.undo_policy =
                 if matches!(view.mode, EditorMode::Insert | EditorMode::Replace) {
                     UndoPolicy::Boundary
                 } else {
                     UndoPolicy::Ignore
                 };
+            // In Visual mode a text object selects its range.
+            if let Some(mut selection) = view.selection {
+                if let Some(range) = text_object(&buffer.text, view.cursor, motion, count)? {
+                    let head = if range.is_empty() {
+                        range.start
+                    } else {
+                        previous_grapheme_boundary(&buffer.text, range.end)
+                    };
+                    selection.anchor = range.start;
+                    transaction.operations.push(EditorOperation::SetSelection {
+                        view: view_id,
+                        selection: Some(selection),
+                    });
+                    transaction.operations.push(EditorOperation::SetCursor {
+                        view: view_id,
+                        position: head,
+                    });
+                    return Ok(CommandOutcome {
+                        transaction: Some(transaction),
+                        effects: Vec::new(),
+                        message: None,
+                        follow_up: Vec::new(),
+                    });
+                }
+            }
+            let character = character_argument(invocation, "character")?;
+            let target = motion_target(
+                &buffer.text,
+                view.cursor,
+                motion,
+                count,
+                character,
+                state.policy,
+            )?;
             transaction.operations.push(EditorOperation::SetCursor {
                 view: view_id,
                 position: target,
@@ -118,6 +154,34 @@ pub(super) fn execute_builtin<E>(
                 UndoPolicy::Merge
             };
             let text = string_argument(invocation, "text")?;
+            let pair = (state.policy.autopairs && view.block_insert.is_empty())
+                .then(|| auto_pair(&buffer.text, view.cursor, text))
+                .flatten();
+            if let Some(pair) = pair {
+                let (inserted, step) = match pair {
+                    AutoPair::Open(close) => (format!("{text}{close}"), text.len()),
+                    AutoPair::Skip => (String::new(), text.len()),
+                };
+                if !inserted.is_empty() {
+                    transaction.operations.push(EditorOperation::ApplyEdits {
+                        buffer: buffer_id,
+                        edits: TextEditSet::new(
+                            buffer.text.revision(),
+                            vec![TextEdit::new(ByteRange::empty(view.cursor), inserted)],
+                        ),
+                    });
+                }
+                transaction.operations.push(EditorOperation::SetCursor {
+                    view: view_id,
+                    position: ByteOffset(view.cursor.get() + step),
+                });
+                return Ok(CommandOutcome {
+                    transaction: Some(transaction),
+                    effects: Vec::new(),
+                    message: None,
+                    follow_up: Vec::new(),
+                });
+            }
             let positions = if view.block_insert.is_empty() {
                 vec![view.cursor]
             } else {
@@ -235,9 +299,13 @@ pub(super) fn execute_builtin<E>(
                 .iter()
                 .map(|position| previous_grapheme_boundary(&buffer.text, *position))
                 .collect::<Vec<_>>();
+            let pair_end = (state.policy.autopairs && view.block_insert.is_empty())
+                .then(|| empty_pair_end(&buffer.text, view.cursor))
+                .flatten();
+            let ends = pair_end.map_or_else(|| positions.clone(), |end| vec![end]);
             let edits = starts
                 .iter()
-                .zip(&positions)
+                .zip(&ends)
                 .filter(|(start, end)| start != end)
                 .map(|(start, end)| {
                     ByteRange::new(*start, *end)
@@ -413,6 +481,7 @@ pub(super) fn execute_builtin<E>(
                             motion,
                             count,
                             requested_linewise,
+                            character_argument(invocation, "character")?,
                             state.policy,
                         )?],
                         if requested_linewise {
@@ -426,18 +495,60 @@ pub(super) fn execute_builtin<E>(
             let first_range = *ranges
                 .first()
                 .ok_or_else(|| CommandError::Unavailable("visual block is empty".into()))?;
+            let whole_range = ByteRange::new(
+                first_range.start,
+                ranges.last().map_or(first_range.end, |range| range.end),
+            )
+            .map_err(failed)?;
+            if matches!(operator, "comment" | "surround_add") {
+                if operator == "comment" {
+                    let token = invocation
+                        .arguments
+                        .get("comment")
+                        .map(|value| value.as_str())
+                        .transpose()?
+                        .ok_or_else(|| {
+                            CommandError::Unavailable(
+                                "no comment string for this file type; set editor.comments".into(),
+                            )
+                        })?;
+                    build_comment_toggle(
+                        &mut transaction,
+                        &buffer.text,
+                        view_id,
+                        buffer_id,
+                        whole_range,
+                        view.cursor.min(whole_range.end).max(whole_range.start),
+                        token,
+                    )?;
+                } else {
+                    let character =
+                        character_argument(invocation, "character")?.ok_or_else(|| {
+                            CommandError::InvalidArguments("surround needs a character".into())
+                        })?;
+                    build_surround_add(
+                        &mut transaction,
+                        &buffer.text,
+                        view_id,
+                        buffer_id,
+                        whole_range,
+                        character,
+                    )?;
+                }
+                return Ok(CommandOutcome {
+                    transaction: Some(transaction),
+                    effects: Vec::new(),
+                    message: None,
+                    follow_up: Vec::new(),
+                });
+            }
             if matches!(operator, "indent" | "unindent") {
-                let indent_range = ByteRange::new(
-                    first_range.start,
-                    ranges.last().map_or(first_range.end, |range| range.end),
-                )
-                .map_err(failed)?;
                 build_indent(
                     &mut transaction,
                     &buffer.text,
                     view_id,
                     buffer_id,
-                    indent_range,
+                    whole_range,
                     operator == "indent",
                     state.policy,
                 )?;
@@ -523,6 +634,31 @@ pub(super) fn execute_builtin<E>(
                     EditorMode::Normal
                 },
             });
+        }
+        "edit.surround" => {
+            let action = string_argument(invocation, "action")?;
+            let character = character_argument(invocation, "character")?
+                .ok_or_else(|| CommandError::InvalidArguments("missing `character`".into()))?;
+            let replacement = match action {
+                "delete" => None,
+                "replace" => Some(character_argument(invocation, "replacement")?.ok_or_else(
+                    || CommandError::InvalidArguments("missing `replacement`".into()),
+                )?),
+                other => {
+                    return Err(CommandError::InvalidArguments(format!(
+                        "unknown surround action `{other}`"
+                    )));
+                }
+            };
+            build_surround_change(
+                &mut transaction,
+                &buffer.text,
+                view_id,
+                buffer_id,
+                view.cursor,
+                character,
+                replacement,
+            )?;
         }
         "edit.put" => {
             let before = bool_argument(invocation, "before")?;
@@ -639,4 +775,20 @@ pub(super) fn execute_builtin<E>(
         message: None,
         follow_up: Vec::new(),
     })
+}
+
+fn character_argument(
+    invocation: &CommandInvocation,
+    name: &str,
+) -> Result<Option<char>, CommandError> {
+    let Some(value) = invocation.arguments.get(name) else {
+        return Ok(None);
+    };
+    let mut characters = value.as_str()?.chars();
+    match (characters.next(), characters.next()) {
+        (Some(character), None) => Ok(Some(character)),
+        _ => Err(CommandError::InvalidArguments(format!(
+            "`{name}` must be one character"
+        ))),
+    }
 }

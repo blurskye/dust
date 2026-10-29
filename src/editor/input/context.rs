@@ -34,6 +34,7 @@ const BUILTIN_SURFACES: &[&str] = &[
     "register",
     "prefix",
     "replace",
+    "character",
     "macro_record",
     "macro_replay",
 ];

@@ -19,6 +19,7 @@ gutter_padding = 1
 control_character_replacement = "�"
 zero_width_replacement = "◌"
 ambiguous_width = "narrow"
+autopairs = true
 
 [editor.viewport]
 horizontal_margin = 4
@@ -48,6 +49,43 @@ status_label = "LARGE"
 [editor.registers]
 storage = "internal"
 mirror_named_to_unnamed = true
+
+# Line comment string per file extension for `gc`/`gcc`.
+[editor.comments]
+bash = "#"
+c = "//"
+cc = "//"
+cpp = "//"
+cs = "//"
+dart = "//"
+ex = "#"
+exs = "#"
+go = "//"
+h = "//"
+hpp = "//"
+hs = "--"
+java = "//"
+js = "//"
+jsx = "//"
+kt = "//"
+lua = "--"
+mjs = "//"
+nix = "#"
+php = "//"
+py = "#"
+rb = "#"
+rs = "//"
+sh = "#"
+sql = "--"
+swift = "//"
+toml = "#"
+ts = "//"
+tsx = "//"
+vim = "\""
+yaml = "#"
+yml = "#"
+zig = "//"
+zsh = "#"
 
 [ui]
 theme = "dust"
@@ -551,11 +589,13 @@ terminal = "terminal.send"
 [input.character_fallback_commands]
 register = "input.register.select"
 replace = "input.replace.text"
+character = "input.character"
 macro_record = "input.macro.record.select"
 macro_replay = "input.macro.replay.select"
 
 [input.unmatched_commands]
 prefix = "input.cancel"
+character = "input.cancel"
 documentation = "lsp.documentation.close"
 
 [input.command_aliases]
@@ -938,6 +978,7 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "edit.replace_backspace" = "Restore previous Replace-mode text"
 "edit.replace_text" = "Replace text in Replace mode"
 "edit.substitute" = "Substitute characters"
+"edit.surround" = "Delete or replace surrounding pair"
 "edit.toggle_case" = "Toggle character case"
 "editor.quit" = "Quit Dust"
 "file.new" = "New buffer"
@@ -1004,7 +1045,11 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "history.redo" = "Redo"
 "history.undo" = "Undo"
 "input.cancel" = "Cancel focused input"
+"input.character" = "Complete pending character input"
 "input.count" = "Append count digit"
+"input.find.begin" = "Find character on line"
+"input.find.repeat" = "Repeat last find"
+"input.find.reverse" = "Repeat last find backward"
 "input.macro.record.select" = "Record macro register"
 "input.macro.record.toggle" = "Toggle macro recording"
 "input.macro.replay.begin" = "Select macro for replay"
@@ -1018,6 +1063,7 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "input.register.select" = "Use register"
 "input.replace.begin" = "Replace character"
 "input.replace.text" = "Replace with text"
+"input.surround.begin" = "Delete or replace surrounding pair"
 "input.visual.operator" = "Apply configured Visual operator"
 "input.zero" = "Count zero or line start"
 "keymap.conflicts" = "Show keymap conflicts"

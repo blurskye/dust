@@ -14,7 +14,9 @@ pub fn register_builtin_commands<E: 'static>(
         "view.cursor.move",
         "Move cursor",
         ContextRequirement::View,
-        ArgumentSchema::default().field("motion", ArgumentType::String, true),
+        ArgumentSchema::default()
+            .field("motion", ArgumentType::String, true)
+            .field("character", ArgumentType::String, false),
     )?;
     register(
         registry,
@@ -82,7 +84,19 @@ pub fn register_builtin_commands<E: 'static>(
         ArgumentSchema::default()
             .field("operator", ArgumentType::String, true)
             .field("motion", ArgumentType::String, true)
-            .field("linewise", ArgumentType::Bool, true),
+            .field("linewise", ArgumentType::Bool, true)
+            .field("character", ArgumentType::String, false)
+            .field("comment", ArgumentType::String, false),
+    )?;
+    register(
+        registry,
+        "edit.surround",
+        "Delete or replace surrounding pair",
+        ContextRequirement::View,
+        ArgumentSchema::default()
+            .field("action", ArgumentType::String, true)
+            .field("character", ArgumentType::String, true)
+            .field("replacement", ArgumentType::String, false),
     )?;
     register(
         registry,

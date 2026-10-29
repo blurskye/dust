@@ -9,6 +9,7 @@ use crate::editor::{
 
 use super::{
     super::{CommandError, CommandInvocation},
+    text_object::text_object,
     transaction::{failed, integer_argument, string_argument},
 };
 
@@ -17,10 +18,22 @@ pub(super) fn motion_target(
     cursor: ByteOffset,
     motion: &str,
     count: usize,
+    character: Option<char>,
     policy: EditingPolicy,
 ) -> Result<ByteOffset, CommandError> {
     let mut target = cursor;
     match motion {
+        "find_forward"
+        | "till_forward"
+        | "till_forward_again"
+        | "find_backward"
+        | "till_backward"
+        | "till_backward_again" => {
+            let character = character.ok_or_else(|| {
+                CommandError::InvalidArguments(format!("motion `{motion}` needs a character"))
+            })?;
+            target = find_on_line(text, cursor, motion, character, count)?;
+        }
         "left" => {
             for _ in 0..count {
                 let previous = previous_grapheme_boundary(text, target);
@@ -355,12 +368,24 @@ pub(super) fn operator_range(
     motion: &str,
     count: usize,
     linewise: bool,
+    character: Option<char>,
     policy: EditingPolicy,
 ) -> Result<ByteRange, CommandError> {
+    if let Some(range) = text_object(text, cursor, motion, count)? {
+        return Ok(range);
+    }
     if linewise {
-        let line = text.byte_to_line(cursor).map_err(failed)?;
+        // `dd` covers `count` lines; `dj`, `dk`, `dG`… cover every line up to the target.
+        let cursor_line = text.byte_to_line(cursor).map_err(failed)?;
+        let (line, last) = if motion == "line" {
+            (cursor_line, cursor_line + count.saturating_sub(1))
+        } else {
+            let target = motion_target(text, cursor, motion, count, character, policy)?;
+            let target_line = text.byte_to_line(target).map_err(failed)?;
+            (cursor_line.min(target_line), cursor_line.max(target_line))
+        };
         let start = text.line_to_byte(line).map_err(failed)?;
-        let after = line.saturating_add(count);
+        let after = last.saturating_add(1);
         let end = if after < text.len_lines() {
             text.line_to_byte(after).map_err(failed)?
         } else {
@@ -368,7 +393,7 @@ pub(super) fn operator_range(
         };
         return ByteRange::new(start, end).map_err(failed);
     }
-    let target = motion_target(text, cursor, motion, count, policy)?;
+    let target = motion_target(text, cursor, motion, count, character, policy)?;
     let (start, mut end) = if target < cursor {
         (target, cursor)
     } else {
@@ -377,12 +402,73 @@ pub(super) fn operator_range(
     if target >= cursor
         && matches!(
             motion,
-            "right" | "word_end" | "big_word_end" | "line_end" | "matching_pair"
+            "right"
+                | "word_end"
+                | "big_word_end"
+                | "line_end"
+                | "matching_pair"
+                | "find_forward"
+                | "till_forward"
+                | "till_forward_again"
         )
     {
         end = next_grapheme_boundary(text, end);
     }
     ByteRange::new(start, end).map_err(failed)
+}
+
+/// `f`/`t` search the cursor line only, like Vim. `till_*_again` is the `;` repeat of a
+/// till motion, which skips the character the cursor already stands next to.
+fn find_on_line(
+    text: &TextBuffer,
+    cursor: ByteOffset,
+    motion: &str,
+    character: char,
+    count: usize,
+) -> Result<ByteOffset, CommandError> {
+    let line = text.byte_to_line(cursor).map_err(failed)?;
+    let start = text.line_to_byte(line).map_err(failed)?.get();
+    let line_text = text.line(line).map_err(failed)?;
+    let content = line_text.strip_suffix('\n').unwrap_or(&line_text);
+    let relative = cursor.get().saturating_sub(start).min(content.len());
+    let forward = motion.starts_with("find_forward") || motion.starts_with("till_forward");
+    let till = motion.starts_with("till");
+    let candidates: Vec<usize> = if forward {
+        content
+            .char_indices()
+            .filter(|(index, found)| *index > relative && *found == character)
+            .map(|(index, _)| index)
+            .collect()
+    } else {
+        content[..relative]
+            .char_indices()
+            .rev()
+            .filter(|(_, found)| *found == character)
+            .map(|(index, _)| index)
+            .collect()
+    };
+    let neighbour = if forward {
+        content[relative..]
+            .chars()
+            .next()
+            .map(|current| relative + current.len_utf8())
+    } else {
+        content[..relative]
+            .chars()
+            .next_back()
+            .map(|previous| relative - previous.len_utf8())
+    };
+    let skip = usize::from(motion.ends_with("_again") && candidates.first() == neighbour.as_ref());
+    let index = candidates
+        .get(skip + count.max(1) - 1)
+        .copied()
+        .ok_or_else(|| CommandError::Unavailable(format!("`{character}` not found on the line")))?;
+    let at = ByteOffset(start + index);
+    Ok(match (till, forward) {
+        (false, _) => at,
+        (true, true) => previous_grapheme_boundary(text, at),
+        (true, false) => next_grapheme_boundary(text, at),
+    })
 }
 
 pub(super) fn line_content_end(text: &TextBuffer, line: usize) -> Result<ByteOffset, CommandError> {

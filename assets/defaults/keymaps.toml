@@ -793,13 +793,750 @@ keys = "l"
 command = "input.motion"
 arguments = { motion = "right", linewise = false }
 
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.j"
+context = "editor"
+mode = "operator_pending"
+keys = "j"
+command = "input.motion"
+arguments = { motion = "down", linewise = true }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.k"
+context = "editor"
+mode = "operator_pending"
+keys = "k"
+command = "input.motion"
+arguments = { motion = "up", linewise = true }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.upper-g"
+context = "editor"
+mode = "operator_pending"
+keys = "G"
+command = "input.motion"
+arguments = { motion = "document_end", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.upper-g"
+context = "editor"
+mode = "visual_char"
+keys = "G"
+command = "input.motion"
+arguments = { motion = "document_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.g-g"
+context = "editor"
+mode = "visual_char"
+keys = "g g"
+command = "input.motion"
+arguments = { motion = "document_start", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.upper-g"
+context = "editor"
+mode = "visual_line"
+keys = "G"
+command = "input.motion"
+arguments = { motion = "document_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.g-g"
+context = "editor"
+mode = "visual_line"
+keys = "g g"
+command = "input.motion"
+arguments = { motion = "document_start", linewise = false }
+
+# Find on line, text objects, comments and surround (LazyVim: mini.ai, mini.surround).
+[[keymap]]
+id = "builtin.editor.normal.input-find-begin.f"
+context = "editor"
+mode = "normal"
+keys = "f"
+command = "input.find.begin"
+arguments = { text = "find_forward" }
+[[keymap]]
+id = "builtin.editor.normal.input-find-begin.upper-f"
+context = "editor"
+mode = "normal"
+keys = "F"
+command = "input.find.begin"
+arguments = { text = "find_backward" }
+[[keymap]]
+id = "builtin.editor.normal.input-find-begin.t"
+context = "editor"
+mode = "normal"
+keys = "t"
+command = "input.find.begin"
+arguments = { text = "till_forward" }
+[[keymap]]
+id = "builtin.editor.normal.input-find-begin.upper-t"
+context = "editor"
+mode = "normal"
+keys = "T"
+command = "input.find.begin"
+arguments = { text = "till_backward" }
+[[keymap]]
+id = "builtin.editor.normal.input-find-repeat.semicolon"
+context = "editor"
+mode = "normal"
+keys = ";"
+command = "input.find.repeat"
+[[keymap]]
+id = "builtin.editor.normal.input-find-reverse.comma"
+context = "editor"
+mode = "normal"
+keys = ","
+command = "input.find.reverse"
+[[keymap]]
+id = "builtin.editor.operator-pending.input-find-begin.f"
+context = "editor"
+mode = "operator_pending"
+keys = "f"
+command = "input.find.begin"
+arguments = { text = "find_forward" }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-find-begin.upper-f"
+context = "editor"
+mode = "operator_pending"
+keys = "F"
+command = "input.find.begin"
+arguments = { text = "find_backward" }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-find-begin.t"
+context = "editor"
+mode = "operator_pending"
+keys = "t"
+command = "input.find.begin"
+arguments = { text = "till_forward" }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-find-begin.upper-t"
+context = "editor"
+mode = "operator_pending"
+keys = "T"
+command = "input.find.begin"
+arguments = { text = "till_backward" }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-find-repeat.semicolon"
+context = "editor"
+mode = "operator_pending"
+keys = ";"
+command = "input.find.repeat"
+[[keymap]]
+id = "builtin.editor.operator-pending.input-find-reverse.comma"
+context = "editor"
+mode = "operator_pending"
+keys = ","
+command = "input.find.reverse"
+[[keymap]]
+id = "builtin.editor.visual-char.input-find-begin.f"
+context = "editor"
+mode = "visual_char"
+keys = "f"
+command = "input.find.begin"
+arguments = { text = "find_forward" }
+[[keymap]]
+id = "builtin.editor.visual-char.input-find-begin.upper-f"
+context = "editor"
+mode = "visual_char"
+keys = "F"
+command = "input.find.begin"
+arguments = { text = "find_backward" }
+[[keymap]]
+id = "builtin.editor.visual-char.input-find-begin.t"
+context = "editor"
+mode = "visual_char"
+keys = "t"
+command = "input.find.begin"
+arguments = { text = "till_forward" }
+[[keymap]]
+id = "builtin.editor.visual-char.input-find-begin.upper-t"
+context = "editor"
+mode = "visual_char"
+keys = "T"
+command = "input.find.begin"
+arguments = { text = "till_backward" }
+[[keymap]]
+id = "builtin.editor.visual-char.input-find-repeat.semicolon"
+context = "editor"
+mode = "visual_char"
+keys = ";"
+command = "input.find.repeat"
+[[keymap]]
+id = "builtin.editor.visual-char.input-find-reverse.comma"
+context = "editor"
+mode = "visual_char"
+keys = ","
+command = "input.find.reverse"
+[[keymap]]
+id = "builtin.editor.visual-line.input-find-begin.f"
+context = "editor"
+mode = "visual_line"
+keys = "f"
+command = "input.find.begin"
+arguments = { text = "find_forward" }
+[[keymap]]
+id = "builtin.editor.visual-line.input-find-begin.upper-f"
+context = "editor"
+mode = "visual_line"
+keys = "F"
+command = "input.find.begin"
+arguments = { text = "find_backward" }
+[[keymap]]
+id = "builtin.editor.visual-line.input-find-begin.t"
+context = "editor"
+mode = "visual_line"
+keys = "t"
+command = "input.find.begin"
+arguments = { text = "till_forward" }
+[[keymap]]
+id = "builtin.editor.visual-line.input-find-begin.upper-t"
+context = "editor"
+mode = "visual_line"
+keys = "T"
+command = "input.find.begin"
+arguments = { text = "till_backward" }
+[[keymap]]
+id = "builtin.editor.visual-line.input-find-repeat.semicolon"
+context = "editor"
+mode = "visual_line"
+keys = ";"
+command = "input.find.repeat"
+[[keymap]]
+id = "builtin.editor.visual-line.input-find-reverse.comma"
+context = "editor"
+mode = "visual_line"
+keys = ","
+command = "input.find.reverse"
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-w"
+context = "editor"
+mode = "operator_pending"
+keys = "i w"
+command = "input.motion"
+arguments = { motion = "inner_word", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-upper-w"
+context = "editor"
+mode = "operator_pending"
+keys = "i W"
+command = "input.motion"
+arguments = { motion = "inner_big_word", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-p"
+context = "editor"
+mode = "operator_pending"
+keys = "i p"
+command = "input.motion"
+arguments = { motion = "inner_paragraph", linewise = true }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-paren-open"
+context = "editor"
+mode = "operator_pending"
+keys = "i ("
+command = "input.motion"
+arguments = { motion = "inner_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-paren-close"
+context = "editor"
+mode = "operator_pending"
+keys = "i )"
+command = "input.motion"
+arguments = { motion = "inner_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-b"
+context = "editor"
+mode = "operator_pending"
+keys = "i b"
+command = "input.motion"
+arguments = { motion = "inner_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-bracket-open"
+context = "editor"
+mode = "operator_pending"
+keys = "i ["
+command = "input.motion"
+arguments = { motion = "inner_bracket", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-bracket-close"
+context = "editor"
+mode = "operator_pending"
+keys = "i ]"
+command = "input.motion"
+arguments = { motion = "inner_bracket", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-brace-open"
+context = "editor"
+mode = "operator_pending"
+keys = "i {"
+command = "input.motion"
+arguments = { motion = "inner_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-brace-close"
+context = "editor"
+mode = "operator_pending"
+keys = "i }"
+command = "input.motion"
+arguments = { motion = "inner_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-upper-b"
+context = "editor"
+mode = "operator_pending"
+keys = "i B"
+command = "input.motion"
+arguments = { motion = "inner_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-angle-open"
+context = "editor"
+mode = "operator_pending"
+keys = "i <"
+command = "input.motion"
+arguments = { motion = "inner_angle", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-angle-close"
+context = "editor"
+mode = "operator_pending"
+keys = "i >"
+command = "input.motion"
+arguments = { motion = "inner_angle", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-double-quote"
+context = "editor"
+mode = "operator_pending"
+keys = "i \""
+command = "input.motion"
+arguments = { motion = "inner_double_quote", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-single-quote"
+context = "editor"
+mode = "operator_pending"
+keys = "i '"
+command = "input.motion"
+arguments = { motion = "inner_single_quote", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-backtick"
+context = "editor"
+mode = "operator_pending"
+keys = "i `"
+command = "input.motion"
+arguments = { motion = "inner_backtick", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-w"
+context = "editor"
+mode = "operator_pending"
+keys = "a w"
+command = "input.motion"
+arguments = { motion = "a_word", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-upper-w"
+context = "editor"
+mode = "operator_pending"
+keys = "a W"
+command = "input.motion"
+arguments = { motion = "a_big_word", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-p"
+context = "editor"
+mode = "operator_pending"
+keys = "a p"
+command = "input.motion"
+arguments = { motion = "a_paragraph", linewise = true }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-paren-open"
+context = "editor"
+mode = "operator_pending"
+keys = "a ("
+command = "input.motion"
+arguments = { motion = "a_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-paren-close"
+context = "editor"
+mode = "operator_pending"
+keys = "a )"
+command = "input.motion"
+arguments = { motion = "a_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-b"
+context = "editor"
+mode = "operator_pending"
+keys = "a b"
+command = "input.motion"
+arguments = { motion = "a_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-bracket-open"
+context = "editor"
+mode = "operator_pending"
+keys = "a ["
+command = "input.motion"
+arguments = { motion = "a_bracket", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-bracket-close"
+context = "editor"
+mode = "operator_pending"
+keys = "a ]"
+command = "input.motion"
+arguments = { motion = "a_bracket", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-brace-open"
+context = "editor"
+mode = "operator_pending"
+keys = "a {"
+command = "input.motion"
+arguments = { motion = "a_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-brace-close"
+context = "editor"
+mode = "operator_pending"
+keys = "a }"
+command = "input.motion"
+arguments = { motion = "a_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-upper-b"
+context = "editor"
+mode = "operator_pending"
+keys = "a B"
+command = "input.motion"
+arguments = { motion = "a_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-angle-open"
+context = "editor"
+mode = "operator_pending"
+keys = "a <"
+command = "input.motion"
+arguments = { motion = "a_angle", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-angle-close"
+context = "editor"
+mode = "operator_pending"
+keys = "a >"
+command = "input.motion"
+arguments = { motion = "a_angle", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-double-quote"
+context = "editor"
+mode = "operator_pending"
+keys = "a \""
+command = "input.motion"
+arguments = { motion = "a_double_quote", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-single-quote"
+context = "editor"
+mode = "operator_pending"
+keys = "a '"
+command = "input.motion"
+arguments = { motion = "a_single_quote", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-backtick"
+context = "editor"
+mode = "operator_pending"
+keys = "a `"
+command = "input.motion"
+arguments = { motion = "a_backtick", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-w"
+context = "editor"
+mode = "visual_char"
+keys = "i w"
+command = "input.motion"
+arguments = { motion = "inner_word", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-upper-w"
+context = "editor"
+mode = "visual_char"
+keys = "i W"
+command = "input.motion"
+arguments = { motion = "inner_big_word", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-p"
+context = "editor"
+mode = "visual_char"
+keys = "i p"
+command = "input.motion"
+arguments = { motion = "inner_paragraph", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-paren-open"
+context = "editor"
+mode = "visual_char"
+keys = "i ("
+command = "input.motion"
+arguments = { motion = "inner_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-paren-close"
+context = "editor"
+mode = "visual_char"
+keys = "i )"
+command = "input.motion"
+arguments = { motion = "inner_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-b"
+context = "editor"
+mode = "visual_char"
+keys = "i b"
+command = "input.motion"
+arguments = { motion = "inner_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-bracket-open"
+context = "editor"
+mode = "visual_char"
+keys = "i ["
+command = "input.motion"
+arguments = { motion = "inner_bracket", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-bracket-close"
+context = "editor"
+mode = "visual_char"
+keys = "i ]"
+command = "input.motion"
+arguments = { motion = "inner_bracket", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-brace-open"
+context = "editor"
+mode = "visual_char"
+keys = "i {"
+command = "input.motion"
+arguments = { motion = "inner_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-brace-close"
+context = "editor"
+mode = "visual_char"
+keys = "i }"
+command = "input.motion"
+arguments = { motion = "inner_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-upper-b"
+context = "editor"
+mode = "visual_char"
+keys = "i B"
+command = "input.motion"
+arguments = { motion = "inner_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-angle-open"
+context = "editor"
+mode = "visual_char"
+keys = "i <"
+command = "input.motion"
+arguments = { motion = "inner_angle", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-angle-close"
+context = "editor"
+mode = "visual_char"
+keys = "i >"
+command = "input.motion"
+arguments = { motion = "inner_angle", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-double-quote"
+context = "editor"
+mode = "visual_char"
+keys = "i \""
+command = "input.motion"
+arguments = { motion = "inner_double_quote", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-single-quote"
+context = "editor"
+mode = "visual_char"
+keys = "i '"
+command = "input.motion"
+arguments = { motion = "inner_single_quote", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-backtick"
+context = "editor"
+mode = "visual_char"
+keys = "i `"
+command = "input.motion"
+arguments = { motion = "inner_backtick", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-w"
+context = "editor"
+mode = "visual_char"
+keys = "a w"
+command = "input.motion"
+arguments = { motion = "a_word", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-upper-w"
+context = "editor"
+mode = "visual_char"
+keys = "a W"
+command = "input.motion"
+arguments = { motion = "a_big_word", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-p"
+context = "editor"
+mode = "visual_char"
+keys = "a p"
+command = "input.motion"
+arguments = { motion = "a_paragraph", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-paren-open"
+context = "editor"
+mode = "visual_char"
+keys = "a ("
+command = "input.motion"
+arguments = { motion = "a_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-paren-close"
+context = "editor"
+mode = "visual_char"
+keys = "a )"
+command = "input.motion"
+arguments = { motion = "a_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-b"
+context = "editor"
+mode = "visual_char"
+keys = "a b"
+command = "input.motion"
+arguments = { motion = "a_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-bracket-open"
+context = "editor"
+mode = "visual_char"
+keys = "a ["
+command = "input.motion"
+arguments = { motion = "a_bracket", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-bracket-close"
+context = "editor"
+mode = "visual_char"
+keys = "a ]"
+command = "input.motion"
+arguments = { motion = "a_bracket", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-brace-open"
+context = "editor"
+mode = "visual_char"
+keys = "a {"
+command = "input.motion"
+arguments = { motion = "a_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-brace-close"
+context = "editor"
+mode = "visual_char"
+keys = "a }"
+command = "input.motion"
+arguments = { motion = "a_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-upper-b"
+context = "editor"
+mode = "visual_char"
+keys = "a B"
+command = "input.motion"
+arguments = { motion = "a_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-angle-open"
+context = "editor"
+mode = "visual_char"
+keys = "a <"
+command = "input.motion"
+arguments = { motion = "a_angle", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-angle-close"
+context = "editor"
+mode = "visual_char"
+keys = "a >"
+command = "input.motion"
+arguments = { motion = "a_angle", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-double-quote"
+context = "editor"
+mode = "visual_char"
+keys = "a \""
+command = "input.motion"
+arguments = { motion = "a_double_quote", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-single-quote"
+context = "editor"
+mode = "visual_char"
+keys = "a '"
+command = "input.motion"
+arguments = { motion = "a_single_quote", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-backtick"
+context = "editor"
+mode = "visual_char"
+keys = "a `"
+command = "input.motion"
+arguments = { motion = "a_backtick", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.edit-operator.g-c-c"
+context = "editor"
+mode = "normal"
+keys = "g c c"
+command = "edit.operator"
+arguments = { operator = "comment", motion = "line", linewise = true }
+desc = "Toggle Comment Line"
+[[keymap]]
+id = "builtin.editor.normal.input-operator-begin.g-c"
+context = "editor"
+mode = "normal"
+keys = "g c"
+command = "input.operator.begin"
+arguments = { operator = "comment" }
+desc = "Toggle Comment"
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.g-c"
+context = "editor"
+mode = "visual_char"
+keys = "g c"
+command = "input.visual.operator"
+arguments = { operator = "comment", linewise = false }
+desc = "Toggle Comment"
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.g-c"
+context = "editor"
+mode = "visual_line"
+keys = "g c"
+command = "input.visual.operator"
+arguments = { operator = "comment", linewise = true }
+desc = "Toggle Comment"
+[[keymap]]
+id = "builtin.editor.normal.input-operator-begin.g-s-a"
+context = "editor"
+mode = "normal"
+keys = "g s a"
+command = "input.operator.begin"
+arguments = { operator = "surround_add" }
+desc = "Add Surrounding"
+[[keymap]]
+id = "builtin.editor.normal.input-surround-begin.g-s-d"
+context = "editor"
+mode = "normal"
+keys = "g s d"
+command = "input.surround.begin"
+arguments = { text = "delete" }
+desc = "Delete Surrounding"
+[[keymap]]
+id = "builtin.editor.normal.input-surround-begin.g-s-r"
+context = "editor"
+mode = "normal"
+keys = "g s r"
+command = "input.surround.begin"
+arguments = { text = "replace" }
+desc = "Replace Surrounding"
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.g-s-a"
+context = "editor"
+mode = "visual_char"
+keys = "g s a"
+command = "input.visual.operator"
+arguments = { operator = "surround_add", linewise = false }
+desc = "Add Surrounding"
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.g-s-a"
+context = "editor"
+mode = "visual_line"
+keys = "g s a"
+command = "input.visual.operator"
+arguments = { operator = "surround_add", linewise = true }
+desc = "Add Surrounding"
+[[keymap]]
+id = "builtin.character.surface.input-cancel.escape"
+context = "character"
+keys = "escape"
+command = "input.cancel"
+
 # Prefix and pending-character contexts.
 [[keymap]]
 id = "builtin.prefix.surface.input-motion.g"
 context = "prefix"
 keys = "g"
 command = "input.motion"
-arguments = { motion = "document_start", linewise = false }
+arguments = { motion = "document_start", linewise = true }
 [[keymap]]
 id = "builtin.prefix.surface.input-cancel.escape"
 context = "prefix"

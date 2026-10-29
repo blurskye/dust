@@ -62,6 +62,7 @@ impl InputSession {
             | "edit.join_lines"
             | "edit.toggle_case"
             | "edit.put"
+            | "edit.surround"
             | "edit.operator"
             | "edit.repeat_visual" => {
                 self.last_change = vec![semantic];

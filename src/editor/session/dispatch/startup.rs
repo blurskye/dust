@@ -48,6 +48,7 @@ impl InteractiveApplication {
                 .mirror_named_to_unnamed,
             ambiguous_width_wide: configuration.settings.editor.ambiguous_width
                 == crate::config::AmbiguousWidth::Wide,
+            autopairs: configuration.settings.editor.autopairs,
         };
         let dashboard_visible = matches!(startup, StartupTarget::Dashboard { .. })
             && configuration.settings.startup.show_dashboard;

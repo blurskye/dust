@@ -531,7 +531,7 @@ fn symbolic_leaders_expand_before_dispatch_and_preserve_literal_space_actions() 
     loaded.bundled_count = bundled_count;
     let policy = crate::config::KeymapPolicyConfig {
         load_bundled_defaults: true,
-        leader: ",".into(),
+        leader: "\\".into(),
         local_leader: ";".into(),
     };
     let (keymaps, diagnostic) = compile_keymaps(&app.commands, &loaded, &policy);
@@ -541,7 +541,7 @@ fn symbolic_leaders_expand_before_dispatch_and_preserve_literal_space_actions() 
         .inspect("editor.normal", "buffer.picker.open")
         .expect("bundled leader binding");
     assert_eq!(leader_binding.source_keys, "<leader> ,");
-    assert_eq!(leader_binding.keys, ", ,");
+    assert_eq!(leader_binding.keys, "\\ ,");
     assert_eq!(
         keymaps
             .binding_for("dashboard", "health.open")
@@ -556,7 +556,7 @@ fn symbolic_leaders_expand_before_dispatch_and_preserve_literal_space_actions() 
 
     let mut dispatch = crate::editor::input::KeymapSequence::default();
     assert_eq!(
-        keymaps.resolve(&mut dispatch, "editor.normal", KeyEvent::character(',')),
+        keymaps.resolve(&mut dispatch, "editor.normal", KeyEvent::character('\\')),
         MappingResolution::Pending
     );
     assert_eq!(
@@ -1159,11 +1159,15 @@ fn documented_key_reaches(
             "space" => ' ',
             other => other.chars().next().expect("single-character key token"),
         };
-        match keymaps.resolve(&mut sequence, "editor.normal", KeyEvent::character(character)) {
+        match keymaps.resolve(
+            &mut sequence,
+            "editor.normal",
+            KeyEvent::character(character),
+        ) {
             MappingResolution::Pending => {}
             MappingResolution::Ready(invocation)
             | MappingResolution::ReadyAndReplay(invocation, _) => {
-                return Some(invocation.id.as_str().to_owned())
+                return Some(invocation.id.as_str().to_owned());
             }
             _ => return None,
         }
@@ -1226,11 +1230,8 @@ fn the_documented_git_and_debugger_keys_each_reach_their_command() {
 fn every_key_the_experience_document_names_is_bound_or_marked_as_having_no_command() {
     let app = app();
     let keymaps = bundled_keymaps(&app);
-    let document = fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/docs/experience.md"
-    ))
-    .expect("the experience document is part of the checkout");
+    let document = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/experience.md"))
+        .expect("the experience document is part of the checkout");
     // Scope to the prefix table itself: section 2.2's leader table also names `Space g g`,
     // and a row there says what the key opens rather than whether it is bound.
     let table = document

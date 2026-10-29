@@ -559,6 +559,21 @@ fn register_grammar_commands(
             GrammarInput::ReplaceText,
         ),
         (
+            "input.character",
+            "Complete pending character input",
+            GrammarInput::Character,
+        ),
+        (
+            "input.find.begin",
+            "Find character on line",
+            GrammarInput::FindBegin,
+        ),
+        (
+            "input.surround.begin",
+            "Delete or replace surrounding pair",
+            GrammarInput::SurroundBegin,
+        ),
+        (
             "input.macro.record.select",
             "Record macro register",
             GrammarInput::MacroRecordSelect,
@@ -580,6 +595,19 @@ fn register_grammar_commands(
                     string_arg(invocation, "text")?.into(),
                 )))
             },
+        )?;
+    }
+    for (id, title, reverse) in [
+        ("input.find.repeat", "Repeat last find", false),
+        ("input.find.reverse", "Repeat last find backward", true),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::View,
+            ArgumentSchema::default(),
+            move |_| AppEffect::Grammar(GrammarInput::FindRepeat { reverse }),
         )?;
     }
     register(

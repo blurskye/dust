@@ -34,6 +34,10 @@ Dust uses Vim-style Normal, Insert, Visual, and command-line modes.
 | Undo / redo | `u` / `Ctrl-r` |
 | Search forward/backward | `/` / `?` |
 | Repeat search | `n` / `N` |
+| Find a character on the line | `f`/`F`/`t`/`T`, then `;` / `,` to repeat |
+| Change inside quotes, brackets, a word | `ci"`, `ci(`, `ciw` (also `a…` for around, `ip`/`ap` paragraph) |
+| Toggle comment | `gcc` line, `gc` + motion, `gc` in Visual |
+| Add / delete / replace surrounding pair | `gsa` + motion + char, `gsd` + char, `gsr` + old + new |
 | Command palette | `Space f c` |
 | File picker | `Space Space` |
 | Workspace grep | `Space /` or `Space s g` |

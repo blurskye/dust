@@ -260,6 +260,7 @@ pub struct EditingPolicy {
     pub registers_enabled: bool,
     pub mirror_named_to_unnamed: bool,
     pub ambiguous_width_wide: bool,
+    pub autopairs: bool,
 }
 
 impl Default for EditingPolicy {
@@ -272,6 +273,7 @@ impl Default for EditingPolicy {
             registers_enabled: true,
             mirror_named_to_unnamed: true,
             ambiguous_width_wide: false,
+            autopairs: false,
         }
     }
 }

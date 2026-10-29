@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -194,11 +196,15 @@ pub struct EditorConfig {
     pub control_character_replacement: String,
     pub zero_width_replacement: String,
     pub ambiguous_width: AmbiguousWidth,
+    /// Insert the closing bracket or quote as the opening one is typed.
+    pub autopairs: bool,
     pub viewport: EditorViewportConfig,
     pub git_signs: GitSignsConfig,
     pub indent_guides: IndentGuideConfig,
     pub registers: RegisterConfig,
     pub large_file: LargeFileConfig,
+    /// Line comment string per file extension, used by `gc`.
+    pub comments: BTreeMap<String, String>,
 }
 
 impl Default for EditorConfig {
@@ -222,11 +228,13 @@ impl Default for EditorConfig {
             control_character_replacement: "�".into(),
             zero_width_replacement: "◌".into(),
             ambiguous_width: AmbiguousWidth::Narrow,
+            autopairs: true,
             viewport: EditorViewportConfig::default(),
             git_signs: GitSignsConfig::default(),
             indent_guides: IndentGuideConfig::default(),
             registers: RegisterConfig::default(),
             large_file: LargeFileConfig::default(),
+            comments: BTreeMap::new(),
         }
     }
 }

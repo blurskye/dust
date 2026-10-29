@@ -19,6 +19,7 @@ pub enum PendingInputContext {
     Register,
     Prefix,
     Replace,
+    Character,
     MacroRecord,
     MacroReplay,
 }
@@ -32,15 +33,30 @@ pub enum GrammarInput {
     RegisterSelect(String),
     OperatorBegin(String),
     OperatorRepeat(String),
-    Motion { motion: String, linewise: bool },
+    Motion {
+        motion: String,
+        linewise: bool,
+    },
     PrefixBegin,
     ReplaceBegin,
     ReplaceText(String),
+    /// `f`, `F`, `t` or `T`: the motion waits for the character to find.
+    FindBegin(String),
+    /// `;` repeats the last find, `,` repeats it in the other direction.
+    FindRepeat {
+        reverse: bool,
+    },
+    /// `gsd` and `gsr`: wait for the surrounding character to delete or replace.
+    SurroundBegin(String),
+    Character(String),
     MacroRecordToggle,
     MacroRecordSelect(String),
     MacroReplayBegin,
     MacroReplaySelect(String),
-    VisualOperator { operator: String, linewise: bool },
+    VisualOperator {
+        operator: String,
+        linewise: bool,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -50,8 +66,19 @@ pub struct ModalResolver {
     operator: Option<String>,
     register: Option<char>,
     pending: Option<PendingInputContext>,
+    awaiting: Option<CharacterTarget>,
+    last_find: Option<(String, char)>,
     macro_recording: bool,
     count_limit: u64,
+}
+
+/// What a typed character completes while the `character` context is pending.
+#[derive(Clone, Debug)]
+enum CharacterTarget {
+    Find(String),
+    SurroundAdd(CommandInvocation),
+    SurroundDelete,
+    SurroundReplace(Option<char>),
 }
 
 impl Default for ModalResolver {
@@ -62,6 +89,8 @@ impl Default for ModalResolver {
             operator: None,
             register: None,
             pending: None,
+            awaiting: None,
+            last_find: None,
             macro_recording: false,
             count_limit: ABSOLUTE_MAX_COUNT,
         }
@@ -84,7 +113,9 @@ impl ModalResolver {
 
     pub fn cancel_pending(&mut self) {
         let count_limit = self.count_limit;
+        let last_find = self.last_find.take();
         *self = Self::with_count_limit(count_limit);
+        self.last_find = last_find;
     }
 
     #[must_use]
@@ -147,7 +178,7 @@ impl ModalResolver {
                     self.push_count(0)?;
                     Ok(InputAction::Pending)
                 } else {
-                    self.motion("line_start", false)
+                    self.motion("line_start", false, None)
                 }
             }
             GrammarInput::RegisterBegin => {
@@ -175,7 +206,7 @@ impl ModalResolver {
                 self.reset_pending();
                 Ok(InputAction::Invoke(invocation))
             }
-            GrammarInput::Motion { motion, linewise } => self.motion(&motion, linewise),
+            GrammarInput::Motion { motion, linewise } => self.motion(&motion, linewise, None),
             GrammarInput::PrefixBegin => {
                 self.pending = Some(PendingInputContext::Prefix);
                 Ok(InputAction::Pending)
@@ -190,6 +221,83 @@ impl ModalResolver {
                     command("edit.replace")?.with_argument("text", CommandValue::String(text));
                 invocation.count = count_nonzero(self.take_count());
                 Ok(InputAction::Invoke(invocation))
+            }
+            GrammarInput::FindBegin(motion) => {
+                self.await_character(CharacterTarget::Find(motion));
+                Ok(InputAction::Pending)
+            }
+            GrammarInput::FindRepeat { reverse } => {
+                let Some((motion, character)) = self.last_find.clone() else {
+                    self.reset_pending();
+                    return Ok(InputAction::Cancelled);
+                };
+                let motion = if reverse {
+                    reversed_find(&motion)
+                } else {
+                    motion.as_str()
+                };
+                // Repeating `t`/`T` must not stop in front of the character it already reached.
+                let motion = match motion {
+                    "till_forward" => "till_forward_again",
+                    "till_backward" => "till_backward_again",
+                    other => other,
+                };
+                self.motion(motion, false, Some(character))
+            }
+            GrammarInput::SurroundBegin(action) => {
+                self.await_character(match action.as_str() {
+                    "replace" => CharacterTarget::SurroundReplace(None),
+                    _ => CharacterTarget::SurroundDelete,
+                });
+                Ok(InputAction::Pending)
+            }
+            GrammarInput::Character(value) => {
+                let character = one_character(&value)?;
+                let Some(target) = self.awaiting.take() else {
+                    self.reset_pending();
+                    return Ok(InputAction::Cancelled);
+                };
+                self.pending = None;
+                match target {
+                    CharacterTarget::Find(motion) => {
+                        self.last_find = Some((motion.clone(), character));
+                        self.motion(&motion, false, Some(character))
+                    }
+                    CharacterTarget::SurroundAdd(invocation) => {
+                        self.reset_pending();
+                        Ok(InputAction::Invoke(invocation.with_argument(
+                            "character",
+                            CommandValue::String(character.to_string()),
+                        )))
+                    }
+                    CharacterTarget::SurroundDelete => {
+                        self.reset_pending();
+                        Ok(InputAction::Invoke(
+                            command("edit.surround")?
+                                .with_argument("action", CommandValue::String("delete".into()))
+                                .with_argument(
+                                    "character",
+                                    CommandValue::String(character.to_string()),
+                                ),
+                        ))
+                    }
+                    CharacterTarget::SurroundReplace(None) => {
+                        self.await_character(CharacterTarget::SurroundReplace(Some(character)));
+                        Ok(InputAction::Pending)
+                    }
+                    CharacterTarget::SurroundReplace(Some(old)) => {
+                        self.reset_pending();
+                        Ok(InputAction::Invoke(
+                            command("edit.surround")?
+                                .with_argument("action", CommandValue::String("replace".into()))
+                                .with_argument("character", CommandValue::String(old.to_string()))
+                                .with_argument(
+                                    "replacement",
+                                    CommandValue::String(character.to_string()),
+                                ),
+                        ))
+                    }
+                }
             }
             GrammarInput::MacroRecordToggle => {
                 if self.macro_recording {
@@ -222,29 +330,57 @@ impl ModalResolver {
                 Ok(InputAction::Invoke(invocation))
             }
             GrammarInput::VisualOperator { operator, linewise } => {
+                let surround = operator == "surround_add";
                 let mut invocation = command("edit.operator")?
                     .with_argument("operator", CommandValue::String(operator))
                     .with_argument("motion", CommandValue::String("visual".into()))
                     .with_argument("linewise", CommandValue::Bool(linewise));
                 invocation.register = self.register.take();
                 self.reset_pending();
+                if surround {
+                    self.await_character(CharacterTarget::SurroundAdd(invocation));
+                    return Ok(InputAction::Pending);
+                }
                 Ok(InputAction::Invoke(invocation))
             }
         }
     }
 
-    fn motion(&mut self, motion: &str, linewise: bool) -> Result<InputAction, InputError> {
+    fn motion(
+        &mut self,
+        motion: &str,
+        linewise: bool,
+        character: Option<char>,
+    ) -> Result<InputAction, InputError> {
         self.pending = None;
         if self.operator.is_some() {
             let count = self.combined_count()?;
-            let invocation = self.operator_invocation(motion, linewise, count)?;
+            let mut invocation = self.operator_invocation(motion, linewise, count)?;
+            if let Some(character) = character {
+                invocation = invocation
+                    .with_argument("character", CommandValue::String(character.to_string()));
+            }
+            let surround = self.operator.as_deref() == Some("surround_add");
             self.reset_pending();
+            if surround {
+                self.await_character(CharacterTarget::SurroundAdd(invocation));
+                return Ok(InputAction::Pending);
+            }
             return Ok(InputAction::Invoke(invocation));
         }
         let mut invocation = command("view.cursor.move")?
             .with_argument("motion", CommandValue::String(motion.into()));
+        if let Some(character) = character {
+            invocation =
+                invocation.with_argument("character", CommandValue::String(character.to_string()));
+        }
         invocation.count = count_nonzero(self.take_count());
         Ok(InputAction::Invoke(invocation))
+    }
+
+    fn await_character(&mut self, target: CharacterTarget) {
+        self.awaiting = Some(target);
+        self.pending = Some(PendingInputContext::Character);
     }
 
     fn operator_invocation(
@@ -298,6 +434,17 @@ impl ModalResolver {
         self.operator = None;
         self.register = None;
         self.pending = None;
+        self.awaiting = None;
+    }
+}
+
+fn reversed_find(motion: &str) -> &str {
+    match motion {
+        "find_forward" => "find_backward",
+        "find_backward" => "find_forward",
+        "till_forward" => "till_backward",
+        "till_backward" => "till_forward",
+        other => other,
     }
 }
 

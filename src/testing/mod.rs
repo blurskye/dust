@@ -45,6 +45,7 @@ impl HeadlessEditor {
             mirror_named_to_unnamed: loaded.config.editor.registers.mirror_named_to_unnamed,
             ambiguous_width_wide: loaded.config.editor.ambiguous_width
                 == crate::config::AmbiguousWidth::Wide,
+            autopairs: loaded.config.editor.autopairs,
         };
         let (keymaps, diagnostic) =
             compile_keymaps(&registry, &loaded.keymaps, &loaded.config.input.keymaps);
@@ -170,6 +171,7 @@ impl HeadlessEditor {
                 crate::editor::input::PendingInputContext::Register => "register",
                 crate::editor::input::PendingInputContext::Prefix => "prefix",
                 crate::editor::input::PendingInputContext::Replace => "replace",
+                crate::editor::input::PendingInputContext::Character => "character",
                 crate::editor::input::PendingInputContext::MacroRecord => "macro_record",
                 crate::editor::input::PendingInputContext::MacroReplay => "macro_replay",
             }
@@ -457,5 +459,113 @@ mod tests {
             .feed(KeyEvent::plain(crate::editor::input::KeyCode::Escape))
             .expect("normal");
         assert_eq!(editor.text(), "Q cd\n");
+    }
+
+    /// Feeds `keys` one character at a time; `\u{1b}` is Escape and `\u{8}` is Backspace.
+    fn edited(text: &str, keys: &str) -> String {
+        let mut editor = HeadlessEditor::with_text(text);
+        for character in keys.chars() {
+            let key = match character {
+                '\u{1b}' => KeyEvent::plain(crate::editor::input::KeyCode::Escape),
+                '\u{8}' => KeyEvent::plain(crate::editor::input::KeyCode::Backspace),
+                other => KeyEvent::character(other),
+            };
+            editor
+                .feed(key)
+                .unwrap_or_else(|error| panic!("key {character:?} in {keys:?}: {error}"));
+        }
+        editor.text()
+    }
+
+    #[test]
+    fn find_motions_move_operate_and_repeat_on_the_line() {
+        assert_eq!(edited("a,b,c,d", "f,;x"), "a,bc,d");
+        assert_eq!(edited("a,b,c,d", "f,;,x"), "ab,c,d");
+        assert_eq!(edited("abc,def", "dt,"), ",def");
+        assert_eq!(edited("abc,def", "df,"), "def");
+        assert_eq!(edited("abc,def", "$F,x"), "abcdef");
+        assert_eq!(edited("abc,def", "$dT,"), "abc,f");
+        // `;` after `t` steps past the character the cursor already stands before.
+        assert_eq!(edited("a,b,c", "t,;x"), "a,,c");
+    }
+
+    #[test]
+    fn text_objects_work_after_operators_and_in_visual_mode() {
+        assert_eq!(edited("call(one, two)", "fnci(x\u{1b}"), "call(x)");
+        assert_eq!(edited("say \"hello world\" now", "di\""), "say \"\" now");
+        assert_eq!(edited("say \"hello world\" now", "da\""), "say  now");
+        assert_eq!(edited("one two three", "wdaw"), "one three");
+        assert_eq!(edited("one two", "ciwX\u{1b}"), "X two");
+        assert_eq!(edited("one two", "dW"), "two");
+        assert_eq!(edited("a [b (c) d] e", "fcdi]"), "a [] e");
+        assert_eq!(edited("a [b (c) d] e", "fcdab"), "a [b  d] e");
+        assert_eq!(edited("a\nb\n\nc\n", "dip"), "\nc\n");
+        assert_eq!(edited("a\nb\n\nc\n", "dap"), "c\n");
+        assert_eq!(edited("fn x() {\n    body\n}\n", "jdi{"), "fn x() {\n}\n");
+        assert_eq!(edited("one two", "wviwd"), "one ");
+        assert_eq!(edited("(a b)", "lva(d"), "");
+    }
+
+    #[test]
+    fn linewise_motions_after_operators_cover_every_line_to_the_target() {
+        assert_eq!(edited("a\nb\nc\n", "dj"), "c\n");
+        assert_eq!(edited("a\nb\nc\n", "jdk"), "c\n");
+        assert_eq!(edited("a\nb\nc\n", "jdG"), "a\n");
+        assert_eq!(edited("a\nb\nc\n", "Gdgg"), "");
+    }
+
+    #[test]
+    fn surround_adds_deletes_and_replaces_pairs() {
+        assert_eq!(edited("one two", "gsaiw)"), "(one) two");
+        assert_eq!(edited("one two", "gsaiw("), "( one ) two");
+        assert_eq!(edited("one two", "gsae\""), "\"one\" two");
+        assert_eq!(edited("one two", "viwgsa]"), "[one] two");
+        assert_eq!(edited("(one) two", "lgsd)"), "one two");
+        assert_eq!(edited("( one ) two", "llgsd("), "one two");
+        assert_eq!(edited("'one' two", "lgsr'\""), "\"one\" two");
+        assert_eq!(edited("[one] two", "lgsr]b"), "(one) two");
+    }
+
+    #[test]
+    fn autopairs_close_skip_and_delete_pairs_in_insert_mode() {
+        assert_eq!(edited("", "i(x\u{1b}"), "(x)");
+        assert_eq!(edited("", "i()\u{1b}"), "()");
+        assert_eq!(edited("", "i(\u{8}\u{1b}"), "");
+        assert_eq!(edited("", "i\"a\"\u{1b}"), "\"a\"");
+        assert_eq!(edited("", "iit's\u{1b}"), "it's");
+        assert_eq!(edited("ab", "i(\u{1b}"), "(ab");
+        assert_eq!(edited("", "i{[\u{1b}"), "{[]}");
+    }
+
+    #[test]
+    fn comment_operator_toggles_lines_at_the_smallest_indent() {
+        use crate::editor::{CommandInvocation, CommandValue, InvocationSource};
+        let source = "fn a() {\n    x();\n\n    y();\n}\n";
+        let mut editor = HeadlessEditor::with_text(source);
+        let toggle = || {
+            let mut invocation = CommandInvocation::new("edit.operator", InvocationSource::Test)
+                .expect("command")
+                .with_argument("operator", CommandValue::String("comment".into()))
+                .with_argument("motion", CommandValue::String("line".into()))
+                .with_argument("linewise", CommandValue::Bool(true))
+                .with_argument("comment", CommandValue::String("//".into()));
+            invocation.count = std::num::NonZeroU64::new(5);
+            invocation
+        };
+        editor.execute(toggle()).expect("comment");
+        assert_eq!(
+            editor.text(),
+            "// fn a() {\n//     x();\n\n//     y();\n// }\n"
+        );
+        editor.execute(toggle()).expect("uncomment");
+        assert_eq!(editor.text(), source);
+
+        let mut editor = HeadlessEditor::with_text("    a\n    // b\n");
+        let mut invocation = toggle();
+        invocation.count = std::num::NonZeroU64::new(2);
+        editor
+            .execute(invocation)
+            .expect("mixed lines are commented");
+        assert_eq!(editor.text(), "    // a\n    // // b\n");
     }
 }

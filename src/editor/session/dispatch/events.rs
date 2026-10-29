@@ -396,6 +396,7 @@ impl InteractiveApplication {
                 crate::editor::input::PendingInputContext::Register => "register",
                 crate::editor::input::PendingInputContext::Prefix => "prefix",
                 crate::editor::input::PendingInputContext::Replace => "replace",
+                crate::editor::input::PendingInputContext::Character => "character",
                 crate::editor::input::PendingInputContext::MacroRecord => "macro_record",
                 crate::editor::input::PendingInputContext::MacroReplay => "macro_replay",
             }
@@ -679,6 +680,28 @@ impl InteractiveApplication {
         if invocation.target.buffer.is_none() {
             invocation.target.buffer = self.state.active_buffer_id();
         }
+        if invocation.id.as_str() == "edit.operator"
+            && invocation.arguments.get("operator") == Some(&CommandValue::String("comment".into()))
+            && !invocation.arguments.contains_key("comment")
+        {
+            let token = invocation
+                .target
+                .buffer
+                .and_then(|id| self.state.buffers.get(id))
+                .and_then(|buffer| buffer.path.as_deref())
+                .and_then(|path| path.extension())
+                .and_then(|extension| {
+                    self.configuration
+                        .settings()
+                        .editor
+                        .comments
+                        .get(extension.to_string_lossy().as_ref())
+                        .cloned()
+                });
+            if let Some(token) = token {
+                invocation = invocation.with_argument("comment", CommandValue::String(token));
+            }
+        }
         let visual_operator = invocation.id.as_str() == "edit.operator"
             && invocation
                 .arguments
@@ -742,7 +765,18 @@ impl InteractiveApplication {
                     self.process_effect(effect);
                 }
             }
-            Err(error) => self.show_error(error),
+            Err(error) => {
+                // A failed `dfz` or `di(` must not leave the view stuck in operator-pending.
+                if self
+                    .state
+                    .active_view
+                    .and_then(|view| self.state.views.get(view))
+                    .is_some_and(|view| view.mode == EditorMode::OperatorPending)
+                {
+                    self.set_mode(EditorMode::Normal);
+                }
+                self.show_error(error);
+            }
         }
     }
 }
@@ -839,6 +873,7 @@ impl InteractiveApplication {
                 .mirror_named_to_unnamed,
             ambiguous_width_wide: candidate.view().settings.editor.ambiguous_width
                 == crate::config::AmbiguousWidth::Wide,
+            autopairs: candidate.view().settings.editor.autopairs,
         };
         self.state.mark_editor_changed();
         if candidate.view().settings.observability != self.configuration.settings().observability {
@@ -2611,8 +2646,8 @@ impl InteractiveApplication {
                     .map(|(index, item)| {
                         (
                             PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                                badge: String::new(),
+                                kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("code-lens:{index}")),
                                 label: item.title,
                                 detail: item.command.unwrap_or_default(),
