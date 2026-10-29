@@ -166,9 +166,9 @@ impl TerminalSession {
         Ok(())
     }
 
-    pub fn set_theme(&mut self, theme: ThemeConfig) {
-        if self.theme != theme {
-            self.theme = theme;
+    pub fn set_theme(&mut self, theme: &ThemeConfig) {
+        if &self.theme != theme {
+            self.theme = theme.clone();
             self.previous = None;
         }
     }
@@ -191,7 +191,8 @@ impl TerminalSession {
         }
     }
 
-    pub fn draw(&mut self, frame: &Frame) -> Result<(), TerminalError> {
+    /// Paint what changed since the last frame, and say whether anything did.
+    pub fn draw(&mut self, frame: &Frame) -> Result<bool, TerminalError> {
         let mut output = Vec::new();
         if !queue_frame(
             &mut output,
@@ -200,12 +201,12 @@ impl TerminalSession {
             &self.theme,
             self.color_tier,
         )? {
-            return Ok(());
+            return Ok(false);
         }
         self.stdout.write_all(&output)?;
         self.stdout.flush()?;
         self.previous = Some(frame.clone());
-        Ok(())
+        Ok(true)
     }
 }
 
@@ -228,6 +229,11 @@ fn queue_frame(
     if size_changed {
         queue!(writer, Clear(ClearType::All))?;
     }
+    // Where the terminal cursor is known to be, and the style last sent. A run of changed
+    // cells is written with one move and one style; the move is only skipped after plain
+    // ASCII, whose width every terminal agrees on.
+    let mut at = None;
+    let mut style = None;
     for y in 0..frame.grid.height() {
         for x in 0..frame.grid.width() {
             let cell = frame.grid.get(x, y).expect("grid bounds");
@@ -240,9 +246,17 @@ fn queue_frame(
             if unchanged && !size_changed {
                 continue;
             }
-            queue!(writer, MoveTo(x, y))?;
-            queue_style(writer, cell.style, theme, color_tier)?;
+            if at != Some((x, y)) {
+                queue!(writer, MoveTo(x, y))?;
+            }
+            if style != Some(cell.style) {
+                queue_style(writer, cell.style, theme, color_tier)?;
+                style = Some(cell.style);
+            }
             queue!(writer, Print(&cell.symbol))?;
+            let plain = cell.symbol.len() == 1 && cell.symbol.as_bytes()[0].is_ascii_graphic()
+                || cell.symbol == " ";
+            at = plain.then(|| (x + 1, y));
         }
     }
     queue!(writer, ResetColor, SetAttribute(Attribute::Reset))?;
@@ -692,6 +706,8 @@ mod tests {
         assert!(emitted.starts_with("\x1b[?2026h\x1b[?25l\x1b[2J"));
         assert!(emitted.ends_with("\x1b[2;3H\x1b[6 q\x1b[?25h\x1b[?2026l"));
         assert_eq!(emitted.matches("\x1b[?25h").count(), 1);
+        // A run of same-styled text is one move, one style and the text.
+        assert!(emitted.contains("top") && emitted.contains("status"));
 
         // An unchanged frame must not move/show the cursor or restart its blink/trail.
         let mut output = Vec::new();

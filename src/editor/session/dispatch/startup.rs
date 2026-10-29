@@ -17,6 +17,9 @@ impl InteractiveApplication {
         persist_logs: bool,
         clock: std::sync::Arc<dyn crate::clock::Clock>,
     ) -> Result<Self, InteractiveError> {
+        // Checking which of the ~300 catalog tools are installed reads every PATH directory;
+        // it runs while the configuration below is parsed and compiled.
+        let tool_inspection = std::thread::spawn(crate::tools::inspect_tools);
         let mut state = build_state(&startup);
         let mut commands = CommandRegistry::default();
         register_builtin_commands(&mut commands)?;
@@ -120,7 +123,11 @@ impl InteractiveApplication {
         );
         let debugger_session =
             DebugSession::new(&configuration.settings.debug, workspace.version());
-        let tooling = super::super::tooling::ToolingSession::new();
+        let tooling = super::super::tooling::ToolingSession::new(
+            tool_inspection
+                .join()
+                .unwrap_or_else(|_| crate::tools::inspect_tools()),
+        );
         let mut application = InteractiveApplication {
             state,
             extension: super::super::extensions::ExtensionSession::new(

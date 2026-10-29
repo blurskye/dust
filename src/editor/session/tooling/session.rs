@@ -125,9 +125,9 @@ pub(in crate::editor::session) enum ToolInstall {
 }
 
 impl ToolingSession {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(entries: Vec<ToolEntry>) -> Self {
         Self {
-            entries: inspect_tools(),
+            entries,
             nix_preferred: BTreeSet::new(),
             managed_preferred: BTreeSet::new(),
             managed_versions: BTreeMap::new(),

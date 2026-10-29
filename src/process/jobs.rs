@@ -107,7 +107,20 @@ impl JobSupervisor {
             .spawn(move || {
                 let mut engine = JobEngine::new(event_capacity);
                 while !closing.load(Ordering::Acquire) {
-                    match rx.try_recv() {
+                    // Child processes are polled every 2 ms while any run; with none, the
+                    // worker sleeps until a job arrives so an idle editor stays idle.
+                    let next = if engine.jobs.is_empty() {
+                        rx.recv_timeout(Duration::from_millis(100))
+                            .map_err(|error| match error {
+                                mpsc::RecvTimeoutError::Timeout => mpsc::TryRecvError::Empty,
+                                mpsc::RecvTimeoutError::Disconnected => {
+                                    mpsc::TryRecvError::Disconnected
+                                }
+                            })
+                    } else {
+                        rx.try_recv()
+                    };
+                    match next {
                         Ok(submission) => {
                             let id = submission.id;
                             let revision = submission.request.root_revision;
@@ -140,7 +153,9 @@ impl JobSupervisor {
                             return;
                         }
                     }
-                    thread::sleep(Duration::from_millis(2));
+                    if !engine.jobs.is_empty() {
+                        thread::sleep(Duration::from_millis(2));
+                    }
                 }
             })
             .expect("job worker");

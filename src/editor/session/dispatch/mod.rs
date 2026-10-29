@@ -226,6 +226,12 @@ pub fn run_interactive(
     application.window_session.observe_size(terminal.size()?);
     application.clipboard.enable(&application.state.registers);
 
+    // Polls since the screen last changed or input arrived. Background results are only
+    // picked up between polls, so the loop polls quickly while things happen and slows to
+    // IDLE_POLL once the screen has been still for IDLE_AFTER polls. Input always wakes it.
+    const IDLE_AFTER: u32 = 60;
+    const IDLE_POLL: Duration = Duration::from_millis(250);
+    let mut still_polls = 0u32;
     while !application.should_quit {
         application.process_vfs_results();
         application.process_git_status_events();
@@ -290,16 +296,18 @@ pub fn run_interactive(
         );
         terminal.set_mouse(application.configuration.settings().ui.mouse)?;
         terminal.set_color_mode(application.configuration.settings().ui.color_mode);
-        terminal.set_theme(application.configuration.theme().clone());
+        terminal.set_theme(application.configuration.theme());
         application
             .notices
             .set_terminal_capabilities(terminal.capability_summary());
-        terminal.draw(&frame)?;
+        let painted = terminal.draw(&frame)?;
         application.queue_startup_reads();
         application.schedule_recovery_work();
-        if let Some(event) = terminal.poll_event(Duration::from_millis(
-            application.configuration.settings().runtime.event_poll_ms,
-        ))? {
+        still_polls = if painted { 0 } else { still_polls.saturating_add(1) };
+        let poll = Duration::from_millis(application.configuration.settings().runtime.event_poll_ms);
+        let poll = if still_polls < IDLE_AFTER { poll } else { poll.max(IDLE_POLL) };
+        if let Some(event) = terminal.poll_event(poll)? {
+            still_polls = 0;
             if matches!(
                 event,
                 UiEvent::Resize(_, _) | UiEvent::FocusGained | UiEvent::FocusLost

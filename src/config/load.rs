@@ -4,7 +4,10 @@ use std::{
     hash::{Hash, Hasher},
     io::Read,
     path::{Path, PathBuf},
-    sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError},
+    sync::{
+        OnceLock,
+        mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError},
+    },
     thread::{self, JoinHandle},
     time::{Duration, Instant, SystemTime},
 };
@@ -99,10 +102,34 @@ pub(super) const BUNDLED_KEYMAPS: &str = include_str!("../../assets/defaults/key
 pub(super) const BUNDLED_DASHBOARD: &str = include_str!("../../assets/defaults/dashboard.toml");
 pub(super) const BUNDLED_THEME: &str = include_str!("../../assets/themes/dust.toml");
 
+/// The bundled defaults, parsed once. Startup and every reload need them several times, and
+/// parsing about 170 KB of TOML is most of the startup time.
 #[must_use]
 pub fn load_bundled_config() -> LoadedConfig {
-    let config =
-        toml::from_str::<Config>(BUNDLED_CONFIG).expect("bundled config must be covered by tests");
+    static BUNDLED: OnceLock<LoadedConfig> = OnceLock::new();
+    BUNDLED.get_or_init(parse_bundled_config).clone()
+}
+
+fn bundled_settings() -> Config {
+    static SETTINGS: OnceLock<Config> = OnceLock::new();
+    SETTINGS
+        .get_or_init(|| {
+            toml::from_str::<Config>(BUNDLED_CONFIG).expect("bundled config must remain valid")
+        })
+        .clone()
+}
+
+fn bundled_settings_value() -> toml::Value {
+    static VALUE: OnceLock<toml::Value> = OnceLock::new();
+    VALUE
+        .get_or_init(|| {
+            toml::from_str::<toml::Value>(BUNDLED_CONFIG).expect("bundled config must remain valid")
+        })
+        .clone()
+}
+
+fn parse_bundled_config() -> LoadedConfig {
+    let config = bundled_settings();
     config
         .validate()
         .expect("bundled config policy must be covered by tests");
@@ -116,8 +143,7 @@ pub fn load_bundled_config() -> LoadedConfig {
     dashboard
         .validate()
         .expect("bundled dashboard dimensions must be covered by tests");
-    let theme = toml::from_str::<ThemeConfig>(BUNDLED_THEME)
-        .expect("bundled theme must be covered by tests");
+    let theme = bundled_theme();
     theme
         .validate()
         .expect("bundled theme fallbacks must be covered by tests");
@@ -464,7 +490,10 @@ pub(super) fn append_diagnostic(target: &mut Option<String>, diagnostic: String)
 }
 
 pub(super) fn bundled_theme() -> ThemeConfig {
-    toml::from_str(BUNDLED_THEME).expect("bundled theme must remain valid")
+    static THEME: OnceLock<ThemeConfig> = OnceLock::new();
+    THEME
+        .get_or_init(|| toml::from_str(BUNDLED_THEME).expect("bundled theme must remain valid"))
+        .clone()
 }
 
 pub(super) fn parse_theme_capture(captured: &CapturedSource) -> Result<ThemeConfig, String> {
@@ -535,7 +564,7 @@ pub(super) fn fallback_config(diagnostic: Option<String>) -> LoadedConfig {
         user_configuration: false,
         user_setting_keys: BTreeSet::new(),
         user_setting_spans: BTreeMap::new(),
-        config: toml::from_str::<Config>(BUNDLED_CONFIG).expect("bundled config must remain valid"),
+        config: bundled_settings(),
         path: PathBuf::from("<bundled:config>"),
         diagnostic,
         keymaps: LoadedKeymaps::default(),
@@ -575,10 +604,8 @@ pub(super) fn parse_config_source(path: &Path, source: &str) -> LoadedConfig {
         }
     };
     let source = migrated.as_str();
-    let defaults =
-        toml::from_str::<Config>(BUNDLED_CONFIG).expect("bundled config must remain valid");
-    let mut merged =
-        toml::from_str::<toml::Value>(BUNDLED_CONFIG).expect("bundled config must remain valid");
+    let defaults = bundled_settings();
+    let mut merged = bundled_settings_value();
     let user = match toml::from_str::<toml::Value>(source) {
         Ok(user) => user,
         Err(error) => {

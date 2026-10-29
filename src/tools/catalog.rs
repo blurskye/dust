@@ -1,6 +1,8 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
-    env, fs,
+    collections::{BTreeMap, BTreeSet, HashMap},
+    env,
+    ffi::{OsStr, OsString},
+    fs,
     io::{Read, Write},
     path::{Component, Path, PathBuf},
 };
@@ -206,6 +208,43 @@ pub fn discover_executable(executable: &str) -> Option<PathBuf> {
         let path = directory.join(executable);
         path.is_file().then_some(path)
     })
+}
+
+/// The executables on `PATH`, read with one listing per directory. Looking up every catalog
+/// tool in every directory separately costs thousands of `stat` calls at startup.
+struct PathExecutables(HashMap<OsString, PathBuf>);
+
+impl PathExecutables {
+    fn scan() -> Self {
+        let mut found = HashMap::new();
+        let mut listed = BTreeSet::new();
+        for directory in env::split_paths(&env::var_os("PATH").unwrap_or_default()) {
+            if !listed.insert(directory.clone()) {
+                continue;
+            }
+            let Ok(entries) = fs::read_dir(&directory) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                found.entry(entry.file_name()).or_insert_with(|| entry.path());
+            }
+        }
+        Self(found)
+    }
+
+    /// Same answer as [`discover_executable`] for the PATH that was scanned.
+    fn find(&self, executable: &str) -> Option<PathBuf> {
+        if executable.contains(std::path::MAIN_SEPARATOR) {
+            return discover_executable(executable);
+        }
+        let path = self.0.get(OsStr::new(executable))?;
+        // A directory of that name shadows nothing: keep searching like the plain lookup.
+        if path.is_file() {
+            Some(path.clone())
+        } else {
+            discover_executable(executable)
+        }
+    }
 }
 
 #[must_use]
@@ -592,13 +631,13 @@ pub fn nix_lsp_launch_environment(
     nix_lsp_launch_environment_at(&tool_store_root(), definition)
 }
 
-pub(super) fn install_readiness(definition: &ToolDefinition) -> Option<String> {
+fn install_readiness(definition: &ToolDefinition, on_path: &PathExecutables) -> Option<String> {
     match definition.install.as_ref()? {
         ToolInstall::NpmPackage { .. }
-            if discover_executable("bun").is_none()
+            if on_path.find("bun").is_none()
                 && !(definition.kind == ToolKind::Lsp
                     && is_nixos_host()
-                    && discover_executable("nix").is_some())
+                    && on_path.find("nix").is_some())
                 && (!fhs_glibc_loader_available() || runtime_artifact("bun").is_err()) =>
         {
             Some(
@@ -623,16 +662,18 @@ pub(super) fn install_readiness(definition: &ToolDefinition) -> Option<String> {
 
 #[must_use]
 pub fn inspect_tools_at(root: &Path) -> Vec<ToolEntry> {
+    let on_path = PathExecutables::scan();
     bundled_tool_catalog()
         .into_iter()
         .map(|definition| {
             // PATH is intentionally first priority. A Dust-managed installation
             // remains independently selectable in the interactive runtime picker.
-            let status = discover_executable(&definition.executable)
+            let status = on_path
+                .find(&definition.executable)
                 .or_else(|| managed_executable(root, &definition))
                 .map_or_else(
                     || {
-                        install_readiness(&definition)
+                        install_readiness(&definition, &on_path)
                             .map_or(ToolStatus::Available, ToolStatus::Unavailable)
                     },
                     ToolStatus::Installed,
