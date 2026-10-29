@@ -486,32 +486,33 @@ fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
 }
 
 #[test]
-fn workspace_trust_requires_exact_confirmation_cancels_on_focus_loss_and_persists() {
+fn workspace_trust_is_one_key_cancels_on_focus_loss_and_persists() {
+    let key = |name: &str| name.parse::<KeyEvent>().expect("key");
     let mut app = app();
     prepare_trust_identity(&mut app);
     app.notify_message("stale notification".into(), true);
     app.request_workspace_trust();
     assert!(app.ui.notification.is_none());
     assert!(!app.ui.notification_error);
-    assert_eq!(
-        app.ui.prompt.as_ref().map(|prompt| prompt.kind),
-        Some(crate::ui::PromptKind::WorkspaceTrust)
-    );
     let prompt = app.ui.prompt.as_ref().expect("trust prompt");
-    assert!(prompt.error.is_none());
-    assert!(
-        prompt
-            .help
-            .as_deref()
-            .is_some_and(|help| help.contains("Allows project commands"))
-    );
-    app.prompt_insert("wrong");
-    app.submit_prompt();
+    assert_eq!(prompt.kind, crate::ui::PromptKind::WorkspaceTrust);
+    let confirmation = prompt.confirmation.as_ref().expect("yes/no trust prompt");
+    assert_eq!(confirmation.selected, crate::ui::ConfirmationChoice::Yes);
+    assert!(confirmation.message.contains("LSP servers"));
+
+    // Escape declines and says what stays off.
+    app.handle_configured_key(key("escape"));
+    assert!(app.ui.prompt.is_none());
     assert_eq!(
         app.workspace.trust(),
         crate::workspace::WorkspaceTrust::Untrusted
     );
-    assert!(app.input.search_history().is_empty() && app.input.command_history().is_empty());
+    assert!(
+        app.ui
+            .notification
+            .as_deref()
+            .is_some_and(|message| message.contains("not trusted"))
+    );
 
     app.request_workspace_trust();
     app.handle_event(crate::ui::UiEvent::FocusLost);
@@ -521,24 +522,16 @@ fn workspace_trust_requires_exact_confirmation_cancels_on_focus_loss_and_persist
         crate::workspace::WorkspaceTrust::Untrusted
     );
 
+    // Enter accepts the preselected Trust.
     app.request_workspace_trust();
-    let phrase = app
-        .configuration
-        .settings()
-        .workspace
-        .trust_confirmation_phrase
-        .clone();
-    app.prompt_insert(&phrase);
-    app.submit_prompt();
-    assert_eq!(
-        app.workspace.trust(),
-        crate::workspace::WorkspaceTrust::Untrusted
-    );
+    app.handle_configured_key(key("enter"));
+    assert!(app.ui.prompt.is_none());
     wait_trust(&mut app);
     assert_eq!(
         app.workspace.trust(),
         crate::workspace::WorkspaceTrust::Trusted
     );
+    assert!(app.input.search_history().is_empty() && app.input.command_history().is_empty());
     let source = fs::read_to_string(app.workspace.state_path()).expect("persisted trust");
     assert!(source.contains("filesystem_identity"));
 
@@ -597,13 +590,7 @@ fn automatic_workspace_trust_prompt_never_steals_an_active_prompt_or_safe_mode()
 #[test]
 fn workspace_trust_never_activates_before_identity_and_database_are_ready() {
     let mut app = app();
-    app.confirm_workspace_trust(
-        app.configuration
-            .settings()
-            .workspace
-            .trust_confirmation_phrase
-            .clone(),
-    );
+    app.confirm_workspace_trust();
     assert_eq!(
         app.workspace.trust(),
         crate::workspace::WorkspaceTrust::Untrusted

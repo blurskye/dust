@@ -1078,13 +1078,31 @@ pub(in crate::editor::session) fn compile_typed_keymap_entries(
             source,
         });
         keymap.insert(&sequence, invocation);
-        result.reverse.insert(
-            (context, fingerprint),
-            ReverseBinding {
-                id: entry.id.clone(),
-                keys: effective_keys,
-            },
-        );
+        // The key shown for a command (dashboard, footers, palette) is the user's own
+        // binding first, then the shortest one, so a surface's `q` beats `space q q`.
+        let replaces = |existing: &ReverseBinding| {
+            entry.origin.layer > existing.layer
+                || (entry.origin.layer == existing.layer
+                    && sequence.len() < existing.keys.split_whitespace().count())
+        };
+        match result.reverse.entry((context, fingerprint)) {
+            std::collections::hash_map::Entry::Occupied(mut slot) => {
+                if replaces(slot.get()) {
+                    slot.insert(ReverseBinding {
+                        id: entry.id.clone(),
+                        keys: effective_keys,
+                        layer: entry.origin.layer,
+                    });
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                slot.insert(ReverseBinding {
+                    id: entry.id.clone(),
+                    keys: effective_keys,
+                    layer: entry.origin.layer,
+                });
+            }
+        }
     }
 
     if let Ok(effective_groups) = resolve_key_group_identities(groups, group_origins)

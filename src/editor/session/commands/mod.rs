@@ -319,7 +319,6 @@ pub enum AppEffect {
     SafeModeStatus,
     MarkSet(String),
     WorkspaceTrust,
-    WorkspaceTrustConfirm(String),
     WorkspaceUntrust,
     WorkspaceStatus,
     WorkspaceRootAdd(PathBuf),

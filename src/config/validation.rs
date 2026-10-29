@@ -329,13 +329,6 @@ impl Config {
             || !(1..=100_000).contains(&self.workspace.maximum_diagnostics_per_owner_uri)
             || !(1..=100_000).contains(&self.workspace.maximum_picker_items)
             || !(1..=1_024).contains(&self.workspace.trust_state_queue_capacity)
-            || self.workspace.trust_confirmation_phrase.trim().is_empty()
-            || self.workspace.trust_confirmation_phrase.len() > 128
-            || self
-                .workspace
-                .trust_confirmation_phrase
-                .chars()
-                .any(char::is_control)
         {
             return Err("workspace service limits are outside safe bounds");
         }
@@ -809,7 +802,7 @@ impl Config {
             "workspace_trust_untrusted",
             "workspace_trust_status",
             "workspace_trust_confirmation",
-            "workspace_trust_confirmation_wrong",
+            "workspace_trust_declined",
             "workspace_trust_not_ready",
             "workspace_trust_saving",
             "workspace_trust_state_failed",

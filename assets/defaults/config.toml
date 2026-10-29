@@ -454,7 +454,6 @@ maximum_diagnostics = 10000
 maximum_diagnostics_per_owner_uri = 2000
 maximum_picker_items = 10000
 picker_wrap = true
-trust_confirmation_phrase = "trust this workspace"
 trust_state_queue_capacity = 8
 
 [workspace.search]
@@ -737,8 +736,8 @@ workspace_untrusted = "workspace trust revoked; project execution is blocked"
 workspace_trust_trusted = "trusted"
 workspace_trust_untrusted = "untrusted"
 workspace_trust_status = "workspace is {state}"
-workspace_trust_confirmation = "Allows project commands. Type `{phrase}`."
-workspace_trust_confirmation_wrong = "workspace trust confirmation did not match; workspace remains untrusted"
+workspace_trust_confirmation = "Trusting lets LSP servers, tasks and debuggers run code from this project."
+workspace_trust_declined = "workspace not trusted: LSP, tasks and debugging stay off; run :trust to change this"
 workspace_trust_not_ready = "workspace identity and trust state are not ready; workspace remains untrusted"
 workspace_trust_saving = "saving workspace trust state…"
 workspace_trust_state_failed = "workspace trust state failed; workspace remains untrusted: {diagnostic}"
@@ -1251,7 +1250,6 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "health.virtual.open" = "Open read-only health document"
 "health.virtual.refresh" = "Refresh read-only health document"
 "workspace.trust" = "Request workspace trust"
-"workspace.trust.confirm" = "Confirm workspace trust"
 "workspace.untrust" = "Revoke workspace trust"
 "workspace.trust.status" = "Show workspace trust"
 "workspace.edit.toggle" = "Toggle workspace edit file"

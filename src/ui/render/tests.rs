@@ -321,7 +321,7 @@ fn workspace_trust_prompt_is_one_centered_confirmation_panel() {
     let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
     let loaded = crate::config::load_bundled_config();
     let mut prompt = PromptState::new(PromptKind::WorkspaceTrust);
-    prompt.help = Some("Allows project commands. Type `trust this workspace`.".into());
+    prompt.help = Some("Allows project commands.".into());
     let frame = render(
         &state,
         &UiState {
@@ -349,7 +349,7 @@ fn workspace_trust_prompt_is_one_centered_confirmation_panel() {
         frame
             .grid
             .row_text(geometry.top + 1)
-            .contains("Allows project commands. Type `trust this workspace`.")
+            .contains("Allows project commands.")
     );
     assert_eq!(
         frame

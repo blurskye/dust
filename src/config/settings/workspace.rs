@@ -119,7 +119,6 @@ pub struct WorkspaceConfig {
     pub maximum_diagnostics_per_owner_uri: usize,
     pub maximum_picker_items: usize,
     pub picker_wrap: bool,
-    pub trust_confirmation_phrase: String,
     pub trust_state_queue_capacity: usize,
     pub search: WorkspaceSearchConfig,
 }
@@ -131,7 +130,6 @@ impl Default for WorkspaceConfig {
             maximum_diagnostics_per_owner_uri: 2_000,
             maximum_picker_items: 10_000,
             picker_wrap: true,
-            trust_confirmation_phrase: "trust this workspace".into(),
             trust_state_queue_capacity: 8,
             search: WorkspaceSearchConfig::default(),
         }

@@ -1,7 +1,6 @@
 # A walk through the main surfaces, from startup.
 wait 800
 shot 01-dashboard
-type trust this workspace
 key enter
 wait 300
 key space

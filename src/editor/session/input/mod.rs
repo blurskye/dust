@@ -190,10 +190,9 @@ impl InputSession {
                 crate::ui::PromptKind::SearchForward | crate::ui::PromptKind::SearchBackward => {
                     "search_prompt"
                 }
-                crate::ui::PromptKind::WorkspaceTrust | crate::ui::PromptKind::GitReset => {
-                    "workspace_trust_prompt"
-                }
-                crate::ui::PromptKind::ExplorerDelete
+                crate::ui::PromptKind::GitReset => "workspace_trust_prompt",
+                crate::ui::PromptKind::WorkspaceTrust
+                | crate::ui::PromptKind::ExplorerDelete
                 | crate::ui::PromptKind::PluginConfirmation
                 | crate::ui::PromptKind::TerminalClose
                 | crate::ui::PromptKind::DirtyClose

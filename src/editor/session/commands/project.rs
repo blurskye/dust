@@ -6,18 +6,6 @@ use super::{
 pub(super) fn register_commands(
     registry: &mut CommandRegistry<AppEffect>,
 ) -> Result<(), CommandError> {
-    register(
-        registry,
-        "workspace.trust.confirm",
-        "Confirm workspace trust",
-        ContextRequirement::Workspace,
-        ArgumentSchema::default().field("phrase", ArgumentType::String, true),
-        |invocation| {
-            Ok(AppEffect::WorkspaceTrustConfirm(
-                string_arg(invocation, "phrase")?.into(),
-            ))
-        },
-    )?;
     for (id, title, effect) in [
         (
             "workspace.trust",

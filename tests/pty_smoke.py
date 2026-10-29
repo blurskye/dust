@@ -399,7 +399,7 @@ def main() -> None:
         assert code == 0
         first_open = terminal_screen(snapshots[0])
         assert "Do you want to trust this workspace?" in first_open
-        assert "Allows project commands" in first_open
+        assert "LSP servers" in first_open
         assert "[[seen]]" in (
             pathlib.Path(directory) / ".dust-state" / "trusted-workspaces.toml"
         ).read_text(encoding="utf-8")
@@ -589,9 +589,9 @@ def main() -> None:
             [
                 (0.8, b":workspace.trust.status\r", None),
                 (0.2, b":workspace.trust\r", None),
-                (0.2, b"wrong\r", None),
+                (0.2, b"\x1b", None),
                 (0.3, b":workspace.trust\r", None),
-                (0.2, b"trust this workspace\r", None),
+                (0.2, b"\r", None),
                 (0.5, b":q\r", None),
             ],
         )
@@ -599,8 +599,8 @@ def main() -> None:
         assert "untrusted" in terminal_screen(snapshots[1])
         trust_prompt = terminal_screen(snapshots[2])
         assert "Do you want to trust this workspace?" in trust_prompt
-        assert "Allows project commands" in trust_prompt
-        assert "did not match" in terminal_screen(snapshots[3])
+        assert "LSP servers" in trust_prompt
+        assert "not trusted" in terminal_screen(snapshots[3])
         assert "Do you want to trust this workspace?" in terminal_screen(snapshots[4])
         assert "workspace trusted" in terminal_screen(snapshots[5])
         assert_restored(output)
@@ -656,7 +656,7 @@ def main() -> None:
             ["main.rs"],
             [
                 (0.7, b":workspace.trust\r", None),
-                (0.2, b"trust this workspace\r", None),
+                (0.2, b"\r", None),
                 (0.6, b":lint.run name=check\r", None),
                 (1.0, b"", None),
                 (0.2, b"]e", None),
@@ -732,7 +732,7 @@ while True:
             ["main.rs"],
             [
                 (0.7, b":workspace.trust\r", None),
-                (0.2, b"trust this workspace\r", None),
+                (0.2, b"\r", None),
                 (1.8, b"K", None),
                 (0.8, b"", None),
                 (0.1, b"j", None),
@@ -1040,7 +1040,7 @@ while True:
             [str(target)],
             [
                 (0.4, b":trust\r", None),
-                (0.2, b"trust this workspace\r", None),
+                (0.2, b"\r", None),
                 (0.5, b":explore\r", None),
                 (0.7, b"\x0c", None),  # explorer -> editor
                 (0.7, b"\x1f", None),  # legacy Ctrl+/ opens bundled shell
@@ -1131,7 +1131,7 @@ exit 1
             ["main.rs"],
             [
                 (0.5, b":workspace.trust\r", None),
-                (0.2, b"trust this workspace\r", None),
+                (0.2, b"\r", None),
                 (1.2, b":lsp\r", None),
                 (0.8, b"i", None),
                 (1.5, b"", None),
@@ -1165,7 +1165,7 @@ exit 1
                 binary,
                 directory,
                 [str(path)],
-                [(0.4,b":workspace.trust\r",None),(0.2,b"trust this workspace\r",None),(1.7,b"",None),(0.1,b":lsp.server.status\r",None),(0.2,b":q\r",None)],
+                [(0.4,b":workspace.trust\r",None),(0.2,b"\r",None),(1.7,b"",None),(0.1,b":lsp.server.status\r",None),(0.2,b":q\r",None)],
             )
             assert code == 0
             lsp_status = terminal_screen(snapshots[4])
@@ -1202,7 +1202,7 @@ exit 1
                 binary,
                 directory,
                 [str(path)],
-                [(0.4,b":workspace.trust\r",None),(0.2,b"trust this workspace\r",None),(1.7,b"",None),(0.1,b":lsp.server.status\r",None),(0.2,b":q\r",None)],
+                [(0.4,b":workspace.trust\r",None),(0.2,b"\r",None),(1.7,b"",None),(0.1,b":lsp.server.status\r",None),(0.2,b":q\r",None)],
             )
             assert code == 0
             lsp_status = terminal_screen(snapshots[4])
@@ -1495,7 +1495,7 @@ arguments = { force = false }
         assert "Files" in hint_screen
         assert "Search" in hint_screen
         assert "Diagnostics" in hint_screen
-        assert "Language" in hint_screen
+        assert "Code" in hint_screen
         assert "space" in hint_screen
         goto_screen = terminal_screen(snapshots[3])
         assert "Go to implementation" in goto_screen
@@ -1522,7 +1522,7 @@ leader = ","
         (config_home / "keymaps.toml").write_text(
             """
 [[key_group]]
-id = "builtin.editor.normal.group.files"
+id = "builtin.global.group.files.editor-normal"
 context = "editor"
 mode = "normal"
 prefix = "<leader> f"
@@ -1543,7 +1543,9 @@ order = 1
         assert code == 0
         custom_hint_screen = terminal_screen(snapshots[1])
         assert "Project files" in custom_hint_screen
-        assert "Files" not in custom_hint_screen.replace("Project files", "")
+        assert "Files" not in custom_hint_screen.replace("Project files", "").replace(
+            "Find Files", ""
+        )
         assert "," in custom_hint_screen
         assert_restored(output)
 
@@ -1569,7 +1571,7 @@ order = 1
         disabled_hint_screen = terminal_screen(snapshots[1])
         assert "Files" not in disabled_hint_screen
         assert "Diagnostics" not in disabled_hint_screen
-        assert "Language" not in disabled_hint_screen
+        assert "Code" not in disabled_hint_screen
         assert_restored(output)
 
     with tempfile.TemporaryDirectory() as directory:

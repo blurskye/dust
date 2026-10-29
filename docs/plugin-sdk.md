@@ -211,7 +211,7 @@ Command names and manifest IDs must form valid Dust command-ID segments. Argumen
 
 ## Current package and lock formats
 
-The current package workflow does not consume a unified archive manifest. `package.install` and `package.update` take three workspace-rooted files after the workspace is trusted: a JSON `PackageManifest`, the schema-1 plugin TOML above, and Component bytes. The bundled trust prompt requires **`trust this workspace`**, but current configuration schema 1 can replace that phrase; this is a known Partial mismatch with the protected target copy, not permission for a plugin to supply or bypass trust. Safe mode blocks the operation. Each manifest is at most 1 MiB; the package object ceiling is fixed at 64 MiB and a lower configured plugin component ceiling narrows it during activation. The closed JSON package record has required fields:
+The current package workflow does not consume a unified archive manifest. `package.install` and `package.update` take three workspace-rooted files after the workspace is trusted: a JSON `PackageManifest`, the schema-1 plugin TOML above, and Component bytes. A plugin cannot supply or bypass trust. Safe mode blocks the operation. Each manifest is at most 1 MiB; the package object ceiling is fixed at 64 MiB and a lower configured plugin component ceiling narrows it during activation. The closed JSON package record has required fields:
 
 ```json
 {

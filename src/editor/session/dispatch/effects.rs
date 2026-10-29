@@ -2847,9 +2847,6 @@ impl InteractiveApplication {
     ) -> Result<(), AppEffect> {
         match effect {
             AppEffect::WorkspaceTrust => self.request_workspace_trust(),
-            AppEffect::WorkspaceTrustConfirm(phrase) => {
-                self.confirm_workspace_trust(phrase);
-            }
             AppEffect::WorkspaceUntrust => self.revoke_workspace_trust(),
             AppEffect::WorkspaceStatus => {
                 let state = if self.workspace.trust() == WorkspaceTrust::Trusted {
@@ -4630,10 +4627,8 @@ impl InteractiveApplication {
                 .keymaps()
                 .binding_for("confirmation_prompt", command)
         };
+        // Arrows and tab also move the selection; the footer names only y/n so it fits.
         let selections = [
-            "command_line.move_left",
-            "command_line.move_right",
-            "surface.confirmation.toggle",
             "surface.confirmation.select_yes",
             "surface.confirmation.select_no",
         ]
@@ -4989,20 +4984,19 @@ impl InteractiveApplication {
                     self.prompt_error(error.to_string());
                 }
             },
-            PromptKind::WorkspaceTrust => match CommandInvocation::new(
-                "workspace.trust.confirm",
-                InvocationSource::CommandLine,
-            ) {
-                Ok(invocation) => {
-                    let invocation =
-                        invocation.with_argument("phrase", CommandValue::String(prompt.input));
-                    self.invoke(invocation);
+            PromptKind::WorkspaceTrust => {
+                let selected = prompt
+                    .confirmation
+                    .map_or(crate::ui::ConfirmationChoice::No, |state| state.selected);
+                if selected == crate::ui::ConfirmationChoice::Yes {
+                    // Confirm before closing: closing cancels a still-pending confirmation.
+                    self.confirm_workspace_trust();
                     self.close_prompt();
+                } else {
+                    self.close_prompt();
+                    self.notify_message(self.message("workspace_trust_declined", &[]), false);
                 }
-                Err(error) => {
-                    self.prompt_error(error.to_string());
-                }
-            },
+            }
             PromptKind::GitReset => {
                 self.close_prompt();
                 self.confirm_reset_selected_git_hunk(prompt.input);
@@ -12687,7 +12681,16 @@ impl InteractiveApplication {
                 self.project_input_prompt();
             }
             AppEffect::PromptSubmit => self.submit_prompt(),
-            AppEffect::PromptCancel => self.close_prompt(),
+            AppEffect::PromptCancel => {
+                let declined_trust = self
+                    .input
+                    .prompt()
+                    .is_some_and(|prompt| prompt.kind == PromptKind::WorkspaceTrust);
+                self.close_prompt();
+                if declined_trust {
+                    self.notify_message(self.message("workspace_trust_declined", &[]), false);
+                }
+            }
             AppEffect::NotificationHistory => {
                 let items = self
                     .notices
@@ -13597,34 +13600,27 @@ impl InteractiveApplication {
         }
         match self.workspace.request_confirmation() {
             Ok(()) => {
-                self.open_prompt(PromptKind::WorkspaceTrust, String::new());
                 self.clear_notice();
-                self.prompt_help(
-                    self.message(
-                        "workspace_trust_confirmation",
-                        &[(
-                            "phrase",
-                            self.configuration
-                                .settings()
-                                .workspace
-                                .trust_confirmation_phrase
-                                .clone(),
-                        )],
-                    ),
+                self.open_confirmation_actions(
+                    PromptKind::WorkspaceTrust,
+                    self.configuration
+                        .settings()
+                        .ui
+                        .command_line
+                        .text
+                        .workspace_trust_title
+                        .clone(),
+                    self.message("workspace_trust_confirmation", &[]),
+                    crate::ui::ConfirmationChoice::Yes,
+                    "Trust",
+                    "Not now",
                 );
             }
             Err(e) => self.show_workspace_failure(e),
         }
     }
-    pub(in crate::editor::session) fn confirm_workspace_trust(&mut self, phrase: String) {
-        match self.workspace.confirm(
-            &phrase,
-            &self
-                .configuration
-                .settings()
-                .workspace
-                .trust_confirmation_phrase,
-        ) {
+    pub(in crate::editor::session) fn confirm_workspace_trust(&mut self) {
+        match self.workspace.confirm() {
             Ok(()) => self.notify_message(self.message("workspace_trust_saving", &[]), false),
             Err(e) => self.show_workspace_failure(e),
         }

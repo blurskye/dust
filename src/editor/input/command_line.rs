@@ -159,13 +159,6 @@ pub fn parse_ex(
                 command(command_id)?
                     .with_argument("query", CommandValue::String(arguments.to_owned()))
             }
-            "workspace.trust.confirm" => {
-                if arguments.is_empty() {
-                    return Err(ExParseError::MissingArgument("phrase"));
-                }
-                command(command_id)?
-                    .with_argument("phrase", CommandValue::String(arguments.to_owned()))
-            }
             "workspace.replace" => {
                 let Some((query, replacement)) = arguments.split_once(char::is_whitespace) else {
                     return Err(ExParseError::MissingArgument("replacement"));

@@ -43,6 +43,7 @@ pub struct KeymapInspection {
 pub(in crate::editor::session) struct ReverseBinding {
     pub(in crate::editor::session) id: String,
     pub(in crate::editor::session) keys: String,
+    pub(in crate::editor::session) layer: InputContextLayer,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

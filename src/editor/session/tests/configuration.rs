@@ -540,8 +540,8 @@ fn symbolic_leaders_expand_before_dispatch_and_preserve_literal_space_actions() 
     let leader_binding = keymaps
         .inspect("editor.normal", "buffer.picker.open")
         .expect("bundled leader binding");
-    assert_eq!(leader_binding.source_keys, "<leader> f b");
-    assert_eq!(leader_binding.keys, ", f b");
+    assert_eq!(leader_binding.source_keys, "<leader> ,");
+    assert_eq!(leader_binding.keys, ", ,");
     assert_eq!(
         keymaps
             .binding_for("dashboard", "health.open")

@@ -470,11 +470,7 @@ impl WorkspaceSession {
         }
         Ok(())
     }
-    pub(in crate::editor::session) fn confirm(
-        &mut self,
-        phrase: &str,
-        expected: &str,
-    ) -> Result<(), WorkspaceFailure> {
+    pub(in crate::editor::session) fn confirm(&mut self) -> Result<(), WorkspaceFailure> {
         if self.safe_mode {
             return Err(WorkspaceFailure::Message("safe_mode_blocked"));
         }
@@ -494,12 +490,6 @@ impl WorkspaceSession {
                     .collect::<Vec<_>>()
         {
             return Err(WorkspaceFailure::Message("workspace_trust_not_ready"));
-        }
-        if phrase != expected {
-            self.state.set_trust(WorkspaceTrust::Untrusted);
-            return Err(WorkspaceFailure::Message(
-                "workspace_trust_confirmation_wrong",
-            ));
         }
         if confirmation
             .identities
@@ -900,7 +890,7 @@ mod tests {
         owner.cancel_confirmation();
         assert!(
             owner
-                .confirm("trust this workspace", "trust this workspace")
+                .confirm()
                 .is_err()
         );
         owner
@@ -909,7 +899,7 @@ mod tests {
         owner.set_active_root(RootId(2)).unwrap();
         assert!(
             owner
-                .confirm("trust this workspace", "trust this workspace")
+                .confirm()
                 .is_err()
         );
         owner
@@ -920,7 +910,7 @@ mod tests {
         owner.fixture_identity(RootId(1), replacement).unwrap();
         assert!(
             owner
-                .confirm("trust this workspace", "trust this workspace")
+                .confirm()
                 .is_err()
         );
         owner
@@ -929,7 +919,7 @@ mod tests {
         owner.fixture_safe_mode(true);
         assert!(
             owner
-                .confirm("trust this workspace", "trust this workspace")
+                .confirm()
                 .is_err()
         );
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
