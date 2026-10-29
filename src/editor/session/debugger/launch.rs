@@ -1,10 +1,10 @@
-//! Original debugger intent and its validation/discovery/preflight/actor lifecycle.
+//! Original debugger intent and its discovery/preflight/actor lifecycle.
 use super::{DebugSession, TerminalPolicy};
 use crate::{
     config::{DebugAdapterConfig, DebugConfig, DebugRequestKind, DebugSessionConfig},
     debugger::{DapLaunch, ExecutionScope},
     editor::session::workspace::{
-        DebugPermit, ExecutionLane, ExecutionReady, WorkspaceSession, WorkspaceVersion,
+        ExecutionLane, ExecutionReady, WorkspaceSession, WorkspaceVersion,
     },
     files::ProjectRootResolution,
     process::{ExecutionPreflightRequest, PreflightId},
@@ -26,11 +26,6 @@ impl PartialEq for DebugIntent {
     }
 }
 impl Eq for DebugIntent {}
-impl DebugIntent {
-    pub(in crate::editor::session) fn nonce(&self) -> Arc<()> {
-        self.nonce.clone()
-    }
-}
 struct Tool {
     definition: ToolDefinition,
     executable: PathBuf,
@@ -39,7 +34,7 @@ struct Tool {
     workspace_root: PathBuf,
 }
 enum Phase {
-    Validation,
+    Requested,
     Discovery,
     Discovering(u64),
     Adapter,
@@ -282,7 +277,7 @@ impl DebugSession {
             cwd,
             program,
             executable: None,
-            phase: Phase::Validation,
+            phase: Phase::Requested,
             terminal,
         });
         Ok(token)
@@ -290,7 +285,6 @@ impl DebugSession {
     pub(in crate::editor::session) fn authorize_debug(
         &mut self,
         intent: DebugIntent,
-        permit: DebugPermit,
         workspace: &WorkspaceSession,
     ) -> Result<(), String> {
         let launch = self
@@ -299,12 +293,12 @@ impl DebugSession {
             .filter(|l| {
                 l.token == intent
                     && l.scope == workspace.version()
-                    && matches!(l.phase, Phase::Validation)
+                    && matches!(l.phase, Phase::Requested)
             })
             .ok_or("debug launch intent retired or foreign")?;
-        if !workspace.consume_debug_permit(permit, &intent.nonce) {
-            return Err("debug launch authorization retired or foreign".into());
-        }
+        workspace
+            .execution_allowed()
+            .map_err(|_| "debuggers run only in a trusted workspace".to_owned())?;
         launch.phase = if launch.tool.is_some() {
             Phase::Discovery
         } else {
@@ -410,7 +404,7 @@ impl DebugSession {
             return Err("debug launch source retired".into());
         }
         match launch.phase {
-            Phase::Validation | Phase::Discovering(_) | Phase::Preflight { .. } => {}
+            Phase::Requested | Phase::Discovering(_) | Phase::Preflight { .. } => {}
             Phase::Discovery => {
                 if !lane.discovery_available() {
                     self.launch = Some(launch);
@@ -533,30 +527,8 @@ pub(super) use tests::original_launch_fixture;
 mod tests {
     use super::*;
     pub(in crate::editor::session::debugger) fn original_launch_fixture() {
-        use crate::editor::session::workspace::{
-            DiscoveryKind, WorkspacePreflightEvent, WorkspaceUpdate,
-        };
+        use crate::editor::session::workspace::{DiscoveryKind, WorkspacePreflightEvent};
         use std::time::{Duration, Instant};
-        fn permit(workspace: &mut WorkspaceSession, intent: &DebugIntent) -> DebugPermit {
-            let id = workspace
-                .begin_validation()
-                .unwrap_or_else(|_| panic!("owned validation"));
-            let deadline = Instant::now() + Duration::from_secs(2);
-            loop {
-                for event in workspace.poll() {
-                    if let WorkspaceUpdate::Validated {
-                        id: actual,
-                        permit: Some(permit),
-                    } = event
-                    {
-                        assert_eq!(actual, id);
-                        return workspace.debug_permit(permit, id, intent.nonce()).unwrap();
-                    }
-                }
-                assert!(Instant::now() < deadline);
-                std::thread::sleep(Duration::from_millis(2));
-            }
-        }
         let directory = tempfile::tempdir().unwrap();
         let identity = RootIdentity::capture(directory.path()).unwrap();
         let state = crate::workspace::WorkspaceState::new(
@@ -604,7 +576,6 @@ mod tests {
                 &[],
             )
             .unwrap();
-        let old_permit = permit(&mut workspace, &old);
         let fresh = owner
             .request_debug(
                 (Some("owned"), None),
@@ -620,11 +591,8 @@ mod tests {
         assert_eq!(captured.name, "shell");
         assert_eq!(captured.cwd, directory.path());
         assert_eq!(captured.profile, terminals.profiles["shell"]);
-        assert!(owner.authorize_debug(old, old_permit, &workspace).is_err());
-        let fresh_permit = permit(&mut workspace, &fresh);
-        owner
-            .authorize_debug(fresh.clone(), fresh_permit, &workspace)
-            .unwrap();
+        assert!(owner.authorize_debug(old, &workspace).is_err());
+        owner.authorize_debug(fresh.clone(), &workspace).unwrap();
         owner
             .advance_debug(
                 workspace.execution_lane(DiscoveryKind::Debugger),
@@ -643,12 +611,7 @@ mod tests {
         );
         // A separately constructed owner cannot consume the first owner's intent.
         let mut foreign = DebugSession::new(&policy, workspace.version());
-        let foreign_permit = permit(&mut workspace, &fresh);
-        assert!(
-            foreign
-                .authorize_debug(fresh, foreign_permit, &workspace)
-                .is_err()
-        );
+        assert!(foreign.authorize_debug(fresh, &workspace).is_err());
         let _ = owner.stop();
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
@@ -678,10 +641,7 @@ mod tests {
                 &[],
             )
             .unwrap();
-        let authorization = permit(&mut workspace, &intent);
-        owner
-            .authorize_debug(intent, authorization, &workspace)
-            .unwrap();
+        owner.authorize_debug(intent, &workspace).unwrap();
         assert!(
             owner
                 .advance_debug(
@@ -765,29 +725,7 @@ mod tests {
                 &[],
             )
             .unwrap();
-        // A permit for the intent, the same way the fixture's own tests obtain one.
-        fn local_permit(workspace: &mut WorkspaceSession, intent: &DebugIntent) -> DebugPermit {
-            let id = workspace
-                .begin_validation()
-                .unwrap_or_else(|_| panic!("owned validation"));
-            let deadline = Instant::now() + Duration::from_secs(2);
-            loop {
-                for event in workspace.poll() {
-                    if let crate::editor::session::workspace::WorkspaceUpdate::Validated {
-                        id: actual,
-                        permit: Some(permit),
-                    } = event
-                    {
-                        assert_eq!(actual, id);
-                        return workspace.debug_permit(permit, id, intent.nonce()).unwrap();
-                    }
-                }
-                assert!(Instant::now() < deadline);
-                std::thread::sleep(Duration::from_millis(2));
-            }
-        }
-        let authorization = local_permit(&mut workspace, &intent);
-        owner.authorize_debug(intent, authorization, &workspace).unwrap();
+        owner.authorize_debug(intent, &workspace).unwrap();
         owner
             .advance_debug(
                 workspace.execution_lane(DiscoveryKind::Debugger),

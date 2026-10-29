@@ -1097,117 +1097,6 @@ fn stale_async_root_add_and_pending_service_removal_are_rejected() {
     assert!(app.ui.notification_error);
 }
 
-pub(super) fn wait_execution_validation(app: &mut InteractiveApplication) {
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while app.workspace.validation_pending() {
-        app.process_trust_events();
-        assert!(Instant::now() < deadline, "execution validation timed out");
-        thread::yield_now();
-    }
-}
-
-#[cfg(unix)]
-#[test]
-fn same_session_root_replacement_cancels_all_protected_action_kinds() {
-    for kind in 0..3 {
-        let mut app = app();
-        let action = match kind {
-            0 => super::DeferredExecution::InstallTool {
-                id: "missing".into(),
-                source: None,
-            },
-            1 => super::DeferredExecution::StartLsp(Some("missing".into())),
-            _ => {
-                let mut policy = crate::config::DebugConfig::default();
-                policy.adapters.insert(
-                    "owned".into(),
-                    crate::config::DebugAdapterConfig {
-                        program: "/bin/sh".into(),
-                        arguments: vec![],
-                        environment: Default::default(),
-                    },
-                );
-                policy.sessions.insert(
-                    "owned".into(),
-                    crate::config::DebugSessionConfig {
-                        adapter: "owned".into(),
-                        request: crate::config::DebugRequestKind::Attach,
-                        cwd: None,
-                        program: None,
-                        run_in_terminal_profile: None,
-                        arguments: Default::default(),
-                        path_maps: Default::default(),
-                    },
-                );
-                let intent = app
-                    .debugger_session
-                    .request_debug(
-                        (Some("owned"), None),
-                        None,
-                        None,
-                        (
-                            &policy,
-                            &app.configuration.settings().terminals,
-                            app.configuration.binding_revision(),
-                        ),
-                        &app.workspace,
-                        app.tooling.entries(),
-                    )
-                    .unwrap();
-                super::DeferredExecution::StartDebug(intent)
-            }
-        };
-        prepare_trust_identity(&mut app);
-        for root in app.workspace.roots().to_vec() {
-            app.workspace.fixture_trust_identity(root.identity.clone());
-        }
-        app.reconcile_workspace_trust();
-        assert_eq!(
-            app.workspace.trust(),
-            crate::workspace::WorkspaceTrust::Trusted
-        );
-        let original = app.state.workspace_root.clone();
-        let displaced = original.with_extension("displaced");
-        fs::rename(&original, &displaced).expect("displace root");
-        fs::create_dir(&original).expect("replacement root");
-        app.defer_trusted_execution(action);
-        wait_execution_validation(&mut app);
-        assert_eq!(
-            app.workspace.trust(),
-            crate::workspace::WorkspaceTrust::Untrusted
-        );
-        assert!(app.language.active().is_none());
-        assert!(app.ui.notification_error);
-    }
-}
-
-#[test]
-fn protected_action_resumes_once_after_successful_identity_revalidation() {
-    let mut app = app();
-    prepare_trust_identity(&mut app);
-    for root in app.workspace.roots().to_vec() {
-        app.workspace.fixture_trust_identity(root.identity.clone());
-    }
-    app.reconcile_workspace_trust();
-    app.defer_trusted_execution(super::DeferredExecution::InstallTool {
-        id: "missing".into(),
-        source: None,
-    });
-    app.defer_trusted_execution(super::DeferredExecution::StartLsp(None));
-    assert!(
-        app.ui.notification_error,
-        "concurrent protected action is rejected"
-    );
-    wait_execution_validation(&mut app);
-    assert_eq!(
-        app.workspace.trust(),
-        crate::workspace::WorkspaceTrust::Trusted
-    );
-    assert!(!app.workspace.validation_pending());
-    assert!(app.tooling.validation().is_none());
-    assert!(app.language.validation().is_none());
-}
-
 fn wait_workspace_search(app: &mut InteractiveApplication) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while app.search.pending() || app.workspace_edits.preparing() {
@@ -2039,7 +1928,6 @@ fn task_formatter_uses_authorized_worker_and_refuses_reloaded_snapshot() {
             fs::write(root.path().join("invalid"), "").unwrap();
         }
         app.process_effect(AppEffect::FormatRun("owned-format".into()));
-        wait_execution_validation(&mut app);
         let deadline = Instant::now() + Duration::from_secs(3);
         while !root.path().join("ready").exists() && Instant::now() < deadline {
             app.process_execution_preflight();
@@ -2150,7 +2038,6 @@ fn linter_job_and_vfs_publish_only_original_source_then_recover() {
     app.reconcile_workspace_trust();
     for stale in [true, false] {
         app.process_effect(AppEffect::LintRun("owned-lint".into()));
-        wait_execution_validation(&mut app);
         let deadline = Instant::now() + Duration::from_secs(3);
         while app.tasks.linter_count() == 0 && Instant::now() < deadline {
             app.process_execution_preflight();

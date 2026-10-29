@@ -4006,10 +4006,9 @@ fn terminal_preflight_close_and_capture_keep_original_pty_and_geometry() {
     driver.trust_owned_terminal_fixture();
     driver.terminal_request("owned-terminal");
     driver.terminal_close();
-    driver.terminal_finish_validation();
     assert!(
         driver.projection().terminal_panel.is_none(),
-        "close during validation retires the actual intent"
+        "close before the terminal starts retires the intent"
     );
     assert_eq!(driver.terminal_started_markers(), "");
     driver.terminal_open("owned-terminal");
@@ -4124,22 +4123,15 @@ fn terminal_preflight_close_and_capture_keep_original_pty_and_geometry() {
     }
     assert!(driver.projection().terminal_panel.is_none());
     assert_eq!(driver.keyboard_terminal(), None);
-    // Opening AND dismissing a capture during validation must not look unchanged.
+    // A second open starts a fresh terminal.
     driver.terminal_request("owned-terminal");
-    driver.open_command_prompt();
-    driver.close_prompt();
-    driver.terminal_finish_validation();
-    assert!(
-        driver.projection().terminal_panel.is_none(),
-        "late valid data may start hidden, not seize focus"
-    );
+    assert!(driver.projection().terminal_panel.is_some());
     let deadline = Instant::now() + Duration::from_secs(4);
     while driver.terminal_started_markers() != "xx" {
         driver.pump_terminal();
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(2));
     }
-    assert_eq!(driver.keyboard_terminal(), None);
     driver.focus_only_terminal();
     driver.terminal_close();
     while driver.terminal_pending() != 0 {
@@ -4346,8 +4338,7 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
     driver.trust_owned_terminal_fixture();
     driver.debug_request("owned");
     driver.debug_stop();
-    driver.terminal_finish_validation();
-    assert!(!starts.exists(), "stop during validation launched adapter");
+    assert!(!starts.exists(), "stop before launch started the adapter");
     let drain = |driver: &mut TestSession| {
         let deadline = Instant::now() + Duration::from_secs(3);
         while driver.debug_preflights() != 0 {
@@ -4356,6 +4347,8 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
             std::thread::sleep(Duration::from_millis(2));
         }
     };
+    drain(&mut driver);
+    assert!(!starts.exists(), "stopped request launched adapter");
     driver.debug_start("owned");
     assert_eq!(driver.debug_preflights(), 1);
     driver.debug_stop();

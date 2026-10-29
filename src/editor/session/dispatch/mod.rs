@@ -50,7 +50,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::DeferredExecution;
+use super::TrustedAction;
 use super::workspace::WorkspacePreflightEvent as ExecutionPreflightEvent;
 use crate::config::LoadedConfig;
 use crate::debugger::{DapControl, DapEvent, DapResponse, DapSourceBreakpoint};

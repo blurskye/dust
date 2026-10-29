@@ -9,7 +9,6 @@ mod language;
 mod language_features;
 pub(super) mod project;
 mod window_workflows;
-use project::wait_execution_validation;
 mod surfaces;
 mod viewport;
 
@@ -34,7 +33,7 @@ use crate::ui::{
 use tempfile::tempdir;
 
 use super::{
-    DeferredExecution, InteractiveApplication, KeymapOperation, LspProjectionOwner,
+    InteractiveApplication, KeymapOperation, LspProjectionOwner,
     LspRuntimeSource, build_restored_layout, capture_persisted_layout, compile_keymaps,
     compile_keymaps_with_plugin_catalog, configuration_generation_is_newer,
     lsp_runtime_source_allowed_on_host, reload_keymaps, resolve_configuration,

@@ -1,7 +1,7 @@
 //! Terminal screens, tab selection and PTY source lifetimes. No window/focus authority.
 mod input;
 use super::windows::TerminalGeometrySource;
-use super::workspace::{ExecutionReady, TerminalPermit, WorkspaceSession, WorkspaceVersion};
+use super::workspace::{ExecutionReady, WorkspaceSession, WorkspaceVersion};
 use crate::{
     config::{TerminalProfileConfig, TerminalsConfig},
     process::{ExecutionPreflightRequest, PtyEvent, PtyId, PtyPolicy, PtyRequest, PtyService},
@@ -32,20 +32,11 @@ impl Eq for TerminalKey {}
 pub(in crate::editor::session) struct TerminalIntent {
     key: TerminalKey,
     profile: String,
-    nonce: Arc<()>,
 }
 struct TerminalCloseSource {
     key: TerminalKey,
     pty: Option<PtyId>,
     phase: crate::ui::TerminalPhase,
-}
-impl TerminalIntent {
-    pub(in crate::editor::session) fn profile(&self) -> &str {
-        &self.profile
-    }
-    pub(in crate::editor::session) fn nonce(&self) -> Arc<()> {
-        self.nonce.clone()
-    }
 }
 struct Intent {
     token: TerminalIntent,
@@ -90,11 +81,6 @@ pub(super) struct TerminalSession {
     epoch: Arc<()>,
     policy: TerminalsConfig,
     retired: HashSet<PtyId>,
-    validation: Option<(
-        super::workspace::ValidationId,
-        TerminalIntent,
-        Option<crate::debugger::DapTerminalReply>,
-    )>,
     close_intent: Option<TerminalCloseSource>,
     closed: bool,
 }
@@ -113,37 +99,9 @@ impl TerminalSession {
             epoch: Arc::new(()),
             policy: policy.clone(),
             retired: HashSet::new(),
-            validation: None,
             close_intent: None,
             closed: false,
         }
-    }
-    pub(super) fn defer_validation(
-        &mut self,
-        id: super::workspace::ValidationId,
-        intent: TerminalIntent,
-        reply: Option<crate::debugger::DapTerminalReply>,
-    ) {
-        debug_assert!(self.validation.is_none());
-        self.validation = Some((id, intent, reply));
-    }
-    pub(super) fn take_validation(
-        &mut self,
-        id: super::workspace::ValidationId,
-    ) -> Option<crate::editor::session::DeferredExecution> {
-        let matches = self
-            .validation
-            .as_ref()
-            .is_some_and(|(expected, ..)| *expected == id);
-        matches.then(|| {
-            let (_, intent, reply) = self.validation.take().expect("matched terminal validation");
-            match reply {
-                Some(reply) => {
-                    crate::editor::session::DeferredExecution::OpenDapTerminal { intent, reply }
-                }
-                None => crate::editor::session::DeferredExecution::OpenTerminal(intent),
-            }
-        })
     }
     pub(in crate::editor::session) fn selected(&self) -> Option<PtyId> {
         self.selected
@@ -371,7 +329,6 @@ impl TerminalSession {
                 id,
             },
             profile: name.into(),
-            nonce: Arc::new(()),
         };
         self.intent = Some(Intent {
             token: token.clone(),
@@ -392,12 +349,11 @@ impl TerminalSession {
     pub(in crate::editor::session) fn prepare(
         &mut self,
         token: TerminalIntent,
-        permit: TerminalPermit,
         workspace: &WorkspaceSession,
     ) -> Result<TerminalOpen, String> {
-        if !workspace.consume_terminal_permit(permit, token.profile(), &token.nonce) {
-            return Err("terminal launch requires its original execution permit".into());
-        }
+        workspace
+            .execution_allowed()
+            .map_err(|_| "terminals run only in a trusted workspace".to_owned())?;
         let source = self.intent.as_ref().ok_or("terminal intent closed")?;
         if self.closed
             || source.token != token

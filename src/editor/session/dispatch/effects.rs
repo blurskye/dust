@@ -2,7 +2,7 @@ use super::super::configuration::{configured_grapheme_width, configured_text_wid
 use super::{
     AdapterContext, AppEffect, ArgumentSchema, BTreeMap, BTreeSet, ByteOffset, ByteRange,
     CommandId, CommandInvocation, CommandOutcome, CommandSource, CommandSpec,
-    ContextRequirement, DapControl, DapEvent, DapResponse, DapSourceBreakpoint, DeferredExecution,
+    ContextRequirement, DapControl, DapEvent, DapResponse, DapSourceBreakpoint, TrustedAction,
     DiagnosticFilter, DiagnosticOwner, DisplayWidthPolicy, DockEdge, DocumentationPopupKind,
     EditorCloseSave, EditorCloseStep, EditorCloseTarget, EditorMode, EditorOperation, EditorState,
     EditorTransaction, ExecutionPreflightEvent, ExecutionSource, ExplorerKind, ExplorerMutation,
@@ -1956,14 +1956,14 @@ impl InteractiveApplication {
                     self.show_error(self.message("test_matcher_missing", &[]));
                     return Ok(());
                 };
-                self.defer_trusted_execution(DeferredExecution::RunTest { name, matcher });
+                self.run_trusted(TrustedAction::RunTest { name, matcher });
             }
             AppEffect::TestStop(name) => self.stop_task(&name),
             AppEffect::TestList(name) => self.show_test_picker(&name),
             AppEffect::TaskList => self.show_task_picker(),
             AppEffect::TaskRestart(name) => {
                 self.stop_task(&name);
-                self.defer_trusted_execution(DeferredExecution::RunTask(name));
+                self.run_trusted(TrustedAction::RunTask(name));
             }
             AppEffect::LintRun(name) => {
                 let Some(task) = self.configuration.settings().tasks.get(&name) else {
@@ -1974,7 +1974,7 @@ impl InteractiveApplication {
                     self.show_error(self.message("linter_matcher_missing", &[]));
                     return Ok(());
                 };
-                self.defer_trusted_execution(DeferredExecution::RunLinter { name, matcher });
+                self.run_trusted(TrustedAction::RunLinter { name, matcher });
             }
             AppEffect::LintClear(name) => {
                 if let Ok(owner) = DiagnosticOwner::new(format!("task:{name}")) {
@@ -1992,12 +1992,12 @@ impl InteractiveApplication {
                 let buffer = view.buffer;
                 match crate::editor::session::tasks::FormatterSource::capture(&self.state, buffer) {
                     Ok(source) => self
-                        .defer_trusted_execution(DeferredExecution::RunFormatter { name, source }),
+                        .run_trusted(TrustedAction::RunFormatter { name, source }),
                     Err(error) => self.show_error(error),
                 }
             }
             AppEffect::TaskRun(name) => {
-                self.defer_trusted_execution(DeferredExecution::RunTask(name))
+                self.run_trusted(TrustedAction::RunTask(name))
             }
             AppEffect::TaskStop(name) => self.stop_task(&name),
             AppEffect::TaskOutput(name) => self.show_output_picker(&name),
@@ -2458,7 +2458,7 @@ impl InteractiveApplication {
                 if self.workspace.safe_mode() {
                     self.show_error(self.message("safe_mode_blocked", &[]));
                 } else {
-                    self.defer_trusted_execution(DeferredExecution::InstallPackage {
+                    self.run_trusted(TrustedAction::InstallPackage {
                         package_manifest,
                         plugin_manifest,
                         component,
@@ -2489,7 +2489,7 @@ impl InteractiveApplication {
                 if self.workspace.safe_mode() {
                     self.show_error(self.message("safe_mode_blocked", &[]))
                 } else {
-                    self.defer_trusted_execution(DeferredExecution::InstallRegistry {
+                    self.run_trusted(TrustedAction::InstallRegistry {
                         publisher,
                         name,
                         version,
@@ -5206,7 +5206,7 @@ impl InteractiveApplication {
             &self.workspace,
             self.tooling.entries(),
         ) {
-            Ok(intent) => self.defer_trusted_execution(DeferredExecution::StartDebug(intent)),
+            Ok(intent) => self.run_trusted(TrustedAction::StartDebug(intent)),
             Err(error) => self.show_error(error),
         }
     }
@@ -5233,23 +5233,17 @@ impl InteractiveApplication {
             &self.workspace,
             self.tooling.entries(),
         ) {
-            Ok(intent) => self.defer_trusted_execution(DeferredExecution::StartDebug(intent)),
+            Ok(intent) => self.run_trusted(TrustedAction::StartDebug(intent)),
             Err(error) => self.show_error(error),
         }
     }
     pub(super) fn authorize_debug_launch(
         &mut self,
         intent: crate::editor::session::debugger::DebugIntent,
-        authorization: Option<ExecutionAuthorization>,
     ) {
-        let Some(permit) = authorization.and_then(|a| a.debug_permit(&self.workspace, &intent))
-        else {
-            self.show_error("debug launch requires its original authorization");
-            return;
-        };
         if let Err(error) = self
             .debugger_session
-            .authorize_debug(intent, permit, &self.workspace)
+            .authorize_debug(intent, &self.workspace)
         {
             self.show_error(error);
             return;
@@ -5463,39 +5457,17 @@ impl InteractiveApplication {
         }
     }
 
-    pub(super) fn start_task_after_validation(
-        &mut self,
-        name: &str,
-        authorization: Option<super::effects::ExecutionAuthorization>,
-    ) {
-        self.start_task_plan(name, AdapterContext::Plain, authorization);
-    }
-
     pub(super) fn start_task_plan(
         &mut self,
         name: &str,
         adapter: AdapterContext,
-        authorization: Option<super::effects::ExecutionAuthorization>,
     ) {
-        let kind = match &adapter {
-            AdapterContext::Plain => crate::config::TaskKind::Task,
-            AdapterContext::Formatter { .. } => crate::config::TaskKind::Formatter,
-            AdapterContext::Linter { .. } => crate::config::TaskKind::Linter,
-            AdapterContext::Test { .. } => crate::config::TaskKind::Test,
-        };
-        let Some(permit) = authorization
-            .and_then(|authorization| authorization.task_permit(&self.workspace, name, kind))
-        else {
-            self.show_error("task launch requires its requesting execution authorization");
-            return;
-        };
         match self.tasks.plan(
             name,
             &adapter,
             self.configuration.settings(),
             &self.workspace,
             self.configuration.binding_revision(),
-            permit,
         ) {
             Ok(()) => {}
             Err(error) => {
@@ -5911,10 +5883,10 @@ impl InteractiveApplication {
                 .navigation_stamp(self.state.window_version(), self.state.active_view),
             self.input.capture_epoch(),
         ) {
-            Ok(intent) => self.defer_trusted_execution(if let Some(reply) = reply {
-                DeferredExecution::OpenDapTerminal { intent, reply }
+            Ok(intent) => self.run_trusted(if let Some(reply) = reply {
+                TrustedAction::OpenDapTerminal { intent, reply }
             } else {
-                DeferredExecution::OpenTerminal(intent)
+                TrustedAction::OpenTerminal(intent)
             }),
             Err(error) => {
                 if let Some(reply) = reply {
@@ -5925,24 +5897,16 @@ impl InteractiveApplication {
         }
     }
 
-    pub(super) fn open_terminal_after_validation_with_response(
+    pub(super) fn open_terminal_with_response(
         &mut self,
         intent: super::super::terminal::TerminalIntent,
         reply: Option<crate::debugger::DapTerminalReply>,
-        authorization: Option<ExecutionAuthorization>,
     ) {
         if reply.as_ref().is_some_and(|r| !r.current()) {
-            self.show_error("requesting debugger retired before terminal admission");
+            self.show_error("the debugger that asked for this terminal has stopped");
             return;
         }
-        let Some(permit) = authorization.and_then(|a| a.terminal_permit(&self.workspace, &intent))
-        else {
-            self.show_error("terminal launch requires its original authorization");
-            return;
-        };
-        match self
-            .terminal_session
-            .prepare(intent, permit, &self.workspace)
+        match self.terminal_session.prepare(intent, &self.workspace)
         {
             Ok(open) => {
                 let id = self
@@ -9266,7 +9230,6 @@ impl InteractiveApplication {
             || self.workspace_edits.proposal().is_some()
             || self.documents.legacy_pending()
             || self.workspace.persist_pending()
-            || self.workspace.validation_pending()
             || self.documents.has_startup_work()
             || self.documents.file_work_pending();
         busy.then(|| self.message("workspace_root_service_blocker", &[]))
@@ -10559,13 +10522,12 @@ impl InteractiveApplication {
         id: &str,
         source: Option<LspRuntimeSource>,
     ) {
-        self.install_tool_authorized(id, source, None);
+        self.install_tool(id, source);
     }
-    pub(in crate::editor::session) fn install_tool_authorized(
+    pub(in crate::editor::session) fn install_tool(
         &mut self,
         id: &str,
         source: Option<LspRuntimeSource>,
-        authorization: Option<ExecutionAuthorization>,
     ) {
         let Some(index) = self
             .tooling
@@ -10658,19 +10620,8 @@ impl InteractiveApplication {
                 LspRuntimeSource::Managed | LspRuntimeSource::Nix => {}
             }
         }
-        if !authorization.is_some_and(|permit| {
-            permit.consume(
-                &self.workspace,
-                ExecutionAdmission::Tool(
-                    id.into(),
-                    (definition.kind == ToolKind::Lsp).then_some(source),
-                ),
-            )
-        }) {
-            self.defer_trusted_execution(DeferredExecution::InstallTool {
-                id: id.into(),
-                source: (definition.kind == ToolKind::Lsp).then_some(source),
-            });
+        if let Err(failure) = self.workspace.execution_allowed() {
+            self.show_workspace_failure(failure);
             return;
         }
         if let Err(error) = self
@@ -11047,9 +10998,12 @@ impl InteractiveApplication {
                     RegistryResult::Artifact { .. } => self.show_error("unowned registry artifact"),
                 },
                 RegistryUpdate::ValidateArtifact => {
-                    self.defer_trusted_execution(DeferredExecution::PrepareRegistryArtifact);
-                    if !self.workspace.validation_pending() {
-                        self.extension.discard_artifact();
+                    match self.workspace.execution_allowed() {
+                        Ok(()) => self.run_trusted(TrustedAction::PrepareRegistryArtifact),
+                        Err(failure) => {
+                            self.show_workspace_failure(failure);
+                            self.extension.discard_artifact();
+                        }
                     }
                 }
                 RegistryUpdate::Error(error) => self
@@ -11197,7 +11151,6 @@ impl InteractiveApplication {
             enabled: self.configuration.settings().lsp.enabled,
             auto_start: self.configuration.settings().lsp.auto_start,
             nix_workspace_fallback: self.configuration.settings().lsp.nix_workspace_fallback,
-            execution_busy: self.workspace.validation_pending(),
             launchable_server,
         };
         if let Some(server) =
@@ -11330,13 +11283,6 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn start_lsp(&mut self, requested: Option<String>) {
-        self.start_lsp_authorized(requested, None);
-    }
-    pub(in crate::editor::session) fn start_lsp_authorized(
-        &mut self,
-        requested: Option<String>,
-        authorization: Option<ExecutionAuthorization>,
-    ) {
         if !self.configuration.settings().lsp.enabled {
             self.show_error(self.message("lsp_disabled", &[]));
             return;
@@ -11491,13 +11437,8 @@ impl InteractiveApplication {
         else {
             return;
         };
-        if !authorization.is_some_and(|permit| {
-            permit.consume(
-                &self.workspace,
-                ExecutionAdmission::Lsp(definition.id.clone()),
-            )
-        }) {
-            self.defer_trusted_execution(DeferredExecution::StartLsp(Some(definition.id.clone())));
+        if let Err(failure) = self.workspace.execution_allowed() {
+            self.show_workspace_failure(failure);
             return;
         }
         if let Err(error) = self.workspace.authorize_execution(
@@ -11583,23 +11524,14 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn restart_lsp_session(&mut self, key: String) {
-        self.restart_lsp_authorized(key, None);
-    }
-    pub(in crate::editor::session) fn restart_lsp_authorized(
-        &mut self,
-        key: String,
-        authorization: Option<ExecutionAuthorization>,
-    ) {
         let Some(state) = self.language.sessions().get(&key) else {
             return;
         };
         if state.circuit_open || !state.desired_running {
             return;
         }
-        if !authorization.is_some_and(|permit| {
-            permit.consume(&self.workspace, ExecutionAdmission::Restart(key.clone()))
-        }) {
-            self.defer_trusted_execution(DeferredExecution::RestartLsp(key));
+        if let Err(failure) = self.workspace.execution_allowed() {
+            self.show_workspace_failure(failure);
             return;
         }
         let Some((&buffer, document)) = state.documents.iter().next() else {
@@ -12497,92 +12429,6 @@ impl InteractiveApplication {
     }
 }
 
-#[derive(Eq, PartialEq)]
-pub(in crate::editor::session) enum ExecutionAdmission {
-    Tool(String, Option<LspRuntimeSource>),
-    Lsp(String),
-    Restart(String),
-    Debug(crate::editor::session::debugger::DebugIntent),
-    Task(String, crate::config::TaskKind),
-    Terminal(crate::editor::session::terminal::TerminalIntent),
-}
-impl ExecutionAdmission {
-    fn for_action(action: &DeferredExecution) -> Option<Self> {
-        Some(match action {
-            DeferredExecution::InstallTool { id, source } => Self::Tool(id.clone(), *source),
-            DeferredExecution::StartLsp(Some(id)) => Self::Lsp(id.clone()),
-            DeferredExecution::RestartLsp(id) => Self::Restart(id.clone()),
-            DeferredExecution::StartDebug(intent) => Self::Debug(intent.clone()),
-            DeferredExecution::OpenTerminal(intent)
-            | DeferredExecution::OpenDapTerminal { intent, .. } => Self::Terminal(intent.clone()),
-            DeferredExecution::RunTask(name) => {
-                Self::Task(name.clone(), crate::config::TaskKind::Task)
-            }
-            DeferredExecution::RunTest { name, .. } => {
-                Self::Task(name.clone(), crate::config::TaskKind::Test)
-            }
-            DeferredExecution::RunLinter { name, .. } => {
-                Self::Task(name.clone(), crate::config::TaskKind::Linter)
-            }
-            DeferredExecution::RunFormatter { name, .. } => {
-                Self::Task(name.clone(), crate::config::TaskKind::Formatter)
-            }
-            _ => return None,
-        })
-    }
-}
-pub(in crate::editor::session) struct ExecutionAuthorization {
-    admission: ExecutionAdmission,
-    id: crate::editor::session::workspace::ValidationId,
-    permit: crate::editor::session::workspace::ExecutionPermit,
-}
-impl ExecutionAuthorization {
-    pub(in crate::editor::session) fn debug_permit(
-        self,
-        workspace: &crate::editor::session::workspace::WorkspaceSession,
-        intent: &crate::editor::session::debugger::DebugIntent,
-    ) -> Option<crate::editor::session::workspace::DebugPermit> {
-        if self.admission != ExecutionAdmission::Debug(intent.clone()) {
-            return None;
-        }
-        workspace.debug_permit(self.permit, self.id, intent.nonce())
-    }
-    pub(in crate::editor::session) fn terminal_permit(
-        self,
-        workspace: &crate::editor::session::workspace::WorkspaceSession,
-        intent: &crate::editor::session::terminal::TerminalIntent,
-    ) -> Option<crate::editor::session::workspace::TerminalPermit> {
-        if self.admission != ExecutionAdmission::Terminal(intent.clone()) {
-            return None;
-        }
-        workspace.terminal_permit(
-            self.permit,
-            self.id,
-            intent.profile().into(),
-            intent.nonce(),
-        )
-    }
-
-    pub(in crate::editor::session) fn task_permit(
-        self,
-        workspace: &crate::editor::session::workspace::WorkspaceSession,
-        name: &str,
-        kind: crate::config::TaskKind,
-    ) -> Option<crate::editor::session::workspace::TaskPermit> {
-        if self.admission != ExecutionAdmission::Task(name.into(), kind) {
-            return None;
-        }
-        workspace.task_permit(self.permit, self.id, name.into(), kind)
-    }
-
-    pub(in crate::editor::session) fn consume(
-        self,
-        workspace: &crate::editor::session::workspace::WorkspaceSession,
-        requested: ExecutionAdmission,
-    ) -> bool {
-        self.admission == requested && workspace.consume_permit(self.permit, self.id)
-    }
-}
 use crate::editor::session::workspace::{WorkspaceFailure, WorkspaceUpdate};
 impl InteractiveApplication {
     pub(in crate::editor::session) fn show_workspace_failure(&mut self, failure: WorkspaceFailure) {
@@ -12595,126 +12441,15 @@ impl InteractiveApplication {
         };
         self.show_error(message);
     }
-    pub(in crate::editor::session) fn defer_trusted_execution(
-        &mut self,
-        action: DeferredExecution,
-    ) {
-        match self.workspace.begin_validation() {
-            Ok(id) => {
-                match action {
-                    DeferredExecution::InstallTool { id: tool, source } => {
-                        self.tooling.defer_validation(id, tool, source)
-                    }
-                    DeferredExecution::StartLsp(server) => {
-                        self.language.defer_start_validation(id, server)
-                    }
-                    DeferredExecution::RestartLsp(server) => {
-                        self.language.defer_restart_validation(id, server)
-                    }
-                    DeferredExecution::StartDebug(intent) => {
-                        self.debugger_session.defer_validation(id, intent)
-                    }
-                    DeferredExecution::InstallRegistry {
-                        publisher,
-                        name,
-                        version,
-                    } => self
-                        .extension
-                        .defer_registry_validation(id, publisher, name, version),
-                    DeferredExecution::PrepareRegistryArtifact => {
-                        self.extension.defer_artifact_validation(id)
-                    }
-                    DeferredExecution::InstallPackage {
-                        package_manifest,
-                        plugin_manifest,
-                        component,
-                        update,
-                    } => self.extension.defer_package_validation(
-                        id,
-                        package_manifest,
-                        plugin_manifest,
-                        component,
-                        update,
-                    ),
-                    DeferredExecution::RunTask(name) => {
-                        self.tasks.defer_validation(id, name, AdapterContext::Plain)
-                    }
-                    DeferredExecution::OpenTerminal(intent) => {
-                        self.terminal_session.defer_validation(id, intent, None)
-                    }
-                    DeferredExecution::OpenDapTerminal { intent, reply } => self
-                        .terminal_session
-                        .defer_validation(id, intent, Some(reply)),
-                    DeferredExecution::RunTest { name, matcher } => {
-                        self.tasks
-                            .defer_validation(id, name, AdapterContext::Test { matcher })
-                    }
-                    DeferredExecution::RunLinter { name, matcher } => {
-                        self.tasks
-                            .defer_validation(id, name, AdapterContext::Linter { matcher })
-                    }
-                    DeferredExecution::RunFormatter { name, source } => self
-                        .tasks
-                        .defer_validation(id, name, AdapterContext::Formatter { source }),
-                }
-                self.notify_message(self.message("workspace_execution_validating", &[]), false);
-            }
-            Err(e) => self.show_workspace_failure(e),
-        }
-    }
-    fn finish_execution_validation(
-        &mut self,
-        id: crate::editor::session::workspace::ValidationId,
-        permit: Option<crate::editor::session::workspace::ExecutionPermit>,
-    ) {
-        let Some(action) = self
-            .tooling
-            .take_validation(id)
-            .or_else(|| self.language.take_validation(id))
-            .or_else(|| self.debugger_session.take_validation(id))
-            .or_else(|| self.extension.take_validation(id))
-            .or_else(|| self.tasks.take_validation(id))
-            .or_else(|| self.terminal_session.take_validation(id))
-        else {
-            return;
-        };
-        let Some(permit) = permit else {
-            self.show_error(self.message(
-                "workspace_execution_validation_failed",
-                &[("diagnostic", "workspace root identity changed".into())],
-            ));
-            return;
-        };
-        if !self.workspace.permit_current(&permit, id) {
-            self.show_error("workspace execution permit is stale");
+    /// Run a project-defined command if the workspace is trusted.
+    pub(in crate::editor::session) fn run_trusted(&mut self, action: TrustedAction) {
+        if let Err(failure) = self.workspace.execution_allowed() {
+            self.show_workspace_failure(failure);
             return;
         }
-        self.clear_notice();
-        let authorization = if let Some(admission) = ExecutionAdmission::for_action(&action) {
-            Some(ExecutionAuthorization {
-                admission,
-                id,
-                permit,
-            })
-        } else {
-            if !self.workspace.consume_permit(permit, id) {
-                self.show_error("workspace execution permit is stale");
-                return;
-            }
-            None
-        };
         match action {
-            DeferredExecution::InstallTool { id, source } => {
-                self.install_tool_authorized(&id, source, authorization)
-            }
-            DeferredExecution::StartLsp(requested) => {
-                self.start_lsp_authorized(requested, authorization)
-            }
-            DeferredExecution::RestartLsp(key) => self.restart_lsp_authorized(key, authorization),
-            DeferredExecution::StartDebug(intent) => {
-                self.authorize_debug_launch(intent, authorization)
-            }
-            DeferredExecution::InstallRegistry {
+            TrustedAction::StartDebug(intent) => self.authorize_debug_launch(intent),
+            TrustedAction::InstallRegistry {
                 publisher,
                 name,
                 version,
@@ -12726,13 +12461,12 @@ impl InteractiveApplication {
                 },
                 true,
             ),
-            DeferredExecution::PrepareRegistryArtifact => {
+            TrustedAction::PrepareRegistryArtifact => {
                 if let Err(error) = self.extension.prepare_artifact(self.plugin_limits()) {
                     self.show_error(error);
                 }
             }
-
-            DeferredExecution::InstallPackage {
+            TrustedAction::InstallPackage {
                 package_manifest,
                 plugin_manifest,
                 component,
@@ -12743,22 +12477,21 @@ impl InteractiveApplication {
                 component,
                 update,
             ),
-            DeferredExecution::RunTask(name) => {
-                self.start_task_after_validation(&name, authorization)
+            TrustedAction::RunTask(name) => self.start_task_plan(&name, AdapterContext::Plain),
+            TrustedAction::OpenTerminal(intent) => {
+                self.open_terminal_with_response(intent, None)
             }
-            DeferredExecution::OpenTerminal(intent) => {
-                self.open_terminal_after_validation_with_response(intent, None, authorization)
+            TrustedAction::OpenDapTerminal { intent, reply } => {
+                self.open_terminal_with_response(intent, Some(reply))
             }
-            DeferredExecution::OpenDapTerminal { intent, reply } => self
-                .open_terminal_after_validation_with_response(intent, Some(reply), authorization),
-            DeferredExecution::RunTest { name, matcher } => {
-                self.start_task_plan(&name, AdapterContext::Test { matcher }, authorization)
+            TrustedAction::RunTest { name, matcher } => {
+                self.start_task_plan(&name, AdapterContext::Test { matcher })
             }
-            DeferredExecution::RunLinter { name, matcher } => {
-                self.start_task_plan(&name, AdapterContext::Linter { matcher }, authorization)
+            TrustedAction::RunLinter { name, matcher } => {
+                self.start_task_plan(&name, AdapterContext::Linter { matcher })
             }
-            DeferredExecution::RunFormatter { name, source } => {
-                self.start_task_plan(&name, AdapterContext::Formatter { source }, authorization)
+            TrustedAction::RunFormatter { name, source } => {
+                self.start_task_plan(&name, AdapterContext::Formatter { source })
             }
         }
     }
@@ -12777,7 +12510,6 @@ impl InteractiveApplication {
             match event {
                 WorkspaceUpdate::Failure(e) => self.show_workspace_failure(e),
                 WorkspaceUpdate::Message(key) => self.notify_message(self.message(key, &[]), false),
-                WorkspaceUpdate::ScopeInvalidated => self.documents.retire_startup(),
                 WorkspaceUpdate::RootAdded(path) => {
                     self.invalidate_root_scoped_operations();
                     self.notify_message(
@@ -12789,9 +12521,6 @@ impl InteractiveApplication {
                     );
                 }
                 WorkspaceUpdate::RootSwitched { path, old } => self.finish_root_switch(path, &old),
-                WorkspaceUpdate::Validated { id, permit } => {
-                    self.finish_execution_validation(id, permit)
-                }
             }
         }
     }
@@ -12845,69 +12574,5 @@ impl InteractiveApplication {
             Ok(()) => self.notify_message(self.message("workspace_trust_saving", &[]), false),
             Err(e) => self.show_workspace_failure(e),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::editor::session::workspace::{ExecutionPermit, ValidationId, WorkspaceSession};
-    use crate::workspace::{RootIdentity, WorkspaceId, WorkspaceState};
-    use std::time::Duration;
-    fn permit(owner: &mut WorkspaceSession) -> (ValidationId, ExecutionPermit) {
-        let id = owner
-            .begin_validation()
-            .unwrap_or_else(|_| panic!("validation"));
-        let deadline = Instant::now() + Duration::from_secs(2);
-        loop {
-            for event in owner.poll() {
-                if let WorkspaceUpdate::Validated {
-                    id: actual,
-                    permit: Some(permit),
-                } = event
-                {
-                    assert_eq!(id, actual);
-                    return (id, permit);
-                }
-            }
-            assert!(Instant::now() < deadline);
-            std::thread::sleep(Duration::from_millis(1));
-        }
-    }
-    #[test]
-    fn explicit_authorizations_are_consumed_by_exact_arguments_and_current_workspace_only() {
-        let root = tempfile::tempdir().unwrap();
-        let identity = RootIdentity::capture(root.path()).unwrap();
-        let state =
-            WorkspaceState::new(WorkspaceId(1), [("root".into(), identity.clone())]).unwrap();
-        let mut owner =
-            WorkspaceSession::new(state, root.path().join("trust.toml"), 2, false, false, 2);
-        owner
-            .fixture_identity(crate::workspace::RootId(1), identity.clone())
-            .unwrap();
-        owner.fixture_trust_identity(identity);
-        owner.reconcile_trust();
-        let (id, permit) = permit(&mut owner);
-        let rejected = ExecutionAuthorization {
-            admission: ExecutionAdmission::Lsp("one".into()),
-            id,
-            permit,
-        };
-        assert!(!rejected.consume(&owner, ExecutionAdmission::Lsp("two".into())));
-        let (id, token) = self::permit(&mut owner);
-        let valid = ExecutionAuthorization {
-            admission: ExecutionAdmission::Lsp("one".into()),
-            id,
-            permit: token,
-        };
-        assert!(valid.consume(&owner, ExecutionAdmission::Lsp("one".into())));
-        let (id, token) = self::permit(&mut owner);
-        let stale = ExecutionAuthorization {
-            admission: ExecutionAdmission::Restart("one".into()),
-            id,
-            permit: token,
-        };
-        owner.fixture_safe_mode(true);
-        assert!(!stale.consume(&owner, ExecutionAdmission::Restart("one".into())));
     }
 }

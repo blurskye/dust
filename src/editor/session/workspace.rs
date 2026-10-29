@@ -1,4 +1,4 @@
-//! Workspace roots, exact trust identities and asynchronous identity validation.
+//! Workspace roots and their trust. Project-defined commands run only in a trusted workspace.
 //! Feature execution payloads remain with their callers, not in this owner.
 mod discovery;
 use crate::workspace::{
@@ -9,7 +9,6 @@ pub(in crate::editor::session) use discovery::{
     DiscoveryKind, ExecutionLane, ExecutionReady, WorkspacePreflightEvent,
 };
 use std::{
-    collections::HashMap,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -22,8 +21,6 @@ impl PartialEq for WorkspaceVersion {
     }
 }
 impl Eq for WorkspaceVersion {}
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::editor::session) struct ValidationId(u64);
 pub(in crate::editor::session) enum WorkspaceFailure {
     Message(&'static str),
     Diagnostic(&'static str, String),
@@ -40,32 +37,6 @@ pub(in crate::editor::session) enum WorkspaceUpdate {
     RootAdded(PathBuf),
     /// The editor moved from the `old` root to the new `path`.
     RootSwitched { path: PathBuf, old: PathBuf },
-    ScopeInvalidated,
-    Validated {
-        id: ValidationId,
-        permit: Option<ExecutionPermit>,
-    },
-}
-pub(in crate::editor::session) struct ExecutionPermit {
-    id: ValidationId,
-    source: WorkspaceVersion,
-}
-pub(in crate::editor::session) struct DebugPermit {
-    permit: ExecutionPermit,
-    id: ValidationId,
-    nonce: Arc<()>,
-}
-pub(in crate::editor::session) struct TaskPermit {
-    permit: ExecutionPermit,
-    id: ValidationId,
-    name: String,
-    kind: crate::config::TaskKind,
-}
-pub(in crate::editor::session) struct TerminalPermit {
-    nonce: Arc<()>,
-    permit: ExecutionPermit,
-    id: ValidationId,
-    profile: String,
 }
 struct RootOperation {
     generation: u64,
@@ -73,12 +44,6 @@ struct RootOperation {
     requested_path: PathBuf,
     /// The root this one replaces when switching worktrees.
     replaces: Option<RootId>,
-}
-struct Validation {
-    id: ValidationId,
-    source: WorkspaceVersion,
-    failed: bool,
-    generations: HashMap<u64, RootIdentity>,
 }
 struct Confirmation {
     source: WorkspaceVersion,
@@ -103,8 +68,6 @@ pub(super) struct WorkspaceSession {
     startup_prompt_checked: bool,
     safe_mode: bool,
     root_operation: Option<RootOperation>,
-    validation: Option<Validation>,
-    next_validation: Option<u64>,
     confirmation: Option<Confirmation>,
     language_roots: discovery::Discovery,
     debugger_roots: discovery::Discovery,
@@ -162,8 +125,6 @@ impl WorkspaceSession {
             startup_prompt_checked: false,
             safe_mode,
             root_operation: None,
-            validation: None,
-            next_validation: Some(0),
             confirmation: None,
             language_roots: discovery::Discovery::default(),
             debugger_roots: discovery::Discovery::default(),
@@ -173,85 +134,6 @@ impl WorkspaceSession {
             tutor_generation: None,
             tutor_progress: crate::workspace::TutorProgress::default(),
         }
-    }
-    pub(in crate::editor::session) fn debug_permit(
-        &self,
-        permit: ExecutionPermit,
-        id: ValidationId,
-        nonce: Arc<()>,
-    ) -> Option<DebugPermit> {
-        self.permit_current(&permit, id)
-            .then_some(DebugPermit { permit, id, nonce })
-    }
-    pub(in crate::editor::session) fn consume_debug_permit(
-        &self,
-        permit: DebugPermit,
-        nonce: &Arc<()>,
-    ) -> bool {
-        Arc::ptr_eq(&permit.nonce, nonce) && self.consume_permit(permit.permit, permit.id)
-    }
-    pub(in crate::editor::session) fn terminal_permit(
-        &self,
-        permit: ExecutionPermit,
-        id: ValidationId,
-        profile: String,
-        nonce: Arc<()>,
-    ) -> Option<TerminalPermit> {
-        self.permit_current(&permit, id).then_some(TerminalPermit {
-            nonce,
-            permit,
-            id,
-            profile,
-        })
-    }
-    pub(in crate::editor::session) fn consume_terminal_permit(
-        &self,
-        permit: TerminalPermit,
-        profile: &str,
-        nonce: &Arc<()>,
-    ) -> bool {
-        Arc::ptr_eq(&permit.nonce, nonce)
-            && permit.profile == profile
-            && self.consume_permit(permit.permit, permit.id)
-    }
-    pub(in crate::editor::session) fn task_permit(
-        &self,
-        permit: ExecutionPermit,
-        id: ValidationId,
-        name: String,
-        kind: crate::config::TaskKind,
-    ) -> Option<TaskPermit> {
-        self.permit_current(&permit, id).then_some(TaskPermit {
-            permit,
-            id,
-            name,
-            kind,
-        })
-    }
-    pub(in crate::editor::session) fn consume_task_permit(
-        &self,
-        permit: TaskPermit,
-        name: &str,
-        kind: crate::config::TaskKind,
-    ) -> bool {
-        permit.name == name && permit.kind == kind && self.consume_permit(permit.permit, permit.id)
-    }
-    pub(in crate::editor::session) fn consume_permit(
-        &self,
-        permit: ExecutionPermit,
-        id: ValidationId,
-    ) -> bool {
-        self.permit_current(&permit, id)
-    }
-    pub(in crate::editor::session) fn permit_current(
-        &self,
-        permit: &ExecutionPermit,
-        id: ValidationId,
-    ) -> bool {
-        permit.id == id
-            && permit.source == self.version
-            && !self.safe_mode
-            && self.state.trust() == WorkspaceTrust::Trusted
     }
     pub(in crate::editor::session) fn version(&self) -> WorkspaceVersion {
         self.version.clone()
@@ -559,56 +441,18 @@ impl WorkspaceSession {
             }
         }
     }
-    pub(in crate::editor::session) fn validation_pending(&self) -> bool {
-        self.validation.is_some()
-    }
-    pub(in crate::editor::session) fn begin_validation(
-        &mut self,
-    ) -> Result<ValidationId, WorkspaceFailure> {
+    /// Whether project-defined commands (tasks, terminals, debuggers, language servers, tool
+    /// installs) may run now. Checked when a command is chosen and again when it spawns.
+    pub(in crate::editor::session) fn execution_allowed(&self) -> Result<(), WorkspaceFailure> {
         if self.safe_mode {
             return Err(WorkspaceFailure::Message("safe_mode_blocked"));
         }
-        if self.validation.is_some() {
-            return Err(WorkspaceFailure::Message(
-                "workspace_execution_validation_busy",
-            ));
-        }
-        self.state
-            .authorize_execution(ExecutionSource::ProjectLocal)?;
         if !self.database_ready || !self.identity_ready {
-            self.state.set_trust(WorkspaceTrust::Untrusted);
             return Err(WorkspaceFailure::Message("workspace_trust_not_ready"));
         }
-        let next = self.next_validation.ok_or(WorkspaceFailure::Plain(
-            "workspace validation identity exhausted".into(),
-        ))?;
-        self.next_validation = next.checked_add(1);
-        let id = ValidationId(next);
-        let mut generations = HashMap::new();
-        for root in self.state.roots() {
-            match self
-                .service
-                .inspect_root(root.identity.canonical_path.clone())
-            {
-                Ok(generation) => {
-                    generations.insert(generation, root.identity.clone());
-                }
-                Err(e) => {
-                    self.state.set_trust(WorkspaceTrust::Untrusted);
-                    return Err(WorkspaceFailure::Diagnostic(
-                        "workspace_execution_validation_failed",
-                        e.to_string(),
-                    ));
-                }
-            }
-        }
-        self.validation = Some(Validation {
-            id,
-            source: self.version(),
-            failed: false,
-            generations,
-        });
-        Ok(id)
+        self.state
+            .authorize_execution(ExecutionSource::ProjectLocal)
+            .map_err(WorkspaceFailure::from)
     }
     pub(in crate::editor::session) fn poll(&mut self) -> Vec<WorkspaceUpdate> {
         let mut updates = Vec::new();
@@ -619,12 +463,6 @@ impl WorkspaceSession {
                 Err(e) => {
                     self.state.set_trust(WorkspaceTrust::Untrusted);
                     self.root_operation = None;
-                    if let Some(v) = self.validation.take() {
-                        updates.push(WorkspaceUpdate::Validated {
-                            id: v.id,
-                            permit: None,
-                        });
-                    }
                     updates.push(WorkspaceUpdate::Failure(WorkspaceFailure::Diagnostic(
                         "workspace_trust_state_failed",
                         e.to_string(),
@@ -721,57 +559,6 @@ impl WorkspaceSession {
                     Err(e) => updates.push(WorkspaceUpdate::Failure(WorkspaceFailure::Plain(
                         format!("{}: {e}", operation.requested_path.display()),
                     ))),
-                }
-            }
-            TrustEvent::RootInspected { generation, result }
-                if self
-                    .validation
-                    .as_ref()
-                    .is_some_and(|v| v.generations.contains_key(&generation)) =>
-            {
-                let validation = self.validation.as_mut().expect("matched validation");
-                let expected = validation
-                    .generations
-                    .remove(&generation)
-                    .expect("matched generation");
-                let previously_failed = validation.failed;
-                validation.failed |= !result.as_ref().is_ok_and(|id| id == &expected)
-                    || !self.store.is_trusted(&expected);
-                if validation.failed {
-                    if let Ok(actual) = &result {
-                        if actual.canonical_path == expected.canonical_path && actual != &expected {
-                            if let Some(root) = self
-                                .state
-                                .roots()
-                                .iter()
-                                .find(|root| root.identity == expected)
-                                .map(|root| root.id)
-                            {
-                                let _ = self.state.replace_root_identity(root, actual.clone());
-                            }
-                        }
-                    }
-                    if !previously_failed {
-                        updates.push(WorkspaceUpdate::ScopeInvalidated);
-                    }
-                    self.state.set_trust(WorkspaceTrust::Untrusted);
-                    self.confirmation = None;
-                    self.version = WorkspaceVersion(Arc::new(()));
-                }
-                if validation.generations.is_empty() {
-                    let validation = self.validation.take().expect("completed validation");
-                    let valid =
-                        !validation.failed && validation.source == self.version && !self.safe_mode;
-                    if !valid {
-                        self.state.set_trust(WorkspaceTrust::Untrusted);
-                    }
-                    updates.push(WorkspaceUpdate::Validated {
-                        id: validation.id,
-                        permit: valid.then(|| ExecutionPermit {
-                            id: validation.id,
-                            source: self.version(),
-                        }),
-                    });
                 }
             }
             TrustEvent::Persisted { generation, result }
@@ -961,95 +748,5 @@ mod tests {
             assert!(std::time::Instant::now() < deadline);
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
-    }
-    #[test]
-    fn completed_validation_permits_reject_later_root_changes_and_foreign_owners() {
-        let (mut owner, _directory) = fixture();
-        let identity = owner.roots()[0].identity.clone();
-        owner.validation = Some(Validation {
-            id: ValidationId(3),
-            source: owner.version(),
-            failed: false,
-            generations: HashMap::from([(7, identity.clone())]),
-        });
-        let mut events = Vec::new();
-        owner.accept_event(
-            TrustEvent::RootInspected {
-                generation: 7,
-                result: Ok(identity),
-            },
-            &mut events,
-        );
-        let WorkspaceUpdate::Validated {
-            id,
-            permit: Some(permit),
-        } = events.pop().unwrap()
-        else {
-            panic!("permit")
-        };
-        owner.set_active_root(RootId(2)).unwrap();
-        assert!(!owner.consume_permit(permit, id));
-        let (foreign, _foreign_directory) = fixture();
-        let permit = ExecutionPermit {
-            id,
-            source: foreign.version(),
-        };
-        assert!(!owner.consume_permit(permit, id));
-        let permit = ExecutionPermit {
-            id,
-            source: owner.version(),
-        };
-        assert!(owner.consume_permit(permit, id));
-    }
-    #[test]
-    fn first_identity_failure_revokes_before_other_probes_finish_and_old_results_do_not_revalidate()
-    {
-        let (mut owner, _directory) = fixture();
-        let identity = owner.roots()[0].identity.clone();
-        let before = owner.version();
-        owner.validation = Some(Validation {
-            id: ValidationId(4),
-            source: before.clone(),
-            failed: false,
-            generations: HashMap::from([(7, identity.clone()), (8, identity.clone())]),
-        });
-        let mut changed = identity.clone();
-        changed.filesystem_identity = Some((1, 77));
-        let mut events = Vec::new();
-        owner.accept_event(
-            TrustEvent::RootInspected {
-                generation: 7,
-                result: Ok(changed),
-            },
-            &mut events,
-        );
-        assert_eq!(owner.trust(), WorkspaceTrust::Untrusted);
-        assert_ne!(owner.version(), before);
-        assert!(matches!(
-            events.pop(),
-            Some(WorkspaceUpdate::ScopeInvalidated)
-        ));
-        assert!(events.is_empty());
-        owner.accept_event(
-            TrustEvent::RootInspected {
-                generation: 8,
-                result: Ok(identity.clone()),
-            },
-            &mut events,
-        );
-        assert!(matches!(
-            events.pop(),
-            Some(WorkspaceUpdate::Validated { permit: None, .. })
-        ));
-        owner.accept_event(
-            TrustEvent::RootInspected {
-                generation: 8,
-                result: Ok(identity),
-            },
-            &mut events,
-        );
-        assert!(events.is_empty());
-        owner.next_validation = None;
-        assert!(owner.begin_validation().is_err());
     }
 }

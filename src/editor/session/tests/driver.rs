@@ -789,12 +789,8 @@ impl TestSession {
         self.application
             .process_effect(crate::editor::AppEffect::TerminalOpen(Some(profile.into())));
     }
-    pub(super) fn terminal_finish_validation(&mut self) {
-        super::wait_execution_validation(&mut self.application);
-    }
     pub(super) fn terminal_open(&mut self, profile: &str) {
         self.terminal_request(profile);
-        self.terminal_finish_validation();
     }
     pub(super) fn focus_only_terminal(&mut self) {
         let ids = self.application.terminal_session.descriptions();
@@ -1034,7 +1030,6 @@ impl TestSession {
     pub(super) fn debug_start(&mut self, name: &str) {
         self.application
             .process_effect(crate::editor::AppEffect::DapConfigurationStart(name.into()));
-        super::wait_execution_validation(&mut self.application);
     }
     pub(super) fn debug_stop(&mut self) {
         self.application

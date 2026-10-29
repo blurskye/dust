@@ -157,7 +157,6 @@ pub(super) struct TaskSession {
     matchers: HashMap<String, regex::Regex>,
     events: VecDeque<JobEvent>,
     maximum_output: usize,
-    validation: Option<(super::workspace::ValidationId, String, AdapterContext)>,
     closed: bool,
 }
 impl TaskSession {
@@ -177,44 +176,10 @@ impl TaskSession {
             matchers: HashMap::new(),
             events: VecDeque::new(),
             maximum_output: 0,
-            validation: None,
             closed: false,
         };
         owner.configure(config);
         owner
-    }
-    pub(super) fn defer_validation(
-        &mut self,
-        id: super::workspace::ValidationId,
-        name: String,
-        adapter: AdapterContext,
-    ) {
-        debug_assert!(self.validation.is_none());
-        self.validation = Some((id, name, adapter));
-    }
-    pub(super) fn take_validation(
-        &mut self,
-        id: super::workspace::ValidationId,
-    ) -> Option<crate::editor::session::DeferredExecution> {
-        let matches = self
-            .validation
-            .as_ref()
-            .is_some_and(|(expected, ..)| *expected == id);
-        matches.then(|| {
-            let (_, name, adapter) = self.validation.take().expect("matched task validation");
-            match adapter {
-                AdapterContext::Plain => crate::editor::session::DeferredExecution::RunTask(name),
-                AdapterContext::Test { matcher } => {
-                    crate::editor::session::DeferredExecution::RunTest { name, matcher }
-                }
-                AdapterContext::Linter { matcher } => {
-                    crate::editor::session::DeferredExecution::RunLinter { name, matcher }
-                }
-                AdapterContext::Formatter { source } => {
-                    crate::editor::session::DeferredExecution::RunFormatter { name, source }
-                }
-            }
-        })
     }
     pub(super) fn configure(&mut self, config: &Config) {
         self.maximum_output = config.processes.maximum_output_bytes;
@@ -243,17 +208,10 @@ impl TaskSession {
         config: &Config,
         workspace: &WorkspaceSession,
         configuration: u64,
-        permit: super::workspace::TaskPermit,
     ) -> Result<(), String> {
-        let kind = match adapter {
-            AdapterContext::Plain => crate::config::TaskKind::Task,
-            AdapterContext::Formatter { .. } => crate::config::TaskKind::Formatter,
-            AdapterContext::Linter { .. } => crate::config::TaskKind::Linter,
-            AdapterContext::Test { .. } => crate::config::TaskKind::Test,
-        };
-        if !workspace.consume_task_permit(permit, name, kind) {
-            return Err("task execution permit is stale or foreign".into());
-        }
+        workspace
+            .execution_allowed()
+            .map_err(|_| "tasks run only in a trusted workspace".to_owned())?;
         self.plan_checked(name, adapter, config, workspace, configuration)
     }
     fn plan_checked(

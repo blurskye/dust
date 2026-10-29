@@ -34,7 +34,7 @@ fn installed_language_server_autostarts_after_workspace_trust_is_exact() {
     });
 
     app.sync_lsp_document();
-    assert!(app.language.validation().is_none());
+    assert!(!app.language.project_pending());
     assert!(!app.ui.notification_error);
 
     prepare_trust_identity(&mut app);
@@ -43,11 +43,7 @@ fn installed_language_server_autostarts_after_workspace_trust_is_exact() {
     }
     app.reconcile_workspace_trust();
     app.sync_lsp_document();
-    assert!(matches!(
-        app.language.validation().as_ref(),
-        Some(super::DeferredExecution::StartLsp(Some(server)))
-            if server == "automatic-rust"
-    ));
+    assert!(app.language.project_pending(), "trusting the workspace starts the server");
     assert_eq!(app.workspace.trust(), WorkspaceTrust::Trusted);
 }
 
@@ -100,7 +96,6 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
     }
     app.reconcile_workspace_trust();
     app.start_lsp(Some("nested-rust".into()));
-    wait_execution_validation(&mut app);
     let deadline = Instant::now() + Duration::from_secs(2);
     while app.language.project_pending() {
         app.process_lsp_project_root();
@@ -244,7 +239,6 @@ fn nested_marker_backed_project_gets_its_own_dap_preflight_root() {
     }
     app.reconcile_workspace_trust();
     app.start_dap(Some("nested-rust-dap".into()), Some(source.clone()));
-    wait_execution_validation(&mut app);
     let deadline = Instant::now() + Duration::from_secs(2);
     while app.debugger_session.debug_discovering() {
         app.process_dap_project_root();
@@ -320,7 +314,6 @@ fn untrusted_workspace_blocks_project_local_language_server_launch() {
     )
     .unwrap();
     app.start_lsp(Some("project-local".into()));
-    wait_execution_validation(&mut app);
     let deadline = Instant::now() + Duration::from_secs(2);
     while app.language.project_pending() && Instant::now() < deadline {
         app.process_lsp_project_root();
@@ -1023,13 +1016,14 @@ fn enter_installs_a_missing_managed_lsp_instead_of_trying_to_start_it() {
     }
     app.reconcile_workspace_trust();
     app.activate_selected_tool();
-    assert!(matches!(
-        app.tooling.validation().as_ref(),
-        Some(super::DeferredExecution::InstallTool {
-            id,
-            source: Some(LspRuntimeSource::Managed | LspRuntimeSource::Nix),
-        }) if id == "installable-lsp"
-    ));
+    assert!(
+        app.ui
+            .notification
+            .as_deref()
+            .is_some_and(|message| message.starts_with("installing Installable LSP")),
+        "{:?}",
+        app.ui.notification
+    );
 }
 
 #[test]

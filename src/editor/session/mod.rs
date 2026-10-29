@@ -29,13 +29,7 @@ mod workspace;
 mod workspace_edits;
 
 #[derive(Clone, Debug)]
-pub(in crate::editor::session) enum DeferredExecution {
-    InstallTool {
-        id: String,
-        source: Option<tooling::LspRuntimeSource>,
-    },
-    StartLsp(Option<String>),
-    RestartLsp(String),
+pub(in crate::editor::session) enum TrustedAction {
     StartDebug(debugger::DebugIntent),
     InstallRegistry {
         publisher: String,
