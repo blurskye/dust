@@ -1914,11 +1914,7 @@ impl InteractiveApplication {
             .map(|(buffer, state)| SyntaxDocument {
                 buffer,
                 text: &state.text,
-                language: state.path.as_deref().and_then(language_for_path).or_else(|| {
-                    (state.virtual_owner() == Some(super::agent::TRANSCRIPT_OWNER))
-                        .then(|| language_for_path(std::path::Path::new("agent.md")))
-                        .flatten()
-                }),
+                language: state.path.as_deref().and_then(language_for_path),
                 enabled: !(self.effective_large_file(buffer)
                     && self
                         .configuration
@@ -2000,6 +1996,7 @@ impl InteractiveApplication {
         self.ui
             .syntax_spans
             .sort_unstable_by_key(|span| (span.range.start, span.range.end));
+        self.project_agent_spans();
     }
 }
 

@@ -409,6 +409,15 @@ fn queue_style(
         }
         return Ok(());
     }
+    let (style, added) = match style {
+        Style::MarkupHeading => (Style::Accent, Some(Attribute::Bold)),
+        Style::MarkupStrong => (Style::Default, Some(Attribute::Bold)),
+        Style::MarkupEmphasis => (Style::Default, Some(Attribute::Italic)),
+        Style::MarkupCode => (Style::SyntaxString, None),
+        Style::MarkupLink => (Style::SyntaxType, Some(Attribute::Underlined)),
+        Style::MarkupQuote => (Style::Muted, Some(Attribute::Italic)),
+        other => (other, None),
+    };
     let configured = match style {
         Style::Default => &theme.styles.default,
         Style::Muted => &theme.styles.muted,
@@ -467,6 +476,12 @@ fn queue_style(
         Style::SyntaxKeyword => &theme.styles.syntax_keyword,
         Style::SyntaxType => &theme.styles.syntax_type,
         Style::SyntaxVariable => &theme.styles.syntax_variable,
+        Style::MarkupHeading
+        | Style::MarkupStrong
+        | Style::MarkupEmphasis
+        | Style::MarkupCode
+        | Style::MarkupLink
+        | Style::MarkupQuote => unreachable!("markup styles are mapped above"),
     };
     queue!(
         writer,
@@ -486,6 +501,9 @@ fn queue_style(
     )?;
     for attribute in &configured.attributes {
         queue!(writer, SetAttribute(terminal_attribute(*attribute)))?;
+    }
+    if let Some(attribute) = added {
+        queue!(writer, SetAttribute(attribute))?;
     }
     Ok(())
 }

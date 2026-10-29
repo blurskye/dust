@@ -21,6 +21,12 @@ pub(super) fn syntax_role_style(role: crate::language::syntax::SyntaxRole) -> St
         crate::language::syntax::SyntaxRole::Keyword => Style::SyntaxKeyword,
         crate::language::syntax::SyntaxRole::Type => Style::SyntaxType,
         crate::language::syntax::SyntaxRole::Variable => Style::SyntaxVariable,
+        crate::language::syntax::SyntaxRole::Heading => Style::MarkupHeading,
+        crate::language::syntax::SyntaxRole::Strong => Style::MarkupStrong,
+        crate::language::syntax::SyntaxRole::Emphasis => Style::MarkupEmphasis,
+        crate::language::syntax::SyntaxRole::Code => Style::MarkupCode,
+        crate::language::syntax::SyntaxRole::Link => Style::MarkupLink,
+        crate::language::syntax::SyntaxRole::Quote => Style::MarkupQuote,
     }
 }
 

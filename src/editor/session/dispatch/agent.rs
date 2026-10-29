@@ -1,7 +1,7 @@
 //! The agent panel: ACP sessions as tabs. Each session has its own agent process, transcript,
 //! options (model, mode, thinking level) and permission requests. The panel is one read-only
-//! Markdown buffer in a split beside the code that shows the active session, with a tab line
-//! on top. Questions go to the active session. A session keeps the worktree it started in;
+//! buffer in a split beside the code that shows the active session with its Markdown
+//! rendered, with a tab line on top. Questions go to the active session. A session keeps the worktree it started in;
 //! switching worktrees does not move it.
 
 use std::{
@@ -22,13 +22,17 @@ use crate::{
         Axis, BufferId, EditorMode, LayoutAction, session::search::PickerPayload,
         text::TextBuffer,
     },
+    language::syntax::SyntaxRole,
     tools::{ToolKind, ToolStatus},
-    ui::{ConfirmationChoice, PromptKind},
+    ui::{
+        ConfirmationChoice, PromptKind, UiSyntaxSpan,
+        markdown::{self, Styled},
+    },
     workspace::{PickerAction, PickerItem, PickerItemId, PickerItemKind},
 };
 
-/// Shown where a file would show its name, and how the syntax session knows to use Markdown.
-pub(super) const TRANSCRIPT_OWNER: &str = "Agent";
+/// Shown where a file would show its name.
+const TRANSCRIPT_OWNER: &str = "Agent";
 /// Messages handled per session and tick, so a chatty agent cannot stall input.
 const MESSAGES_PER_TICK: usize = 256;
 /// Files larger than this are not read for the agent.
@@ -71,6 +75,8 @@ pub(super) struct AgentPanel {
     asking: Option<PermissionRequest>,
     /// Whether the tabs open when Dust last quit were brought back.
     restored: bool,
+    /// The styles of the rendered transcript, by byte range.
+    spans: Vec<(std::ops::Range<usize>, SyntaxRole)>,
 }
 
 struct AgentSession {
@@ -1288,7 +1294,7 @@ impl InteractiveApplication {
             .unwrap_or(80)
             .saturating_sub(8)
             .max(20);
-        let text = self.agent_transcript(width);
+        let styled = self.agent_transcript(width);
         let (old_lines, revision) = {
             let target = &self.state.buffers[buffer];
             let revision = match &target.origin {
@@ -1309,10 +1315,12 @@ impl InteractiveApplication {
             buffer,
             revision,
             revision.saturating_add(1),
-            TextBuffer::from_text(&text),
+            TextBuffer::from_text(&styled.text),
         ) {
             return;
         }
+        self.agent.spans = styled.spans;
+        self.project_agent_spans();
         let new_text = &self.state.buffers[buffer].text;
         let last = new_text.visible_lines().saturating_sub(1);
         let last_start = new_text.line_to_byte(last).map_or(0, |offset| offset.get());
@@ -1332,45 +1340,79 @@ impl InteractiveApplication {
         }
     }
 
-    /// The tab line, the active session's settings and its transcript, as Markdown.
-    fn agent_transcript(&self, width: usize) -> String {
+    /// The tab line, the active session's settings and its transcript.
+    fn agent_transcript(&self, width: usize) -> Styled {
+        let mut out = Styled::default();
+        let plain = ("", None);
         let Some(session) = self.active_agent() else {
-            return "# Agent\n\nNo session yet. Ask with <leader>aa, or pick an agent with <leader>an.\n"
-                .into();
+            out.push("Agent", Some(SyntaxRole::Heading));
+            out.push("\n\n", None);
+            out.wrapped(
+                "No session yet. Ask with <leader>aa, or pick an agent with <leader>an.",
+                None,
+                plain,
+                plain,
+                width,
+            );
+            return out;
         };
-        let tabs = self
-            .agent
-            .sessions
-            .iter()
-            .enumerate()
-            .map(|(index, tab)| {
-                let mark = match tab.status(self.agent_waiting(tab.number)) {
-                    "working" | "starting" => " …",
-                    "waiting for you" | "sign-in needed" => " ?",
-                    "stopped" => " ✗",
-                    _ => "",
-                };
-                let label = format!("{} {}{mark}", tab.number, tab.name);
-                if index == self.agent.active { format!("[{label}]") } else { label }
-            })
-            .collect::<Vec<_>>()
-            .join(" · ");
+        let mut tabs = Vec::new();
+        for (index, tab) in self.agent.sessions.iter().enumerate() {
+            let mark = match tab.status(self.agent_waiting(tab.number)) {
+                "working" | "starting" => " …",
+                "waiting for you" | "sign-in needed" => " ?",
+                "stopped" => " ✗",
+                _ => "",
+            };
+            if index > 0 {
+                tabs.push((" · ".to_owned(), Some(SyntaxRole::Comment)));
+            }
+            let label = format!("{} {}{mark}", tab.number, tab.name);
+            tabs.push(if index == self.agent.active {
+                (format!("[{label}]"), Some(SyntaxRole::Heading))
+            } else {
+                (label, Some(SyntaxRole::Comment))
+            });
+        }
+        out.runs(&tabs, width);
+        let comment = Some(SyntaxRole::Comment);
+        out.wrapped(&shown_root(&session.root, width), comment, plain, plain, width);
         let settings = [("model", ""), ("mode", "mode "), (THINKING, "thinking ")]
             .into_iter()
             .filter_map(|(key, label)| Some(format!("{label}{}", value_name(session.option(key)?))))
             .collect::<Vec<_>>();
+        out.wrapped(&settings.join(" · "), comment, plain, plain, width);
         let working = match (session.process.is_some(), session.phase) {
-            (true, Phase::Initializing(_) | Phase::Creating(_) | Phase::Rejoining(_)) => "_Starting…_",
-            (true, Phase::Prompting(_)) => "_Working…_",
+            (true, Phase::Initializing(_) | Phase::Creating(_) | Phase::Rejoining(_)) => "Starting…",
+            (true, Phase::Prompting(_)) => "Working…",
             _ => "",
         };
-        format!(
-            "{}\n`{}`\n{}{}",
-            wrap(&tabs, width),
-            shown_root(&session.root, width),
-            wrap(&settings.join(" · "), width),
-            transcript(&session.name, &session.entries, working, width)
-        )
+        transcript(&mut out, &session.name, &session.entries, working, width);
+        out
+    }
+
+    /// Give the transcript buffer its styles, alongside the parsed files' syntax spans.
+    pub(super) fn project_agent_spans(&mut self) {
+        let Some(buffer) = self.agent.buffer else {
+            return;
+        };
+        self.ui.syntax_spans.retain(|span| span.buffer != buffer);
+        let Some(target) = self.state.buffers.get(buffer) else {
+            return;
+        };
+        let revision = target.text.revision();
+        self.ui.syntax_spans.extend(self.agent.spans.iter().filter_map(|(range, role)| {
+            Some(UiSyntaxSpan {
+                buffer,
+                revision,
+                range: crate::editor::text::ByteRange::new(
+                    crate::editor::text::ByteOffset(range.start),
+                    crate::editor::text::ByteOffset(range.end),
+                )
+                .ok()?,
+                role: *role,
+            })
+        }));
     }
 }
 
@@ -1513,92 +1555,93 @@ fn selected_text(
 }
 
 /// One session's conversation as Markdown, hard-wrapped to `width` outside code blocks.
-fn transcript(name: &str, entries: &[Entry], working: &str, width: usize) -> String {
-    let mut out = String::new();
-    let mut answered = true;
-    let push = |out: &mut String, text: &str| {
-        let mut fenced = false;
-        for line in text.lines() {
-            if line.trim_start().starts_with("```") {
-                fenced = !fenced;
-            }
-            if fenced || line.chars().count() <= width {
-                out.push_str(line);
-                out.push('\n');
-            } else {
-                out.push_str(&wrap(line, width));
-            }
-        }
+/// The conversation, with the Markdown in questions and answers rendered.
+fn transcript(out: &mut Styled, name: &str, entries: &[Entry], working: &str, width: usize) {
+    let plain = ("", None);
+    let quote = Some(SyntaxRole::Quote);
+    let heading = |out: &mut Styled, title: &str| {
+        out.push("\n", None);
+        out.push(title, Some(SyntaxRole::Heading));
+        out.push("\n\n", None);
     };
+    let mut answered = true;
     for (index, entry) in entries.iter().enumerate() {
-        // Markdown needs a blank line between a tool list and the prose around it.
+        // A blank line between tool lines and the prose around them.
         let previous = index.checked_sub(1).map(|previous| &entries[previous]);
         if matches!(
             (previous, entry),
             (Some(Entry::Agent(_)), Entry::Tool { .. }) | (Some(Entry::Tool { .. }), Entry::Agent(_))
         ) {
-            out.push('\n');
+            out.push("\n", None);
         }
         let needs_heading = matches!(
             entry,
             Entry::Agent(_) | Entry::Thought(_) | Entry::Tool { .. } | Entry::Plan(_)
         );
         if needs_heading && !answered {
-            out.push_str(&format!("\n## {name}\n\n"));
+            heading(out, name);
             answered = true;
         }
         match entry {
             // The first start is described by the settings line; later ones are restarts.
             Entry::Started { root } => {
                 if index > 0 {
-                    out.push_str(&format!("\n---\n\n_{name} restarted in `{}`._\n", shown_root(root, width)));
+                    out.push("\n", None);
+                    out.rule(width);
+                    let text = format!("{name} restarted in {}.", shown_root(root, width));
+                    out.wrapped(&text, quote, plain, plain, width);
                 }
             }
             Entry::User { text, context } => {
-                out.push_str("\n## You\n\n");
-                push(&mut out, text);
+                heading(out, "You");
+                markdown::render(out, text, width);
                 for label in context {
-                    out.push_str(&format!("> + {label}\n"));
+                    out.wrapped(&format!("+ {label}"), Some(SyntaxRole::Comment), plain, plain, width);
                 }
                 answered = false;
             }
-            Entry::Agent(text) => push(&mut out, text),
+            Entry::Agent(text) => markdown::render(out, text, width),
             Entry::Thought(text) => {
                 // Only the thought still being written is shown; finished ones are noise.
                 if index + 1 == entries.len() {
-                    for line in wrap(text, width.saturating_sub(2)).lines() {
-                        out.push_str(&format!("> {line}\n"));
-                    }
+                    let bar = ("▎ ", quote);
+                    out.wrapped(text, quote, bar, bar, width);
                 }
             }
             Entry::Tool { title, status, .. } => {
                 let mark = match status.as_str() {
-                    "completed" => "✓",
-                    "failed" => "✗",
-                    "in_progress" => "…",
-                    _ => "○",
+                    "completed" => "✓ ",
+                    "failed" => "✗ ",
+                    "in_progress" => "… ",
+                    _ => "○ ",
                 };
-                out.push_str(&format!("- {mark} {title}\n"));
+                out.wrapped(title, None, (mark, Some(SyntaxRole::Keyword)), ("  ", None), width);
             }
             Entry::Plan(steps) => {
-                out.push_str("\n**Plan**\n");
+                out.push("\n", None);
+                out.push("Plan", Some(SyntaxRole::Strong));
+                out.push("\n", None);
                 for (status, step) in steps {
                     let mark = match status.as_str() {
-                        "completed" => "x",
-                        "in_progress" => "~",
-                        _ => " ",
+                        "completed" => "✓ ",
+                        "in_progress" => "… ",
+                        _ => "○ ",
                     };
-                    out.push_str(&format!("- [{mark}] {step}\n"));
+                    out.wrapped(step, None, (mark, Some(SyntaxRole::Keyword)), ("  ", None), width);
                 }
-                out.push('\n');
+                out.push("\n", None);
             }
-            Entry::Notice(text) => out.push_str(&format!("\n_{text}_\n")),
+            Entry::Notice(text) => {
+                out.push("\n", None);
+                out.wrapped(text, quote, plain, plain, width);
+            }
         }
     }
     if !working.is_empty() {
-        out.push_str(&format!("\n{working}\n"));
+        out.push("\n", None);
+        out.push(working, quote);
+        out.push("\n", None);
     }
-    out
 }
 
 /// The session's directory with the home directory as `~`, cut from the left to fit.
@@ -1615,26 +1658,6 @@ fn shown_root(root: &Path, width: usize) -> String {
     } else {
         format!("…{}", shown.chars().skip(count + 1 - width).collect::<String>())
     }
-}
-
-fn wrap(line: &str, width: usize) -> String {
-    let mut out = String::new();
-    let mut current = String::new();
-    for word in line.split(' ') {
-        let candidate = current.chars().count() + usize::from(!current.is_empty()) + word.chars().count();
-        if !current.is_empty() && candidate > width {
-            out.push_str(&current);
-            out.push('\n');
-            current.clear();
-        }
-        if !current.is_empty() {
-            current.push(' ');
-        }
-        current.push_str(word);
-    }
-    out.push_str(&current);
-    out.push('\n');
-    out
 }
 
 #[cfg(test)]
@@ -1658,10 +1681,16 @@ mod tests {
             },
             Entry::Agent("Because.".into()),
         ];
-        assert_eq!(
-            transcript("claude", &entries, "", 80),
-            "\n## You\n\nwhy\n> + main.rs\n\n## claude\n\n- ✓ Read main.rs\n\nBecause.\n"
-        );
+        let mut out = Styled::default();
+        transcript(&mut out, "claude", &entries, "", 80);
+        assert_eq!(out.text, "\nYou\n\nwhy\n+ main.rs\n\nclaude\n\n✓ Read main.rs\n\nBecause.\n");
+        let headings = out
+            .spans
+            .iter()
+            .filter(|(_, role)| *role == SyntaxRole::Heading)
+            .map(|(range, _)| &out.text[range.clone()])
+            .collect::<Vec<_>>();
+        assert_eq!(headings, ["You", "claude"]);
     }
 
     #[test]
@@ -1718,10 +1747,5 @@ mod tests {
         session.earlier = Some("old".into());
         session.open_session();
         assert!(session.recap && session.earlier.is_none());
-    }
-
-    #[test]
-    fn long_lines_wrap_at_words() {
-        assert_eq!(wrap("aaa bbb ccc", 7), "aaa bbb\nccc\n");
     }
 }

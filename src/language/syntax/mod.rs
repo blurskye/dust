@@ -193,6 +193,13 @@ pub enum SyntaxRole {
     Keyword,
     Type,
     Variable,
+    /// Markup: headings, bold and italic text, code, links and quotes.
+    Heading,
+    Strong,
+    Emphasis,
+    Code,
+    Link,
+    Quote,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SyntaxSpan {
@@ -359,6 +366,73 @@ impl SyntaxService {
         }
     }
 }
+fn highlight_spans(query: &Query, tree: &tree_sitter::Tree, source: &str, maximum: usize) -> Vec<SyntaxSpan> {
+    let mut cursor = QueryCursor::new();
+    let names = query.capture_names();
+    let mut matches = cursor.matches(query, tree.root_node(), source.as_bytes());
+    let mut spans = Vec::new();
+    while let Some(item) = matches.next() {
+        for capture in item.captures {
+            if spans.len() >= maximum {
+                break;
+            }
+            if let Some(role) = role(names[capture.index as usize]) {
+                let range = capture.node.byte_range();
+                if source.is_char_boundary(range.start) && source.is_char_boundary(range.end) {
+                    spans.push(SyntaxSpan {
+                        start: range.start,
+                        end: range.end,
+                        role,
+                    });
+                }
+            }
+        }
+    }
+    spans
+}
+
+/// Highlight a short snippet right away, such as a code block in a chat reply. The
+/// compiled query is kept per thread, since compiling it costs more than the parse.
+#[must_use]
+pub fn highlight(language: SyntaxLanguage, source: &str) -> Vec<SyntaxSpan> {
+    thread_local! {
+        static QUERIES: std::cell::RefCell<HashMap<SyntaxLanguage, Query>> = Default::default();
+    }
+    let descriptor = descriptor(language);
+    let mut parser = Parser::new();
+    if parser.set_language(&descriptor.language).is_err() {
+        return Vec::new();
+    }
+    let Some(tree) = parser.parse(source, None) else {
+        return Vec::new();
+    };
+    QUERIES.with_borrow_mut(|queries| {
+        let query = match queries.entry(language) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                match Query::new(&descriptor.language, descriptor.highlights) {
+                    Ok(query) => entry.insert(query),
+                    Err(_) => return Vec::new(),
+                }
+            }
+        };
+        highlight_spans(query, &tree, source, usize::MAX)
+    })
+}
+
+/// The language a code fence names, such as `rust` or `ts`.
+#[must_use]
+pub fn language_for_fence(name: &str) -> Option<SyntaxLanguage> {
+    match name.to_ascii_lowercase().as_str() {
+        "rust" => Some(SyntaxLanguage::Rust),
+        "typescript" => Some(SyntaxLanguage::TypeScript),
+        "javascript" | "node" => Some(SyntaxLanguage::JavaScript),
+        "golang" => Some(SyntaxLanguage::Go),
+        "markdown" => Some(SyntaxLanguage::Markdown),
+        other => language_for_path(Path::new(&format!("fence.{other}"))),
+    }
+}
+
 #[must_use]
 pub fn language_for_path(path: &Path) -> Option<SyntaxLanguage> {
     let extension = path.extension()?.to_str()?.to_ascii_lowercase();
@@ -375,6 +449,12 @@ pub fn language_for_path(path: &Path) -> Option<SyntaxLanguage> {
     }
 }
 fn role(name: &str) -> Option<SyntaxRole> {
+    match name {
+        "text.title" => return Some(SyntaxRole::Heading),
+        "text.literal" => return Some(SyntaxRole::Code),
+        "text.uri" | "text.reference" => return Some(SyntaxRole::Link),
+        _ => {}
+    }
     let root = name.split('.').next().unwrap_or(name);
     match root {
         "none" => None,
@@ -412,29 +492,7 @@ fn parse(request: Request) -> SyntaxEvent {
         Ok(query) => query,
         Err(error) => return failed(&request, format!("highlight query: {error}")),
     };
-    let mut cursor = QueryCursor::new();
-    let names = query.capture_names();
-    let mut matches = cursor.matches(&query, tree.root_node(), request.source.as_bytes());
-    let mut spans = Vec::new();
-    while let Some(item) = matches.next() {
-        for capture in item.captures {
-            if spans.len() >= request.policy.maximum_spans {
-                break;
-            }
-            if let Some(role) = role(names[capture.index as usize]) {
-                let range = capture.node.byte_range();
-                if request.source.is_char_boundary(range.start)
-                    && request.source.is_char_boundary(range.end)
-                {
-                    spans.push(SyntaxSpan {
-                        start: range.start,
-                        end: range.end,
-                        role,
-                    });
-                }
-            }
-        }
-    }
+    let spans = highlight_spans(&query, &tree, &request.source, request.policy.maximum_spans);
     let folds = match query_rows(
         &descriptor.language,
         descriptor.folds,

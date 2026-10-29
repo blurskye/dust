@@ -63,6 +63,13 @@ pub enum Style {
     SyntaxKeyword,
     SyntaxType,
     SyntaxVariable,
+    /// Markup styles reuse a theme color and add an attribute, so themes need no entries.
+    MarkupHeading,
+    MarkupStrong,
+    MarkupEmphasis,
+    MarkupCode,
+    MarkupLink,
+    MarkupQuote,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

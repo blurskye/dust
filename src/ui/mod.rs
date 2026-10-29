@@ -3,6 +3,7 @@
 pub mod geometry;
 mod diff;
 mod grid;
+pub mod markdown;
 mod pty_screen;
 mod render;
 mod terminal;
