@@ -12,7 +12,7 @@ library.
 | `files/` | Filesystem access, file watching, atomic saves, recovery journals, explorer tree data |
 | `language/` | Tree-sitter syntax (`syntax`) and the LSP client (`lsp`) |
 | `debugger/` | DAP client |
-| `workspace/` | Roots, trust, diagnostics, pickers, search, Git (signs, hunks, conflicts, worktrees), tutor |
+| `workspace/` | Roots, trust, diagnostics, pickers, search, Git (signs, hunks, conflicts, worktrees) |
 | `forge/` | Pull requests through `gh`: list, check out into a worktree, review comments |
 | `agent/` | ACP client: agent process, JSON-RPC lines, protocol messages |
 | `process/` | Child processes, PTYs and JSON-RPC framing shared by LSP, DAP and terminals |

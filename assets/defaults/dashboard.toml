@@ -8,8 +8,8 @@ unbound_label = "unbound"
 key_format = "[{key}]"
 content_width = 70
 minimum_width = 20
-minimum_height = 11
-block_height = 11
+minimum_height = 12
+block_height = 12
 identity_row = 0
 version_row = 1
 path_row = 3
@@ -35,6 +35,10 @@ label = "File explorer"
 [[action]]
 command = "file.new"
 label = "New buffer"
+
+[[action]]
+command = "session.tutor"
+label = "Tutorial"
 
 [[action]]
 command = "editor.quit"

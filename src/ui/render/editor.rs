@@ -56,7 +56,13 @@ pub(super) fn render_editor_view(
 ) -> Frame {
     if let Some(panel) = ui.agent_panel.as_ref().filter(|panel| panel.view == view_id) {
         let focused = state.active_view == Some(view_id) && !ui.explorer_focused;
-        return super::agent::render_agent_panel(panel, focused, config, width, height);
+        // Alone on screen the panel keeps the status line under it, like any editor view.
+        let status = config.ui.status_line.enabled && height > 1;
+        let mut frame = super::agent::render_agent_panel(panel, focused, config, width, height, status);
+        if status {
+            render_status_line(&mut frame.grid, state, view_id, ui, config, width, height - 1);
+        }
+        return frame;
     }
     let mut grid = CellGrid::new_with_policy(
         width,
@@ -760,17 +766,19 @@ pub(super) fn render_status_line(
         return;
     };
     grid.fill_row(status_y, Style::Status);
-    let agent = ui.agent_panel.as_ref().is_some_and(|panel| panel.view == view_id);
-    let mode_label = if agent {
-        "AGENT"
-    } else {
-        config
-            .ui
-            .status_line
-            .mode_labels
-            .get(mode_name(view.mode))
-            .expect("resolved configuration validates mode labels")
-    };
+    // The agent panel's input has its own Insert and Normal modes.
+    let panel = ui.agent_panel.as_ref().filter(|panel| panel.view == view_id);
+    let agent = panel.is_some();
+    let mode_label = config
+        .ui
+        .status_line
+        .mode_labels
+        .get(match panel {
+            Some(panel) if panel.normal => "normal",
+            Some(_) => "insert",
+            None => mode_name(view.mode),
+        })
+        .expect("resolved configuration validates mode labels");
     let mode = format!(
         "{}{}{}",
         config.ui.status_line.mode_padding, mode_label, config.ui.status_line.mode_padding

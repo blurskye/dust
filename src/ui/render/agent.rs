@@ -54,6 +54,8 @@ pub struct AgentPanelUi {
     pub selected: usize,
     /// What the agent is doing, such as `⠋ Working`, shown in the input's top border.
     pub busy: String,
+    /// Whether the input is in Vim's Normal mode.
+    pub normal: bool,
     pub input: String,
     /// Byte offset of the cursor in `input`.
     pub cursor: usize,
@@ -64,16 +66,20 @@ pub struct AgentPanelUi {
     pub settings: String,
 }
 
-/// Where the transcript's lines start, without the trailing empty ones.
+/// Where the transcript's lines start, without the trailing empty ones outside the bands, so
+/// the user's last message keeps its padding while the answer is awaited.
 #[must_use]
-pub fn transcript_lines(text: &str) -> Vec<Range<usize>> {
+pub fn transcript_lines(text: &str, bands: &[Range<usize>]) -> Vec<Range<usize>> {
     let mut lines = Vec::new();
     let mut start = 0;
     for line in text.split('\n') {
         lines.push(start..start + line.len());
         start += line.len() + 1;
     }
-    while lines.last().is_some_and(|line| line.is_empty()) {
+    while lines
+        .last()
+        .is_some_and(|line| line.is_empty() && !bands.iter().any(|band| band.contains(&line.start)))
+    {
         lines.pop();
     }
     lines
@@ -85,6 +91,7 @@ pub(super) fn render_agent_panel(
     config: &Config,
     width: u16,
     height: u16,
+    status_row: bool,
 ) -> Frame {
     let mut grid = CellGrid::new_with_policy(
         width,
@@ -93,6 +100,8 @@ pub(super) fn render_agent_panel(
         &config.editor.zero_width_replacement,
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
+    // The last row is left for the status line the caller draws there.
+    let height = height - u16::from(status_row);
     if width < 8 || height < 6 {
         return Frame { grid, cursor: None };
     }
@@ -173,7 +182,7 @@ pub(super) fn render_agent_panel(
     grid.put_text_clipped(settings_x, footer, &panel.settings, Style::Muted, width - 1);
 
     let area = usize::from(list_top - chips - 1);
-    let lines = transcript_lines(&panel.transcript.text);
+    let lines = transcript_lines(&panel.transcript.text, &panel.bands);
     let hidden = lines.len().saturating_sub(area);
     let scroll = panel.scroll.min(hidden);
     for (offset, line) in lines.iter().skip(hidden - scroll).take(area).enumerate() {
@@ -190,7 +199,8 @@ pub(super) fn render_agent_panel(
     let cursor = focused.then(|| {
         let row = u16::try_from(cursor_row - first).unwrap_or(0);
         let column = u16::try_from(cursor_column).unwrap_or(0).min(inner);
-        (1 + column, input_top + row, SetCursorStyle::SteadyBar)
+        let shape = if panel.normal { SetCursorStyle::SteadyBlock } else { SetCursorStyle::SteadyBar };
+        (1 + column, input_top + row, shape)
     });
     Frame { grid, cursor }
 }
@@ -265,6 +275,7 @@ mod tests {
 
     #[test]
     fn trailing_empty_lines_are_not_shown() {
-        assert_eq!(transcript_lines("a\n\nb\n\n"), [0..1, 2..2, 3..4]);
+        assert_eq!(transcript_lines("a\n\nb\n\n", &[]), [0..1, 2..2, 3..4]);
+        assert_eq!(transcript_lines("a\n\nb\n\n", &[2..6]), [0..1, 2..2, 3..4, 5..5]);
     }
 }

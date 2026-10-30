@@ -354,17 +354,20 @@ fn floating_explorer_pages_cursor_and_hit_test_use_its_body_not_the_workspace_he
     session.explorer_fixture();
     session.float_explorer();
     let body = session.projection().surface_content.explorer.unwrap();
-    assert_eq!((body.x, body.y, body.height), (5, 8, 4));
+    assert_eq!((body.x, body.y, body.height), (5, 7, 5));
     assert_eq!(
         session.projection().explorer.as_ref().unwrap().rows.len(),
-        4
+        5
     );
     session.page_explorer(1);
     let explorer = session.projection().explorer.as_ref().unwrap();
     assert_eq!(explorer.scroll, 1);
     assert!(explorer.rows.last().unwrap().selected);
     let frame = session.frame();
-    assert_eq!(frame.cursor.unwrap().1, body.y + body.height - 1);
+    assert_eq!(
+        frame.grid.get(body.x + 1, body.y + body.height - 1).unwrap().style,
+        Style::ExplorerSelection
+    );
     session.click(body.x + 1, body.y + 1);
     assert!(session.projection().explorer.as_ref().unwrap().rows[1].selected);
     let selected = session
@@ -395,10 +398,10 @@ fn floating_explorer_pages_cursor_and_hit_test_use_its_body_not_the_workspace_he
     loaded.config.ui.status_line.enabled = false;
     session.apply_candidate(loaded).unwrap();
     let body = session.projection().surface_content.explorer.unwrap();
-    assert_eq!(body.height, 5);
+    assert_eq!(body.height, 6);
     assert_eq!(
         session.projection().explorer.as_ref().unwrap().rows.len(),
-        5
+        6
     );
 }
 
@@ -435,30 +438,25 @@ fn documentation_scroll_reaches_the_last_line_in_a_short_actual_workspace() {
 }
 
 #[test]
-fn wide_notice_text_stays_inside_its_configured_cell_rectangle() {
+fn wide_notice_text_stays_inside_its_box() {
     let mut loaded = crate::config::load_bundled_config();
-    loaded.config.ui.notifications.left = 2;
-    loaded.config.ui.notifications.max_width = 6;
-    let policy = loaded.config.clone();
+    loaded.config.ui.notifications.max_width = 8;
     let mut session = TestSession::new(loaded);
     session.resize(40, 12);
     let before = session.frame();
     session.notice("界界界界界界");
     let after = session.frame();
-    let rect = crate::ui::geometry::notification_geometry(&policy, 40, 12).unwrap();
+    // The box is 8 wide at the top right, one cell from the edge: x 31..39, y 1..4.
     for y in 0..12 {
         for x in 0..40 {
-            // The notice owns its whole row; everything else is untouched.
-            if y != rect.y {
-                assert_eq!(
-                    before.grid.get(x, y),
-                    after.grid.get(x, y),
-                    "outside notice at {x},{y}"
-                );
+            if !((31..39).contains(&x) && (1..4).contains(&y)) {
+                assert_eq!(before.grid.get(x, y), after.grid.get(x, y), "outside notice at {x},{y}");
             }
         }
     }
-    assert_eq!(after.grid.get(rect.x, rect.y).unwrap().symbol, "界");
+    assert_eq!(after.grid.get(31, 1).unwrap().symbol, "╭");
+    assert_eq!(after.grid.get(33, 2).unwrap().symbol, "界");
+    assert_eq!(after.grid.get(31, 1).unwrap().style, Style::Accent);
 }
 
 #[test]

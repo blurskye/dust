@@ -13,14 +13,6 @@ pub use root::{
     ExecutionSource, RootId, RootIdentity, WorkspaceId, WorkspaceRoot, WorkspaceState,
     WorkspaceTrust,
 };
-mod lesson;
-pub use lesson::{
-    TutorAction, TutorFeature, TutorLesson, TutorProgress, TutorStep, LESSONS,
-};
-mod tutor;
-#[cfg(test)]
-mod tutor_tests;
-pub use tutor::{TutorError, TutorEvent, TutorFixture, TutorGeneration, TutorService};
 mod trust;
 pub use trust::{
     TRUST_STATE_VERSION, TrustDatabase, TrustEvent, TrustStateError, TrustStore,

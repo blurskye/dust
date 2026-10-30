@@ -6746,17 +6746,6 @@ impl InteractiveApplication {
                 self.notify_message("Git hunk reset".into(), false);
             }
             Ok(Some(crate::editor::session::git::GitMutationOutcome::Staged)) => {
-                // A step completes because the change was really staged, not because a command
-                // was invoked or a question was answered.
-                if self
-                    .workspace
-                    .observe_tutor_action(crate::workspace::TutorAction::Staged)
-                {
-                    self.notify_message(
-                        "Tutor: step complete — you staged a change".into(),
-                        false,
-                    );
-                }
                 self.input.clear_pending_stage();
                 self.ui.git_signs.clear();
                 self.start_git_status_refresh();
@@ -8792,117 +8781,20 @@ impl InteractiveApplication {
         }
         self.install_picker(title, items);
     }
-    /// Open the practice sandbox. This states its isolation where the user can read it: the
-    /// fixture is disposable, outside every workspace root, carries no credentials, executes no
-    /// hooks and cannot reach a network.
-    pub(in crate::editor::session) fn start_tutor_sandbox(&mut self) {
-        if self.workspace.tutor_pending() {
-            self.show_error("a practice fixture is already being prepared");
-            return;
-        }
-        match self
-            .workspace
-            .start_tutor_fixture(std::time::Duration::from_secs(10))
-        {
+    /// Open the tutorial, a fresh copy of `assets/defaults/tutor.md` in the state directory, so
+    /// the user practises on it and can save without touching the original, as in vimtutor.
+    pub(in crate::editor::session) fn open_tutor(&mut self) {
+        let path = crate::config::user_state_directory().join("tutor.md");
+        let written = path
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| std::fs::write(&path, include_str!("../../../../assets/defaults/tutor.md")));
+        match written {
             Ok(()) => {
-                let roots = self.workspace.roots().len();
-                self.notify_message(
-                    format!(
-                        "Practice sandbox: preparing a disposable fixture outside all {roots} workspace roots. \
-                         It holds no credentials, runs no hooks and has no network access."
-                    ),
-                    false,
-                );
+                self.set_dashboard_visibility(false);
+                self.start_open(path);
             }
-            Err(error) => self.show_error(error.to_string()),
-        }
-    }
-    /// The practice chapters. Each lesson says what it teaches, whether this revision can teach
-    /// it, which keys to press — the EFFECTIVE bindings, so no lesson names a key the user
-    /// cannot press — and which steps the user has actually completed.
-    pub(in crate::editor::session) fn open_tutor_lessons(&mut self) {
-        let progress = self.workspace.tutor_progress().clone();
-        let keymaps = self.configuration.keymaps();
-        let mut items = Vec::new();
-        for (index, lesson) in self.workspace.tutor_lessons().iter().enumerate() {
-            match lesson.missing_feature() {
-                // A lesson whose feature does not exist is NOT offered as teachable. It says
-                // which feature is missing, so the chapter is visibly gated rather than wrong.
-                Some(feature) => items.push((
-                    PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
-                        id: PickerItemId(format!("lesson:{index}")),
-                        label: lesson.title.to_owned(),
-                        detail: format!("not available yet: {} is not implemented", feature.name()),
-                        source: "tutor".into(),
-                        action: PickerAction::None,
-                    },
-                    PickerPayload::Command("session.tutor.lessons".into()),
-                )),
-                None => {
-                    for (step_index, step) in lesson.steps.iter().enumerate() {
-                        let effective = keymaps.effective_binding("editor.normal", step.command());
-                        let done = if progress.is_complete(*step) { "done" } else { "todo" };
-                        items.push((
-                            PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
-                                id: PickerItemId(format!("lesson:{index}:{step_index}")),
-                                label: step.describe().to_owned(),
-                                detail: format!("{done} · {}", effective.display()),
-                                source: format!("chapter {}", lesson.chapter),
-                                action: PickerAction::None,
-                            },
-                            PickerPayload::Command(step.command().to_owned()),
-                        ));
-                    }
-                }
-            }
-        }
-        let completed = progress.completed();
-        let title = format!("Practice lessons · {completed} step(s) done");
-        self.install_picker(title, items);
-    }
-    /// Leave the practice sandbox and remove its fixture. The session keeps its handle until the
-    /// worker reports the directory is gone.
-    pub(in crate::editor::session) fn stop_tutor_sandbox(&mut self) {
-        match self
-            .workspace
-            .dispose_tutor_fixture(std::time::Duration::from_secs(10))
-        {
-            Ok(()) => {
-                if self.workspace.tutor_fixture().is_none() {
-                    self.notify_message("There is no practice sandbox open".into(), false);
-                } else {
-                    // Removal is confirmed by the worker's event, not by the request.
-                    self.notify_message("Practice sandbox: removing its fixture".into(), false);
-                }
-            }
-            Err(error) => self.show_error(error.to_string()),
-        }
-    }
-    /// One poll per call, exactly once, because a second poll can consume and discard the
-    /// event this handler was written to see.
-    pub(in crate::editor::session) fn process_tutor_events(&mut self) {
-        let Some(event) = self.workspace.poll_tutor() else {
-            return;
-        };
-        match event {
-            crate::workspace::TutorEvent::Created { result, .. } => match result {
-                Ok(path) => self.notify_message(
-                    format!("Practice fixture ready at {}", path.display()),
-                    false,
-                ),
-                Err(error) => self.show_error(error.to_string()),
-            },
-            crate::workspace::TutorEvent::Disposed { result, .. } => match result {
-                Ok(()) => self.notify_message(
-                    "Practice sandbox closed; its disposable fixture was removed".into(),
-                    false,
-                ),
-                Err(error) => self.show_error(error.to_string()),
-            },
+            Err(error) => self.show_error(format!("could not write the tutorial: {error}")),
         }
     }
     /// Contextual help: what is available on the focused surface, read from the command
@@ -11098,6 +10990,11 @@ impl InteractiveApplication {
         document: &LspDocument,
         matching_session: bool,
     ) {
+        // A server runs for a workspace root; a file outside every root, such as the
+        // tutorial's copy, gets none rather than an error.
+        if self.workspace.require_path(&document.path).is_err() {
+            return;
+        }
         let launchable_server = self
             .tooling
             .entries()
@@ -11689,6 +11586,28 @@ impl InteractiveApplication {
                 self.notify_message(self.message("new_scratch", &[]), false);
             }
             AppEffect::OpenWorkspaceFilePicker => self.start_workspace_file_picker(),
+            AppEffect::NewTab => {
+                // An untouched [No Name] tab is reused, so ctrl-t never piles up empty tabs;
+                // the file picked from the finder replaces it.
+                let unused = self.state.buffers.iter().find(|(_, buffer)| {
+                    buffer.path.is_none()
+                        && !buffer.dirty
+                        && buffer.text.len_bytes() == 0
+                        && buffer.origin == crate::editor::BufferOrigin::FileOrScratch
+                });
+                match unused.map(|(id, _)| id) {
+                    Some(buffer) => {
+                        if let Err(error) = self.state.show_buffer(buffer) {
+                            self.show_error(error);
+                        }
+                    }
+                    None => {
+                        self.state.open_text(TextBuffer::from_text(""), None);
+                    }
+                }
+                self.set_dashboard_visibility(false);
+                self.start_workspace_file_picker();
+            }
             AppEffect::GitFileStage => {
                 self.input.set_pending_stage(AppEffect::GitFileStage);
                 // The plan itself refuses a path whose buffer has unsaved edits and reports
@@ -11762,9 +11681,7 @@ impl InteractiveApplication {
                 self.preview_git_replacement(&side, &files);
             }
             AppEffect::GitConflictReplaceSubmit => {}
-            AppEffect::TutorStart => self.start_tutor_sandbox(),
-            AppEffect::TutorStop => self.stop_tutor_sandbox(),
-            AppEffect::TutorLessons => self.open_tutor_lessons(),
+            AppEffect::Tutor => self.open_tutor(),
             AppEffect::HelpContextual => self.open_contextual_help(),
             AppEffect::HelpCommandReference => self.open_command_reference(),
             AppEffect::GitWorktreeOpen => self.open_git_worktree(),

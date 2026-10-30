@@ -19,6 +19,7 @@ const BUILTIN_SURFACES: &[&str] = &[
     "explorer",
     "panel",
     "agent",
+    "agent_normal",
     "terminal",
     "terminal_normal",
     "terminal_visual",

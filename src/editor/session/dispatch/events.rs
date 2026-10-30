@@ -557,7 +557,7 @@ impl InteractiveApplication {
             return context;
         }
         if !self.window_session.dashboard_visible() && self.agent_input_focused() {
-            return "agent".into();
+            return if self.agent_normal_mode() { "agent_normal" } else { "agent" }.into();
         }
         if self.window_session.dashboard_visible() || self.state.active_view.is_none() {
             return "dashboard".into();
@@ -1279,6 +1279,10 @@ impl InteractiveApplication {
                 Break(RestoreUpdate::Waiting) => continue,
                 Break(RestoreUpdate::Ready(ready)) => {
                     self.finish_session_restore(*ready);
+                    continue;
+                }
+                Break(RestoreUpdate::Abandoned) => {
+                    self.cancel_session_restore();
                     continue;
                 }
                 Break(RestoreUpdate::Failed(error)) => {

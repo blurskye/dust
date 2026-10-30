@@ -92,9 +92,10 @@ struct Cli {
     #[arg(long, value_name = "LINE", requires = "remote")]
     line: Option<usize>,
 
-    /// Serve the subagent tool over MCP for the agent tab TAB (Dust starts this itself).
-    #[arg(long, value_name = "TAB", hide = true)]
-    agent_tools: Option<u64>,
+    /// Serve the subagent tool over MCP for the agent tab TAB, or the one in
+    /// `DUST_AGENT_TAB` (Dust starts this itself, or an agent's MCP config names it).
+    #[arg(long, value_name = "TAB", hide = true, num_args = 0..=1)]
+    agent_tools: Option<Option<u64>>,
 }
 
 fn external_tui_fixture() -> ExitCode {
@@ -138,10 +139,10 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(tab) = cli.agent_tools {
-        let server = std::env::var_os(dust::remote::SERVER_VARIABLE)
-            .ok_or("--agent-tools only works for an agent started by Dust")?;
+        let tab = tab.or_else(|| std::env::var(dust::agent::mcp::TAB_VARIABLE).ok()?.parse().ok());
+        let server = std::env::var_os(dust::remote::SERVER_VARIABLE).map(Into::into);
         let profiles = std::env::var(dust::agent::mcp::PROFILES_VARIABLE).unwrap_or_default();
-        dust::agent::mcp::serve(server.into(), tab, &profiles)?;
+        dust::agent::mcp::serve(server.zip(tab), &profiles)?;
         return Ok(());
     }
     if !cli.remote.is_empty() {

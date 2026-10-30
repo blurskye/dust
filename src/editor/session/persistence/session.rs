@@ -122,6 +122,8 @@ impl RestoreReady {
 pub(in crate::editor::session) enum RestoreUpdate {
     Waiting,
     Ready(Box<RestoreReady>),
+    /// The user started working while the files were read; their work stays.
+    Abandoned,
     Failed(String),
 }
 impl PersistenceSession {
@@ -149,8 +151,9 @@ impl PersistenceSession {
         let Some(source) = self.load_source.take() else {
             return Ok(None);
         };
+        // The user started working before the saved session was read: keep what they have.
         if !source.current(&context) || context.editor.buffers.values().any(|buffer| buffer.dirty) {
-            return Err("session restore source changed; current editing was preserved".into());
+            return Ok(None);
         }
         let mut panes = Vec::new();
         for tab in &session.tabs {
@@ -243,9 +246,7 @@ impl PersistenceSession {
             .remove(&id)
             .expect("owned read identity");
         if !current {
-            return Break(RestoreUpdate::Failed(
-                "session restore source changed; current editing was preserved".into(),
-            ));
+            return Break(RestoreUpdate::Abandoned);
         }
         if !context
             .workspace

@@ -122,5 +122,13 @@ pub(super) fn register_commands(
         ArgumentSchema::default(),
         |_| AppEffect::NewBuffer,
     )?;
+    register(
+        registry,
+        "buffer.new_tab",
+        "New tab: an empty buffer with the file finder over it",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::NewTab,
+    )?;
     Ok(())
 }

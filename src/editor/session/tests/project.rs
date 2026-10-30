@@ -861,7 +861,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
     wait_explorer(&mut app);
     let explorer = app.ui.explorer.as_ref().expect("explorer projection");
     assert_eq!(explorer.total, 40);
-    assert_eq!(explorer.rows.len(), 6);
+    assert_eq!(explorer.rows.len(), 7);
     assert!(explorer.rows.len() < explorer.total);
     assert_eq!(explorer.rows.iter().filter(|row| row.selected).count(), 1);
     let first_child = app.explorer.tree().selected_id().expect("first child");
@@ -878,7 +878,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
 
     app.handle_event(crate::ui::UiEvent::Resize(80, 20));
     let explorer = app.ui.explorer.as_ref().expect("grown projection");
-    assert_eq!(explorer.rows.len(), 16);
+    assert_eq!(explorer.rows.len(), 17);
     assert_eq!(explorer.rows.iter().filter(|row| row.selected).count(), 1);
     assert_eq!(
         app.explorer.tree().projection_generation(),
@@ -886,7 +886,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
     );
     app.handle_event(crate::ui::UiEvent::Resize(80, 8));
     let explorer = app.ui.explorer.as_ref().expect("shrunk projection");
-    assert_eq!(explorer.rows.len(), 4);
+    assert_eq!(explorer.rows.len(), 5);
     assert_eq!(explorer.rows.iter().filter(|row| row.selected).count(), 1);
     assert_eq!(
         app.explorer.tree().projection_generation(),
@@ -895,7 +895,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
 
     app.move_explorer_selection(30);
     let explorer = app.ui.explorer.as_ref().expect("scrolled projection");
-    assert_eq!(explorer.rows.len(), 4);
+    assert_eq!(explorer.rows.len(), 5);
     assert!(explorer.scroll > 0);
     assert!(explorer.rows.iter().any(|row| row.selected));
     let before_page = app
@@ -949,7 +949,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
     app.page_explorer_selection(1);
     assert_eq!(app.explorer.tree().selected_id(), bottom);
     let first_viewport_node = app.ui.explorer.as_ref().unwrap().rows[0].node_id;
-    app.input.observe_mouse(1, 3);
+    app.input.observe_mouse(1, 2);
     app.explorer_mouse_select();
     assert_eq!(
         app.explorer.tree().selected_id(),
@@ -3464,269 +3464,6 @@ fn help_opened_over_help_keeps_the_original_surface() {
 }
 
 #[test]
-fn the_tutor_fixture_is_disposable_and_isolated_from_real_roots() {
-    let mut app = app();
-    let real_root = app.state.workspace_root.clone();
-    app.invoke(
-        crate::editor::CommandInvocation::new("session.tutor.start", InvocationSource::Test)
-            .expect("command id"),
-    );
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while app.workspace.tutor_pending() {
-        app.process_tutor_events();
-        assert!(Instant::now() < deadline, "fixture creation timed out");
-        thread::yield_now()
-    }
-    let fixture = app
-        .workspace
-        .tutor_fixture()
-        .cloned()
-        .expect("the sandbox reported a fixture");
-    let path = fixture.path.clone();
-
-    // Isolation, asserted on real state rather than inferred from a returned code.
-    assert!(path.is_dir(), "the fixture is a directory");
-    assert!(
-        !path.starts_with(&real_root),
-        "the fixture is outside the real root: {} is not under {}",
-        path.display(),
-        real_root.display()
-    );
-    assert!(
-        !app.workspace
-            .roots()
-            .iter()
-            .any(|root| path.starts_with(&root.identity.canonical_path)),
-        "the fixture is not inside any workspace root"
-    );
-    assert!(
-        !app.workspace
-            .roots()
-            .iter()
-            .any(|root| root.identity.canonical_path == path),
-        "the fixture was never entered as a workspace root"
-    );
-    // It is a real repository with history, so exercises have something to practise on.
-    let repository = git2::Repository::open(&path).expect("the fixture is a repository");
-    assert!(
-        repository.head().and_then(|head| head.peel_to_commit()).is_ok(),
-        "the fixture has a commit"
-    );
-    drop(repository);
-
-    // Disposal really removes it, and the session stops believing in it.
-    app.invoke(
-        crate::editor::CommandInvocation::new("session.tutor.stop", InvocationSource::Test)
-            .expect("command id"),
-    );
-    while app.workspace.tutor_fixture().is_some() {
-        app.process_tutor_events();
-        assert!(Instant::now() < deadline, "fixture disposal timed out");
-        thread::yield_now()
-    }
-    assert!(
-        !path.exists(),
-        "disposal removed the fixture directory: {} still exists",
-        path.display()
-    );
-}
-
-#[test]
-fn opening_a_sandbox_never_touches_the_real_trust_store_or_its_state_file() {
-    let mut app = app();
-    // The state file's bytes before anything happens: a sandbox must not rewrite the user's
-    // real trust database.
-    let state_path = app.workspace.state_path().to_path_buf();
-    // A sentinel database is placed first, because comparing two absent files would prove
-    // nothing. The session already loaded its store at construction, so this stands in for the
-    // user's real trust database on disk.
-    let sentinel = b"# dust trust database sentinel\nversion = 1\n".to_vec();
-    std::fs::write(&state_path, &sentinel).expect("sentinel written");
-    let before = std::fs::read(&state_path).expect("the sentinel is readable");
-
-    app.invoke(
-        crate::editor::CommandInvocation::new("session.tutor.start", InvocationSource::Test)
-            .expect("command id"),
-    );
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while app.workspace.tutor_pending() {
-        app.process_tutor_events();
-        assert!(Instant::now() < deadline);
-        thread::yield_now()
-    }
-    let fixture = app
-        .workspace
-        .tutor_fixture()
-        .cloned()
-        .expect("the sandbox reported a fixture");
-
-    // MEASURED, not inferred from "it was never entered as a root": the real trust store does
-    // not trust this fixture, and has not even recorded having seen it.
-    let identity = crate::workspace::RootIdentity::capture(&fixture.path)
-        .expect("the fixture has a capturable identity");
-    assert!(
-        !app.workspace.fixture_is_trusted(&identity),
-        "the fixture is not trusted by the real trust store"
-    );
-    assert!(
-        !app.workspace.fixture_is_seen(&identity),
-        "the fixture never even passed through the real trust store"
-    );
-
-    app.invoke(
-        crate::editor::CommandInvocation::new("session.tutor.stop", InvocationSource::Test)
-            .expect("command id"),
-    );
-    while app.workspace.tutor_fixture().is_some() {
-        app.process_tutor_events();
-        assert!(Instant::now() < deadline);
-        thread::yield_now()
-    }
-    assert!(!fixture.path.exists(), "the fixture is gone");
-
-    let after = std::fs::read(&state_path).expect("the trust database is still there");
-    assert_eq!(
-        before, sentinel,
-        "the sentinel really was the database on disk before the sandbox opened"
-    );
-    assert_eq!(
-        after, before,
-        "opening and closing a sandbox left the user's trust database byte-identical"
-    );
-}
-
-
-#[test]
-fn lesson_progress_comes_from_the_real_action_and_nothing_else() {
-    let mut app = app();
-    let repo = history_fixture(&app.state.workspace_root, &["base"]);
-    // A real change to stage.
-    fs::write(app.state.workspace_root.join("h0.txt"), "changed\n").unwrap();
-    prepare_trust_identity(&mut app);
-    for root in app.workspace.roots().to_vec() {
-        app.workspace.fixture_trust_identity(root.identity.clone())
-    }
-    app.reconcile_workspace_trust();
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let refresh = |app: &mut InteractiveApplication| {
-        app.start_git_status_refresh();
-        while app.git.status_pending() {
-            app.process_git_status_events();
-            assert!(Instant::now() < deadline);
-            thread::yield_now()
-        }
-    };
-    refresh(&mut app);
-
-    let stage_complete = |app: &InteractiveApplication| {
-        app.workspace
-            .tutor_progress()
-            .is_complete(crate::workspace::TutorStep::StageAChange)
-    };
-    // 2. NOT performing the action leaves the step incomplete.
-    assert!(
-        !stage_complete(&app),
-        "nothing done yet: the staging step is incomplete"
-    );
-    // 3. Answering completes NOTHING: opening the lessons page and the reference, and running
-    //    a command that is not the action, must not mark the step done.
-    for id in ["session.tutor.lessons", "overlay.help.contextual"] {
-        app.invoke(
-            crate::editor::CommandInvocation::new(id, InvocationSource::Test).expect("command id"),
-        );
-        app.search.close_picker();
-        assert!(
-            !stage_complete(&app),
-            "invoking {id} is not staging a change and must not complete the step"
-        );
-    }
-
-    // 1. Performing the genuine action completes it, and it is the mutation OUTCOME that does it.
-    //    Staging operates on a SELECTED hunk, so the real flow is: load the hunks, select one,
-    //    then stage it.
-    let invoke = |app: &mut InteractiveApplication, id: &str| {
-        app.invoke(
-            crate::editor::CommandInvocation::new(id, InvocationSource::Test).expect("command id"),
-        );
-    };
-    let load_hunks = |app: &mut InteractiveApplication, id: &str| {
-        invoke(app, id);
-        while app.git.hunks_pending() {
-            app.process_git_hunk_events();
-            assert!(Instant::now() < deadline);
-            thread::yield_now()
-        }
-    };
-    // The hunk commands act on the ACTIVE buffer's file, so the changed file must be open —
-    // that is the real flow a user follows too.
-    let changed_path = app.state.workspace_root.join("h0.txt");
-    let (buffer, view) = app.state.open_text(
-        crate::editor::text::TextBuffer::from_text("changed\n"),
-        Some(changed_path.clone()),
-    );
-    app.state.active_view = Some(view);
-    app.state.views[view].buffer = buffer;
-    load_hunks(&mut app, "workspace.git.hunks.open");
-    let hunks = app
-        .git
-        .hunks()
-        .unwrap_or_else(|| panic!("unstaged hunks: {:?}", app.ui.notification))
-        .clone();
-    assert!(!hunks.hunks.is_empty(), "there is a real change to stage");
-    assert!(app.git.select(
-        hunks.status_revision,
-        hunks.repository_id,
-        hunks.root_revision,
-        &changed_path,
-        hunks.hunks[0].id
-    ));
-    app.invoke(
-        crate::editor::CommandInvocation::new("workspace.git.hunk.stage", InvocationSource::Test)
-            .expect("command id"),
-    );
-    assert!(
-        app.git.mutation_pending(),
-        "the staging plan actually started rather than being refused"
-    );
-    while app.git.mutation_pending() {
-        app.process_git_mutation_events();
-        assert!(Instant::now() < deadline);
-        thread::yield_now()
-    }
-    assert!(
-        stage_complete(&app),
-        "staging a change really happened and completed the step"
-    );
-    // The staging step is a real one: the repository's index really holds the change, read
-    // through a fresh handle because the index is cached per Repository.
-    let staged = git2::Repository::open(&app.state.workspace_root)
-        .unwrap()
-        .index()
-        .unwrap()
-        .get_path(std::path::Path::new("h0.txt"), 0)
-        .is_some();
-    assert!(staged, "the change is really in the index, not merely reported as staged");
-    // And the lessons page now reports it as done rather than todo.
-    app.invoke(
-        crate::editor::CommandInvocation::new("session.tutor.lessons", InvocationSource::Test)
-            .expect("command id"),
-    );
-    let page = app.search.picker_projection().expect("lessons page");
-    let stage_row = page
-        .rows
-        .iter()
-        .find(|row| row.label == "Stage one change")
-        .expect("the staging step is listed");
-    assert!(
-        stage_row.detail.contains("done"),
-        "the step the user really performed reads done: {:?}",
-        stage_row.detail
-    );
-    let _ = repo;
-}
-
-
-#[test]
 fn the_conflict_surface_shows_the_paused_operation_and_each_side() {
     let mut app = app();
     let repo = history_fixture(&app.state.workspace_root, &["base"]);
@@ -4270,7 +4007,8 @@ fn the_changes_surface_renders_its_sections_columns_badge_and_footer() {
     let badge_row = u16::try_from(
         rendered
             .iter()
-            .position(|row| row.contains("unsaved.txt"))
+            // Not the "opened …/unsaved.txt" notice at the top.
+            .position(|row| row.contains("unsaved.txt") && !row.contains("opened"))
             .expect("the unsaved-only row"),
     )
     .expect("row index");

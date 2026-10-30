@@ -210,6 +210,8 @@ impl Config {
                 &glyphs.tree_middle,
                 &glyphs.tree_last,
                 &glyphs.tree_space,
+                &glyphs.expander,
+                &glyphs.expander_open,
                 &glyphs.directory,
                 &glyphs.directory_open,
                 &glyphs.file,
@@ -238,9 +240,6 @@ impl Config {
             || !(1..=10_000).contains(&self.ui.explorer.maximum_visible_rows)
             || !(1..=16 * 1024 * 1024).contains(&self.ui.explorer.maximum_preview_bytes)
             || !(1..=1000).contains(&self.ui.explorer.maximum_preview_lines)
-            || self.ui.explorer.focus_marker.is_empty()
-            || self.ui.explorer.focus_marker.chars().count() > 8
-            || self.ui.explorer.focus_marker.chars().any(char::is_control)
             || self.ui.explorer.loading_label.is_empty()
             || self.ui.explorer.loading_label.chars().count() > 64
             || self.ui.explorer.loading_label.chars().any(char::is_control)

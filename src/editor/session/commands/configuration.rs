@@ -283,27 +283,11 @@ pub(super) fn register_commands(
     )?;
     register(
         registry,
-        "session.tutor.start",
-        "Open the practice sandbox: a disposable fixture isolated from your work",
+        "session.tutor",
+        "Open the tutorial: every feature of Dust, with text to practise on",
         ContextRequirement::Application,
         ArgumentSchema::default(),
-        |_invocation| Ok(AppEffect::TutorStart),
-    )?;
-    register(
-        registry,
-        "session.tutor.lessons",
-        "Show the practice chapters: what each teaches and what you have done",
-        ContextRequirement::Application,
-        ArgumentSchema::default(),
-        |_invocation| Ok(AppEffect::TutorLessons),
-    )?;
-    register(
-        registry,
-        "session.tutor.stop",
-        "Leave the practice sandbox and remove its disposable fixture",
-        ContextRequirement::Application,
-        ArgumentSchema::default(),
-        |_invocation| Ok(AppEffect::TutorStop),
+        |_invocation| Ok(AppEffect::Tutor),
     )?;
     register(
         registry,

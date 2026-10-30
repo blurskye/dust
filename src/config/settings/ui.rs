@@ -166,8 +166,6 @@ impl Default for StatusLineConfig {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct NotificationConfig {
-    pub left: u16,
-    pub rows_from_bottom: u16,
     pub max_width: u16,
     pub timeout_ms: u64,
 }
@@ -175,10 +173,8 @@ pub struct NotificationConfig {
 impl Default for NotificationConfig {
     fn default() -> Self {
         Self {
-            left: 1,
-            rows_from_bottom: 2,
             max_width: 120,
-            timeout_ms: 0,
+            timeout_ms: 4000,
         }
     }
 }
@@ -426,6 +422,9 @@ pub struct ExplorerGlyphSet {
     pub tree_middle: String,
     pub tree_last: String,
     pub tree_space: String,
+    /// Before a folder's icon, closed and open.
+    pub expander: String,
+    pub expander_open: String,
     pub directory: String,
     pub directory_open: String,
     pub file: String,
@@ -483,7 +482,6 @@ pub struct ExplorerConfig {
     pub preview_enabled: bool,
     pub maximum_preview_bytes: usize,
     pub maximum_preview_lines: usize,
-    pub focus_marker: String,
     pub loading_label: String,
     pub icon_mode: ExplorerIconMode,
     pub glyphs: ExplorerGlyphs,
@@ -504,11 +502,13 @@ impl Default for ExplorerConfig {
     fn default() -> Self {
         let unicode = ExplorerGlyphSet {
             tree_vertical: "│ ".into(),
-            tree_middle: "├─".into(),
-            tree_last: "└─".into(),
+            tree_middle: "│ ".into(),
+            tree_last: "└ ".into(),
             tree_space: "  ".into(),
-            directory: "▸".into(),
-            directory_open: "▾".into(),
+            expander: "▸ ".into(),
+            expander_open: "▾ ".into(),
+            directory: "▪".into(),
+            directory_open: "▫".into(),
             file: "·".into(),
             symlink: "↗".into(),
             loading: "…".into(),
@@ -526,13 +526,14 @@ impl Default for ExplorerConfig {
             preview_enabled: false,
             maximum_preview_bytes: 256 * 1024,
             maximum_preview_lines: 20,
-            focus_marker: ">".into(),
             loading_label: "loading…".into(),
             icon_mode: ExplorerIconMode::NerdFont,
             glyphs: ExplorerGlyphs {
                 nerd_font: ExplorerGlyphSet {
-                    directory: "󰉋".into(),
-                    directory_open: "󰝰".into(),
+                    expander: "\u{f460} ".into(),
+                    expander_open: "\u{f47c} ".into(),
+                    directory: "\u{e5ff}".into(),
+                    directory_open: "\u{e5fe}".into(),
                     file: "󰈔".into(),
                     symlink: "".into(),
                     ..unicode.clone()
@@ -543,8 +544,10 @@ impl Default for ExplorerConfig {
                     tree_middle: "|-".into(),
                     tree_last: "\\-".into(),
                     tree_space: "  ".into(),
-                    directory: "+".into(),
-                    directory_open: "-".into(),
+                    expander: "+ ".into(),
+                    expander_open: "- ".into(),
+                    directory: "/".into(),
+                    directory_open: "/".into(),
                     file: ".".into(),
                     symlink: "@".into(),
                     loading: "~".into(),

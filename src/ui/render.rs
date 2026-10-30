@@ -1888,31 +1888,10 @@ pub fn render(
         );
     }
     if let Some(message) = ui.notification.as_ref() {
-        if ui.notification_error {
-            render_error_notification(
-                &mut frame,
-                message,
-                Style::Error,
-                config,
-                width,
-                workspace_height,
-            );
-        } else if let Some(rect) =
-            super::geometry::notification_geometry(config, width, workspace_height)
-        {
-            // The message owns its row, like Vim's message line, so no editor text shows
-            // around it.
-            for x in 0..width {
-                frame.grid.set_cell(x, rect.y, " ", Style::Default);
-            }
-            frame.grid.put_text_clipped(
-                rect.x,
-                rect.y,
-                message,
-                Style::Accent,
-                rect.x.saturating_add(rect.width),
-            );
-        }
+        // Messages show in a box at the top right, like errors, and fade after the
+        // configured timeout.
+        let style = if ui.notification_error { Style::Error } else { Style::Accent };
+        render_error_notification(&mut frame, message, style, config, width, workspace_height);
     } else if let Some(message) = ui.config_diagnostic.as_ref() {
         render_error_notification(
             &mut frame,

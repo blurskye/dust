@@ -440,8 +440,19 @@ impl EditorState {
                             .panes
                             .iter()
                             .any(|(_, candidate)| candidate.view == previous)
+                        && let Some(old) = self.views.remove(previous)
                     {
-                        self.views.remove(previous);
+                        // An untouched [No Name] buffer gives way to what opens over it, as
+                        // in Vim, so `ctrl-t` and a picked file leave one tab.
+                        let unused = self.buffers.get(old.buffer).is_some_and(|buffer| {
+                            buffer.path.is_none()
+                                && !buffer.dirty
+                                && buffer.text.len_bytes() == 0
+                                && buffer.origin == BufferOrigin::FileOrScratch
+                        });
+                        if unused && !self.views.values().any(|other| other.buffer == old.buffer) {
+                            self.buffers.remove(old.buffer);
+                        }
                     }
                     self.mark_window_changed();
                     return;
@@ -593,6 +604,16 @@ impl EditorState {
             return Err("pane is absent from active tab");
         }
         self.set_focused_pane(tab, pane)
+    }
+
+    /// Whether the focused pane is the only one left, so closing it would close the editor.
+    #[must_use]
+    pub fn is_last_pane(&self) -> bool {
+        self.tabs.len() == 1
+            && self
+                .active_tab
+                .and_then(|tab| self.tabs.get(tab))
+                .is_some_and(|tab| pane_ids(&tab.root).len() == 1)
     }
 
     pub fn focus_pane(&mut self, offset: isize, wrap: bool) -> Result<(), &'static str> {

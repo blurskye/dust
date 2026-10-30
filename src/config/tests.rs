@@ -781,7 +781,7 @@ fn bundled_assets_share_the_typed_configuration_loaders() {
     assert!(loaded.config.editor.indent_guides.enabled);
     assert!(loaded.config.editor.indent_guides.active_scope);
     assert_eq!(loaded.config.editor.indent_guides.character, "│");
-    assert_eq!(loaded.dashboard.action.len(), 6);
+    assert_eq!(loaded.dashboard.action.len(), 7);
     assert!(
         loaded
             .dashboard

@@ -338,10 +338,10 @@ fn body_and_notice_bounds_fail_closed_at_tiny_sizes() {
                 assert!(body.y >= rect.y && body.y + body.height <= rect.y + height);
                 assert!(body.width <= width);
                 if let Some(notice) =
-                    crate::ui::geometry::notification_geometry(&config, width, height)
+                    crate::ui::geometry::error_notification_geometry(&config, width, height)
                 {
                     assert!(notice.x + notice.width <= width);
-                    assert!(notice.y < height);
+                    assert!(notice.y + notice.height <= height);
                 }
                 let rows = crate::ui::geometry::documentation_page_rows(&config, width, height);
                 assert!(
@@ -421,7 +421,7 @@ fn accepted_projection_rejects_old_source_graph_size_and_invalidation() {
         1
     );
     let body = windows.content().explorer.unwrap();
-    assert_eq!((body.y, body.height), (3, 26));
+    assert_eq!((body.y, body.height), (2, 27));
     assert_eq!(
         windows.content().documentation_rows,
         crate::ui::geometry::documentation_page_rows(&config, 75, 30)

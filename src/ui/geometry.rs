@@ -139,19 +139,22 @@ pub fn picker_content_geometry(
     })
 }
 
+/// The explorer's title row and the gap under it.
+const EXPLORER_HEADER_ROWS: u16 = 2;
+
 #[must_use]
 pub fn explorer_body_geometry(rect: WindowRect, config: &Config) -> WindowRect {
     WindowRect {
         x: rect.x,
         y: rect
             .y
-            .saturating_add(3)
+            .saturating_add(EXPLORER_HEADER_ROWS)
             .min(rect.y.saturating_add(rect.height)),
         width: rect.width.saturating_sub(1),
         height: rect
             .height
             .saturating_sub(u16::from(config.ui.status_line.enabled))
-            .saturating_sub(3)
+            .saturating_sub(EXPLORER_HEADER_ROWS)
             .min(u16::try_from(config.ui.explorer.maximum_visible_rows).unwrap_or(u16::MAX)),
     }
 }
@@ -166,24 +169,6 @@ pub fn documentation_page_rows(config: &Config, width: u16, height: u16) -> usiz
             .saturating_sub(u16::from(config.ui.status_line.enabled))
             .saturating_sub(2),
     ))
-}
-
-#[must_use]
-pub fn notification_geometry(config: &Config, width: u16, height: u16) -> Option<WindowRect> {
-    let policy = &config.ui.notifications;
-    let x = policy.left.min(width);
-    let available = policy.max_width.min(width.saturating_sub(x));
-    if available == 0 || height == 0 {
-        return None;
-    }
-    Some(WindowRect {
-        x,
-        y: height
-            .saturating_sub(policy.rows_from_bottom)
-            .min(height - 1),
-        width: available,
-        height: 1,
-    })
 }
 
 pub(crate) fn error_notification_geometry(

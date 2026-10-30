@@ -1224,6 +1224,7 @@ const GLOBAL_KEYMAP_TARGETS: &[(&str, &str)] = &[
     ("terminal_normal", ""),
     ("tool_manager", ""),
     ("panel", ""),
+    ("agent_normal", ""),
 ];
 
 fn normalized_keys(keys: &Option<String>) -> Option<String> {

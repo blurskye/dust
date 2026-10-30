@@ -2,7 +2,10 @@
 //! starts a subagent in a new tab of Dust's agent panel and returns the subagent's final
 //! answer, so every agent gets the same subagents whatever its own harness offers. It runs
 //! as `dust --agent-tools <tab>`, speaks MCP (JSON-RPC, one message per line) on stdin and
-//! stdout, and asks the running Dust over the socket in `DUST_SERVER`.
+//! stdout, and asks the running Dust over the socket in `DUST_SERVER`. Agents that only read
+//! MCP servers from their own config, such as pi, run `dust --agent-tools` with no tab; it
+//! then uses `DUST_AGENT_TAB`, which Dust sets for every agent it starts. Outside Dust, or in
+//! a subagent, the server offers no tools.
 
 use std::{
     io::{self, BufRead, Write},
@@ -17,6 +20,8 @@ use crate::remote;
 
 /// The configured agent profiles, comma separated, for the tool's description.
 pub const PROFILES_VARIABLE: &str = "DUST_AGENT_PROFILES";
+/// The tab number of the agent session, for servers started from an agent's own config.
+pub const TAB_VARIABLE: &str = "DUST_AGENT_TAB";
 
 const INSTRUCTIONS: &str = "You run inside Dust, a terminal editor. Dust provides subagents \
 through the `agent` tool of this server. Whenever a subagent would help (a broad search, \
@@ -38,10 +43,10 @@ pub fn server_entry(dust: &Path, socket: &Path, tab: u64, profiles: &str) -> Val
 }
 
 /// Answer MCP requests until stdin closes. Tool calls run on their own threads, so several
-/// subagents can work at once.
-pub fn serve(socket: PathBuf, tab: u64, profiles: &str) -> io::Result<()> {
+/// subagents can work at once. Without Dust's socket and a tab there are no tools.
+pub fn serve(target: Option<(PathBuf, u64)>, profiles: &str) -> io::Result<()> {
     let output = Arc::new(Mutex::new(io::stdout()));
-    let tool = tool(profiles);
+    let tools = if target.is_some() { vec![tool(profiles)] } else { Vec::new() };
     for line in io::stdin().lock().lines() {
         let line = line?;
         let Ok(message) = serde_json::from_str::<Value>(&line) else {
@@ -57,12 +62,16 @@ pub fn serve(socket: PathBuf, tab: u64, profiles: &str) -> io::Result<()> {
                 "protocolVersion": params["protocolVersion"].as_str().unwrap_or("2025-06-18"),
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": "dust", "version": env!("CARGO_PKG_VERSION")},
-                "instructions": INSTRUCTIONS,
+                "instructions": if target.is_some() { INSTRUCTIONS } else { "" },
             })),
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({"tools": [tool]})),
+            "tools/list" => Ok(json!({"tools": tools})),
             "tools/call" => {
-                let (socket, params, output) = (socket.clone(), params.clone(), Arc::clone(&output));
+                let Some((socket, tab)) = target.clone() else {
+                    write(&output, &answer(id, Err(json!({"code": -32602, "message": "Dust offers no tools here"}))));
+                    continue;
+                };
+                let (params, output) = (params.clone(), Arc::clone(&output));
                 thread::spawn(move || write(&output, &answer(id, Ok(call(&socket, tab, &params)))));
                 continue;
             }

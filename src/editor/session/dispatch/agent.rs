@@ -104,8 +104,8 @@ pub(super) struct AgentPanel {
     lines: usize,
     /// The width the transcript was wrapped to.
     width: usize,
-    /// The pane Escape goes back to.
-    back: Option<crate::editor::PaneId>,
+    /// Whether the input is in Vim's Normal mode; it starts in Insert.
+    normal: bool,
     /// The selected row of the slash-command menu.
     selected: usize,
 }
@@ -801,9 +801,21 @@ impl InteractiveApplication {
         }
     }
 
-    /// `ctrl-t` in the panel: another session of the shown tab's agent.
+    /// `ctrl-t` in the panel: another session of the shown tab's agent. A tab nobody asked
+    /// anything yet is shown instead, so empty tabs do not pile up.
     pub(super) fn new_agent_tab(&mut self) {
         self.restore_agent_tabs();
+        let unused = self.agent.sessions.iter().position(|session| {
+            session.parent.is_none()
+                && !session.entries.iter().any(|entry| matches!(entry, Entry::User { .. }))
+        });
+        if let Some(index) = unused {
+            self.agent.active = index;
+            self.agent.scroll = 0;
+            self.show_agent_panel();
+            self.refresh_agent_transcript();
+            return;
+        }
         let name = self.active_agent().map_or_else(
             || self.configuration.settings().agents.default.clone(),
             |session| session.name.clone(),
@@ -827,7 +839,7 @@ impl InteractiveApplication {
         };
         let name = request.agent.clone().unwrap_or_else(|| parent.name.clone());
         let root = parent.root.clone();
-        let spawned = match self.spawn_agent(&name, &root) {
+        let spawned = match self.spawn_agent(&name, &root, None) {
             Ok(spawned) => spawned,
             Err(error) => {
                 request.reply.send(Err(error));
@@ -901,7 +913,7 @@ impl InteractiveApplication {
 
     fn start_agent_session(&mut self, name: &str) -> Result<(), String> {
         let root = self.state.workspace_root.clone();
-        let spawned = self.spawn_agent(name, &root)?;
+        let spawned = self.spawn_agent(name, &root, Some(self.agent.started + 1))?;
         let index = self.add_agent_tab(name.to_owned(), root, Vec::new(), None, None);
         self.agent.active = index;
         self.agent.sessions[index].attach(spawned);
@@ -967,13 +979,16 @@ impl InteractiveApplication {
         let Some(session) = self.active_agent() else {
             return Ok(());
         };
-        let (name, root) = (session.name.clone(), session.root.clone());
-        let spawned = self.spawn_agent(&name, &root)?;
+        let (name, root, tab) = (session.name.clone(), session.root.clone(), session.number);
+        let tab = session.parent.is_none().then_some(tab);
+        let spawned = self.spawn_agent(&name, &root, tab)?;
         self.agent.sessions[self.agent.active].attach(spawned);
         Ok(())
     }
 
-    fn spawn_agent(&self, name: &str, root: &Path) -> Result<Spawned, String> {
+    /// Start the agent of profile `name`. `tab` is the session's tab number, for agents that
+    /// start Dust's MCP server from their own config; subagents get none.
+    fn spawn_agent(&self, name: &str, root: &Path, tab: Option<u64>) -> Result<Spawned, String> {
         let profile = self
             .configuration
             .settings()
@@ -995,8 +1010,17 @@ impl InteractiveApplication {
                 format!("{} is not installed", profile.program.display())
             });
         };
-        let mut process =
-            AgentProcess::spawn(&program, &profile.arguments, &profile.environment, root)
+        let mut environment = profile.environment.clone();
+        if let Some(server) = &self.remote {
+            environment.insert(crate::remote::SERVER_VARIABLE.into(), server.path().display().to_string());
+        }
+        if let Some(tab) = tab {
+            environment.insert(agent::mcp::TAB_VARIABLE.into(), tab.to_string());
+        }
+        let profiles = self.configuration.settings().agents.profiles.keys();
+        let profiles = profiles.map(String::as_str).collect::<Vec<_>>().join(",");
+        environment.insert(agent::mcp::PROFILES_VARIABLE.into(), profiles);
+        let mut process = AgentProcess::spawn(&program, &profile.arguments, &environment, root)
                 .map_err(|error| format!("could not start agent {name}: {error}"))?;
         let id = process.request("initialize", agent::initialize_params())?;
         Ok((process, Phase::Initializing(id), profile.options.clone(), profile.meta.clone()))
@@ -1394,7 +1418,14 @@ impl InteractiveApplication {
         if let Some(pane) = self.agent_pane() {
             let previous = self.active_tab_focus();
             if self.state.focus_pane_id(pane).is_ok() {
-                self.apply_layout_action(LayoutAction::ClosePane);
+                // The only window cannot close: an empty buffer and the dashboard take its
+                // place instead, as when the last file is closed.
+                if self.state.is_last_pane() {
+                    self.state.open_text(TextBuffer::from_text(""), None);
+                    self.set_dashboard_visibility(true);
+                } else {
+                    self.apply_layout_action(LayoutAction::ClosePane);
+                }
             }
             if let Some(previous) = previous.filter(|previous| *previous != pane) {
                 let _ = self.state.focus_pane_id(previous);
@@ -1436,8 +1467,9 @@ impl InteractiveApplication {
         let Some(pane) = self.agent_pane() else {
             return;
         };
-        if let Some(previous) = previous.filter(|previous| *previous != pane) {
-            self.agent.back = Some(previous);
+        // Coming from another window starts typing, as in a chat box.
+        if previous != Some(pane) {
+            self.agent.normal = false;
         }
         self.set_explorer_focus(false);
         let _ = self.state.focus_pane_id(pane);
@@ -1520,7 +1552,7 @@ impl InteractiveApplication {
                 (String::new(), String::new())
             }
         };
-        self.agent.lines = crate::ui::transcript_lines(&text.text).len();
+        self.agent.lines = crate::ui::transcript_lines(&text.text, &bands).len();
         self.agent.scroll = self.agent.scroll.min(self.agent.lines);
         self.ui.agent_panel = Some(AgentPanelUi {
             view,
@@ -1532,6 +1564,7 @@ impl InteractiveApplication {
             family: Vec::new(),
             menu: Vec::new(),
             selected: 0,
+            normal: false,
             busy: String::new(),
             input: String::new(),
             cursor: 0,
@@ -1586,7 +1619,10 @@ impl InteractiveApplication {
             Some(session) => {
                 let busy = match (session.working(), session.phase) {
                     (false, _) => String::new(),
-                    (true, Phase::Prompting(_)) => format!("{spinner} Working · esc to stop"),
+                    (true, Phase::Prompting(_)) if self.agent.normal => {
+                        format!("{spinner} Working · esc to stop")
+                    }
+                    (true, Phase::Prompting(_)) => format!("{spinner} Working · esc esc to stop"),
                     (true, _) => format!("{spinner} Starting"),
                 };
                 let main = session.parent.unwrap_or(session.number);
@@ -1684,6 +1720,7 @@ impl InteractiveApplication {
         };
         panel.input.clone_from(&self.agent.input);
         panel.cursor = self.agent.cursor;
+        panel.normal = self.agent.normal;
         panel.scroll = self.agent.scroll;
         panel.context = self.agent.context.iter().map(context_label).collect();
         panel.placeholder = format!("Ask {name}…  / for commands");
@@ -1722,10 +1759,14 @@ impl InteractiveApplication {
     }
 
     /// Editing keys in the input: `submit`, `newline`, `backspace`, `delete`, `left`, `right`,
-    /// `home`, `end`, `up`, `down`, `delete_word`, `clear_line`, `clear` and `complete`. While
-    /// the slash-command menu is open, up and down move in it, and `complete` and `submit`
-    /// take the selected command.
+    /// `home`, `end`, `up`, `down`, `delete_word`, `clear_line`, `clear` and `complete`, and
+    /// the Vim ones in `agent_input_vim`. While the slash-command menu is open, up and down
+    /// move in it, and `complete` and `submit` take the selected command.
     pub(super) fn agent_input_edit(&mut self, action: &str) {
+        if self.agent_input_vim(action) {
+            self.sync_agent_input();
+            return;
+        }
         let menu = self.slash_menu();
         if !menu.is_empty() && matches!(action, "up" | "down" | "complete" | "submit") {
             let count = menu.len();
@@ -1846,6 +1887,83 @@ impl InteractiveApplication {
         self.sync_agent_input();
     }
 
+    /// Vim's mode changes, motions and line edits in the input. Returns false for any
+    /// other action.
+    fn agent_input_vim(&mut self, action: &str) -> bool {
+        let menu_open = !self.slash_menu().is_empty();
+        let input = &mut self.agent.input;
+        let cursor = self.agent.cursor.min(input.len());
+        let line_start = input[..cursor].rfind('\n').map_or(0, |index| index + 1);
+        let line_end = input[cursor..].find('\n').map_or(input.len(), |index| cursor + index);
+        let before = input[..cursor].chars().next_back().map_or(0, char::len_utf8);
+        let after = input[cursor..].chars().next().map_or(0, char::len_utf8);
+        let (cursor, insert) = match action {
+            "normal" if menu_open => {
+                input.clear();
+                (0, false)
+            }
+            // Leaving Insert steps back onto the last typed character, as in Vim.
+            "normal" => (if cursor > line_start { cursor - before } else { cursor }, false),
+            "insert" => (cursor, true),
+            "append" => (if cursor < line_end { cursor + after } else { cursor }, true),
+            "insert_home" => (line_start, true),
+            "append_end" => (line_end, true),
+            "open_below" => {
+                input.insert(line_end, '\n');
+                (line_end + 1, true)
+            }
+            "open_above" => {
+                input.insert(line_start, '\n');
+                (line_start, true)
+            }
+            "slash" => {
+                input.insert(cursor, '/');
+                (cursor + 1, true)
+            }
+            "word_forward" => {
+                let rest = &input[cursor..];
+                let word = rest.find(char::is_whitespace).unwrap_or(rest.len());
+                let next = rest[word..]
+                    .find(|character: char| !character.is_whitespace())
+                    .map_or(rest.len(), |gap| word + gap);
+                (cursor + next, false)
+            }
+            "word_back" => {
+                let text = input[..cursor].trim_end();
+                (text.rfind(char::is_whitespace).map_or(0, |space| space + 1), false)
+            }
+            "word_end" => {
+                let skip = cursor + after;
+                let rest = &input[skip..];
+                let start = rest.find(|character: char| !character.is_whitespace()).unwrap_or(rest.len());
+                let end = rest[start..].find(char::is_whitespace).map_or(rest.len(), |end| start + end);
+                let last = rest[..end].chars().next_back().map_or(0, char::len_utf8);
+                (skip + end - last, false)
+            }
+            "delete_line" => {
+                let (start, end) = if line_end < input.len() {
+                    (line_start, line_end + 1)
+                } else {
+                    (line_start.saturating_sub(1), line_end)
+                };
+                input.replace_range(start..end, "");
+                (start.min(input.len()), false)
+            }
+            "delete_to_end" | "change_to_end" => {
+                input.replace_range(cursor..line_end, "");
+                (cursor, action == "change_to_end")
+            }
+            "change_line" => {
+                input.replace_range(line_start..line_end, "");
+                (line_start, true)
+            }
+            _ => return false,
+        };
+        self.agent.cursor = cursor;
+        self.agent.normal = !insert;
+        true
+    }
+
     /// Scroll the transcript; positive is up, toward older output.
     pub(super) fn scroll_agent(&mut self, rows: i64) {
         let rows = isize::try_from(rows).unwrap_or(0);
@@ -1853,8 +1971,8 @@ impl InteractiveApplication {
         self.sync_agent_input();
     }
 
-    /// Escape closes the slash-command menu, stops a turn that is running, and otherwise
-    /// goes back to the code.
+    /// Escape in Normal mode: close the slash-command menu, or stop a turn that is running.
+    /// Insert mode's Escape goes to Normal; `ctrl-h/l` leave the panel like any window.
     pub(super) fn agent_escape(&mut self) {
         if !self.slash_menu().is_empty() {
             self.agent.input.clear();
@@ -1867,25 +1985,12 @@ impl InteractiveApplication {
             .is_some_and(|session| matches!(session.phase, Phase::Prompting(_)))
         {
             self.cancel_agent_turn();
-            return;
         }
-        let agent = self.agent_pane();
-        let shown = self.state.active_tab_views();
-        let back = self
-            .agent
-            .back
-            .filter(|pane| self.state.panes.contains_key(*pane) && Some(*pane) != agent)
-            .or_else(|| {
-                self.state
-                    .panes
-                    .iter()
-                    .find(|(id, pane)| Some(*id) != agent && shown.contains(&pane.view))
-                    .map(|(id, _)| id)
-            });
-        if let Some(pane) = back {
-            let _ = self.state.focus_pane_id(pane);
-            self.reconcile_editor_windows();
-        }
+    }
+
+    /// Whether the input is in Normal mode, for the `agent_normal` key context.
+    pub(super) fn agent_normal_mode(&self) -> bool {
+        self.agent.normal
     }
 
     /// The wheel scrolls the transcript, a click focuses the input, and a click on the tab

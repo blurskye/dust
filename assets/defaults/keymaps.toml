@@ -2768,6 +2768,12 @@ keys = "g T"
 command = "tab.previous"
 
 [[keymap]]
+id = "builtin.dashboard.surface.session-tutor.t"
+context = "dashboard"
+keys = "t"
+command = "session.tutor"
+
+[[keymap]]
 id = "builtin.dashboard.surface.recovery-inspect.r"
 context = "dashboard"
 keys = "r"
@@ -4723,11 +4729,12 @@ arguments = { action = "clear" }
 desc = "Clear Input"
 
 [[keymap]]
-id = "builtin.agent.escape"
+id = "builtin.agent.normal.escape"
 context = "agent"
 keys = "escape"
-command = "agent.escape"
-desc = "Stop Agent or Back to Code"
+command = "agent.input.edit"
+arguments = { action = "normal" }
+desc = "Normal Mode"
 
 [[keymap]]
 id = "builtin.agent.complete.tab"
@@ -4861,9 +4868,9 @@ command = "agent.resume"
 desc = "Resume Conversation"
 
 [[keymap]]
-id = "builtin.agent.close.alt-x"
+id = "builtin.agent.close.ctrl-q"
 context = "agent"
-keys = "alt-x"
+keys = "ctrl-q"
 command = "agent.session.close"
 desc = "Close Session"
 
@@ -4932,3 +4939,452 @@ context = "global"
 keys = "<leader> g p a"
 command = "workspace.git.pr.comment"
 desc = "Comment on Line"
+
+[[keymap]]
+id = "builtin.agent-normal.submit.enter"
+context = "agent_normal"
+keys = "enter"
+command = "agent.input.edit"
+arguments = { action = "submit" }
+desc = "Send"
+
+[[keymap]]
+id = "builtin.agent-normal.left"
+context = "agent_normal"
+keys = "left"
+command = "agent.input.edit"
+arguments = { action = "left" }
+
+[[keymap]]
+id = "builtin.agent-normal.right"
+context = "agent_normal"
+keys = "right"
+command = "agent.input.edit"
+arguments = { action = "right" }
+
+[[keymap]]
+id = "builtin.agent-normal.up"
+context = "agent_normal"
+keys = "up"
+command = "agent.input.edit"
+arguments = { action = "up" }
+
+[[keymap]]
+id = "builtin.agent-normal.down"
+context = "agent_normal"
+keys = "down"
+command = "agent.input.edit"
+arguments = { action = "down" }
+
+[[keymap]]
+id = "builtin.agent-normal.home"
+context = "agent_normal"
+keys = "home"
+command = "agent.input.edit"
+arguments = { action = "home" }
+
+[[keymap]]
+id = "builtin.agent-normal.end"
+context = "agent_normal"
+keys = "end"
+command = "agent.input.edit"
+arguments = { action = "end" }
+
+[[keymap]]
+id = "builtin.agent-normal.complete.tab"
+context = "agent_normal"
+keys = "tab"
+command = "agent.input.edit"
+arguments = { action = "complete" }
+desc = "Complete Slash Command"
+
+[[keymap]]
+id = "builtin.agent-normal.tab-new.ctrl-t"
+context = "agent_normal"
+keys = "ctrl-t"
+command = "agent.tab.new"
+desc = "New Agent Tab"
+
+[[keymap]]
+id = "builtin.agent-normal.scroll-up.shift-up"
+context = "agent_normal"
+keys = "shift-up"
+command = "agent.scroll"
+arguments = { rows = 3 }
+
+[[keymap]]
+id = "builtin.agent-normal.scroll-down.shift-down"
+context = "agent_normal"
+keys = "shift-down"
+command = "agent.scroll"
+arguments = { rows = -3 }
+
+[[keymap]]
+id = "builtin.agent-normal.scroll-up.ctrl-b"
+context = "agent_normal"
+keys = "ctrl-b"
+command = "agent.scroll"
+arguments = { rows = 20 }
+desc = "Scroll Up"
+
+[[keymap]]
+id = "builtin.agent-normal.scroll-down.ctrl-f"
+context = "agent_normal"
+keys = "ctrl-f"
+command = "agent.scroll"
+arguments = { rows = -20 }
+desc = "Scroll Down"
+
+[[keymap]]
+id = "builtin.agent-normal.surface-focus-left.ctrl-h"
+context = "agent_normal"
+keys = "ctrl-h"
+command = "surface.focus.left"
+
+[[keymap]]
+id = "builtin.agent-normal.surface-focus-down.ctrl-j"
+context = "agent_normal"
+keys = "ctrl-j"
+command = "surface.focus.down"
+
+[[keymap]]
+id = "builtin.agent-normal.surface-focus-up.ctrl-k"
+context = "agent_normal"
+keys = "ctrl-k"
+command = "surface.focus.up"
+
+[[keymap]]
+id = "builtin.agent-normal.surface-focus-right.ctrl-l"
+context = "agent_normal"
+keys = "ctrl-l"
+command = "surface.focus.right"
+
+[[keymap]]
+id = "builtin.agent-normal.window-resize.ctrl-left"
+context = "agent_normal"
+keys = "ctrl-left"
+command = "window.resize.directional"
+arguments = { direction = "left" }
+
+[[keymap]]
+id = "builtin.agent-normal.window-resize.ctrl-down"
+context = "agent_normal"
+keys = "ctrl-down"
+command = "window.resize.directional"
+arguments = { direction = "down" }
+
+[[keymap]]
+id = "builtin.agent-normal.window-resize.ctrl-up"
+context = "agent_normal"
+keys = "ctrl-up"
+command = "window.resize.directional"
+arguments = { direction = "up" }
+
+[[keymap]]
+id = "builtin.agent-normal.window-resize.ctrl-right"
+context = "agent_normal"
+keys = "ctrl-right"
+command = "window.resize.directional"
+arguments = { direction = "right" }
+
+[[keymap]]
+id = "builtin.agent-normal.terminal-toggle.ctrl-slash"
+context = "agent_normal"
+keys = "ctrl-/"
+command = "terminal.toggle"
+
+[[keymap]]
+id = "builtin.agent-normal.session-next.alt-bracket-right"
+context = "agent_normal"
+keys = "alt-]"
+command = "agent.session.next"
+desc = "Next Session"
+
+[[keymap]]
+id = "builtin.agent-normal.session-previous.alt-bracket-left"
+context = "agent_normal"
+keys = "alt-["
+command = "agent.session.previous"
+desc = "Previous Session"
+
+[[keymap]]
+id = "builtin.agent-normal.new.ctrl-n"
+context = "agent_normal"
+keys = "ctrl-n"
+command = "agent.new"
+desc = "New Session"
+
+[[keymap]]
+id = "builtin.agent-normal.resume.ctrl-r"
+context = "agent_normal"
+keys = "ctrl-r"
+command = "agent.resume"
+desc = "Resume Conversation"
+
+[[keymap]]
+id = "builtin.agent-normal.close.ctrl-q"
+context = "agent_normal"
+keys = "ctrl-q"
+command = "agent.session.close"
+desc = "Close Session"
+
+[[keymap]]
+id = "builtin.agent-normal.model.ctrl-p"
+context = "agent_normal"
+keys = "ctrl-p"
+command = "agent.model"
+desc = "Model"
+
+[[keymap]]
+id = "builtin.agent-normal.thinking.shift-tab"
+context = "agent_normal"
+keys = "shift-tab"
+command = "agent.thinking"
+desc = "Thinking Level"
+
+[[keymap]]
+id = "builtin.agent-normal.options.ctrl-o"
+context = "agent_normal"
+keys = "ctrl-o"
+command = "agent.options"
+desc = "Agent Options"
+
+[[keymap]]
+id = "builtin.agent-normal.insert.i"
+context = "agent_normal"
+keys = "i"
+command = "agent.input.edit"
+arguments = { action = "insert" }
+desc = "Insert"
+
+[[keymap]]
+id = "builtin.agent-normal.append.a"
+context = "agent_normal"
+keys = "a"
+command = "agent.input.edit"
+arguments = { action = "append" }
+desc = "Append"
+
+[[keymap]]
+id = "builtin.agent-normal.insert-home.upper-i"
+context = "agent_normal"
+keys = "I"
+command = "agent.input.edit"
+arguments = { action = "insert_home" }
+
+[[keymap]]
+id = "builtin.agent-normal.append-end.upper-a"
+context = "agent_normal"
+keys = "A"
+command = "agent.input.edit"
+arguments = { action = "append_end" }
+
+[[keymap]]
+id = "builtin.agent-normal.open-below.o"
+context = "agent_normal"
+keys = "o"
+command = "agent.input.edit"
+arguments = { action = "open_below" }
+
+[[keymap]]
+id = "builtin.agent-normal.open-above.upper-o"
+context = "agent_normal"
+keys = "O"
+command = "agent.input.edit"
+arguments = { action = "open_above" }
+
+[[keymap]]
+id = "builtin.agent-normal.left.h"
+context = "agent_normal"
+keys = "h"
+command = "agent.input.edit"
+arguments = { action = "left" }
+
+[[keymap]]
+id = "builtin.agent-normal.right.l"
+context = "agent_normal"
+keys = "l"
+command = "agent.input.edit"
+arguments = { action = "right" }
+
+[[keymap]]
+id = "builtin.agent-normal.down.j"
+context = "agent_normal"
+keys = "j"
+command = "agent.input.edit"
+arguments = { action = "down" }
+
+[[keymap]]
+id = "builtin.agent-normal.up.k"
+context = "agent_normal"
+keys = "k"
+command = "agent.input.edit"
+arguments = { action = "up" }
+
+[[keymap]]
+id = "builtin.agent-normal.home.zero"
+context = "agent_normal"
+keys = "0"
+command = "agent.input.edit"
+arguments = { action = "home" }
+
+[[keymap]]
+id = "builtin.agent-normal.home.caret"
+context = "agent_normal"
+keys = "^"
+command = "agent.input.edit"
+arguments = { action = "home" }
+
+[[keymap]]
+id = "builtin.agent-normal.end.dollar"
+context = "agent_normal"
+keys = "$"
+command = "agent.input.edit"
+arguments = { action = "end" }
+
+[[keymap]]
+id = "builtin.agent-normal.word-forward.w"
+context = "agent_normal"
+keys = "w"
+command = "agent.input.edit"
+arguments = { action = "word_forward" }
+
+[[keymap]]
+id = "builtin.agent-normal.word-back.b"
+context = "agent_normal"
+keys = "b"
+command = "agent.input.edit"
+arguments = { action = "word_back" }
+
+[[keymap]]
+id = "builtin.agent-normal.word-end.e"
+context = "agent_normal"
+keys = "e"
+command = "agent.input.edit"
+arguments = { action = "word_end" }
+
+[[keymap]]
+id = "builtin.agent-normal.delete.x"
+context = "agent_normal"
+keys = "x"
+command = "agent.input.edit"
+arguments = { action = "delete" }
+
+[[keymap]]
+id = "builtin.agent-normal.backspace.upper-x"
+context = "agent_normal"
+keys = "X"
+command = "agent.input.edit"
+arguments = { action = "backspace" }
+
+[[keymap]]
+id = "builtin.agent-normal.delete-line.d-d"
+context = "agent_normal"
+keys = "d d"
+command = "agent.input.edit"
+arguments = { action = "delete_line" }
+desc = "Delete Line"
+
+[[keymap]]
+id = "builtin.agent-normal.delete-to-end.upper-d"
+context = "agent_normal"
+keys = "D"
+command = "agent.input.edit"
+arguments = { action = "delete_to_end" }
+
+[[keymap]]
+id = "builtin.agent-normal.change-to-end.upper-c"
+context = "agent_normal"
+keys = "C"
+command = "agent.input.edit"
+arguments = { action = "change_to_end" }
+
+[[keymap]]
+id = "builtin.agent-normal.change-line.upper-s"
+context = "agent_normal"
+keys = "S"
+command = "agent.input.edit"
+arguments = { action = "change_line" }
+
+[[keymap]]
+id = "builtin.agent-normal.change-line.c-c"
+context = "agent_normal"
+keys = "c c"
+command = "agent.input.edit"
+arguments = { action = "change_line" }
+
+[[keymap]]
+id = "builtin.agent-normal.slash"
+context = "agent_normal"
+keys = "/"
+command = "agent.input.edit"
+arguments = { action = "slash" }
+desc = "Slash Command"
+
+[[keymap]]
+id = "builtin.agent-normal.escape"
+context = "agent_normal"
+keys = "escape"
+command = "agent.escape"
+desc = "Stop Agent"
+
+[[keymap]]
+id = "builtin.agent-normal.scroll-up.ctrl-u"
+context = "agent_normal"
+keys = "ctrl-u"
+command = "agent.scroll"
+arguments = { rows = 10 }
+
+[[keymap]]
+id = "builtin.agent-normal.scroll-down.ctrl-d"
+context = "agent_normal"
+keys = "ctrl-d"
+command = "agent.scroll"
+arguments = { rows = -10 }
+
+[[keymap]]
+id = "builtin.agent-normal.scroll-top.g-g"
+context = "agent_normal"
+keys = "g g"
+command = "agent.scroll"
+arguments = { rows = 1000000 }
+desc = "Top of Conversation"
+
+[[keymap]]
+id = "builtin.agent-normal.scroll-bottom.upper-g"
+context = "agent_normal"
+keys = "G"
+command = "agent.scroll"
+arguments = { rows = -1000000 }
+desc = "End of Conversation"
+
+[[keymap]]
+id = "builtin.agent-normal.command-line.colon"
+context = "agent_normal"
+keys = ":"
+command = "command_line.open"
+arguments = { kind = "command" }
+
+[[keymap]]
+id = "builtin.editor.normal.buffer-new-tab.ctrl-t"
+context = "editor"
+mode = "normal"
+keys = "ctrl-t"
+command = "buffer.new_tab"
+desc = "New Tab"
+
+[[keymap]]
+id = "builtin.editor.normal.buffer-close.ctrl-q"
+context = "editor"
+mode = "normal"
+keys = "ctrl-q"
+command = "buffer.close"
+arguments = { force = false }
+desc = "Close Tab"
+
+[[keymap]]
+id = "builtin.dashboard.buffer-new-tab.ctrl-t"
+context = "dashboard"
+keys = "ctrl-t"
+command = "buffer.new_tab"
+desc = "New Tab"

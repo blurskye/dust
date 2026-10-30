@@ -319,7 +319,8 @@ impl CompositorSnapshot {
                 let WindowPlacement::Floating(requested) = window.placement else {
                     continue;
                 };
-                if let Some(rect) = project_float(requested, remaining) {
+                // Floats sit over the whole screen, docks included, as in Neovim.
+                if let Some(rect) = project_float(requested, bounds) {
                     push_compositor_window(
                         &mut output,
                         *window,

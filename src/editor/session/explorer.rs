@@ -689,20 +689,21 @@ impl ExplorerSession {
             .take(maximum)
             .filter_map(|id| tree.node(*id))
             .map(|node| {
+                // Guides for the ancestors, then a chevron on folders as in neo-tree. Files at
+                // the top level get no guide, only room for the chevron of their neighbours.
                 let lineage = tree.tree_lineage(node.id);
+                let folder = matches!(node.kind, ExplorerKind::Root | ExplorerKind::Directory);
                 let mut tree_prefix = String::new();
                 for (index, is_last) in lineage.iter().enumerate() {
                     let final_segment = index + 1 == lineage.len();
-                    tree_prefix.push_str(if final_segment {
-                        if *is_last {
-                            &glyphs.tree_last
-                        } else {
-                            &glyphs.tree_middle
-                        }
-                    } else if *is_last {
-                        &glyphs.tree_space
-                    } else {
-                        &glyphs.tree_vertical
+                    tree_prefix.push_str(match (final_segment, folder, *is_last) {
+                        (true, true, _) if tree.is_expanded(node.id) => &glyphs.expander_open,
+                        (true, true, _) => &glyphs.expander,
+                        (true, false, _) if lineage.len() == 1 => &glyphs.tree_space,
+                        (true, false, true) => &glyphs.tree_last,
+                        (true, false, false) => &glyphs.tree_middle,
+                        (false, _, true) => &glyphs.tree_space,
+                        (false, _, false) => &glyphs.tree_vertical,
                     });
                 }
                 let git_status = git_status.get(&node.path);

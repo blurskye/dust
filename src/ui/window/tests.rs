@@ -498,7 +498,7 @@ fn compositor_projects_docks_tiles_floats_fullscreen_and_overlays_deterministica
         projection.window(floating).expect("float projected").rect,
         WindowRect {
             x: 80,
-            y: 14,
+            y: 20,
             width: 20,
             height: 10,
         }
