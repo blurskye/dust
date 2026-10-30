@@ -145,6 +145,38 @@ pub(super) fn motion_target(
             let last = text.visible_lines().saturating_sub(1);
             target = first_nonblank(text, count.saturating_sub(1).min(last))?;
         }
+        // `}` and `{` stop at the next blank line past the current paragraph, as in Vim.
+        "paragraph_forward" | "paragraph_backward" => {
+            let blank = |line: usize| {
+                text.line(line)
+                    .map(|content| content.trim().is_empty())
+                    .unwrap_or(true)
+            };
+            let last = text.visible_lines().saturating_sub(1);
+            let mut line = text.byte_to_line(cursor).map_err(failed)?;
+            for _ in 0..count {
+                if motion == "paragraph_forward" {
+                    while line < last && blank(line) {
+                        line += 1;
+                    }
+                    while line < last && !blank(line) {
+                        line += 1;
+                    }
+                } else {
+                    while line > 0 && blank(line) {
+                        line -= 1;
+                    }
+                    while line > 0 && !blank(line) {
+                        line -= 1;
+                    }
+                }
+            }
+            target = if motion == "paragraph_forward" && line == last && !blank(line) {
+                on_last_character(text, line_content_end(text, line)?)?
+            } else {
+                text.line_to_byte(line).map_err(failed)?
+            };
+        }
         // `G` lands on the last line's first non-blank character, as in Vim.
         "document_end" => {
             target = first_nonblank(text, text.visible_lines().saturating_sub(1))?;

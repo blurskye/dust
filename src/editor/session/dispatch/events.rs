@@ -83,13 +83,7 @@ impl InteractiveApplication {
     }
 
     fn flash_jump(&mut self, view: crate::editor::ViewId, target: ByteOffset) {
-        if let Some(current) = self.current_persisted_location() {
-            self.persistence.record_location(
-                current,
-                false,
-                self.configuration.settings().persistence.jumps,
-            );
-        }
+        self.record_jump();
         if let Some(view) = self.state.views.get_mut(view) {
             view.cursor = target;
             view.preferred_column = None;
@@ -820,7 +814,6 @@ impl InteractiveApplication {
     }
 
     pub(super) fn invoke(&mut self, mut invocation: CommandInvocation) {
-        self.tutor_observe(&invocation);
         if !invocation.id.as_str().starts_with("lsp.documentation.") {
             self.close_documentation();
         }
@@ -872,6 +865,21 @@ impl InteractiveApplication {
         let repeat_override = visual_operator
             .then(|| self.normalized_visual_repeat(&invocation))
             .flatten();
+        // Long moves are jumps that `ctrl-o` comes back from, as in Vim.
+        if invocation.id.as_str() == "view.cursor.move"
+            && invocation.arguments.get("motion").is_some_and(|motion| {
+                matches!(
+                    motion,
+                    CommandValue::String(motion) if matches!(
+                        motion.as_str(),
+                        "document_start" | "document_end" | "line_number" | "matching_pair"
+                            | "paragraph_forward" | "paragraph_backward"
+                    )
+                )
+            })
+        {
+            self.record_jump();
+        }
         match self.commands.execute(&self.state, &invocation) {
             Ok(outcome) => {
                 let changed = outcome.transaction.is_some();
@@ -919,6 +927,7 @@ impl InteractiveApplication {
                     repeat_override.as_ref(),
                     suppress_repeat,
                 );
+                self.tutor_observe(&invocation);
                 for effect in outcome.effects {
                     self.process_effect(effect);
                 }

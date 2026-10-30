@@ -466,26 +466,13 @@ impl InputSession {
                     limit: policy.runtime.completion_limit,
                 });
             }
-        } else {
-            let query = input.to_lowercase();
-            for (alias, command_id) in &policy.input.command_aliases {
-                let detail = policy
-                    .command_labels
-                    .get(command_id)
-                    .expect("resolved configuration validates command labels");
-                if alias.starts_with(&query) || detail.to_lowercase().contains(&query) {
-                    candidates.insert(alias.clone(), detail.into());
-                }
-            }
-            for id in commands {
-                let label = &policy.command_labels[id];
-                if id.starts_with(&query) || label.to_lowercase().contains(&query) {
-                    candidates.insert(id.into(), label.clone());
-                }
-            }
+        }
+        let mut ordered = candidates.into_iter().collect::<Vec<_>>();
+        if request.is_none() && !input.contains(char::is_whitespace) {
+            ordered = command_completions(policy, &input, commands);
         }
         if let Some(prompt) = &mut self.prompt {
-            prompt.completions = candidates
+            prompt.completions = ordered
                 .into_iter()
                 .take(policy.runtime.completion_limit)
                 .map(|(label, detail)| CompletionItem { label, detail })
@@ -545,4 +532,56 @@ impl InputSession {
             history.drain(..excess);
         }
     }
+}
+
+/// `:` completions, Vim style: one row per command, named by its shortest alias that fits
+/// what is typed, so `w`, `q` and `e` come first. Labels match too. Dotted command ids are
+/// offered once the input has a `.`.
+fn command_completions<'a>(
+    policy: &crate::config::Config,
+    input: &str,
+    commands: impl IntoIterator<Item = &'a str>,
+) -> Vec<(String, String)> {
+    let query = input.to_lowercase();
+    // Rank: typed prefix first, then shorter, then lowercase, then alphabetical.
+    let rank = |alias: &str, prefix: bool| {
+        (
+            !prefix,
+            alias.len(),
+            alias.chars().any(char::is_uppercase),
+            alias.to_owned(),
+        )
+    };
+    let mut best = BTreeMap::<&str, (bool, usize, bool, String)>::new();
+    for (alias, command_id) in &policy.input.command_aliases {
+        let label = policy
+            .command_labels
+            .get(command_id)
+            .expect("resolved configuration validates command labels");
+        let prefix = alias.to_lowercase().starts_with(&query);
+        if !prefix && !label.to_lowercase().contains(&query) {
+            continue;
+        }
+        let candidate = rank(alias, prefix);
+        best.entry(command_id)
+            .and_modify(|current| {
+                if candidate < *current {
+                    *current = candidate.clone();
+                }
+            })
+            .or_insert(candidate);
+    }
+    let mut rows = best
+        .into_iter()
+        .map(|(command_id, rank)| (rank, policy.command_labels[command_id].clone()))
+        .collect::<Vec<_>>();
+    if query.contains('.') {
+        for id in commands {
+            if id.starts_with(&query) {
+                rows.push((rank(id, true), policy.command_labels[id].clone()));
+            }
+        }
+    }
+    rows.sort();
+    rows.into_iter().map(|(rank, label)| (rank.3, label)).collect()
 }

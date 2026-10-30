@@ -666,6 +666,7 @@ pub fn normalize_event(event: Event) -> Option<UiEvent> {
                 CtKeyCode::Home => KeyCode::Home,
                 CtKeyCode::End => KeyCode::End,
                 CtKeyCode::Delete => KeyCode::Delete,
+                CtKeyCode::F(number) => KeyCode::F(number),
                 _ => return None,
             };
             // Crossterm's Char carries the translated text identity. Uppercase

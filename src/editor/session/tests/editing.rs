@@ -138,9 +138,10 @@ fn command_completion_accepts_registry_items_and_preserves_invalid_input() {
         app.ui.prompt.as_ref().expect("prompt").selected_completion,
         Some(index)
     );
+    // Enter on a chosen command runs it.
     app.submit_prompt();
-    assert_eq!(app.ui.prompt.as_ref().expect("prompt").input, "health");
-    app.prompt_insert("-not-real");
+    assert!(app.ui.prompt.is_none(), "the chosen command ran");
+    app.open_prompt(crate::ui::PromptKind::Command, "health-not-real".into());
     app.submit_prompt();
     let prompt = app.ui.prompt.as_ref().expect("invalid prompt stays open");
     assert_eq!(prompt.input, "health-not-real");
@@ -649,11 +650,11 @@ fn tutor_moves_on_when_each_step_is_done() {
     assert!(title(&app).starts_with("Tutor 3/"), "{}", title(&app));
     // A step that checks text waits for the practice line to read right.
     app.process_effect(AppEffect::TutorBack);
-    for _ in 0..7 {
+    for _ in 0..10 {
         app.process_effect(AppEffect::TutorNext);
     }
     app.tutor_tick();
-    assert!(title(&app).starts_with("Tutor 9/"), "{}", title(&app));
+    assert!(title(&app).starts_with("Tutor 12/"), "{}", title(&app));
     assert_eq!(cursor_line(&app), "Thhe cow jumpped over thee moon.");
     for key in ["l", "x", "f", "p", "x", "$", "6", "h", "x"] {
         press(&mut app, key);
@@ -661,14 +662,19 @@ fn tutor_moves_on_when_each_step_is_done() {
     let view = &app.state.views[app.state.active_view.unwrap()];
     assert!(app.state.buffers[view.buffer].text.to_string().contains("    The cow jumped over the moon.\n"));
     // The next step put the cursor on its own practice line.
-    assert!(title(&app).starts_with("Tutor 10/"), "{}", title(&app));
+    assert!(title(&app).starts_with("Tutor 13/"), "{}", title(&app));
     assert_eq!(cursor_line(&app), "Dust is a editor");
+    // Going back to a step already done in the text stays there.
+    app.process_effect(AppEffect::TutorBack);
+    app.tutor_tick();
+    assert!(title(&app).starts_with("Tutor 12/"), "{}", title(&app));
+    app.process_effect(AppEffect::TutorNext);
     app.process_effect(AppEffect::TutorQuit);
     assert!(app.ui.tutor.is_none());
     app.process_effect(AppEffect::Tutor);
     wait_vfs(&mut app);
     app.tutor_tick();
-    assert!(title(&app).starts_with("Tutor 10/"), "{}", title(&app));
+    assert!(title(&app).starts_with("Tutor 13/"), "{}", title(&app));
 }
 
 #[test]
@@ -692,4 +698,99 @@ fn j_and_k_keep_their_column_across_shorter_lines() {
     press(&mut app, "h");
     press(&mut app, "k");
     assert_eq!(app.state.views[view].cursor, ByteOffset(9));
+}
+
+fn press_keys(app: &mut InteractiveApplication, keys: &[&str]) {
+    for key in keys {
+        app.handle_event(UiEvent::Key {
+            key: key.parse().unwrap(),
+            kind: crate::ui::KeyInputKind::Press,
+        });
+    }
+}
+
+#[test]
+fn vim_edits_that_lazyvim_users_reach_for() {
+    let mut app = app();
+    app.set_dashboard_visibility(false);
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text("The cat sat.\n"), None);
+    app.state.views[view].cursor = ByteOffset(4);
+    // `cw` keeps the space after the word.
+    press_keys(&mut app, &["c", "w", "d", "o", "g", "escape"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "The dog sat.\n");
+
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text("a\nb\n\nc\n"), None);
+    app.state.views[view].cursor = ByteOffset(0);
+    // Visual `>` with a count indents that many levels and leaves blank lines alone.
+    press_keys(&mut app, &["V", "j", "j", "2", ">"]);
+    let level = if app.state.policy.expand_tabs {
+        " ".repeat(app.state.policy.indent_width)
+    } else {
+        "\t".into()
+    };
+    let indent = level.repeat(2);
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        format!("{indent}a\n{indent}b\n\nc\n")
+    );
+
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text("one two\nthree\n"), None);
+    app.state.views[view].cursor = ByteOffset(0);
+    // Visual `U`, `J` and `p`.
+    press_keys(&mut app, &["v", "e", "U"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "ONE two\nthree\n");
+    press_keys(&mut app, &["V", "j", "J"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "ONE two three\n");
+    app.state.views[view].cursor = ByteOffset(0);
+    press_keys(&mut app, &["y", "i", "w"]);
+    app.state.views[view].cursor = ByteOffset(4);
+    press_keys(&mut app, &["v", "e", "p"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "ONE ONE three\n");
+}
+
+#[test]
+fn paragraph_moves_are_jumps_that_ctrl_o_returns_from() {
+    let mut app = app();
+    app.set_dashboard_visibility(false);
+    let path = app.state.workspace_root.join("jumps.txt");
+    fs::write(&path, b"a\nb\n\nc\n").expect("jumps");
+    app.start_open(path);
+    wait_vfs(&mut app);
+    let view = app.state.active_view.expect("view");
+    app.state.views[view].cursor = ByteOffset(0);
+    press_keys(&mut app, &["}"]);
+    assert_eq!(app.state.views[view].cursor, ByteOffset(4));
+    press_keys(&mut app, &["G", "ctrl-o"]);
+    wait_vfs(&mut app);
+    let view = app.state.active_view.expect("view");
+    assert_eq!(app.state.views[view].cursor, ByteOffset(4));
+    press_keys(&mut app, &["ctrl-o"]);
+    wait_vfs(&mut app);
+    let view = app.state.active_view.expect("view");
+    assert_eq!(app.state.views[view].cursor, ByteOffset(0));
+    press_keys(&mut app, &["tab"]);
+    wait_vfs(&mut app);
+    let view = app.state.active_view.expect("view");
+    assert_eq!(app.state.views[view].cursor, ByteOffset(4));
+}
+
+#[test]
+fn markdown_lines_comment_with_html_comments() {
+    let mut app = app();
+    app.set_dashboard_visibility(false);
+    let path = app.state.workspace_root.join("notes.md");
+    fs::write(&path, b"hello\n").expect("notes");
+    app.start_open(path);
+    wait_vfs(&mut app);
+    let buffer = app.state.active_buffer_id().expect("notes buffer");
+    press_keys(&mut app, &["g", "c", "c"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "<!-- hello -->\n");
+    press_keys(&mut app, &["g", "c", "c"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "hello\n");
 }

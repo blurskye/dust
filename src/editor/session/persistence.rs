@@ -20,6 +20,8 @@ pub(in crate::editor::session) struct PersistenceSession {
     recent_files: Vec<PathBuf>,
     marks: Vec<crate::persistence::PersistedMark>,
     jumps: Vec<crate::persistence::PersistedLocation>,
+    /// Where `ctrl-o`/`ctrl-i` stand in `jumps`; `None` is past the newest entry.
+    jump_index: Option<usize>,
     changes: Vec<crate::persistence::PersistedLocation>,
     worker: PersistenceService,
     path: PathBuf,
@@ -42,6 +44,7 @@ impl PersistenceSession {
             recent_files: Vec::new(),
             marks: Vec::new(),
             jumps: Vec::new(),
+            jump_index: None,
             changes: Vec::new(),
             worker,
             path,

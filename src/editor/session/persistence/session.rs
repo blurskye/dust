@@ -326,9 +326,37 @@ impl PersistenceSession {
         {
             return;
         }
+        if !change {
+            // A new jump ends a walk with `ctrl-o`, and a place is only kept once, as in Vim.
+            self.jump_index = None;
+            list.retain(|previous| previous.path != location.path || previous.byte != location.byte);
+        }
         list.push(location);
         let extra = list.len().saturating_sub(maximum);
         list.drain(..extra);
+    }
+    /// One step of Vim's `ctrl-o` (`back`) or `ctrl-i` through the jump list. The first step
+    /// back records where the cursor is, so `ctrl-i` can return to it.
+    pub(in crate::editor::session) fn walk_jumps(
+        &mut self,
+        current: Option<PersistedLocation>,
+        back: bool,
+        maximum: usize,
+    ) -> Option<PersistedLocation> {
+        let index = match self.jump_index {
+            Some(index) => index,
+            None if back => {
+                if let Some(current) = current {
+                    self.record_location(current, false, maximum);
+                }
+                self.jumps.len().checked_sub(1)?
+            }
+            None => return None,
+        };
+        let next = if back { index.checked_sub(1)? } else { index + 1 };
+        let location = self.jumps.get(next)?.clone();
+        self.jump_index = Some(next);
+        Some(location)
     }
     pub(in crate::editor::session) fn restore_history(
         &mut self,
@@ -336,6 +364,7 @@ impl PersistenceSession {
         config: &PersistenceConfig,
     ) {
         // Loaded history is older than edits made while the read was in flight.
+        self.jump_index = None;
         let mut seen = std::collections::HashSet::new();
         self.recent_files = std::mem::take(&mut self.recent_files)
             .into_iter()

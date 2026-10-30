@@ -293,6 +293,8 @@ pub(super) fn register_commands(
         ("session.tutor.next", "Skip to the next tutor step", AppEffect::TutorNext),
         ("session.tutor.back", "Go back to the previous tutor step", AppEffect::TutorBack),
         ("session.tutor.quit", "Stop the tutor; :Tutor picks up where it stopped", AppEffect::TutorQuit),
+        ("navigation.jump.back", "Jump back to where the cursor was", AppEffect::WalkJumps(true)),
+        ("navigation.jump.forward", "Jump forward again", AppEffect::WalkJumps(false)),
     ] {
         register(
             registry,

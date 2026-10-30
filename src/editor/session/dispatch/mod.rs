@@ -30,6 +30,7 @@ use crate::editor::session::debugger::DebugSession;
 pub(super) mod agent;
 mod effects;
 mod events;
+mod palette;
 mod pull_requests;
 mod remote;
 
@@ -174,6 +175,8 @@ struct InteractiveApplication {
     agent: agent::AgentPanel,
     pull_requests: pull_requests::PullRequests,
     tutor: tutor::Tutor,
+    /// Commands last run from the palette, newest first.
+    palette_recent: Vec<String>,
     /// Where `dust --remote` from Dust's own terminals reaches this session.
     remote: Option<crate::remote::RemoteServer>,
     /// The parse results and views `ui.syntax_spans` and `ui.syntax_folds` were built from.

@@ -3965,6 +3965,13 @@ command = "command_palette.open"
 desc = "Commands"
 
 [[keymap]]
+id = "builtin.global.commands.f1"
+context = "global"
+keys = "f1"
+command = "command_palette.open"
+desc = "Commands"
+
+[[keymap]]
 id = "builtin.global.notifications"
 context = "global"
 keys = "<leader> n"
@@ -5450,3 +5457,370 @@ id = "builtin.explorer-search.previous.ctrl-p"
 context = "explorer_search"
 keys = "ctrl-p"
 command = "explorer.previous"
+
+# Vim keys LazyVim users expect: the jump list, paragraphs, case operators and Visual-mode edits.
+[[keymap]]
+id = "builtin.editor.normal.jump-back.ctrl-o"
+context = "editor"
+mode = "normal"
+keys = "ctrl-o"
+command = "navigation.jump.back"
+[[keymap]]
+id = "builtin.editor.normal.jump-forward.tab"
+context = "editor"
+mode = "normal"
+keys = "tab"
+command = "navigation.jump.forward"
+[[keymap]]
+id = "builtin.editor.normal.input-motion.right-brace"
+context = "editor"
+mode = "normal"
+keys = "}"
+command = "input.motion"
+arguments = { motion = "paragraph_forward", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.left-brace"
+context = "editor"
+mode = "normal"
+keys = "{"
+command = "input.motion"
+arguments = { motion = "paragraph_backward", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.right-brace"
+context = "editor"
+mode = "operator_pending"
+keys = "}"
+command = "input.motion"
+arguments = { motion = "paragraph_forward", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.left-brace"
+context = "editor"
+mode = "operator_pending"
+keys = "{"
+command = "input.motion"
+arguments = { motion = "paragraph_backward", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.right-brace"
+context = "editor"
+mode = "visual_char"
+keys = "}"
+command = "input.motion"
+arguments = { motion = "paragraph_forward", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.left-brace"
+context = "editor"
+mode = "visual_char"
+keys = "{"
+command = "input.motion"
+arguments = { motion = "paragraph_backward", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.right-brace"
+context = "editor"
+mode = "visual_line"
+keys = "}"
+command = "input.motion"
+arguments = { motion = "paragraph_forward", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.left-brace"
+context = "editor"
+mode = "visual_line"
+keys = "{"
+command = "input.motion"
+arguments = { motion = "paragraph_backward", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-operator-begin.g-u"
+context = "editor"
+mode = "normal"
+keys = "g u"
+command = "input.operator.begin"
+arguments = { operator = "lowercase" }
+[[keymap]]
+id = "builtin.editor.normal.input-operator-begin.g-upper-u"
+context = "editor"
+mode = "normal"
+keys = "g U"
+command = "input.operator.begin"
+arguments = { operator = "uppercase" }
+[[keymap]]
+id = "builtin.editor.normal.input-operator-begin.g-tilde"
+context = "editor"
+mode = "normal"
+keys = "g ~"
+command = "input.operator.begin"
+arguments = { operator = "toggle_case" }
+[[keymap]]
+id = "builtin.editor.visual-char.input-count.key-1"
+context = "editor"
+mode = "visual_char"
+keys = "1"
+command = "input.count"
+arguments = { digit = 1 }
+[[keymap]]
+id = "builtin.editor.visual-char.input-count.key-2"
+context = "editor"
+mode = "visual_char"
+keys = "2"
+command = "input.count"
+arguments = { digit = 2 }
+[[keymap]]
+id = "builtin.editor.visual-char.input-count.key-3"
+context = "editor"
+mode = "visual_char"
+keys = "3"
+command = "input.count"
+arguments = { digit = 3 }
+[[keymap]]
+id = "builtin.editor.visual-char.input-count.key-4"
+context = "editor"
+mode = "visual_char"
+keys = "4"
+command = "input.count"
+arguments = { digit = 4 }
+[[keymap]]
+id = "builtin.editor.visual-char.input-count.key-5"
+context = "editor"
+mode = "visual_char"
+keys = "5"
+command = "input.count"
+arguments = { digit = 5 }
+[[keymap]]
+id = "builtin.editor.visual-char.input-count.key-6"
+context = "editor"
+mode = "visual_char"
+keys = "6"
+command = "input.count"
+arguments = { digit = 6 }
+[[keymap]]
+id = "builtin.editor.visual-char.input-count.key-7"
+context = "editor"
+mode = "visual_char"
+keys = "7"
+command = "input.count"
+arguments = { digit = 7 }
+[[keymap]]
+id = "builtin.editor.visual-char.input-count.key-8"
+context = "editor"
+mode = "visual_char"
+keys = "8"
+command = "input.count"
+arguments = { digit = 8 }
+[[keymap]]
+id = "builtin.editor.visual-char.input-count.key-9"
+context = "editor"
+mode = "visual_char"
+keys = "9"
+command = "input.count"
+arguments = { digit = 9 }
+[[keymap]]
+id = "builtin.editor.visual-char.input-zero.key-0"
+context = "editor"
+mode = "visual_char"
+keys = "0"
+command = "input.zero"
+[[keymap]]
+id = "builtin.editor.visual-char.selection-swap.o"
+context = "editor"
+mode = "visual_char"
+keys = "o"
+command = "view.selection.swap"
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.greater"
+context = "editor"
+mode = "visual_char"
+keys = ">"
+command = "input.visual.operator"
+arguments = { operator = "indent", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.less"
+context = "editor"
+mode = "visual_char"
+keys = "<"
+command = "input.visual.operator"
+arguments = { operator = "unindent", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.x"
+context = "editor"
+mode = "visual_char"
+keys = "x"
+command = "input.visual.operator"
+arguments = { operator = "delete", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.p"
+context = "editor"
+mode = "visual_char"
+keys = "p"
+command = "input.visual.operator"
+arguments = { operator = "replace", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.upper-p"
+context = "editor"
+mode = "visual_char"
+keys = "P"
+command = "input.visual.operator"
+arguments = { operator = "replace", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.upper-j"
+context = "editor"
+mode = "visual_char"
+keys = "J"
+command = "input.visual.operator"
+arguments = { operator = "join", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.tilde"
+context = "editor"
+mode = "visual_char"
+keys = "~"
+command = "input.visual.operator"
+arguments = { operator = "toggle_case", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.u"
+context = "editor"
+mode = "visual_char"
+keys = "u"
+command = "input.visual.operator"
+arguments = { operator = "lowercase", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.upper-u"
+context = "editor"
+mode = "visual_char"
+keys = "U"
+command = "input.visual.operator"
+arguments = { operator = "uppercase", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-count.key-1"
+context = "editor"
+mode = "visual_line"
+keys = "1"
+command = "input.count"
+arguments = { digit = 1 }
+[[keymap]]
+id = "builtin.editor.visual-line.input-count.key-2"
+context = "editor"
+mode = "visual_line"
+keys = "2"
+command = "input.count"
+arguments = { digit = 2 }
+[[keymap]]
+id = "builtin.editor.visual-line.input-count.key-3"
+context = "editor"
+mode = "visual_line"
+keys = "3"
+command = "input.count"
+arguments = { digit = 3 }
+[[keymap]]
+id = "builtin.editor.visual-line.input-count.key-4"
+context = "editor"
+mode = "visual_line"
+keys = "4"
+command = "input.count"
+arguments = { digit = 4 }
+[[keymap]]
+id = "builtin.editor.visual-line.input-count.key-5"
+context = "editor"
+mode = "visual_line"
+keys = "5"
+command = "input.count"
+arguments = { digit = 5 }
+[[keymap]]
+id = "builtin.editor.visual-line.input-count.key-6"
+context = "editor"
+mode = "visual_line"
+keys = "6"
+command = "input.count"
+arguments = { digit = 6 }
+[[keymap]]
+id = "builtin.editor.visual-line.input-count.key-7"
+context = "editor"
+mode = "visual_line"
+keys = "7"
+command = "input.count"
+arguments = { digit = 7 }
+[[keymap]]
+id = "builtin.editor.visual-line.input-count.key-8"
+context = "editor"
+mode = "visual_line"
+keys = "8"
+command = "input.count"
+arguments = { digit = 8 }
+[[keymap]]
+id = "builtin.editor.visual-line.input-count.key-9"
+context = "editor"
+mode = "visual_line"
+keys = "9"
+command = "input.count"
+arguments = { digit = 9 }
+[[keymap]]
+id = "builtin.editor.visual-line.input-zero.key-0"
+context = "editor"
+mode = "visual_line"
+keys = "0"
+command = "input.zero"
+[[keymap]]
+id = "builtin.editor.visual-line.selection-swap.o"
+context = "editor"
+mode = "visual_line"
+keys = "o"
+command = "view.selection.swap"
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.greater"
+context = "editor"
+mode = "visual_line"
+keys = ">"
+command = "input.visual.operator"
+arguments = { operator = "indent", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.less"
+context = "editor"
+mode = "visual_line"
+keys = "<"
+command = "input.visual.operator"
+arguments = { operator = "unindent", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.x"
+context = "editor"
+mode = "visual_line"
+keys = "x"
+command = "input.visual.operator"
+arguments = { operator = "delete", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.p"
+context = "editor"
+mode = "visual_line"
+keys = "p"
+command = "input.visual.operator"
+arguments = { operator = "replace", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.upper-p"
+context = "editor"
+mode = "visual_line"
+keys = "P"
+command = "input.visual.operator"
+arguments = { operator = "replace", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.upper-j"
+context = "editor"
+mode = "visual_line"
+keys = "J"
+command = "input.visual.operator"
+arguments = { operator = "join", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.tilde"
+context = "editor"
+mode = "visual_line"
+keys = "~"
+command = "input.visual.operator"
+arguments = { operator = "toggle_case", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.u"
+context = "editor"
+mode = "visual_line"
+keys = "u"
+command = "input.visual.operator"
+arguments = { operator = "lowercase", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.upper-u"
+context = "editor"
+mode = "visual_line"
+keys = "U"
+command = "input.visual.operator"
+arguments = { operator = "uppercase", linewise = true }

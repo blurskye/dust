@@ -44,6 +44,8 @@ pub enum KeyCode {
     Home,
     End,
     Delete,
+    /// A function key, `f1` to `f12`.
+    F(u8),
     FocusGained,
     FocusLost,
     MouseLeftDown,
@@ -180,6 +182,7 @@ impl fmt::Display for KeyEvent {
             KeyCode::Home => "home".into(),
             KeyCode::End => "end".into(),
             KeyCode::Delete => "delete".into(),
+            KeyCode::F(number) => format!("f{number}"),
             KeyCode::FocusGained => "focus-gained".into(),
             KeyCode::FocusLost => "focus-lost".into(),
             KeyCode::MouseLeftDown => "mouse-left-down".into(),
@@ -284,6 +287,12 @@ impl FromStr for KeyEvent {
             "delete" => KeyCode::Delete,
             "focus-gained" => KeyCode::FocusGained,
             "focus-lost" => KeyCode::FocusLost,
+            name if name.len() > 1
+                && name.starts_with('f')
+                && name[1..].parse::<u8>().is_ok_and(|number| (1..=12).contains(&number)) =>
+            {
+                KeyCode::F(name[1..].parse().unwrap_or(1))
+            }
             _ => {
                 let mut characters = key_name.chars();
                 let character = characters

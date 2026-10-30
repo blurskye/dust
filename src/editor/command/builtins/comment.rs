@@ -1,6 +1,7 @@
 //! `gc` line comments. Blank lines are left alone; if every other line in the range is
 //! already commented the range is uncommented, otherwise the comment string goes in at
-//! the smallest indent, as in Neovim.
+//! the smallest indent, as in Neovim. A comment string with `%s`, like `<!-- %s -->`, wraps
+//! each line in what comes before and after it.
 
 use crate::editor::{
     state::{BufferId, EditorMode, ViewId},
@@ -24,6 +25,10 @@ pub(super) fn build_comment_toggle(
     if last > first && text.line_to_byte(last).map_err(failed)? == range.end {
         last -= 1;
     }
+    let (token, suffix) = match token.split_once("%s") {
+        Some((before, after)) => (before.trim_end(), after.trim_start()),
+        None => (token, ""),
+    };
     let mut lines = Vec::new();
     for line in first..=last {
         let start = text.line_to_byte(line).map_err(failed)?.get();
@@ -33,40 +38,66 @@ pub(super) fn build_comment_toggle(
             continue;
         }
         let indent = content.len() - content.trim_start().len();
-        let commented = content[indent..].starts_with(token);
+        let body = content[indent..].trim_end();
+        let commented = body.starts_with(token)
+            && body.ends_with(suffix)
+            && body.len() >= token.len() + suffix.len();
         let spaced = commented && content[indent + token.len()..].starts_with(' ');
-        lines.push((start, indent, commented, spaced));
+        // Where the closing part starts, with the space before it, when there is one.
+        let closing = (commented && !suffix.is_empty()).then(|| {
+            let end = indent + body.len() - suffix.len();
+            let spaced_end = if body[..body.len() - suffix.len()].ends_with(' ')
+                && end > indent + token.len() + usize::from(spaced)
+            {
+                end - 1
+            } else {
+                end
+            };
+            (start + spaced_end, start + indent + body.len())
+        });
+        lines.push((start, indent, commented, spaced, closing, start + content.len()));
     }
     if lines.is_empty() {
         return Ok(());
     }
-    let uncomment = lines.iter().all(|(_, _, commented, _)| *commented);
+    let uncomment = lines.iter().all(|line| line.2);
     let edits = if uncomment {
-        lines
-            .iter()
-            .map(|(start, indent, _, spaced)| {
-                let from = start + indent;
-                let to = from + token.len() + usize::from(*spaced);
-                ByteRange::new(ByteOffset(from), ByteOffset(to))
-                    .map(|range| TextEdit::new(range, ""))
-                    .map_err(failed)
-            })
-            .collect::<Result<Vec<_>, _>>()?
+        let mut edits = Vec::new();
+        for (start, indent, _, spaced, closing, _) in &lines {
+            let from = start + indent;
+            let to = from + token.len() + usize::from(*spaced);
+            edits.push(TextEdit::new(
+                ByteRange::new(ByteOffset(from), ByteOffset(to)).map_err(failed)?,
+                "",
+            ));
+            if let Some((from, to)) = closing {
+                edits.push(TextEdit::new(
+                    ByteRange::new(ByteOffset(*from), ByteOffset(*to)).map_err(failed)?,
+                    "",
+                ));
+            }
+        }
+        edits
     } else {
         let indent = lines
             .iter()
-            .map(|(_, indent, _, _)| *indent)
+            .map(|line| line.1)
             .min()
             .unwrap_or(0);
-        lines
-            .iter()
-            .map(|(start, _, _, _)| {
-                TextEdit::new(
-                    ByteRange::empty(ByteOffset(start + indent)),
-                    format!("{token} "),
-                )
-            })
-            .collect()
+        let mut edits = Vec::new();
+        for (start, _, _, _, _, end) in &lines {
+            edits.push(TextEdit::new(
+                ByteRange::empty(ByteOffset(start + indent)),
+                format!("{token} "),
+            ));
+            if !suffix.is_empty() {
+                edits.push(TextEdit::new(
+                    ByteRange::empty(ByteOffset(*end)),
+                    format!(" {suffix}"),
+                ));
+            }
+        }
+        edits
     };
     let mut position = cursor.get();
     for edit in &edits {

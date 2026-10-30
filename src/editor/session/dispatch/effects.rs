@@ -148,7 +148,7 @@ fn compose_plugin_picker_items(
         .collect())
 }
 
-fn compose_command_picker_items(
+pub(super) fn compose_command_picker_items(
     items: Vec<(PickerItem, PickerPayload)>,
 ) -> Result<Vec<(PickerItem, PickerPayload)>, SearchWorkflowError> {
     let spec = SearchWorkflowSpec {
@@ -4970,7 +4970,14 @@ impl InteractiveApplication {
             .completion_accept_on_submit
             && self.accept_completion()
         {
-            return;
+            // A chosen command runs at once, as Enter does in Vim's wildmenu; a chosen path
+            // waits, so a directory can be completed further.
+            let command = self.input.prompt().is_some_and(|prompt| {
+                prompt.kind == PromptKind::Command && !prompt.input.contains(char::is_whitespace)
+            });
+            if !command {
+                return;
+            }
         }
         let Some(prompt) = self.input.prompt().cloned() else {
             return;
@@ -5146,6 +5153,7 @@ impl InteractiveApplication {
             self.show_error(self.message("no_previous_search", &[]));
             return;
         };
+        self.record_jump();
         let Some(view_id) = self.state.active_view else {
             return;
         };
@@ -7125,6 +7133,7 @@ impl InteractiveApplication {
             self.show_error(error);
             return;
         }
+        self.record_jump();
         let encoding = self
             .language
             .capabilities()
@@ -7193,6 +7202,26 @@ impl InteractiveApplication {
         })
     }
 
+    /// Remember where the cursor is before it jumps, for `ctrl-o`.
+    pub(in crate::editor::session) fn record_jump(&mut self) {
+        if let Some(location) = self.current_persisted_location() {
+            self.persistence.record_location(
+                location,
+                false,
+                self.configuration.settings().persistence.jumps,
+            );
+        }
+    }
+
+    /// `ctrl-o` (back) and `ctrl-i` (forward) through the jump list.
+    pub(in crate::editor::session) fn walk_jumps(&mut self, back: bool) {
+        let current = self.current_persisted_location();
+        let maximum = self.configuration.settings().persistence.jumps;
+        if let Some(location) = self.persistence.walk_jumps(current, back, maximum) {
+            self.go_to_persisted_location(location);
+        }
+    }
+
     pub(in crate::editor::session) fn push_change_location(&mut self) {
         if let Some(location) = self.current_persisted_location() {
             self.persistence.record_location(
@@ -7242,13 +7271,11 @@ impl InteractiveApplication {
             self.show_error(self.message("navigation_outside_workspace", &[]));
             return;
         }
-        if let Some(current) = self.current_persisted_location() {
-            self.persistence.record_location(
-                current,
-                false,
-                self.configuration.settings().persistence.jumps,
-            );
-        }
+        self.record_jump();
+        self.go_to_persisted_location(location);
+    }
+
+    fn go_to_persisted_location(&mut self, location: PersistedLocation) {
         let roots = self
             .workspace
             .roots()
@@ -7780,41 +7807,7 @@ impl InteractiveApplication {
                     .collect();
                 self.install_picker(title, items);
             }
-            PickerKind::Commands => {
-                let items = self
-                    .commands
-                    .specs()
-                    .enumerate()
-                    .map(|(index, spec)| {
-                        let command = spec.id.as_str().to_owned();
-                        let id = PickerItemId(format!("command:{index}:{command}"));
-                        (
-                            PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
-                                id,
-                                label: command.clone(),
-                                detail: self
-                                    .configuration
-                                    .settings()
-                                    .command_labels
-                                    .get(&command)
-                                    .cloned()
-                                    .unwrap_or_default(),
-                                source: String::new(),
-                                action: PickerAction::None,
-                            },
-                            PickerPayload::Command(command),
-                        )
-                    })
-                    .collect();
-                match compose_command_picker_items(items) {
-                    Ok(items) => {
-                        self.install_picker(self.message("picker_commands_title", &[]), items)
-                    }
-                    Err(error) => self.show_error(error.to_string()),
-                }
-            }
+            PickerKind::Commands => self.open_command_palette(),
         }
     }
 
@@ -8400,6 +8393,7 @@ impl InteractiveApplication {
             }
             Some(PickerPayload::Command(command)) if !command.is_empty() => {
                 if let Ok(invocation) = CommandInvocation::new(&command, InvocationSource::Picker) {
+                    self.remember_palette_command(&command);
                     self.invoke(invocation);
                 }
             }
@@ -11691,6 +11685,7 @@ impl InteractiveApplication {
             AppEffect::GitConflictReplaceSubmit => {}
             AppEffect::Tutor => self.open_tutor(),
             AppEffect::TutorNext => self.tutor_next(),
+            AppEffect::WalkJumps(back) => self.walk_jumps(back),
             AppEffect::TutorBack => self.tutor_back(),
             AppEffect::TutorQuit => self.tutor_quit(),
             AppEffect::HelpContextual => self.open_contextual_help(),
@@ -12062,6 +12057,7 @@ impl InteractiveApplication {
         }
     }
     pub(in crate::editor::session) fn start_open(&mut self, path: PathBuf) {
+        self.record_jump();
         match self.documents.request_open(
             path,
             &self.state.workspace_root,

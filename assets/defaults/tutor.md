@@ -50,6 +50,11 @@ Bigger moves:
     ctrl-d / ctrl-u  half page down / up
     ctrl-f / ctrl-b  page down / up
     %  matching bracket
+    ctrl-o / tab     back / forward through the places you jumped from
+
+Try it: put the cursor on the first `(` and press `%`.
+
+    call(first, (second))
 
 Most moves take a count: `3w` moves three words, `5j` five lines.
 
@@ -62,6 +67,10 @@ Try it: put the cursor here, press `s`, type `fl` and the label next to "flash".
 
 On a line, `f` and `t` jump to a character: `fa` goes to the next "a", `ta` just before it.
 `;` repeats the jump, `,` repeats it backwards.
+
+Try it: press `f,` to jump to the comma.
+
+    First part, second part.
 
 `<leader>sj` lists the places you jumped from, `<leader>sm` the marks, and `<leader>fr`
 the files you had open recently.
@@ -140,7 +149,11 @@ Comments and surrounds:
     gsd "      delete surrounding quotes
     gsr " '    replace " with '
 
-Try it: surround the word `value` with parentheses (`gsaiw(`), then remove them (`gsd(`).
+Try it: comment this line out with `gcc`.
+
+    comment me
+
+Try it: surround the word `value` with parentheses (`gsaiw)`), then remove them (`gsd)`).
 
     total = value * 2
 
@@ -149,7 +162,8 @@ Copy and paste: `yy` copies a line, `yw` a word, `p` pastes after, `P` before.
 ## 3. Visual mode, registers, macros
 
 `v` selects characters, `V` whole lines, `ctrl-v` a block. Move to grow the selection,
-then act on it: `d` delete, `c` change, `y` copy, `>` indent, `gc` comment.
+then act on it: `d` delete, `c` change, `y` copy, `p` paste over, `>` indent, `gc` comment,
+`J` join, `U` upper case, `u` lower case, `~` toggle case. `o` jumps to the other end.
 
 Try it: select these three lines with `V` and `2j`, then indent them with `>`.
 
@@ -319,7 +333,7 @@ Pressing `e` on a file in lazygit opens it in this Dust.
 
     <leader>gw   worktrees: list, create, switch, remove
     <leader>gx   merge conflicts, side by side
-    <leader>gpp  pull requests (with gh)   <leader>gpv  view one   <leader>gpd  its diff
+    <leader>gpp  pull requests (gh or tea)   <leader>gpv  view one   <leader>gpd  its diff
     <leader>gpr  review it                 <leader>gpc  its comments   <leader>gpa  comment
 
 ## 12. The agent panel
@@ -379,7 +393,7 @@ one off. Plugins are WebAssembly components and run sandboxed.
 ## 16. Getting help
 
     <leader>?    what you can do right here, with the keys
-    <leader>:    every command, searchable
+    F1           every command by name with its key, searchable (also <leader>:)
     <leader>sC   the same
     :health      what works and what is missing
     :messages    earlier notifications

@@ -655,10 +655,19 @@ impl Config {
         {
             return Err("editor.indent_guides.character must occupy one narrow display cell");
         }
+        // A comment string is a line prefix like `//`, or a template like `<!-- %s -->`.
         if self.editor.comments.values().any(|token| {
-            token.is_empty() || token.len() > 16 || token.chars().any(char::is_whitespace)
+            let parts = token.split("%s").collect::<Vec<_>>();
+            token.trim().is_empty()
+                || token.len() > 24
+                || token.chars().any(char::is_control)
+                || parts.len() > 2
+                || parts[0].trim().is_empty()
+                || (parts.len() == 1 && token.chars().any(char::is_whitespace))
         }) {
-            return Err("editor.comments values must be 1 to 16 characters without spaces");
+            return Err(
+                "editor.comments values must be a prefix without spaces or one `before %s after` template",
+            );
         }
         if self.editor.viewport.horizontal_margin > 100 {
             return Err("editor.viewport.horizontal_margin must not exceed 100");

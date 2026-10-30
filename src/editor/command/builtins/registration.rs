@@ -39,6 +39,7 @@ pub fn register_builtin_commands<E: 'static>(
         ("edit.substitute", "Substitute characters"),
         ("edit.join_lines", "Join lines"),
         ("edit.toggle_case", "Toggle character case"),
+        ("view.selection.swap", "Go to the other end of the selection"),
         ("edit.backspace", "Delete previous character"),
         (
             "edit.replace_backspace",

@@ -1613,7 +1613,14 @@ fn wrap_card_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<Ve
     lines
 }
 
-fn render_tutor_card(frame: &mut Frame, card: &TutorCard, config: &Config, width: u16, height: u16) {
+fn render_tutor_card(
+    frame: &mut Frame,
+    card: &TutorCard,
+    config: &Config,
+    width: u16,
+    height: u16,
+    hints_open: bool,
+) {
     let card_width = width.saturating_sub(2).min(64);
     if card_width < 24 || height < 8 {
         return;
@@ -1635,7 +1642,12 @@ fn render_tutor_card(frame: &mut Frame, card: &TutorCard, config: &Config, width
     rows.push(vec![(card.footer.clone(), Style::Muted)]);
     // Leave the status line and a row above the card free; long steps lose their last rows.
     let card_height = u16::try_from(rows.len()).unwrap_or(u16::MAX).saturating_add(2).min(height.saturating_sub(3));
-    let top = height.saturating_sub(card_height.saturating_add(1));
+    // The key hint box fills the bottom, so the card moves to the top while it is open.
+    let top = if hints_open {
+        1
+    } else {
+        height.saturating_sub(card_height.saturating_add(1))
+    };
     let left = width.saturating_sub(card_width.saturating_add(1));
     let right = left + card_width - 1;
     let bottom = top + card_height - 1;
@@ -1926,9 +1938,6 @@ pub fn render(
             }
         }
     }
-    if let Some(card) = &ui.tutor {
-        render_tutor_card(&mut frame, card, config, width, height);
-    }
     if let Some(tool_menu) = &ui.tool_menu {
         render_tool_menu(&mut frame, tool_menu, config, width, workspace_height);
     }
@@ -1977,6 +1986,11 @@ pub fn render(
             content_width,
             workspace_height,
         );
+    }
+    // The tutor card stays on top of popups so its instructions are readable while they are
+    // open, and moves to the top while the key hints use the bottom.
+    if let Some(card) = &ui.tutor {
+        render_tutor_card(&mut frame, card, config, width, height, ui.key_hints.is_some());
     }
     if config.ui.lsp_progress.enabled && !ui.lsp_progress.is_empty() {
         render_lsp_progress(

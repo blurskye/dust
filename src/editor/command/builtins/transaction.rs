@@ -225,6 +225,7 @@ pub(super) fn build_indent(
     buffer: BufferId,
     range: ByteRange,
     indent: bool,
+    levels: usize,
     policy: EditingPolicy,
 ) -> Result<(), CommandError> {
     let first_line = text.byte_to_line(range.start).map_err(failed)?;
@@ -241,22 +242,34 @@ pub(super) fn build_indent(
         .map_err(failed)?;
     let mut replacement = String::new();
     for line in source.split_inclusive('\n') {
-        if indent {
-            if policy.expand_tabs {
-                replacement.push_str(&" ".repeat(policy.indent_width));
-            } else {
-                replacement.push('\t');
+        // Empty lines stay empty, as in Vim.
+        if indent && line.trim_end_matches(['\r', '\n']).is_empty() {
+            replacement.push_str(line);
+        } else if indent {
+            for _ in 0..levels {
+                if policy.expand_tabs {
+                    replacement.push_str(&" ".repeat(policy.indent_width));
+                } else {
+                    replacement.push('\t');
+                }
             }
             replacement.push_str(line);
-        } else if let Some(rest) = line.strip_prefix('\t') {
-            replacement.push_str(rest);
         } else {
-            let spaces = line
-                .bytes()
-                .take_while(|byte| *byte == b' ')
-                .take(policy.indent_width)
-                .count();
-            replacement.push_str(&line[spaces..]);
+            let mut rest = line;
+            for _ in 0..levels {
+                rest = match rest.strip_prefix('\t') {
+                    Some(rest) => rest,
+                    None => {
+                        let spaces = rest
+                            .bytes()
+                            .take_while(|byte| *byte == b' ')
+                            .take(policy.indent_width)
+                            .count();
+                        &rest[spaces..]
+                    }
+                };
+            }
+            replacement.push_str(rest);
         }
     }
     transaction.operations.push(EditorOperation::ApplyEdits {

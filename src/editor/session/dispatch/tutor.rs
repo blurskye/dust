@@ -30,13 +30,21 @@ pub(super) struct Step {
     pub(super) done: Vec<String>,
     line: Option<String>,
     gone: Option<String>,
+    /// A line that must be there at least twice, as after a copy and paste.
+    twice: Option<String>,
+    /// A line that must be indented further than the practice blocks are.
+    indented: Option<String>,
     cursor: Option<String>,
     pub(super) at: Option<String>,
 }
 
 impl Step {
     fn checks_text(&self) -> bool {
-        self.line.is_some() || self.gone.is_some() || self.cursor.is_some()
+        self.line.is_some()
+            || self.gone.is_some()
+            || self.twice.is_some()
+            || self.indented.is_some()
+            || self.cursor.is_some()
     }
 }
 
@@ -54,8 +62,8 @@ pub(super) struct Tutor {
     observed: bool,
     /// The previous step was just finished, so the card says so.
     praised: bool,
-    /// The step's `at` line still has to be shown; dropped at the next key so a late jump
-    /// never pulls the cursor away from what the user is doing.
+    /// The step's `at` line still has to be shown: it is, as soon as the practice file is in
+    /// front in Normal mode.
     jump: bool,
     /// Editor revision the text checks last looked at.
     checked: Option<u64>,
@@ -117,14 +125,37 @@ impl InteractiveApplication {
                 return self.show_error(format!("could not write the tutorial: {error}"));
             }
         }
-        self.set_dashboard_visibility(false);
-        self.start_open(self.tutor.practice.clone());
         let saved = std::fs::read_to_string(&self.tutor.progress)
             .ok()
             .and_then(|text| text.trim().parse::<usize>().ok())
-            .filter(|step| *step < self.tutor.steps.len())
-            .unwrap_or(0);
-        self.tutor_go(saved, false);
+            .filter(|step| *step < self.tutor.steps.len());
+        // Starting over brings back the untouched practice text, or the lessons would find
+        // their edits already made.
+        if let (None, Some(buffer)) = (saved, self.tutor_buffer()) {
+            let text = &self.state.buffers[buffer].text;
+            if text.to_string() != PRACTICE {
+                let range = crate::editor::text::ByteRange {
+                    start: ByteOffset(0),
+                    end: ByteOffset(text.len_bytes()),
+                };
+                let revision = text.revision();
+                let transaction =
+                    crate::editor::EditorTransaction::new(self.transaction_id())
+                        .with_operation(crate::editor::EditorOperation::ApplyEdits {
+                            buffer,
+                            edits: crate::editor::text::TextEditSet::new(
+                                revision,
+                                vec![crate::editor::text::TextEdit::new(range, PRACTICE)],
+                            ),
+                        });
+                if let Err(error) = self.state.apply_transaction(&transaction) {
+                    return self.show_error(error);
+                }
+            }
+        }
+        self.set_dashboard_visibility(false);
+        self.start_open(self.tutor.practice.clone());
+        self.tutor_go(saved.unwrap_or(0), false);
     }
 
     pub(in crate::editor::session) fn tutor_next(&mut self) {
@@ -148,16 +179,13 @@ impl InteractiveApplication {
         }
     }
 
-    /// Called for every command before it runs.
+    /// Called for every command that ran without an error.
     pub(super) fn tutor_observe(&mut self, invocation: &CommandInvocation) {
         let Some(step) = self.tutor.step() else {
             return;
         };
         if step.done.iter().any(|pattern| invocation_matches(pattern, invocation)) {
             self.tutor.observed = true;
-        }
-        if !invocation.id.as_str().starts_with("session.tutor") {
-            self.tutor.jump = false;
         }
     }
 
@@ -187,7 +215,10 @@ impl InteractiveApplication {
 
     fn tutor_go(&mut self, index: usize, praised: bool) {
         self.tutor.observed = false;
-        self.tutor.checked = None;
+        // A step reached by finishing the last one is checked at once; one picked with
+        // :TutorBack or :TutorNext waits for the next change, so a step already done in the
+        // practice text doesn't skip itself.
+        self.tutor.checked = (!praised).then_some(self.state.revision);
         if index >= self.tutor.steps.len() {
             self.tutor.current = None;
             self.ui.tutor = None;
@@ -264,7 +295,11 @@ impl InteractiveApplication {
                 return false;
             }
         }
-        if step.line.is_none() && step.gone.is_none() {
+        if step.line.is_none()
+            && step.gone.is_none()
+            && step.twice.is_none()
+            && step.indented.is_none()
+        {
             return true;
         }
         // Text is judged once the user is back in Normal mode, not halfway through typing.
@@ -275,7 +310,18 @@ impl InteractiveApplication {
             .filter_map(|line| text.line(line).ok())
             .collect();
         let has = |wanted: &str| lines.iter().any(|line| line.trim() == wanted);
-        step.line.as_deref().is_none_or(has) && step.gone.as_deref().is_none_or(|gone| !has(gone))
+        let twice = |wanted: &str| lines.iter().filter(|line| line.trim() == wanted).count() >= 2;
+        // Practice lines sit four columns in; more than that is indented.
+        let indented = |wanted: &str| {
+            lines.iter().any(|line| {
+                line.trim() == wanted
+                    && line.len() - line.trim_start().len() > 4
+            })
+        };
+        step.line.as_deref().is_none_or(has)
+            && step.gone.as_deref().is_none_or(|gone| !has(gone))
+            && step.twice.as_deref().is_none_or(twice)
+            && step.indented.as_deref().is_none_or(indented)
     }
 
     /// Put the cursor on the step's practice line, when the practice file is in front.

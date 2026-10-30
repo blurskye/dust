@@ -52,13 +52,14 @@ mirror_named_to_unnamed = true
 # "unnamedplus" shares yanks and pastes with the system clipboard; "off" keeps them internal.
 clipboard = "unnamedplus"
 
-# Line comment string per file extension for `gc`/`gcc`.
+# Line comment string per file extension for `gc`/`gcc`; `%s` marks where the line goes.
 [editor.comments]
 bash = "#"
 c = "//"
 cc = "//"
 cpp = "//"
 cs = "//"
+css = "/* %s */"
 dart = "//"
 ex = "#"
 exs = "#"
@@ -66,11 +67,14 @@ go = "//"
 h = "//"
 hpp = "//"
 hs = "--"
+html = "<!-- %s -->"
 java = "//"
 js = "//"
 jsx = "//"
 kt = "//"
 lua = "--"
+md = "<!-- %s -->"
+markdown = "<!-- %s -->"
 mjs = "//"
 nix = "#"
 php = "//"
@@ -84,6 +88,7 @@ toml = "#"
 ts = "//"
 tsx = "//"
 vim = "\""
+xml = "<!-- %s -->"
 yaml = "#"
 yml = "#"
 zig = "//"
@@ -1051,6 +1056,57 @@ dap_source_loaded = "loaded debug source {name} {mime}"
 dap_no_configuration = "no configured debug session is available to restart"
 dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is invalid"
 
+
+# The command palette (F1, <leader>:): rows read "Category: Label" with the key on the right.
+[command_palette]
+# Plumbing that only keys use; commands that need arguments are left out on their own.
+hidden = [
+  "input.", "command_line.", "picker.", "surface.", "mode.", "completion.",
+  "history.", "edit.", "view.cursor.", "view.selection.", "view.scroll", "explorer.search.",
+  "agent.input.", "agent.escape", "tools.category.", "tools.menu.", "terminal.mode.",
+  "terminal.send", "macro.", "dap.watch.", "workspace.edit.", "explorer.rename.",
+]
+
+[command_palette.categories]
+agent = "Agent"
+application = "Dust"
+buffer = "Buffer"
+command_palette = "Commands"
+config = "Settings"
+crash = "Dust"
+dap = "Debug"
+diagnostic = "Diagnostics"
+editor = "Editor"
+explorer = "Explorer"
+file = "File"
+format = "Code"
+health = "Health"
+keymap = "Keys"
+lint = "Code"
+lsp = "Code"
+navigation = "Go"
+package = "Packages"
+pane = "Window"
+plugin = "Plugins"
+recovery = "Recovery"
+search = "Search"
+session = "Session"
+"session.tutor" = "Tutor"
+snippet = "Snippets"
+syntax = "Syntax"
+tab = "Tab"
+task = "Tasks"
+terminal = "Terminal"
+test = "Test"
+theme = "Theme"
+tools = "Tools"
+view = "View"
+window = "Window"
+workspace = "Project"
+"workspace.git" = "Git"
+"workspace.search" = "Search"
+"workspace.replace" = "Search"
+
 [command_labels]
 "dap.inspector.next" = "Show the next debug inspector"
 "buffer.close" = "Close buffer"
@@ -1094,6 +1150,7 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "edit.substitute" = "Substitute characters"
 "edit.surround" = "Delete or replace surrounding pair"
 "edit.toggle_case" = "Toggle character case"
+"view.selection.swap" = "Other end of selection"
 "editor.quit" = "Quit Dust"
 "file.new" = "New buffer"
 "file.open" = "Open file"
@@ -1321,6 +1378,8 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "navigation.marks" = "Open marks"
 "navigation.mark.set" = "Set navigation mark"
 "navigation.jumps" = "Open jump list"
+"navigation.jump.back" = "Jump back"
+"navigation.jump.forward" = "Jump forward"
 "navigation.changes" = "Open change list"
 "workspace.root.activate" = "Activate workspace root"
 "workspace.root.remove" = "Remove workspace root"

@@ -1208,6 +1208,7 @@ pub(super) fn unknown_key_warning(source: &str) -> Option<String> {
                     | "workspace"
                     | "messages"
                     | "command_labels"
+                    | "command_palette"
             )
         })
         .cloned()

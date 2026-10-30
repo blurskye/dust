@@ -336,6 +336,7 @@ impl ModalResolver {
                     .with_argument("motion", CommandValue::String("visual".into()))
                     .with_argument("linewise", CommandValue::Bool(linewise));
                 invocation.register = self.register.take();
+                invocation.count = count_nonzero(self.take_count());
                 self.reset_pending();
                 if surround {
                     self.await_character(CharacterTarget::SurroundAdd(invocation));

@@ -467,14 +467,33 @@ pub(super) fn execute_builtin<E>(
             }
         }
         "edit.join_lines" => {
+            // `J` and `2J` join two lines, `3J` three, as in Vim.
             build_join_lines(
                 &mut transaction,
                 &buffer.text,
                 view_id,
                 buffer_id,
                 view.cursor,
-                count,
+                count.saturating_sub(1).max(1),
             )?;
+        }
+        "view.selection.swap" => {
+            let Some(selection) = view.selection else {
+                return Err(CommandError::Unavailable("nothing is selected".into()));
+            };
+            transaction.operations.push(EditorOperation::SetSelection {
+                view: view_id,
+                selection: Some(crate::editor::Selection {
+                    anchor: selection.head,
+                    head: selection.anchor,
+                    kind: selection.kind,
+                }),
+            });
+            transaction.operations.push(EditorOperation::SetCursor {
+                view: view_id,
+                position: selection.anchor,
+            });
+            transaction.undo_policy = UndoPolicy::Ignore;
         }
         "edit.toggle_case" => {
             build_toggle_case(
@@ -492,6 +511,7 @@ pub(super) fn execute_builtin<E>(
                 repeat_visual_ranges(&buffer.text, view, invocation, state.policy)?
             } else {
                 let motion = counted_motion(string_argument(invocation, "motion")?, invocation);
+                let motion = change_word_motion(operator, motion, &buffer.text, view.cursor);
                 let requested_linewise = bool_argument(invocation, "linewise")?;
                 if motion == "visual" {
                     visual_ranges(&buffer.text, view, state.policy)?
@@ -573,6 +593,12 @@ pub(super) fn execute_builtin<E>(
                     buffer_id,
                     whole_range,
                     operator == "indent",
+                    // In Visual mode the count is how many levels; otherwise it counts lines.
+                    if string_argument(invocation, "motion").ok() == Some("visual") {
+                        count
+                    } else {
+                        1
+                    },
                     state.policy,
                 )?;
                 transaction.operations.push(EditorOperation::SetMode {
@@ -585,6 +611,123 @@ pub(super) fn execute_builtin<E>(
                     message: None,
                     follow_up: Vec::new(),
                 });
+            }
+            if matches!(operator, "lowercase" | "uppercase" | "toggle_case") {
+                let edits = ranges
+                    .iter()
+                    .map(|range| {
+                        let text = buffer.text.slice(*range).map_err(failed)?;
+                        let changed = match operator {
+                            "lowercase" => text.to_lowercase(),
+                            "uppercase" => text.to_uppercase(),
+                            _ => text
+                                .chars()
+                                .map(|character| {
+                                    if character.is_uppercase() {
+                                        character.to_lowercase().collect::<String>()
+                                    } else {
+                                        character.to_uppercase().collect()
+                                    }
+                                })
+                                .collect(),
+                        };
+                        Ok(TextEdit::new(*range, changed))
+                    })
+                    .collect::<Result<Vec<_>, CommandError>>()?;
+                transaction.operations.push(EditorOperation::ApplyEdits {
+                    buffer: buffer_id,
+                    edits: TextEditSet::new(buffer.text.revision(), edits),
+                });
+                transaction.operations.push(EditorOperation::SetCursor {
+                    view: view_id,
+                    position: first_range.start,
+                });
+                transaction.operations.push(EditorOperation::SetMode {
+                    view: view_id,
+                    mode: EditorMode::Normal,
+                });
+                return Ok(CommandOutcome {
+                    transaction: Some(transaction),
+                    effects: Vec::new(),
+                    message: None,
+                    follow_up: Vec::new(),
+                });
+            }
+            if operator == "join" {
+                // Visual `J` joins every selected line, and at least two.
+                let first = buffer.text.byte_to_line(whole_range.start).map_err(failed)?;
+                let last = buffer
+                    .text
+                    .byte_to_line(ByteOffset(whole_range.end.get().saturating_sub(1).max(whole_range.start.get())))
+                    .map_err(failed)?;
+                build_join_lines(
+                    &mut transaction,
+                    &buffer.text,
+                    view_id,
+                    buffer_id,
+                    whole_range.start,
+                    last.saturating_sub(first).max(1),
+                )?;
+                transaction.operations.push(EditorOperation::SetMode {
+                    view: view_id,
+                    mode: EditorMode::Normal,
+                });
+                return Ok(CommandOutcome {
+                    transaction: Some(transaction),
+                    effects: Vec::new(),
+                    message: None,
+                    follow_up: Vec::new(),
+                });
+            }
+            if operator == "replace" {
+                // Visual `p`: the register replaces the selection, and the selection goes into
+                // the unnamed register, as in Vim.
+                let register = state
+                    .registers
+                    .get(invocation.register.unwrap_or('"'))
+                    .ok_or_else(|| CommandError::Failed("register is empty".into()))?;
+                if shape == RegisterShape::Block || register.shape == RegisterShape::Block {
+                    return Err(CommandError::Unavailable(
+                        "pasting over a block selection is not supported".into(),
+                    ));
+                }
+                let put = match (shape, register.shape) {
+                    (RegisterShape::Line, RegisterShape::Character) => format!("{}\n", register.text),
+                    (RegisterShape::Character, RegisterShape::Line) => format!("\n{}", register.text),
+                    _ => register.text.clone(),
+                };
+                let replaced = buffer.text.slice(whole_range).map_err(failed)?;
+                transaction.operations.push(EditorOperation::ApplyEdits {
+                    buffer: buffer_id,
+                    edits: TextEditSet::new(
+                        buffer.text.revision(),
+                        vec![TextEdit::new(whole_range, put)],
+                    ),
+                });
+                transaction.operations.push(EditorOperation::SetRegister {
+                    name: '"',
+                    text: replaced,
+                    shape,
+                });
+                transaction.operations.push(EditorOperation::SetCursor {
+                    view: view_id,
+                    position: whole_range.start,
+                });
+                transaction.operations.push(EditorOperation::SetMode {
+                    view: view_id,
+                    mode: EditorMode::Normal,
+                });
+                return Ok(CommandOutcome {
+                    transaction: Some(transaction),
+                    effects: Vec::new(),
+                    message: None,
+                    follow_up: Vec::new(),
+                });
+            }
+            if !matches!(operator, "delete" | "change" | "yank") {
+                return Err(CommandError::InvalidArguments(format!(
+                    "unknown operator `{operator}`"
+                )));
             }
             let text = ranges
                 .iter()
@@ -829,6 +972,26 @@ fn counted_motion<'a>(motion: &'a str, invocation: &CommandInvocation) -> &'a st
         "line_number"
     } else {
         motion
+    }
+}
+
+/// `cw` on a word changes to the word's end and keeps the space after it, as in Vim.
+fn change_word_motion<'a>(
+    operator: &str,
+    motion: &'a str,
+    text: &crate::editor::text::TextBuffer,
+    cursor: ByteOffset,
+) -> &'a str {
+    let next = crate::editor::text::next_grapheme_boundary(text, cursor);
+    let on_word = ByteRange::new(cursor, next)
+        .ok()
+        .and_then(|range| text.slice(range).ok())
+        .and_then(|character| character.chars().next())
+        .is_some_and(|character| !character.is_whitespace());
+    match (operator, motion) {
+        ("change", "word_forward") if on_word => "word_end",
+        ("change", "big_word_forward") if on_word => "big_word_end",
+        _ => motion,
     }
 }
 

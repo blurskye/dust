@@ -344,7 +344,7 @@ fn generic_picker_filters_and_invokes_registry_commands() {
             .as_ref()
             .is_some_and(|picker| !picker.rows.is_empty())
     );
-    app.picker_insert("health");
+    app.picker_insert("show health");
     let picker = app.ui.picker.as_ref().expect("picker");
     assert!(picker.rows.iter().any(|row| {
         format!("{} {}", row.label, row.detail)

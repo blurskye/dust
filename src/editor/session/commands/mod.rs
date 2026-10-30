@@ -106,6 +106,8 @@ pub enum AppEffect {
     TutorNext,
     TutorBack,
     TutorQuit,
+    /// `ctrl-o` (true) or `ctrl-i` through the jump list.
+    WalkJumps(bool),
     HelpContextual,
     HelpCommandReference,
     HelpForForm,

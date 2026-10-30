@@ -75,6 +75,20 @@ pub struct Config {
     pub workspace: WorkspaceConfig,
     pub messages: BTreeMap<String, String>,
     pub command_labels: BTreeMap<String, String>,
+    #[serde(default)]
+    pub command_palette: CommandPaletteConfig,
+}
+
+/// What the command palette (F1) lists and how it names the rows.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommandPaletteConfig {
+    /// Row category by command id prefix; the longest matching prefix wins.
+    #[serde(default)]
+    pub categories: BTreeMap<String, String>,
+    /// Command id prefixes left out of the palette: plumbing only keys use.
+    #[serde(default)]
+    pub hidden: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
