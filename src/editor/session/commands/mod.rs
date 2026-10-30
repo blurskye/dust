@@ -69,6 +69,7 @@ pub enum AppEffect {
     AgentEdit(String),
     AgentScroll(i64),
     AgentEscape,
+    AgentNewTab,
     PullRequestList,
     PullRequestComments,
     PullRequestComment,

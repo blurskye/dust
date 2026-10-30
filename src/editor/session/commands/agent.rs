@@ -71,5 +71,13 @@ pub(super) fn register_commands(
         ArgumentSchema::default(),
         |_| AppEffect::AgentEscape,
     )?;
+    register(
+        registry,
+        "agent.tab.new",
+        "Start another session of the shown agent in a new tab",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::AgentNewTab,
+    )?;
     Ok(())
 }

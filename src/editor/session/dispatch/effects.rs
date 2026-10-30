@@ -11801,6 +11801,7 @@ impl InteractiveApplication {
             AppEffect::AgentEdit(action) => self.agent_input_edit(&action),
             AppEffect::AgentScroll(rows) => self.scroll_agent(rows),
             AppEffect::AgentEscape => self.agent_escape(),
+            AppEffect::AgentNewTab => self.new_agent_tab(),
             AppEffect::PullRequestList => self.list_pull_requests(),
             AppEffect::PullRequestComments => self.list_review_comments(),
             AppEffect::PullRequestComment => self.begin_review_comment(),

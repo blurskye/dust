@@ -146,11 +146,12 @@ scratch_icon = "󰎚"
 virtual_icon = "󰈙"
 terminal_icon = ""
 custom_icon = "󰈔"
+agent_icon = "󰚩"
 # Per-extension overrides; otherwise the explorer's file icons are used.
 extension_icons = {}
 hide_when_single = true
-active_format = " {title}{dirty} "
-inactive_format = " {title}{dirty} "
+active_format = " {title}{dirty}  "
+inactive_format = " {title}{dirty}  "
 separator = "│"
 dirty_marker = " ●"
 scratch_label = "[scratch]"
@@ -471,7 +472,8 @@ float = true
 close_on_exit = true
 
 # ACP agents for `<leader>a`. Each session runs in the worktree that was open when it
-# started. The Claude, Codex and pi adapters can be installed from the tool manager
+# started. Every agent that supports MCP gets Dust's `agent` tool for subagents, which run
+# as tabs of their own. The Claude, Codex and pi adapters can be installed from the tool manager
 # (`<leader>cm`, Agent); OpenCode and Gemini speak ACP themselves. `options` picks a model,
 # mode or thinking level at start, e.g. `options = { model = "…", thought_level = "high" }`.
 [agents]
@@ -482,6 +484,8 @@ program = "claude-agent-acp"
 arguments = []
 environment = {}
 options = {}
+# Subagents come from Dust's `agent` tool, so Claude Code's own Task tool is off.
+meta = { claudeCode = { options = { disallowedTools = ["Task"] } } }
 
 [agents.profiles.codex]
 program = "codex-acp"
@@ -498,7 +502,8 @@ options = {}
 [agents.profiles.opencode]
 program = "opencode"
 arguments = ["acp"]
-environment = {}
+# Subagents come from Dust's `agent` tool, so OpenCode's own task tool is off.
+environment = { OPENCODE_CONFIG_CONTENT = '{"tools":{"task":false}}' }
 options = {}
 
 [agents.profiles.gemini]
@@ -1113,6 +1118,7 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 "agent.input.edit" = "Edit Agent Input"
 "agent.scroll" = "Scroll Agent Transcript"
 "agent.escape" = "Stop Agent or Back to Code"
+"agent.tab.new" = "New Agent Tab"
 "editor.flash" = "Flash jump"
 "workspace.git.browse" = "Git Browse (open)"
 "workspace.git.browse.copy" = "Git Browse (copy)"

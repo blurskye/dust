@@ -16,6 +16,7 @@ use std::{
 };
 
 pub mod history;
+pub mod mcp;
 
 pub const PROTOCOL_VERSION: u64 = 1;
 const LINE_BYTE_CEILING: usize = 16 * 1024 * 1024;
@@ -190,9 +191,15 @@ pub fn initialize_params() -> Value {
     })
 }
 
+/// Parameters of `session/new`: `tools` are the MCP servers the session gets and `meta` the
+/// profile's adapter settings, sent as `_meta`.
 #[must_use]
-pub fn new_session_params(cwd: &Path) -> Value {
-    json!({"cwd": cwd, "mcpServers": []})
+pub fn new_session_params(cwd: &Path, tools: &Value, meta: Option<&Value>) -> Value {
+    let mut params = json!({"cwd": cwd, "mcpServers": tools});
+    if let Some(meta) = meta {
+        params["_meta"] = meta.clone();
+    }
+    params
 }
 
 /// How an agent can pick up one of its earlier sessions, from its `initialize` reply.
@@ -215,8 +222,10 @@ pub fn rejoin_support(initialize: &Value) -> Rejoin {
 
 /// Parameters of `session/resume` and `session/load`.
 #[must_use]
-pub fn rejoin_params(session: &str, cwd: &Path) -> Value {
-    json!({"sessionId": session, "cwd": cwd, "mcpServers": []})
+pub fn rejoin_params(session: &str, cwd: &Path, tools: &Value, meta: Option<&Value>) -> Value {
+    let mut params = new_session_params(cwd, tools, meta);
+    params["sessionId"] = json!(session);
+    params
 }
 
 /// One piece of a prompt: text, or a file the agent should look at.
@@ -274,6 +283,8 @@ pub enum SessionUpdate {
     Options(Vec<SessionOption>),
     /// The agent switched its mode (the older mode API).
     Mode(String),
+    /// The slash commands the agent offers, by name and description.
+    Commands(Vec<(String, String)>),
     Other,
 }
 
@@ -297,6 +308,19 @@ pub fn session_update(params: &Value) -> SessionUpdate {
         },
         "config_option_update" => SessionUpdate::Options(config_options(update)),
         "current_mode_update" => SessionUpdate::Mode(string("currentModeId").unwrap_or_default()),
+        "available_commands_update" => SessionUpdate::Commands(
+            update["availableCommands"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|command| {
+                    Some((
+                        command["name"].as_str()?.trim_start_matches('/').to_owned(),
+                        command["description"].as_str().unwrap_or_default().to_owned(),
+                    ))
+                })
+                .collect(),
+        ),
         "plan" => SessionUpdate::Plan(
             update["entries"]
                 .as_array()

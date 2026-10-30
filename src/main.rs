@@ -91,6 +91,10 @@ struct Cli {
     /// The line to open the first --remote file at.
     #[arg(long, value_name = "LINE", requires = "remote")]
     line: Option<usize>,
+
+    /// Serve the subagent tool over MCP for the agent tab TAB (Dust starts this itself).
+    #[arg(long, value_name = "TAB", hide = true)]
+    agent_tools: Option<u64>,
 }
 
 fn external_tui_fixture() -> ExitCode {
@@ -133,6 +137,13 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(tab) = cli.agent_tools {
+        let server = std::env::var_os(dust::remote::SERVER_VARIABLE)
+            .ok_or("--agent-tools only works for an agent started by Dust")?;
+        let profiles = std::env::var(dust::agent::mcp::PROFILES_VARIABLE).unwrap_or_default();
+        dust::agent::mcp::serve(server.into(), tab, &profiles)?;
+        return Ok(());
+    }
     if !cli.remote.is_empty() {
         let server = std::env::var_os(dust::remote::SERVER_VARIABLE)
             .ok_or("--remote only works from a terminal started by Dust")?;

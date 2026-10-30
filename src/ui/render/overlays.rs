@@ -530,8 +530,10 @@ pub(super) fn content_tab_segments(
             Style::BufferLinePin,
         ));
     }
+    // Inactive tabs are drawn in one quiet style so the active one stands out.
+    let accent = |role| if entry.active { role } else { style };
     if config.ui.buffer_line.show_icons {
-        segments.push((format!("{} ", entry.icon), Style::BufferLineIcon));
+        segments.push((format!(" {} ", entry.icon), accent(Style::BufferLineIcon)));
     }
     segments.push((before, style));
     if !dirty.is_empty() {
@@ -556,7 +558,7 @@ pub(super) fn content_tab_segments(
     if config.ui.buffer_line.show_close && entry.closeable {
         segments.push((
             format!(" {}", config.ui.buffer_line.close_marker),
-            Style::BufferLineClose,
+            accent(Style::BufferLineClose),
         ));
     }
     segments.push((after, style));

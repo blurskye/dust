@@ -532,6 +532,7 @@ impl Config {
                 &self.ui.buffer_line.virtual_icon,
                 &self.ui.buffer_line.terminal_icon,
                 &self.ui.buffer_line.custom_icon,
+                &self.ui.buffer_line.agent_icon,
             ]
             .iter()
             .any(|value| value.len() > 256 || value.chars().any(char::is_control))
@@ -544,6 +545,7 @@ impl Config {
                 &self.ui.buffer_line.virtual_icon,
                 &self.ui.buffer_line.terminal_icon,
                 &self.ui.buffer_line.custom_icon,
+                &self.ui.buffer_line.agent_icon,
             ]
             .iter()
             .any(|glyph| UnicodeWidthStr::width(glyph.as_str()) != 1)

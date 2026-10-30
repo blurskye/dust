@@ -15,6 +15,10 @@ pub struct AgentProfileConfig {
     /// `model`, `mode` or `thought_level`. Values the agent does not offer are reported.
     #[serde(default)]
     pub options: BTreeMap<String, String>,
+    /// Sent as `_meta` when a session starts, for adapter settings such as which tools
+    /// Claude Code may use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]

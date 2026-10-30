@@ -1,6 +1,8 @@
-//! The agent panel: its session tabs on top, the conversation, the input box and a footer
-//! with where the session works and its model. It is drawn in place of the pane that holds
-//! it, so the pane still moves, resizes and zooms like any other window.
+//! The agent panel: its session tabs on top (drawn like the buffer line), the conversation,
+//! the subagents or the slash-command menu, the input box with what the agent is doing in
+//! its top border, and a footer with where the session works and its model. It is drawn in
+//! place of the pane that holds it, so the pane still moves, resizes and zooms like any
+//! other window.
 
 use std::ops::Range;
 
@@ -14,17 +16,29 @@ use crate::{
     ui::{CellGrid, Style, geometry::text_width, markdown::Styled},
 };
 
-use super::{Frame, visual_rows::syntax_role_style};
+use super::{ContentTabEntry, Frame, overlays::render_content_tab_line, visual_rows::syntax_role_style};
 
 /// The input box grows with what is typed up to this many rows, then scrolls.
 const INPUT_ROW_CEILING: usize = 8;
+/// Rows of the slash-command menu and of the subagent list.
+const LIST_ROW_CEILING: usize = 8;
+
+/// One session of the shown conversation's family: the main session and its subagents.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentListRow {
+    pub shown: bool,
+    pub name: String,
+    pub task: String,
+    /// A spinner frame while it works, `✓` or `✗` once done.
+    pub status: String,
+}
 
 /// What the session hands the renderer for the pane that shows `view`.
 #[derive(Clone, Debug)]
 pub struct AgentPanelUi {
     pub view: ViewId,
-    /// Each session's label and whether it is the one shown.
-    pub tabs: Vec<(String, bool)>,
+    /// The sessions, as buffer-line entries whose identity is the session's index.
+    pub tabs: Vec<ContentTabEntry>,
     /// The conversation, wrapped to the pane's width less the side padding.
     pub transcript: Styled,
     /// Byte ranges of the transcript drawn as the user's messages.
@@ -33,11 +47,18 @@ pub struct AgentPanelUi {
     pub scroll: usize,
     /// What goes with the next question.
     pub context: Vec<String>,
+    /// The shown session's family, when it has subagents.
+    pub family: Vec<AgentListRow>,
+    /// Slash commands matching what is typed, by name and description, and the selected one.
+    pub menu: Vec<(String, String)>,
+    pub selected: usize,
+    /// What the agent is doing, such as `⠋ Working`, shown in the input's top border.
+    pub busy: String,
     pub input: String,
     /// Byte offset of the cursor in `input`.
     pub cursor: usize,
     pub placeholder: String,
-    /// Left of the footer: what the session is doing, or where it works.
+    /// Left of the footer: where the session works.
     pub status: String,
     /// Right of the footer: model, mode and thinking level.
     pub settings: String,
@@ -75,17 +96,14 @@ pub(super) fn render_agent_panel(
     if width < 8 || height < 6 {
         return Frame { grid, cursor: None };
     }
-    grid.fill_row(0, Style::Status);
-    let mut x = 0;
-    for (label, active) in &panel.tabs {
-        let style = if *active { Style::StatusAccent } else { Style::Status };
-        x = grid.put_text(x, 0, &format!(" {label} "), style);
-    }
+    render_content_tab_line(&mut grid, &panel.tabs, config, 0);
 
     let inner = width - 2;
     let chips = u16::from(!panel.context.is_empty());
+    let list = if panel.menu.is_empty() { panel.family.len() } else { panel.menu.len() };
+    let list = u16::try_from(list.min(LIST_ROW_CEILING)).unwrap_or(0).min(height.saturating_sub(8) / 2);
     let (rows, (cursor_row, cursor_column)) = wrap_input(&panel.input, panel.cursor, usize::from(inner));
-    let room = usize::from(height.saturating_sub(6 + chips)).max(1);
+    let room = usize::from(height.saturating_sub(6 + chips + list)).max(1);
     let shown = rows.len().min(INPUT_ROW_CEILING).min(room);
     let first = cursor_row.saturating_sub(shown - 1).min(rows.len() - shown);
     let footer = height - 1;
@@ -97,6 +115,44 @@ pub(super) fn render_agent_panel(
         grid.set_cell(column, top, "─", border);
         grid.set_cell(column, bottom, "─", border);
     }
+    if !panel.busy.is_empty() {
+        let x = grid.put_text(2, top, " ", border);
+        let x = grid.put_text_clipped(x, top, &panel.busy, Style::Accent, width - 2);
+        grid.put_text(x, top, " ", border);
+    }
+    let list_top = top - list;
+    if panel.menu.is_empty() {
+        for (offset, row) in panel.family.iter().take(usize::from(list)).enumerate() {
+            let y = list_top + u16::try_from(offset).unwrap_or(0);
+            let (mark, style) = if row.shown { ("● ", Style::MarkupStrong) } else { ("○ ", Style::Muted) };
+            let x = grid.put_text(1, y, mark, style);
+            let x = grid.put_text_clipped(x, y, &row.name, style, width - 1);
+            let x = grid.put_text_clipped(x.saturating_add(2), y, &row.task, Style::Muted, width - 1);
+            let status = match row.status.as_str() {
+                "✓" => Style::GitSignAdded,
+                "✗" => Style::Error,
+                _ => Style::Accent,
+            };
+            grid.put_text_clipped(x.saturating_add(2), y, &row.status, status, width - 1);
+        }
+    } else {
+        let shown = usize::from(list);
+        let first = panel.selected.saturating_sub(shown.saturating_sub(1));
+        for (offset, (name, description)) in panel.menu.iter().skip(first).take(shown).enumerate() {
+            let y = list_top + u16::try_from(offset).unwrap_or(0);
+            let selected = first + offset == panel.selected;
+            if selected {
+                grid.fill_row(y, Style::Selection);
+            }
+            let (name_style, text_style) = if selected {
+                (Style::Selection, Style::Selection)
+            } else {
+                (Style::Accent, Style::Muted)
+            };
+            let x = grid.put_text_clipped(1, y, &format!("/{name}"), name_style, width - 1);
+            grid.put_text_clipped(x.saturating_add(2).max(18), y, description, text_style, width - 1);
+        }
+    }
     if panel.input.is_empty() {
         grid.put_text_clipped(1, input_top, &panel.placeholder, Style::Muted, width - 1);
     }
@@ -107,7 +163,7 @@ pub(super) fn render_agent_panel(
     if chips > 0 {
         let mut x = 1;
         for label in &panel.context {
-            x = grid.put_text_clipped(x, top - 1, &format!("+ {label}"), Style::Accent, width - 1);
+            x = grid.put_text_clipped(x, list_top - 1, &format!("+ {label}"), Style::Accent, width - 1);
             x = x.saturating_add(2);
         }
     }
@@ -116,7 +172,7 @@ pub(super) fn render_agent_panel(
     grid.put_text_clipped(1, footer, &panel.status, Style::Muted, settings_x.saturating_sub(1));
     grid.put_text_clipped(settings_x, footer, &panel.settings, Style::Muted, width - 1);
 
-    let area = usize::from(top - chips - 1);
+    let area = usize::from(list_top - chips - 1);
     let lines = transcript_lines(&panel.transcript.text);
     let hidden = lines.len().saturating_sub(area);
     let scroll = panel.scroll.min(hidden);

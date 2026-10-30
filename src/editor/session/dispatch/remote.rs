@@ -1,4 +1,6 @@
-//! Files that programs in Dust's terminals ask it to open, such as lazygit's edit key.
+//! Requests that reach the running Dust over its socket: files that programs in its
+//! terminals ask it to open, such as lazygit's edit key, and subagents that agents start
+//! through `dust --agent-tools`.
 
 use std::collections::BTreeMap;
 
@@ -6,7 +8,7 @@ use super::InteractiveApplication;
 use super::WindowPlacement;
 use crate::{
     language::lsp::{LspLocation, LspPosition, LspRange, file_uri},
-    remote::{RemoteServer, SERVER_VARIABLE, lazygit_config},
+    remote::{RemoteRequest, RemoteServer, SERVER_VARIABLE, lazygit_config},
 };
 
 impl InteractiveApplication {
@@ -41,7 +43,14 @@ impl InteractiveApplication {
             return;
         };
         let requests = std::iter::from_fn(|| server.try_request()).collect::<Vec<_>>();
-        if requests.is_empty() {
+        let mut opens = Vec::new();
+        for request in requests {
+            match request {
+                RemoteRequest::Open(open) => opens.push(open),
+                RemoteRequest::Agent(request) => self.start_subagent(request),
+            }
+        }
+        if opens.is_empty() {
             return;
         }
         // The program that asked, such as lazygit in a float, hides like `ctrl+/` would hide
@@ -49,7 +58,7 @@ impl InteractiveApplication {
         if self.window_session.terminal_focused() {
             self.place_active_terminal(WindowPlacement::Hidden);
         }
-        for request in requests {
+        for request in opens {
             let position = LspPosition {
                 line: request.line.unwrap_or(1) - 1,
                 character: 0,

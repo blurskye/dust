@@ -4730,6 +4730,21 @@ command = "agent.escape"
 desc = "Stop Agent or Back to Code"
 
 [[keymap]]
+id = "builtin.agent.complete.tab"
+context = "agent"
+keys = "tab"
+command = "agent.input.edit"
+arguments = { action = "complete" }
+desc = "Complete Slash Command"
+
+[[keymap]]
+id = "builtin.agent.tab-new.ctrl-t"
+context = "agent"
+keys = "ctrl-t"
+command = "agent.tab.new"
+desc = "New Agent Tab"
+
+[[keymap]]
 id = "builtin.agent.scroll-up.shift-up"
 context = "agent"
 keys = "shift-up"

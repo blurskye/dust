@@ -28,7 +28,7 @@ use surfaces::{
 #[cfg(test)]
 use visual_rows::{VisualRowSlice, editor_line_number_digits, git_sign_column};
 
-pub use agent::{AgentPanelUi, transcript_lines};
+pub use agent::{AgentListRow, AgentPanelUi, transcript_lines};
 pub use editor::{snap_display_column, snap_display_column_forward};
 pub use explorer::explorer_panel_width;
 pub use overlays::content_tab_at_column;
