@@ -403,6 +403,22 @@ impl EditorState {
         Ok(view)
     }
 
+    /// Show `buffer`, or a new empty one, in the focused pane in place of its view.
+    pub fn replace_active_view(&mut self, buffer: Option<BufferId>) -> Result<(), &'static str> {
+        let tab = self.active_tab.ok_or("no active tab")?;
+        let pane = self.tabs.get(tab).ok_or("active tab is stale")?.focused;
+        if !self.panes.contains_key(pane) {
+            return Err("focused pane is stale");
+        }
+        let buffer = buffer.unwrap_or_else(|| self.buffers.insert(Buffer::new(TextBuffer::from_text(""), None)));
+        let view = self.views.insert(View::new(buffer));
+        let old = std::mem::replace(&mut self.panes[pane].view, view);
+        self.views.remove(old);
+        self.active_view = Some(view);
+        self.mark_window_changed();
+        Ok(())
+    }
+
     pub fn cycle_buffer(&mut self, offset: isize, wrap: bool) -> Result<ViewId, &'static str> {
         let buffers = self
             .buffers

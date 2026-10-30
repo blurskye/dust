@@ -766,7 +766,26 @@ impl EditorDraft {
         {
             return Err("close target changed");
         }
-        self.state.close_active_view()?;
+        // As LazyVim's buffer delete: the window stays and shows the buffer before (or after)
+        // this one, or an empty one. Only the last window of a buffer-less editor closes.
+        let others = self
+            .state
+            .buffers
+            .keys()
+            .filter(|other| *other != buffer && Some(*other) != self.state.kept_buffer)
+            .collect::<Vec<_>>();
+        let position = self.state.buffers.keys().position(|other| other == buffer).unwrap_or(0);
+        let replacement = others
+            .iter()
+            .rev()
+            .find(|other| self.state.buffers.keys().position(|key| key == **other) < Some(position))
+            .or_else(|| others.first())
+            .copied();
+        if replacement.is_none() && self.state.is_last_pane() {
+            self.state.close_active_view()?;
+        } else {
+            self.state.replace_active_view(replacement)?;
+        }
         let removed = !self.state.views.values().any(|v| v.buffer == buffer);
         if removed {
             self.state.remove_buffer(buffer);
