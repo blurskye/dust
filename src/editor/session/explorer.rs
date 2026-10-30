@@ -689,21 +689,23 @@ impl ExplorerSession {
             .take(maximum)
             .filter_map(|id| tree.node(*id))
             .map(|node| {
-                // Guides for the ancestors, then a chevron on folders as in neo-tree. Files at
-                // the top level get no guide, only room for the chevron of their neighbours.
+                // As in neo-tree: guides under the open folders above, the row's own connector,
+                // then a chevron on folders and as much room on files, so icons line up. The
+                // top level has no guides.
                 let lineage = tree.tree_lineage(node.id);
                 let folder = matches!(node.kind, ExplorerKind::Root | ExplorerKind::Directory);
                 let mut tree_prefix = String::new();
-                for (index, is_last) in lineage.iter().enumerate() {
-                    let final_segment = index + 1 == lineage.len();
-                    tree_prefix.push_str(match (final_segment, folder, *is_last) {
-                        (true, true, _) if tree.is_expanded(node.id) => &glyphs.expander_open,
-                        (true, true, _) => &glyphs.expander,
-                        (true, false, _) if lineage.len() == 1 => &glyphs.tree_space,
-                        (true, false, true) => &glyphs.tree_last,
-                        (true, false, false) => &glyphs.tree_middle,
-                        (false, _, true) => &glyphs.tree_space,
-                        (false, _, false) => &glyphs.tree_vertical,
+                if let Some((is_last, ancestors)) = lineage.split_last() {
+                    for ancestor_is_last in ancestors.iter().skip(1) {
+                        tree_prefix.push_str(if *ancestor_is_last { &glyphs.tree_space } else { &glyphs.tree_vertical });
+                    }
+                    if !ancestors.is_empty() {
+                        tree_prefix.push_str(if *is_last { &glyphs.tree_last } else { &glyphs.tree_middle });
+                    }
+                    tree_prefix.push_str(match folder {
+                        true if tree.is_expanded(node.id) => &glyphs.expander_open,
+                        true => &glyphs.expander,
+                        false => &glyphs.tree_space,
                     });
                 }
                 let git_status = git_status.get(&node.path);
