@@ -5388,3 +5388,65 @@ context = "dashboard"
 keys = "ctrl-t"
 command = "buffer.new_tab"
 desc = "New Tab"
+
+[[keymap]]
+id = "builtin.agent-normal.session-previous.upper-h"
+context = "agent_normal"
+keys = "H"
+command = "agent.session.previous"
+
+[[keymap]]
+id = "builtin.agent-normal.session-next.upper-l"
+context = "agent_normal"
+keys = "L"
+command = "agent.session.next"
+
+# `/` in the explorer types into the search bar at its top and filters the tree.
+[[keymap]]
+id = "builtin.explorer.surface.explorer-search.slash"
+context = "explorer"
+keys = "/"
+command = "explorer.search"
+desc = "Search"
+
+[[keymap]]
+id = "builtin.explorer-search.delete.backspace"
+context = "explorer_search"
+keys = "backspace"
+command = "explorer.search.delete"
+
+[[keymap]]
+id = "builtin.explorer-search.done.enter"
+context = "explorer_search"
+keys = "enter"
+command = "explorer.search.done"
+
+[[keymap]]
+id = "builtin.explorer-search.cancel.escape"
+context = "explorer_search"
+keys = "escape"
+command = "explorer.search.cancel"
+
+[[keymap]]
+id = "builtin.explorer-search.next.down"
+context = "explorer_search"
+keys = "down"
+command = "explorer.next"
+
+[[keymap]]
+id = "builtin.explorer-search.previous.up"
+context = "explorer_search"
+keys = "up"
+command = "explorer.previous"
+
+[[keymap]]
+id = "builtin.explorer-search.next.ctrl-n"
+context = "explorer_search"
+keys = "ctrl-n"
+command = "explorer.next"
+
+[[keymap]]
+id = "builtin.explorer-search.previous.ctrl-p"
+context = "explorer_search"
+keys = "ctrl-p"
+command = "explorer.previous"

@@ -184,6 +184,8 @@ In the explorer:
     s            open in a split
     .            show hidden files  I  show ignored files
     R            refresh            esc  back to the editor
+    /            search the whole tree from the bar at the top: type, enter keeps
+                 the matches for j k and enter, esc clears the search
 
 `ctrl-h` and `ctrl-l` move between the explorer and the editor, like any window.
 
@@ -304,9 +306,9 @@ In the panel you type in an input box. It has Vim modes too: `esc` goes to Norma
 
     enter         send                     shift-enter  new line
     /             slash commands (with tab to complete)
-    ctrl-t        a new tab with the same agent   ctrl-q  close the tab
-    alt-]  alt-[  next / previous agent tab
-    ctrl-p        model     ctrl-o  mode and options    shift-tab  thinking level
+    ctrl-t        a new tab: pick its agent       ctrl-q  close the tab
+    alt-]  alt-[  next / previous agent tab (H and L in Normal mode)
+    ctrl-p        model, or another agent   ctrl-o  mode and options    shift-tab  thinking level
     ctrl-r        resume an earlier conversation (they are kept by Dust)
     ctrl-h        back to the code
 

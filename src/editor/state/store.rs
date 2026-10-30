@@ -122,6 +122,9 @@ pub struct EditorState {
     pub undo_directory: Option<PathBuf>,
     pub undo_maximum_bytes: usize,
     zoom: Option<Zoom>,
+    /// A buffer that keeps its window, such as the agent panel's: files open beside it,
+    /// never over it, and buffer cycling skips it.
+    pub kept_buffer: Option<BufferId>,
     pub(super) window_revision: u64,
     window_revision_exhausted: bool,
 }
@@ -148,6 +151,7 @@ impl Clone for EditorState {
             undo_directory: self.undo_directory.clone(),
             undo_maximum_bytes: self.undo_maximum_bytes,
             zoom: self.zoom,
+            kept_buffer: self.kept_buffer,
             window_revision: self.window_revision,
             window_revision_exhausted: self.window_revision_exhausted,
         }
@@ -173,6 +177,7 @@ impl EditorState {
             undo_directory: None,
             undo_maximum_bytes: 0,
             zoom: None,
+            kept_buffer: None,
             window_revision: 0,
             window_revision_exhausted: false,
         }
@@ -399,7 +404,11 @@ impl EditorState {
     }
 
     pub fn cycle_buffer(&mut self, offset: isize, wrap: bool) -> Result<ViewId, &'static str> {
-        let buffers = self.buffers.keys().collect::<Vec<_>>();
+        let buffers = self
+            .buffers
+            .keys()
+            .filter(|buffer| Some(*buffer) != self.kept_buffer)
+            .collect::<Vec<_>>();
         if buffers.is_empty() {
             return Err("no buffers are open");
         }
@@ -429,6 +438,7 @@ impl EditorState {
             self.mark_window_changed();
             return;
         }
+        self.leave_kept_pane(view);
         if let Some(tab_id) = self.active_tab {
             if let Some(tab) = self.tabs.get(tab_id) {
                 if let Some(pane) = self.panes.get_mut(tab.focused) {
@@ -467,6 +477,49 @@ impl EditorState {
         self.active_tab = Some(tab);
         self.active_view = Some(view);
         self.mark_window_changed();
+    }
+
+    /// When the focused pane holds the kept buffer and something else is to be shown, focus
+    /// another pane of the tab, or split one off to the kept pane's left.
+    fn leave_kept_pane(&mut self, view: ViewId) {
+        let Some(kept) = self.kept_buffer else {
+            return;
+        };
+        let Some(tab_id) = self.active_tab else {
+            return;
+        };
+        let Some(tab) = self.tabs.get(tab_id) else {
+            return;
+        };
+        let shows_kept = |state: &Self, pane: PaneId| {
+            state
+                .panes
+                .get(pane)
+                .and_then(|pane| state.views.get(pane.view))
+                .is_some_and(|view| view.buffer == kept)
+        };
+        let focused = tab.focused;
+        if !shows_kept(self, focused) || self.views.get(view).is_some_and(|view| view.buffer == kept) {
+            return;
+        }
+        if let Some(other) = pane_ids(&tab.root).into_iter().find(|pane| !shows_kept(self, *pane)) {
+            if let Some(tab) = self.tabs.get_mut(tab_id) {
+                tab.focused = other;
+            }
+            return;
+        }
+        // The split's new pane lands on the right: it takes the kept view, and the old pane
+        // on the left is left focused for what opens.
+        let kept_view = self.panes[focused].view;
+        if let Ok(clone) = self.clone_pane(focused, Axis::Horizontal, 500)
+            && let Some(right) = self.tabs.get(tab_id).map(|tab| tab.focused)
+        {
+            self.panes[right].view = kept_view;
+            self.views.remove(clone);
+            if let Some(tab) = self.tabs.get_mut(tab_id) {
+                tab.focused = focused;
+            }
+        }
     }
 
     pub fn split_active(&mut self, axis: Axis, ratio: u16) -> Result<ViewId, &'static str> {

@@ -967,6 +967,10 @@ pub struct ExplorerUiState {
     pub scroll: usize,
     pub loading: bool,
     pub total: usize,
+    /// What `/` filters the tree by; empty shows everything.
+    pub query: String,
+    /// Whether keys type into the query.
+    pub searching: bool,
     pub preview_lines: Vec<String>,
 }
 

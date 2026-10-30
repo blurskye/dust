@@ -94,8 +94,6 @@ pub(super) struct AgentPanel {
     permissions: VecDeque<PermissionRequest>,
     /// The request the open permission prompt answers.
     asking: Option<PermissionRequest>,
-    /// Whether the tabs open when Dust last quit were brought back.
-    restored: bool,
     /// The question being typed, and the cursor in it as a byte offset.
     input: String,
     cursor: usize,
@@ -164,7 +162,7 @@ enum Phase {
     SigningIn,
     Ready,
     Prompting(u64),
-    /// The agent exited; a tab restored from history has no process but is not stopped.
+    /// The agent exited; a tab resumed from history has no process but is not stopped.
     Stopped,
 }
 
@@ -307,7 +305,7 @@ impl AgentSession {
         }
     }
 
-    fn conversation(&self, open: bool) -> Conversation {
+    fn conversation(&self) -> Conversation {
         let title = self
             .entries
             .iter()
@@ -325,7 +323,6 @@ impl AgentSession {
             updated: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |elapsed| elapsed.as_secs()),
-            open,
         }
     }
 
@@ -417,7 +414,6 @@ impl InteractiveApplication {
     }
 
     pub(super) fn agent_ask(&mut self, question: String) {
-        self.restore_agent_tabs();
         let question = question.trim().to_owned();
         if question.is_empty() {
             self.agent.context.clear();
@@ -529,7 +525,6 @@ impl InteractiveApplication {
 
     /// `<leader>as`: the open sessions.
     pub(super) fn open_agent_sessions_picker(&mut self) {
-        self.restore_agent_tabs();
         if self.agent.sessions.is_empty() {
             self.notify_message("no agent sessions; start one with <leader>an".into(), false);
             return;
@@ -598,7 +593,32 @@ impl InteractiveApplication {
             self.sync_picker_ui();
             return;
         };
+        // The model picker also lists the other agents, so one key changes agent and model.
+        let mut others = Vec::new();
+        if key == "model" {
+            let current = session.name.clone();
+            for (name, profile) in &self.configuration.settings().agents.profiles {
+                if *name != current && self.agent_program(&profile.program).is_some() {
+                    others.push((
+                        picker_row(
+                            format!("agent:{name}"),
+                            format!("{name} ›"),
+                            "another agent, in a new tab".to_owned(),
+                            "agent".to_owned(),
+                        ),
+                        PickerPayload::Agent(AgentChoice::Profile(name.clone())),
+                    ));
+                }
+            }
+        }
         let Some(option) = session.option(key).cloned() else {
+            if !others.is_empty() {
+                let title = format!("{} Agent", session.name);
+                self.install_picker(title, others);
+                self.search.set_picker_footer("Enter Use · Esc Close".to_owned());
+                self.sync_picker_ui();
+                return;
+            }
             let what = match key {
                 THINKING => "thinking level",
                 other => other,
@@ -623,6 +643,7 @@ impl InteractiveApplication {
                     }),
                 )
             })
+            .chain(others)
             .collect();
         self.install_picker(format!("{} {}", session.name, option.name), items);
         self.search.set_picker_footer("Enter Use · Esc Close".to_owned());
@@ -631,7 +652,6 @@ impl InteractiveApplication {
 
     /// `<leader>aR`: saved conversations, newest first.
     pub(super) fn open_agent_resume_picker(&mut self) {
-        self.restore_agent_tabs();
         let saved = history::list(&history::directory());
         if saved.is_empty() {
             self.notify_message("no saved agent conversations".into(), false);
@@ -693,9 +713,7 @@ impl InteractiveApplication {
 
     pub(super) fn accept_agent_choice(&mut self, choice: AgentChoice) {
         let result = match choice {
-            AgentChoice::Profile(name) => self.start_agent_session(&name).map(|()| {
-                self.show_agent_panel();
-            }),
+            AgentChoice::Profile(name) => self.open_agent_tab(&name),
             AgentChoice::Session(number) => {
                 if let Some(index) = self.agent.sessions.iter().position(|s| s.number == number) {
                     self.agent.active = index;
@@ -741,7 +759,6 @@ impl InteractiveApplication {
 
     /// `<leader>a]` and `<leader>a[`.
     pub(super) fn cycle_agent_session(&mut self, offset: isize) {
-        self.restore_agent_tabs();
         let count = self.agent.sessions.len();
         if count == 0 {
             self.notify_message("no agent sessions; start one with <leader>an".into(), false);
@@ -760,7 +777,7 @@ impl InteractiveApplication {
             return;
         }
         // Closed tabs stay in the history and can be resumed with <leader>aR.
-        self.save_agent_history(self.agent.active, false);
+        self.save_agent_history(self.agent.active);
         let mut session = self.agent.sessions.remove(self.agent.active);
         if let Some(reply) = session.reply.take() {
             reply.send(Err("the user closed the subagent".into()));
@@ -801,33 +818,41 @@ impl InteractiveApplication {
         }
     }
 
-    /// `ctrl-t` in the panel: another session of the shown tab's agent. A tab nobody asked
-    /// anything yet is shown instead, so empty tabs do not pile up.
+    /// `ctrl-t` in the panel: ask which agent the new tab runs. With one agent installed
+    /// there is nothing to ask.
     pub(super) fn new_agent_tab(&mut self) {
-        self.restore_agent_tabs();
-        let unused = self.agent.sessions.iter().position(|session| {
-            session.parent.is_none()
-                && !session.entries.iter().any(|entry| matches!(entry, Entry::User { .. }))
-        });
-        if let Some(index) = unused {
+        let installed = self
+            .configuration
+            .settings()
+            .agents
+            .profiles
+            .iter()
+            .filter(|(_, profile)| self.agent_program(&profile.program).is_some())
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        match installed.as_slice() {
+            [name] => self.accept_agent_choice(AgentChoice::Profile(name.clone())),
+            _ => self.open_agent_picker(),
+        }
+    }
+
+    /// Start `name` in a tab. A tab of the same agent nobody asked anything yet is shown
+    /// instead, and other such tabs give way, so empty tabs never pile up.
+    fn open_agent_tab(&mut self, name: &str) -> Result<(), String> {
+        let unused = |session: &AgentSession| {
+            session.parent.is_none() && !session.entries.iter().any(|entry| matches!(entry, Entry::User { .. }))
+        };
+        if let Some(index) = self.agent.sessions.iter().position(|session| unused(session) && session.name == name) {
             self.agent.active = index;
-            self.agent.scroll = 0;
-            self.show_agent_panel();
-            self.refresh_agent_transcript();
-            return;
+        } else {
+            self.start_agent_session(name)?;
+            let shown = self.agent.sessions[self.agent.active].number;
+            self.agent.sessions.retain(|session| session.number == shown || !unused(session));
+            self.agent.active = self.agent.sessions.iter().position(|session| session.number == shown).unwrap_or(0);
         }
-        let name = self.active_agent().map_or_else(
-            || self.configuration.settings().agents.default.clone(),
-            |session| session.name.clone(),
-        );
-        match self.start_agent_session(&name) {
-            Ok(()) => {
-                self.agent.scroll = 0;
-                self.show_agent_panel();
-                self.refresh_agent_transcript();
-            }
-            Err(error) => self.show_error(error),
-        }
+        self.agent.scroll = 0;
+        self.show_agent_panel();
+        Ok(())
     }
 
     /// An agent's `agent` tool call: start a subagent of the asking session in a new tab.
@@ -1063,7 +1088,7 @@ impl InteractiveApplication {
                 let save = matches!(message, AgentMessage::Response { .. } | AgentMessage::Exited(_));
                 self.handle_agent_message(index, message);
                 if save {
-                    self.save_agent_history(index, true);
+                    self.save_agent_history(index);
                 }
             }
             changed |= self.settle_subagent(index);
@@ -1101,33 +1126,14 @@ impl InteractiveApplication {
 
     /// Keep the tab's history file current; tabs nobody asked anything are not kept, and
     /// subagents belong to the conversation that started them.
-    fn save_agent_history(&self, index: usize, open: bool) {
+    fn save_agent_history(&self, index: usize) {
         let session = &self.agent.sessions[index];
         if self.configuration.settings().persistence.enabled
             && session.parent.is_none()
             && session.entries.iter().any(|entry| matches!(entry, Entry::User { .. }))
         {
-            history::save(history::directory(), session.conversation(open), session.entries.clone());
+            history::save(history::directory(), session.conversation(), session.entries.clone());
         }
-    }
-
-    /// Bring back the tabs that were open when Dust last quit, stopped until asked again.
-    fn restore_agent_tabs(&mut self) {
-        if std::mem::replace(&mut self.agent.restored, true)
-            || !self.configuration.settings().persistence.enabled
-        {
-            return;
-        }
-        let mut open = history::list(&history::directory())
-            .into_iter()
-            .filter(|conversation| conversation.open)
-            .collect::<Vec<_>>();
-        // Oldest first, so the tabs keep their order.
-        open.reverse();
-        for conversation in open {
-            self.reopen_conversation(&conversation.id);
-        }
-        self.agent.active = 0;
     }
 
     /// Put a saved conversation in a tab, or show the tab it is already in.
@@ -1414,7 +1420,6 @@ impl InteractiveApplication {
     }
 
     pub(super) fn toggle_agent_panel(&mut self) {
-        self.restore_agent_tabs();
         if let Some(pane) = self.agent_pane() {
             let previous = self.active_tab_focus();
             if self.state.focus_pane_id(pane).is_ok() {
@@ -1456,6 +1461,7 @@ impl InteractiveApplication {
                         1,
                     );
                     self.agent.buffer = Some(buffer);
+                    self.state.kept_buffer = Some(buffer);
                     Ok(())
                 }
             };

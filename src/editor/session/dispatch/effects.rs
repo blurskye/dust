@@ -2867,6 +2867,28 @@ impl InteractiveApplication {
                 });
             }
             AppEffect::ExplorerOpen => self.open_explorer(),
+            AppEffect::ExplorerSearch => {
+                self.explorer.start_search();
+                self.sync_explorer_ui();
+            }
+            AppEffect::ExplorerSearchInsert(text) => {
+                let query = format!("{}{text}", self.explorer.tree().filter());
+                self.search_explorer(query);
+            }
+            AppEffect::ExplorerSearchDelete => {
+                let mut query = self.explorer.tree().filter().to_owned();
+                query.pop();
+                self.search_explorer(query);
+            }
+            AppEffect::ExplorerSearchStop { keep } => {
+                self.explorer.stop_search(keep);
+                self.sync_explorer_ui();
+            }
+            // Esc on a filtered tree clears the filter before it closes the explorer.
+            AppEffect::ExplorerClose if !self.explorer.tree().filter().is_empty() => {
+                self.explorer.stop_search(false);
+                self.sync_explorer_ui();
+            }
             AppEffect::ExplorerClose => {
                 if self
                     .input

@@ -546,7 +546,7 @@ impl InteractiveApplication {
             return "completion".into();
         }
         if self.ui.explorer.is_some() && self.window_session.explorer_focused() {
-            return "explorer".into();
+            return if self.explorer.searching() { "explorer_search" } else { "explorer" }.into();
         }
         if let Some(context) = self
             .window_session

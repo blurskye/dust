@@ -139,8 +139,8 @@ pub fn picker_content_geometry(
     })
 }
 
-/// The explorer's title row and the gap under it.
-const EXPLORER_HEADER_ROWS: u16 = 2;
+/// The explorer's title, its search row and the rule under them.
+const EXPLORER_HEADER_ROWS: u16 = 3;
 
 #[must_use]
 pub fn explorer_body_geometry(rect: WindowRect, config: &Config) -> WindowRect {

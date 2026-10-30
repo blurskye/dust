@@ -17,6 +17,7 @@ const BUILTIN_SURFACES: &[&str] = &[
     "theme_picker",
     "workspace_edit",
     "explorer",
+    "explorer_search",
     "panel",
     "agent",
     "agent_normal",

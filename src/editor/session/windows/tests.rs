@@ -421,7 +421,7 @@ fn accepted_projection_rejects_old_source_graph_size_and_invalidation() {
         1
     );
     let body = windows.content().explorer.unwrap();
-    assert_eq!((body.y, body.height), (2, 27));
+    assert_eq!((body.y, body.height), (3, 26));
     assert_eq!(
         windows.content().documentation_rows,
         crate::ui::geometry::documentation_page_rows(&config, 75, 30)

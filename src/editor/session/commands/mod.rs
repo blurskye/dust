@@ -323,6 +323,10 @@ pub enum AppEffect {
     ExplorerFollow,
     ExplorerToggleHidden,
     ExplorerToggleIgnored,
+    ExplorerSearch,
+    ExplorerSearchInsert(String),
+    ExplorerSearchDelete,
+    ExplorerSearchStop { keep: bool },
     ExplorerFileOpen {
         split: bool,
     },

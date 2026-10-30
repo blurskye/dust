@@ -241,7 +241,10 @@ impl ExplorerState {
             parent.children = ids;
             parent.load = ExplorerLoadState::Loaded;
         }
-        self.expanded.insert(node);
+        // Folders a search reads in the background stay closed.
+        if self.filter.is_empty() {
+            self.expanded.insert(node);
+        }
         self.rebuild_visible_projection();
         true
     }
@@ -285,6 +288,22 @@ impl ExplorerState {
     #[must_use]
     pub fn filter(&self) -> &str {
         &self.filter
+    }
+
+    /// A folder not read yet, so a search can read the whole tree, up to `limit` entries.
+    #[must_use]
+    pub fn unloaded_directory(&self, limit: usize) -> Option<ExplorerNodeId> {
+        if self.data.nodes.len() >= limit {
+            return None;
+        }
+        self.data
+            .nodes
+            .values()
+            .find(|node| {
+                matches!(node.kind, ExplorerKind::Root | ExplorerKind::Directory)
+                    && node.load == ExplorerLoadState::Unloaded
+            })
+            .map(|node| node.id)
     }
 
     #[must_use]

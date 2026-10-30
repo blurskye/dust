@@ -3,7 +3,7 @@ use crate::{
     ui::{CellGrid, Style, geometry::text_width, window::WindowRect},
 };
 
-use super::{ExplorerSegmentRole, ExplorerUiState, Frame, UiState};
+use super::{ExplorerSegmentRole, ExplorerUiState, Frame, UiState, editor::cursor_style};
 
 /// Width of the persistent explorer dock, leaving a usable editor pane.
 #[must_use]
@@ -120,9 +120,27 @@ pub(super) fn render_explorer_window(
             }
         }
     }
-    // The selected row is highlighted; a terminal cursor on it would only cover the guides.
-    if focused {
-        frame.cursor = None;
+    if focused && explorer.searching {
+        // Typing goes to the search bar under the title.
+        let typed = text_width(&config.ui.explorer.focus_marker, config.editor.ambiguous_width)
+            + 1
+            + text_width(&explorer.query, config.editor.ambiguous_width);
+        let x = u16::try_from(typed).unwrap_or(u16::MAX).saturating_add(1).min(panel_width.saturating_sub(1));
+        frame.cursor = (rect.height > 1).then(|| (rect.x.saturating_add(x), rect.y.saturating_add(1), cursor_style(config.ui.cursor.insert)));
+    } else if focused {
+        frame.cursor = explorer
+            .rows
+            .iter()
+            .position(|row| row.selected)
+            .and_then(|row| u16::try_from(row).ok())
+            .map(|row| {
+                (
+                    rect.x.saturating_add(1.min(panel_width.saturating_sub(1))),
+                    body.y.saturating_add(row),
+                    cursor_style(config.ui.cursor.normal),
+                )
+            })
+            .filter(|(_, y, _)| *y < body.y.saturating_add(body.height));
     }
 }
 
@@ -156,24 +174,65 @@ pub(super) fn render_explorer_dock(
         );
     }
 
-    // One title row as in neo-tree: the title, bright while focused, and the count or the
-    // loading label on the right. The row under it stays empty.
-    let title_style = if focused { Style::ExplorerHeader } else { Style::ExplorerCount };
-    grid.put_text_clipped(1, 0, &explorer.title, title_style, panel_width);
-    let count = if explorer.loading {
-        config.ui.explorer.loading_label.clone()
-    } else {
-        explorer.total.to_string()
-    };
-    let count_width =
-        u16::try_from(text_width(&count, config.editor.ambiguous_width)).unwrap_or(panel_width);
-    grid.put_text_clipped(
-        panel_width.saturating_sub(count_width).saturating_sub(1),
-        0,
-        &count,
-        Style::ExplorerCount,
-        panel_width,
-    );
+    let title = format!(" {} ", explorer.title);
+    let title_width = u16::try_from(text_width(&title, config.editor.ambiguous_width))
+        .unwrap_or(panel_width)
+        .min(panel_width);
+    let title_left = panel_width.saturating_sub(title_width) / 2;
+    for x in 0..panel_width {
+        grid.set_cell(x, 0, &glyphs.panel_horizontal, Style::ExplorerBorder);
+    }
+    grid.put_text_clipped(title_left, 0, &title, Style::ExplorerHeader, panel_width);
+
+    if panel_height > 1 {
+        for x in 0..panel_width {
+            grid.set_cell(x, 1, " ", Style::ExplorerHeader);
+        }
+        // Matches out of what is read so far while a search filters the tree.
+        let count = if explorer.query.is_empty() {
+            format!("{0}/{0}", explorer.total)
+        } else {
+            format!("{}", explorer.total)
+        };
+        let count_width =
+            u16::try_from(text_width(&count, config.editor.ambiguous_width)).unwrap_or(panel_width);
+        grid.put_text_clipped(
+            panel_width.saturating_sub(count_width).saturating_sub(1),
+            1,
+            &count,
+            Style::ExplorerCount,
+            panel_width,
+        );
+        if explorer.loading {
+            grid.put_text_clipped(
+                1,
+                1,
+                &config.ui.explorer.loading_label,
+                Style::ExplorerCount,
+                panel_width,
+            );
+        } else if focused || !explorer.query.is_empty() {
+            let x = grid.put_text_clipped(
+                1,
+                1,
+                &config.ui.explorer.focus_marker,
+                Style::ExplorerHeader,
+                panel_width,
+            );
+            grid.put_text_clipped(
+                x.saturating_add(1),
+                1,
+                &explorer.query,
+                Style::ExplorerHeader,
+                panel_width.saturating_sub(count_width).saturating_sub(2),
+            );
+        }
+    }
+    if panel_height > 2 {
+        for x in 0..panel_width {
+            grid.set_cell(x, 2, &glyphs.panel_horizontal, Style::ExplorerBorder);
+        }
+    }
 
     let body_top = body.y;
     let available_rows = usize::from(body.height);

@@ -581,6 +581,8 @@ fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
         scroll: 0,
         loading: false,
         total: 0,
+        query: String::new(),
+        searching: false,
         preview_lines: Vec::new(),
     });
     app.ensure_cursor_visible();

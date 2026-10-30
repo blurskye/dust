@@ -48,6 +48,9 @@ impl ExplorerCloneCandidate {
     }
 }
 
+/// How many entries a search reads at most, so a huge tree does not stall it.
+const SEARCH_ENTRY_LIMIT: usize = 50_000;
+
 pub(in crate::editor::session) struct ExplorerSession {
     primary: ExplorerViewState,
     cloned_views: BTreeMap<ExplorerViewId, ExplorerViewState>,
@@ -68,6 +71,8 @@ pub(in crate::editor::session) struct ExplorerSession {
     root_count: usize,
     hidden: bool,
     ignored: bool,
+    /// Whether keys type into the search at the top.
+    searching: bool,
     follow: Option<PathBuf>,
     next_load: Option<ExplorerNodeId>,
     watch: ExplorerWatchService,
@@ -101,6 +106,7 @@ impl ExplorerSession {
             root_count: 0,
             hidden: false,
             ignored: false,
+            searching: false,
             follow: None,
             next_load: None,
             watch,
@@ -355,6 +361,48 @@ impl ExplorerSession {
         self.tree_mut().collapse_or_parent_from(first);
         self.mark_view_changed();
         self.retire_changed_preview_selection();
+    }
+    pub(in crate::editor::session) fn start_search(&mut self) {
+        self.searching = true;
+        self.mark_view_changed();
+    }
+    pub(in crate::editor::session) fn searching(&self) -> bool {
+        self.searching
+    }
+    /// Filter by `query` and select the first match.
+    pub(in crate::editor::session) fn set_search(&mut self, query: String) {
+        self.tree_mut().set_filter(query);
+        self.select_search_match();
+    }
+    /// Select the first match unless a match is selected; matches turn up as the
+    /// background reads finish.
+    pub(in crate::editor::session) fn select_search_match(&mut self) {
+        let first = self.first_presented();
+        let tree = self.tree();
+        let needle = tree.filter().to_lowercase();
+        let matches = |node: &crate::workspace::ExplorerNode| node.name.to_lowercase().contains(&needle);
+        if needle.is_empty() || tree.selected_node().is_some_and(matches) {
+            return;
+        }
+        let found = tree
+            .visible_ids()
+            .iter()
+            .skip(first)
+            .find(|id| tree.node(**id).is_some_and(matches))
+            .copied();
+        if let Some(found) = found {
+            self.tree_mut().select(found);
+        }
+        self.mark_view_changed();
+        self.retire_changed_preview_selection();
+    }
+    /// Stop typing; `keep` leaves the tree filtered so `j`/`k` and enter work on the matches.
+    pub(in crate::editor::session) fn stop_search(&mut self, keep: bool) {
+        self.searching = false;
+        if !keep {
+            self.tree_mut().set_filter("");
+        }
+        self.mark_view_changed();
     }
     pub(in crate::editor::session) fn toggle_hidden(&mut self) {
         self.hidden = !self.hidden;
@@ -624,7 +672,11 @@ impl ExplorerSession {
                 return Some(id);
             }
         }
-        None
+        // A search reads the folders not read yet, one at a time.
+        if self.tree().filter().is_empty() {
+            return None;
+        }
+        self.tree().unloaded_directory(SEARCH_ENTRY_LIMIT)
     }
     pub(in crate::editor::session) fn reconfigure_watch(
         &mut self,
@@ -689,23 +741,20 @@ impl ExplorerSession {
             .take(maximum)
             .filter_map(|id| tree.node(*id))
             .map(|node| {
-                // As in neo-tree: guides under the open folders above, the row's own connector,
-                // then a chevron on folders and as much room on files, so icons line up. The
-                // top level has no guides.
                 let lineage = tree.tree_lineage(node.id);
-                let folder = matches!(node.kind, ExplorerKind::Root | ExplorerKind::Directory);
                 let mut tree_prefix = String::new();
-                if let Some((is_last, ancestors)) = lineage.split_last() {
-                    for ancestor_is_last in ancestors.iter().skip(1) {
-                        tree_prefix.push_str(if *ancestor_is_last { &glyphs.tree_space } else { &glyphs.tree_vertical });
-                    }
-                    if !ancestors.is_empty() {
-                        tree_prefix.push_str(if *is_last { &glyphs.tree_last } else { &glyphs.tree_middle });
-                    }
-                    tree_prefix.push_str(match folder {
-                        true if tree.is_expanded(node.id) => &glyphs.expander_open,
-                        true => &glyphs.expander,
-                        false => &glyphs.tree_space,
+                for (index, is_last) in lineage.iter().enumerate() {
+                    let final_segment = index + 1 == lineage.len();
+                    tree_prefix.push_str(if final_segment {
+                        if *is_last {
+                            &glyphs.tree_last
+                        } else {
+                            &glyphs.tree_middle
+                        }
+                    } else if *is_last {
+                        &glyphs.tree_space
+                    } else {
+                        &glyphs.tree_vertical
                     });
                 }
                 let git_status = git_status.get(&node.path);
@@ -796,6 +845,8 @@ impl ExplorerSession {
         ExplorerUiState {
             title,
             total,
+            query: self.tree().filter().to_owned(),
+            searching: self.searching,
             rows,
             scroll,
             loading: self.pending.is_some(),

@@ -865,6 +865,8 @@ impl InteractiveApplication {
             scroll: 0,
             loading: false,
             total: 0,
+            query: String::new(),
+            searching: false,
             preview_lines: Vec::new(),
         });
         self.set_explorer_focus(true);
@@ -922,6 +924,14 @@ impl InteractiveApplication {
         self.sync_explorer_ui();
     }
 
+    /// Filter the tree by `query`; the folders not read yet are read in the background so
+    /// the whole project is searched.
+    pub(in crate::editor::session) fn search_explorer(&mut self, query: String) {
+        self.explorer.set_search(query);
+        self.start_next_explorer_watch_reload();
+        self.sync_explorer_ui();
+    }
+
     pub(in crate::editor::session) fn explorer_toggle(&mut self) {
         let Some(node) = self.explorer.tree().selected_node().cloned() else {
             return;
@@ -948,6 +958,7 @@ impl InteractiveApplication {
         if let Err(error) = result {
             self.show_error(error);
         }
+        self.explorer.select_search_match();
         self.sync_explorer_ui();
         self.continue_explorer_follow();
         self.start_next_explorer_watch_reload();

@@ -998,6 +998,8 @@ fn buffer_line_begins_after_the_explorer_dock() {
             scroll: 0,
             loading: false,
             total: 0,
+            query: String::new(),
+            searching: false,
             preview_lines: Vec::new(),
         }),
         ..UiState::default()
@@ -1028,6 +1030,8 @@ fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity() {
             scroll: 0,
             loading: false,
             total: 0,
+            query: String::new(),
+            searching: false,
             preview_lines: Vec::new(),
         }),
         lsp_progress: vec![
@@ -2374,6 +2378,8 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
             scroll: 0,
             loading: false,
             total: 2,
+            query: String::new(),
+            searching: false,
             preview_lines: Vec::new(),
         }),
         explorer_focused: true,
@@ -2386,34 +2392,34 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
     assert_eq!(super::explorer_panel_width(&loaded.config, 2), None);
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 100, 20);
     assert!(frame.grid.row_text(0).contains("Explorer"));
-    assert!(frame.grid.row_text(2).contains("src"));
-    assert!(frame.grid.row_text(3).contains("main.rs"));
+    assert!(frame.grid.row_text(3).contains("src"));
+    assert!(frame.grid.row_text(4).contains("main.rs"));
     assert_eq!(
-        frame.grid.get(1, 2).expect("tree segment").style,
+        frame.grid.get(1, 3).expect("tree segment").style,
         crate::ui::Style::ExplorerTree
     );
     assert_eq!(
-        frame.grid.get(3, 2).expect("icon segment").style,
+        frame.grid.get(3, 3).expect("icon segment").style,
         crate::ui::Style::ExplorerIcon
     );
     assert_eq!(
-        frame.grid.get(5, 2).expect("directory name").style,
+        frame.grid.get(5, 3).expect("directory name").style,
         crate::ui::Style::ExplorerDirectory
     );
     assert_eq!(
-        frame.grid.get(37, 2).expect("git decoration").style,
+        frame.grid.get(37, 3).expect("git decoration").style,
         crate::ui::Style::ExplorerGit
     );
     assert_eq!(
-        frame.grid.get(38, 2).expect("diagnostic decoration").style,
+        frame.grid.get(38, 3).expect("diagnostic decoration").style,
         crate::ui::Style::ExplorerDiagnostic
     );
     assert_eq!(
-        frame.grid.get(1, 3).expect("selected row").style,
+        frame.grid.get(1, 4).expect("selected row").style,
         crate::ui::Style::ExplorerSelection
     );
     assert_eq!(
-        frame.grid.get(panel, 2).expect("dock separator").symbol,
+        frame.grid.get(panel, 3).expect("dock separator").symbol,
         "⎸"
     );
     assert_eq!(
@@ -2432,8 +2438,7 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
             .style,
         crate::ui::Style::Muted
     );
-    // The selected row is highlighted instead of carrying a terminal cursor.
-    assert!(frame.cursor.is_none());
+    assert!(frame.cursor.is_some_and(|(x, y, _)| x == 1 && y == 4));
     assert!(frame.grid.row_text(19).contains("NORMAL"));
     let mut editor_ui = ui.clone();
     editor_ui.explorer_focused = false;
@@ -2753,6 +2758,8 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
         scroll: 0,
         loading: false,
         total: 0,
+        query: String::new(),
+        searching: false,
         preview_lines: Vec::new(),
     });
     ui.terminal_panel = Some(terminal.clone());
@@ -2900,6 +2907,8 @@ fn key_hints_anchor_clip_and_preserve_protected_rows() {
         scroll: 0,
         loading: false,
         total: 0,
+        query: String::new(),
+        searching: false,
         preview_lines: Vec::new(),
     });
     let left = render(&state, &ui, &config, &loaded.dashboard, 80, 20);

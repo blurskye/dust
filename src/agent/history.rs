@@ -39,8 +39,6 @@ pub struct Conversation {
     pub title: String,
     /// Seconds since the Unix epoch.
     pub updated: u64,
-    /// Whether it was an open tab when last saved; open tabs come back after a restart.
-    pub open: bool,
 }
 
 #[must_use]
@@ -139,7 +137,6 @@ mod tests {
             session: Some("ses_1".into()),
             title: "why".into(),
             updated: 5,
-            open: true,
         };
         let entries = vec![
             Entry::User { text: "why".into(), context: Vec::new() },
