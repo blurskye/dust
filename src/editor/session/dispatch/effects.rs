@@ -8805,20 +8805,6 @@ impl InteractiveApplication {
     }
     /// Open the tutorial, a fresh copy of `assets/defaults/tutor.md` in the state directory, so
     /// the user practises on it and can save without touching the original, as in vimtutor.
-    pub(in crate::editor::session) fn open_tutor(&mut self) {
-        let path = crate::config::user_state_directory().join("tutor.md");
-        let written = path
-            .parent()
-            .map_or(Ok(()), std::fs::create_dir_all)
-            .and_then(|()| std::fs::write(&path, include_str!("../../../../assets/defaults/tutor.md")));
-        match written {
-            Ok(()) => {
-                self.set_dashboard_visibility(false);
-                self.start_open(path);
-            }
-            Err(error) => self.show_error(format!("could not write the tutorial: {error}")),
-        }
-    }
     /// Contextual help: what is available on the focused surface, read from the command
     /// registry through the dispatcher's own context check, so help can never advertise a
     /// command the dispatcher would refuse and can never drift from a renamed command.
@@ -11704,6 +11690,9 @@ impl InteractiveApplication {
             }
             AppEffect::GitConflictReplaceSubmit => {}
             AppEffect::Tutor => self.open_tutor(),
+            AppEffect::TutorNext => self.tutor_next(),
+            AppEffect::TutorBack => self.tutor_back(),
+            AppEffect::TutorQuit => self.tutor_quit(),
             AppEffect::HelpContextual => self.open_contextual_help(),
             AppEffect::HelpCommandReference => self.open_command_reference(),
             AppEffect::GitWorktreeOpen => self.open_git_worktree(),

@@ -57,6 +57,11 @@ pub enum EditorOperation {
         view: ViewId,
         position: ByteOffset,
     },
+    /// The column `j` and `k` aim for; any other cursor move clears it.
+    SetPreferredColumn {
+        view: ViewId,
+        column: usize,
+    },
     SetScroll {
         view: ViewId,
         first_line: usize,
@@ -360,9 +365,17 @@ fn apply_operation(
                 .get_mut(*view)
                 .ok_or(TransactionError::MissingView)?;
             target.cursor = *position;
+            target.preferred_column = None;
             if let Some(selection) = &mut target.selection {
                 selection.head = *position;
             }
+        }
+        EditorOperation::SetPreferredColumn { view, column } => {
+            state
+                .views
+                .get_mut(*view)
+                .ok_or(TransactionError::MissingView)?
+                .preferred_column = Some(*column);
         }
         EditorOperation::SetScroll { view, first_line } => {
             let target = state

@@ -153,6 +153,7 @@ impl InteractiveApplication {
             flash: None,
             agent: super::agent::AgentPanel::default(),
             pull_requests: super::pull_requests::PullRequests::default(),
+            tutor: super::tutor::Tutor::new(&state_directory),
             remote: None,
             syntax_spans_source: (Vec::new(), Vec::new()),
             window_session: WindowSession::new(dashboard_visible, terminal_panel_height),

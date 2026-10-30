@@ -41,7 +41,7 @@ pub use render::{
     explorer_panel_width, pane_viewports, picker_geometry, prompt_geometry,
     prompt_geometry_for_state, prompt_surface_dimensions, render, snap_display_column,
     snap_display_column_forward, terminal_panel_geometry, terminal_tab_at_column};
-pub use render::{AgentListRow, AgentPanelUi, DebugPane, DebugPanesUiState, transcript_lines};
+pub use render::{AgentListRow, AgentPanelUi, DebugPane, DebugPanesUiState, TutorCard, transcript_lines};
 pub use diff::{emphasise_changed_spans, parse_unified_patch};
 pub use terminal::{
     KeyInputKind, TerminalError, TerminalOptions, TerminalSession, UiEvent,

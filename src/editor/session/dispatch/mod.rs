@@ -173,6 +173,7 @@ struct InteractiveApplication {
     /// The ACP agent session and its transcript panel.
     agent: agent::AgentPanel,
     pull_requests: pull_requests::PullRequests,
+    tutor: tutor::Tutor,
     /// Where `dust --remote` from Dust's own terminals reaches this session.
     remote: Option<crate::remote::RemoteServer>,
     /// The parse results and views `ui.syntax_spans` and `ui.syntax_folds` were built from.
@@ -378,6 +379,7 @@ pub fn run_interactive(
             }
             application.handle_event(event);
         }
+        application.tutor_tick();
     }
     drop(terminal);
     application.finish_shutdown()
@@ -424,3 +426,4 @@ mod tests;
 mod render;
 mod shutdown;
 mod startup;
+mod tutor;

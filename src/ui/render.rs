@@ -1297,6 +1297,18 @@ pub struct UiState {
     pub large_file_buffers: Vec<crate::editor::BufferId>,
     /// The agent panel, drawn in place of the pane that shows its view.
     pub agent_panel: Option<AgentPanelUi>,
+    /// The interactive tutor's current step.
+    pub tutor: Option<TutorCard>,
+}
+
+/// One tutor step on a card above the status line. Text in `backticks` is drawn as keys.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TutorCard {
+    pub title: String,
+    pub text: String,
+    /// The previous step was just finished.
+    pub praised: bool,
+    pub footer: String,
 }
 
 #[derive(Clone, Debug)]
@@ -1565,6 +1577,91 @@ fn render_error_notification(
     );
 }
 
+/// Words of `text` wrapped to `width`, each line a list of (piece, is a key) runs.
+fn wrap_card_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<Vec<(String, bool)>> {
+    let mut lines = Vec::new();
+    let mut key = false;
+    for paragraph in text.split('\n') {
+        let mut line: Vec<(String, bool)> = Vec::new();
+        let mut used = 0;
+        for word in paragraph.split(' ').filter(|word| !word.is_empty()) {
+            let space_is_key = key;
+            let mut pieces = Vec::new();
+            for (index, piece) in word.split('`').enumerate() {
+                if index > 0 {
+                    key = !key;
+                }
+                if !piece.is_empty() {
+                    pieces.push((piece.to_owned(), key));
+                }
+            }
+            let word_width: usize = pieces.iter().map(|(piece, _)| text_width(piece, ambiguous)).sum();
+            if used > 0 && used + 1 + word_width > width {
+                lines.push(std::mem::take(&mut line));
+                used = 0;
+            }
+            if used > 0 {
+                line.push((" ".into(), space_is_key));
+                used += 1;
+            }
+            line.extend(pieces);
+            used += word_width;
+        }
+        lines.push(line);
+    }
+    lines
+}
+
+fn render_tutor_card(frame: &mut Frame, card: &TutorCard, config: &Config, width: u16, height: u16) {
+    let card_width = width.saturating_sub(2).min(64);
+    if card_width < 24 || height < 8 {
+        return;
+    }
+    let inner = card_width.saturating_sub(4);
+    let ambiguous = config.editor.ambiguous_width;
+    let mut rows: Vec<Vec<(String, Style)>> = Vec::new();
+    if card.praised {
+        rows.push(vec![("✓ Done! Next:".into(), Style::GitSignAdded)]);
+    }
+    for line in wrap_card_text(&card.text, usize::from(inner), ambiguous) {
+        rows.push(
+            line.into_iter()
+                .map(|(piece, key)| (piece, if key { Style::KeyHintKey } else { Style::Default }))
+                .collect(),
+        );
+    }
+    rows.push(Vec::new());
+    rows.push(vec![(card.footer.clone(), Style::Muted)]);
+    // Leave the status line and a row above the card free; long steps lose their last rows.
+    let card_height = u16::try_from(rows.len()).unwrap_or(u16::MAX).saturating_add(2).min(height.saturating_sub(3));
+    let top = height.saturating_sub(card_height.saturating_add(1));
+    let left = width.saturating_sub(card_width.saturating_add(1));
+    let right = left + card_width - 1;
+    let bottom = top + card_height - 1;
+    for y in top..=bottom {
+        for x in left..=right {
+            frame.grid.set_cell(x, y, " ", Style::Default);
+        }
+        frame.grid.set_cell(left, y, "│", Style::Accent);
+        frame.grid.set_cell(right, y, "│", Style::Accent);
+    }
+    for x in left + 1..right {
+        frame.grid.set_cell(x, top, "─", Style::Accent);
+        frame.grid.set_cell(x, bottom, "─", Style::Accent);
+    }
+    frame.grid.set_cell(left, top, "╭", Style::Accent);
+    frame.grid.set_cell(right, top, "╮", Style::Accent);
+    frame.grid.set_cell(left, bottom, "╰", Style::Accent);
+    frame.grid.set_cell(right, bottom, "╯", Style::Accent);
+    frame.grid.put_text_clipped(left + 2, top, &format!(" {} ", card.title), Style::Accent, right.saturating_sub(1));
+    for (row, y) in rows.iter().zip(top + 1..bottom) {
+        let mut x = left + 2;
+        for (piece, style) in row {
+            x = frame.grid.put_text_clipped(x, y, piece, *style, right.saturating_sub(1));
+        }
+    }
+}
+
 #[must_use]
 pub fn render(
     state: &EditorState,
@@ -1827,6 +1924,9 @@ pub fn render(
                 render_private_surface(&mut frame, surface, projected.rect);
             }
         }
+    }
+    if let Some(card) = &ui.tutor {
+        render_tutor_card(&mut frame, card, config, width, height);
     }
     if let Some(tool_menu) = &ui.tool_menu {
         render_tool_menu(&mut frame, tool_menu, config, width, workspace_height);

@@ -614,3 +614,82 @@ fn the_line_after_a_final_newline_is_never_a_normal_mode_line() {
     assert_eq!(app.state.buffers[buffer].text.to_string(), "one\n");
     assert_eq!(line(&app), 0, "dd on the last line lands on the line above");
 }
+
+#[test]
+fn tutor_moves_on_when_each_step_is_done() {
+    fn press(app: &mut InteractiveApplication, key: &str) {
+        app.handle_event(UiEvent::Key {
+            key: key.parse().unwrap(),
+            kind: crate::ui::KeyInputKind::Press,
+        });
+        app.tutor_tick();
+    }
+    fn title(app: &InteractiveApplication) -> String {
+        app.ui.tutor.as_ref().map(|card| card.title.clone()).unwrap_or_default()
+    }
+    fn cursor_line(app: &InteractiveApplication) -> String {
+        let view = &app.state.views[app.state.active_view.unwrap()];
+        let text = &app.state.buffers[view.buffer].text;
+        text.line(text.byte_to_line(view.cursor).unwrap()).unwrap().trim().to_owned()
+    }
+    let mut app = app();
+    app.process_effect(AppEffect::Tutor);
+    wait_vfs(&mut app);
+    app.tutor_tick();
+    assert!(title(&app).starts_with("Tutor 1/"), "{}", title(&app));
+    press(&mut app, "j");
+    assert!(title(&app).starts_with("Tutor 2/"), "{}", title(&app));
+    assert!(cursor_line(&app).starts_with("h  left"), "{}", cursor_line(&app));
+    for _ in 0..4 {
+        press(&mut app, "j");
+    }
+    assert_eq!(cursor_line(&app), "The X marks the spot.");
+    // `j` kept the column of `h` through the blank line, so `w` lands on the X.
+    press(&mut app, "w");
+    assert!(title(&app).starts_with("Tutor 3/"), "{}", title(&app));
+    // A step that checks text waits for the practice line to read right.
+    app.process_effect(AppEffect::TutorBack);
+    for _ in 0..7 {
+        app.process_effect(AppEffect::TutorNext);
+    }
+    app.tutor_tick();
+    assert!(title(&app).starts_with("Tutor 9/"), "{}", title(&app));
+    assert_eq!(cursor_line(&app), "Thhe cow jumpped over thee moon.");
+    for key in ["l", "x", "f", "p", "x", "$", "6", "h", "x"] {
+        press(&mut app, key);
+    }
+    let view = &app.state.views[app.state.active_view.unwrap()];
+    assert!(app.state.buffers[view.buffer].text.to_string().contains("    The cow jumped over the moon.\n"));
+    // The next step put the cursor on its own practice line.
+    assert!(title(&app).starts_with("Tutor 10/"), "{}", title(&app));
+    assert_eq!(cursor_line(&app), "Dust is a editor");
+    app.process_effect(AppEffect::TutorQuit);
+    assert!(app.ui.tutor.is_none());
+    app.process_effect(AppEffect::Tutor);
+    wait_vfs(&mut app);
+    app.tutor_tick();
+    assert!(title(&app).starts_with("Tutor 10/"), "{}", title(&app));
+}
+
+#[test]
+fn j_and_k_keep_their_column_across_shorter_lines() {
+    fn press(app: &mut InteractiveApplication, key: &str) {
+        app.handle_event(UiEvent::Key {
+            key: key.parse().unwrap(),
+            kind: crate::ui::KeyInputKind::Press,
+        });
+    }
+    let mut app = app();
+    app.set_dashboard_visibility(false);
+    let (_, view) = app
+        .state
+        .open_text(TextBuffer::from_text("abcdef\n\nab\nabcdef\n"), None);
+    app.state.views[view].cursor = ByteOffset(4);
+    for _ in 0..3 {
+        press(&mut app, "j");
+    }
+    assert_eq!(app.state.views[view].cursor, ByteOffset(15));
+    press(&mut app, "h");
+    press(&mut app, "k");
+    assert_eq!(app.state.views[view].cursor, ByteOffset(9));
+}

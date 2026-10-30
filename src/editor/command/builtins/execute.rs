@@ -13,7 +13,7 @@ use super::{
     super::{CommandError, CommandId, CommandInvocation, CommandOutcome},
     comment::build_comment_toggle,
     motion::{
-        block_start_column, motion_target, operator_range, repeat_visual_ranges, visual_ranges,
+        block_start_column, cursor_display_column, motion_target, on_last_character, operator_range, repeat_visual_ranges, visual_ranges,
     },
     pairs::{AutoPair, auto_pair, build_surround_add, build_surround_change, empty_pair_end},
     text_object::text_object,
@@ -81,6 +81,14 @@ pub(super) fn execute_builtin<E>(
                 }
             }
             let character = character_argument(invocation, "character")?;
+            // Like Vim, `j` and `k` keep the column they started from across shorter lines.
+            let wanted_column = match (motion, view.preferred_column) {
+                ("up" | "down", Some(column)) => Some(column),
+                ("up" | "down", None) => {
+                    Some(cursor_display_column(&buffer.text, view.cursor, state.policy)?)
+                }
+                _ => None,
+            };
             let target = motion_target(
                 &buffer.text,
                 view.cursor,
@@ -88,11 +96,25 @@ pub(super) fn execute_builtin<E>(
                 count,
                 character,
                 state.policy,
+                wanted_column,
             )?;
+            let target = if wanted_column.is_some()
+                && !matches!(view.mode, EditorMode::Insert | EditorMode::Replace)
+            {
+                on_last_character(&buffer.text, target)?
+            } else {
+                target
+            };
             transaction.operations.push(EditorOperation::SetCursor {
                 view: view_id,
                 position: target,
             });
+            if let Some(column) = wanted_column {
+                transaction.operations.push(EditorOperation::SetPreferredColumn {
+                    view: view_id,
+                    column,
+                });
+            }
         }
         "mode.normal" => {
             transaction.undo_policy = UndoPolicy::Boundary;

@@ -20,6 +20,7 @@ pub(super) fn motion_target(
     count: usize,
     character: Option<char>,
     policy: EditingPolicy,
+    wanted_column: Option<usize>,
 ) -> Result<ByteOffset, CommandError> {
     let mut target = cursor;
     match motion {
@@ -63,18 +64,14 @@ pub(super) fn motion_target(
         }
         "up" | "down" => {
             let line = text.byte_to_line(cursor).map_err(failed)?;
-            let start = text.line_to_byte(line).map_err(failed)?;
-            let source_line = text.line(line).map_err(failed)?;
-            let source_content = source_line.strip_suffix('\n').unwrap_or(&source_line);
             let width_policy = DisplayWidthPolicy {
                 tab_width: policy.tab_width,
                 ambiguous_wide: policy.ambiguous_width_wide,
             };
-            let column = display_column_at(
-                source_content,
-                cursor.get().saturating_sub(start.get()),
-                width_policy,
-            );
+            let column = match wanted_column {
+                Some(column) => column,
+                None => cursor_display_column(text, cursor, policy)?,
+            };
             let destination = if motion == "up" {
                 line.saturating_sub(count)
             } else {
@@ -382,7 +379,7 @@ pub(super) fn operator_range(
         let (line, last) = if motion == "line" {
             (cursor_line, cursor_line + count.saturating_sub(1))
         } else {
-            let target = motion_target(text, cursor, motion, count, character, policy)?;
+            let target = motion_target(text, cursor, motion, count, character, policy, None)?;
             let target_line = text.byte_to_line(target).map_err(failed)?;
             (cursor_line.min(target_line), cursor_line.max(target_line))
         };
@@ -412,7 +409,7 @@ pub(super) fn operator_range(
         }
         return ByteRange::new(cursor, end).map_err(failed);
     }
-    let target = motion_target(text, cursor, motion, count, character, policy)?;
+    let target = motion_target(text, cursor, motion, count, character, policy, None)?;
     let (start, mut end) = if target < cursor {
         (target, cursor)
     } else {
@@ -514,6 +511,39 @@ pub(super) fn word_class(character: char) -> u8 {
     } else {
         2
     }
+}
+
+/// In Normal mode the cursor sits on a character, so a line shorter than the wanted column
+/// puts it on its last one.
+pub(super) fn on_last_character(text: &TextBuffer, offset: ByteOffset) -> Result<ByteOffset, CommandError> {
+    let line = text.byte_to_line(offset).map_err(failed)?;
+    let start = text.line_to_byte(line).map_err(failed)?;
+    let end = line_content_end(text, line)?;
+    Ok(if offset >= end && end > start {
+        previous_grapheme_boundary(text, end)
+    } else {
+        offset
+    })
+}
+
+/// The cursor's screen column within its line, which `j` and `k` try to keep.
+pub(super) fn cursor_display_column(
+    text: &TextBuffer,
+    cursor: ByteOffset,
+    policy: EditingPolicy,
+) -> Result<usize, CommandError> {
+    let line = text.byte_to_line(cursor).map_err(failed)?;
+    let start = text.line_to_byte(line).map_err(failed)?;
+    let content = text.line(line).map_err(failed)?;
+    let content = content.strip_suffix('\n').unwrap_or(&content);
+    Ok(display_column_at(
+        content,
+        cursor.get().saturating_sub(start.get()),
+        DisplayWidthPolicy {
+            tab_width: policy.tab_width,
+            ambiguous_wide: policy.ambiguous_width_wide,
+        },
+    ))
 }
 
 pub(super) fn word_forward(text: &TextBuffer, cursor: ByteOffset) -> ByteOffset {

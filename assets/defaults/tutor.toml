@@ -1,0 +1,330 @@
+# The interactive tutor's lessons. `:Tutor` shows them one step at a time on a card and
+# moves on once the step is done.
+#
+# A step is done when:
+#   line   - a line of the practice file (tutor.md) reads this text, in Normal mode
+#   gone   - no line of the practice file reads this text, in Normal mode
+#   cursor - the text under the cursor starts with this
+#   done   - otherwise, when one of these commands runs ("id key=value ...")
+# A step with none of them waits for :TutorNext.
+# `at` puts the cursor on the practice line that reads this text when the step starts.
+
+[[step]]
+chapter = "Welcome"
+text = "Hi! I'm the tutor. Each step tells you what to try and moves on once you've done it. Stuck? `:TutorNext` skips a step, `:TutorBack` goes back, `:TutorQuit` stops and `:Tutor` picks up where you left. Start by pressing `j` to move down a line."
+done = ["input.motion motion=down"]
+
+[[step]]
+chapter = "Moving around"
+text = "`h` `j` `k` `l` move left, down, up and right. Move the cursor onto the X in “The X marks the spot.”"
+at = "h  left      j  down      k  up      l  right"
+cursor = "X marks"
+
+[[step]]
+chapter = "Moving around"
+text = "`w` jumps to the next word, `b` back a word, `e` to the end of a word. Press `w` a few times."
+done = ["input.motion motion=word_forward"]
+
+[[step]]
+chapter = "Moving around"
+text = "`0` goes to the start of the line, `$` to its end. Press `$`."
+done = ["input.motion motion=line_end"]
+
+[[step]]
+chapter = "Moving around"
+text = "`G` goes to the last line of the file. Press `G`."
+done = ["input.motion motion=document_end"]
+
+[[step]]
+chapter = "Moving around"
+text = "`gg` goes back to the first line. Press `gg`."
+done = ["input.motion motion=document_start"]
+
+[[step]]
+chapter = "Moving around"
+text = "Flash jumps anywhere on screen: press `s`, type two letters of where you want to go, then the label that appears there. Try reaching the word “flash”."
+at = "You can reach this flash word in three keys."
+done = ["editor.flash"]
+
+[[step]]
+chapter = "Moving around"
+text = "`f` and a letter jumps to that letter on the line, `t` just before it. `;` repeats. Try `fa`."
+done = ["input.find.begin"]
+
+[[step]]
+chapter = "Changing text"
+text = "`x` deletes the character under the cursor. Fix the line so it reads “The cow jumped over the moon.”"
+at = "Thhe cow jumpped over thee moon."
+line = "The cow jumped over the moon."
+
+[[step]]
+chapter = "Changing text"
+text = "`i` types before the cursor and `a` after it; `esc` goes back to Normal mode. Make the line read “Dust is a fast editor”, then press `esc`."
+at = "Dust is a editor"
+line = "Dust is a fast editor"
+
+[[step]]
+chapter = "Changing text"
+text = "`A` types at the end of the line. Finish it so it reads “Dust runs in a terminal.” and press `esc`."
+at = "Dust runs in a"
+line = "Dust runs in a terminal."
+
+[[step]]
+chapter = "Changing text"
+text = "`o` opens a new line below, `O` above. Press `o`, type “a new line”, then `esc`."
+at = "Open a line below this one."
+line = "a new line"
+
+[[step]]
+chapter = "Changing text"
+text = "Operators take a motion: `dw` deletes a word, `d$` to the end of the line. Delete the repeated words so it reads “This line has some repeated words.”"
+at = "This line has has some some repeated repeated words."
+line = "This line has some repeated words."
+
+[[step]]
+chapter = "Changing text"
+text = "`dd` deletes the whole line. Delete the line that says to."
+at = "DELETE THIS WHOLE LINE"
+gone = "DELETE THIS WHOLE LINE"
+
+[[step]]
+chapter = "Changing text"
+text = "`u` undoes. Press `u` to bring the line back."
+done = ["history.undo"]
+
+[[step]]
+chapter = "Changing text"
+text = "`ctrl-r` redoes. Press it to delete the line again."
+done = ["history.redo"]
+
+[[step]]
+chapter = "Changing text"
+text = "`c` changes: `ciw` replaces the word you are in. Change “red” to “green”."
+at = "This is a red apple."
+line = "This is a green apple."
+
+[[step]]
+chapter = "Changing text"
+text = "Text objects work inside pairs too: `ci\"` changes what is in the quotes. Make the greeting “hi”."
+at = "let greeting = \"hello there\";"
+line = "let greeting = \"hi\";"
+
+[[step]]
+chapter = "Changing text"
+text = "`r` replaces one character. Turn “Dusk” into “Dust”."
+at = "Dusk is fast."
+line = "Dust is fast."
+
+[[step]]
+chapter = "Changing text"
+text = "`J` joins a line with the next one. Join these two lines into one."
+at = "one line,"
+line = "one line, joined."
+
+[[step]]
+chapter = "Changing text"
+text = "`yy` copies a line and `p` pastes it below (`P` above). Copy “copy me” and paste it."
+at = "copy me"
+done = ["edit.put"]
+
+[[step]]
+chapter = "Changing text"
+text = "`gcc` comments a line out and back in; `gc` takes a motion like `gc3j`. Try `gcc`. Surrounds: `gsaiw\"` quotes a word, `gsd\"` removes the quotes."
+done = ["edit.operator operator=comment", "input.operator.begin operator=comment"]
+
+[[step]]
+chapter = "Visual mode"
+text = "`v` selects characters, `V` whole lines, `ctrl-v` a block. Then `d` deletes, `y` copies, `>` indents, `gc` comments. Press `V` on “alpha”, `2j`, then `>`."
+at = "alpha"
+done = ["mode.visual_line"]
+
+[[step]]
+chapter = "Visual mode"
+text = "Macros repeat keys: `qa` records into register a, `q` stops, `@a` replays. Record `qa` `I- ` `esc` `j` `q` on “first”, then `3@a`."
+at = "first"
+line = "- fourth"
+
+[[step]]
+chapter = "Search"
+text = "`/` searches forward, `?` backward. Type `/cat` and press `enter`."
+at = "The cat sat. The cat ran. Every cat naps."
+done = ["command_line.submit"]
+
+[[step]]
+chapter = "Search"
+text = "Change every “cat” to “dog”: `cw` `dog` `esc` on a match, then `n` jumps to the next one and `.` repeats the change."
+line = "The dog sat. The dog ran. Every dog naps."
+
+[[step]]
+chapter = "Search"
+text = "`*` searches for the word under the cursor, `#` backwards. Try `*` on any word."
+done = ["search.word"]
+
+[[step]]
+chapter = "Search"
+text = "`space` is the leader key: press it and wait, and a box lists what can follow. `<leader>/` searches every file of the project. Try it, then `esc`."
+done = ["workspace.search.prompt"]
+
+[[step]]
+chapter = "Search"
+text = "`<leader>sr` searches and replaces across files, with a preview. In any list type to filter, `enter` opens, `esc` closes."
+done = ["workspace.replace.prompt"]
+
+[[step]]
+chapter = "Files"
+text = "`<leader><space>` finds a file by name. Try it, then `esc`."
+done = ["workspace.file.find"]
+
+[[step]]
+chapter = "Files"
+text = "`<leader>fr` lists the files you opened recently."
+done = ["navigation.recents"]
+
+[[step]]
+chapter = "Files"
+text = "`<leader>e` shows the file explorer: `j` `k` move, `l` opens, `h` closes a folder, `a` adds a file, `r` renames, `d` deletes. Open it."
+done = ["explorer.panel.toggle"]
+
+[[step]]
+chapter = "Files"
+text = "In the explorer press `/` to search the whole tree. `enter` keeps the matches, `esc` clears them."
+done = ["explorer.search"]
+
+[[step]]
+chapter = "Files"
+text = "`ctrl-l` goes back to the editor, `ctrl-h` to the explorer. `<leader>e` hides it. Go back to the editor."
+done = ["surface.focus.right", "explorer.panel.toggle", "explorer.close"]
+
+[[step]]
+chapter = "Tabs and windows"
+text = "Every open file is a tab at the top. `ctrl-t` opens a new tab with the file finder. Try it, then pick a file or `esc`."
+done = ["buffer.new_tab"]
+
+[[step]]
+chapter = "Tabs and windows"
+text = "`H` and `L` move between tabs. Come back to this one with `H` or `L`. `ctrl-q` closes a tab and keeps its window."
+done = ["buffer.previous", "buffer.next"]
+
+[[step]]
+chapter = "Tabs and windows"
+text = "`<leader>,` lists the open buffers."
+done = ["buffer.picker.open"]
+
+[[step]]
+chapter = "Tabs and windows"
+text = "`<leader>|` splits the window side by side, `<leader>-` top and bottom. Split it."
+done = ["pane.split.horizontal", "pane.split.vertical"]
+
+[[step]]
+chapter = "Tabs and windows"
+text = "`ctrl-h` `ctrl-j` `ctrl-k` `ctrl-l` move between windows. Move to the other one."
+done = ["surface.focus.left", "surface.focus.right", "surface.focus.up", "surface.focus.down"]
+
+[[step]]
+chapter = "Tabs and windows"
+text = "`<leader>wm` zooms a window to the full screen and back."
+done = ["pane.zoom"]
+
+[[step]]
+chapter = "Tabs and windows"
+text = "`<leader>wd` closes the window; its file stays open as a tab."
+done = ["pane.close"]
+
+[[step]]
+chapter = "Terminal"
+text = "`ctrl-/` opens the terminal at the bottom. Open it and run something."
+done = ["terminal.toggle"]
+
+[[step]]
+chapter = "Terminal"
+text = "In the terminal, `esc esc` switches to Normal mode to scroll and copy with `v` and `y`; `i` types again. Try `esc esc`, then `ctrl-/` hides the terminal."
+done = ["terminal.mode.normal"]
+
+[[step]]
+chapter = "Code"
+text = "In a source file the language server starts on its own. `K` shows documentation, `gd` goes to the definition, `gr` lists references. Try `K`."
+done = ["lsp.hover", "lsp.definition", "lsp.references"]
+
+[[step]]
+chapter = "Code"
+text = "`<leader>ca` lists code actions, `<leader>cf` formats, `]d` goes to the next problem and `<leader>xx` lists them all. Try one."
+done = ["lsp.code_action", "lsp.format", "diagnostic.next", "diagnostic.open"]
+
+[[step]]
+chapter = "Tools"
+text = "`<leader>cm` opens the tool manager for language servers, formatters, linters and debuggers: `i` installs, `enter` shows details. Open it, then `esc`."
+done = ["tools.menu.open"]
+
+[[step]]
+chapter = "Debugging"
+text = "`<leader>db` toggles a breakpoint on the line, `<leader>ds` starts debugging, `<leader>dc` continues, `<leader>dO` steps over. Toggle a breakpoint."
+done = ["dap.breakpoint.toggle", "dap.session.start"]
+
+[[step]]
+chapter = "Git"
+text = "`<leader>gg` opens lazygit on top of everything; `q` closes it. `<leader>gf` shows this file's history."
+done = ["terminal.open profile=lazygit", "terminal.open profile=lazygit_file"]
+
+[[step]]
+chapter = "Git"
+text = "Changed lines are marked beside the numbers. `]h` and `[h` jump between changes, `<leader>ghp` previews one and `<leader>ghs` stages it."
+done = ["workspace.git.hunk.next", "workspace.git.hunk.previous", "workspace.git.hunk.preview"]
+
+[[step]]
+chapter = "Git"
+text = "`<leader>gw` lists worktrees and `<leader>gpp` pull requests (with gh). Try one."
+done = ["workspace.git.worktrees.open", "workspace.git.pr.list"]
+
+[[step]]
+chapter = "Agents"
+text = "`<leader>an` starts a coding agent (Claude, Codex, pi and others) in a panel beside your code. Start one."
+done = ["agent.new", "agent.toggle"]
+
+[[step]]
+chapter = "Agents"
+text = "Type in the panel and press `enter` to send. `esc` goes to Normal mode there, `i` types again. Press `esc`."
+done = ["agent.input.edit action=normal"]
+
+[[step]]
+chapter = "Agents"
+text = "`ctrl-t` opens another agent tab and asks which agent. `H` and `L` in Normal mode switch tabs, `ctrl-q` closes one."
+done = ["agent.tab.new", "agent.session.next", "agent.session.previous"]
+
+[[step]]
+chapter = "Agents"
+text = "`ctrl-p` picks the model, or another agent. `ctrl-o` sets the mode, `ctrl-r` resumes an earlier conversation."
+done = ["agent.model"]
+
+[[step]]
+chapter = "Agents"
+text = "`ctrl-h` goes back to the code. From there `<leader>aa` asks about the selection and `<leader>af` adds the file to your next question."
+done = ["surface.focus.left", "agent.ask", "agent.add_file"]
+
+[[step]]
+chapter = "Projects"
+text = "`<leader>fp` lists the project folders. `:sessionsave` and `:sessionload` keep layouts, and `:recovery` brings back unsaved work after a crash."
+done = ["workspace.root.list"]
+
+[[step]]
+chapter = "Look and feel"
+text = "`<leader>uC` picks a theme with a live preview."
+done = ["theme.select"]
+
+[[step]]
+chapter = "Look and feel"
+text = "`<leader>uw` wraps long lines, `<leader>ul` toggles line numbers, `<leader>uz` zen mode. Try one."
+done = ["view.wrap.toggle", "view.line_numbers.toggle", "view.zen.toggle"]
+
+[[step]]
+chapter = "Help"
+text = "`<leader>?` shows what you can do right where you are."
+done = ["overlay.help.contextual"]
+
+[[step]]
+chapter = "Help"
+text = "`<leader>:` lists every command, searchable. `:health` checks what works."
+done = ["command_palette.open"]
+
+[[step]]
+chapter = "Done"
+text = "That's the tour. Your settings go in ~/.config/dust/config.toml and your keys in keymaps.toml, only what you change. `:TutorNext` ends the tutor; `:Tutor` starts it again any time."

@@ -1,8 +1,10 @@
 # Dust tutorial
 
-This is a copy made for you. Edit it, break it, practise on it: `:Tutor` makes a fresh one
-whenever you like. Read it top to bottom with `j` and `k`, or jump between chapters with
-`/## ` and `n`.
+The card at the bottom right is your teacher. It gives you one thing to try at a time,
+puts the cursor on the text to practise on, and moves on by itself once you've done it.
+`:TutorNext` skips a step, `:TutorBack` goes back, `:TutorQuit` stops, and `:Tutor` picks up
+where you left. This file is a copy made for you: edit it, break it. It also works as a
+reference: read it with `j` and `k`, or jump between chapters with `/## ` and `n`.
 
 `<leader>` is the space bar. When you press it and wait, a hint box lists what can follow,
 so you never need to remember a whole key sequence: press `space`, read, continue.
@@ -74,9 +76,21 @@ Enter Insert mode with:
 
 Type, then press `esc`.
 
+Try it: delete the extra letters with `x`.
+
+    Thhe cow jumpped over thee moon.
+
 Try it: add the missing word to the line below so it reads "Dust is a fast editor".
 
     Dust is a editor
+
+Try it: finish this line with `A`.
+
+    Dust runs in a
+
+Try it: open a new line with `o`.
+
+    Open a line below this one.
 
 Deleting and changing work as operator + motion:
 
@@ -96,9 +110,27 @@ Try it: delete the repeated words.
 
     This line has has some some repeated repeated words.
 
+Try it: delete this line with `dd`, bring it back with `u`, delete it again with `ctrl-r`.
+
+    DELETE THIS WHOLE LINE
+
+Try it: change "red" to "green" with `ciw`.
+
+    This is a red apple.
+
 Try it: with the cursor inside the quotes, press `ci"` and type a new greeting.
 
     let greeting = "hello there";
+
+Try it: fix the first letter of "Dusk" with `r`, and join the two lines after it with `J`.
+
+    Dusk is fast.
+    one line,
+    joined.
+
+Try it: copy this line with `yy` and paste it with `p`.
+
+    copy me
 
 Comments and surrounds:
 

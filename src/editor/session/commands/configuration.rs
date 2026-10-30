@@ -284,11 +284,25 @@ pub(super) fn register_commands(
     register(
         registry,
         "session.tutor",
-        "Open the tutorial: every feature of Dust, with text to practise on",
+        "Start the interactive tutor, or pick up where you left it",
         ContextRequirement::Application,
         ArgumentSchema::default(),
         |_invocation| Ok(AppEffect::Tutor),
     )?;
+    for (id, description, effect) in [
+        ("session.tutor.next", "Skip to the next tutor step", AppEffect::TutorNext),
+        ("session.tutor.back", "Go back to the previous tutor step", AppEffect::TutorBack),
+        ("session.tutor.quit", "Stop the tutor; :Tutor picks up where it stopped", AppEffect::TutorQuit),
+    ] {
+        register(
+            registry,
+            id,
+            description,
+            ContextRequirement::Application,
+            ArgumentSchema::default(),
+            move |_invocation| Ok(effect.clone()),
+        )?;
+    }
     register(
         registry,
         "overlay.help.contextual",

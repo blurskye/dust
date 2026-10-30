@@ -92,6 +92,7 @@ impl InteractiveApplication {
         }
         if let Some(view) = self.state.views.get_mut(view) {
             view.cursor = target;
+            view.preferred_column = None;
             if let Some(selection) = view.selection.as_mut() {
                 selection.head = target;
             }
@@ -819,6 +820,7 @@ impl InteractiveApplication {
     }
 
     pub(super) fn invoke(&mut self, mut invocation: CommandInvocation) {
+        self.tutor_observe(&invocation);
         if !invocation.id.as_str().starts_with("lsp.documentation.") {
             self.close_documentation();
         }
