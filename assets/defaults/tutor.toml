@@ -272,7 +272,7 @@ done = ["workspace.git.hunk.next", "workspace.git.hunk.previous", "workspace.git
 
 [[step]]
 chapter = "Git"
-text = "`<leader>gw` lists worktrees and `<leader>gpp` pull requests (with gh). Try one."
+text = "`<leader>gw` lists worktrees and `<leader>gpp` pull requests (with gh or tea). Try one."
 done = ["workspace.git.worktrees.open", "workspace.git.pr.list"]
 
 [[step]]

@@ -13,6 +13,8 @@ use crate::{
 /// The renderer receives a projection, never this owner's mutable state.
 pub(super) struct NoticeSession {
     current: Option<(bool, String)>,
+    /// The current notice is a warning: something degraded, but the work went on.
+    warning: bool,
     history: VecDeque<(bool, String)>,
     deadline: Option<Instant>,
     logs: StructuredLogs,
@@ -27,6 +29,7 @@ impl NoticeSession {
     pub(super) fn new(config: &Config, persist: bool, crash_path: PathBuf, now: Instant) -> Self {
         Self {
             current: None,
+            warning: false,
             history: VecDeque::new(),
             deadline: None,
             logs: make_logs(config, persist),
@@ -57,6 +60,16 @@ impl NoticeSession {
             self.deadline = (!timeout.is_zero()).then_some(now + timeout);
         }
         self.current = Some((error, message));
+        self.warning = false;
+    }
+
+    pub(super) fn warn(&mut self, message: String, now: Instant, timeout: Duration) {
+        self.notify(message, false, now, timeout);
+        self.warning = true;
+    }
+
+    pub(super) fn is_warning(&self) -> bool {
+        self.current.is_some() && self.warning
     }
 
     pub(super) fn clear(&mut self) {
@@ -180,6 +193,10 @@ mod tests {
         assert_eq!(notices.current(), Some((true, "error")));
         notices.clear();
         assert_eq!(notices.current(), None);
+        notices.warn("offline".into(), now, Duration::ZERO);
+        assert!(notices.is_warning());
+        notices.notify("back".into(), false, now, Duration::ZERO);
+        assert!(!notices.is_warning());
     }
 
     #[test]

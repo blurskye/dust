@@ -1,6 +1,6 @@
-//! Pull request review through `gh`: pick a pull request to check out into its own worktree,
-//! list its review comments, and comment on the current line. Viewing, diffing and submitting
-//! a review run `gh` in a terminal float (see the `gh_pr_*` terminal profiles).
+//! Pull request review through the forge CLI (`gh` or `tea`): pick a pull request to check out
+//! into its own worktree, list its review comments, and comment on the current line. Viewing,
+//! diffing and submitting a GitHub review run `gh` in a terminal float (the `gh_pr_*` profiles).
 
 use std::path::PathBuf;
 
@@ -80,7 +80,37 @@ impl InteractiveApplication {
                 ForgeReply::List(Err(error))
                 | ForgeReply::CheckedOut(Err(error))
                 | ForgeReply::Comments(Err(error))
-                | ForgeReply::Commented(Err(error)) => self.show_error(format!("gh: {error}")),
+                | ForgeReply::Commented(Err(error)) => self.show_error(error),
+                ForgeReply::Offline { error, local } if local.is_empty() => {
+                    self.notify_warning(format!("pull requests unavailable: {error}"));
+                }
+                ForgeReply::Offline { error, local } => {
+                    let items = local
+                        .into_iter()
+                        .map(|(number, path)| {
+                            (
+                                PickerItem {
+                                    badge: "local".into(),
+                                    kind: PickerItemKind::Entry,
+                                    id: PickerItemId(format!("pr:{number}")),
+                                    label: format!("#{number}"),
+                                    detail: path.display().to_string(),
+                                    source: String::new(),
+                                    action: PickerAction::None,
+                                },
+                                PickerPayload::GitWorktree {
+                                    name: format!("pr-{number}"),
+                                    path,
+                                },
+                            )
+                        })
+                        .collect();
+                    self.install_picker("Pull Requests (local)".to_owned(), items);
+                    self.search
+                        .set_picker_footer("Enter Open the worktree · Esc Close".to_owned());
+                    self.sync_picker_ui();
+                    self.notify_warning(format!("{error} · showing local checkouts"));
+                }
                 ForgeReply::List(Ok(list)) if list.is_empty() => {
                     self.notify_message("no open pull requests".into(), false);
                 }

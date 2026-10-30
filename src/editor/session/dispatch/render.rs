@@ -155,6 +155,15 @@ impl InteractiveApplication {
         );
         self.project_notice();
     }
+    /// A small yellow notice: something is missing, but what could be shown is shown.
+    pub(super) fn notify_warning(&mut self, message: String) {
+        self.notices.warn(
+            message,
+            self.clock.monotonic(),
+            Duration::from_millis(self.configuration.settings().ui.notifications.timeout_ms),
+        );
+        self.project_notice();
+    }
     pub(super) fn clear_notice(&mut self) {
         self.notices.clear();
         self.project_notice();
@@ -163,6 +172,7 @@ impl InteractiveApplication {
         let current = self.notices.current();
         self.ui.notification = current.map(|(_, message)| message.to_owned());
         self.ui.notification_error = current.is_some_and(|(error, _)| error);
+        self.ui.notification_warning = self.notices.is_warning();
     }
     /// Project the operation bar from the repository's REAL state. It is projected whenever the
     /// status is refreshed rather than per frame, and it is cleared when nothing is paused, so

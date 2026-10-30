@@ -1250,6 +1250,7 @@ pub struct UiState {
     pub prompt: Option<PromptState>,
     pub notification: Option<String>,
     pub notification_error: bool,
+    pub notification_warning: bool,
     pub search_query: Option<String>,
     /// The `s` jump's matches and labels while it is active.
     pub flash: Option<FlashOverlay>,
@@ -1994,7 +1995,13 @@ pub fn render(
     if let Some(message) = ui.notification.as_ref() {
         // Messages show in a box at the top right, like errors, and fade after the
         // configured timeout.
-        let style = if ui.notification_error { Style::Error } else { Style::Accent };
+        let style = if ui.notification_error {
+            Style::Error
+        } else if ui.notification_warning {
+            Style::Warning
+        } else {
+            Style::Accent
+        };
         render_error_notification(&mut frame, message, style, config, width, workspace_height);
     } else if let Some(message) = ui.config_diagnostic.as_ref() {
         render_error_notification(
