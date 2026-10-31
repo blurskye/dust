@@ -143,6 +143,22 @@ impl LspSession {
                     .cloned()
             })
     }
+    pub(in crate::editor::session) fn formatting_server(
+        &self,
+        buffer: BufferId,
+        document: &LspDocument,
+    ) -> Option<String> {
+        self.sessions
+            .iter()
+            .filter(|(_, state)| {
+                state.definition.supports_language(&document.language_id)
+                    && state.documents.contains_key(&buffer)
+                    && document.path.starts_with(&state.root_path)
+                    && state.capabilities.as_ref().is_some_and(|c| c.formatting)
+            })
+            .map(|(key, _)| key.clone())
+            .min()
+    }
     pub(in crate::editor::session) fn request_projected(
         &mut self,
         server: &str,

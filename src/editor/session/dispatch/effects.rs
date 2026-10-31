@@ -1254,6 +1254,36 @@ impl InteractiveApplication {
         }
     }
 
+    /// Asked for by the user, a saved session replaces what is open unless that would lose work.
+    pub(super) fn load_session_on_request(&mut self) {
+        if !self.configuration.settings().persistence.enabled {
+            self.show_error(self.message("session_disabled", &[]));
+            return;
+        }
+        if self.state.buffers.values().any(|buffer| buffer.dirty) {
+            self.show_error(self.message("session_load_dirty", &[]));
+            return;
+        }
+        let result = self.persistence.load_session(
+            self.persistence_policy(),
+            RestoreContext {
+                editor: &self.state,
+                workspace: &self.workspace,
+                input: &self.input,
+                windows: &self.window_session,
+                configuration: self.configuration.binding_revision(),
+            },
+            true,
+        );
+        match result {
+            Ok(()) => {
+                self.session_load_requested = true;
+                self.configuration.begin_theme_restore();
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+
     pub(super) fn load_persistence(&mut self) {
         let configured = &self.configuration.settings().persistence;
         if !configured.enabled || !configured.restore_on_startup {
@@ -1347,8 +1377,14 @@ impl InteractiveApplication {
     }
 
     pub(super) fn save_persistence(&mut self) {
+        if self.configuration.settings().persistence.save_on_exit {
+            self.write_persistence();
+        }
+    }
+
+    fn write_persistence(&mut self) {
         let configured = &self.configuration.settings().persistence;
-        if !configured.enabled || !configured.save_on_exit || self.persistence.pending() {
+        if !configured.enabled || self.persistence.pending() {
             return;
         }
         let mut metadata = self.tooling.metadata();
@@ -1408,6 +1444,15 @@ impl InteractiveApplication {
     }
 
     pub(super) fn process_persistence_events(&mut self) {
+        self.read_persistence_events();
+        // A project with no saved session file finishes loading without any event.
+        if self.session_load_requested && !self.persistence.pending() {
+            self.session_load_requested = false;
+            self.notify_message(self.message("session_load_none", &[]), false);
+        }
+    }
+
+    fn read_persistence_events(&mut self) {
         while let Some(event) = self.persistence.poll() {
             match event {
                 Ok(mut state) => {
@@ -1440,11 +1485,20 @@ impl InteractiveApplication {
                         state.search_history,
                         configured,
                     );
+                    let requested = std::mem::take(&mut self.session_load_requested);
+                    let found = session.is_some();
                     if let Some(session) = session {
                         self.restore_session(session);
                     }
+                    if requested {
+                        let message = if found { "session_restored" } else { "session_load_none" };
+                        self.notify_message(self.message(message, &[]), false);
+                    }
                 }
-                Err(error) => self.ui.config_diagnostic = Some(error),
+                Err(error) => {
+                    self.session_load_requested = false;
+                    self.ui.config_diagnostic = Some(error);
+                }
             }
         }
         if self.persistence.take_save_request() {
@@ -1788,13 +1842,14 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::SessionSave => {
-                self.save_persistence();
-                self.notify_message(self.message("session_save_queued", &[]), false);
+                if self.configuration.settings().persistence.enabled {
+                    self.write_persistence();
+                    self.notify_message(self.message("session_saved", &[]), false);
+                } else {
+                    self.show_error(self.message("session_disabled", &[]));
+                }
             }
-            AppEffect::SessionLoad => {
-                self.load_persistence();
-                self.notify_message(self.message("session_load_queued", &[]), false);
-            }
+            AppEffect::SessionLoad => self.load_session_on_request(),
             AppEffect::HistoryClear => {
                 self.input.clear_history();
                 self.notify_message(self.message("history_cleared", &[]), false);
@@ -11923,7 +11978,11 @@ impl InteractiveApplication {
                 quit_after,
                 path,
                 force,
-            } => self.start_save(quit_after, path, force),
+            } => {
+                if path.is_some() || force || !self.begin_format_on_save(quit_after) {
+                    self.start_save(quit_after, path, force);
+                }
+            }
             AppEffect::OpenPath(path) => self.start_open(path),
             // Settings files are optional, so the first open creates an empty one to edit.
             AppEffect::OpenUserFile(path) => {
@@ -12214,6 +12273,7 @@ impl InteractiveApplication {
                     crate::editor::session::ViewToggle::RelativeNumbers => "relative numbers",
                     crate::editor::session::ViewToggle::IndentGuides => "indent guides",
                     crate::editor::session::ViewToggle::GitSigns => "git signs",
+                    crate::editor::session::ViewToggle::FormatOnSave => "format on save",
                 };
                 self.ensure_cursor_visible();
                 self.notify_message(
@@ -12464,6 +12524,49 @@ impl InteractiveApplication {
             Err(e) => self.show_document_failure(e),
         }
     }
+    /// Ask the language server to format, and save when it answers. False when there is nothing
+    /// to wait for, so the caller saves right away.
+    fn begin_format_on_save(&mut self, quit_after: bool) -> bool {
+        if !self.configuration.settings().lsp.format_on_save || self.format_on_save.is_some() {
+            return false;
+        }
+        let Some((buffer, document)) = self.active_lsp_document_without_text() else {
+            return false;
+        };
+        if self.language.formatting_server(buffer, &document).is_none() {
+            return false;
+        }
+        self.format_on_save = Some(super::FormatOnSave {
+            buffer,
+            quit_after,
+            // VS Code gives formatters 750ms by default; a slow server must not hold a save back.
+            deadline: std::time::Instant::now() + std::time::Duration::from_millis(1000),
+        });
+        self.request_lsp(LspFeature::Formatting);
+        true
+    }
+
+    pub(in crate::editor::session) fn finish_format_on_save(&mut self) {
+        let Some(pending) = self.format_on_save.take() else {
+            return;
+        };
+        if self.state.active_buffer_id() == Some(pending.buffer) {
+            self.start_save(pending.quit_after, None, false);
+        } else {
+            self.show_error(self.message("format_on_save_skipped", &[]));
+        }
+    }
+
+    pub(super) fn process_format_on_save_deadline(&mut self) {
+        if self
+            .format_on_save
+            .as_ref()
+            .is_some_and(|pending| std::time::Instant::now() >= pending.deadline)
+        {
+            self.finish_format_on_save();
+        }
+    }
+
     pub(in crate::editor::session) fn start_save(
         &mut self,
         quit_after: bool,

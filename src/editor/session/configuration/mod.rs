@@ -85,6 +85,7 @@ pub enum ViewToggle {
     RelativeNumbers,
     IndentGuides,
     GitSigns,
+    FormatOnSave,
 }
 
 /// What zen mode turned off, put back when it ends.
@@ -340,6 +341,11 @@ impl ConfigurationSession {
             ViewToggle::GitSigns => {
                 editor.git_signs.enabled = !editor.git_signs.enabled;
                 editor.git_signs.enabled
+            }
+            ViewToggle::FormatOnSave => {
+                let lsp = &mut self.accepted.settings.lsp;
+                lsp.format_on_save = !lsp.format_on_save;
+                lsp.format_on_save
             }
         }
     }

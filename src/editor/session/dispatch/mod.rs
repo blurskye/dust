@@ -154,7 +154,16 @@ impl<T> std::ops::DerefMut for Tracked<T> {
     }
 }
 
+/// A save waiting for the language server to format the buffer.
+struct FormatOnSave {
+    buffer: crate::editor::BufferId,
+    quit_after: bool,
+    deadline: std::time::Instant,
+}
+
 struct InteractiveApplication {
+    format_on_save: Option<FormatOnSave>,
+    session_load_requested: bool,
     notices: super::notifications::NoticeSession,
     clock: std::sync::Arc<dyn crate::clock::Clock>,
     state: Tracked<EditorState>,
@@ -311,6 +320,7 @@ pub fn run_interactive(
         application.process_nix_lsp_workspace();
         application.process_dap_project_root();
         application.process_lsp_events();
+        application.process_format_on_save_deadline();
         application.restart_lsp_if_due();
         application.process_dap_events();
         application.process_execution_preflight();

@@ -2263,6 +2263,12 @@ impl InteractiveApplication {
         method: String,
         message: String,
     ) {
+        // A formatter that fails must not cost the save.
+        if method == "textDocument/formatting" && self.format_on_save.is_some() {
+            self.append_lsp_log(format!("format on save failed: {message}"));
+            self.finish_format_on_save();
+            return;
+        }
         if method == "textDocument/inlayHint" {
             if self.language.fail_inlay(&server, generation) {
                 self.schedule_lsp_inlay_warmup_retry();
@@ -2630,7 +2636,14 @@ impl InteractiveApplication {
         let Some((buffer, document)) = self.active_lsp_document() else {
             return;
         };
-        let server = self.language.supporting_server(buffer, &document);
+        let server = if matches!(feature, LspFeature::Formatting) {
+            // Not every server on a file formats it: Tailwind sits beside the TypeScript one.
+            self.language
+                .formatting_server(buffer, &document)
+                .or_else(|| self.language.supporting_server(buffer, &document))
+        } else {
+            self.language.supporting_server(buffer, &document)
+        };
         let Some(server) = server else {
             self.start_lsp(None);
             return;
@@ -2852,6 +2865,27 @@ impl InteractiveApplication {
                     if document.uri.is_empty() {
                         document.uri = uri.into();
                     }
+                }
+                // Formatting was asked for and touches one file, so it applies without a review.
+                if matches!(method, "textDocument/formatting" | "textDocument/rangeFormatting") {
+                    // Typing while the server worked moved the text its edits point at.
+                    let edit_is_current = context.as_ref().is_none_or(|context| {
+                        self.language.edit_context_current(context)
+                            && context.document_source(uri).is_none_or(|(buffer, version)| {
+                                self.state.buffers.get(*buffer).is_some_and(|buffer| {
+                                    buffer.text.source_version() == *version
+                                })
+                            })
+                    });
+                    let has_edits = edit.documents.iter().any(|document| !document.edits.is_empty());
+                    if edit_is_current && has_edits {
+                        let encoding = self.lsp_position_encoding();
+                        if let Err(error) = self.apply_lsp_workspace_edit(edit, encoding) {
+                            self.show_error(error);
+                        }
+                    }
+                    self.finish_format_on_save();
+                    return;
                 }
                 self.begin_workspace_proposal_owned(
                     self.message("workspace_edit_lsp_label", &[]),
@@ -3091,6 +3125,10 @@ impl InteractiveApplication {
                 }
             }
             LspFeatureResult::Colors(_) => {}
+            // Nothing to change is a normal answer from a formatter.
+            LspFeatureResult::Empty if method == "textDocument/formatting" => {
+                self.finish_format_on_save();
+            }
             LspFeatureResult::Empty => self.show_error(self.message("lsp_no_result", &[])),
         }
     }

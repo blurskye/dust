@@ -1451,6 +1451,8 @@ impl InteractiveApplication {
     fn show_agent_panel(&mut self) {
         let previous = self.active_tab_focus();
         if self.agent_pane().is_none() {
+            let pane_width = crate::ui::active_editor_pane_viewport(&self.state, &self.ui)
+                .map(|viewport| u32::from(viewport.width));
             if self.state.active_view.is_some() {
                 self.apply_layout_action(LayoutAction::Split(Axis::Horizontal));
             }
@@ -1475,11 +1477,15 @@ impl InteractiveApplication {
             }
             // A plain split would give the panel half the screen; it opens narrower.
             if let (Some(code), Some(panel)) = (previous, self.active_tab_focus()) {
-                let width = self.configuration.settings().agents.panel_width;
+                let share = u32::from(self.configuration.settings().agents.panel_width) * 10;
+                // A conversation needs about 40 columns, however narrow the terminal is.
+                let readable = pane_width.map_or(share, |width| {
+                    (40 * 1_000 / width.max(1)).min(700)
+                });
                 let _ = self.state.set_split_ratio_between(
                     code,
                     panel,
-                    1_000u16.saturating_sub(width.saturating_mul(10)),
+                    1_000u16.saturating_sub(share.max(readable) as u16),
                 );
             }
         }

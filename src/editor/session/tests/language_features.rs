@@ -319,3 +319,101 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
     assert!(app.ui.documentation_popup.is_none());
     assert!(app.ui.notification_error);
 }
+
+fn app_waiting_to_save_formatted(name: &str) -> (InteractiveApplication, crate::editor::BufferId, std::path::PathBuf, String) {
+    let mut app = app();
+    let path = app.state.workspace_root.join(name);
+    std::fs::write(&path, "a  b\n").unwrap();
+    let (buffer, _) = app.state.open_text(
+        crate::editor::text::TextBuffer::from_text("a  b\n"),
+        Some(path.clone()),
+    );
+    app.set_dashboard_visibility(false);
+    app.state.set_buffer_dirty(buffer, true);
+    app.reconcile_editor_windows();
+    app.format_on_save = Some(super::super::FormatOnSave {
+        buffer,
+        quit_after: false,
+        deadline: std::time::Instant::now() + std::time::Duration::from_secs(60),
+    });
+    let uri = format!("file://{}", path.display());
+    (app, buffer, path, uri)
+}
+
+#[test]
+fn a_format_result_applies_without_a_review_and_finishes_the_waiting_save() {
+    use crate::language::lsp::{
+        LspDocumentEdit, LspFeatureResult, LspPosition, LspRange, LspTextEdit, LspWorkspaceEdit,
+    };
+    let (mut app, buffer, path, uri) = app_waiting_to_save_formatted("formatted.txt");
+    let position = |character| LspPosition { line: 0, character };
+    app.present_lsp_result(
+        "formatter",
+        1,
+        "textDocument/formatting",
+        &uri,
+        LspFeatureResult::WorkspaceEdit(LspWorkspaceEdit {
+            resources: Vec::new(),
+            documents: vec![LspDocumentEdit {
+                uri: String::new(),
+                version: None,
+                edits: vec![LspTextEdit {
+                    range: LspRange {
+                        start: position(1),
+                        end: position(3),
+                    },
+                    new_text: " ".into(),
+                }],
+            }],
+        }),
+    );
+    assert!(app.format_on_save.is_none());
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "a b\n");
+    super::wait_vfs(&mut app);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "a b\n");
+}
+
+#[test]
+fn a_save_still_happens_when_the_formatter_has_nothing_fails_or_is_slow() {
+    let (mut app, _, path, uri) = app_waiting_to_save_formatted("nothing.txt");
+    app.present_lsp_result(
+        "formatter",
+        1,
+        "textDocument/formatting",
+        &uri,
+        crate::language::lsp::LspFeatureResult::Empty,
+    );
+    assert!(app.format_on_save.is_none());
+    super::wait_vfs(&mut app);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "a  b\n");
+    assert!(!app.state.buffers[app.state.active_buffer_id().unwrap()].dirty);
+
+    let (mut app, buffer, ..) = app_waiting_to_save_formatted("failed.txt");
+    app.handle_lsp_request_failure(
+        "formatter".into(),
+        1,
+        "textDocument/formatting".into(),
+        "formatter crashed".into(),
+    );
+    assert!(app.format_on_save.is_none());
+    super::wait_vfs(&mut app);
+    assert!(!app.state.buffers[buffer].dirty);
+
+    let (mut app, buffer, ..) = app_waiting_to_save_formatted("slow.txt");
+    app.process_format_on_save_deadline();
+    assert!(app.format_on_save.is_some());
+    app.format_on_save.as_mut().unwrap().deadline = std::time::Instant::now();
+    app.process_format_on_save_deadline();
+    assert!(app.format_on_save.is_none());
+    super::wait_vfs(&mut app);
+    assert!(!app.state.buffers[buffer].dirty);
+}
+
+#[test]
+fn loading_a_session_refuses_to_replace_unsaved_work() {
+    let (mut app, buffer, ..) = app_waiting_to_save_formatted("unsaved.txt");
+    app.load_session_on_request();
+    assert!(!app.session_load_requested);
+    assert!(app.state.buffers.contains_key(buffer));
+    assert!(app.state.buffers[buffer].dirty);
+}

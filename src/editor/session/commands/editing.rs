@@ -252,6 +252,7 @@ pub(super) fn register_commands(
         ),
         ("view.indent_guides.toggle", "Toggle indent guides", ViewToggle::IndentGuides),
         ("view.git_signs.toggle", "Toggle git signs", ViewToggle::GitSigns),
+        ("view.format_on_save.toggle", "Toggle format on save", ViewToggle::FormatOnSave),
     ] {
         register(
             registry,

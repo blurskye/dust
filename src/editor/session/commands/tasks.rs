@@ -1,6 +1,6 @@
 use super::{
     AppEffect, ArgumentSchema, ArgumentType, CommandError, CommandRegistry, ContextRequirement,
-    SyntaxFoldAction, register, string_arg,
+    PromptKind, SyntaxFoldAction, register, string_arg,
 };
 
 pub(super) fn register_commands(
@@ -42,6 +42,23 @@ pub(super) fn register_commands(
             ))
         },
     )?;
+    for (id, description, initial) in [
+        ("test.run.prompt", "Run test by name", "test name="),
+        ("test.list.prompt", "Show test results by name", "tests name="),
+        ("test.stop.prompt", "Stop test by name", "teststop name="),
+    ] {
+        register(
+            registry,
+            id,
+            description,
+            ContextRequirement::Workspace,
+            ArgumentSchema::default(),
+            move |_| AppEffect::OpenPrompt {
+                kind: PromptKind::Command,
+                initial: initial.to_owned(),
+            },
+        )?;
+    }
     register(
         registry,
         "test.run",

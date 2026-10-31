@@ -3858,6 +3858,12 @@ icon = "󰅩"
 order = 10
 
 [[key_group]]
+id = "builtin.global.group.test"
+context = "global"
+prefix = "<leader> t"
+label = "Test"
+
+[[key_group]]
 id = "builtin.global.group.debug"
 context = "global"
 prefix = "<leader> d"
@@ -4425,6 +4431,41 @@ context = "global"
 keys = "<leader> u G"
 command = "view.git_signs.toggle"
 desc = "Toggle Git Signs"
+
+[[keymap]]
+id = "builtin.global.ui-format-on-save"
+context = "global"
+keys = "<leader> u f"
+command = "view.format_on_save.toggle"
+desc = "Toggle Format on Save"
+
+[[keymap]]
+id = "builtin.global.session-restore"
+context = "global"
+keys = "<leader> q s"
+command = "session.load"
+desc = "Restore Session"
+
+[[keymap]]
+id = "builtin.global.test-run"
+context = "global"
+keys = "<leader> t t"
+command = "test.run.prompt"
+desc = "Run Test"
+
+[[keymap]]
+id = "builtin.global.test-results"
+context = "global"
+keys = "<leader> t s"
+command = "test.list.prompt"
+desc = "Test Results"
+
+[[keymap]]
+id = "builtin.global.test-stop"
+context = "global"
+keys = "<leader> t S"
+command = "test.stop.prompt"
+desc = "Stop Test"
 
 [[keymap]]
 id = "builtin.global.ui-zen"

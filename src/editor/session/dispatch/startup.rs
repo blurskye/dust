@@ -158,6 +158,8 @@ impl InteractiveApplication {
             border_drag: None,
             remote: None,
             syntax_spans_source: (Vec::new(), Vec::new()),
+            format_on_save: None,
+            session_load_requested: false,
             window_session: WindowSession::new(dashboard_visible, terminal_panel_height),
             tooling,
             language: super::super::lsp::LspSession::default(),

@@ -145,6 +145,9 @@ pub(super) struct LspSession {
     fixture_capabilities: Option<LspCapabilities>,
 }
 impl LspSession {
+    pub(in crate::editor::session) fn edit_context_current(&self, context: &EditContext) -> bool {
+        self.service.edit_context_current(context)
+    }
     pub(super) fn register_navigation_read(
         &mut self,
         id: crate::files::RequestId,
