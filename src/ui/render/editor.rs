@@ -33,6 +33,16 @@ fn diagnostic_style(severity: crate::workspace::DiagnosticSeverity) -> Style {
     }
 }
 
+/// Guides keep their own colour over syntax (a multi-line string's indentation is part of the
+/// string), but a selection or search match still shows through them.
+fn indent_guide_style(style: Style, active: bool) -> Style {
+    match style {
+        Style::Selection | Style::Search => style,
+        _ if active => Style::Muted,
+        _ => Style::Border,
+    }
+}
+
 fn diagnostic_label(diagnostic: &UiDiagnostic) -> String {
     let message = diagnostic
         .message
@@ -534,12 +544,8 @@ pub(super) fn render_editor_view(
                         x,
                         screen_row,
                         guide.unwrap_or(" "),
-                        if guide.is_some() && style == Style::Default {
-                            if active_guide {
-                                Style::Muted
-                            } else {
-                                Style::Border
-                            }
+                        if guide.is_some() {
+                            indent_guide_style(style, active_guide)
                         } else {
                             style
                         },
@@ -581,15 +587,7 @@ pub(super) fn render_editor_view(
                             x,
                             screen_row,
                             guide,
-                            if style == Style::Default {
-                                if active_guide {
-                                    Style::Muted
-                                } else {
-                                    Style::Border
-                                }
-                            } else {
-                                style
-                            },
+                            indent_guide_style(style, active_guide),
                         );
                     } else {
                         grid.set_cell(x, screen_row, grapheme, style);

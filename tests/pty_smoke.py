@@ -426,7 +426,7 @@ def main() -> None:
         assert code == 0, code
         dashboard = terminal_screen(snapshots[0])
         assert pathlib.Path(directory).as_posix() in dashboard
-        assert "File explorer" in dashboard
+        assert "Explorer" in dashboard
         assert "package activations complete" not in dashboard
         command_screen = terminal_screen(snapshots[1])
         assert "package activations complete" not in command_screen
@@ -1607,20 +1607,9 @@ show_path = true
 identity = "CUSTOM DASH"
 version_format = "release {version}"
 resize_message = "MAKE ROOM"
-unbound_label = "none"
-key_format = "<{key}>"
 content_width = 66
 minimum_width = 20
 minimum_height = 7
-block_height = 9
-identity_row = 0
-version_row = 1
-path_row = 3
-actions_row = 5
-action_key_width = 12
-action_left_offset = 2
-compact_left = 1
-compact_top = 1
 
 [[action]]
 command = "command_line.open"

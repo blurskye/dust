@@ -170,6 +170,9 @@ const fn default_true() -> bool {
 pub struct DashboardActionConfig {
     pub command: String,
     pub label: String,
+    /// A one-cell glyph shown before the label; empty for none.
+    #[serde(default)]
+    pub icon: String,
     #[serde(default = "default_true")]
     pub visible: bool,
     #[serde(default = "default_true")]
@@ -181,53 +184,41 @@ pub struct DashboardActionConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DashboardConfig {
+    /// Big block letters shown on top; `identity` stands in when the screen is too small for
+    /// them, or when this is empty.
+    #[serde(default)]
+    pub logo: String,
     pub show_identity: bool,
-    pub show_version: bool,
-    pub show_path: bool,
     pub identity: String,
+    pub show_version: bool,
     pub version_format: String,
+    pub show_path: bool,
     pub resize_message: String,
-    pub unbound_label: String,
-    pub key_format: String,
+    /// Width of the action rows; the key sits at their right end.
     pub content_width: u16,
     pub minimum_width: u16,
     pub minimum_height: u16,
-    pub block_height: u16,
-    pub identity_row: u16,
-    pub version_row: u16,
-    pub path_row: u16,
-    pub actions_row: u16,
-    pub action_key_width: u16,
-    pub action_left_offset: u16,
-    pub compact_left: u16,
-    pub compact_top: u16,
     #[serde(default)]
     pub action: Vec<DashboardActionConfig>,
 }
 
 impl DashboardConfig {
     fn validate(&self) -> Result<(), String> {
-        if self.content_width == 0
-            || self.minimum_width == 0
-            || self.minimum_height == 0
-            || self.block_height == 0
-            || self.action_key_width == 0
-        {
+        if self.content_width == 0 || self.minimum_width == 0 || self.minimum_height == 0 {
             return Err("dashboard dimensions must be positive".into());
         }
         if !self.version_format.contains("{version}") {
             return Err("dashboard version_format must contain `{version}`".into());
         }
-        if !self.key_format.contains("{key}") {
-            return Err("dashboard key_format must contain `{key}`".into());
-        }
         if self.content_width > 1_000
-            || self.block_height > 1_000
             || self.action.len() > 1_000
+            || self.logo.lines().count() > 64
+            || self.logo.chars().any(|c| c.is_control() && c != '\n')
             || self
                 .identity
                 .chars()
                 .chain(self.resize_message.chars())
+                .chain(self.action.iter().flat_map(|action| action.icon.chars()))
                 .any(char::is_control)
         {
             return Err("dashboard presentation exceeds safe bounds".into());
@@ -239,26 +230,16 @@ impl DashboardConfig {
 impl Default for DashboardConfig {
     fn default() -> Self {
         Self {
+            logo: String::new(),
             show_identity: true,
-            show_version: true,
-            show_path: true,
             identity: "D U S T".into(),
+            show_version: true,
             version_format: "v{version}".into(),
+            show_path: true,
             resize_message: "Dust — resize terminal".into(),
-            unbound_label: "unbound".into(),
-            key_format: "[{key}]".into(),
-            content_width: 70,
+            content_width: 50,
             minimum_width: 20,
             minimum_height: 7,
-            block_height: 9,
-            identity_row: 0,
-            version_row: 1,
-            path_row: 3,
-            actions_row: 5,
-            action_key_width: 12,
-            action_left_offset: 2,
-            compact_left: 1,
-            compact_top: 1,
             action: Vec::new(),
         }
     }

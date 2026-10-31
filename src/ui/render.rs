@@ -171,6 +171,7 @@ impl PromptState {
 pub struct DashboardAction {
     pub command: String,
     pub label: String,
+    pub icon: String,
     pub key: Option<String>,
 }
 
@@ -1743,7 +1744,22 @@ pub fn render(
     let content_bounds = if let Some(layout) = debug {
         Some(layout.source)
     } else if ui.dashboard || state.active_view.is_none() {
-        dashboard_rect.or(workspace)
+        // The dashboard centres itself in what a docked explorer leaves free.
+        dashboard_rect.or(workspace).map(|bounds| match explorer_rect {
+            Some(dock) if dock.x <= bounds.x && dock.x + dock.width > bounds.x => {
+                let cut = (dock.x + dock.width - bounds.x).min(bounds.width);
+                WindowRect {
+                    x: bounds.x + cut,
+                    width: bounds.width - cut,
+                    ..bounds
+                }
+            }
+            Some(dock) if dock.x > bounds.x && dock.x < bounds.x + bounds.width => WindowRect {
+                width: dock.x - bounds.x,
+                ..bounds
+            },
+            _ => bounds,
+        })
     } else {
         workspace
     };

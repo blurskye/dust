@@ -3844,3 +3844,34 @@ fn side_by_side_halves_scroll_independently() {
     );
 }
 
+
+#[test]
+fn indent_guides_inside_a_multiline_string_keep_the_guide_colour() {
+    let text = "fn f() {\n    let s = r\"a\n        b\";\n}\n";
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    let (buffer, view) = state.open_text(
+        crate::editor::text::TextBuffer::from_text(text),
+        Some(PathBuf::from("/workspace/file.rs")),
+    );
+    let loaded = crate::config::load_bundled_config();
+    let mut config = loaded.config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.ui.status_line.enabled = false;
+    let start = text.find("r\"").expect("string start");
+    let end = text.find("\";").expect("string end") + 1;
+    let mut ui = ui_with_editor_layout(&state);
+    ui.syntax_spans = vec![super::UiSyntaxSpan {
+        buffer,
+        revision: state.buffers[buffer].text.revision(),
+        range: crate::editor::text::ByteRange::new(
+            crate::editor::text::ByteOffset(start),
+            crate::editor::text::ByteOffset(end),
+        )
+        .expect("string range"),
+        role: crate::language::syntax::SyntaxRole::String,
+    }];
+    let frame = super::render_editor_view(&state, view, &ui, &config, 30, 5);
+    let guide = frame.grid.get(4, 2).expect("guide inside the string");
+    assert_ne!(guide.symbol, " ");
+    assert!(matches!(guide.style, crate::ui::Style::Border | crate::ui::Style::Muted), "{:?}", guide.style);
+}

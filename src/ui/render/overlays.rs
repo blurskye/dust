@@ -276,74 +276,95 @@ pub(super) fn render_dashboard(
     width: u16,
     height: u16,
 ) -> Frame {
+    let ambiguous = editor_config.editor.ambiguous_width;
     let mut grid = CellGrid::new_with_policy(
         width,
         height,
         &editor_config.editor.control_character_replacement,
         &editor_config.editor.zero_width_replacement,
-        editor_config.editor.ambiguous_width == AmbiguousWidth::Wide,
+        ambiguous == AmbiguousWidth::Wide,
     );
-    if width < configured.minimum_width || height < configured.minimum_height {
+    let measure = |text: &str| u16::try_from(text_width(text, ambiguous)).unwrap_or(u16::MAX);
+    let logo: Vec<&str> = configured.logo.lines().collect();
+    let logo_width = logo.iter().map(|line| measure(line)).max().unwrap_or(0);
+    let actions = u16::try_from(configured_actions.len()).unwrap_or(u16::MAX);
+    let version = u16::from(configured.show_version);
+    let footer = if configured.show_path { 2 } else { 0 };
+    // Like LazyVim's dashboard: the big logo and roomy rows when they fit, then smaller
+    // pieces as the window shrinks.
+    let big_logo = !logo.is_empty() && logo_width.saturating_add(2) <= width;
+    let layouts = [(true, 2), (true, 1), (false, 2), (false, 1)];
+    let fitting = layouts.into_iter().find_map(|(use_logo, row_step)| {
+        if use_logo && !big_logo {
+            return None;
+        }
+        let header = if use_logo {
+            u16::try_from(logo.len()).unwrap_or(u16::MAX).saturating_add(version)
+        } else {
+            u16::from(configured.show_identity).saturating_add(version)
+        };
+        let rows = actions.saturating_mul(row_step).saturating_sub(row_step - 1);
+        let total = header.saturating_add(2).saturating_add(rows).saturating_add(footer);
+        (total <= height).then_some((use_logo, row_step, header, total))
+    });
+    let Some((use_logo, row_step, header, total)) = fitting.filter(|_| {
+        width >= configured.minimum_width && height >= configured.minimum_height
+    }) else {
         grid.put_text(
-            configured.compact_left.min(width.saturating_sub(1)),
-            configured.compact_top.min(height.saturating_sub(1)),
+            1.min(width.saturating_sub(1)),
+            1.min(height.saturating_sub(1)),
             &configured.resize_message,
             Style::Accent,
         );
         return Frame { grid, cursor: None };
-    }
-    let content_width = width.min(configured.content_width);
-    let left = width.saturating_sub(content_width) / 2;
-    let top = height.saturating_sub(configured.block_height) / 2;
-    if configured.show_identity {
-        center_text(
-            &mut grid,
-            top.saturating_add(configured.identity_row),
-            &configured.identity,
-            Style::Accent,
-            editor_config.editor.ambiguous_width,
-        );
+    };
+    let top = height.saturating_sub(total) / 2;
+    let mut y = top;
+    if use_logo {
+        let left = width.saturating_sub(logo_width) / 2;
+        for line in &logo {
+            grid.put_text(left, y, line, Style::Accent);
+            y = y.saturating_add(1);
+        }
+    } else if configured.show_identity {
+        center_text(&mut grid, y, &configured.identity, Style::Accent, ambiguous);
+        y = y.saturating_add(1);
     }
     if configured.show_version {
         center_text(
             &mut grid,
-            top.saturating_add(configured.version_row),
+            y,
             &configured
                 .version_format
                 .replace("{version}", env!("CARGO_PKG_VERSION")),
             Style::Muted,
-            editor_config.editor.ambiguous_width,
+            ambiguous,
         );
+    }
+    y = top.saturating_add(header).saturating_add(2);
+    let row_width = configured.content_width.min(width.saturating_sub(4));
+    let left = width.saturating_sub(row_width) / 2;
+    let right = left.saturating_add(row_width);
+    for action in configured_actions {
+        if !action.icon.is_empty() {
+            grid.put_text_clipped(left, y, &action.icon, Style::Accent, right);
+        }
+        let label_x = if action.icon.is_empty() { left } else { left.saturating_add(3) };
+        grid.put_text_clipped(label_x, y, &action.label, Style::Default, right);
+        if let Some(key) = &action.key {
+            let key_x = right.saturating_sub(measure(key));
+            grid.put_text_clipped(key_x, y, key, Style::Accent, right);
+        }
+        y = y.saturating_add(row_step);
     }
     if configured.show_path {
+        let y = y.saturating_sub(row_step).saturating_add(2);
         center_text(
             &mut grid,
-            top.saturating_add(configured.path_row),
-            &dashboard_path(root, usize::from(content_width)),
-            Style::Default,
-            editor_config.editor.ambiguous_width,
-        );
-    }
-    for (index, action) in configured_actions.iter().enumerate() {
-        let y = top
-            .saturating_add(configured.actions_row)
-            .saturating_add(u16::try_from(index).unwrap_or(u16::MAX));
-        if y >= height {
-            break;
-        }
-        let x = left.saturating_add(content_width / 2).saturating_sub(
-            configured
-                .action_key_width
-                .saturating_add(configured.action_left_offset),
-        );
-        let key = action.key.as_deref().unwrap_or(&configured.unbound_label);
-        let key = configured.key_format.replace("{key}", key);
-        grid.put_text(x, y, &key, Style::Accent);
-        grid.put_text(
-            x.saturating_add(configured.action_key_width),
             y,
-            &action.label,
-            Style::Default,
+            &dashboard_path(root, usize::from(width.saturating_sub(4))),
+            Style::Muted,
+            ambiguous,
         );
     }
     Frame { grid, cursor: None }

@@ -1695,15 +1695,30 @@ context = "dashboard"
 keys = "n"
 command = "file.new"
 [[keymap]]
-id = "builtin.dashboard.surface.workspace-file-find.e"
-context = "dashboard"
-keys = "e"
-command = "workspace.file.find"
-[[keymap]]
-id = "builtin.dashboard.surface.explorer-open.shortcut-f"
+id = "builtin.dashboard.surface.workspace-file-find.f"
 context = "dashboard"
 keys = "f"
+command = "workspace.file.find"
+[[keymap]]
+id = "builtin.dashboard.surface.workspace-search-prompt.g"
+context = "dashboard"
+keys = "g"
+command = "workspace.search.prompt"
+[[keymap]]
+id = "builtin.dashboard.surface.navigation-recents.r"
+context = "dashboard"
+keys = "r"
+command = "navigation.recents"
+[[keymap]]
+id = "builtin.dashboard.surface.explorer-open.e"
+context = "dashboard"
+keys = "e"
 command = "explorer.open"
+[[keymap]]
+id = "builtin.dashboard.surface.session-load.s"
+context = "dashboard"
+keys = "s"
+command = "session.load"
 
 # Command/search prompt controls.
 [[keymap]]
@@ -2774,9 +2789,9 @@ keys = "t"
 command = "session.tutor"
 
 [[keymap]]
-id = "builtin.dashboard.surface.recovery-inspect.r"
+id = "builtin.dashboard.surface.recovery-inspect.shift-r"
 context = "dashboard"
-keys = "r"
+keys = "R"
 command = "recovery.inspect"
 [[keymap]]
 id = "builtin.editor.normal.pane-resize-grow.ctrl-w-plus"

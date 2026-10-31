@@ -171,6 +171,7 @@ pub(in crate::editor::session) fn dashboard_actions(
         .map(|action| DashboardAction {
             command: action.command.clone(),
             label: action.label.clone(),
+            icon: action.icon.clone(),
             key: action
                 .show_binding
                 .then(|| {

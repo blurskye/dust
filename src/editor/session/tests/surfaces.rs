@@ -1386,7 +1386,7 @@ fn dashboard_exposes_and_dispatches_the_file_explorer_without_picker_fallback() 
     assert!(app.ui.dashboard);
     assert!(
         app.ui.dashboard_actions.iter().any(|action| {
-            action.label == "File explorer" && action.key.as_deref() == Some("f")
+            action.label == "Explorer" && action.key.as_deref() == Some("e")
         }),
         "resolved dashboard actions: {:?}",
         app.ui.dashboard_actions

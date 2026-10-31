@@ -422,7 +422,7 @@ fn resolved_explain_reports_exact_layered_and_replacement_provenance() {
     for (source, explanation, expected) in [
         (config_source, setting, "7"),
         (dashboard_source.as_str(), dashboard, "\"PROVENANCE DASH\""),
-        (dashboard_source.as_str(), dashboard_action, "\"Command\""),
+        (dashboard_source.as_str(), dashboard_action, "\"Find File\""),
         (theme_source.as_str(), theme, "\"provenance\""),
     ] {
         let range = explanation
