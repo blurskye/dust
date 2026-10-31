@@ -799,3 +799,41 @@ fn dragging_the_border_between_two_windows_resizes_them() {
     let after = border(&app);
     assert!(after.x.abs_diff(before.x - 20) <= 1, "{} -> {}", before.x, after.x);
 }
+
+#[test]
+fn the_agent_panel_opens_narrow_and_ctrl_arrows_resize_it() {
+    let mut app = app();
+    app.window_session.observe_size((160, 45));
+    app.state.open_text(TextBuffer::from_text("a\n"), None);
+    app.set_dashboard_visibility(false);
+    for key in [' ', 'a', 't'] {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    app.reconcile_editor_windows();
+    let border = |app: &InteractiveApplication| {
+        let projection = app.compositor_projection().expect("projection");
+        let borders = projection
+            .borders
+            .iter()
+            .filter(|border| border.axis == crate::ui::window::TileAxis::Horizontal)
+            .map(|border| border.x)
+            .collect::<Vec<_>>();
+        let windows = projection
+            .windows
+            .iter()
+            .map(|window| (window.rect.x, window.rect.width))
+            .collect::<Vec<_>>();
+        (borders, format!("{windows:?} {:?}", app.state.tabs[app.state.active_tab.unwrap()].root))
+    };
+    let (opened, layout) = border(&app);
+    assert_eq!(opened.len(), 1, "{layout}");
+    assert!((100..=106).contains(&opened[0]), "the panel opens at about 35%: {layout}");
+    app.handle_configured_key("ctrl-left".parse::<KeyEvent>().expect("ctrl-left"));
+    // As in LazyVim, ctrl-left narrows the focused window and ctrl-right widens it.
+    let (narrowed, layout) = border(&app);
+    assert!(narrowed[0] > opened[0], "ctrl-left narrows the panel: {opened:?} -> {layout}");
+    app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Escape));
+    app.handle_configured_key("ctrl-right".parse::<KeyEvent>().expect("ctrl-right"));
+    let (widened, layout) = border(&app);
+    assert!(widened[0] < narrowed[0], "ctrl-right widens it in Normal mode: {narrowed:?} -> {layout}");
+}

@@ -359,10 +359,9 @@ pub(super) fn project_tiled_node(
         } => match axis {
             TileAxis::Horizontal => {
                 let available = bounds.width.saturating_sub(1);
-                let first_width = available
-                    .saturating_mul(*ratio)
-                    .checked_div(1_000)
-                    .unwrap_or(0)
+                // u32: a u16 product saturates on terminals wider than about 130 columns.
+                let first_width = u16::try_from(u32::from(available) * u32::from(*ratio) / 1_000)
+                    .unwrap_or(available)
                     .min(available);
                 let second_width = available.saturating_sub(first_width);
                 project_tiled_node(
@@ -392,10 +391,9 @@ pub(super) fn project_tiled_node(
             }
             TileAxis::Vertical => {
                 let available = bounds.height.saturating_sub(1);
-                let first_height = available
-                    .saturating_mul(*ratio)
-                    .checked_div(1_000)
-                    .unwrap_or(0)
+                // u32: a u16 product saturates on terminals taller than about 130 rows.
+                let first_height = u16::try_from(u32::from(available) * u32::from(*ratio) / 1_000)
+                    .unwrap_or(available)
                     .min(available);
                 let second_height = available.saturating_sub(first_height);
                 project_tiled_node(
