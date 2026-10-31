@@ -1,6 +1,6 @@
 use super::{
     AppEffect, ArgumentSchema, ArgumentType, CommandError, CommandRegistry, ContextRequirement,
-    PathBuf, integer_arg, optional_string_arg, register, string_arg,
+    PathBuf, integer_arg, optional_integer_arg, optional_string_arg, register, string_arg,
 };
 
 pub(super) fn register_commands(
@@ -69,22 +69,22 @@ pub(super) fn register_commands(
     register(
         registry,
         "dap.scopes",
-        "Show debug scopes",
+        "Show debug variables by scope",
         ContextRequirement::Application,
-        ArgumentSchema::default().field("frame", ArgumentType::Integer, true),
-        |invocation| Ok(AppEffect::DapScopes(integer_arg(invocation, "frame")?)),
+        ArgumentSchema::default().field("frame", ArgumentType::Integer, false),
+        |invocation| Ok(AppEffect::DapScopes(optional_integer_arg(invocation, "frame"))),
     )?;
     register(
         registry,
         "dap.variables",
         "Show debug variables",
         ContextRequirement::Application,
-        ArgumentSchema::default().field("reference", ArgumentType::Integer, true),
+        ArgumentSchema::default().field("reference", ArgumentType::Integer, false),
         |invocation| {
-            Ok(AppEffect::DapVariables(integer_arg(
+            Ok(AppEffect::DapVariables(optional_integer_arg(
                 invocation,
                 "reference",
-            )?))
+            )))
         },
     )?;
     register(
@@ -117,7 +117,7 @@ pub(super) fn register_commands(
     register(
         registry,
         "dap.session.restart",
-        "Restart configured debug session",
+        "Restart debug session",
         ContextRequirement::Application,
         ArgumentSchema::default(),
         |_| AppEffect::DapRestart,

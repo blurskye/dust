@@ -230,6 +230,15 @@ pub fn parse_ex(
                 command(command_id)?
                     .with_argument("query", CommandValue::String(arguments.to_owned()))
             }
+            "dap.evaluate" | "dap.watch.add" => {
+                // An expression has spaces of its own, so all of it is the argument.
+                let expression = arguments.strip_prefix("expression=").unwrap_or(arguments);
+                if expression.is_empty() {
+                    return Err(ExParseError::MissingArgument("expression"));
+                }
+                command(command_id)?
+                    .with_argument("expression", CommandValue::String(expression.to_owned()))
+            }
             "workspace.git.worktree.create" => {
                 let mut parts = arguments.split_whitespace();
                 let branch = parts.next().ok_or(ExParseError::MissingArgument("branch"))?;
@@ -339,6 +348,11 @@ mod tests {
         let quit = parse_ex(":q!", &aliases).expect("quit");
         assert_eq!(quit.id.as_str(), "editor.quit");
         assert_eq!(quit.arguments.get("force"), Some(&CommandValue::Bool(true)));
+        let watch = parse_ex("dap.watch.add total * 10", &aliases).expect("watch");
+        assert_eq!(
+            watch.arguments.get("expression"),
+            Some(&CommandValue::String("total * 10".into()))
+        );
         let edit = parse_ex("edit src/main.rs", &aliases).expect("edit");
         assert_eq!(edit.id.as_str(), "file.open");
         assert_eq!(

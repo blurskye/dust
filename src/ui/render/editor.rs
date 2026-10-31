@@ -358,6 +358,9 @@ pub(super) fn render_editor_view(
                 let signs = &config.editor.debug_signs;
                 let (symbol, fallback, style) = match sign.kind {
                     DebugSignKind::Breakpoint => (&signs.breakpoint, "*", Style::Error),
+                    DebugSignKind::ConditionalBreakpoint => {
+                        (&signs.conditional_breakpoint, "?", Style::Error)
+                    }
                     DebugSignKind::Execution => (&signs.execution, ">", Style::Warning),
                 };
                 grid.set_cell(

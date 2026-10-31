@@ -441,8 +441,8 @@ pub enum AppEffect {
     DapInspectorNext,
     DapThreads,
     DapStack(i64),
-    DapScopes(i64),
-    DapVariables(i64),
+    DapScopes(Option<i64>),
+    DapVariables(Option<i64>),
     DapEvaluate(String),
     DapBreakpointToggle,
     DapBreakpointConfigure {
@@ -777,6 +777,13 @@ fn one_character_arg(
         )));
     }
     Ok(character)
+}
+
+fn optional_integer_arg(invocation: &crate::editor::CommandInvocation, name: &str) -> Option<i64> {
+    match invocation.arguments.get(name) {
+        Some(CommandValue::Integer(value)) => Some(*value),
+        _ => None,
+    }
 }
 
 fn integer_arg(

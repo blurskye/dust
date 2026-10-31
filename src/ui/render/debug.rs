@@ -143,11 +143,13 @@ pub(crate) fn debug_layout(width: u16, height: u16) -> Option<DebugLayout> {
     }
     let console_height = DEBUG_CONSOLE_HEIGHT.min(height / 3);
     let body = height - console_height;
-    let source_width = width - DEBUG_SIDE_WIDTH * 2;
+    // A wide terminal has room to read values rather than clip them.
+    let side_width = (width / 5).clamp(DEBUG_SIDE_WIDTH, 48);
+    let source_width = width - side_width * 2;
     Some(DebugLayout {
         mode: DebugLayoutMode::Wide,
         source: WindowRect {
-            x: DEBUG_SIDE_WIDTH,
+            x: side_width,
             y: 0,
             width: source_width,
             height: body,
@@ -155,13 +157,13 @@ pub(crate) fn debug_layout(width: u16, height: u16) -> Option<DebugLayout> {
         left: Some(WindowRect {
             x: 0,
             y: 0,
-            width: DEBUG_SIDE_WIDTH,
+            width: side_width,
             height: body,
         }),
         right: Some(WindowRect {
-            x: DEBUG_SIDE_WIDTH + source_width,
+            x: side_width + source_width,
             y: 0,
-            width: DEBUG_SIDE_WIDTH,
+            width: side_width,
             height: body,
         }),
         console: Some(WindowRect {

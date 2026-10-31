@@ -4177,6 +4177,13 @@ command = "dap.breakpoint.toggle"
 desc = "Toggle Breakpoint"
 
 [[keymap]]
+id = "builtin.global.debug-variables"
+context = "global"
+keys = "<leader> d v"
+command = "dap.scopes"
+desc = "Inspect Variables"
+
+[[keymap]]
 id = "builtin.global.debug-breakpoint-condition"
 context = "global"
 keys = "<leader> d B"

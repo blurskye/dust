@@ -208,7 +208,11 @@ impl DebugSession {
             let adapter = DebugAdapterConfig {
                 program: executable.clone(),
                 arguments: entry.definition.launch_args.clone(),
-                environment: BTreeMap::new(),
+                // The program being debugged runs with what the user's shell gave Dust. Delve
+                // also needs it to find `go`, and hangs without one.
+                environment: std::env::vars_os()
+                    .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+                    .collect(),
             };
             let session = DebugSessionConfig {
                 adapter: entry.definition.id.clone(),
@@ -503,6 +507,11 @@ impl DebugSession {
                     arguments.insert("python".into(), serde_json::json!([venv]));
                 }
                 if let Some(program) = launch.program {
+                    // Go builds packages, so a file beside the active one still has to compile.
+                    let program = match program.parent() {
+                        Some(package) if launch.session.adapter == "delve" => package.to_owned(),
+                        _ => program,
+                    };
                     arguments.insert("program".into(), serde_json::json!(program));
                 }
                 admission

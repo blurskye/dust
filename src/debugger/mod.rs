@@ -10,7 +10,7 @@ use std::{
         mpsc::{self, Receiver},
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde_json::{Value, json};
@@ -196,6 +196,13 @@ fn set_breakpoints_arguments(
 
 /// The argument that makes the Dust binary start a program in a session of its own.
 pub const ADAPTER_SESSION_ARGUMENT: &str = "--adapter-session";
+pub const ADAPTER_BRIDGE_ARGUMENT: &str = "--adapter-bridge";
+/// In a catalog entry's `launch_args`, where the socket address of a bridged adapter goes.
+const ADAPTER_ADDRESS: &str = "{address}";
+/// How long an adapter gets to answer `initialize` before Dust says it is not working.
+const ADAPTER_ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long a stopping adapter gets to end its program and clean up before it is killed.
+const ADAPTER_EXIT_GRACE: Duration = Duration::from_secs(2);
 static ADAPTER_SESSION_LAUNCHER: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
 /// Name the binary that can start adapters in their own session. `main` does this once.
@@ -206,6 +213,78 @@ pub fn use_adapter_session_launcher(binary: PathBuf) {
 /// Become a session leader and turn into `program`. This has no controlling terminal, so debugpy
 /// cannot make its program the foreground group of /dev/tty, which would leave the editor unable
 /// to read keys. Only returns if it failed.
+/// Delve and CodeLLDB speak DAP only over a socket. Give them one and carry it over this
+/// process's stdin and stdout, so the rest of Dust has one way to talk to an adapter.
+#[cfg(unix)]
+pub fn bridge_adapter_socket(
+    program: &std::ffi::OsStr,
+    arguments: &[std::ffi::OsString],
+) -> std::io::Result<()> {
+    use std::os::fd::AsFd;
+    nix::unistd::setsid()?;
+    let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))?;
+    let address = listener.local_addr()?.to_string();
+    let mut adapter = Command::new(program)
+        .args(
+            arguments
+                .iter()
+                .map(|argument| argument.to_string_lossy().replace(ADAPTER_ADDRESS, &address)),
+        )
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .spawn()?;
+    listener.set_nonblocking(true)?;
+    let deadline = Instant::now() + ADAPTER_ANSWER_TIMEOUT;
+    let socket = loop {
+        match listener.accept() {
+            Ok((socket, _)) => break socket,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if adapter.try_wait()?.is_some() || Instant::now() >= deadline {
+                    let _ = adapter.kill();
+                    let _ = adapter.wait();
+                    return Err(std::io::Error::other("the adapter did not connect"));
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => return Err(error),
+        }
+    };
+    socket.set_nonblocking(false)?;
+    socket.set_nodelay(true)?;
+    let to_adapter = socket.try_clone()?;
+    std::thread::spawn(move || {
+        relay_adapter_messages(std::io::stdin().lock(), &to_adapter);
+        let _ = to_adapter.shutdown(std::net::Shutdown::Write);
+    });
+    // Not `io::stdout()`: its line buffering would hold back a DAP body, which ends with no newline.
+    let stdout = std::fs::File::from(std::io::stdout().as_fd().try_clone_to_owned()?);
+    relay_adapter_messages(&socket, stdout);
+    // The connection closes before Delve has deleted its debug binary.
+    if !adapter_exited_within(&mut adapter, ADAPTER_EXIT_GRACE / 2) {
+        let _ = adapter.kill();
+    }
+    let _ = adapter.wait();
+    Ok(())
+}
+fn adapter_exited_within(adapter: &mut std::process::Child, grace: Duration) -> bool {
+    let deadline = Instant::now() + grace;
+    while Instant::now() < deadline {
+        if !matches!(adapter.try_wait(), Ok(None)) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    false
+}
+#[cfg(unix)]
+fn relay_adapter_messages(mut from: impl std::io::Read, mut to: impl std::io::Write) {
+    let mut chunk = [0; 64 * 1024];
+    while let Ok(read) = from.read(&mut chunk) {
+        if read == 0 || to.write_all(&chunk[..read]).is_err() {
+            break;
+        }
+    }
+}
 #[cfg(unix)]
 pub fn exec_in_own_session(program: &std::ffi::OsStr, arguments: &[std::ffi::OsString]) -> std::io::Error {
     use std::os::unix::process::CommandExt;
@@ -219,8 +298,13 @@ fn adapter_command(executable: PathBuf, arguments: Vec<String>) -> Command {
     match ADAPTER_SESSION_LAUNCHER.get().filter(|binary| binary.is_file()) {
         Some(binary) => {
             let mut command = Command::new(binary);
+            let speaks_over_a_socket = arguments.iter().any(|a| a.contains(ADAPTER_ADDRESS));
             command
-                .arg(ADAPTER_SESSION_ARGUMENT)
+                .arg(if speaks_over_a_socket {
+                    ADAPTER_BRIDGE_ARGUMENT
+                } else {
+                    ADAPTER_SESSION_ARGUMENT
+                })
                 .arg(executable)
                 .args(arguments);
             command
@@ -368,6 +452,7 @@ fn run_adapter(
     let initialize_sequence = sequence;
     sequence += 1;
     let mut launched = false;
+    let started = Instant::now();
     let mut launch_accepted = false;
     let mut paused = false;
     let mut supports_configuration_done = false;
@@ -488,6 +573,15 @@ fn run_adapter(
                 pending.insert(sequence, (command.into(), stop_generation));
                 sequence += 1;
             }
+        }
+        if !launched && started.elapsed() >= ADAPTER_ANSWER_TIMEOUT {
+            events
+                .send(DapEvent::Failed {
+                    adapter: adapter.clone(),
+                    message: "it did not answer; check that it works from a terminal".into(),
+                })
+                .ok();
+            break;
         }
         match receiver.recv_timeout(Duration::from_millis(10)) {
             Ok(Ok(message)) => match message.get("type").and_then(Value::as_str) {
@@ -786,6 +880,7 @@ fn run_adapter(
     // Controller owns kill/wait; no foreground thread waits for this cleanup.
     live.store(false, Ordering::Release);
     events.actor.cancel.store(true, Ordering::Release);
+    // Closing its input ends the session; the adapter gets a moment to clean up (see `terminate_adapter`).
     drop(stdin);
     drop(reader);
     drop(writer);
@@ -1025,7 +1120,7 @@ fn normalize_response(
 }
 fn terminate_adapter(child: &mut std::process::Child) {
     // Do not signal a numeric process group after the direct child was reaped.
-    if matches!(child.try_wait(), Ok(Some(_))) {
+    if adapter_exited_within(child, ADAPTER_EXIT_GRACE) {
         return;
     }
     #[cfg(unix)]

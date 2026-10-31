@@ -159,6 +159,7 @@ pub struct GitSignsConfig {
 #[serde(deny_unknown_fields)]
 pub struct DebugSignsConfig {
     pub breakpoint: String,
+    pub conditional_breakpoint: String,
     pub execution: String,
 }
 
@@ -166,6 +167,7 @@ impl Default for DebugSignsConfig {
     fn default() -> Self {
         Self {
             breakpoint: "●".into(),
+            conditional_breakpoint: "◆".into(),
             execution: "▶".into(),
         }
     }

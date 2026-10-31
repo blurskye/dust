@@ -108,6 +108,30 @@ while True:
     service.stop().unwrap();
 }
 #[test]
+fn stopping_lets_the_adapter_end_its_program_and_clean_up() {
+    let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
+    let body = r#"
+log=open('requests.log','a',buffering=1)
+while True:
+ m=read()
+ if m is None: break
+ if m.get('type')!='request': continue
+ log.write(m['command']+'\n')
+ send({'type':'response','request_seq':m['seq'],'command':m['command'],'success':True,'body':{}})
+ if m['command']=='launch': send({'type':'event','event':'initialized','body':{}})
+time.sleep(0.3)
+log.write('cleaned up\n')
+"#;
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("cleanup.py");
+    std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
+    let mut service = DapService::new();
+    service.start_absolute(launch(root.path(), &script)).unwrap();
+    wait(|| request_log(root.path()).iter().any(|line| line == "launch"));
+    service.stop().unwrap();
+    wait(|| request_log(root.path()).iter().any(|line| line == "cleaned up"));
+}
+#[test]
 fn startup_reply_survives_stop_and_wrong_commands_cannot_consume_requests() {
     let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
     for request in ["launch", "attach"] {

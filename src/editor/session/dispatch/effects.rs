@@ -2126,7 +2126,7 @@ impl InteractiveApplication {
                             String::new(),
                             DapControl::Evaluate {
                                 expression,
-                                frame_id: None,
+                                frame_id: self.debugger_session.current_frame(),
                                 context: "watch".into(),
                             },
                         )
@@ -2233,15 +2233,16 @@ impl InteractiveApplication {
                     self.show_error(error)
                 }
             }
-            AppEffect::DapScopes(frame) => {
-                if let Err(error) = self
-                    .debugger_session
-                    .control(DapControl::Scopes { frame_id: frame })
-                {
+            AppEffect::DapScopes(frame) | AppEffect::DapVariables(frame @ None) => {
+                let Some(frame_id) = frame.or(self.debugger_session.current_frame()) else {
+                    self.show_error(self.message("dap_not_paused", &[]));
+                    return Ok(());
+                };
+                if let Err(error) = self.debugger_session.control(DapControl::Scopes { frame_id }) {
                     self.show_error(error)
                 }
             }
-            AppEffect::DapVariables(reference) => {
+            AppEffect::DapVariables(Some(reference)) => {
                 if let Err(error) = self.debugger_session.control(DapControl::Variables {
                     reference,
                     start: 0,
@@ -2267,43 +2268,33 @@ impl InteractiveApplication {
                 if let Some(name) = self.debugger_session.configuration().map(str::to_owned) {
                     let _ = self.debugger_session.stop();
                     self.start_dap_configuration(&name)
+                } else if let Some(target) = self.debugger_session.target().cloned() {
+                    // A session started from the active file restarts what it was running.
+                    let _ = self.debugger_session.stop();
+                    self.start_dap(Some(target.adapter), target.program);
                 } else {
                     self.show_error(self.message("dap_no_configuration", &[]));
                 }
             }
             AppEffect::DapBreakpointConfigure {
+                condition: None,
+                hit_condition: None,
+                log_message: None,
+            } => {
+                let current = self.cursor_breakpoint_place().and_then(|(path, line)| {
+                    self.debugger_session
+                        .persisted_breakpoints()
+                        .into_iter()
+                        .find(|row| row.path == path && row.line == line)
+                        .and_then(|row| row.condition)
+                });
+                self.open_prompt(PromptKind::BreakpointCondition, current.unwrap_or_default());
+            }
+            AppEffect::DapBreakpointConfigure {
                 condition,
                 hit_condition,
                 log_message,
-            } => {
-                let Some(view) = self.state.active_view else {
-                    return Ok(());
-                };
-                let buffer = &self.state.buffers[self.state.views[view].buffer];
-                let Some(path) = buffer.path.clone() else {
-                    return Ok(());
-                };
-                let Ok(line) = buffer
-                    .text
-                    .byte_to_line(self.state.views[view].cursor)
-                    .map(|line| line as u64 + 1)
-                else {
-                    return Ok(());
-                };
-                if let Err(error) = self.debugger_session.breakpoint(
-                    DapSourceBreakpoint {
-                        path,
-                        line,
-                        column: None,
-                        condition,
-                        hit_condition,
-                        log_message,
-                    },
-                    false,
-                ) {
-                    self.show_error(error);
-                }
-            }
+            } => self.configure_breakpoint(condition, hit_condition, log_message),
             AppEffect::DapBreakpointToggle => {
                 let Some(view) = self.state.active_view else {
                     return Ok(());
@@ -5107,6 +5098,7 @@ impl InteractiveApplication {
                 | PromptKind::PluginConfirmation
                 | PromptKind::TerminalClose
                 | PromptKind::DirtyClose
+                | PromptKind::BreakpointCondition
         ) {
             self.record_prompt_history(prompt.kind, &prompt.input);
         }
@@ -5201,6 +5193,15 @@ impl InteractiveApplication {
             PromptKind::ReviewComment => {
                 self.close_prompt();
                 self.submit_review_comment(prompt.input);
+            }
+            PromptKind::BreakpointCondition => {
+                self.close_prompt();
+                let condition = prompt.input.trim();
+                self.configure_breakpoint(
+                    (!condition.is_empty()).then(|| condition.to_owned()),
+                    None,
+                    None,
+                );
             }
             PromptKind::AgentPermission => self.answer_agent_permission(
                 prompt
@@ -8500,8 +8501,14 @@ impl InteractiveApplication {
                         .navigation_stamp(self.state.window_version(), self.state.active_view),
                     capture: self.input.capture_epoch(),
                 };
+                let debug_selection = debug_selection.expect("debug selection routed");
+                // A value with nothing inside it opens to the whole of itself, unclipped.
+                if let Some(value) = debug_selection.as_ref().ok().and_then(|s| s.value()) {
+                    let value = value.to_owned();
+                    self.debugger_session.record_console_evaluation(value.clone());
+                    self.notify_message(value, false);
+                }
                 match debug_selection
-                    .expect("debug selection routed")
                     .and_then(|selection| self.debugger_session.activate(selection, target))
                 {
                     Ok(Some(location)) => self.navigate_matcher_source(MatcherSource {
@@ -8746,6 +8753,35 @@ impl InteractiveApplication {
     }
     /// Show what is TRUE about each breakpoint. The rows carry the adapter's verdict, so a
     /// request is never presented as a fact.
+    fn cursor_breakpoint_place(&self) -> Option<(PathBuf, u64)> {
+        let view = &self.state.views[self.state.active_view?];
+        let buffer = &self.state.buffers[view.buffer];
+        let line = buffer.text.byte_to_line(view.cursor).ok()?;
+        Some((buffer.path.clone()?, line as u64 + 1))
+    }
+    fn configure_breakpoint(
+        &mut self,
+        condition: Option<String>,
+        hit_condition: Option<String>,
+        log_message: Option<String>,
+    ) {
+        let Some((path, line)) = self.cursor_breakpoint_place() else {
+            return;
+        };
+        if let Err(error) = self.debugger_session.breakpoint(
+            DapSourceBreakpoint {
+                path,
+                line,
+                column: None,
+                condition,
+                hit_condition,
+                log_message,
+            },
+            false,
+        ) {
+            self.show_error(error);
+        }
+    }
     pub(in crate::editor::session) fn open_breakpoint_states(&mut self) {
         let rows = self.debugger_session.persisted_breakpoints();
         let items = rows
@@ -8762,8 +8798,15 @@ impl InteractiveApplication {
                     badge: String::new(),
                     kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(format!("breakpoint:{index}")),
-                        label: format!("{}:{}", row.path.display(), row.line),
-                        detail: state.to_owned(),
+                        label: format!(
+                            "{}:{}",
+                            self.workspace_relative_label(&row.path),
+                            row.line
+                        ),
+                        detail: match &row.condition {
+                            Some(condition) => format!("{state}, if {condition}"),
+                            None => state.to_owned(),
+                        },
                         source: "debugger".into(),
                         action: PickerAction::None,
                     },

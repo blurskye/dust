@@ -182,7 +182,8 @@ impl InputSession {
             return Some(match prompt.kind {
                 crate::ui::PromptKind::Command
                 | crate::ui::PromptKind::ExplorerRename
-                | crate::ui::PromptKind::ReviewComment => {
+                | crate::ui::PromptKind::ReviewComment
+                | crate::ui::PromptKind::BreakpointCondition => {
                     "command_prompt"
                 }
                 crate::ui::PromptKind::SearchForward | crate::ui::PromptKind::SearchBackward => {

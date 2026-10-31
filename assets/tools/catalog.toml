@@ -377,16 +377,16 @@ name = "Delve"
 kind = "dap"
 languages = ["go"]
 executable = "dlv"
-version = "1.25.2"
+version = "1.27.2"
 probe_args = ["version"]
-launch_args = ["dap"]
+launch_args = ["dap", "--client-addr={address}"]
 debug_program_policy = "source"
 project_root_markers = ["go.work", "go.mod"]
 project_root_strategy = "go"
 
 [tool.install]
 method = "go_package"
-package = "github.com/go-delve/delve/cmd/dlv@v1.25.2"
+package = "github.com/go-delve/delve/cmd/dlv@v1.27.2"
 
 [[tool]]
 id = "codelldb"
@@ -396,6 +396,7 @@ languages = ["rust", "c", "cpp"]
 executable = "codelldb"
 version = "1.12.3"
 probe_args = ["--version"]
+launch_args = ["--connect", "{address}"]
 project_root_markers = ["Cargo.toml", "compile_commands.json", "compile_flags.txt", ".clangd"]
 project_root_strategy = "marker"
 

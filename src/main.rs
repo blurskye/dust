@@ -127,8 +127,21 @@ fn main() -> ExitCode {
     #[cfg(unix)]
     {
         let mut arguments = std::env::args_os().skip(1);
-        if arguments.next().as_deref()
-            == Some(std::ffi::OsStr::new(dust::debugger::ADAPTER_SESSION_ARGUMENT))
+        let first = arguments.next();
+        if first.as_deref() == Some(std::ffi::OsStr::new(dust::debugger::ADAPTER_BRIDGE_ARGUMENT)) {
+            let Some(program) = arguments.next() else {
+                return ExitCode::FAILURE;
+            };
+            let rest: Vec<_> = arguments.collect();
+            return match dust::debugger::bridge_adapter_socket(&program, &rest) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("dust: {error}");
+                    ExitCode::FAILURE
+                }
+            };
+        }
+        if first.as_deref() == Some(std::ffi::OsStr::new(dust::debugger::ADAPTER_SESSION_ARGUMENT))
         {
             let Some(program) = arguments.next() else {
                 return ExitCode::FAILURE;

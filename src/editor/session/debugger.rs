@@ -55,10 +55,20 @@ pub(in crate::editor::session) struct DebugRow {
 enum Choice {
     Control(DapControl),
     Frame(DapStackFrame),
+    /// A variable with no children: choosing it shows its value.
+    Value(String),
 }
 pub(in crate::editor::session) struct DebugSelection {
     source: DapContext,
     choice: Choice,
+}
+impl DebugSelection {
+    pub(in crate::editor::session) fn value(&self) -> Option<&str> {
+        match &self.choice {
+            Choice::Value(value) => Some(value),
+            _ => None,
+        }
+    }
 }
 struct Choices {
     epoch: Arc<()>,
@@ -586,7 +596,16 @@ impl DebugSession {
             && self.watches.len() < self.policy.maximum_watches
             && !self.watches.contains(&expression)
         {
-            self.watches.push(expression);
+            self.watches.push(expression.clone());
+            // Paused, the value can be shown now rather than at the next stop.
+            if self.execution.is_some() {
+                let frame_id = self.console_frame;
+                let _ = self.control(DapControl::Evaluate {
+                    expression,
+                    frame_id,
+                    context: "watch".into(),
+                });
+            }
         }
     }
     pub(in crate::editor::session) fn remove_watch(&mut self, expression: &str) {
@@ -1034,7 +1053,7 @@ impl DebugSession {
                     }
                     let open: Vec<i64> = self.expansion.clone();
                     let shown = current.len();
-                    let mut values: Vec<(String, String, DapControl)> = current
+                    let mut values: Vec<(String, String, Choice)> = current
                         .into_iter()
                         .map(|r| {
                             // A reference already OPEN on this path is shown AS a reference: the
@@ -1049,15 +1068,17 @@ impl DebugSession {
                             } else {
                                 r.type_name.unwrap_or_default()
                             };
-                            (
-                                format!("{} = {}", r.name, r.value),
-                                detail,
-                                DapControl::Variables {
+                            let label = format!("{} = {}", r.name, r.value);
+                            let choice = if r.variables_reference == 0 {
+                                Choice::Value(label.clone())
+                            } else {
+                                Choice::Control(DapControl::Variables {
                                     reference: r.variables_reference,
                                     start: 0,
                                     count: VARIABLE_PAGE,
-                                },
-                            )
+                                })
+                            };
+                            (label, detail, choice)
                         })
                         .collect();
                     // A FULL page means more may follow, so the continuation carries the EXACT
@@ -1067,15 +1088,15 @@ impl DebugSession {
                             values.push((
                                 format!("load more ({shown} shown)"),
                                 format!("continue from {}", start + shown as u64),
-                                DapControl::Variables {
+                                Choice::Control(DapControl::Variables {
                                     reference,
                                     start: start + shown as u64,
                                     count: VARIABLE_PAGE,
-                                },
+                                }),
                             ));
                         }
                     }
-                    self.controls(values)
+                    self.install(values)
                 },
             ),
             value => return DebugResponse::Result(value),
@@ -1294,6 +1315,7 @@ impl DebugSession {
             return Err(DapError::Retired);
         }
         match selection.choice {
+            Choice::Value(_) => Ok(None),
             Choice::Control(control) => {
                 self.service.control_owned(&selection.source, control)?;
                 Ok(None)

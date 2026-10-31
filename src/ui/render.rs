@@ -73,6 +73,7 @@ pub enum PromptKind {
     GitDestructive,
     AgentPermission,
     ReviewComment,
+    BreakpointCondition,
 }
 
 impl PromptKind {
@@ -93,6 +94,7 @@ impl PromptKind {
             Self::GitDestructive => "Confirm Git change",
             Self::AgentPermission => "Agent permission",
             Self::ReviewComment => "Review comment",
+            Self::BreakpointCondition => "Breakpoint condition",
         }
     }
 
@@ -113,6 +115,7 @@ impl PromptKind {
             | Self::GitDestructive
             | Self::AgentPermission => "",
             Self::ReviewComment => ">",
+            Self::BreakpointCondition => ">",
         }
     }
 }
@@ -1158,6 +1161,7 @@ enum PluginRenderable<'a> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DebugSignKind {
     Breakpoint,
+    ConditionalBreakpoint,
     Execution,
 }
 

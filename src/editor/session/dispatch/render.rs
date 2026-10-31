@@ -216,7 +216,13 @@ impl InteractiveApplication {
             .debugger_session
             .persisted_breakpoints()
             .iter()
-            .map(|b| format!("{}:{}", self.workspace_relative_label(&b.path), b.line))
+            .map(|b| {
+                let place = format!("{}:{}", self.workspace_relative_label(&b.path), b.line);
+                match &b.condition {
+                    Some(condition) => format!("{place} if {condition}"),
+                    None => place,
+                }
+            })
             .collect();
         let threads = self.debugger_session.threads().to_vec();
         let stack = self.debugger_session.stack().to_vec();
@@ -263,7 +269,14 @@ impl InteractiveApplication {
             .map(|breakpoint| crate::ui::DebugSign {
                 path: breakpoint.path,
                 line: breakpoint.line.saturating_sub(1) as usize,
-                kind: crate::ui::DebugSignKind::Breakpoint,
+                kind: if breakpoint.condition.is_some()
+                    || breakpoint.hit_condition.is_some()
+                    || breakpoint.log_message.is_some()
+                {
+                    crate::ui::DebugSignKind::ConditionalBreakpoint
+                } else {
+                    crate::ui::DebugSignKind::Breakpoint
+                },
             })
             .collect();
         if let Some((path, line)) = self.debugger_session.execution() {
@@ -1108,7 +1121,7 @@ impl InteractiveApplication {
 
 impl InteractiveApplication {
     /// A path as the reader knows it in the project, or whole when it lies outside.
-    fn workspace_relative_label(&self, path: &std::path::Path) -> String {
+    pub(super) fn workspace_relative_label(&self, path: &std::path::Path) -> String {
         self.workspace
             .roots()
             .iter()

@@ -304,6 +304,7 @@ impl InputSession {
                 | PromptKind::GitDestructive
                 | PromptKind::AgentPermission
                 | PromptKind::ReviewComment
+                | PromptKind::BreakpointCondition
         ) {
             return;
         }
@@ -515,6 +516,7 @@ impl InputSession {
             PromptKind::WorkspaceTrust
                 | PromptKind::ExplorerRename
                 | PromptKind::ReviewComment
+                | PromptKind::BreakpointCondition
         ) {
             return;
         }
