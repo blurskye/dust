@@ -3,7 +3,7 @@
 //! repository byte-unchanged.
 use std::{
     hash::{Hash, Hasher},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -127,6 +127,8 @@ pub enum GitBranchError {
     UnknownBranch(String),
     #[error("worktree `{0}` does not exist")]
     UnknownWorktree(String),
+    #[error("a worktree named `{0}` already exists")]
+    WorktreeExists(String),
     #[error("branch `{0}` is checked out in another worktree")]
     RefusedCheckedOut(String),
     #[error("worktree `{0}` has uncommitted changes")]
@@ -415,13 +417,25 @@ fn has_changes(repository: &git2::Repository) -> Result<bool, GitBranchError> {
     Ok(!statuses.is_empty())
 }
 
-fn local_branch<'a>(
-    repository: &'a git2::Repository,
-    name: &str,
-) -> Result<git2::Branch<'a>, GitBranchError> {
-    repository
-        .find_branch(name, git2::BranchType::Local)
-        .map_err(|_| GitBranchError::UnknownBranch(name.to_owned()))
+/// A worktree inside the main checkout would otherwise show as untracked in its status.
+fn exclude_from_status(repository: &git2::Repository, path: &Path) {
+    let Some(root) = repository.commondir().parent() else {
+        return;
+    };
+    let Some(Component::Normal(top)) = path.strip_prefix(root).ok().and_then(|p| p.components().next())
+    else {
+        return;
+    };
+    let line = format!("/{}/", top.to_string_lossy());
+    let exclude = repository.commondir().join("info").join("exclude");
+    let current = std::fs::read_to_string(&exclude).unwrap_or_default();
+    if current.lines().any(|existing| existing == line) {
+        return;
+    }
+    if let Some(parent) = exclude.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&exclude, format!("{current}{line}\n"));
 }
 
 fn checked_out_path(
@@ -521,6 +535,10 @@ fn run(
         } => {
             let repository = open(repository)?;
             let _ = deadline;
+            // A relative path starts at the main checkout, from any worktree.
+            let main_root = repository.commondir().parent().map(Path::to_path_buf);
+            let path = main_root.as_deref().map_or(path.clone(), |root| root.join(path));
+            let path = path.as_path();
             // Validate everything that could refuse before creating anything.
             if let Ok(metadata) = std::fs::symlink_metadata(path)
                 && (!metadata.file_type().is_dir()
@@ -533,9 +551,10 @@ fn run(
                     path.display().to_string(),
                 ));
             }
-            if let Some(short) = reference.strip_prefix("refs/heads/")
-                && checked_out_path(&repository, short)?.is_some()
-            {
+            let short = reference
+                .strip_prefix("refs/heads/")
+                .unwrap_or(reference.as_str());
+            if checked_out_path(&repository, short)?.is_some() {
                 return Err(GitBranchError::RefusedBranchAlreadyCheckedOut(
                     short.to_owned(),
                 ));
@@ -547,20 +566,44 @@ fn run(
                 ));
             }
             if repository.find_worktree(name).is_ok() {
-                return Err(GitBranchError::UnknownWorktree(name.clone()));
+                return Err(GitBranchError::WorktreeExists(name.clone()));
             }
-            // The checked-out reference must be a real reference, so the request names a
-            // local branch rather than an arbitrary revision expression.
-            let short = reference
-                .strip_prefix("refs/heads/")
-                .unwrap_or(reference.as_str());
-            let branch = local_branch(&repository, short)?;
+            // A branch that doesn't exist yet starts at HEAD, like `git worktree add -b`.
+            let existing = repository.find_branch(short, git2::BranchType::Local).ok();
+            let new_branch = existing.is_none();
+            let branch = match existing {
+                Some(branch) => branch,
+                None => {
+                    let head = repository
+                        .head()
+                        .and_then(|head| head.peel_to_commit())
+                        .map_err(|_| GitBranchError::Backend)?;
+                    repository
+                        .branch(short, &head, false)
+                        .map_err(|_| GitBranchError::UnknownBranch(short.to_owned()))?
+                }
+            };
             let reference = branch.into_reference();
             let mut options = git2::WorktreeAddOptions::new();
             options.reference(Some(&reference));
-            repository
-                .worktree(name, path, Some(&options))
-                .map_err(|_| GitBranchError::Backend)?;
+            let added = path
+                .parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .map_err(|_| GitBranchError::Backend)
+                .and_then(|()| {
+                    repository
+                        .worktree(name, path, Some(&options))
+                        .map_err(|_| GitBranchError::Backend)
+                });
+            if let Err(error) = added {
+                if new_branch
+                    && let Ok(mut branch) = repository.find_branch(short, git2::BranchType::Local)
+                {
+                    let _ = branch.delete();
+                }
+                return Err(error);
+            }
+            exclude_from_status(&repository, path);
             Ok(GitBranchResult::Changed)
         }
         GitBranchRequest::RemoveWorktree {

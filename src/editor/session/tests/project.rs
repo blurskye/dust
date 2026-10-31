@@ -4519,3 +4519,30 @@ fn palette_rows_that_need_text_open_a_command_line_that_runs_them() {
             .unwrap_or_else(|error| panic!("`{id}` prompt `{initial}`: {error}"));
     }
 }
+
+#[test]
+fn command_line_completes_commands_without_an_alias_and_fills_in_their_arguments() {
+    let mut app = app();
+    app.open_prompt(crate::ui::PromptKind::Command, "wor".into());
+    app.refresh_completions();
+    let completions = |app: &InteractiveApplication| -> Vec<String> {
+        app.input
+            .prompt()
+            .unwrap()
+            .completions
+            .iter()
+            .map(|item| item.label.clone())
+            .collect()
+    };
+    let rows = completions(&app);
+    assert_eq!(rows[0], "worktree", "{rows:?}");
+    assert!(rows.iter().any(|row| row == "workspace.git.worktree.remove"), "{rows:?}");
+
+    app.close_prompt();
+    app.open_prompt(crate::ui::PromptKind::Command, String::new());
+    app.refresh_completions();
+    let rows = completions(&app);
+    assert_eq!(rows[0].len(), 1, "short aliases come first: {rows:?}");
+    assert!(rows.iter().any(|row| row == "workspace.git.hunk.stage"), "{rows:?}");
+    assert!(!rows.iter().any(|row| row.starts_with("input.")), "{rows:?}");
+}

@@ -159,6 +159,19 @@ pub fn parse_ex(
                 command(command_id)?
                     .with_argument("query", CommandValue::String(arguments.to_owned()))
             }
+            "workspace.git.worktree.create" => {
+                let mut parts = arguments.split_whitespace();
+                let branch = parts.next().ok_or(ExParseError::MissingArgument("branch"))?;
+                let mut invocation =
+                    command(command_id)?.with_argument("branch", CommandValue::String(branch.into()));
+                if let Some(path) = parts.next() {
+                    invocation = invocation.with_argument("path", CommandValue::String(path.into()));
+                }
+                if parts.next().is_some() {
+                    return Err(ExParseError::UnexpectedArguments(arguments.into()));
+                }
+                invocation
+            }
             "workspace.replace" => {
                 let Some((query, replacement)) = arguments.split_once(char::is_whitespace) else {
                     return Err(ExParseError::MissingArgument("replacement"));

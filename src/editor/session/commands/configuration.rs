@@ -184,17 +184,15 @@ pub(super) fn register_commands(
     register(
         registry,
         "workspace.git.worktree.create",
-        "Create a worktree for a branch",
+        "New Worktree: check out a branch in its own directory",
         ContextRequirement::Workspace,
         ArgumentSchema::default()
-            .field("name", ArgumentType::String, true)
-            .field("path", ArgumentType::String, true)
-            .field("reference", ArgumentType::String, true),
+            .field("branch", ArgumentType::String, true)
+            .field("path", ArgumentType::String, false),
         |invocation| {
             Ok(AppEffect::GitWorktreeCreate {
-                name: string_arg(invocation, "name")?.into(),
-                path: std::path::PathBuf::from(string_arg(invocation, "path")?),
-                reference: string_arg(invocation, "reference")?.into(),
+                branch: string_arg(invocation, "branch")?.into(),
+                path: optional_string_arg(invocation, "path").map(std::path::PathBuf::from),
             })
         },
     )?;

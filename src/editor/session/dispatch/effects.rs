@@ -6521,7 +6521,11 @@ impl InteractiveApplication {
     }
     pub(in crate::editor::session) fn start_git_worktrees(&mut self) {
         let Some(status) = self.git.status().cloned() else {
-            self.show_error("Git status is unavailable; refresh first");
+            if self.git.status_pending() {
+                self.git.show_worktrees_after_change();
+            } else {
+                self.show_error("Git status is not ready; is this a Git repository?");
+            }
             return;
         };
         if let Err(error) = self.git.start_branches(&status.repository) {
@@ -6550,7 +6554,7 @@ impl InteractiveApplication {
         match self.git.status() {
             Some(status) => Some(status.repository.clone()),
             None => {
-                self.show_error("Git status is unavailable; refresh first");
+                self.show_error("Git status is not ready; is this a Git repository?");
                 None
             }
         }
@@ -6562,16 +6566,19 @@ impl InteractiveApplication {
     }
     pub(in crate::editor::session) fn create_git_worktree(
         &mut self,
-        name: String,
-        path: std::path::PathBuf,
-        reference: String,
+        branch: String,
+        path: Option<std::path::PathBuf>,
     ) {
         let Some(repository) = self.git_repository() else {
             return;
         };
+        // Git names a worktree with one path segment; branches may have several.
+        let name = branch.replace('/', "-");
+        let path = path.unwrap_or_else(|| std::path::Path::new(".worktree").join(&name));
         let result = self
             .git
-            .start_worktree_create(&repository, &name, &path, &reference);
+            .start_worktree_create(&repository, &name, &path, &branch);
+        self.git.show_worktrees_after_change();
         self.report_branch_request(result);
     }
     fn confirm_git_destructive(&mut self, action: Option<crate::editor::session::git::GitDestructiveAction>) {
@@ -6579,11 +6586,12 @@ impl InteractiveApplication {
             return;
         };
         let Some(status) = self.git.status().cloned() else {
-            self.show_error("Git status is unavailable; refresh first");
+            self.show_error("Git status is not ready; is this a Git repository?");
             return;
         };
         let result = match action {
             crate::editor::session::git::GitDestructiveAction::RemoveWorktree(name) => {
+                self.git.show_worktrees_after_change();
                 self.git.start_worktree_remove(&status.repository, &name)
             }
         };
@@ -6606,14 +6614,29 @@ impl InteractiveApplication {
             Some(crate::editor::session::git::GitBranchOutcome::Changed) => {
                 self.start_git_status_refresh();
                 self.notify_message("Git branch or worktree updated".into(), false);
+                if self.git.take_show_worktrees() {
+                    self.start_git_worktrees();
+                }
                 return;
             }
             None => return,
         };
-        let items = list
-            .worktrees
-            .iter()
-            .map(|worktree| {
+        let new_worktree = (
+            PickerItem {
+                badge: String::new(),
+                kind: crate::workspace::PickerItemKind::Entry,
+                id: PickerItemId("git-worktree-new".into()),
+                label: "New worktree…".into(),
+                detail: "check out a branch in its own directory".into(),
+                source: String::new(),
+                action: PickerAction::None,
+            },
+            crate::editor::session::search::PickerPayload::Command(
+                "workspace.git.worktree.create".into(),
+            ),
+        );
+        let items = std::iter::once(new_worktree)
+            .chain(list.worktrees.iter().map(|worktree| {
                 let mut detail = match &worktree.branch {
                     Some(branch) => format!("branch {branch}"),
                     None => "detached".to_string(),
@@ -6645,12 +6668,12 @@ impl InteractiveApplication {
                         path: worktree.path.clone(),
                     },
                 )
-            })
+            }))
             .collect::<Vec<_>>();
         let title = format!("Git worktrees · {}", list.worktrees.len());
         self.install_picker(title, items);
         self.search
-            .set_picker_footer("Enter Switch · Esc Close".to_owned());
+            .set_picker_footer("Enter Switch · ctrl-x Remove · Esc Close".to_owned());
         self.sync_picker_ui();
     }
     pub(in crate::editor::session) fn unstage_selected_git_hunk(&mut self) {
@@ -6886,6 +6909,8 @@ impl InteractiveApplication {
             self.git.open_changes_when_ready = false;
         } else if self.git.open_changes_when_ready {
             self.open_git_status_picker();
+        } else if self.git.take_show_worktrees() {
+            self.start_git_worktrees();
         }
         if self.ui.explorer.is_some() {
             self.sync_explorer_ui();
@@ -8459,7 +8484,7 @@ impl InteractiveApplication {
             return;
         };
         let Some(status) = self.git.status() else {
-            self.show_error("Git status is unavailable; refresh first");
+            self.show_error("Git status is not ready; is this a Git repository?");
             return;
         };
         let repository = status.repository.clone();
@@ -8777,7 +8802,7 @@ impl InteractiveApplication {
         match self.git.status() {
             Some(status) => Some(status.repository.clone()),
             None => {
-                self.show_error("Git status is unavailable; refresh first");
+                self.show_error("Git status is not ready; is this a Git repository?");
                 None
             }
         }
@@ -8796,7 +8821,7 @@ impl InteractiveApplication {
     /// ABSENT rather than as content.
     pub(in crate::editor::session) fn open_git_conflicts(&mut self) {
         let Some(status) = self.git.status() else {
-            self.show_error("Git status is unavailable; refresh first");
+            self.show_error("Git status is not ready; is this a Git repository?");
             return;
         };
         let repository = status.repository.clone();
@@ -11758,11 +11783,9 @@ impl InteractiveApplication {
                     ),
                 }
             }
-            AppEffect::GitWorktreeCreate {
-                name,
-                path,
-                reference,
-            } => self.create_git_worktree(name, path, reference),
+            AppEffect::GitWorktreeCreate { branch, path } => {
+                self.create_git_worktree(branch, path);
+            }
             AppEffect::HelpForForm => self.open_form_help(),
             AppEffect::GitConflictsOpen => self.open_git_conflicts(),
             AppEffect::GitConflictChoose { side } => self.choose_git_conflict_side(&side),

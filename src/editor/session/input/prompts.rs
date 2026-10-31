@@ -399,6 +399,13 @@ impl InputSession {
                 })
             {
                 prompt.input.push(' ');
+            } else {
+                // A command that needs typed text completes to what the palette opens it with.
+                let command = policy.input.command_aliases.get(prompt.input.as_str());
+                let command = command.map_or(prompt.input.as_str(), String::as_str);
+                if let Some(initial) = policy.command_palette.prompts.get(command) {
+                    prompt.input = initial.clone();
+                }
             }
         }
         prompt.cursor = prompt.input.len();
@@ -536,8 +543,8 @@ impl InputSession {
 }
 
 /// `:` completions, Vim style: one row per command, named by its shortest alias that fits
-/// what is typed, so `w`, `q` and `e` come first. Labels match too. Dotted command ids are
-/// offered once the input has a `.`.
+/// what is typed, so `w`, `q` and `e` come first. Labels match too. Commands without an alias
+/// follow under their dotted id; plumbing only keys use appears once the input has a `.`.
 fn command_completions<'a>(
     policy: &crate::config::Config,
     input: &str,
@@ -553,7 +560,7 @@ fn command_completions<'a>(
             alias.to_owned(),
         )
     };
-    let mut best = BTreeMap::<&str, (bool, usize, bool, String)>::new();
+    let mut best = BTreeMap::<String, (bool, usize, bool, String)>::new();
     for (alias, command_id) in &policy.input.command_aliases {
         let label = policy
             .command_labels
@@ -564,7 +571,7 @@ fn command_completions<'a>(
             continue;
         }
         let candidate = rank(alias, prefix);
-        best.entry(command_id)
+        best.entry(command_id.clone())
             .and_modify(|current| {
                 if candidate < *current {
                     *current = candidate.clone();
@@ -572,17 +579,24 @@ fn command_completions<'a>(
             })
             .or_insert(candidate);
     }
+    let hidden = &policy.command_palette.hidden;
+    for id in commands {
+        let Some(label) = policy.command_labels.get(id) else {
+            continue;
+        };
+        let plumbing = hidden.iter().any(|prefix| id.starts_with(prefix.as_str()));
+        if best.contains_key(id)
+            || (plumbing && !query.contains('.'))
+            || !(id.contains(&query) || label.to_lowercase().contains(&query))
+        {
+            continue;
+        }
+        best.insert(id.to_owned(), rank(id, id.starts_with(&query)));
+    }
     let mut rows = best
         .into_iter()
-        .map(|(command_id, rank)| (rank, policy.command_labels[command_id].clone()))
+        .map(|(command_id, rank)| (rank, policy.command_labels[&command_id].clone()))
         .collect::<Vec<_>>();
-    if query.contains('.') {
-        for id in commands {
-            if id.starts_with(&query) {
-                rows.push((rank(id, true), policy.command_labels[id].clone()));
-            }
-        }
-    }
     rows.sort();
     rows.into_iter().map(|(rank, label)| (rank.3, label)).collect()
 }

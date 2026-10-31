@@ -43,6 +43,7 @@ pub(super) struct GitSession {
     mutation_generation: Option<GitMutationGeneration>,
     branches: GitBranchService,
     branch_generation: Option<GitBranchGeneration>,
+    show_worktrees: bool,
     /// The previewed whole-file replacement waiting for its confirmation. The plan is rebuilt
     /// when the answer arrives, so a plan previewed against one repository state is never applied
     /// to another.
@@ -395,7 +396,7 @@ impl GitSession {
             .status_snapshot
             .as_ref()
             .filter(|s| s.root_revision == revision)
-            .ok_or("Git status is unavailable; refresh first")?;
+            .ok_or("Git status is not ready; is this a Git repository?")?;
         let path = path.ok_or("active buffer has no file path")?;
         let relative = path
             .strip_prefix(&status.scope_root)
@@ -509,7 +510,7 @@ impl GitSession {
         let status = self
             .status_snapshot
             .as_ref()
-            .ok_or("Git status is unavailable; refresh first")?;
+            .ok_or("Git status is not ready; is this a Git repository?")?;
         let path = status.scope_root.join(&snapshot.file);
         let line = hunk.new_start.saturating_sub(1) as usize;
         self.selected = Some((snapshot.clone(), hunk.clone(), path.clone()));
@@ -544,7 +545,7 @@ impl GitSession {
         let status = self
             .status_snapshot
             .as_ref()
-            .ok_or("Git status is unavailable; refresh first")?;
+            .ok_or("Git status is not ready; is this a Git repository?")?;
         self.selected = Some((
             snapshot.clone(),
             hunk.clone(),
@@ -594,7 +595,7 @@ impl GitSession {
             .status_snapshot
             .as_ref()
             .filter(|s| s.root_revision == revision)
-            .ok_or("Git status is unavailable; refresh first")?;
+            .ok_or("Git status is not ready; is this a Git repository?")?;
         let id = editor.active_buffer_id().ok_or("no active buffer")?;
         let path = editor.buffers[id]
             .path
@@ -642,7 +643,7 @@ impl GitSession {
                     .status_snapshot
                     .as_ref()
                     .filter(|status| status.root_revision == revision)
-                    .ok_or("Git status is unavailable; refresh first")?;
+                    .ok_or("Git status is not ready; is this a Git repository?")?;
                 (relative, status.scope_root.clone())
             }
             None => self.active_relative(editor, revision)?,
@@ -650,7 +651,7 @@ impl GitSession {
         let status = self
             .status_snapshot
             .as_ref()
-            .ok_or("Git status is unavailable; refresh first")?;
+            .ok_or("Git status is not ready; is this a Git repository?")?;
         let from_worktree = matches!(
             kind,
             GitMutationKind::StageFile | GitMutationKind::StageHunk | GitMutationKind::StageLines
@@ -740,6 +741,13 @@ impl GitSession {
         Ok(())
     }
     /// Create a worktree for a branch. The destination and occupancy checks are the model's.
+    /// The worktree list reopens when the running change finishes.
+    pub(super) fn show_worktrees_after_change(&mut self) {
+        self.show_worktrees = true;
+    }
+    pub(super) fn take_show_worktrees(&mut self) -> bool {
+        std::mem::take(&mut self.show_worktrees)
+    }
     pub(super) fn start_worktree_create(
         &mut self,
         repository: &Path,
@@ -893,13 +901,13 @@ impl GitSession {
     pub(super) fn unsaved_refusal(&self) -> Option<&Path> {
         self.unsaved_refusal.as_deref()
     }
+    pub(super) fn status_pending(&self) -> bool {
+        self.status_generation.is_some()
+    }
 }
 
 #[cfg(test)]
 impl GitSession {
-    pub(super) fn status_pending(&self) -> bool {
-        self.status_generation.is_some()
-    }
     pub(super) fn signs_pending(&self) -> bool {
         self.sign_generation.is_some()
     }

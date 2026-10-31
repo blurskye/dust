@@ -113,9 +113,8 @@ pub enum AppEffect {
     HelpCommandReference,
     HelpForForm,
     GitWorktreeCreate {
-        name: String,
-        path: std::path::PathBuf,
-        reference: String,
+        branch: String,
+        path: Option<std::path::PathBuf>,
     },
     GitFileStage,
     GitFileUnstage,

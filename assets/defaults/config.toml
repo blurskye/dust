@@ -643,7 +643,7 @@ vfs_queue_capacity = 8
 macro_recursion_limit = 16
 macro_step_limit = 10000
 repeat_step_limit = 10000
-completion_limit = 100
+completion_limit = 1000
 
 [history.command]
 enabled = true
@@ -767,6 +767,8 @@ dap = "dap.menu.open"
 problems = "diagnostic.open"
 buffers = "buffer.picker.open"
 commands = "command_palette.open"
+worktree = "workspace.git.worktree.create"
+worktrees = "workspace.git.worktrees.open"
 theme = "theme.select"
 colorscheme = "theme.select"
 colo = "theme.select"
@@ -1097,6 +1099,7 @@ hidden = [
 "test.list" = "tests name="
 "test.run" = "test name="
 "test.stop" = "teststop name="
+"workspace.git.worktree.create" = "worktree "
 "workspace.root.add" = "rootadd "
 
 [command_palette.categories]
@@ -1241,7 +1244,7 @@ workspace = "Project"
 "workspace.git.hunk.unstage" = "Unstage selected staged Git hunk"
 "workspace.git.worktrees.open" = "Open the Git worktree list"
 "workspace.git.worktree.remove" = "Remove the selected worktree and its directory"
-"workspace.git.worktree.create" = "Create a worktree for a branch"
+"workspace.git.worktree.create" = "New Worktree: check out a branch in its own directory"
 "workspace.git.worktree.open" = "Switch to the selected worktree"
 "overlay.help.contextual" = "Show what is available on the focused surface"
 "overlay.help.reference" = "Show the reference for the selected command"

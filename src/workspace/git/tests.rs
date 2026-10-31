@@ -2357,3 +2357,28 @@ fn a_review_worktree_is_detached_at_the_inspected_revision_and_moves_no_branch()
 
 
 
+
+#[test]
+fn a_new_worktree_creates_its_branch_at_head_and_stays_out_of_status() {
+    let dir = tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    commit(&repo, "w.txt", "one\n");
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let head = repo.head().unwrap().target().unwrap();
+
+    run_branch(crate::workspace::git::GitBranchRequest::CreateWorktree {
+        repository: root.clone(),
+        name: "feat-x".into(),
+        path: PathBuf::from(".worktree/feat-x"),
+        reference: "feat/x".into(),
+        deadline: Duration::from_secs(5),
+    })
+    .unwrap();
+
+    assert!(root.join(".worktree/feat-x/w.txt").exists());
+    let branch = repo.find_branch("feat/x", git2::BranchType::Local).unwrap();
+    assert_eq!(branch.get().target(), Some(head));
+    let mut options = git2::StatusOptions::new();
+    options.include_untracked(true);
+    assert!(repo.statuses(Some(&mut options)).unwrap().is_empty());
+}

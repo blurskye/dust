@@ -19,7 +19,7 @@ impl Default for RuntimeConfig {
             macro_recursion_limit: 16,
             macro_step_limit: 10_000,
             repeat_step_limit: 10_000,
-            completion_limit: 100,
+            completion_limit: 1000,
         }
     }
 }

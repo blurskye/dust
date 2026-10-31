@@ -287,6 +287,8 @@ pub fn run_interactive(
     let mut input_arrived = true;
     while !application.should_quit {
         application.process_vfs_results();
+        // Git commands need status from the start, not only once a file or the tree is open.
+        application.start_git_status_refresh_silent();
         application.process_git_status_events();
         application.process_git_hunk_events();
         application.process_git_sign_events();
