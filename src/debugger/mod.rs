@@ -629,15 +629,12 @@ fn run_adapter(
                                 if generation == stop_generation || is_startup_request(&command) {
                                     if message.get("success").and_then(Value::as_bool) != Some(true)
                                     {
-                                        let message = format!(
-                                            "DAP {command} request rejected: {}",
-                                            bounded(message.get("message"))
-                                        );
+                                        let detail = rejection_detail(&message);
                                         if is_startup_request(&command) {
                                             events
                                                 .send(DapEvent::Failed {
                                                     adapter: adapter.clone(),
-                                                    message,
+                                                    message: detail,
                                                 })
                                                 .ok();
                                             break;
@@ -647,8 +644,8 @@ fn run_adapter(
                                                 adapter: adapter.clone(),
                                                 stop_generation: generation,
                                                 request_seq,
+                                                message: format!("DAP {command} request rejected: {detail}"),
                                                 command,
-                                                message,
                                             })
                                             .ok();
                                         continue;
@@ -971,6 +968,21 @@ fn is_startup_request(command: &str) -> bool {
     matches!(command, "launch" | "attach")
 }
 
+/// Why a request was refused. Delve's `message` is only "Failed to launch"; the reason is in
+/// `body.error.format`.
+fn rejection_detail(response: &Value) -> String {
+    let format = response.pointer("/body/error/format").and_then(Value::as_str);
+    match format.filter(|format| !format.is_empty()) {
+        Some(format) => {
+            let variables = response.pointer("/body/error/variables").and_then(Value::as_object);
+            let filled = variables.into_iter().flatten().fold(format.to_owned(), |text, (name, value)| {
+                text.replace(&format!("{{{name}}}"), value.as_str().unwrap_or_default())
+            });
+            sanitize_output(&filled)
+        }
+        None => bounded(response.get("message")),
+    }
+}
 fn bounded(value: Option<&Value>) -> String {
     sanitize_output(value.and_then(Value::as_str).unwrap_or_default())
 }

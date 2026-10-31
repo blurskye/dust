@@ -1570,6 +1570,8 @@ pub fn terminal_panel_geometry(
     })
 }
 
+const NOTIFICATION_MAX_LINES: usize = 5;
+
 fn render_error_notification(
     frame: &mut Frame,
     message: &str,
@@ -1581,10 +1583,27 @@ fn render_error_notification(
     let Some(mut rect) = super::geometry::error_notification_geometry(config, width, height) else {
         return;
     };
-    let content_width = u16::try_from(text_width(message, config.editor.ambiguous_width))
+    // A long message wraps instead of losing its end, which is usually the part that says why.
+    let ambiguous = config.editor.ambiguous_width;
+    let inner = usize::from(rect.width.saturating_sub(4)).max(1);
+    let lines: Vec<String> = if text_width(message, ambiguous) <= inner {
+        vec![message.to_owned()]
+    } else {
+        wrap_card_text(message, inner, ambiguous)
+            .into_iter()
+            .map(|runs| runs.into_iter().map(|(piece, _)| piece).collect())
+            .take(usize::from(height.saturating_sub(rect.y + 2)).clamp(1, NOTIFICATION_MAX_LINES))
+            .collect()
+    };
+    let content_width = lines
+        .iter()
+        .map(|line| text_width(line, ambiguous))
+        .max()
+        .and_then(|width| u16::try_from(width).ok())
         .unwrap_or(rect.width)
         .saturating_add(4)
         .clamp(4, rect.width);
+    rect.height = lines.len() as u16 + 2;
     rect.x = rect
         .x
         .saturating_add(rect.width.saturating_sub(content_width));
@@ -1604,15 +1623,13 @@ fn render_error_notification(
     frame.grid.set_cell(right, rect.y, "╮", style);
     frame.grid.set_cell(rect.x, bottom, "╰", style);
     frame.grid.set_cell(right, bottom, "╯", style);
-    frame.grid.set_cell(rect.x, rect.y + 1, "│", style);
-    frame.grid.set_cell(right, rect.y + 1, "│", style);
-    frame.grid.put_text_clipped(
-        rect.x.saturating_add(2),
-        rect.y + 1,
-        message,
-        style,
-        right.saturating_sub(1),
-    );
+    for (row, line) in (rect.y + 1..).zip(&lines) {
+        frame.grid.set_cell(rect.x, row, "│", style);
+        frame.grid.set_cell(right, row, "│", style);
+        frame
+            .grid
+            .put_text_clipped(rect.x.saturating_add(2), row, line, style, right.saturating_sub(1));
+    }
 }
 
 /// Words of `text` wrapped to `width`, each line a list of (piece, is a key) runs.

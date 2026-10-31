@@ -108,6 +108,12 @@ while True:
     service.stop().unwrap();
 }
 #[test]
+fn a_rejection_says_why_rather_than_only_that_it_failed() {
+    let delve = json!({"message":"Failed to launch","body":{"error":{"format":"Failed to launch: {why}","variables":{"why":"Build error"}}}});
+    assert_eq!(rejection_detail(&delve), "Failed to launch: Build error");
+    assert_eq!(rejection_detail(&json!({"message":"no such file"})), "no such file");
+}
+#[test]
 fn stopping_lets_the_adapter_end_its_program_and_clean_up() {
     let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
     let body = r#"

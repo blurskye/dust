@@ -2018,6 +2018,18 @@ fn concrete_gutter_reserves_content_at_zero_one_and_two_cell_widths() {
 }
 
 #[test]
+fn a_long_notification_wraps_so_its_end_stays_readable() {
+    let mut state = EditorState::new(PathBuf::from("/tmp"));
+    let _ = state.open_text(crate::editor::text::TextBuffer::from_text(""), None);
+    let loaded = crate::config::load_bundled_config();
+    let mut ui = ui_with_editor_layout(&state);
+    ui.notification = Some(format!("{} says why at the very end", "failed ".repeat(20)));
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 60, 20);
+    let text: Vec<String> = (0..20).map(|row| frame.grid.row_text(row)).collect();
+    assert!(text.iter().any(|row| row.contains("very end")), "{text:#?}");
+}
+
+#[test]
 fn wrapping_ignores_horizontal_offset() {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
     let (_, view) = state.open_text(

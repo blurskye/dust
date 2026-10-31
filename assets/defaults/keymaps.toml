@@ -4247,6 +4247,13 @@ command = "dap.session.restart"
 desc = "Restart"
 
 [[keymap]]
+id = "builtin.global.debug-next-pane"
+context = "global"
+keys = "<leader> d n"
+command = "dap.inspector.next"
+desc = "Next Debug Pane"
+
+[[keymap]]
 id = "builtin.global.debug-repl"
 context = "global"
 keys = "<leader> d r"

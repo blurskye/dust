@@ -506,6 +506,13 @@ impl DebugSession {
                 {
                     arguments.insert("python".into(), serde_json::json!([venv]));
                 }
+                // A debug build has no use for VCS stamping, and it fails the build when Git can't
+                // read the repository, such as one owned by another user.
+                if launch.session.adapter == "delve" {
+                    arguments
+                        .entry("buildFlags")
+                        .or_insert_with(|| serde_json::json!("-buildvcs=false"));
+                }
                 if let Some(program) = launch.program {
                     // Go builds packages, so a file beside the active one still has to compile.
                     let program = match program.parent() {

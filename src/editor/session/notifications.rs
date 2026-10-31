@@ -13,6 +13,8 @@ use crate::{
 /// The renderer receives a projection, never this owner's mutable state.
 pub(super) struct NoticeSession {
     current: Option<(bool, String)>,
+    /// A notice to take down when what it announced is over.
+    passing: Option<String>,
     /// The current notice is a warning: something degraded, but the work went on.
     warning: bool,
     history: VecDeque<(bool, String)>,
@@ -29,6 +31,7 @@ impl NoticeSession {
     pub(super) fn new(config: &Config, persist: bool, crash_path: PathBuf, now: Instant) -> Self {
         Self {
             current: None,
+            passing: None,
             warning: false,
             history: VecDeque::new(),
             deadline: None,
@@ -75,6 +78,20 @@ impl NoticeSession {
     pub(super) fn clear(&mut self) {
         self.current = None;
         self.deadline = None;
+    }
+
+    /// Remembers the current notice as one that stops being true, such as "starting".
+    pub(super) fn mark_current_passing(&mut self) {
+        self.passing = self.current.as_ref().map(|(_, message)| message.clone());
+    }
+
+    /// Takes down the passing notice once it has passed, unless another has replaced it.
+    pub(super) fn clear_passing(&mut self) {
+        if self.passing.take().is_some_and(|passing| {
+            self.current.as_ref().is_some_and(|(_, current)| *current == passing)
+        }) {
+            self.clear();
+        }
     }
 
     pub(super) fn tick(&mut self, now: Instant) -> bool {

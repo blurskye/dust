@@ -5382,7 +5382,8 @@ impl InteractiveApplication {
             self.tooling.entries(),
         ) {
             Ok(Some(name)) => {
-                self.notify_message(self.message("dap_started", &[("adapter", name)]), false)
+                self.notify_message(self.message("dap_started", &[("adapter", name)]), false);
+                self.notices.mark_current_passing();
             }
             Ok(None) => {}
             Err(error) => self.show_error(error),
@@ -5419,8 +5420,13 @@ impl InteractiveApplication {
                         self.show_error(message);
                     }
                 }
+                // "Starting" is over, and it would cover the variables the stop just filled in.
+                DapEvent::Stopped { .. } => {
+                    self.notices.clear_passing();
+                    self.project_notice();
+                }
                 // The panes and the execution sign show these.
-                DapEvent::Running { .. } | DapEvent::Stopped { .. } | DapEvent::Output { .. } => {}
+                DapEvent::Running { .. } | DapEvent::Output { .. } => {}
                 DapEvent::Response { response, .. } => match self
                     .debugger_session
                     .response(response)

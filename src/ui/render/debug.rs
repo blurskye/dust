@@ -298,9 +298,14 @@ pub(crate) fn render_debug_panes(
                             break;
                         }
                     }
-                    frame.grid.put_text(x, y, &label, super::Style::Border);
+                    frame.grid.put_text(x, y, &label, super::Style::Default);
                     x = x.saturating_add(width);
                     content_top = y.saturating_add(1);
+                }
+                const NEXT_PANE_HINT: &str = "· <leader>dn";
+                let hint_width = NEXT_PANE_HINT.chars().count() as u16;
+                if x.saturating_sub(strip.x + 1) + hint_width <= inner {
+                    frame.grid.put_text(x, y, NEXT_PANE_HINT, super::Style::Border);
                 }
                 let mut body = rows(panes.selected, panes);
                 body.insert(0, format!("{}:", panes.selected.label()));
