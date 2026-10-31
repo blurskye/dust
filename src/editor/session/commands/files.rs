@@ -47,7 +47,7 @@ pub(super) fn register_commands(
     register(
         registry,
         "file.open",
-        "Open file",
+        "Open file by path",
         ContextRequirement::Workspace,
         ArgumentSchema::default().field("path", ArgumentType::String, true),
         |invocation| {

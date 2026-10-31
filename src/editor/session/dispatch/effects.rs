@@ -7,7 +7,7 @@ use super::{
     EditorCloseSave, EditorCloseStep, EditorCloseTarget, EditorMode, EditorOperation, EditorState,
     EditorTransaction, ExecutionPreflightEvent, ExecutionSource, ExplorerKind, ExplorerMutation,
     FileSnapshot, FocusDirection, HashSet, InputAction, Instant, InteractiveApplication,
-    InvocationSource, LargeFileOverride, LayoutAction, LayoutPlanError, LogLevel,
+    LargeFileOverride, LayoutAction, LayoutPlanError, LogLevel,
     LspAutostartObservation, LspDocument, LspFeature, LspLaunchRequest, LspLaunchSource,
     LspMarkupContent, LspMarkupKind, LspRuntimeSource, LspWorkspaceEdit, MatcherSource,
     NativeDescriptions, NativeSurfaceTarget, PackageOperation, Path,
@@ -8423,10 +8423,7 @@ impl InteractiveApplication {
                 self.request_registry(RegistryRequest::Fetch { metadata }, true)
             }
             Some(PickerPayload::Command(command)) if !command.is_empty() => {
-                if let Ok(invocation) = CommandInvocation::new(&command, InvocationSource::Picker) {
-                    self.remember_palette_command(&command);
-                    self.invoke(invocation);
-                }
+                self.run_palette_command(&command);
             }
             Some(PickerPayload::PluginProviderItem { plugin, .. }) => {
                 if let Some(command) = provider_selection {
@@ -11656,6 +11653,16 @@ impl InteractiveApplication {
                 force,
             } => self.start_save(quit_after, path, force),
             AppEffect::OpenPath(path) => self.start_open(path),
+            // Settings files are optional, so the first open creates an empty one to edit.
+            AppEffect::OpenUserFile(path) => {
+                let created = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| {
+                    std::fs::OpenOptions::new().append(true).create(true).open(&path).map(drop)
+                });
+                match created {
+                    Ok(()) => self.start_open(path),
+                    Err(error) => self.show_error(format!("{}: {error}", path.display())),
+                }
+            }
             AppEffect::Reload { force } => self.start_reload(force),
             AppEffect::CloseBuffer { force } => self.close_active_buffer(force),
             AppEffect::CycleBuffer(offset) => match self.state.cycle_buffer(

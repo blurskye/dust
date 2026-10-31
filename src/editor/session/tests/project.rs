@@ -4466,3 +4466,56 @@ fn opening_changes_before_status_arrives_opens_them_when_it_does() {
         "the change list opens once status arrives"
     );
 }
+
+fn palette_row_for(app: &mut InteractiveApplication, query: &str) -> String {
+    app.open_builtin_picker(crate::editor::PickerKind::Commands);
+    app.picker_insert(query);
+    let palette = app.search.picker_projection().expect("palette");
+    let selected = palette.selected.unwrap_or_else(|| panic!("no row for `{query}`"));
+    palette.rows[selected].label.clone()
+}
+
+#[test]
+fn palette_finds_commands_by_the_words_people_type() {
+    let mut app = app();
+    for (query, expected) in [
+        ("theme", "Select Color Theme"),
+        ("color", "Select Color Theme"),
+        ("colorscheme", "Select Color Theme"),
+        ("mason", "Tool Manager"),
+        ("quit dust", "Quit Dust"),
+        ("close buffer", "Close buffer"),
+        ("rename symbol", "Rename symbol"),
+        ("open settings", "Open Settings"),
+        ("undo", "Undo"),
+    ] {
+        let row = palette_row_for(&mut app, query);
+        assert!(row.contains(expected), "`{query}` picked `{row}`");
+    }
+}
+
+#[test]
+fn palette_runs_flagged_commands_with_the_flag_off() {
+    let mut app = app();
+    palette_row_for(&mut app, "quit dust");
+    app.accept_picker();
+    assert!(app.should_quit);
+}
+
+#[test]
+fn palette_rows_that_need_text_open_a_command_line_that_runs_them() {
+    let mut app = app();
+    palette_row_for(&mut app, "file.open");
+    app.accept_picker();
+    assert_eq!(app.input.prompt().expect("prompt").input, "e ");
+
+    let settings = app.configuration.settings();
+    for (id, initial) in &settings.command_palette.prompts {
+        let invocation = crate::editor::input::parse_ex(&format!("{initial}value"), &settings.input.command_aliases)
+            .unwrap_or_else(|error| panic!("`{id}` prompt `{initial}`: {error}"));
+        assert_eq!(invocation.id.as_str(), id, "prompt `{initial}`");
+        app.commands
+            .validate_invocation_shape(&invocation)
+            .unwrap_or_else(|error| panic!("`{id}` prompt `{initial}`: {error}"));
+    }
+}

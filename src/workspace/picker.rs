@@ -335,10 +335,12 @@ pub(super) fn fuzzy_score(query: &str, label: &str, detail: &str) -> Option<i64>
         return Some(0);
     }
     let haystack = format!("{label} {detail}").to_lowercase();
+    let query = query.to_lowercase();
     let mut previous = None;
-    let mut score = 0_i64;
+    // The query typed as one piece beats the same letters scattered across the row.
+    let mut score = if haystack.contains(&query) { 1000_i64 } else { 0 };
     let mut search_start = 0;
-    for needle in query.to_lowercase().chars() {
+    for needle in query.chars() {
         let relative = haystack.get(search_start..)?.find(needle)?;
         let position = search_start + relative;
         score += 100 - i64::try_from(position).unwrap_or(100);

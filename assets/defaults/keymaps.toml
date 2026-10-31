@@ -3987,6 +3987,14 @@ command = "command_palette.open"
 desc = "Commands"
 
 [[keymap]]
+id = "builtin.editor.insert.commands.f1"
+context = "editor"
+mode = "insert"
+keys = "f1"
+command = "command_palette.open"
+desc = "Commands"
+
+[[keymap]]
 id = "builtin.global.notifications"
 context = "global"
 keys = "<leader> n"

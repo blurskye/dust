@@ -33,6 +33,7 @@ pub enum AppEffect {
         force: bool,
     },
     OpenPath(PathBuf),
+    OpenUserFile(PathBuf),
     Reload {
         force: bool,
     },

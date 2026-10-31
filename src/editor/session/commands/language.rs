@@ -7,7 +7,7 @@ pub(super) fn register_commands(
     registry: &mut CommandRegistry<AppEffect>,
 ) -> Result<(), CommandError> {
     for (id, title, category) in [
-        ("tools.menu.open", "Open tool manager", "all"),
+        ("tools.menu.open", "Tool Manager: install language servers (Mason)", "all"),
         ("lsp.menu.open", "Open language-server manager", "lsp"),
         ("dap.menu.open", "Open debug-adapter manager", "dap"),
     ] {

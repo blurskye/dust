@@ -9,7 +9,7 @@ pub(super) fn register_commands(
     register(
         registry,
         "theme.select",
-        "Select theme (live preview; remember in editor state)",
+        "Select Color Theme (Colorscheme)",
         ContextRequirement::Application,
         ArgumentSchema::default(),
         |_| AppEffect::SelectTheme,
@@ -17,10 +17,26 @@ pub(super) fn register_commands(
     register(
         registry,
         "config.reload",
-        "Reload configuration transactionally",
+        "Reload Settings",
         ContextRequirement::Application,
         ArgumentSchema::default(),
         |_| AppEffect::ReloadConfiguration,
+    )?;
+    register(
+        registry,
+        "config.open",
+        "Open Settings (config.toml)",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::OpenUserFile(crate::config::user_config_path()),
+    )?;
+    register(
+        registry,
+        "keymap.open",
+        "Open Keymaps (keymaps.toml)",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::OpenUserFile(crate::config::user_keymaps_path()),
     )?;
     register(
         registry,

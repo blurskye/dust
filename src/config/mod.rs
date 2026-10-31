@@ -89,6 +89,9 @@ pub struct CommandPaletteConfig {
     /// Command id prefixes left out of the palette: plumbing only keys use.
     #[serde(default)]
     pub hidden: Vec<String>,
+    /// Command line text a row opens with, for commands that need typed text.
+    #[serde(default)]
+    pub prompts: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]

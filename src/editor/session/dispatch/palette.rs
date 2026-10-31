@@ -2,9 +2,9 @@
 //! run by name, read as "Category: Label", with its key on the right and the commands run
 //! from here most recently at the top. Enter runs the command.
 
-use super::InteractiveApplication;
+use super::{CommandInvocation, CommandValue, InteractiveApplication, InvocationSource, PromptKind};
 use crate::{
-    editor::session::search::PickerPayload,
+    editor::{ArgumentType, session::search::PickerPayload},
     workspace::{PickerAction, PickerItem, PickerItemId, PickerItemKind},
 };
 
@@ -29,7 +29,10 @@ impl InteractiveApplication {
             .filter(|spec| {
                 let id = spec.id.as_str();
                 !palette.hidden.iter().any(|prefix| id.starts_with(prefix.as_str()))
-                    && !spec.arguments.fields.values().any(|field| field.required)
+                    && (palette.prompts.contains_key(id)
+                        || spec.arguments.fields.values().all(|field| {
+                            !field.required || field.kind == ArgumentType::Bool
+                        }))
             })
             .map(|spec| {
                 let id = spec.id.as_str().to_owned();
@@ -90,11 +93,34 @@ impl InteractiveApplication {
         }
     }
 
-    /// A command run from the palette moves to the top of it.
-    pub(super) fn remember_palette_command(&mut self, id: &str) {
+    /// Runs the chosen row and moves it to the top of the palette. Flags such as `force` stay
+    /// off; a command that needs typed text opens the command line instead.
+    pub(super) fn run_palette_command(&mut self, id: &str) {
         self.palette_recent.retain(|previous| previous != id);
         self.palette_recent.insert(0, id.to_owned());
         self.palette_recent.truncate(RECENT);
+        let prompt = self.configuration.settings().command_palette.prompts.get(id);
+        if let Some(initial) = prompt.cloned() {
+            self.open_prompt(PromptKind::Command, initial);
+            return;
+        }
+        let Ok(mut invocation) = CommandInvocation::new(id, InvocationSource::Picker) else {
+            return;
+        };
+        let flags = self
+            .commands
+            .specs()
+            .filter(|spec| spec.id.as_str() == id)
+            .flat_map(|spec| spec.arguments.fields.iter())
+            .filter(|(_, field)| field.required && field.kind == ArgumentType::Bool)
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        for name in flags {
+            invocation = invocation.with_argument(&name, CommandValue::Bool(false));
+        }
+        // Settle focus now the picker is gone: a command that navigates checks it hasn't moved.
+        self.reconcile_editor_windows();
+        self.invoke(invocation);
     }
 }
 
