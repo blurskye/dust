@@ -228,6 +228,29 @@ pub(super) fn contains_pane(node: &LayoutNode, target: PaneId) -> bool {
     }
 }
 
+/// The split with `first` on its first side and `second` on its second: the one a border
+/// between them belongs to.
+pub(super) fn split_between(
+    node: &mut LayoutNode,
+    first_pane: PaneId,
+    second_pane: PaneId,
+) -> Option<&mut LayoutNode> {
+    let LayoutNode::Split { first, second, .. } = node else {
+        return None;
+    };
+    if contains_pane(first, first_pane) && contains_pane(second, second_pane) {
+        return Some(node);
+    }
+    let LayoutNode::Split { first, second, .. } = node else {
+        return None;
+    };
+    if contains_pane(first, first_pane) {
+        split_between(first, first_pane, second_pane)
+    } else {
+        split_between(second, first_pane, second_pane)
+    }
+}
+
 pub(super) fn resize_parent(node: &mut LayoutNode, target: PaneId, delta: i16) -> bool {
     let LayoutNode::Split {
         ratio,

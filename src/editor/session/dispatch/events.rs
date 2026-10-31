@@ -143,6 +143,101 @@ impl InteractiveApplication {
         self.reconcile_editor_windows();
     }
 
+    /// Dragging the border between two editor windows resizes them, as in Neovim.
+    fn handle_border_drag(&mut self, key: &KeyEvent, column: u16, row: u16) -> bool {
+        use crate::editor::input::TerminalMouseInput;
+        use crate::ui::window::TileAxis;
+        let Some(projection) = self.compositor_projection() else {
+            return false;
+        };
+        let pane_at = |x: u16, y: u16| {
+            projection
+                .windows
+                .iter()
+                .filter(|window| rect_contains_point(window.rect, x, y))
+                .find_map(|window| self.window_session.editor_ids().pane_for_window(window.window))
+        };
+        match key.terminal_mouse() {
+            Some(TerminalMouseInput::LeftDown) => {
+                let sides = projection.borders.iter().find_map(|border| match border.axis {
+                    TileAxis::Horizontal
+                        if column == border.x
+                            && (border.y..border.y.saturating_add(border.length)).contains(&row) =>
+                    {
+                        Some((pane_at(column.wrapping_sub(1), row)?, pane_at(column + 1, row)?))
+                    }
+                    TileAxis::Vertical
+                        if row == border.y
+                            && (border.x..border.x.saturating_add(border.length)).contains(&column) =>
+                    {
+                        Some((pane_at(column, row.wrapping_sub(1))?, pane_at(column, row + 1)?))
+                    }
+                    _ => None,
+                });
+                self.border_drag = sides;
+                sides.is_some()
+            }
+            Some(TerminalMouseInput::LeftDrag) => {
+                let Some((first, second)) = self.border_drag else {
+                    return false;
+                };
+                let Some(panes) = self.state.panes_of_split_between(first, second) else {
+                    self.border_drag = None;
+                    return false;
+                };
+                // Measure the split from the windows under it, then put the border at the mouse.
+                let rects: Vec<WindowRect> = projection
+                    .windows
+                    .iter()
+                    .filter(|window| {
+                        self.window_session
+                            .editor_ids()
+                            .pane_for_window(window.window)
+                            .is_some_and(|pane| panes.contains(&pane))
+                    })
+                    .map(|window| window.rect)
+                    .collect();
+                let (Some(first_rect), Some(second_rect)) = (
+                    projection.windows.iter().find(|window| {
+                        self.window_session.editor_ids().pane_for_window(window.window) == Some(first)
+                    }),
+                    projection.windows.iter().find(|window| {
+                        self.window_session.editor_ids().pane_for_window(window.window)
+                            == Some(second)
+                    }),
+                ) else {
+                    return true;
+                };
+                let side_by_side = second_rect.rect.x > first_rect.rect.x;
+                let (start, end, at) = if side_by_side {
+                    (
+                        rects.iter().map(|rect| rect.x).min().unwrap_or(0),
+                        rects.iter().map(|rect| rect.x + rect.width).max().unwrap_or(0),
+                        column,
+                    )
+                } else {
+                    (
+                        rects.iter().map(|rect| rect.y).min().unwrap_or(0),
+                        rects.iter().map(|rect| rect.y + rect.height).max().unwrap_or(0),
+                        row,
+                    )
+                };
+                let available = u32::from(end.saturating_sub(start).saturating_sub(1)).max(1);
+                let ratio = u32::from(at.saturating_sub(start)) * 1_000 / available;
+                if self
+                    .state
+                    .set_split_ratio_between(first, second, u16::try_from(ratio).unwrap_or(900))
+                    .is_ok()
+                {
+                    self.reconcile_editor_windows();
+                }
+                true
+            }
+            Some(TerminalMouseInput::LeftUp) => self.border_drag.take().is_some(),
+            _ => false,
+        }
+    }
+
     pub(super) fn handle_content_tab_mouse(
         &mut self,
         key: &KeyEvent,
@@ -299,7 +394,9 @@ impl InteractiveApplication {
                         _ => {}
                     }
                 }
-                if self.handle_content_tab_mouse(&key, column, row) {
+                if self.handle_content_tab_mouse(&key, column, row)
+                    || self.handle_border_drag(&key, column, row)
+                {
                     return;
                 }
                 let over_terminal = self

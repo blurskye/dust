@@ -177,6 +177,8 @@ struct InteractiveApplication {
     tutor: tutor::Tutor,
     /// Commands last run from the palette, newest first.
     palette_recent: Vec<String>,
+    /// The split border being dragged with the mouse: the panes on its two sides.
+    border_drag: Option<(crate::editor::PaneId, crate::editor::PaneId)>,
     /// Where `dust --remote` from Dust's own terminals reaches this session.
     remote: Option<crate::remote::RemoteServer>,
     /// The parse results and views `ui.syntax_spans` and `ui.syntax_folds` were built from.

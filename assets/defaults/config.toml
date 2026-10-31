@@ -481,6 +481,9 @@ close_on_exit = true
 # mode or thinking level at start, e.g. `options = { model = "…", thought_level = "high" }`.
 [agents]
 default = "claude"
+# Share of the editor width the agent panel opens at; drag its border or use ctrl-left and
+# ctrl-right in it to change it.
+panel_width = 35
 
 [agents.profiles.claude]
 program = "claude-agent-acp"

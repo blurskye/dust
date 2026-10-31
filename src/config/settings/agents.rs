@@ -21,12 +21,29 @@ pub struct AgentProfileConfig {
     pub meta: Option<serde_json::Value>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentsConfig {
     /// The agent `<leader>aa` starts when none was picked.
     #[serde(default)]
     pub default: String,
+    /// How much of the editor width the agent panel takes when it opens, in percent.
+    #[serde(default = "default_panel_width")]
+    pub panel_width: u16,
     #[serde(default)]
     pub profiles: BTreeMap<String, AgentProfileConfig>,
+}
+
+const fn default_panel_width() -> u16 {
+    35
+}
+
+impl Default for AgentsConfig {
+    fn default() -> Self {
+        Self {
+            default: String::new(),
+            panel_width: default_panel_width(),
+            profiles: BTreeMap::new(),
+        }
+    }
 }

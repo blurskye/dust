@@ -10,7 +10,7 @@ use super::{
     layout::{
         FocusRectangle, collect_focus_rectangles, focus_score, layout_depth,
         layout_ratios_are_valid, offset_index, pane_depth, pane_ids, remove_leaf, resize_parent,
-        resize_parent_on_axis, split_leaf, swap_layout_leaves,
+        resize_parent_on_axis, split_between, split_leaf, swap_layout_leaves,
     },
     model::{
         Axis, Buffer, BufferOrigin, EditingPolicy, EditorMode, FocusDirection, LayoutNode, Pane,
@@ -777,6 +777,35 @@ impl EditorState {
         } else {
             Err("active pane has no resizable split on that axis")
         }
+    }
+
+    /// The panes under the split between `first` and `second`, for measuring it on screen.
+    #[must_use]
+    pub fn panes_of_split_between(&self, first: PaneId, second: PaneId) -> Option<Vec<PaneId>> {
+        let mut root = self.tabs.get(self.active_tab?)?.root.clone();
+        split_between(&mut root, first, second).map(|node| pane_ids(node))
+    }
+
+    /// Move the border between `first` and `second` so `first`'s side gets `ratio` per mille.
+    pub fn set_split_ratio_between(
+        &mut self,
+        first: PaneId,
+        second: PaneId,
+        ratio: u16,
+    ) -> Result<(), &'static str> {
+        let tab_id = self.active_tab.ok_or("no active tab")?;
+        let tab = self.tabs.get_mut(tab_id).ok_or("active tab is stale")?;
+        let Some(LayoutNode::Split { ratio: current, .. }) =
+            split_between(&mut tab.root, first, second)
+        else {
+            return Err("no split between those panes");
+        };
+        let ratio = ratio.clamp(100, 900);
+        if *current != ratio {
+            *current = ratio;
+            self.mark_window_changed();
+        }
+        Ok(())
     }
 
     /// Swap two pane leaves in the active tab without changing pane, view, or

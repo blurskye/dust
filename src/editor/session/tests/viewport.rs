@@ -766,3 +766,36 @@ fn documentation_keys_scroll_clamp_and_close_the_popup_context() {
         Some(4)
     );
 }
+
+#[test]
+fn dragging_the_border_between_two_windows_resizes_them() {
+    let mut app = app();
+    app.window_session.observe_size((100, 30));
+    app.state.open_text(TextBuffer::from_text("a\n"), None);
+    app.set_dashboard_visibility(false);
+    app.apply_layout_action(crate::editor::LayoutAction::Split(crate::editor::Axis::Horizontal));
+    app.reconcile_editor_windows();
+    let border = |app: &InteractiveApplication| {
+        app.compositor_projection()
+            .expect("projection")
+            .borders
+            .iter()
+            .find(|border| border.axis == crate::ui::window::TileAxis::Horizontal)
+            .copied()
+            .expect("side by side border")
+    };
+    let before = border(&app);
+    let mouse = |app: &mut InteractiveApplication, code, column| {
+        app.handle_event(crate::ui::UiEvent::Mouse {
+            key: KeyEvent::mouse(code, crate::editor::input::Modifiers::default()),
+            column,
+            row: before.y + 2,
+        });
+    };
+    use crate::editor::input::KeyCode::{MouseLeftDown, MouseLeftDrag, MouseLeftUp};
+    mouse(&mut app, MouseLeftDown, before.x);
+    mouse(&mut app, MouseLeftDrag, before.x - 20);
+    mouse(&mut app, MouseLeftUp, before.x - 20);
+    let after = border(&app);
+    assert!(after.x.abs_diff(before.x - 20) <= 1, "{} -> {}", before.x, after.x);
+}

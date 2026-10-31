@@ -386,6 +386,7 @@ impl Config {
             return Err("terminal policy is invalid");
         }
         if (!self.agents.default.is_empty() && !self.agents.profiles.contains_key(&self.agents.default))
+            || !(10..=90).contains(&self.agents.panel_width)
             || self.agents.profiles.iter().any(|(name, profile)| {
                 name.is_empty()
                     || profile.program.as_os_str().is_empty()

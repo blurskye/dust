@@ -1469,6 +1469,15 @@ impl InteractiveApplication {
                 Ok(()) => self.set_dashboard_visibility(false),
                 Err(error) => self.show_error(error),
             }
+            // A plain split would give the panel half the screen; it opens narrower.
+            if let (Some(code), Some(panel)) = (previous, self.active_tab_focus()) {
+                let width = self.configuration.settings().agents.panel_width;
+                let _ = self.state.set_split_ratio_between(
+                    code,
+                    panel,
+                    1_000u16.saturating_sub(width.saturating_mul(10)),
+                );
+            }
         }
         let Some(pane) = self.agent_pane() else {
             return;

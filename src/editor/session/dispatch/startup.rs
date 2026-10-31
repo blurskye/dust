@@ -155,6 +155,7 @@ impl InteractiveApplication {
             pull_requests: super::pull_requests::PullRequests::default(),
             tutor: super::tutor::Tutor::new(&state_directory),
             palette_recent: Vec::new(),
+            border_drag: None,
             remote: None,
             syntax_spans_source: (Vec::new(), Vec::new()),
             window_session: WindowSession::new(dashboard_visible, terminal_panel_height),
