@@ -37,6 +37,15 @@ pub(super) struct Projection {
     completion_owner: Option<(u64, LspProjectionOwner)>,
     completion_items: Vec<LspCompletionItem>,
     completion_servers: Vec<String>,
+    /// Everything the servers offered; `completion_items` is the part matching what was typed.
+    completion_all: Vec<(String, LspCompletionItem)>,
+    completion_incomplete: bool,
+    /// Where the word being completed starts.
+    completion_start: Option<ByteOffset>,
+    /// Opened by typing, so an empty answer or a failure stays quiet.
+    completion_automatic: bool,
+    completion_narrowed: Option<(ByteOffset, crate::editor::text::BufferRevision)>,
+    typed: Option<char>,
     completion_selected: usize,
     completion_scroll: usize,
     resolve: Option<(u64, LspProjectionOwner, usize, ByteOffset)>,
@@ -421,6 +430,7 @@ impl LspSession {
         &mut self,
         server: &str,
         items: Vec<LspCompletionItem>,
+        incomplete: bool,
         generation: u64,
     ) {
         let append = self
@@ -436,14 +446,117 @@ impl LspSession {
                 .map(|owner| (generation, owner));
             self.projection.completion_items.clear();
             self.projection.completion_servers.clear();
+            self.projection.completion_all.clear();
+            self.projection.completion_incomplete = false;
             self.projection.completion_selected = 0;
             self.projection.completion_scroll = 0;
             self.projection.resolve = None;
         }
+        self.projection.completion_incomplete |= incomplete;
+        self.projection.completion_narrowed = None;
+        self.projection.completion_servers.extend(std::iter::repeat_n(server.to_owned(), items.len()));
+        self.projection.completion_items.extend(items.iter().cloned());
         self.projection
-            .completion_servers
-            .extend(std::iter::repeat_n(server.to_owned(), items.len()));
-        self.projection.completion_items.extend(items);
+            .completion_all
+            .extend(items.into_iter().map(|item| (server.to_owned(), item)));
+    }
+    /// Records a typed character for the next sync, which decides whether it opens the menu.
+    pub(in crate::editor::session) fn note_typed(&mut self, text: &str) {
+        let mut characters = text.chars();
+        self.projection.typed = characters.next().filter(|_| characters.next().is_none());
+    }
+    pub(in crate::editor::session) fn take_typed(&mut self) -> Option<char> {
+        self.projection.typed.take()
+    }
+    pub(in crate::editor::session) fn is_completion_trigger(&self, servers: &[String], typed: char) -> bool {
+        let typed = typed.to_string();
+        servers.iter().any(|server| {
+            self.sessions
+                .get(server)
+                .and_then(|session| session.capabilities.as_ref())
+                .is_some_and(|capabilities| capabilities.completion_triggers.contains(&typed))
+        })
+    }
+    pub(in crate::editor::session) fn begin_completion(&mut self, start: Option<ByteOffset>, automatic: bool) {
+        self.projection.completion_start = start;
+        self.projection.completion_automatic = automatic;
+    }
+    pub(in crate::editor::session) fn completion_start(&self) -> Option<ByteOffset> {
+        self.projection.completion_start
+    }
+    pub(in crate::editor::session) fn completion_automatic(&self) -> bool {
+        self.projection.completion_automatic
+    }
+    pub(in crate::editor::session) fn completion_incomplete(&self) -> bool {
+        self.projection.completion_incomplete
+    }
+    pub(in crate::editor::session) fn completion_position(&self) -> (usize, usize) {
+        (self.projection.completion_selected, self.projection.completion_scroll)
+    }
+    /// True once per cursor and text position, so an idle pass does no work.
+    pub(in crate::editor::session) fn completion_needs_narrowing(
+        &self,
+        cursor: ByteOffset,
+        revision: crate::editor::text::BufferRevision,
+    ) -> bool {
+        self.projection.completion_narrowed != Some((cursor, revision))
+    }
+    pub(in crate::editor::session) fn completion_encodings(&self) -> HashMap<String, crate::editor::text::PositionEncoding> {
+        self.projection
+            .completion_all
+            .iter()
+            .map(|(server, _)| (server.clone(), self.server_encoding(server)))
+            .collect()
+    }
+    /// Scores each item against the text `typed` gives for it; an item that doesn't match gets none.
+    pub(in crate::editor::session) fn score_completions(
+        &self,
+        typed: impl Fn(&str, &LspCompletionItem) -> String,
+    ) -> Vec<Option<i64>> {
+        self.projection
+            .completion_all
+            .iter()
+            .map(|(server, item)| {
+                let target = item.filter_text.as_deref().unwrap_or(&item.label);
+                crate::workspace::fuzzy_score(&typed(server, item), target, "")
+            })
+            .collect()
+    }
+    /// Keeps the matching items, best first and in the server's order among equals. A selection
+    /// the user moved stays on its item while that item is still listed.
+    pub(in crate::editor::session) fn narrow_completions(
+        &mut self,
+        scores: Vec<Option<i64>>,
+        cursor: ByteOffset,
+        revision: crate::editor::text::BufferRevision,
+    ) {
+        let selected = self.projection.completion_selected;
+        let kept = (selected > 0)
+            .then(|| self.projection.completion_items.get(selected).map(|item| item.label.clone()))
+            .flatten();
+        let mut order = scores
+            .iter()
+            .enumerate()
+            .filter_map(|(index, score)| score.map(|score| (index, score)))
+            .collect::<Vec<_>>();
+        order.sort_by(|(left, left_score), (right, right_score)| {
+            let rank = |index: usize| {
+                let item = &self.projection.completion_all[index].1;
+                item.sort_text.as_deref().unwrap_or(&item.label).to_owned()
+            };
+            right_score.cmp(left_score).then_with(|| rank(*left).cmp(&rank(*right)))
+        });
+        let (servers, items): (Vec<_>, Vec<_>) = order
+            .into_iter()
+            .map(|(index, _)| self.projection.completion_all[index].clone())
+            .unzip();
+        self.projection.completion_servers = servers;
+        self.projection.completion_items = items;
+        self.projection.completion_selected = kept
+            .and_then(|label| self.projection.completion_items.iter().position(|item| item.label == label))
+            .unwrap_or(0);
+        self.projection.completion_scroll = self.projection.completion_scroll.min(self.projection.completion_selected);
+        self.projection.completion_narrowed = Some((cursor, revision));
     }
     pub(in crate::editor::session) fn completion_server(&self, index: usize) -> Option<&str> {
         self.projection
@@ -454,6 +567,11 @@ impl LspSession {
     pub(in crate::editor::session) fn clear_completion(&mut self) {
         self.projection.completion_items.clear();
         self.projection.completion_servers.clear();
+        self.projection.completion_all.clear();
+        self.projection.completion_incomplete = false;
+        self.projection.completion_start = None;
+        self.projection.completion_automatic = false;
+        self.projection.completion_narrowed = None;
         self.projection.completion_owner = None;
         self.projection.resolve = None;
         self.projection.completion_selected = 0;
@@ -885,6 +1003,8 @@ mod tests {
     fn item(label: &str) -> LspCompletionItem {
         LspCompletionItem {
             label: label.into(),
+            filter_text: None,
+            sort_text: None,
             detail: String::new(),
             insert_text: label.into(),
             text_edit: None,
@@ -921,10 +1041,10 @@ mod tests {
             owner.accept_result(server, 3, "textDocument/completion", &source.uri, source.revision.0)
         };
         assert!(accept(&mut owner, "tailwind"));
-        owner.install_completions("tailwind", vec![item("bg-red-500")], 3);
+        owner.install_completions("tailwind", vec![item("bg-red-500")], false, 3);
         assert!(owner.request_pending());
         assert!(accept(&mut owner, "html"));
-        owner.install_completions("html", vec![item("class")], 3);
+        owner.install_completions("html", vec![item("class")], false, 3);
         assert!(!owner.request_pending());
         assert!(!accept(&mut owner, "html"));
         let labels = owner.completion_items().iter().map(|i| i.label.as_str()).collect::<Vec<_>>();
@@ -932,7 +1052,7 @@ mod tests {
         assert_eq!(owner.completion_server(0), Some("tailwind"));
         assert_eq!(owner.completion_server(1), Some("html"));
         // A new request starts a fresh list.
-        owner.install_completions("html", vec![item("id")], 4);
+        owner.install_completions("html", vec![item("id")], false, 4);
         assert_eq!(owner.completion_items().len(), 1);
         assert_eq!(owner.completion_server(0), Some("html"));
     }
@@ -955,7 +1075,7 @@ mod tests {
         let mut owner = LspSession::default();
         owner.projection.owner = Some(source.clone());
         owner.projection.generation = 7;
-        owner.install_completions("owned", vec![item("first"), item("second")], 7);
+        owner.install_completions("owned", vec![item("first"), item("second")], false, 7);
         owner.projection.request = Some((7, source.clone()));
         owner.projection.request_servers = vec!["owned".into()];
         owner.projection.resolve = Some((7, source.clone(), 0, ByteOffset(0)));

@@ -398,7 +398,11 @@ fn accepted_projection_rejects_old_source_graph_size_and_invalidation() {
         graph_revision: revision,
         bounds,
         minimum_size: (4, 2),
-        insets: (1, 1),
+        insets: crate::ui::window::TiledInsets {
+            top: 1,
+            bottom: 1,
+            ..Default::default()
+        },
         surfaces: NativeSurfaceWindowBinding {
             explorer: Some(WindowId(1)),
             terminal: None,
@@ -839,7 +843,7 @@ fn native_command_plans_are_source_bound_before_any_candidate_copy() {
             height: 30,
         },
         minimum_size: (4, 2),
-        insets: (0, 0),
+        insets: Default::default(),
         surfaces: NativeSurfaceWindowBinding {
             explorer: None,
             terminal: None,
@@ -899,7 +903,7 @@ fn native_command_plans_are_source_bound_before_any_candidate_copy() {
             height: 30,
         },
         minimum_size: (4, 2),
-        insets: (0, 0),
+        insets: Default::default(),
         surfaces: NativeSurfaceWindowBinding {
             explorer: None,
             terminal: None,
@@ -952,7 +956,7 @@ fn native_command_plans_are_source_bound_before_any_candidate_copy() {
             height: 30,
         },
         minimum_size: (4, 2),
-        insets: (0, 0),
+        insets: Default::default(),
         surfaces: NativeSurfaceWindowBinding {
             explorer: None,
             terminal: None,

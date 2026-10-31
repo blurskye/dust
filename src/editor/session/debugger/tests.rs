@@ -166,7 +166,8 @@ fn debugger_owner_keeps_original_actor_stop_context_and_private_selection() {
                 path_maps: BTreeMap::new(),
                 root: root.path().into(),
                 request: "launch".into(),
-                request_arguments: serde_json::json!({})
+                request_arguments: serde_json::json!({}),
+                breakpoints: Vec::new(),
             })
             .is_err()
     );

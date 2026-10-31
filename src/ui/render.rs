@@ -2,8 +2,8 @@ mod terminal;
 use terminal::{active_compositor, dock_terminal_panel, render_key_hints};
 mod debug;
 mod explorer;
-use debug::{debug_layout, render_debug_panes};
-pub use debug::{DebugPane, DebugPanesUiState};
+use debug::{debug_layout_in, render_debug_panes};
+pub use debug::{DebugPane, DebugPanesUiState, debug_pane_insets};
 use explorer::{place_workspace_frame, render_explorer_window};
 mod overlays;
 use super::geometry::text_width;
@@ -1156,6 +1156,19 @@ enum PluginRenderable<'a> {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DebugSignKind {
+    Breakpoint,
+    Execution,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DebugSign {
+    pub path: std::path::PathBuf,
+    pub line: usize,
+    pub kind: DebugSignKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UiGitSignKind {
     Added,
     Changed,
@@ -1285,6 +1298,8 @@ pub struct UiState {
     /// The coordinated debug arrangement's content, when a debug session is active. Absent means
     /// no session, which is what makes the panes appear and disappear as ONE decision.
     pub debug_panes: Option<DebugPanesUiState>,
+    /// Breakpoints and where the program is paused, known with or without a session.
+    pub debug_signs: Vec<DebugSign>,
     pub plugin_surfaces: Vec<PluginSurfaceUiState>,
     pub private_surfaces: Vec<PrivateSurfaceUiState>,
     pub key_hints: Option<KeyHintUiState>,
@@ -1757,10 +1772,22 @@ pub fn render(
         .debug_panes
         .as_ref()
         .filter(|_| !ui.dashboard && state.active_view.is_some())
-        .and_then(|_| debug_layout(width, debug_height));
-    let content_bounds = if let Some(layout) = debug {
-        Some(layout.source)
-    } else if ui.dashboard || state.active_view.is_none() {
+        .and_then(|_| {
+            let area = workspace.unwrap_or(WindowRect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            });
+            let (top, bottom) = editor_workspace_insets(state, ui, config, area.height);
+            let end = area.y.saturating_add(area.height).min(debug_height);
+            debug_layout_in(WindowRect {
+                y: area.y.saturating_add(top),
+                height: end.saturating_sub(area.y).saturating_sub(top.saturating_add(bottom)),
+                ..area
+            })
+        });
+    let content_bounds = if ui.dashboard || state.active_view.is_none() {
         // The dashboard centres itself in what a docked explorer leaves free.
         dashboard_rect.or(workspace).map(|bounds| match explorer_rect {
             Some(dock) if dock.x <= bounds.x && dock.x + dock.width > bounds.x => {

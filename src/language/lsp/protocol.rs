@@ -94,6 +94,14 @@ pub(super) fn initialize_capabilities(result: Option<&Value>) -> Result<LspCapab
             .and_then(|value| value.get("resolveProvider"))
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        completion_triggers: capabilities
+            .get("completionProvider")
+            .and_then(|value| value.get("triggerCharacters"))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|value| value.as_str().map(str::to_owned))
+            .collect(),
         hover: capability(capabilities, "hoverProvider"),
         signature_help: capability(capabilities, "signatureHelpProvider"),
         definition: capability(capabilities, "definitionProvider"),
@@ -369,7 +377,13 @@ pub(super) fn normalize_result(
     }
     match feature {
         LspFeature::Hover => Ok(LspFeatureResult::Hover(hover_result(result))),
-        LspFeature::Completion => Ok(LspFeatureResult::Completion(completion_items(result)?)),
+        LspFeature::Completion => Ok(LspFeatureResult::Completion {
+            items: completion_items(result)?,
+            incomplete: result
+                .get("isIncomplete")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
         LspFeature::CompletionResolve { .. } => Ok(LspFeatureResult::CompletionResolved(
             completion_item(result, true)?,
         )),
@@ -685,7 +699,14 @@ pub(super) fn completion_item(item: &Value, resolved: bool) -> Result<LspComplet
             value: sanitize_markdown(value, 64 * 1024),
         })
     });
+    let text_field = |name: &str| {
+        item.get(name)
+            .and_then(Value::as_str)
+            .map(|value| value.chars().take(4096).collect::<String>())
+    };
     Ok(LspCompletionItem {
+        filter_text: text_field("filterText"),
+        sort_text: text_field("sortText"),
         label,
         detail: item
             .get("detail")
@@ -896,7 +917,10 @@ pub(super) fn text_edits(value: &Value) -> Result<Vec<LspTextEdit>, String> {
 
 pub(super) fn parse_text_edit(value: &Value) -> Option<LspTextEdit> {
     Some(LspTextEdit {
-        range: parse_range(value.get("range").or_else(|| value.get("replace"))?)?,
+        range: parse_range(value
+            .get("range")
+            .or_else(|| value.get("insert"))
+            .or_else(|| value.get("replace"))?)?,
         new_text: value.get("newText")?.as_str()?.to_owned(),
     })
 }

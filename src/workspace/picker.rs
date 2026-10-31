@@ -330,7 +330,7 @@ impl PickerState {
     }
 }
 
-pub(super) fn fuzzy_score(query: &str, label: &str, detail: &str) -> Option<i64> {
+pub fn fuzzy_score(query: &str, label: &str, detail: &str) -> Option<i64> {
     if query.is_empty() {
         return Some(0);
     }

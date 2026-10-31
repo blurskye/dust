@@ -20,6 +20,25 @@ pub(super) fn register_commands(
     )?;
     register(
         registry,
+        "edit.substitute_lines",
+        "Substitute in lines",
+        ContextRequirement::Buffer,
+        ArgumentSchema::default()
+            .field("range", ArgumentType::String, true)
+            .field("pattern", ArgumentType::String, true)
+            .field("replacement", ArgumentType::String, true)
+            .field("flags", ArgumentType::String, true),
+        |invocation| {
+            Ok(AppEffect::Substitute {
+                range: string_arg(invocation, "range")?.to_owned(),
+                pattern: string_arg(invocation, "pattern")?.to_owned(),
+                replacement: string_arg(invocation, "replacement")?.to_owned(),
+                flags: string_arg(invocation, "flags")?.to_owned(),
+            })
+        },
+    )?;
+    register(
+        registry,
         "file.save",
         "Save file",
         ContextRequirement::Buffer,

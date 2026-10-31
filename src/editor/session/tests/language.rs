@@ -148,9 +148,12 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
         generation,
         "textDocument/completion",
         "",
-        crate::language::lsp::LspFeatureResult::Completion(vec![
-            crate::language::lsp::LspCompletionItem {
+        crate::language::lsp::LspFeatureResult::Completion {
+            incomplete: false,
+            items: vec![crate::language::lsp::LspCompletionItem {
                 label: "main".into(),
+                filter_text: None,
+                sort_text: None,
                 detail: String::new(),
                 insert_text: "main".into(),
                 text_edit: None,
@@ -160,8 +163,8 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
                 documentation: None,
                 resolve_item: None,
                 resolved: false,
-            },
-        ]),
+            }],
+        },
     );
     for _ in 0..3 {
         app.sync_lsp_document();
@@ -594,6 +597,8 @@ fn lsp_completion_applies_through_one_validated_transaction() {
     app.language
         .fixture_completion_items(vec![crate::language::lsp::LspCompletionItem {
             label: "main".into(),
+            filter_text: None,
+            sort_text: None,
             detail: "function".into(),
             insert_text: "in".into(),
             text_edit: None,
@@ -643,6 +648,8 @@ fn lsp_completion_selection_scrolls_and_wraps_inside_the_visible_window() {
         (0..5)
             .map(|index| crate::language::lsp::LspCompletionItem {
                 label: format!("item-{index}"),
+                filter_text: None,
+                sort_text: None,
                 detail: String::new(),
                 insert_text: String::new(),
                 text_edit: None,
@@ -1346,4 +1353,61 @@ fn slash_searches_the_tool_manager_by_name_and_language() {
     app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Escape));
     app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Escape));
     assert!(app.ui.tool_menu.is_none());
+}
+
+#[test]
+fn completion_narrows_as_you_type_and_replaces_what_was_typed() {
+    use crate::language::lsp::LspCompletionItem;
+    let item = |label: &str| LspCompletionItem {
+        label: label.into(),
+        filter_text: None,
+        sort_text: None,
+        detail: String::new(),
+        insert_text: label.into(),
+        text_edit: None,
+        additional_edits: Vec::new(),
+        kind: None,
+        snippet: false,
+        documentation: None,
+        resolve_item: None,
+        resolved: true,
+    };
+    let mut app = app();
+    let path = app.state.workspace_root.join("main.rs");
+    let (buffer, view) = app.state.open_text(
+        crate::editor::text::TextBuffer::from_text("person.na"),
+        Some(path),
+    );
+    app.state.views[view].cursor = ByteOffset(9);
+    app.set_dashboard_visibility(false);
+    app.language
+        .fixture_capabilities(crate::language::lsp::LspCapabilities {
+            position_encoding: crate::editor::text::PositionEncoding::Utf16,
+            ..Default::default()
+        });
+    app.mark_lsp_completion_start(false);
+    assert_eq!(app.language.completion_start(), Some(ByteOffset(7)));
+    app.language.install_completions(
+        "server",
+        vec![item("age"), item("name"), item("nickname")],
+        false,
+        7,
+    );
+    app.narrow_lsp_completion();
+
+    let labels = |app: &InteractiveApplication| {
+        app.ui
+            .language_completion
+            .as_ref()
+            .map(|menu| menu.items.iter().map(|item| item.label.clone()).collect::<Vec<_>>())
+    };
+    assert_eq!(
+        labels(&app),
+        Some(vec!["name".to_owned(), "nickname".to_owned()]),
+        "`na` drops `age` and ranks the whole-word match first"
+    );
+
+    app.accept_lsp_completion();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "person.name");
+    assert!(app.ui.language_completion.is_none());
 }

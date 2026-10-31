@@ -372,6 +372,23 @@ method = "uv_tool"
 packages = ["debugpy==1.8.17"]
 
 [[tool]]
+id = "delve"
+name = "Delve"
+kind = "dap"
+languages = ["go"]
+executable = "dlv"
+version = "1.25.2"
+probe_args = ["version"]
+launch_args = ["dap"]
+debug_program_policy = "source"
+project_root_markers = ["go.work", "go.mod"]
+project_root_strategy = "go"
+
+[tool.install]
+method = "go_package"
+package = "github.com/go-delve/delve/cmd/dlv@v1.25.2"
+
+[[tool]]
 id = "codelldb"
 name = "CodeLLDB"
 kind = "dap"

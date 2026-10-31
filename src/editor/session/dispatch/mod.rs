@@ -30,7 +30,9 @@ use crate::editor::session::debugger::DebugSession;
 pub(super) mod agent;
 mod effects;
 mod events;
+mod conflict_markers;
 mod palette;
+mod substitute;
 mod pull_requests;
 mod remote;
 
@@ -91,9 +93,9 @@ use crate::tools::{
     nix_lsp_launch_environment, nix_lsp_profile_installed,
 };
 use crate::ui::{
-    CompletionItem, DocumentationMarkupKind, DocumentationPopupKind,
+    DocumentationMarkupKind, DocumentationPopupKind,
     EditorWindowBinding as UiEditorWindowBinding, EditorWindowLayoutState, KeyInputKind,
-    LanguageCompletionState, NativeSurfaceWindowBinding, PickerSurfaceKind, PromptKind,
+    NativeSurfaceWindowBinding, PickerSurfaceKind, PromptKind,
     TerminalError, TerminalOptions, TerminalPanelMode, TerminalSession, ToolMenuRow, ToolMenuState,
     ToolRuntimeOption, ToolRuntimePickerState, UiEvent, UiFold, UiInlayHint, UiState, UiSyntaxSpan,
     VisualRowAnchor, VisualRowModel, active_editor_pane_viewport, editor_pane_viewport_at,

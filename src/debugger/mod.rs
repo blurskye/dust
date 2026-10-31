@@ -181,6 +181,61 @@ pub struct DapLaunch {
     pub root: PathBuf,
     pub request: String,
     pub request_arguments: Value,
+    /// Sent when the adapter says it is ready, before the program may run.
+    pub breakpoints: Vec<(PathBuf, Vec<DapSourceBreakpoint>)>,
+}
+
+fn set_breakpoints_arguments(
+    path: &Path,
+    breakpoints: Vec<DapSourceBreakpoint>,
+    path_maps: &BTreeMap<PathBuf, PathBuf>,
+) -> Value {
+    let path = map_path(path, path_maps, false);
+    json!({"source":{"path":path},"breakpoints":breakpoints.into_iter().take(10_000).map(|item|json!({"line":item.line,"column":item.column,"condition":item.condition,"hitCondition":item.hit_condition,"logMessage":item.log_message})).collect::<Vec<_>>()})
+}
+
+/// The argument that makes the Dust binary start a program in a session of its own.
+pub const ADAPTER_SESSION_ARGUMENT: &str = "--adapter-session";
+static ADAPTER_SESSION_LAUNCHER: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Name the binary that can start adapters in their own session. `main` does this once.
+pub fn use_adapter_session_launcher(binary: PathBuf) {
+    let _ = ADAPTER_SESSION_LAUNCHER.set(binary);
+}
+
+/// Become a session leader and turn into `program`. This has no controlling terminal, so debugpy
+/// cannot make its program the foreground group of /dev/tty, which would leave the editor unable
+/// to read keys. Only returns if it failed.
+#[cfg(unix)]
+pub fn exec_in_own_session(program: &std::ffi::OsStr, arguments: &[std::ffi::OsString]) -> std::io::Error {
+    use std::os::unix::process::CommandExt;
+    if let Err(error) = nix::unistd::setsid() {
+        return error.into();
+    }
+    Command::new(program).args(arguments).exec()
+}
+
+fn adapter_command(executable: PathBuf, arguments: Vec<String>) -> Command {
+    match ADAPTER_SESSION_LAUNCHER.get().filter(|binary| binary.is_file()) {
+        Some(binary) => {
+            let mut command = Command::new(binary);
+            command
+                .arg(ADAPTER_SESSION_ARGUMENT)
+                .arg(executable)
+                .args(arguments);
+            command
+        }
+        None => {
+            let mut command = Command::new(executable);
+            command.args(arguments);
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                command.process_group(0);
+            }
+            command
+        }
+    }
 }
 
 fn run_adapter(
@@ -206,6 +261,7 @@ fn run_adapter(
         root,
         request,
         request_arguments,
+        breakpoints: mut initial_breakpoints,
     } = launch;
     if let Some(scope) = &scope {
         if let Err(message) = scope.check() {
@@ -213,20 +269,14 @@ fn run_adapter(
             return;
         }
     }
-    let mut command = Command::new(executable);
+    let mut command = adapter_command(executable, arguments);
     command
-        .args(arguments)
         .env_clear()
         .envs(environment)
         .current_dir(&root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
     if events.actor.cancel.load(Ordering::Acquire) {
         return;
     }
@@ -424,13 +474,10 @@ fn run_adapter(
                     // exactly what the argument says, so a detach cannot be labelled a terminate.
                     (Some("disconnect"), disconnect_arguments(terminate_debuggee))
                 }
-                DapControl::SetBreakpoints { path, breakpoints } => {
-                    let path = map_path(&path, &path_maps, false);
-                    (
-                        Some("setBreakpoints"),
-                        json!({"source":{"path":path},"breakpoints":breakpoints.into_iter().take(10_000).map(|item|json!({"line":item.line,"column":item.column,"condition":item.condition,"hitCondition":item.hit_condition,"logMessage":item.log_message})).collect::<Vec<_>>()}),
-                    )
-                }
+                DapControl::SetBreakpoints { path, breakpoints } => (
+                    Some("setBreakpoints"),
+                    set_breakpoints_arguments(&path, breakpoints, &path_maps),
+                ),
                 DapControl::Stop => {
                     stopping = true;
                     (None, json!({}))
@@ -580,11 +627,18 @@ fn run_adapter(
                         .and_then(Value::as_str)
                         .unwrap_or_default();
                     match event {
-                        "initialized" if supports_configuration_done => {
-                            send_request(&mut stdin, sequence, "configurationDone", json!({}));
-                            sequence += 1;
+                        "initialized" => {
+                            for (path, rows) in std::mem::take(&mut initial_breakpoints) {
+                                let arguments = set_breakpoints_arguments(&path, rows, &path_maps);
+                                send_request(&mut stdin, sequence, "setBreakpoints", arguments);
+                                pending.insert(sequence, ("setBreakpoints".into(), stop_generation));
+                                sequence += 1;
+                            }
+                            if supports_configuration_done {
+                                send_request(&mut stdin, sequence, "configurationDone", json!({}));
+                                sequence += 1;
+                            }
                         }
-                        "initialized" => {}
                         "stopped" => {
                             let Some(next) = stop_generation.checked_add(1) else {
                                 break;
@@ -627,6 +681,9 @@ fn run_adapter(
                                     .ok();
                             }
                         }
+                        "output"
+                            if message.pointer("/body/category").and_then(Value::as_str)
+                                == Some("telemetry") => {}
                         "output" => {
                             let output = message
                                 .pointer("/body/output")

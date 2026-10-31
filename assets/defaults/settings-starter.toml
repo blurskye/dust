@@ -1,0 +1,13 @@
+# Your Dust settings. Anything you set here overrides the default of the same name;
+# the file reloads when you save it. `:config explain <key>` says where a value comes from.
+#
+# [editor]
+# line_numbers = "relative"   # "absolute", "relative" or "off"
+# wrap = true
+# tab_width = 2
+#
+# [ui]
+# theme = "nord"              # :colorscheme lists them all
+#
+# [lsp]
+# auto_completion = false     # only open the menu on ctrl-space

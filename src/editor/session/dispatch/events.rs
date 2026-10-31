@@ -1,9 +1,9 @@
 use super::{
     AppEffect, BTreeMap, BufferRevision, ByteOffset, ByteRange, CommandInvocation, CommandValue,
-    CompletionItem, DiagnosticOwner, DocumentEvent, DocumentationMarkupKind,
+    DiagnosticOwner, DocumentEvent, DocumentationMarkupKind,
     DocumentationPopupKind, Duration, EditorMode, EditorOperation, EditorTransaction,
     ExplorerMutation, ExplorerWatchService, HashSet, IndentError, Instant, InteractiveApplication,
-    InteractiveError, KeyEvent, KeyInputKind, LanguageCompletionState, LoadedConfig, LogLevel,
+    InteractiveError, KeyEvent, KeyInputKind, LoadedConfig, LogLevel,
     LspEvent, LspFeature, LspFeatureResult, LspLaunch, LspMarkupContent, LspMarkupKind,
     LspProgressKind, LspRuntimeSource, LspWorkspaceEdit, MappingResolution, MatcherSource,
     NativeSurfaceTarget, PersistedLocation, PickerAction, PickerItem, PickerItemId, PickerPayload,
@@ -977,6 +977,11 @@ impl InteractiveApplication {
         {
             self.record_jump();
         }
+        if invocation.id.as_str() == "edit.insert_text" {
+            if let Some(CommandValue::String(text)) = invocation.arguments.get("text") {
+                self.language.note_typed(text);
+            }
+        }
         match self.commands.execute(&self.state, &invocation) {
             Ok(outcome) => {
                 let changed = outcome.transaction.is_some();
@@ -1531,6 +1536,8 @@ impl InteractiveApplication {
                             }
                             Some(NavigationRead::Lsp(range, encoding)) => {
                                 let (buffer, view) = self.state.open_text(text, Some(path.clone()));
+                                self.state.buffers[buffer].read_only =
+                                    self.workspace.require_path(&path).is_err();
                                 let position = self.state.buffers.get(buffer).and_then(|buffer| {
                                     PositionCodec::new(&buffer.text)
                                         .lsp_to_byte(
@@ -2270,7 +2277,8 @@ impl InteractiveApplication {
         // Colours are background work, and a second server failing a completion
         // must not hide the items the others returned.
         let secondary = method == "textDocument/completion"
-            && self.language.active().is_some_and(|active| *active != server);
+            && (self.language.completion_automatic()
+                || self.language.active().is_some_and(|active| *active != server));
         if method == "textDocument/documentColor" || secondary {
             self.language.forget_request(&server, generation);
             let server = self.lsp_server_label(&server);
@@ -2812,46 +2820,13 @@ impl InteractiveApplication {
                     vec![content],
                 );
             }
-            LspFeatureResult::Completion(items) => {
-                self.language.install_completions(server, items, generation);
-                let (selected, scroll) = self
-                    .ui
-                    .language_completion
-                    .as_ref()
-                    .map_or((0, 0), |open| (open.selected, open.scroll));
-                let items = self
-                    .language
-                    .completion_items()
-                    .iter()
-                    .enumerate()
-                    .map(|(index, item)| CompletionItem {
-                        label: item.label.clone(),
-                        detail: Self::lsp_completion_detail(
-                            item,
-                            &self.lsp_server_label(
-                                self.language.completion_server(index).unwrap_or(server),
-                            ),
-                        ),
-                        color: item.color(),
-                    })
-                    .collect::<Vec<_>>();
-                // A later server appends, so the selection the user moved to stays put.
-                let keep = self.language.completion_server(0) != Some(server);
-                self.ui.language_completion = (!items.is_empty()).then(|| {
-                    let (selected, scroll) = if keep && selected < items.len() {
-                        (selected, scroll)
-                    } else {
-                        (0, 0)
-                    };
-                    LanguageCompletionState {
-                        items,
-                        selected,
-                        scroll,
-                    }
-                });
-                if self.ui.language_completion.is_some() {
-                    self.refresh_lsp_completion_documentation();
-                } else if !self.language.request_pending() {
+            LspFeatureResult::Completion { items, incomplete } => {
+                self.language.install_completions(server, items, incomplete, generation);
+                self.narrow_lsp_completion();
+                if self.ui.language_completion.is_none()
+                    && !self.language.request_pending()
+                    && !self.language.completion_automatic()
+                {
                     self.show_error(self.message("lsp_no_result", &[]));
                 }
             }
@@ -3466,7 +3441,6 @@ impl InteractiveApplication {
             .prepare_transaction(&transaction)
             .map_err(|e| e.to_string())?;
         self.commit_editor_draft(draft, None, false)?;
-        self.notify_message(self.message("lsp_edit_applied", &[]), false);
         Ok(())
     }
 }

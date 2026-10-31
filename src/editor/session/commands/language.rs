@@ -389,6 +389,16 @@ pub(super) fn register_commands(
             AppEffect::LspCompletionCancel,
         ),
         (
+            "completion.leave",
+            "Close completion and leave Insert",
+            AppEffect::LspCompletionLeave,
+        ),
+        (
+            "lsp.rename.prompt",
+            "Rename symbol",
+            AppEffect::LspRenamePrompt,
+        ),
+        (
             "snippet.next",
             "Next snippet placeholder",
             AppEffect::SnippetNavigate(1),

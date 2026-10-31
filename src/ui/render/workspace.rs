@@ -351,7 +351,11 @@ pub(super) fn render_workspace(
             cursor: None,
         };
     };
-    if pane_count == 1 && !projection.tab_line_visible && !projection.buffer_line_visible {
+    if pane_count == 1
+        && !projection.tab_line_visible
+        && !projection.buffer_line_visible
+        && ui.debug_panes.is_none()
+    {
         let Some(view) = projection.panes.first().map(|pane| pane.view) else {
             return Frame {
                 grid: CellGrid::new(width, height),

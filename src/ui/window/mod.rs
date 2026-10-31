@@ -19,8 +19,8 @@ mod layout;
 pub use layout::{
     CompositorLayer, CompositorProjection, CompositorSnapshot, CompositorWindowSnapshot,
     ContentAdapterKind, DockEdge, ProjectedBorder, ProjectedCompositorWindow, ProjectedWindow,
-    SpatialDirection, TileAxis, TiledLayoutNode, TiledLayoutProjection, TiledLayoutSnapshot,
-    WindowPlacement, WindowRect,
+    SpatialDirection, TileAxis, TiledInsets, TiledLayoutNode, TiledLayoutProjection,
+    TiledLayoutSnapshot, WindowPlacement, WindowRect,
 };
 mod model;
 pub use model::{

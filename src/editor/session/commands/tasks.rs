@@ -1,6 +1,6 @@
 use super::{
     AppEffect, ArgumentSchema, ArgumentType, CommandError, CommandRegistry, ContextRequirement,
-    register, string_arg,
+    SyntaxFoldAction, register, string_arg,
 };
 
 pub(super) fn register_commands(
@@ -86,14 +86,22 @@ pub(super) fn register_commands(
         ArgumentSchema::default(),
         |_| AppEffect::SyntaxStatus,
     )?;
-    register(
-        registry,
-        "syntax.fold.toggle",
-        "Toggle built-in syntax fold",
-        ContextRequirement::View,
-        ArgumentSchema::default(),
-        |_| AppEffect::SyntaxFoldToggle,
-    )?;
+    for (id, name, action) in [
+        ("syntax.fold.toggle", "Toggle fold", SyntaxFoldAction::Toggle),
+        ("syntax.fold.open", "Open fold", SyntaxFoldAction::Open),
+        ("syntax.fold.close", "Close fold", SyntaxFoldAction::Close),
+        ("syntax.fold.open_all", "Open all folds", SyntaxFoldAction::OpenAll),
+        ("syntax.fold.close_all", "Close all folds", SyntaxFoldAction::CloseAll),
+    ] {
+        register(
+            registry,
+            id,
+            name,
+            ContextRequirement::View,
+            ArgumentSchema::default(),
+            move |_| AppEffect::SyntaxFold(action),
+        )?;
+    }
     register(
         registry,
         "syntax.indent.line",

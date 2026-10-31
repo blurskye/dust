@@ -223,6 +223,7 @@ pub struct LspCapabilities {
     pub sync_kind: SyncKind,
     pub completion: bool,
     pub completion_resolve: bool,
+    pub completion_triggers: Vec<String>,
     pub hover: bool,
     pub signature_help: bool,
     pub definition: bool,
@@ -333,6 +334,10 @@ pub struct LspHover {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspCompletionItem {
     pub label: String,
+    /// What typing is matched against, when not the label.
+    pub filter_text: Option<String>,
+    /// Where the server ranks it, when not by label.
+    pub sort_text: Option<String>,
     pub detail: String,
     pub insert_text: String,
     pub text_edit: Option<LspTextEdit>,
@@ -567,7 +572,11 @@ impl LspFeature {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LspFeatureResult {
     Hover(LspHover),
-    Completion(Vec<LspCompletionItem>),
+    /// `incomplete` means the server cut the list short and wants asking again as typing goes on.
+    Completion {
+        items: Vec<LspCompletionItem>,
+        incomplete: bool,
+    },
     CompletionResolved(LspCompletionItem),
     Signature(LspMarkupContent),
     Locations(Vec<LspLocation>),

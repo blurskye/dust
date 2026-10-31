@@ -937,6 +937,57 @@ impl GitSession {
 /// to patch text and re-parse: it maps them straight across and reuses the shared span
 /// computation, so a diff built this way and a diff parsed from patch text agree about what
 /// changed inside a line.
+/// The diff between two texts that aren't in Git, such as a proposed workspace edit.
+pub(in crate::editor::session) fn text_diff_preview(
+    old: &[u8],
+    new: &[u8],
+    provenance: &str,
+) -> crate::ui::DiffPreview {
+    use crate::ui::{DiffHunk, DiffLine, DiffLineKind};
+    let mut hunks = Vec::new();
+    if let Ok(patch) = git2::Patch::from_buffers(old, None, new, None, None) {
+        let mut previous_end = 1;
+        for index in 0..patch.num_hunks() {
+            let Ok((hunk, count)) = patch.hunk(index) else {
+                continue;
+            };
+            let mut lines = (0..count)
+                .filter_map(|line| patch.line_in_hunk(index, line).ok())
+                .filter_map(|line| {
+                    let kind = match line.origin() {
+                        '+' => DiffLineKind::Added,
+                        '-' => DiffLineKind::Removed,
+                        ' ' => DiffLineKind::Context,
+                        _ => return None,
+                    };
+                    Some(DiffLine {
+                        kind,
+                        old_number: line.old_lineno(),
+                        new_number: line.new_lineno(),
+                        text: String::from_utf8_lossy(line.content()).trim_end().to_owned(),
+                        spans: Vec::new(),
+                    })
+                })
+                .collect::<Vec<_>>();
+            crate::ui::emphasise_changed_spans(&mut lines);
+            hunks.push(DiffHunk {
+                header: String::from_utf8_lossy(hunk.header()).trim_end().to_owned(),
+                lines,
+                collapsed_before: usize::try_from(hunk.old_start().saturating_sub(previous_end))
+                    .unwrap_or(usize::MAX),
+            });
+            previous_end = hunk.old_start().saturating_add(hunk.old_lines());
+        }
+    }
+    crate::ui::DiffPreview {
+        hunks,
+        provenance: provenance.to_owned(),
+        truncated: false,
+        total_lines: 0,
+        layout: crate::ui::DiffLayout::Unified,
+    }
+}
+
 pub(in crate::editor::session) fn diff_preview_from_hunks(
     hunks: &[crate::workspace::git::GitHunk],
     provenance: &str,

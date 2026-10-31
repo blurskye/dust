@@ -29,7 +29,7 @@ pub use diagnostics::{
 };
 mod picker;
 pub use picker::{
-    PickerAction, PickerItem, PickerItemId, PickerItemKind, PickerPresentation,
+    fuzzy_score, PickerAction, PickerItem, PickerItemId, PickerItemKind, PickerPresentation,
     PickerRowPresentation, PickerState,
 };
 mod edit;

@@ -147,8 +147,8 @@ pub enum GitBranchError {
     Cancelled,
     #[error("Git branch worker stopped")]
     Stopped,
-    #[error("Git branch backend failed")]
-    Backend,
+    #[error("Git failed: {0}")]
+    Backend(String),
 }
 pub(super) enum GitBranchEvent {
     Complete(Result<GitBranchResult, GitBranchError>),
@@ -282,7 +282,7 @@ struct WorktreeRef {
 fn worktree_branches(repository: &git2::Repository) -> Result<Vec<WorktreeRef>, GitBranchError> {
     let names = repository
         .worktrees()
-        .map_err(|_| GitBranchError::Backend)?;
+        .map_err(backend)?;
     let mut found = Vec::new();
     for index in 0..names.len() {
         let Some(name) = names.get(index) else {
@@ -311,6 +311,13 @@ fn worktree_branches(repository: &git2::Repository) -> Result<Vec<WorktreeRef>, 
     Ok(found)
 }
 
+/// Git's own reason, without libgit2's class and code suffix.
+fn backend(error: impl std::fmt::Display) -> GitBranchError {
+    let message = error.to_string();
+    let reason = message.split("; class=").next().unwrap_or(&message);
+    GitBranchError::Backend(reason.chars().take(512).collect())
+}
+
 fn operation_name(state: git2::RepositoryState) -> Option<String> {
     match state {
         git2::RepositoryState::Clean => None,
@@ -336,18 +343,27 @@ fn read_list(
 ) -> Result<GitBranchResult, GitBranchError> {
     let repository = open(&request.repository)?;
     let started = Instant::now();
-    let main_path = repository
+    // Opened from a linked worktree, `repository` is that worktree; the main checkout sits
+    // beside the common Git directory.
+    let linked_from = repository.is_worktree().then(|| {
+        repository
+            .commondir()
+            .parent()
+            .and_then(|root| git2::Repository::open(root).ok())
+    });
+    let main = linked_from.as_ref().and_then(Option::as_ref).unwrap_or(&repository);
+    let main_path = main
         .workdir()
         .and_then(|path| std::fs::canonicalize(path).ok());
     let mut worktrees = vec![GitWorktreeEntry {
         name: "main".into(),
         path: main_path.clone().unwrap_or_default(),
-        branch: repository
+        branch: main
             .head()
             .ok()
             .and_then(|head| head.shorthand().map(str::to_owned)),
-        dirty: has_changes(&repository)?,
-        operation: operation_name(repository.state()),
+        dirty: has_changes(main)?,
+        operation: operation_name(main.state()),
         locked: false,
         main: true,
     }];
@@ -375,12 +391,12 @@ fn read_list(
     }
     let mut branches = Vec::new();
     for kind in [git2::BranchType::Local, git2::BranchType::Remote] {
-        let iterator = repository.branches(Some(kind)).map_err(|_| GitBranchError::Backend)?;
+        let iterator = repository.branches(Some(kind)).map_err(backend)?;
         for entry in iterator {
             if cancel.load(Ordering::Acquire) {
                 return Err(GitBranchError::Cancelled);
             }
-            let (branch, _) = entry.map_err(|_| GitBranchError::Backend)?;
+            let (branch, _) = entry.map_err(backend)?;
             let Some(name) = branch.name().ok().flatten().map(str::to_owned) else {
                 continue;
             };
@@ -413,7 +429,7 @@ fn has_changes(repository: &git2::Repository) -> Result<bool, GitBranchError> {
     options.include_untracked(true).recurse_untracked_dirs(false);
     let statuses = repository
         .statuses(Some(&mut options))
-        .map_err(|_| GitBranchError::Backend)?;
+        .map_err(backend)?;
     Ok(!statuses.is_empty())
 }
 
@@ -471,7 +487,7 @@ fn run(
             if let Ok(metadata) = std::fs::symlink_metadata(path)
                 && (!metadata.file_type().is_dir()
                     || std::fs::read_dir(path)
-                        .map_err(|_| GitBranchError::Backend)?
+                        .map_err(backend)?
                         .next()
                         .is_some())
             {
@@ -503,22 +519,22 @@ fn run(
             let temporary_branch = format!("dust-review/{name}");
             let starting = repository
                 .reference(&format!("refs/heads/{temporary_branch}"), oid, true, "review checkout")
-                .map_err(|_| GitBranchError::Backend)?;
+                .map_err(backend)?;
             let mut options = git2::WorktreeAddOptions::new();
             options.reference(Some(&starting));
             let created = repository.worktree(name, path, Some(&options));
             drop(starting);
-            created.map_err(|_| GitBranchError::Backend)?;
+            created.map_err(backend)?;
             // DETACHED: no branch is created and none is moved by looking at a review.
-            let linked = git2::Repository::open(path).map_err(|_| GitBranchError::Backend)?;
+            let linked = git2::Repository::open(path).map_err(backend)?;
             linked
                 .set_head_detached(oid)
-                .map_err(|_| GitBranchError::Backend)?;
+                .map_err(backend)?;
             let mut checkout = git2::build::CheckoutBuilder::new();
             checkout.force();
             linked
                 .checkout_head(Some(&mut checkout))
-                .map_err(|_| GitBranchError::Backend)?;
+                .map_err(backend)?;
             // The starting branch has served its purpose: HEAD is detached now, so it can go and
             // no branch is left behind by looking at a review.
             if let Ok(mut branch) = repository.find_branch(&temporary_branch, git2::BranchType::Local) {
@@ -543,7 +559,7 @@ fn run(
             if let Ok(metadata) = std::fs::symlink_metadata(path)
                 && (!metadata.file_type().is_dir()
                     || std::fs::read_dir(path)
-                        .map_err(|_| GitBranchError::Backend)?
+                        .map_err(backend)?
                         .next()
                         .is_some())
             {
@@ -577,7 +593,7 @@ fn run(
                     let head = repository
                         .head()
                         .and_then(|head| head.peel_to_commit())
-                        .map_err(|_| GitBranchError::Backend)?;
+                        .map_err(backend)?;
                     repository
                         .branch(short, &head, false)
                         .map_err(|_| GitBranchError::UnknownBranch(short.to_owned()))?
@@ -589,11 +605,11 @@ fn run(
             let added = path
                 .parent()
                 .map_or(Ok(()), std::fs::create_dir_all)
-                .map_err(|_| GitBranchError::Backend)
+                .map_err(backend)
                 .and_then(|()| {
                     repository
                         .worktree(name, path, Some(&options))
-                        .map_err(|_| GitBranchError::Backend)
+                        .map_err(backend)
                 });
             if let Err(error) = added {
                 if new_branch
@@ -635,11 +651,11 @@ fn run(
             options.valid(true);
             worktree
                 .prune(Some(&mut options))
-                .map_err(|_| GitBranchError::Backend)?;
+                .map_err(backend)?;
             // Pruning removes the worktree's administrative data. The directory itself is
             // only removed here, after every dirtiness and operation check above.
             if path.exists() {
-                std::fs::remove_dir_all(&path).map_err(|_| GitBranchError::Backend)?;
+                std::fs::remove_dir_all(&path).map_err(backend)?;
             }
             Ok(GitBranchResult::Changed)
         }

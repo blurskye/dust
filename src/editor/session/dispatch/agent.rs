@@ -1294,7 +1294,11 @@ impl InteractiveApplication {
                 session.send_next_prompt();
             }
             (phase, Err(error)) => {
+                // With no sign-in method to offer here, the agent's own CLI is the way in.
+                let hint = (session.auth_methods.is_empty() && error.to_lowercase().contains("auth"))
+                    .then(|| format!("Sign in with {}'s own command line, then ask again.", session.name));
                 session.entries.push(Entry::Notice(error));
+                session.entries.extend(hint.map(Entry::Notice));
                 if matches!(phase, Phase::Prompting(expected) if expected == id) {
                     session.phase = Phase::Ready;
                     session.send_next_prompt();

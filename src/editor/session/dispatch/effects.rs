@@ -35,6 +35,8 @@ use crate::workspace::search_workflow::{
     SearchStreamGeneration, SearchWorkflowBroker, SearchWorkflowChunk, SearchWorkflowError,
     SearchWorkflowId, SearchWorkflowSpec, picker_item_adapter, plugin_item_adapter,
 };
+use super::commands::SyntaxFoldAction;
+use crate::ui::{CompletionItem, LanguageCompletionState};
 use slotmap::Key;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -1853,7 +1855,7 @@ impl InteractiveApplication {
                     false,
                 );
             }
-            AppEffect::SyntaxFoldToggle => {
+            AppEffect::SyntaxFold(action) => {
                 if let Some(view) = self.state.active_view {
                     let line = self.state.views.get(view).and_then(|view| {
                         self.state.buffers[view.buffer]
@@ -1861,13 +1863,27 @@ impl InteractiveApplication {
                             .byte_to_line(view.cursor)
                             .ok()
                     });
-                    if let Some(fold) = self.ui.syntax_folds.iter_mut().find(|fold| {
-                        fold.view == view
-                            && line.is_some_and(|line| {
-                                line >= fold.start_line && line <= fold.end_line
-                            })
-                    }) {
-                        fold.collapsed = !fold.collapsed;
+                    let folds = self.ui.syntax_folds.iter_mut().filter(|fold| fold.view == view);
+                    match action {
+                        SyntaxFoldAction::OpenAll => folds.for_each(|fold| fold.collapsed = false),
+                        SyntaxFoldAction::CloseAll => folds.for_each(|fold| fold.collapsed = true),
+                        SyntaxFoldAction::Toggle | SyntaxFoldAction::Open | SyntaxFoldAction::Close => {
+                            // The innermost fold around the cursor, the one Vim's `za` acts on.
+                            if let Some(fold) = folds
+                                .filter(|fold| {
+                                    line.is_some_and(|line| {
+                                        line >= fold.start_line && line <= fold.end_line
+                                    })
+                                })
+                                .max_by_key(|fold| fold.start_line)
+                            {
+                                fold.collapsed = match action {
+                                    SyntaxFoldAction::Open => false,
+                                    SyntaxFoldAction::Close => true,
+                                    _ => !fold.collapsed,
+                                };
+                            }
+                        }
                     }
                 }
             }
@@ -1956,11 +1972,11 @@ impl InteractiveApplication {
                     self.show_error(self.message("task_unknown", &[("name", name)]));
                     return Ok(());
                 };
-                let Some(matcher) = task.matcher.clone() else {
-                    self.show_error(self.message("test_matcher_missing", &[]));
-                    return Ok(());
-                };
-                self.run_trusted(TrustedAction::RunTest { name, matcher });
+                // Without a matcher there are no per-test rows, but the run and its exit code stand.
+                match task.matcher.clone() {
+                    Some(matcher) => self.run_trusted(TrustedAction::RunTest { name, matcher }),
+                    None => self.run_trusted(TrustedAction::RunTask(name)),
+                }
             }
             AppEffect::TestStop(name) => self.stop_task(&name),
             AppEffect::TestList(name) => self.show_test_picker(&name),
@@ -2068,8 +2084,11 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::DapContinue => {
-                if let Err(error) = self.debugger_session.control(DapControl::Continue) {
-                    self.show_error(error);
+                // With nothing to continue, start one, as F5 does in VS Code.
+                match self.debugger_session.control(DapControl::Continue) {
+                    Err(crate::debugger::DapError::NotRunning) => self.start_dap(None, None),
+                    Err(error) => self.show_error(error),
+                    Ok(_) => {}
                 }
             }
             AppEffect::DapPause => {
@@ -2180,9 +2199,10 @@ impl InteractiveApplication {
                 // What the user typed is recorded as a COMMAND, distinct from what comes back.
                 self.debugger_session
                     .record_console_command(expression.clone());
+                let frame_id = self.debugger_session.current_frame();
                 if let Err(error) = self.debugger_session.control(DapControl::Evaluate {
                     expression,
-                    frame_id: None,
+                    frame_id,
                     context: "repl".into(),
                 }) {
                     self.show_error(error)
@@ -2246,7 +2266,7 @@ impl InteractiveApplication {
                 };
                 match self.debugger_session.breakpoint(
                     DapSourceBreakpoint {
-                        path: path.clone(),
+                        path,
                         line,
                         column: None,
                         condition: None,
@@ -2255,24 +2275,8 @@ impl InteractiveApplication {
                     },
                     true,
                 ) {
-                    Ok(removed) => self.notify_message(
-                        self.message(
-                            "dap_breakpoint_status",
-                            &[
-                                (
-                                    "state",
-                                    if removed {
-                                        "removed".into()
-                                    } else {
-                                        "added".into()
-                                    },
-                                ),
-                                ("path", path.display().to_string()),
-                                ("line", line.to_string()),
-                            ],
-                        ),
-                        false,
-                    ),
+                    // The sign in the gutter is the answer.
+                    Ok(_) => self.project_debug_panes(),
                     Err(error) => self.show_error(error),
                 }
             }
@@ -2710,7 +2714,12 @@ impl InteractiveApplication {
                     false,
                 );
             }
-            AppEffect::LspRequest(feature) => self.request_lsp(feature),
+            AppEffect::LspRequest(feature) => {
+                if matches!(feature, LspFeature::Completion) {
+                    self.mark_lsp_completion_start(false);
+                }
+                self.request_lsp(feature);
+            }
             AppEffect::LspDocumentationScroll(direction) => {
                 self.reconcile_editor_windows();
                 let policy = &self.configuration.settings().ui.documentation_popup;
@@ -2728,14 +2737,18 @@ impl InteractiveApplication {
                 self.navigate_diagnostic(direction, filter)
             }
             AppEffect::LspCompletionAccept => self.accept_lsp_completion(),
-            AppEffect::LspCompletionCancel => {
-                let generation = self.language.generation();
-                if let Some(server) = self.language.active().map(String::as_str) {
-                    let _ = self.language.cancel(server, generation);
-                }
-                self.language.clear_completion();
-                self.ui.language_completion = None;
+            AppEffect::LspRenamePrompt => self.open_rename_prompt(),
+            AppEffect::Substitute {
+                range,
+                pattern,
+                replacement,
+                flags,
+            } => self.run_substitute(&range, &pattern, &replacement, &flags),
+            AppEffect::LspCompletionLeave => {
+                self.cancel_lsp_completion();
+                self.invoke_mapped_command("input.cancel");
             }
+            AppEffect::LspCompletionCancel => self.cancel_lsp_completion(),
             AppEffect::SnippetNavigate(direction) => self.navigate_snippet(direction),
             AppEffect::SnippetCancel => {
                 self.input.clear_snippet();
@@ -3003,6 +3016,7 @@ impl InteractiveApplication {
             }
             AppEffect::PickerAccept => self.accept_picker(),
             AppEffect::PickerCancel => self.close_picker(),
+            AppEffect::PickerNormal if self.palette_is_open() => self.close_picker(),
             AppEffect::PickerNormal | AppEffect::PickerInsertMode => {
                 if self.search.picker().is_some() && self.search.workspace_picker().is_none() {
                     self.input
@@ -5344,35 +5358,34 @@ impl InteractiveApplication {
             };
             match event {
                 DapEvent::Starting { .. } => {}
-                DapEvent::RequestFailed { message, .. } => self.show_error(message),
-                DapEvent::Running { adapter } => {
-                    self.notify_message(
-                        self.message("dap_running", &[("adapter", adapter)]),
-                        false,
-                    );
+                DapEvent::RequestFailed { command, message, .. } => {
+                    if !self.debugger_session.watch_request_failed(&command) {
+                        self.show_error(message);
+                    }
                 }
-                DapEvent::Stopped {
-                    adapter, reason, ..
-                } => {
-                    self.notify_message(
-                        self.message("dap_stopped", &[("adapter", adapter), ("reason", reason)]),
-                        false,
-                    );
-                }
-                DapEvent::Output { adapter, output } => {
-                    self.notify_message(
-                        self.message(
-                            "dap_output",
-                            &[("adapter", adapter), ("output", output.replace('\n', " "))],
-                        ),
-                        false,
-                    );
-                }
+                // The panes and the execution sign show these.
+                DapEvent::Running { .. } | DapEvent::Stopped { .. } | DapEvent::Output { .. } => {}
                 DapEvent::Response { response, .. } => match self
                     .debugger_session
                     .response(response)
                 {
-                    crate::editor::session::debugger::DebugResponse::Retired => {}
+                    crate::editor::session::debugger::DebugResponse::Retired
+                    | crate::editor::session::debugger::DebugResponse::Absorbed => {}
+                    crate::editor::session::debugger::DebugResponse::StoppedAt(location) => {
+                        // A library frame outside the workspace stays in the stack pane.
+                        if self
+                            .workspace
+                            .roots()
+                            .iter()
+                            .any(|root| location.path.starts_with(&root.identity.canonical_path))
+                        {
+                            self.navigate_matcher_source(MatcherSource {
+                                path: location.path,
+                                line: location.line.saturating_sub(1) as usize,
+                                column: location.column.saturating_sub(1) as usize,
+                            });
+                        }
+                    }
                     crate::editor::session::debugger::DebugResponse::Picker { kind, rows } => {
                         self.install_debug_rows(kind, rows)
                     }
@@ -5393,15 +5406,7 @@ impl InteractiveApplication {
                                     false,
                                 );
                             }
-                            DapResponse::Breakpoints(rows) => {
-                                self.notify_message(
-                                    self.message(
-                                        "dap_breakpoints_synced",
-                                        &[("count", rows.len().to_string())],
-                                    ),
-                                    false,
-                                );
-                            }
+                            DapResponse::Breakpoints(_) => {}
                             DapResponse::Threads(_)
                             | DapResponse::Stack(_)
                             | DapResponse::Scopes(_)
@@ -6350,24 +6355,41 @@ impl InteractiveApplication {
         let encoding = self.language.server_encoding(&server);
         let snippet = item.snippet;
         let session_allowed = item.additional_edits.is_empty();
-        let edit = item.text_edit.unwrap_or_else(|| {
-            let offset = self
-                .state
-                .active_view
-                .map_or(ByteOffset(0), |view| self.state.views[view].cursor);
-            let buffer = TextBuffer::from_text(&document.text);
-            let (line, character) = PositionCodec::new(&buffer)
-                .byte_to_lsp(offset, encoding)
-                .unwrap_or((0, 0));
-            crate::language::lsp::LspTextEdit {
-                range: crate::language::lsp::LspRange {
-                    start: crate::language::lsp::LspPosition { line, character },
-                    end: crate::language::lsp::LspPosition { line, character },
-                },
-                new_text: item.insert_text,
+        let offset = self
+            .state
+            .active_view
+            .map_or(ByteOffset(0), |view| self.state.views[view].cursor);
+        let buffer = TextBuffer::from_text(&document.text);
+        let codec = PositionCodec::new(&buffer);
+        let (line, character) = codec.byte_to_lsp(offset, encoding).unwrap_or((0, 0));
+        let here = crate::language::lsp::LspPosition { line, character };
+        let mut edit = match item.text_edit {
+            // The range was the server's at request time; what was typed since goes too.
+            Some(mut edit) => {
+                if edit.range.end.line == line && edit.range.end.character < character {
+                    edit.range.end = here;
+                }
+                edit
             }
-        });
-        let mut edit = edit;
+            // No range from the server: replace the word typed so far.
+            None => {
+                let start = self
+                    .language
+                    .completion_start()
+                    .filter(|start| {
+                        *start <= offset
+                            && buffer.byte_to_line(*start).is_ok_and(|start| start == line)
+                    })
+                    .and_then(|start| codec.byte_to_lsp(start, encoding).ok())
+                    .map_or(here.clone(), |(line, character)| {
+                        crate::language::lsp::LspPosition { line, character }
+                    });
+                crate::language::lsp::LspTextEdit {
+                    range: crate::language::lsp::LspRange { start, end: here },
+                    new_text: item.insert_text,
+                }
+            }
+        };
         let mut tabstops = Vec::new();
         if snippet {
             match crate::language::lsp::parse_snippet(&edit.new_text, 1024 * 1024) {
@@ -7185,10 +7207,6 @@ impl InteractiveApplication {
             self.show_error(self.message("lsp_invalid_uri", &[("uri", location.uri.clone())]));
             return;
         };
-        if let Err(error) = self.workspace.require_path(&path) {
-            self.show_error(error);
-            return;
-        }
         self.record_jump();
         let encoding = self
             .language
@@ -7202,12 +7220,21 @@ impl InteractiveApplication {
             .iter()
             .find(|(_, buffer)| buffer.path.as_ref() == Some(&path))
         else {
-            let roots = self
+            let mut roots: Vec<_> = self
                 .workspace
                 .roots()
                 .iter()
                 .map(|root| root.identity.canonical_path.clone())
                 .collect();
+            // A definition in a library or the toolchain opens too, read-only: the reader may
+            // look at it, and nothing here can write it.
+            let mut path = path;
+            if self.workspace.require_path(&path).is_err() {
+                if let Ok(real) = path.canonicalize() {
+                    path = real;
+                }
+                roots.extend(path.parent().map(std::path::Path::to_owned));
+            }
             match self.documents.read_scoped(path, roots) {
                 Ok(id) => {
                     self.language
@@ -8071,6 +8098,35 @@ impl InteractiveApplication {
             self.sync_changes_diff_preview();
             return;
         }
+        if let Some(PickerPayload::ProposalFile(index)) = self.selected_picker_payload() {
+            let index = *index;
+            let preview = self.workspace_edits.proposal().and_then(|proposal| {
+                let file = proposal.files.get(index)?;
+                Some(crate::ui::PickerPreview {
+                    title: file
+                        .canonical_path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                    body: crate::ui::PickerPreviewBody::Diff(
+                        crate::editor::session::git::text_diff_preview(
+                            &file.original_bytes,
+                            &file.proposed_bytes,
+                            "current -> proposed",
+                        ),
+                    ),
+                })
+            });
+            match preview {
+                Some(preview) => {
+                    if let Some(id) = self.search.set_preview(preview) {
+                        self.documents.cancel_request(id);
+                    }
+                }
+                None => self.clear_picker_preview(),
+            }
+            return;
+        }
         let Some((label, payload)) = self
             .search
             .picker()
@@ -8825,6 +8881,7 @@ impl InteractiveApplication {
             return;
         };
         let repository = status.repository.clone();
+        let scope_root = status.scope_root.clone();
         let state = match crate::workspace::git::read_conflict_state(&repository) {
             Ok(state) => state,
             Err(error) => {
@@ -8845,10 +8902,18 @@ impl InteractiveApplication {
                     source: "conflict".into(),
                     action: PickerAction::None,
                 },
-                PickerPayload::Command("workspace.git.conflicts.open".into()),
+                PickerPayload::MatcherSource(MatcherSource {
+                    line: first_conflict_line(&scope_root.join(&conflict.path)),
+                    path: scope_root.join(&conflict.path),
+                    column: 0,
+                }),
             ));
         }
         self.install_picker(title, items);
+        self.search.set_picker_footer(
+            "Enter Open · then Space g m o/t/b takes ours, theirs or both · Esc Close".to_owned(),
+        );
+        self.sync_picker_ui();
     }
     /// Open the tutorial, a fresh copy of `assets/defaults/tutor.md` in the state directory, so
     /// the user practises on it and can save without touching the original, as in vimtutor.
@@ -11262,16 +11327,198 @@ impl InteractiveApplication {
             self.schedule_lsp_inlay_refresh(false);
         }
         self.reconcile_lsp_autostart(buffer, &document, !sessions.is_empty());
-        if changed
-            && completion_open
-            && self
-                .language
-                .active()
-                .is_some_and(|active| sessions.contains(active))
+        let typed = self.language.take_typed();
+        let active_attached = self
+            .language
+            .active()
+            .is_some_and(|active| sessions.contains(active));
+        let trigger = typed.is_some_and(|typed| self.language.is_completion_trigger(&sessions, typed));
+        if completion_open {
+            if changed && trigger && active_attached {
+                self.mark_lsp_completion_start(true);
+                self.request_lsp(LspFeature::Completion);
+            } else if changed && self.language.completion_incomplete() && active_attached {
+                self.request_lsp(LspFeature::Completion);
+            }
+            self.narrow_lsp_completion();
+        } else if changed
+            && self.configuration.settings().lsp.auto_completion
+            && !sessions.is_empty()
+            && !self.ui.large_file_buffers.contains(&buffer)
+            && self.lsp_completion_should_open(typed, trigger)
         {
+            self.mark_lsp_completion_start(true);
             self.request_lsp(LspFeature::Completion);
         }
     }
+
+    /// Whether a typed character opens the menu: a server's trigger character, or a letter that
+    /// starts or continues a word. Numbers don't, and a request already out will show its answer.
+    fn lsp_completion_should_open(&self, typed: Option<char>, trigger: bool) -> bool {
+        if !self.lsp_completion_in_insert() {
+            return false;
+        }
+        if trigger {
+            return true;
+        }
+        typed.is_some_and(completion_word_char)
+            && !self.language.request_pending()
+            && self
+                .lsp_word_before_cursor()
+                .and_then(|word| word.chars().next())
+                .is_some_and(|first| !first.is_numeric())
+    }
+
+    fn lsp_completion_in_insert(&self) -> bool {
+        self.state
+            .active_view
+            .and_then(|view| self.state.views.get(view))
+            .is_some_and(|view| view.mode == EditorMode::Insert)
+    }
+
+    /// The word the cursor is at the end of, with where it starts.
+    fn lsp_word_before_cursor(&self) -> Option<String> {
+        let start = self.lsp_word_start()?;
+        let view = &self.state.views[self.state.active_view?];
+        let range = ByteRange::new(start, view.cursor).ok()?;
+        self.state.buffers.get(view.buffer)?.text.slice(range).ok()
+    }
+
+    fn lsp_word_start(&self) -> Option<ByteOffset> {
+        let view = &self.state.views[self.state.active_view?];
+        let text = &self.state.buffers.get(view.buffer)?.text;
+        let line_start = text.line_to_byte(text.byte_to_line(view.cursor).ok()?).ok()?;
+        let before = text.slice(ByteRange::new(line_start, view.cursor).ok()?).ok()?;
+        let word = before
+            .char_indices()
+            .rev()
+            .take_while(|(_, character)| completion_word_char(*character))
+            .last()
+            .map_or(before.len(), |(index, _)| index);
+        Some(ByteOffset(line_start.get() + word))
+    }
+
+    /// Notes where this completion starts, which later typing is measured from.
+    pub(in crate::editor::session) fn mark_lsp_completion_start(&mut self, automatic: bool) {
+        let start = self.lsp_word_start();
+        self.language.begin_completion(start, automatic);
+    }
+
+    pub(in crate::editor::session) fn cancel_lsp_completion(&mut self) {
+        let generation = self.language.generation();
+        if let Some(server) = self.language.active().map(String::as_str) {
+            let _ = self.language.cancel(server, generation);
+        }
+        self.language.clear_completion();
+        self.ui.language_completion = None;
+    }
+
+    /// Shows the items matching what was typed since the request, best first. The menu closes
+    /// when the cursor leaves the word or nothing matches.
+    pub(in crate::editor::session) fn narrow_lsp_completion(&mut self) {
+        let Some(view) = self.state.active_view.and_then(|view| self.state.views.get(view)) else {
+            return;
+        };
+        let Some(buffer) = self.state.buffers.get(view.buffer) else {
+            return;
+        };
+        let cursor = view.cursor;
+        let revision = buffer.text.revision();
+        let automatic_left_insert = self.language.completion_automatic() && view.mode != EditorMode::Insert;
+        let start = self.language.completion_start();
+        let same_line = |offset: ByteOffset| {
+            buffer.text.byte_to_line(offset).ok() == buffer.text.byte_to_line(cursor).ok()
+        };
+        if automatic_left_insert
+            || start.is_some_and(|start| start > cursor || !same_line(start))
+        {
+            self.cancel_lsp_completion();
+            return;
+        }
+        if !self.language.completion_needs_narrowing(cursor, revision) {
+            return;
+        }
+        let codec = PositionCodec::new(&buffer.text);
+        let typed = |from: ByteOffset| {
+            ByteRange::new(from, cursor)
+                .ok()
+                .and_then(|range| buffer.text.slice(range).ok())
+                .unwrap_or_default()
+        };
+        let from_start = start.map(typed).unwrap_or_default();
+        let encodings = self.language.completion_encodings();
+        let matches = self.language.score_completions(|server, item| {
+            // A server's range says where its item begins; other items start at the word.
+            let edit_start = item.text_edit.as_ref().and_then(|edit| {
+                let encoding = encodings.get(server).copied()?;
+                codec
+                    .lsp_to_byte(edit.range.start.line, edit.range.start.character, encoding)
+                    .ok()
+                    .filter(|offset| *offset <= cursor && same_line(*offset))
+            });
+            edit_start.map_or_else(|| from_start.clone(), typed)
+        });
+        self.language.narrow_completions(matches, cursor, revision);
+        self.project_lsp_completion();
+    }
+
+    /// Mirrors the current items into the menu the renderer draws.
+    pub(in crate::editor::session) fn project_lsp_completion(&mut self) {
+        let items = self
+            .language
+            .completion_items()
+            .iter()
+            .enumerate()
+            .map(|(index, item)| CompletionItem {
+                label: item.label.clone(),
+                detail: Self::lsp_completion_detail(
+                    item,
+                    &self.lsp_server_label(self.language.completion_server(index).unwrap_or_default()),
+                ),
+                color: item.color(),
+            })
+            .collect::<Vec<_>>();
+        let (selected, scroll) = self.language.completion_position();
+        self.ui.language_completion = (!items.is_empty()).then_some(LanguageCompletionState {
+            items,
+            selected,
+            scroll,
+        });
+        self.refresh_lsp_completion_documentation();
+    }
+
+    /// `<leader>cr` and F2: the command line, ready with the name under the cursor.
+    fn open_rename_prompt(&mut self) {
+        let word = self.state.active_view.and_then(|view| self.state.views.get(view)).and_then(|view| {
+            let source = self.state.buffers.get(view.buffer)?.text.to_string();
+            let cursor = view.cursor.get();
+            let start = source[..cursor]
+                .char_indices()
+                .rev()
+                .take_while(|(_, character)| completion_word_char(*character))
+                .last()
+                .map_or(cursor, |(index, _)| index);
+            let end = source[cursor..]
+                .char_indices()
+                .find(|(_, character)| !completion_word_char(*character))
+                .map_or(source.len(), |(relative, _)| cursor + relative);
+            Some(source[start..end].to_owned())
+        });
+        self.open_prompt(PromptKind::Command, format!("rename {}", word.unwrap_or_default()));
+    }
+}
+
+/// Where a conflicted file's first marker is, so opening it lands there.
+fn first_conflict_line(path: &std::path::Path) -> usize {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| text.lines().position(|line| line.starts_with("<<<<<<<")))
+        .unwrap_or(0)
+}
+
+/// A character of an identifier, for the word completion replaces and filters on.
+fn completion_word_char(character: char) -> bool {
+    character.is_alphanumeric() || character == '_' || character == '$'
 }
 
 impl InteractiveApplication {
@@ -11683,6 +11930,18 @@ impl InteractiveApplication {
                 let created = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| {
                     std::fs::OpenOptions::new().append(true).create(true).open(&path).map(drop)
                 });
+                // A new file starts with a few commented examples rather than nothing.
+                let starter = if path.file_name().is_some_and(|name| name == "keymaps.toml") {
+                    include_str!("../../../../assets/defaults/keymaps-starter.toml")
+                } else {
+                    include_str!("../../../../assets/defaults/settings-starter.toml")
+                };
+                let created = created.and_then(|()| {
+                    if std::fs::metadata(&path)?.len() == 0 {
+                        std::fs::write(&path, starter)?;
+                    }
+                    Ok(())
+                });
                 match created {
                     Ok(()) => self.start_open(path),
                     Err(error) => self.show_error(format!("{}: {error}", path.display())),
@@ -11788,6 +12047,7 @@ impl InteractiveApplication {
             }
             AppEffect::HelpForForm => self.open_form_help(),
             AppEffect::GitConflictsOpen => self.open_git_conflicts(),
+            AppEffect::GitConflictAccept { side } => self.accept_conflict_block(&side),
             AppEffect::GitConflictChoose { side } => self.choose_git_conflict_side(&side),
             AppEffect::DebuggerBreakpointStates => self.open_breakpoint_states(),
             AppEffect::DebuggerBreakpointDisable => self.toggle_breakpoint_disabled(),

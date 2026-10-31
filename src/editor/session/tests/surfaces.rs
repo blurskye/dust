@@ -4400,6 +4400,7 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
             std::thread::sleep(Duration::from_millis(2));
         }
     };
+    driver.open_debug_threads_after_stop();
     picker(&mut driver, "original-thread");
     assert_eq!(std::fs::read_to_string(&starts).unwrap(), "x");
     assert!(
@@ -4745,6 +4746,89 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
 
 
 #[test]
+fn a_stop_fills_the_panes_and_makes_room_for_them_without_opening_anything() {
+    use super::driver::TestSession;
+    let files = tempfile::tempdir().unwrap();
+    let adapter = files.path().join("logging-adapter.py");
+    let log_path = files.path().join("requests.log");
+    let source = crate::debugger::TEST_LOGGING_ADAPTER.replace(
+        "'requests.log'",
+        &serde_json::to_string(&log_path).unwrap(),
+    );
+    std::fs::write(&adapter, source).unwrap();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.debug.adapters.insert(
+        "logging".into(),
+        crate::config::DebugAdapterConfig {
+            program: crate::debugger::test_python(),
+            arguments: vec!["-u".into(), adapter.display().to_string()],
+            environment: Default::default(),
+        },
+    );
+    loaded.config.debug.sessions.insert(
+        "logging".into(),
+        crate::config::DebugSessionConfig {
+            adapter: "logging".into(),
+            request: crate::config::DebugRequestKind::Launch,
+            cwd: None,
+            program: Some("debuggee".into()),
+            run_in_terminal_profile: None,
+            arguments: Default::default(),
+            path_maps: Default::default(),
+        },
+    );
+    let mut driver = TestSession::new(loaded);
+    driver.new_buffer();
+    driver.debug_program_fixture();
+    driver.trust_owned_terminal_fixture();
+    driver.resize(120, 40);
+    let tiled = |driver: &TestSession| {
+        driver
+            .application()
+            .compositor_projection()
+            .expect("a current layout")
+            .tiled_bounds
+    };
+    let before = tiled(&driver);
+
+    driver.debug_start("logging");
+    let deadline = Instant::now() + Duration::from_secs(6);
+    while driver.application().debugger_session.variables().is_empty() {
+        driver.pump_debug();
+        assert!(
+            Instant::now() < deadline,
+            "the stop never reached its variables: {:?}",
+            driver.projection().notification
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+
+    assert!(
+        driver.projection().picker.is_none(),
+        "a stop shows itself in the panes; it does not open a picker"
+    );
+    let panes = driver
+        .application()
+        .ui
+        .debug_panes
+        .clone()
+        .expect("the panes are open during the session");
+    assert_eq!(panes.status, "paused: fixture");
+    assert_eq!(panes.stack, ["logging-frame:1"]);
+    assert_eq!(panes.variables, ["child = 1"]);
+    let during = tiled(&driver);
+    assert!(
+        during.height < before.height || during.width < before.width,
+        "the editor windows make room for the panes: {before:?} then {during:?}"
+    );
+
+    driver.debug_stop();
+    driver.pump_debug();
+    assert!(driver.application().ui.debug_panes.is_none(), "the panes close with the session");
+    assert_eq!(tiled(&driver), before, "the editor gets its room back");
+}
+
+#[test]
 fn hiding_an_inspector_sends_no_disconnect_and_leaves_the_session_running() {
     // W-25 acceptance, verbatim: "proof that hiding inspectors does not terminate a session".
     // The stronger half is MEASURED: the adapter itself records every request it receives, so the
@@ -4790,19 +4874,7 @@ fn hiding_an_inspector_sends_no_disconnect_and_leaves_the_session_running() {
     // The start sequence the passing debugger test uses: start, then PUMP until the adapter's
     // answer arrives as a picker.
     driver.debug_start("logging");
-    let deadline = Instant::now() + Duration::from_secs(6);
-    loop {
-        driver.pump_debug();
-        if driver.projection().picker.is_some() {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "the logging session never produced a view: {:?}",
-            driver.projection().notification
-        );
-        std::thread::sleep(Duration::from_millis(2));
-    }
+    driver.open_debug_threads_after_stop();
     assert!(
         driver.application().debugger_session.is_running(),
         "the session is running before hiding"
@@ -4810,6 +4882,7 @@ fn hiding_an_inspector_sends_no_disconnect_and_leaves_the_session_running() {
 
     // HIDE: close the surface, which runs the session's own dismiss_choices path.
     driver.application_mut().close_picker();
+    let deadline = Instant::now() + Duration::from_secs(6);
     while driver.projection().picker.is_some() {
         driver.pump_debug();
         assert!(Instant::now() < deadline, "the inspector never closed");
@@ -4888,19 +4961,7 @@ fn a_started_session_makes_the_debug_arrangement_appear_with_its_own_identity() 
     );
 
     driver.debug_start("logging");
-    let deadline = Instant::now() + Duration::from_secs(6);
-    loop {
-        driver.pump_debug();
-        if driver.projection().picker.is_some() {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "the logging session never produced a view: {:?}",
-            driver.projection().notification
-        );
-        std::thread::sleep(Duration::from_millis(2));
-    }
+    driver.open_debug_threads_after_stop();
 
     // (1) THE ARRANGEMENT APPEARED, projected on the debug pump, naming the session's OWN identity.
     let panes = driver
@@ -5004,19 +5065,7 @@ fn an_attached_session_names_the_target_it_was_given_in_its_status() {
     driver.new_buffer();
     driver.trust_owned_terminal_fixture();
     driver.debug_start("attached");
-    let deadline = Instant::now() + Duration::from_secs(6);
-    loop {
-        driver.pump_debug();
-        if driver.projection().picker.is_some() {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "the attach session never produced a view: {:?}",
-            driver.projection().notification
-        );
-        std::thread::sleep(Duration::from_millis(2));
-    }
+    driver.open_debug_threads_after_stop();
 
     driver.application_mut().invoke_mapped(
         crate::editor::CommandInvocation::new(

@@ -32,6 +32,20 @@ pub(in crate::editor::session) enum DebugResponse {
     },
     Result(DapResponse),
     Retired,
+    /// Part of following a stop: the panes show it, nothing opens.
+    Absorbed,
+    /// The program stopped here, so the editor goes there.
+    StoppedAt(DebugLocation),
+}
+/// What is being fetched on its own after the program stops, so the source, stack and variables
+/// are there without asking. Pickers remain for what the user asks for.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StopFollow {
+    Idle,
+    Threads(Option<i64>),
+    Stack,
+    Scopes,
+    Variables,
 }
 pub(in crate::editor::session) struct DebugRow {
     pub label: String,
@@ -97,6 +111,15 @@ pub(super) struct DebugSession {
     /// Breakpoints the USER disabled. This is session state rather than a flag a caller passes,
     /// so it survives an adapter answer.
     disabled_breakpoints: std::collections::BTreeSet<(PathBuf, u64)>,
+    stop_follow: StopFollow,
+    /// Why the program is paused, while it is.
+    stop_reason: Option<String>,
+    /// Where the program is paused, while it is.
+    execution: Option<(PathBuf, u64)>,
+    variables: Vec<String>,
+    watch_values: BTreeMap<String, String>,
+    /// One entry per evaluation in flight, in order: the watch it answers, or none for the console.
+    evaluations: VecDeque<Option<String>>,
     /// How the session ended, when it has: leaving is not killing.
     end_state: Option<crate::debugger::DapSessionEnd>,
     /// Which STOP the session is currently in, incremented whenever execution runs on or stops
@@ -171,6 +194,12 @@ impl DebugSession {
             next_submission: 0,
             pending_submissions: VecDeque::new(),
             disabled_breakpoints: std::collections::BTreeSet::new(),
+            stop_follow: StopFollow::Idle,
+            stop_reason: None,
+            execution: None,
+            variables: Vec::new(),
+            watch_values: BTreeMap::new(),
+            evaluations: VecDeque::new(),
             pending_breakpoints: std::collections::VecDeque::new(),
             watches: Vec::new(),
             configuration: None,
@@ -199,6 +228,8 @@ impl DebugSession {
     }
     pub(in crate::editor::session) fn stop(&mut self) -> Result<(), DapError> {
         let pending_launch = self.launch.take().is_some();
+        self.clear_paused_state();
+        self.stop_reason = None;
         self.choices = None;
         self.event_source = None;
         self.source = None;
@@ -312,6 +343,14 @@ impl DebugSession {
             self.note_issued(false, None, Some(reference), epoch);
             return Ok(());
         }
+        let evaluation = match &control {
+            DapControl::Evaluate {
+                expression,
+                context,
+                ..
+            } => Some((context == "watch").then(|| expression.clone())),
+            _ => None,
+        };
         let stack = matches!(&control, DapControl::StackTrace { .. });
         let scopes = match &control {
             DapControl::Scopes { frame_id } => Some(*frame_id),
@@ -322,6 +361,7 @@ impl DebugSession {
             _ => None,
         };
         self.service.control(control)?;
+        self.evaluations.extend(evaluation);
         // Recorded only once the request is actually away, so a refused send leaves nothing that a
         // later answer could be matched against.
         self.note_issued(stack, scopes, reference, epoch);
@@ -426,34 +466,30 @@ impl DebugSession {
             DapEvent::RequestFailed { command, .. } if command == "source" => {
                 self.source = None;
             }
+            DapEvent::RequestFailed { command, .. }
+                if matches!(command.as_str(), "threads" | "stackTrace" | "scopes" | "variables") =>
+            {
+                self.stop_follow = StopFollow::Idle;
+            }
             DapEvent::Output { adapter, output } => {
-                self.push_console(crate::debugger::DapConsoleEntry::new(
-                    crate::debugger::DapConsoleOrigin::ProgramOutput,
-                    adapter.clone(),
-                    output.clone(),
-                ));
+                for line in output.lines().filter(|line| !line.trim().is_empty()) {
+                    self.push_console(crate::debugger::DapConsoleEntry::new(
+                        crate::debugger::DapConsoleOrigin::ProgramOutput,
+                        adapter.clone(),
+                        line.to_owned(),
+                    ));
+                }
                 while self.console.len() > 10_000 {
                     self.console.pop_front();
                 }
             }
-            DapEvent::Stopped { .. } => {
+            DapEvent::Stopped {
+                reason, thread_id, ..
+            } => {
                 // A STOP is a new stop: whatever was captured at the previous one is not current.
                 self.begin_stop();
-                for expression in self.watches.iter().take(100) {
-                    // Full is visible as a failed watch submission, not successful evaluation.
-                    if let Err(error) = self.service.control(DapControl::Evaluate {
-                        expression: expression.clone(),
-                        frame_id: None,
-                        context: "watch".into(),
-                    }) {
-                        self.push_console(crate::debugger::DapConsoleEntry::new(
-                            crate::debugger::DapConsoleOrigin::Notice,
-                            "dust",
-                            error.to_string(),
-                        ));
-                        break;
-                    }
-                }
+                self.stop_reason = Some(reason.clone());
+                self.stop_follow = StopFollow::Threads(*thread_id);
             }
             DapEvent::Running { .. } => {
                 // Execution is running, so NOTHING captured while stopped is current.
@@ -730,6 +766,51 @@ impl DebugSession {
             .get(&(path.to_path_buf(), line))
             .copied()
     }
+    /// What the adapter is told as soon as it is ready: a path may hold only disabled rows, which
+    /// still clears what the adapter might remember for it.
+    pub(in crate::editor::session) fn startup_breakpoints(
+        &mut self,
+    ) -> Vec<(PathBuf, Vec<DapSourceBreakpoint>)> {
+        self.pending_breakpoints = self.breakpoints.keys().cloned().collect();
+        self.breakpoints
+            .iter()
+            .map(|(path, rows)| {
+                let enabled = rows
+                    .iter()
+                    .filter(|row| !self.disabled_breakpoints.contains(&(path.clone(), row.line)))
+                    .cloned()
+                    .collect();
+                (path.clone(), enabled)
+            })
+            .collect()
+    }
+    pub(in crate::editor::session) fn stop_reason(&self) -> Option<&str> {
+        self.stop_reason.as_deref()
+    }
+    pub(in crate::editor::session) fn execution(&self) -> Option<&(PathBuf, u64)> {
+        self.execution.as_ref()
+    }
+    pub(in crate::editor::session) fn variables(&self) -> &[String] {
+        &self.variables
+    }
+    pub(in crate::editor::session) fn watch_value(&self, expression: &str) -> Option<&str> {
+        self.watch_values.get(expression).map(String::as_str)
+    }
+    /// The frame an evaluation should run in, which is what makes locals visible to it.
+    pub(in crate::editor::session) fn current_frame(&self) -> Option<i64> {
+        self.console_frame
+    }
+    /// A watch that cannot be evaluated here is a normal thing to see in the pane, not an error.
+    pub(in crate::editor::session) fn watch_request_failed(&mut self, command: &str) -> bool {
+        if command != "evaluate" {
+            return false;
+        }
+        let Some(expression) = self.evaluations.pop_front().flatten() else {
+            return false;
+        };
+        self.watch_values.insert(expression, "not available".into());
+        true
+    }
     pub(in crate::editor::session) fn persisted_breakpoints(&self) -> Vec<PersistedBreakpoint> {
         self.breakpoints
             .values()
@@ -830,6 +911,18 @@ impl DebugSession {
         {
             return DebugResponse::Retired;
         }
+        if matches!(response, DapResponse::Evaluate(_)) {
+            if let Some(expression) = self.evaluations.pop_front().flatten() {
+                if let DapResponse::Evaluate(value) = response {
+                    self.watch_values.insert(expression, value.value);
+                }
+                return DebugResponse::Absorbed;
+            }
+        }
+        let response = match self.follow_stop(response) {
+            Ok(response) => response,
+            Err(followed) => return followed,
+        };
         let (kind, rows) = match response {
             DapResponse::Threads(rows) => (
                 "threads",
@@ -989,6 +1082,107 @@ impl DebugSession {
         };
         DebugResponse::Picker { kind, rows }
     }
+    /// Take the next step of following a stop, or hand back a response that is not part of it.
+    fn follow_stop(&mut self, response: DapResponse) -> Result<DapResponse, DebugResponse> {
+        match (self.stop_follow, response) {
+            (StopFollow::Threads(stopped), DapResponse::Threads(rows)) => {
+                self.threads = rows.iter().map(|r| format!("{} ({})", r.name, r.id)).collect();
+                self.stop_follow = StopFollow::Idle;
+                if let Some(thread_id) = stopped.or(rows.first().map(|r| r.id)) {
+                    self.stop_follow = StopFollow::Stack;
+                    self.follow_control(DapControl::StackTrace {
+                        thread_id,
+                        start: 0,
+                        levels: 256,
+                    });
+                }
+                Err(DebugResponse::Absorbed)
+            }
+            (StopFollow::Stack, DapResponse::Stack(rows)) => {
+                self.stop_follow = StopFollow::Idle;
+                let issued = self.issued_stack.pop_front();
+                if !Self::is_current_stop_answer(issued, self.stop_epoch) {
+                    self.note_refused_answer();
+                    return Err(DebugResponse::Absorbed);
+                }
+                self.stack = rows.iter().map(|f| format!("{}:{}", f.name, f.line)).collect();
+                let Some(top) = rows.into_iter().next() else {
+                    return Err(DebugResponse::Absorbed);
+                };
+                self.console_frame = Some(top.id);
+                self.stop_follow = StopFollow::Scopes;
+                self.follow_control(DapControl::Scopes { frame_id: top.id });
+                for expression in self.watches.clone().into_iter().take(100) {
+                    self.follow_control(DapControl::Evaluate {
+                        expression,
+                        frame_id: Some(top.id),
+                        context: "watch".into(),
+                    });
+                }
+                Err(match top.path {
+                    Some(path) => {
+                        self.execution = Some((path.clone(), top.line));
+                        DebugResponse::StoppedAt(DebugLocation {
+                            path,
+                            line: top.line,
+                            column: top.column,
+                        })
+                    }
+                    None => DebugResponse::Absorbed,
+                })
+            }
+            (StopFollow::Scopes, DapResponse::Scopes(rows)) => {
+                self.stop_follow = StopFollow::Idle;
+                let issued = self.issued_scopes.pop_front().map(|(_, epoch)| epoch);
+                if !Self::is_current_stop_answer(issued, self.stop_epoch) {
+                    self.note_refused_answer();
+                    return Err(DebugResponse::Absorbed);
+                }
+                self.expansion.clear();
+                self.pending_variable_pages.clear();
+                // The first scope is the locals, which is what VS Code opens too.
+                if let Some(scope) = rows.into_iter().find(|scope| !scope.expensive) {
+                    self.stop_follow = StopFollow::Variables;
+                    self.follow_control(DapControl::Variables {
+                        reference: scope.variables_reference,
+                        start: 0,
+                        count: VARIABLE_PAGE,
+                    });
+                }
+                Err(DebugResponse::Absorbed)
+            }
+            (StopFollow::Variables, DapResponse::Variables(rows)) => {
+                self.stop_follow = StopFollow::Idle;
+                self.expansion.clear();
+                self.pending_variable_pages.clear();
+                self.variables = rows
+                    .into_iter()
+                    .filter(|row| !row.value.is_empty())
+                    .map(|row| format!("{} = {}", row.name, row.value))
+                    .collect();
+                Err(DebugResponse::Absorbed)
+            }
+            (_, response) => Ok(response),
+        }
+    }
+    fn follow_control(&mut self, control: DapControl) {
+        if let Err(error) = self.control(control) {
+            self.stop_follow = StopFollow::Idle;
+            self.push_console(crate::debugger::DapConsoleEntry::new(
+                crate::debugger::DapConsoleOrigin::Notice,
+                "dust",
+                error.to_string(),
+            ));
+        }
+    }
+    fn clear_paused_state(&mut self) {
+        self.stop_follow = StopFollow::Idle;
+        self.execution = None;
+        self.variables.clear();
+        self.watch_values.clear();
+        // The adapter actor drops what was in flight when a stop ends, so its answers never come.
+        self.evaluations.clear();
+    }
     pub(in crate::editor::session) fn frames(
         &mut self,
         frames: Vec<DapStackFrame>,
@@ -1017,6 +1211,8 @@ impl DebugSession {
     /// Execution ran on: invalidate the stopped data and every value captured at that stop, so a
     /// previous value can never be presented as current.
     pub(in crate::editor::session) fn begin_running(&mut self) {
+        self.clear_paused_state();
+        self.stop_reason = None;
         self.stop_epoch = self.stop_epoch.wrapping_add(1);
         self.choices = None;
         self.source = None;
@@ -1032,6 +1228,7 @@ impl DebugSession {
     /// A new stop began: the PREVIOUS stop's data is not current either, so it goes the same way
     /// before anything is captured for this stop.
     pub(in crate::editor::session) fn begin_stop(&mut self) {
+        self.clear_paused_state();
         self.stop_epoch = self.stop_epoch.wrapping_add(1);
         self.choices = None;
         self.source = None;

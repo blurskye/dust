@@ -657,7 +657,7 @@ while True:
                         .first()
                         .is_some_and(|section| section.value == "fake hover")
                 }
-                (12, LspFeatureResult::Completion(items)) => {
+                (12, LspFeatureResult::Completion { items, .. }) => {
                     completion = items[0].label == "fakeItem";
                 }
                 (14, LspFeatureResult::InlayHints(items)) => {

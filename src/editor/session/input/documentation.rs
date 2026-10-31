@@ -60,6 +60,17 @@ impl InputSession {
                 if remaining_lines == 0 || remaining_bytes == 0 {
                     break;
                 }
+                // The popup has no Markdown renderer: code fences and bold markers are noise.
+                let bare;
+                let line = if markup == DocumentationMarkupKind::Markdown {
+                    if line.trim_start().starts_with("```") {
+                        continue;
+                    }
+                    bare = line.replace("**", "");
+                    bare.as_str()
+                } else {
+                    line
+                };
                 let sanitized = line
                     .chars()
                     .filter(|character| !character.is_control() || *character == '\t')

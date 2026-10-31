@@ -181,8 +181,19 @@ impl InteractiveApplication {
     /// the breakpoints it holds, its watches and its console. Absent when there is no session, so
     /// the whole arrangement appears and disappears as ONE decision.
     pub(in crate::editor::session) fn project_debug_panes(&mut self) {
-        let Some(target) = self.debugger_session.target() else {
+        self.project_debug_signs();
+        let was_open = self.ui.debug_panes.is_some();
+        let target = self
+            .debugger_session
+            .target()
+            .filter(|_| self.debugger_session.is_running());
+        let Some(target) = target else {
             self.ui.set(None, |ui| &mut ui.debug_panes);
+            if was_open {
+                // The windows make room for the panes, or take it back.
+                self.window_session.invalidate();
+                self.reconcile_editor_windows();
+            }
             return;
         };
         let selected = self
@@ -196,7 +207,7 @@ impl InteractiveApplication {
                 None => "attached".to_owned(),
             },
             crate::config::DebugRequestKind::Launch => match &target.program {
-                Some(program) => format!("launched {}", program.display()),
+                Some(program) => format!("launched {}", self.workspace_relative_label(program)),
                 None => "launched".to_owned(),
             },
         };
@@ -205,11 +216,23 @@ impl InteractiveApplication {
             .debugger_session
             .persisted_breakpoints()
             .iter()
-            .map(|b| format!("{}:{}", b.path.display(), b.line))
+            .map(|b| format!("{}:{}", self.workspace_relative_label(&b.path), b.line))
             .collect();
         let threads = self.debugger_session.threads().to_vec();
         let stack = self.debugger_session.stack().to_vec();
-        let watches = self.debugger_session.watches().to_vec();
+        let watches = self
+            .debugger_session
+            .watches()
+            .iter()
+            .map(|watch| match self.debugger_session.watch_value(watch) {
+                Some(value) => format!("{watch} = {value}"),
+                None => watch.clone(),
+            })
+            .collect();
+        let status = match self.debugger_session.stop_reason() {
+            Some(reason) => format!("paused: {reason}"),
+            None => "running".to_owned(),
+        };
         let console = self
             .debugger_session
             .console()
@@ -218,12 +241,43 @@ impl InteractiveApplication {
         self.ui.debug_panes = Some(crate::ui::DebugPanesUiState {
             selected,
             target: format!("{adapter}: {what}"),
+            status,
             threads,
             stack,
             breakpoints,
+            variables: self.debugger_session.variables().to_vec(),
             watches,
             console,
         });
+        if !was_open {
+            // The windows make room for the panes, or take it back.
+            self.window_session.invalidate();
+            self.reconcile_editor_windows();
+        }
+    }
+    fn project_debug_signs(&mut self) {
+        let mut signs: Vec<crate::ui::DebugSign> = self
+            .debugger_session
+            .persisted_breakpoints()
+            .into_iter()
+            .map(|breakpoint| crate::ui::DebugSign {
+                path: breakpoint.path,
+                line: breakpoint.line.saturating_sub(1) as usize,
+                kind: crate::ui::DebugSignKind::Breakpoint,
+            })
+            .collect();
+        if let Some((path, line)) = self.debugger_session.execution() {
+            // First, so it wins over a breakpoint on the same line.
+            signs.insert(
+                0,
+                crate::ui::DebugSign {
+                    path: path.clone(),
+                    line: line.saturating_sub(1) as usize,
+                    kind: crate::ui::DebugSignKind::Execution,
+                },
+            );
+        }
+        self.ui.debug_signs = signs;
     }
     pub(in crate::editor::session) fn project_operation_bar(&mut self) {
         let Some(status) = self.git.status() else {
@@ -1053,6 +1107,17 @@ impl InteractiveApplication {
 }
 
 impl InteractiveApplication {
+    /// A path as the reader knows it in the project, or whole when it lies outside.
+    fn workspace_relative_label(&self, path: &std::path::Path) -> String {
+        self.workspace
+            .roots()
+            .iter()
+            .find_map(|root| path.strip_prefix(&root.identity.canonical_path).ok())
+            .unwrap_or(path)
+            .display()
+            .to_string()
+    }
+
     pub(in crate::editor::session) fn show_workspace_proposal(&mut self) {
         let Some(proposal) = self.workspace_edits.proposal() else {
             return;
@@ -1071,7 +1136,7 @@ impl InteractiveApplication {
                     badge: String::new(),
                     kind: crate::workspace::PickerItemKind::Entry,
                         id,
-                        label: file.canonical_path.display().to_string(),
+                        label: self.workspace_relative_label(&file.canonical_path),
                         detail: self.message(
                             if file.selected {
                                 "workspace_edit_included"
@@ -1107,7 +1172,7 @@ impl InteractiveApplication {
                     badge: String::new(),
                     kind: crate::workspace::PickerItemKind::Entry,
                             id: PickerItemId(format!("resource-intent:{index}")),
-                            label: intent.source.display().to_string(),
+                            label: self.workspace_relative_label(&intent.source),
                             detail,
                             source: self.message("workspace_resource_staged", &[]),
                             action: PickerAction::None,
@@ -1506,6 +1571,21 @@ impl InteractiveApplication {
                         self.configuration.settings(),
                         preliminary.workspace_bounds.height,
                     );
+                    let (left, right, bottom_panes) = self
+                        .ui
+                        .debug_panes
+                        .as_ref()
+                        .filter(|_| !self.ui.dashboard && self.state.active_view.is_some())
+                        .and_then(|_| {
+                            crate::ui::debug_pane_insets(
+                                preliminary.workspace_bounds.width,
+                                preliminary
+                                    .workspace_bounds
+                                    .height
+                                    .saturating_sub(top.saturating_add(bottom)),
+                            )
+                        })
+                        .unwrap_or_default();
                     let protected = self.input.prompt().map(|prompt| {
                         let prompt_height = preliminary
                             .workspace_bounds
@@ -1533,7 +1613,12 @@ impl InteractiveApplication {
                             self.configuration.settings().ui.panes.minimum_width,
                             self.configuration.settings().ui.panes.minimum_height,
                         ),
-                        insets: (top, bottom),
+                        insets: crate::ui::window::TiledInsets {
+                            top,
+                            bottom: bottom.saturating_add(bottom_panes),
+                            left,
+                            right,
+                        },
                         protected,
                         surfaces: NativeSurfaceWindowBinding {
                             explorer: surfaces.explorer().map(|ids| ids.window),

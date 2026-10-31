@@ -15,6 +15,8 @@ pub struct LspConfig {
     pub auto_start: bool,
     pub inlay_hints: bool,
     pub inlay_hint_level: InlayHintLevel,
+    /// Open the completion menu while typing, not only on ctrl-space.
+    pub auto_completion: bool,
     pub nix_workspace_fallback: bool,
     pub request_timeout_ms: u64,
     pub restart_limit: u8,
@@ -29,6 +31,7 @@ impl Default for LspConfig {
             auto_start: true,
             inlay_hints: true,
             inlay_hint_level: InlayHintLevel::Standard,
+            auto_completion: true,
             nix_workspace_fallback: true,
             request_timeout_ms: 10_000,
             restart_limit: 3,

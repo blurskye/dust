@@ -226,6 +226,18 @@ pub(super) fn register_commands(
     )?;
     register(
         registry,
+        "workspace.git.conflict.accept",
+        "Accept one side of the conflict block at the cursor",
+        ContextRequirement::Buffer,
+        ArgumentSchema::default().field("side", ArgumentType::String, true),
+        |invocation| {
+            Ok(AppEffect::GitConflictAccept {
+                side: string_arg(invocation, "side")?.to_owned(),
+            })
+        },
+    )?;
+    register(
+        registry,
         "workspace.git.conflict.stage",
         "Stage the resolved conflict in the active buffer",
         ContextRequirement::Workspace,

@@ -1041,6 +1041,25 @@ impl TestSession {
         self.application.process_execution_preflight();
         self.application.process_dap_events();
     }
+    /// A stop fills the panes by itself; asking for the threads is what opens a picker.
+    pub(super) fn open_debug_threads_after_stop(&mut self) {
+        let deadline = Instant::now() + Duration::from_secs(6);
+        while self.application.debugger_session.threads().is_empty() {
+            self.pump_debug();
+            assert!(
+                Instant::now() < deadline,
+                "the session never stopped: {:?}",
+                self.projection().notification
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        self.debug_threads();
+        while self.projection().picker.is_none() {
+            self.pump_debug();
+            assert!(Instant::now() < deadline, "the threads picker never opened");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
     pub(super) fn debug_threads(&mut self) {
         self.application
             .process_effect(crate::editor::AppEffect::DapThreads);

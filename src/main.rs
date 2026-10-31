@@ -124,6 +124,24 @@ fn external_tui_fixture() -> ExitCode {
 }
 
 fn main() -> ExitCode {
+    #[cfg(unix)]
+    {
+        let mut arguments = std::env::args_os().skip(1);
+        if arguments.next().as_deref()
+            == Some(std::ffi::OsStr::new(dust::debugger::ADAPTER_SESSION_ARGUMENT))
+        {
+            let Some(program) = arguments.next() else {
+                return ExitCode::FAILURE;
+            };
+            let rest: Vec<_> = arguments.collect();
+            let error = dust::debugger::exec_in_own_session(&program, &rest);
+            eprintln!("dust: {error}");
+            return ExitCode::FAILURE;
+        }
+        if let Ok(binary) = std::env::current_exe() {
+            dust::debugger::use_adapter_session_launcher(binary);
+        }
+    }
     if std::env::var("DUST_TEST_EXTERNAL_TUI_FIXTURE").as_deref() == Ok("1") {
         return external_tui_fixture();
     }

@@ -76,6 +76,40 @@ pub(crate) struct DebugLayout {
     pub console: Option<WindowRect>,
 }
 
+impl DebugLayout {
+    fn at(self, x: u16, y: u16) -> Self {
+        let moved = |rect: WindowRect| WindowRect {
+            x: rect.x + x,
+            y: rect.y + y,
+            ..rect
+        };
+        Self {
+            mode: self.mode,
+            source: moved(self.source),
+            left: self.left.map(moved),
+            right: self.right.map(moved),
+            console: self.console.map(moved),
+        }
+    }
+}
+
+/// The arrangement inside `region`, the workspace without its tab and status lines.
+pub(crate) fn debug_layout_in(region: WindowRect) -> Option<DebugLayout> {
+    debug_layout(region.width, region.height).map(|layout| layout.at(region.x, region.y))
+}
+
+/// What the tiled editor windows give up to the panes: left, right and bottom. Windows are laid
+/// out around the panes, so cursors and mouse clicks stay correct.
+#[must_use]
+pub fn debug_pane_insets(width: u16, height: u16) -> Option<(u16, u16, u16)> {
+    let layout = debug_layout(width, height)?;
+    Some((
+        layout.source.x,
+        width - layout.source.x - layout.source.width,
+        height - layout.source.height,
+    ))
+}
+
 /// The coordinated arrangement for a terminal of this size. `None` when there is no room for a
 /// debug layout worth having, in which case the caller leaves the ordinary workspace alone.
 pub(crate) fn debug_layout(width: u16, height: u16) -> Option<DebugLayout> {
@@ -148,9 +182,12 @@ pub struct DebugPanesUiState {
     pub selected: DebugPane,
     /// What the session IS: attached to what, or which program it launched.
     pub target: String,
+    /// Running, or why it is paused.
+    pub status: String,
     pub threads: Vec<String>,
     pub stack: Vec<String>,
     pub breakpoints: Vec<String>,
+    pub variables: Vec<String>,
     pub watches: Vec<String>,
     pub console: Vec<String>,
 }
@@ -174,15 +211,15 @@ fn rows(pane: DebugPane, panes: &DebugPanesUiState) -> Vec<String> {
         DebugPane::Breakpoints => panes.breakpoints.clone(),
         DebugPane::Threads => panes.threads.clone(),
         DebugPane::Stack => panes.stack.clone(),
-        // Sessions and variables: what the session reports about itself.
-        DebugPane::Sessions | DebugPane::Variables => vec![panes.target.clone()],
+        DebugPane::Variables => panes.variables.clone(),
+        DebugPane::Sessions => vec![panes.target.clone(), panes.status.clone()],
     }
 }
 
 fn draw_region(grid: &mut super::CellGrid, rect: WindowRect, title: &str, body: &[String]) {
     fill(grid, rect);
     let inner = rect.width.saturating_sub(2);
-    grid.put_text(rect.x + 1, rect.y, &clip(title, inner), super::Style::Border);
+    grid.put_text(rect.x + 1, rect.y, &clip(title, inner), super::Style::Accent);
     for (index, line) in body.iter().take(rect.height.saturating_sub(1) as usize).enumerate() {
         let y = rect.y + 1 + index as u16;
         if y >= rect.y.saturating_add(rect.height) {
@@ -203,7 +240,7 @@ pub(crate) fn render_debug_panes(
         DebugLayoutMode::Wide => {
             if let Some(left) = layout.left {
                 // Sessions, THREADS, STACK and breakpoints on ONE side.
-                let mut body = vec![panes.target.clone()];
+                let mut body = rows(DebugPane::Sessions, panes);
                 for (title, pane) in [
                     ("threads:", DebugPane::Threads),
                     ("stack:", DebugPane::Stack),
@@ -219,15 +256,19 @@ pub(crate) fn render_debug_panes(
             }
             if let Some(right) = layout.right {
                 // Variables and watches on the OTHER.
-                draw_region(&mut frame.grid, right, "Watches", &rows(DebugPane::Watches, panes));
+                let mut body = rows(DebugPane::Variables, panes);
+                let watches = rows(DebugPane::Watches, panes);
+                if !watches.is_empty() {
+                    body.push("watches:".to_owned());
+                    body.extend(watches);
+                }
+                draw_region(&mut frame.grid, right, "Variables · Watches", &body);
             }
             if let Some(console) = layout.console {
-                draw_region(
-                    &mut frame.grid,
-                    console,
-                    "Console",
-                    &rows(DebugPane::Console, panes),
-                );
+                // The newest output is what matters, so the tail is what fits.
+                let body = rows(DebugPane::Console, panes);
+                let start = body.len().saturating_sub(console.height.saturating_sub(1) as usize);
+                draw_region(&mut frame.grid, console, "Console", &body[start..]);
             }
         }
         DebugLayoutMode::Narrow => {

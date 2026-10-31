@@ -639,6 +639,8 @@ impl Config {
             &self.editor.git_signs.added,
             &self.editor.git_signs.changed,
             &self.editor.git_signs.deleted,
+            &self.editor.debug_signs.breakpoint,
+            &self.editor.debug_signs.execution,
         ]
         .into_iter()
         .any(|symbol| {
@@ -819,7 +821,6 @@ impl Config {
             "lsp_aux_result",
             "lsp_invalid_uri",
             "lsp_invalid_position",
-            "lsp_edit_applied",
             "lsp_logs",
             "diagnostic_none",
             "diagnostic_current",
@@ -873,7 +874,6 @@ impl Config {
             "formatter_applied",
             "formatter_truncated",
             "linter_matcher_missing",
-            "test_matcher_missing",
             "picker_tasks_title",
             "picker_tests_title",
             "picker_output_title",
@@ -907,9 +907,7 @@ impl Config {
             "workspace_edit_rejected",
             "workspace_edit_applied",
             "dap_started",
-            "dap_running",
             "dap_stopped",
-            "dap_output",
             "dap_failed",
             "dap_status",
             "dap_no_adapter",

@@ -143,6 +143,15 @@ pub enum SpatialDirection {
     Right,
 }
 
+/// Rows and columns the tiled windows leave to the editor's own chrome and the debug panes.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TiledInsets {
+    pub top: u16,
+    pub bottom: u16,
+    pub left: u16,
+    pub right: u16,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompositorProjection {
     pub bounds: WindowRect,
@@ -217,7 +226,12 @@ impl CompositorSnapshot {
         minimum_tiled_width: u16,
         minimum_tiled_height: u16,
     ) -> CompositorProjection {
-        self.project_with_tiled_insets(bounds, minimum_tiled_width, minimum_tiled_height, 0, 0)
+        self.project_with_tiled_insets(
+            bounds,
+            minimum_tiled_width,
+            minimum_tiled_height,
+            TiledInsets::default(),
+        )
     }
 
     #[must_use]
@@ -226,8 +240,7 @@ impl CompositorSnapshot {
         bounds: WindowRect,
         minimum_tiled_width: u16,
         minimum_tiled_height: u16,
-        tiled_top: u16,
-        tiled_bottom: u16,
+        insets: TiledInsets,
     ) -> CompositorProjection {
         let mut output = CompositorProjection {
             bounds,
@@ -282,12 +295,15 @@ impl CompositorSnapshot {
                 }
             }
             output.workspace_bounds = remaining;
-            let top = tiled_top.min(remaining.height);
-            let bottom = tiled_bottom.min(remaining.height.saturating_sub(top));
+            let top = insets.top.min(remaining.height);
+            let bottom = insets.bottom.min(remaining.height.saturating_sub(top));
+            let left = insets.left.min(remaining.width);
+            let right = insets.right.min(remaining.width.saturating_sub(left));
             let tiled_bounds = WindowRect {
+                x: remaining.x.saturating_add(left),
                 y: remaining.y.saturating_add(top),
+                width: remaining.width.saturating_sub(left).saturating_sub(right),
                 height: remaining.height.saturating_sub(top).saturating_sub(bottom),
-                ..remaining
             };
             output.tiled_bounds = tiled_bounds;
             if let Some(tiled) = &self.tiled {

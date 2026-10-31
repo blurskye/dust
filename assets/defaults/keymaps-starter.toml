@@ -1,0 +1,9 @@
+# Your Dust keys. These add to the defaults, and win where the keys are the same.
+# `:keymap inspect <key>` shows what a key does; F1 lists commands with their keys.
+#
+# [[keymap]]
+# id = "my.save"
+# context = "editor"
+# mode = "normal"
+# keys = "<leader> w"
+# command = "file.save"

@@ -32,6 +32,10 @@ added = "│"
 changed = "│"
 deleted = "_"
 
+[editor.debug_signs]
+breakpoint = "●"
+execution = "▶"
+
 [editor.indent_guides]
 enabled = true
 active_scope = true
@@ -631,6 +635,7 @@ enabled = true
 auto_start = true
 inlay_hints = true
 inlay_hint_level = "standard"
+auto_completion = true
 nix_workspace_fallback = true
 request_timeout_ms = 10000
 restart_limit = 3
@@ -723,6 +728,7 @@ documentation = "lsp.documentation.close"
 [input.command_aliases]
 w = "file.save"
 write = "file.save"
+rename = "lsp.rename"
 q = "editor.quit"
 quit = "editor.quit"
 wq = "file.save_quit"
@@ -741,6 +747,7 @@ bprevious = "buffer.previous"
 bp = "buffer.previous"
 health = "health.open"
 checkhealth = "health.open"
+help = "command_palette.open"
 tutor = "session.tutor"
 Tutor = "session.tutor"
 TutorNext = "session.tutor.next"
@@ -907,7 +914,6 @@ lsp_no_result = "language server returned no result"
 lsp_aux_result = "language server returned {count} item(s)"
 lsp_invalid_uri = "language server returned unsupported URI {uri}"
 lsp_invalid_position = "language server returned an invalid document position"
-lsp_edit_applied = "language-server edit applied"
 lsp_logs = "language-server logs: {logs}"
 diagnostic_none = "no diagnostic is available in this buffer"
 diagnostic_current = "diagnostic: {message}"
@@ -993,7 +999,6 @@ formatter_stale = "formatter result rejected because the buffer changed"
 formatter_applied = "formatter result applied to dirty buffer"
 formatter_truncated = "formatter result rejected because output was truncated"
 linter_matcher_missing = "linter task has no problem matcher"
-test_matcher_missing = "test task has no result matcher"
 picker_tasks_title = "Tasks"
 picker_tests_title = "Tests · {name}"
 picker_output_title = "Output · {name}"
@@ -1042,9 +1047,7 @@ workspace_edit_excluded = "{count} edit(s), excluded"
 workspace_edit_rejected = "workspace edit rejected; no files changed"
 workspace_edit_applied = "workspace edit applied atomically to editor buffers; save explicitly"
 dap_started = "starting debug adapter {adapter}"
-dap_running = "debug session {adapter} is running"
-dap_stopped = "debug session {adapter} stopped: {reason}"
-dap_output = "{adapter}: {output}"
+dap_stopped = "debug session {adapter} ended: {reason}. <leader>dr shows its output"
 dap_failed = "debug adapter {adapter} failed: {diagnostic}"
 dap_status = "debug adapter: {adapter}"
 dap_status_attached = "debug adapter: {adapter}, attached to {target}"
@@ -1055,9 +1058,7 @@ dap_console_title = "Debug console"
 dap_sessions_title = "Debug sessions"
 dap_session_running = "running"
 dap_session_stopped = "stopped"
-dap_breakpoint_status = "{state} breakpoint at {path}:{line}"
 dap_evaluate_result = "{name} = {value}"
-dap_breakpoints_synced = "{count} breakpoint(s) synchronized"
 dap_source_loaded = "loaded debug source {name} {mime}"
 dap_no_configuration = "no configured debug session is available to restart"
 dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is invalid"
@@ -1067,6 +1068,7 @@ dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is
 [command_palette]
 # Plumbing that only keys use. Commands that need typed text are listed only under prompts below.
 hidden = [
+    "lsp.rename.prompt",
   "input.", "command_line.", "picker.", "surface.", "mode.", "completion.",
   "edit.", "view.cursor.", "view.selection.", "view.scroll", "explorer.search.",
   "agent.input.", "agent.escape", "tools.category.", "tools.menu.next", "tools.menu.previous",
@@ -1085,7 +1087,7 @@ hidden = [
 "format.run" = "format name="
 "lint.clear" = "lintclear name="
 "lint.run" = "lint name="
-"lsp.rename" = "lsp.rename "
+"lsp.rename" = "rename "
 "lsp.session.select" = "lspselect key="
 "lsp.workspace_symbols" = "lsp.workspace_symbols "
 "navigation.mark.set" = "navigation.mark.set name="
@@ -1255,6 +1257,7 @@ workspace = "Project"
 "session.tutor.quit" = "Stop the tutor"
 "workspace.git.conflicts.open" = "Show the paused operation and each conflicted path's base, ours and theirs"
 "workspace.git.conflict.choose" = "Accept one side of the active conflict into the result buffer"
+"workspace.git.conflict.accept" = "Accept one side of the conflict block at the cursor"
 "workspace.git.conflict.stage" = "Stage the resolved conflict in the active buffer"
 "workspace.git.conflict.continue" = "Finish the paused operation by recording its merge commit"
 "workspace.git.conflict.abort" = "Abandon the paused operation and return to where it started"
@@ -1433,7 +1436,14 @@ workspace = "Project"
 "buffer.large_file.set" = "Set large-file mode"
 "buffer.large_file.status" = "Show large-file mode"
 "syntax.status" = "Show built-in syntax language status"
-"syntax.fold.toggle" = "Toggle built-in syntax fold"
+"syntax.fold.toggle" = "Toggle fold"
+"syntax.fold.open" = "Open fold"
+"syntax.fold.close" = "Close fold"
+"syntax.fold.open_all" = "Open all folds"
+"syntax.fold.close_all" = "Close all folds"
+"lsp.rename.prompt" = "Rename Symbol"
+"edit.substitute_lines" = "Substitute in lines (:s/old/new/g)"
+"completion.leave" = "Close completion and leave Insert"
 "syntax.indent.line" = "Indent current line from built-in syntax structure"
 "task.run" = "Run configured task"
 "task.stop" = "Stop running task"

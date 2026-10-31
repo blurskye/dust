@@ -3,6 +3,60 @@ use std::collections::BTreeMap;
 use crate::editor::{CommandError, CommandInvocation, CommandValue, InvocationSource};
 use thiserror::Error;
 
+/// `:s/a/b/g` with an optional range: `%`, `'<,'>`, `5,9`, `.,$`. Anything else isn't a substitution.
+fn parse_substitute(input: &str) -> Option<Result<CommandInvocation, ExParseError>> {
+    let name_at = input
+        .find(|character: char| !(character.is_ascii_digit() || "%.,$'<>".contains(character)))?;
+    let (range, rest) = input.split_at(name_at);
+    let rest = rest
+        .strip_prefix("substitute")
+        .or_else(|| rest.strip_prefix('s'))?;
+    let delimiter = rest
+        .chars()
+        .next()
+        .filter(|character| !character.is_alphanumeric() && !character.is_whitespace())?;
+    let parts = split_unescaped(&rest[delimiter.len_utf8()..], delimiter);
+    let mut parts = parts.into_iter();
+    let pattern = parts.next().unwrap_or_default();
+    let replacement = parts.next().unwrap_or_default();
+    let flags = parts.next().unwrap_or_default();
+    Some(
+        command("edit.substitute_lines")
+            .map(|invocation| {
+                invocation
+                    .with_argument("range", CommandValue::String(range.to_owned()))
+                    .with_argument("pattern", CommandValue::String(pattern))
+                    .with_argument("replacement", CommandValue::String(replacement))
+                    .with_argument("flags", CommandValue::String(flags))
+            })
+            .map_err(Into::into),
+    )
+}
+
+/// Splits on `delimiter`, turning `\\/` into a plain `/` and leaving other escapes for the regex.
+fn split_unescaped(text: &str, delimiter: char) -> Vec<String> {
+    let mut parts = vec![String::new()];
+    let mut characters = text.chars();
+    while let Some(character) = characters.next() {
+        let current = parts.last_mut().expect("starts with one part");
+        if character == '\\' {
+            match characters.next() {
+                Some(next) if next == delimiter => current.push(next),
+                Some(next) => {
+                    current.push('\\');
+                    current.push(next);
+                }
+                None => current.push('\\'),
+            }
+        } else if character == delimiter {
+            parts.push(String::new());
+        } else {
+            current.push(character);
+        }
+    }
+    parts
+}
+
 pub fn parse_ex(
     input: &str,
     aliases: &BTreeMap<String, String>,
@@ -15,13 +69,30 @@ pub fn parse_ex(
     if input.is_empty() {
         return Err(ExParseError::Empty);
     }
+    if let Some(invocation) = parse_substitute(input) {
+        return invocation;
+    }
+    // Visual mode opens the line with its range; other commands don't use it.
+    let input = input.strip_prefix("'<,'>").map_or(input, str::trim_start);
     let (raw_name, arguments) = input
         .split_once(char::is_whitespace)
         .map_or((input, ""), |(name, arguments)| (name, arguments.trim()));
     let force = raw_name.ends_with('!');
     let name = raw_name.strip_suffix('!').unwrap_or(raw_name);
 
-    let mut invocation = if name == "config" {
+    let mut invocation = if name == "set" {
+        command("config.open")?
+    } else if name == "package" {
+        let (action, rest) = arguments
+            .split_once(char::is_whitespace)
+            .map_or((arguments, ""), |(action, rest)| (action, rest.trim()));
+        match action {
+            "search" if !rest.is_empty() => command("package.registry.search")?
+                .with_argument("query", CommandValue::String(rest.into())),
+            "list" | "" => command("package.list")?,
+            _ => return Err(ExParseError::UnexpectedArguments(arguments.into())),
+        }
+    } else if name == "config" {
         match arguments.split_once(char::is_whitespace) {
             Some(("explain", key)) if !key.trim().is_empty() => command("config.explain")?
                 .with_argument("key", CommandValue::String(key.trim().into())),

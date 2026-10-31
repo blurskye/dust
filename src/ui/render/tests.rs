@@ -201,8 +201,11 @@ fn attach_test_compositor(
             bounds,
             config.ui.panes.minimum_width,
             config.ui.panes.minimum_height,
-            top,
-            bottom,
+            crate::ui::window::TiledInsets {
+                top,
+                bottom,
+                ..Default::default()
+            },
         ),
         surfaces: super::NativeSurfaceWindowBinding {
             explorer: explorer_window,
@@ -3202,6 +3205,8 @@ fn the_debug_arrangement_is_coordinated_and_the_source_is_never_squeezed_out() {
     let panes = DebugPanesUiState {
         selected: DebugPane::Watches,
         target: "owned: attached to processId 4242".into(),
+        status: String::new(),
+        variables: Vec::new(),
         threads: vec!["main (1)".into()],
         stack: vec!["main:1".into()],
         breakpoints: vec!["src/main.rs:3".into()],
@@ -3300,6 +3305,8 @@ fn the_selected_inspector_decides_the_narrow_strip_content_not_only_its_marker()
     let base = DebugPanesUiState {
         selected: DebugPane::Watches,
         target: "owned: attached to processId 4242".into(),
+        status: String::new(),
+        variables: Vec::new(),
         threads: vec!["main (1)".into()],
         stack: vec!["main:1".into()],
         breakpoints: vec!["src/main.rs:3".into()],
@@ -3364,6 +3371,8 @@ fn the_debug_console_and_the_terminal_panel_are_planned_together_rather_than_col
     ui.debug_panes = Some(super::debug::DebugPanesUiState {
         selected: super::debug::DebugPane::Sessions,
         target: "owned: launched debuggee".into(),
+        status: String::new(),
+        variables: Vec::new(),
         threads: vec!["main (1)".into()],
         stack: vec!["main:1".into()],
         breakpoints: vec!["src/main.rs:3".into()],
@@ -3443,9 +3452,9 @@ fn the_debug_console_and_the_terminal_panel_are_planned_together_rather_than_col
         );
     }
     assert!(
-        frame.grid.row_text(panel_row - 1).contains("c7"),
-        "the console's LAST line sits immediately above the panel's first row: {:?}",
-        frame.grid.row_text(panel_row - 1)
+        frame.grid.row_text(panel_row - 2).contains("c7"),
+        "the console's LAST line sits above the status line, which sits above the panel: {:?}",
+        frame.grid.row_text(panel_row - 2)
     );
 }
 

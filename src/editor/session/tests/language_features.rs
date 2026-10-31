@@ -232,6 +232,8 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
     app.language
         .fixture_completion_items(vec![crate::language::lsp::LspCompletionItem {
             label: "value".into(),
+            filter_text: None,
+            sort_text: None,
             detail: "usize".into(),
             insert_text: "value".into(),
             text_edit: None,

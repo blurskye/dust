@@ -22,6 +22,15 @@ use crate::{
     ui::{ConfirmationChoice, PromptKind},
 };
 
+#[derive(Clone, Copy, Debug)]
+pub enum SyntaxFoldAction {
+    Toggle,
+    Open,
+    Close,
+    OpenAll,
+    CloseAll,
+}
+
 #[derive(Clone, Debug)]
 pub enum AppEffect {
     Quit {
@@ -222,7 +231,18 @@ pub enum AppEffect {
     LargeFileSet(String),
     LargeFileStatus,
     SyntaxStatus,
-    SyntaxFoldToggle,
+    SyntaxFold(SyntaxFoldAction),
+    LspRenamePrompt,
+    GitConflictAccept {
+        side: String,
+    },
+    Substitute {
+        range: String,
+        pattern: String,
+        replacement: String,
+        flags: String,
+    },
+    LspCompletionLeave,
     SyntaxIndentLine,
     TaskRun(String),
     TaskStop(String),

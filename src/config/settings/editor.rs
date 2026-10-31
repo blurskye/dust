@@ -155,6 +155,22 @@ pub struct GitSignsConfig {
     pub deleted: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DebugSignsConfig {
+    pub breakpoint: String,
+    pub execution: String,
+}
+
+impl Default for DebugSignsConfig {
+    fn default() -> Self {
+        Self {
+            breakpoint: "●".into(),
+            execution: "▶".into(),
+        }
+    }
+}
+
 impl Default for GitSignsConfig {
     fn default() -> Self {
         Self {
@@ -210,6 +226,7 @@ pub struct EditorConfig {
     pub autopairs: bool,
     pub viewport: EditorViewportConfig,
     pub git_signs: GitSignsConfig,
+    pub debug_signs: DebugSignsConfig,
     pub indent_guides: IndentGuideConfig,
     pub registers: RegisterConfig,
     pub large_file: LargeFileConfig,
@@ -241,6 +258,7 @@ impl Default for EditorConfig {
             autopairs: true,
             viewport: EditorViewportConfig::default(),
             git_signs: GitSignsConfig::default(),
+            debug_signs: DebugSignsConfig::default(),
             indent_guides: IndentGuideConfig::default(),
             registers: RegisterConfig::default(),
             large_file: LargeFileConfig::default(),

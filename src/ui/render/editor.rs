@@ -16,7 +16,7 @@ use crate::{
 };
 
 use super::{
-    Frame, UiDiagnostic, UiGitSignKind, UiState,
+    DebugSignKind, Frame, UiDiagnostic, UiGitSignKind, UiState,
     visual_rows::{
         VisualRowAnchor, VisualRowModel, active_indent_guide, editor_line_number_digits,
         editor_state_content_width, editor_state_gutter_width, git_sign_column,
@@ -351,7 +351,22 @@ pub(super) fn render_editor_view(
                 ),
                 Style::Muted,
             );
-            if let Some(sign) = ui.git_signs.iter().find(|sign| {
+            let debug_sign = ui.debug_signs.iter().find(|sign| {
+                sign.line == line_index && buffer.path.as_deref() == Some(sign.path.as_path())
+            });
+            if let Some(sign) = debug_sign {
+                let signs = &config.editor.debug_signs;
+                let (symbol, fallback, style) = match sign.kind {
+                    DebugSignKind::Breakpoint => (&signs.breakpoint, "*", Style::Error),
+                    DebugSignKind::Execution => (&signs.execution, ">", Style::Warning),
+                };
+                grid.set_cell(
+                    git_sign_column,
+                    screen_row,
+                    one_cell_symbol(symbol, fallback, config.editor.ambiguous_width),
+                    style,
+                );
+            } else if let Some(sign) = ui.git_signs.iter().find(|sign| {
                 sign.buffer == view.buffer
                     && sign.buffer_revision == buffer.text.revision().0
                     && sign.line == line_index

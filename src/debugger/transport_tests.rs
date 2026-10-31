@@ -55,6 +55,7 @@ fn launch(root: &Path, script: &Path) -> DapLaunch {
         root: root.into(),
         request: "launch".into(),
         request_arguments: json!({}),
+        breakpoints: Vec::new(),
     }
 }
 fn wait(mut predicate: impl FnMut() -> bool) {
@@ -63,6 +64,48 @@ fn wait(mut predicate: impl FnMut() -> bool) {
         assert!(Instant::now() < deadline, "owned adapter deadline");
         thread::sleep(Duration::from_millis(2));
     }
+}
+#[test]
+fn breakpoints_reach_the_adapter_before_the_program_runs() {
+    let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
+    let body = r#"
+log=open('requests.log','a',buffering=1)
+while True:
+ m=read()
+ if m is None: break
+ if m.get('type')!='request': continue
+ c=m['command']
+ log.write(c+'\n')
+ body={'supportsConfigurationDoneRequest':True} if c=='initialize' else {'breakpoints':[{'verified':True}]} if c=='setBreakpoints' else {}
+ send({'type':'response','request_seq':m['seq'],'command':c,'success':True,'body':body})
+ if c=='launch': send({'type':'event','event':'initialized','body':{}})
+"#;
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("startup.py");
+    std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
+    let mut configuration = launch(root.path(), &script);
+    let source = root.path().join("program.py");
+    configuration.breakpoints = vec![(
+        source.clone(),
+        vec![DapSourceBreakpoint {
+            path: source,
+            line: 2,
+            column: None,
+            condition: None,
+            hit_condition: None,
+            log_message: None,
+        }],
+    )];
+    let mut service = DapService::new();
+    service.start_absolute(configuration).unwrap();
+    wait(|| request_log(root.path()).iter().any(|line| line == "configurationDone"));
+    let log = request_log(root.path());
+    let position = |name: &str| log.iter().position(|line| line == name).expect(name);
+    assert!(
+        position("setBreakpoints") < position("configurationDone"),
+        "breakpoints come first, or the program runs past them: {log:?}"
+    );
+    service.stop().unwrap();
 }
 #[test]
 fn startup_reply_survives_stop_and_wrong_commands_cannot_consume_requests() {

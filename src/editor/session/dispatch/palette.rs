@@ -93,6 +93,12 @@ impl InteractiveApplication {
         }
     }
 
+    /// Esc closes the palette at once, as in VS Code: it has no list mode worth stopping in.
+    pub(super) fn palette_is_open(&self) -> bool {
+        let title = self.message("picker_commands_title", &[]);
+        self.search.picker().is_some_and(|picker| picker.presentation().title == title)
+    }
+
     /// Runs the chosen row and moves it to the top of the palette. Flags such as `force` stay
     /// off; a command that needs typed text opens the command line instead.
     pub(super) fn run_palette_command(&mut self, id: &str) {

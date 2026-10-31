@@ -58,6 +58,8 @@ pub(super) struct Launch {
     tool: Option<Tool>,
     cwd: PathBuf,
     program: Option<PathBuf>,
+    /// The adapter runs the program itself, so a script needs no execute bit.
+    source_program: bool,
     executable: Option<PathBuf>,
     phase: Phase,
     terminal: Option<TerminalPolicy>,
@@ -168,7 +170,24 @@ impl DebugSession {
                         && matches!(e.status, ToolStatus::Installed(_))
                 })
             }
-            .ok_or("debug adapter is unavailable")?;
+            .ok_or_else(|| {
+                let known = tools
+                    .iter()
+                    .filter(|e| {
+                        e.definition.kind == ToolKind::Dap
+                            && e.definition.languages.iter().any(|l| l == language)
+                    })
+                    .map(|e| e.definition.name.as_str())
+                    .collect::<Vec<_>>();
+                if known.is_empty() {
+                    format!("no debugger is known for {language}")
+                } else {
+                    format!(
+                        "no debugger installed for {language}: install {} with <leader>cm",
+                        known.join(" or ")
+                    )
+                }
+            })?;
             let ToolStatus::Installed(executable) = &entry.status else {
                 return Err("debug adapter is not installed".into());
             };
@@ -217,6 +236,10 @@ impl DebugSession {
                 Some(program),
             )
         };
+        let source_program = tools.iter().any(|e| {
+            e.definition.id == session.adapter
+                && e.definition.debug_program_policy == DebugProgramPolicy::Source
+        });
         let terminal = session
             .run_in_terminal_profile
             .as_ref()
@@ -276,6 +299,7 @@ impl DebugSession {
             tool,
             cwd,
             program,
+            source_program,
             executable: None,
             phase: Phase::Requested,
             terminal,
@@ -337,9 +361,10 @@ impl DebugSession {
         {
             return Err("debug discovery source changed".into());
         }
-        launch.cwd = result
-            .project_root
-            .ok_or("debug adapter requires a catalog-backed project root")?;
+        // A project without marker files debugs from its workspace root, which `cwd` already holds.
+        if let Some(root) = result.project_root {
+            launch.cwd = root;
+        }
         launch.phase = Phase::Adapter;
         Ok(())
     }
@@ -372,7 +397,18 @@ impl DebugSession {
                 if !program.is_absolute() {
                     *program = result.root.join(&*program);
                 }
-                launch.phase = Phase::Program;
+                if launch.source_program {
+                    let target = program
+                        .canonicalize()
+                        .map_err(|_| format!("debug program {} does not exist", program.display()))?;
+                    if !launch.roots.iter().any(|r| target.starts_with(&r.canonical_path)) {
+                        return Err("debug program is outside every workspace root".into());
+                    }
+                    *program = target;
+                    launch.phase = Phase::Start;
+                } else {
+                    launch.phase = Phase::Program;
+                }
             } else {
                 launch.phase = Phase::Start;
             }
@@ -450,6 +486,7 @@ impl DebugSession {
                 // Read the identity FIRST: the request construction below moves fields out of the
                 // intent, and the identity must describe what was actually asked for.
                 let target = launch.identity();
+                let breakpoints = self.startup_breakpoints();
                 let admission = self.service.admission().map_err(|e| e.to_string())?;
                 let mut paths = vec![launch.cwd.clone()];
                 if let Some(program) = &launch.program {
@@ -457,6 +494,14 @@ impl DebugSession {
                 }
                 let mut arguments = serde_json::Map::from_iter(launch.session.arguments);
                 arguments.insert("cwd".into(), serde_json::json!(launch.cwd));
+                // A project's virtual environment is what its imports need, as in VS Code.
+                let venv = launch.cwd.join(".venv/bin/python");
+                if launch.session.adapter == "debugpy"
+                    && venv.exists()
+                    && !arguments.contains_key("python")
+                {
+                    arguments.insert("python".into(), serde_json::json!([venv]));
+                }
                 if let Some(program) = launch.program {
                     arguments.insert("program".into(), serde_json::json!(program));
                 }
@@ -477,6 +522,7 @@ impl DebugSession {
                             }
                             .into(),
                             request_arguments: serde_json::Value::Object(arguments),
+                            breakpoints,
                         },
                         Some(ExecutionScope {
                             roots: launch.roots,

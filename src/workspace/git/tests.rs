@@ -2359,6 +2359,40 @@ fn a_review_worktree_is_detached_at_the_inspected_revision_and_moves_no_branch()
 
 
 #[test]
+fn the_worktree_list_names_the_main_checkout_from_inside_a_linked_worktree() {
+    let dir = tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    commit(&repo, "w.txt", "one\n");
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let main_branch = repo.head().unwrap().shorthand().unwrap().to_owned();
+    run_branch(crate::workspace::git::GitBranchRequest::CreateWorktree {
+        repository: root.clone(),
+        name: "feat".into(),
+        path: PathBuf::from(".worktree/feat"),
+        reference: "feat".into(),
+        deadline: Duration::from_secs(5),
+    })
+    .unwrap();
+    let linked = root.join(".worktree/feat");
+
+    let GitBranchResult::List(list) = run_branch(crate::workspace::git::GitBranchRequest::List(
+        crate::workspace::git::GitBranchListRequest {
+            repository: linked.clone(),
+            deadline: Duration::from_secs(5),
+        },
+    ))
+    .unwrap() else {
+        panic!("expected a list");
+    };
+
+    assert_eq!(list.worktrees[0].path, root);
+    assert_eq!(list.worktrees[0].branch.as_deref(), Some(main_branch.as_str()));
+    assert_eq!(
+        std::fs::canonicalize(&list.worktrees[1].path).unwrap(),
+        std::fs::canonicalize(&linked).unwrap()
+    );
+}
+#[test]
 fn a_new_worktree_creates_its_branch_at_head_and_stays_out_of_status() {
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();

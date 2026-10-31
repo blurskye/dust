@@ -40,7 +40,7 @@ pub(super) struct ProjectionRequest {
     pub graph_revision: u64,
     pub bounds: WindowRect,
     pub minimum_size: (u16, u16),
-    pub insets: (u16, u16),
+    pub insets: crate::ui::window::TiledInsets,
     pub surfaces: NativeSurfaceWindowBinding,
     pub protected: Option<WindowRect>,
 }
@@ -178,8 +178,7 @@ impl WindowSession {
             request.bounds,
             request.minimum_size.0,
             request.minimum_size.1,
-            request.insets.0,
-            request.insets.1,
+            request.insets,
         );
         if let Some(protected) = request.protected {
             projection.set_protected_regions([protected]);
