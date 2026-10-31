@@ -173,6 +173,20 @@ pub(super) fn render_documentation_popup(
     }
 }
 
+/// Two cells read as a square swatch; the third is the gap before the detail.
+const SWATCH_WIDTH: usize = 3;
+
+/// A cell painted in a colour from a language server, with text that stays readable on it.
+pub(super) fn color_swatch_style((red, green, blue): (u8, u8, u8)) -> Style {
+    let luminance = 299 * u32::from(red) + 587 * u32::from(green) + 114 * u32::from(blue);
+    let text = if luminance > 128_000 { (0, 0, 0) } else { (255, 255, 255) };
+    Style::Terminal(crate::ui::PtyStyle {
+        foreground: Some(crate::ui::PtyColor::Rgb(text.0, text.1, text.2)),
+        background: Some(crate::ui::PtyColor::Rgb(red, green, blue)),
+        ..Default::default()
+    })
+}
+
 pub(super) fn render_language_completion(
     frame: &mut Frame,
     completion: &LanguageCompletionState,
@@ -216,6 +230,7 @@ pub(super) fn render_language_completion(
         .map(|item| {
             text_width(&item.label, config.editor.ambiguous_width)
                 .saturating_add(config.ui.command_line.completion_detail_gap.into())
+                .saturating_add(if item.color.is_some() { SWATCH_WIDTH } else { 0 })
                 .saturating_add(text_width(&item.detail, config.editor.ambiguous_width))
         })
         .max()
@@ -252,12 +267,19 @@ pub(super) fn render_language_completion(
             style,
             left.saturating_add(panel_width).saturating_sub(1),
         );
-        let detail_x = left
+        let mut detail_x = left
             .saturating_add(1)
             .saturating_add(
                 u16::try_from(text_width(&item.label, config.editor.ambiguous_width)).unwrap_or(0),
             )
             .saturating_add(config.ui.command_line.completion_detail_gap);
+        if let Some(rgb) = item.color {
+            let swatch = color_swatch_style(rgb);
+            for x in detail_x..detail_x.saturating_add(2).min(right.saturating_sub(1)) {
+                frame.grid.set_cell(x, y, " ", swatch);
+            }
+            detail_x = detail_x.saturating_add(SWATCH_WIDTH as u16);
+        }
         frame.grid.put_text_clipped(
             detail_x,
             y,

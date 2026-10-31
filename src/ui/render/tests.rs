@@ -664,10 +664,12 @@ fn completion_attaches_below_globally_centered_prompt() {
     prompt.cursor = 1;
     prompt.completions = vec![
         CompletionItem {
+            color: None,
             label: "e".into(),
             detail: "Open file".into(),
         },
         CompletionItem {
+            color: None,
             label: "edit.file".into(),
             detail: "Example".into(),
         },
@@ -693,6 +695,7 @@ fn prompt_completion_viewport_follows_a_selected_item_beyond_its_first_page() {
     let mut prompt = PromptState::new(PromptKind::Command);
     prompt.completions = (0..6)
         .map(|index| CompletionItem {
+            color: None,
             label: format!("candidate-{index}"),
             detail: format!("detail-{index}"),
         })
@@ -2282,6 +2285,7 @@ fn completion_is_clipped_to_the_focused_split() {
     let mut ui = ui_with_editor_layout(&state);
     ui.language_completion = Some(super::LanguageCompletionState {
         items: vec![CompletionItem {
+            color: None,
             label: "selected-completion".into(),
             detail: "Function · fake".into(),
         }],
@@ -2582,6 +2586,7 @@ fn language_diagnostics_and_completion_are_projected_without_service_calls() {
         running_tasks: 2,
         language_completion: Some(super::LanguageCompletionState {
             items: vec![CompletionItem {
+                color: None,
                 label: "better".into(),
                 detail: "fake LSP".into(),
             }],
@@ -2666,6 +2671,7 @@ fn language_completion_keeps_the_selected_item_inside_its_bounded_viewport() {
         language_completion: Some(super::LanguageCompletionState {
             items: (0..20)
                 .map(|index| CompletionItem {
+                    color: None,
                     label: format!("item-{index:02}"),
                     detail: "candidate".into(),
                 })

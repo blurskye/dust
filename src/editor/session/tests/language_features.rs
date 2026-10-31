@@ -247,6 +247,7 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
         }]);
     app.ui.language_completion = Some(crate::ui::LanguageCompletionState {
         items: vec![crate::ui::CompletionItem {
+            color: None,
             label: "value".into(),
             detail: "usize".into(),
         }],

@@ -274,6 +274,12 @@ pub(super) fn render_editor_view(
         .collect::<Vec<_>>();
     inlay_hints.sort_unstable_by_key(|hint| hint.position);
     let mut inlay_cursor = 0usize;
+    let color_spans = ui
+        .lsp_colors
+        .iter()
+        .filter(|span| span.buffer == view.buffer && span.revision == buffer.text.revision())
+        .collect::<Vec<_>>();
+    let mut color_cursor = 0usize;
     let mut screen_row = 0_u16;
     let mut line_index = start_anchor.line;
     // The empty line after a final newline is drawn only while the cursor is on it.
@@ -464,6 +470,20 @@ pub(super) fn render_editor_view(
                     .next()
             }) {
                 style
+            } else if let Some(span) = {
+                // Colours sort by start; a skipped span ends before this grapheme.
+                while color_spans
+                    .get(color_cursor)
+                    .is_some_and(|span| span.range.end <= global)
+                {
+                    color_cursor = color_cursor.saturating_add(1);
+                }
+                color_spans
+                    .get(color_cursor)
+                    .copied()
+                    .filter(|span| span.range.contains(global))
+            } {
+                super::overlays::color_swatch_style(span.rgb)
             } else if let Some(span) = {
                 while highlight_spans
                     .get(highlight_cursor)

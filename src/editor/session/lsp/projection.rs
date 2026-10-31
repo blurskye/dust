@@ -21,17 +21,22 @@ const INLAY_DEBOUNCE: Duration = Duration::from_millis(120);
 const INLAY_EMPTY_RETRY: Duration = Duration::from_millis(500);
 const INLAY_RETRY_LIMIT: u8 = 5;
 const INLAY_STARTUP: Duration = Duration::from_secs(8);
+/// Colour requests sit between projection generations (below half) and inlay ones (above it).
+pub(in crate::editor::session) const COLOR_GENERATION: u64 = u64::MAX / 2;
 #[derive(Default)]
 pub(super) struct Projection {
     generation: u64,
     inlay_generation: u64,
     owner: Option<LspProjectionOwner>,
     request: Option<(u64, LspProjectionOwner)>,
+    /// Servers that have not answered the current request; completion asks every one.
+    request_servers: Vec<String>,
     inlay_request: Option<(u64, LspProjectionOwner)>,
     inlay_due: Option<Instant>,
     inlay_retries: u8,
     completion_owner: Option<(u64, LspProjectionOwner)>,
     completion_items: Vec<LspCompletionItem>,
+    completion_servers: Vec<String>,
     completion_selected: usize,
     completion_scroll: usize,
     resolve: Option<(u64, LspProjectionOwner, usize, ByteOffset)>,
@@ -93,6 +98,7 @@ impl LspSession {
         self.projection.selection_ranges.clear();
         self.projection.owner = None;
         self.projection.request = None;
+        self.projection.request_servers.clear();
         self.projection.inlay_request = None;
         self.projection.inlay_retries = 0;
     }
@@ -156,10 +162,75 @@ impl LspSession {
         let generation = self
             .next_generation()
             .ok_or_else(|| LspError::Busy(server.into()))?;
+        let others = if matches!(feature, LspFeature::Completion) {
+            self.attached_servers(owner.buffer, &owner.language, |c| c.completion)
+                .filter(|key| key != server)
+                .collect()
+        } else {
+            Vec::new()
+        };
         self.service
-            .request(server, feature, document, offset, generation)?;
+            .request(server, feature.clone(), document.clone(), offset, generation)?;
         self.projection.request = Some((generation, owner));
+        self.projection.request_servers = vec![server.to_owned()];
+        // Like VS Code, every attached server adds its items, e.g. Tailwind classes beside TypeScript.
+        for other in others {
+            if self
+                .service
+                .request(&other, feature.clone(), document.clone(), offset, generation)
+                .is_ok()
+            {
+                self.projection.request_servers.push(other);
+            }
+        }
         Ok(())
+    }
+    /// Running servers that hold `buffer` and offer a capability.
+    fn attached_servers<'a>(
+        &'a self,
+        buffer: BufferId,
+        language: &'a str,
+        offers: impl Fn(&crate::language::lsp::LspCapabilities) -> bool + 'a,
+    ) -> impl Iterator<Item = String> + 'a {
+        self.sessions
+            .iter()
+            .filter(move |(_, state)| {
+                state.documents.contains_key(&buffer)
+                    && state.definition.supports_language(language)
+                    && state.capabilities.as_ref().is_some_and(&offers)
+            })
+            .map(|(key, _)| key.clone())
+    }
+    /// Asks every attached server with a colour provider for the document's colours.
+    pub(in crate::editor::session) fn request_colors(
+        &self,
+        buffer: BufferId,
+        document: &LspDocument,
+    ) -> Vec<String> {
+        self.attached_servers(buffer, &document.language_id, |c| c.document_colors)
+            .filter(|server| {
+                self.service
+                    .request(
+                        server,
+                        LspFeature::DocumentColors,
+                        document.clone(),
+                        ByteOffset(0),
+                        COLOR_GENERATION,
+                    )
+                    .is_ok()
+            })
+            .collect()
+    }
+    pub(in crate::editor::session) fn server_encoding(
+        &self,
+        server: &str,
+    ) -> crate::editor::text::PositionEncoding {
+        self.sessions
+            .get(server)
+            .and_then(|state| state.capabilities.as_ref())
+            .map_or(crate::editor::text::PositionEncoding::Utf16, |c| {
+                c.position_encoding
+            })
     }
     pub(in crate::editor::session) fn request_inlays(&mut self, document: LspDocument) {
         self.projection.inlay_due = None;
@@ -230,14 +301,33 @@ impl LspSession {
         if !request.as_ref().is_some_and(|(g, owner)| {
             *g == generation
                 && Some(owner) == self.projection.owner.as_ref()
-                && owner.server == server
+                && (if inlay {
+                    owner.server == server
+                } else {
+                    self.projection.request_servers.iter().any(|s| s == server)
+                })
                 && owner.uri == uri
                 && owner.revision.0 == version
         }) {
             return false;
         }
+        if !inlay {
+            self.projection.request_servers.retain(|s| s != server);
+            if !self.projection.request_servers.is_empty() {
+                return true;
+            }
+        }
         *request = None;
         true
+    }
+    /// Whether another server still owes an answer to the current request.
+    pub(in crate::editor::session) fn request_pending(&self) -> bool {
+        !self.projection.request_servers.is_empty()
+    }
+    pub(in crate::editor::session) fn forget_request(&mut self, server: &str, generation: u64) {
+        if generation == self.projection.generation {
+            self.projection.request_servers.retain(|s| s != server);
+        }
     }
     pub(in crate::editor::session) fn fail_inlay(&mut self, server: &str, generation: u64) -> bool {
         if !self
@@ -326,23 +416,44 @@ impl LspSession {
     pub(in crate::editor::session) fn completion_items(&self) -> &[LspCompletionItem] {
         &self.projection.completion_items
     }
+    /// The first answer for a request replaces the list; later servers append to it.
     pub(in crate::editor::session) fn install_completions(
         &mut self,
+        server: &str,
         items: Vec<LspCompletionItem>,
         generation: u64,
     ) {
-        self.projection.completion_owner = self
+        let append = self
             .projection
-            .owner
-            .clone()
-            .map(|owner| (generation, owner));
-        self.projection.completion_items = items;
-        self.projection.completion_selected = 0;
-        self.projection.completion_scroll = 0;
-        self.projection.resolve = None;
+            .completion_owner
+            .as_ref()
+            .is_some_and(|(owned, _)| *owned == generation);
+        if !append {
+            self.projection.completion_owner = self
+                .projection
+                .owner
+                .clone()
+                .map(|owner| (generation, owner));
+            self.projection.completion_items.clear();
+            self.projection.completion_servers.clear();
+            self.projection.completion_selected = 0;
+            self.projection.completion_scroll = 0;
+            self.projection.resolve = None;
+        }
+        self.projection
+            .completion_servers
+            .extend(std::iter::repeat_n(server.to_owned(), items.len()));
+        self.projection.completion_items.extend(items);
+    }
+    pub(in crate::editor::session) fn completion_server(&self, index: usize) -> Option<&str> {
+        self.projection
+            .completion_servers
+            .get(index)
+            .map(String::as_str)
     }
     pub(in crate::editor::session) fn clear_completion(&mut self) {
         self.projection.completion_items.clear();
+        self.projection.completion_servers.clear();
         self.projection.completion_owner = None;
         self.projection.resolve = None;
         self.projection.completion_selected = 0;
@@ -404,7 +515,11 @@ impl LspSession {
             .documentation
             .clone()
             .ok_or("selected completion has no documentation")?;
-        Ok((owner.server.clone(), item.label.clone(), documentation))
+        let server = self
+            .completion_server(selected)
+            .unwrap_or(&owner.server)
+            .to_owned();
+        Ok((server, item.label.clone(), documentation))
     }
     pub(in crate::editor::session) fn resolve_completion(
         &mut self,
@@ -423,17 +538,22 @@ impl LspSession {
         else {
             return Ok(());
         };
+        let server = self
+            .completion_server(selected)
+            .unwrap_or(&owner.server)
+            .to_owned();
         let generation = self
             .next_generation()
-            .ok_or_else(|| LspError::Busy(owner.server.clone()))?;
+            .ok_or_else(|| LspError::Busy(server.clone()))?;
         self.service.request(
-            &owner.server,
+            &server,
             LspFeature::CompletionResolve { item },
             document,
             offset,
             generation,
         )?;
         self.projection.request = Some((generation, owner.clone()));
+        self.projection.request_servers = vec![server];
         self.projection.resolve = Some((generation, owner, selected, offset));
         Ok(())
     }
@@ -777,6 +897,46 @@ mod tests {
         }
     }
     #[test]
+    fn completion_from_every_server_lands_in_one_list() {
+        let root = tempfile::tempdir().unwrap();
+        let mut editor = EditorState::new(root.path().into());
+        let (buffer, view) = editor.open_text(
+            TextBuffer::from_text("<div class=\"\">"),
+            Some(root.path().join("index.html")),
+        );
+        let source = LspProjectionOwner {
+            server: "html".into(),
+            buffer,
+            view,
+            revision: editor.buffers[buffer].text.revision(),
+            uri: "file:///index.html".into(),
+            language: "html".into(),
+        };
+        let mut owner = LspSession::default();
+        owner.projection.owner = Some(source.clone());
+        owner.projection.generation = 3;
+        owner.projection.request = Some((3, source.clone()));
+        owner.projection.request_servers = vec!["html".into(), "tailwind".into()];
+        let accept = |owner: &mut LspSession, server: &str| {
+            owner.accept_result(server, 3, "textDocument/completion", &source.uri, source.revision.0)
+        };
+        assert!(accept(&mut owner, "tailwind"));
+        owner.install_completions("tailwind", vec![item("bg-red-500")], 3);
+        assert!(owner.request_pending());
+        assert!(accept(&mut owner, "html"));
+        owner.install_completions("html", vec![item("class")], 3);
+        assert!(!owner.request_pending());
+        assert!(!accept(&mut owner, "html"));
+        let labels = owner.completion_items().iter().map(|i| i.label.as_str()).collect::<Vec<_>>();
+        assert_eq!(labels, ["bg-red-500", "class"]);
+        assert_eq!(owner.completion_server(0), Some("tailwind"));
+        assert_eq!(owner.completion_server(1), Some("html"));
+        // A new request starts a fresh list.
+        owner.install_completions("html", vec![item("id")], 4);
+        assert_eq!(owner.completion_items().len(), 1);
+        assert_eq!(owner.completion_server(0), Some("html"));
+    }
+    #[test]
     fn projection_resolve_identity_activation_and_delta_bounds() {
         let root = tempfile::tempdir().unwrap();
         let mut editor = EditorState::new(root.path().into());
@@ -795,8 +955,9 @@ mod tests {
         let mut owner = LspSession::default();
         owner.projection.owner = Some(source.clone());
         owner.projection.generation = 7;
-        owner.install_completions(vec![item("first"), item("second")], 7);
+        owner.install_completions("owned", vec![item("first"), item("second")], 7);
         owner.projection.request = Some((7, source.clone()));
+        owner.projection.request_servers = vec!["owned".into()];
         owner.projection.resolve = Some((7, source.clone(), 0, ByteOffset(0)));
         assert!(!owner.accept_result(
             "foreign",

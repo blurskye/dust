@@ -6319,10 +6319,19 @@ impl InteractiveApplication {
         let Some((buffer_id, document)) = self.active_lsp_document() else {
             return;
         };
+        // The item belongs to the server that offered it: resolve there and read its positions in that server's encoding.
+        let server = self
+            .language
+            .completion_server(completion.selected)
+            .map(str::to_owned)
+            .or_else(|| self.language.active().cloned())
+            .unwrap_or_default();
         if !item.resolved
             && self
                 .language
-                .capabilities()
+                .sessions()
+                .get(&server)
+                .and_then(|session| session.capabilities.as_ref())
                 .is_some_and(|capabilities| capabilities.completion_resolve)
             && item.resolve_item.is_some()
         {
@@ -6338,12 +6347,7 @@ impl InteractiveApplication {
             }
             return;
         }
-        let encoding = self
-            .language
-            .capabilities()
-            .map_or(PositionEncoding::Utf16, |capabilities| {
-                capabilities.position_encoding
-            });
+        let encoding = self.language.server_encoding(&server);
         let snippet = item.snippet;
         let session_allowed = item.additional_edits.is_empty();
         let edit = item.text_edit.unwrap_or_else(|| {
@@ -6391,7 +6395,7 @@ impl InteractiveApplication {
                 edits,
             }],
         };
-        if let Err(error) = self.apply_lsp_workspace_edit(workspace_edit) {
+        if let Err(error) = self.apply_lsp_workspace_edit(workspace_edit, encoding) {
             self.show_error(error);
         } else if session_allowed {
             if let Some(start) = insertion_start {
@@ -11053,20 +11057,47 @@ impl InteractiveApplication {
         if self.workspace.require_path(&document.path).is_err() {
             return;
         }
-        let launchable_server = self
+        // Every matching server attaches, as in VS Code and Neovim: Tailwind runs
+        // beside the HTML or TypeScript server. They start one at a time because
+        // project-root discovery takes one launch at a time.
+        let attached = self
+            .language
+            .sessions()
+            .values()
+            .filter(|state| state.documents.contains_key(&buffer))
+            .map(|state| state.server_id.clone())
+            .collect::<Vec<_>>();
+        let mut launchable = self
             .tooling
             .entries()
             .iter()
-            .find(|entry| {
+            .filter(|entry| {
                 entry.definition.kind == ToolKind::Lsp
                     && entry
                         .definition
                         .automatically_supports_language(&document.language_id)
                     && self.selected_lsp_runtime_available(&entry.definition)
             })
-            .map(|entry| entry.definition.id.clone());
+            .collect::<Vec<_>>();
+        // The most specific server starts first and stays primary for hover and
+        // definitions: typescript-language-server before Tailwind.
+        launchable.sort_by_key(|entry| entry.definition.languages.len());
+        let launchable = launchable
+            .into_iter()
+            .map(|entry| entry.definition.id.clone())
+            .collect::<Vec<_>>();
+        if launchable
+            .iter()
+            .any(|id| self.language.launch_pending(id))
+        {
+            return;
+        }
+        let launchable_server = launchable
+            .iter()
+            .find(|id| !attached.contains(id))
+            .cloned();
         // Like mason-lspconfig, point at the server to install when none can start.
-        if launchable_server.is_none()
+        if launchable.is_empty()
             && !matching_session
             && self.configuration.settings().lsp.enabled
         {
@@ -11107,10 +11138,7 @@ impl InteractiveApplication {
             nix_workspace_fallback: self.configuration.settings().lsp.nix_workspace_fallback,
             launchable_server,
         };
-        if let Some(server) =
-            self.language
-                .observe(observation, matching_session, self.workspace.safe_mode())
-        {
+        if let Some(server) = self.language.observe(observation, self.workspace.safe_mode()) {
             self.start_lsp(Some(server));
         }
     }
@@ -11199,6 +11227,9 @@ impl InteractiveApplication {
             {
                 changed = true;
             }
+        }
+        if changed {
+            self.request_lsp_colors();
         }
         if changed
             && !(self.configuration.settings().lsp.inlay_hint_level

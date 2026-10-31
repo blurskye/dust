@@ -205,6 +205,7 @@ impl InputSession {
             })
             .take(policy.runtime.completion_limit)
             .map(|path| CompletionItem {
+                color: None,
                 label: path
                     .strip_prefix(root)
                     .unwrap_or(&path)
@@ -475,7 +476,7 @@ impl InputSession {
             prompt.completions = ordered
                 .into_iter()
                 .take(policy.runtime.completion_limit)
-                .map(|(label, detail)| CompletionItem { label, detail })
+                .map(|(label, detail)| CompletionItem { label, detail, color: None })
                 .collect();
             if prompt
                 .selected_completion

@@ -243,6 +243,7 @@ pub struct LspCapabilities {
     pub document_highlights: bool,
     pub folding_ranges: bool,
     pub selection_ranges: bool,
+    pub document_colors: bool,
     pub semantic_token_types: Vec<String>,
 }
 
@@ -343,6 +344,60 @@ pub struct LspCompletionItem {
     pub resolved: bool,
 }
 
+impl LspCompletionItem {
+    /// The colour of a Color-kind item. Servers put it in the documentation or
+    /// detail as `#rrggbb` or `rgb(...)`, which is what VS Code reads too.
+    #[must_use]
+    pub fn color(&self) -> Option<(u8, u8, u8)> {
+        const COLOR_KIND: u8 = 16;
+        if self.kind != Some(COLOR_KIND) {
+            return None;
+        }
+        self.documentation
+            .as_ref()
+            .and_then(|doc| css_color(&doc.value))
+            .or_else(|| css_color(&self.detail))
+    }
+}
+
+/// The first `#rgb`, `#rrggbb` or `rgb()`/`rgba()` colour in `text`.
+pub(crate) fn css_color(text: &str) -> Option<(u8, u8, u8)> {
+    if let Some(at) = text.find('#') {
+        let digits: String = text[at + 1..]
+            .chars()
+            .take_while(char::is_ascii_hexdigit)
+            .collect();
+        let channel = |hex: &str| u8::from_str_radix(hex, 16).ok();
+        match digits.len() {
+            6 | 8 => {
+                return Some((channel(&digits[0..2])?, channel(&digits[2..4])?, channel(&digits[4..6])?));
+            }
+            3 | 4 => {
+                let short = |i: usize| channel(&digits[i..=i]).map(|v| v * 17);
+                return Some((short(0)?, short(1)?, short(2)?));
+            }
+            _ => {}
+        }
+    }
+    let start = text.find("rgb")?;
+    let open = start + text[start..].find('(')?;
+    let close = open + text[open..].find(')')?;
+    let mut channels = text[open + 1..close]
+        .split(|c: char| c == ',' || c == '/' || c.is_whitespace())
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let value = if let Some(percent) = part.strip_suffix('%') {
+                percent.parse::<f64>().ok()? * 2.55
+            } else {
+                part.parse::<f64>().ok()?
+            };
+            value
+                .is_finite()
+                .then(|| value.clamp(0.0, 255.0).round() as u8)
+        });
+    Some((channels.next()??, channels.next()??, channels.next()??))
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspSymbol {
     pub name: String,
@@ -354,6 +409,12 @@ pub struct LspSymbol {
 pub struct LspInlayHint {
     pub position: LspPosition,
     pub label: String,
+}
+/// A colour the server found in the document, such as a CSS value or a Tailwind class.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LspColor {
+    pub range: LspRange,
+    pub rgb: (u8, u8, u8),
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspCodeLens {
@@ -417,6 +478,7 @@ pub enum LspFeature {
     DocumentHighlights,
     FoldingRanges,
     SelectionRanges,
+    DocumentColors,
 }
 
 impl LspFeature {
@@ -444,6 +506,7 @@ impl LspFeature {
             Self::CodeLens => "textDocument/codeLens",
             Self::DocumentHighlights => "textDocument/documentHighlight",
             Self::FoldingRanges => "textDocument/foldingRange",
+            Self::DocumentColors => "textDocument/documentColor",
             Self::SelectionRanges => "textDocument/selectionRange",
         }
     }
@@ -474,6 +537,7 @@ impl LspFeature {
             Self::DocumentHighlights => capabilities.document_highlights,
             Self::FoldingRanges => capabilities.folding_ranges,
             Self::SelectionRanges => capabilities.selection_ranges,
+            Self::DocumentColors => capabilities.document_colors,
         }
     }
 
@@ -494,6 +558,7 @@ impl LspFeature {
             Self::DocumentHighlights => Some("highlights"),
             Self::FoldingRanges => Some("folds"),
             Self::SelectionRanges => Some("selection-ranges"),
+            Self::DocumentColors => Some("colors"),
             _ => None,
         }
     }
@@ -513,6 +578,7 @@ pub enum LspFeatureResult {
     SemanticTokens(LspSemanticTokens),
     SemanticTokenDelta(LspSemanticTokenDelta),
     InlayHints(Vec<LspInlayHint>),
+    Colors(Vec<LspColor>),
     CodeLens(Vec<LspCodeLens>),
     Ranges(Vec<LspRange>),
     Empty,

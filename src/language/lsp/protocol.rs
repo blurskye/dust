@@ -12,7 +12,7 @@ use super::{
     markdown::sanitize_markdown,
     model::{
         LspCapabilities, LspCodeAction, LspCodeLens, LspCompletionItem, LspDiagnostic, LspDocument,
-        LspDocumentEdit, LspEvent, LspFeature, LspFeatureResult, LspHover, LspInlayHint,
+        LspDocumentEdit, LspEvent, LspFeature, LspColor, LspFeatureResult, LspHover, LspInlayHint,
         LspLocation, LspMarkupContent, LspMarkupKind, LspPosition, LspProgressKind,
         LspPullDiagnostics, LspRange, LspResourceOperation, LspSemanticTokenDelta,
         LspSemanticTokenEdit, LspSemanticTokens, LspSymbol, LspTextEdit, LspWorkspaceEdit,
@@ -51,7 +51,8 @@ pub(super) fn initialize_message(root: &Path, initialization_options: Option<&Va
                     "formatting":{"dynamicRegistration":true},
                     "rangeFormatting":{"dynamicRegistration":true},
                     "codeAction":{"dynamicRegistration":true,"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix","refactor","source"]}}},
-                    "inlayHint":{"dynamicRegistration":true}
+                    "inlayHint":{"dynamicRegistration":true},
+                    "colorProvider":{"dynamicRegistration":true}
                 }
             }
         }
@@ -113,6 +114,7 @@ pub(super) fn initialize_capabilities(result: Option<&Value>) -> Result<LspCapab
         document_highlights: capability(capabilities, "documentHighlightProvider"),
         folding_ranges: capability(capabilities, "foldingRangeProvider"),
         selection_ranges: capability(capabilities, "selectionRangeProvider"),
+        document_colors: capability(capabilities, "colorProvider"),
         semantic_token_types: capabilities
             .pointer("/semanticTokensProvider/legend/tokenTypes")
             .and_then(Value::as_array)
@@ -283,7 +285,10 @@ pub(super) fn feature_params(
         LspFeature::SemanticTokensDelta { previous_result_id } => {
             json!({"textDocument":document,"previousResultId":previous_result_id})
         }
-        LspFeature::SemanticTokensFull | LspFeature::CodeLens | LspFeature::FoldingRanges => {
+        LspFeature::SemanticTokensFull
+        | LspFeature::CodeLens
+        | LspFeature::FoldingRanges
+        | LspFeature::DocumentColors => {
             json!({"textDocument":document})
         }
         LspFeature::InlayHints { range } => {
@@ -358,6 +363,7 @@ pub(super) fn normalize_result(
     if result.is_null() {
         return Ok(match feature {
             LspFeature::InlayHints { .. } => LspFeatureResult::InlayHints(Vec::new()),
+            LspFeature::DocumentColors => LspFeatureResult::Colors(Vec::new()),
             _ => LspFeatureResult::Empty,
         });
     }
@@ -484,6 +490,7 @@ pub(super) fn normalize_result(
         LspFeature::DocumentHighlights => Ok(LspFeatureResult::Ranges(result_ranges(result))),
         LspFeature::FoldingRanges => Ok(LspFeatureResult::Ranges(folding_ranges(result))),
         LspFeature::SelectionRanges => Ok(LspFeatureResult::Ranges(selection_ranges(result))),
+        LspFeature::DocumentColors => Ok(LspFeatureResult::Colors(document_colors(result))),
     }
 }
 
@@ -542,6 +549,32 @@ pub(super) fn selection_ranges(value: &Value) -> Vec<LspRange> {
         }
     }
     out
+}
+pub(super) fn document_colors(value: &Value) -> Vec<LspColor> {
+    // Channels arrive as 0..1 floats; alpha is ignored because the terminal cannot blend.
+    let channel = |color: &Value, key: &str| {
+        let value = color.get(key)?.as_f64()?;
+        value
+            .is_finite()
+            .then(|| (value.clamp(0.0, 1.0) * 255.0).round() as u8)
+    };
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .take(10_000)
+        .filter_map(|item| {
+            let color = item.get("color")?;
+            Some(LspColor {
+                range: parse_range(item.get("range")?)?,
+                rgb: (
+                    channel(color, "red")?,
+                    channel(color, "green")?,
+                    channel(color, "blue")?,
+                ),
+            })
+        })
+        .collect()
 }
 pub(super) fn inlay_hints(value: &Value) -> Vec<LspInlayHint> {
     value

@@ -2267,6 +2267,16 @@ impl InteractiveApplication {
             // current failure is retried above. Neither is user-actionable.
             return;
         }
+        // Colours are background work, and a second server failing a completion
+        // must not hide the items the others returned.
+        let secondary = method == "textDocument/completion"
+            && self.language.active().is_some_and(|active| *active != server);
+        if method == "textDocument/documentColor" || secondary {
+            self.language.forget_request(&server, generation);
+            let server = self.lsp_server_label(&server);
+            self.append_lsp_log(format!("{server}: {method} failed: {message}"));
+            return;
+        }
         let server = self.lsp_server_label(&server);
         self.show_error(self.message(
             "lsp_request_failed",
@@ -2302,6 +2312,7 @@ impl InteractiveApplication {
                     if self.language.running(&server, capabilities) {
                         self.schedule_lsp_inlay_startup_refresh();
                     }
+                    self.request_lsp_colors();
                     // Successful lifecycle transitions are reflected by the
                     // status line and bounded progress surface. They must not
                     // leave persistent bottom-left notifications.
@@ -2313,6 +2324,7 @@ impl InteractiveApplication {
                     if self.language.running(&server, capabilities) {
                         self.schedule_lsp_inlay_refresh(true);
                     }
+                    self.request_lsp_colors();
                 }
 
                 LspEvent::InlayHintsRefresh { server } => {
@@ -2360,6 +2372,10 @@ impl InteractiveApplication {
                     if !current.as_ref().is_some_and(|(_, document)| {
                         document.uri() == uri && document.version == version
                     }) {
+                        continue;
+                    }
+                    if let LspFeatureResult::Colors(colors) = result {
+                        self.install_lsp_colors(&server, &uri, colors, context.encoding());
                         continue;
                     }
                     self.refresh_lsp_projection_owner();
@@ -2447,6 +2463,7 @@ impl InteractiveApplication {
                     let _ = self.language.stop(&server);
                     self.language.forget_synced(&server);
                     self.clear_lsp_progress(&server);
+                    self.ui.lsp_colors.retain(|span| span.server != server);
                     let server_label = self.lsp_server_label(&server);
                     self.notify_message(
                         self.message("lsp_stopped", &[("server", server_label)]),
@@ -2471,6 +2488,7 @@ impl InteractiveApplication {
                     let _ = self.language.stop(&server);
                     self.language.forget_synced(&server);
                     self.clear_lsp_progress(&server);
+                    self.ui.lsp_colors.retain(|span| span.server != server);
                     let server_label = self.lsp_server_label(&server);
                     self.language.failed(server_label.clone(), message.clone());
                     self.show_error(self.message(
@@ -2527,6 +2545,65 @@ impl InteractiveApplication {
         if buffer == owner.buffer {
             self.language.request_inlays(document);
         }
+    }
+
+    /// Asks every attached server with a colour provider for the active document's colours.
+    pub(in crate::editor::session) fn request_lsp_colors(&mut self) {
+        let Some((buffer, document)) = self.active_lsp_document() else {
+            return;
+        };
+        if !self.ui.large_file_buffers.contains(&buffer) {
+            self.language.request_colors(buffer, &document);
+        }
+    }
+    fn install_lsp_colors(
+        &mut self,
+        server: &str,
+        uri: &str,
+        colors: Vec<crate::language::lsp::LspColor>,
+        encoding: PositionEncoding,
+    ) {
+        let Some(path) = path_from_file_uri(uri) else {
+            return;
+        };
+        let Some((buffer_id, buffer)) = self
+            .state
+            .buffers
+            .iter()
+            .find(|(_, buffer)| buffer.path.as_ref() == Some(&path))
+        else {
+            return;
+        };
+        let codec = PositionCodec::new(&buffer.text);
+        let revision = buffer.text.revision();
+        let spans = colors.into_iter().filter_map(|color| {
+            let start = codec
+                .lsp_to_byte(color.range.start.line, color.range.start.character, encoding)
+                .ok()?;
+            let end = codec
+                .lsp_to_byte(color.range.end.line, color.range.end.character, encoding)
+                .ok()?;
+            Some(crate::ui::UiColorSpan {
+                server: server.to_owned(),
+                buffer: buffer_id,
+                revision,
+                range: ByteRange::new(start, end).ok()?,
+                rgb: color.rgb,
+            })
+        });
+        let mut next = self
+            .ui
+            .lsp_colors
+            .iter()
+            .filter(|span| {
+                (span.server != server || span.buffer != buffer_id)
+                    && self.state.buffers.get(span.buffer).is_some()
+            })
+            .cloned()
+            .chain(spans)
+            .collect::<Vec<_>>();
+        next.sort_unstable_by_key(|span| (span.buffer, span.range.start, span.range.end));
+        self.ui.set(next, |ui| &mut ui.lsp_colors);
     }
 
     pub(in crate::editor::session) fn request_lsp(&mut self, mut feature: LspFeature) {
@@ -2736,27 +2813,46 @@ impl InteractiveApplication {
                 );
             }
             LspFeatureResult::Completion(items) => {
-                self.language.install_completions(items, generation);
-                self.ui.language_completion =
-                    (!self.language.completion_items().is_empty()).then(|| {
-                        LanguageCompletionState {
-                            items: self
-                                .language
-                                .completion_items()
-                                .iter()
-                                .map(|item| CompletionItem {
-                                    label: item.label.clone(),
-                                    detail: Self::lsp_completion_detail(item, &server_label),
-                                })
-                                .collect(),
-                            selected: 0,
-                            scroll: 0,
-                        }
-                    });
-                if self.ui.language_completion.is_none() {
-                    self.show_error(self.message("lsp_no_result", &[]));
-                } else {
+                self.language.install_completions(server, items, generation);
+                let (selected, scroll) = self
+                    .ui
+                    .language_completion
+                    .as_ref()
+                    .map_or((0, 0), |open| (open.selected, open.scroll));
+                let items = self
+                    .language
+                    .completion_items()
+                    .iter()
+                    .enumerate()
+                    .map(|(index, item)| CompletionItem {
+                        label: item.label.clone(),
+                        detail: Self::lsp_completion_detail(
+                            item,
+                            &self.lsp_server_label(
+                                self.language.completion_server(index).unwrap_or(server),
+                            ),
+                        ),
+                        color: item.color(),
+                    })
+                    .collect::<Vec<_>>();
+                // A later server appends, so the selection the user moved to stays put.
+                let keep = self.language.completion_server(0) != Some(server);
+                self.ui.language_completion = (!items.is_empty()).then(|| {
+                    let (selected, scroll) = if keep && selected < items.len() {
+                        (selected, scroll)
+                    } else {
+                        (0, 0)
+                    };
+                    LanguageCompletionState {
+                        items,
+                        selected,
+                        scroll,
+                    }
+                });
+                if self.ui.language_completion.is_some() {
                     self.refresh_lsp_completion_documentation();
+                } else if !self.language.request_pending() {
+                    self.show_error(self.message("lsp_no_result", &[]));
                 }
             }
             LspFeatureResult::CompletionResolved(item) => {
@@ -3019,6 +3115,7 @@ impl InteractiveApplication {
                     }
                 }
             }
+            LspFeatureResult::Colors(_) => {}
             LspFeatureResult::Empty => self.show_error(self.message("lsp_no_result", &[])),
         }
     }
@@ -3338,9 +3435,11 @@ impl InteractiveApplication {
         self.close_picker();
         self.notify_message(self.message("workspace_edit_applied", &[]), false);
     }
+    /// Applies an edit whose positions use `encoding`, the encoding of the server that sent it.
     pub(in crate::editor::session) fn apply_lsp_workspace_edit(
         &mut self,
         edit: LspWorkspaceEdit,
+        encoding: PositionEncoding,
     ) -> Result<(), String> {
         let id = self.transaction_id();
         let documents = self
@@ -3358,7 +3457,7 @@ impl InteractiveApplication {
         let transaction =
             crate::editor::session::lsp_edits::LspEditSources::completion_transaction(
                 edit,
-                self.lsp_position_encoding(),
+                encoding,
                 &documents,
                 id,
             )?;

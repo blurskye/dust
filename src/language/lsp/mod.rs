@@ -14,7 +14,7 @@ pub(crate) use origins::{ApplyEditReply, EditContext, OwnedLspEvent, PendingEdit
 mod model;
 pub use model::{
     LspCapabilities, LspCodeAction, LspCodeLens, LspCompletionItem, LspDiagnostic, LspDocument,
-    LspDocumentEdit, LspEvent, LspFeature, LspFeatureResult, LspHealth, LspHover, LspInlayHint,
+    LspDocumentEdit, LspEvent, LspFeature, LspColor, LspFeatureResult, LspHealth, LspHover, LspInlayHint,
     LspLocation, LspMarkupContent, LspMarkupKind, LspPolicy, LspPosition, LspProgressKind,
     LspPullDiagnostics, LspRange, LspResourceOperation, LspSemanticTokenDelta,
     LspSemanticTokenEdit, LspSemanticTokens, LspServerConfiguration, LspSessionKey, LspSymbol,

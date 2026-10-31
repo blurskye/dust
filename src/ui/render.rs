@@ -121,6 +121,8 @@ impl PromptKind {
 pub struct CompletionItem {
     pub label: String,
     pub detail: String,
+    /// A swatch drawn after the label, for colour completions such as Tailwind classes.
+    pub color: Option<(u8, u8, u8)>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -236,6 +238,15 @@ pub struct UiInlayHint {
     pub revision: crate::editor::text::BufferRevision,
     pub position: ByteOffset,
     pub label: String,
+}
+/// A colour a language server reported, painted as the background of its range.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UiColorSpan {
+    pub server: String,
+    pub buffer: crate::editor::BufferId,
+    pub revision: crate::editor::text::BufferRevision,
+    pub range: ByteRange,
+    pub rgb: (u8, u8, u8),
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiFold {
@@ -1293,6 +1304,7 @@ pub struct UiState {
     pub lsp_semantic_spans: Vec<UiSyntaxSpan>,
     pub lsp_highlight_spans: Vec<UiSyntaxSpan>,
     pub lsp_inlay_hints: Vec<UiInlayHint>,
+    pub lsp_colors: Vec<UiColorSpan>,
     pub git_signs: Vec<UiGitSign>,
     pub lsp_folds: Vec<UiFold>,
     pub lsp_server: Option<String>,

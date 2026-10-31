@@ -745,3 +745,40 @@ while True:
         Some(&json!("z"))
     );
 }
+
+#[test]
+fn document_colors_and_color_completions_carry_rgb() {
+    let colors = json!([
+        {"range":{"start":{"line":0,"character":12},"end":{"line":0,"character":22}},
+         "color":{"red":0.937,"green":0.267,"blue":0.267,"alpha":1.0}},
+        {"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":1}},
+         "color":{"red":"bad","green":0,"blue":0,"alpha":1}}
+    ]);
+    let Ok(LspFeatureResult::Colors(colors)) = normalize_result(&LspFeature::DocumentColors, &colors)
+    else {
+        panic!("colours");
+    };
+    assert_eq!(colors.len(), 1);
+    assert_eq!(colors[0].rgb, (239, 68, 68));
+    assert_eq!(colors[0].range.start.character, 12);
+    assert_eq!(
+        normalize_result(&LspFeature::DocumentColors, &Value::Null),
+        Ok(LspFeatureResult::Colors(Vec::new()))
+    );
+    let capabilities =
+        initialize_capabilities(Some(&json!({"capabilities":{"colorProvider":true}}))).unwrap();
+    assert!(capabilities.document_colors);
+
+    let items = completion_items(&json!([
+        {"label":"bg-red-500","kind":16,"documentation":"#ef4444"},
+        {"label":"text-sky-500","kind":16,"documentation":{"kind":"plaintext","value":"rgb(14, 165, 233)"}},
+        {"label":"fff","kind":16,"detail":"color: #fff"},
+        {"label":"red","kind":6,"documentation":"#ff0000"}
+    ]))
+    .unwrap();
+    let swatches = items.iter().map(|item| item.color()).collect::<Vec<_>>();
+    assert_eq!(
+        swatches,
+        [Some((239, 68, 68)), Some((14, 165, 233)), Some((255, 255, 255)), None]
+    );
+}

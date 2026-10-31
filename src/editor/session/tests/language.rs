@@ -606,6 +606,7 @@ fn lsp_completion_applies_through_one_validated_transaction() {
         }]);
     app.ui.language_completion = Some(crate::ui::LanguageCompletionState {
         items: vec![crate::ui::CompletionItem {
+            color: None,
             label: "main".into(),
             detail: "function".into(),
         }],
@@ -630,6 +631,7 @@ fn lsp_completion_selection_scrolls_and_wraps_inside_the_visible_window() {
     app.ui.language_completion = Some(crate::ui::LanguageCompletionState {
         items: (0..5)
             .map(|index| crate::ui::CompletionItem {
+                color: None,
                 label: format!("item-{index}"),
                 detail: String::new(),
             })
@@ -694,7 +696,10 @@ fn stale_lsp_workspace_edit_is_rejected_without_mutation() {
         }],
         resources: Vec::new(),
     };
-    assert!(app.apply_lsp_workspace_edit(edit).is_err());
+    assert!(
+        app.apply_lsp_workspace_edit(edit, crate::editor::text::PositionEncoding::Utf16)
+            .is_err()
+    );
     assert_eq!(app.state.buffers[buffer].text.to_string(), "abc");
 }
 

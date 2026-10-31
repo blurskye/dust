@@ -361,8 +361,14 @@ impl LspSession {
         // No registry entry is installed unless the real transport admitted startup.
         let previous = self.sessions.remove(&key);
         let restart_count = previous.as_ref().map_or(0, |s| s.restart_count);
+        // A server joining a document that already has one stays secondary.
+        let primary_attached = self
+            .active
+            .as_ref()
+            .and_then(|active| self.sessions.get(active))
+            .is_some_and(|active| active.documents.contains_key(&buffer));
         let activate = previous.as_ref().map_or_else(
-            || editor.active_buffer_id() == Some(buffer),
+            || editor.active_buffer_id() == Some(buffer) && !primary_attached,
             |s| s.activate_on_restart,
         );
         let mut documents = previous.map_or_else(HashMap::new, |s| s.documents);
@@ -526,17 +532,16 @@ impl LspSession {
     pub(super) fn reset_autostart(&mut self) {
         self.autostart = None;
     }
+    /// Starts the next unattached server once per change in what the editor sees.
     pub(super) fn observe(
         &mut self,
         observation: LspAutostartObservation,
-        matching: bool,
         safe_mode: bool,
     ) -> Option<String> {
         if self.autostart.as_ref() == Some(&observation) {
             return None;
         }
-        let start = (!matching
-            && observation.enabled
+        let start = (observation.enabled
             && observation.auto_start
             && observation.trust == WorkspaceTrust::Trusted
             && !safe_mode)

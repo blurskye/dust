@@ -311,6 +311,7 @@ pub(super) fn effective_capabilities<'a>(
                 value.semantic_tokens = true
             }
             "textDocument/inlayHint" => value.inlay_hints = true,
+            "textDocument/documentColor" => value.document_colors = true,
             "textDocument/codeLens" => value.code_lens = true,
             "textDocument/documentHighlight" => value.document_highlights = true,
             "textDocument/foldingRange" => value.folding_ranges = true,
