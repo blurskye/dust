@@ -167,7 +167,7 @@ impl RegistryClient {
             .connect_timeout(Duration::from_millis(policy.connect_timeout_ms))
             .timeout(Duration::from_millis(policy.request_timeout_ms))
             .build()
-            .map_err(|error| RegistryError::Http(error.to_string()))?;
+            .map_err(http_error)?;
         Ok(Self {
             policy,
             base,
@@ -250,7 +250,7 @@ impl RegistryClient {
             .get(url)
             .header(ACCEPT, accept)
             .send()
-            .map_err(|error| RegistryError::Http(error.to_string()))?;
+            .map_err(http_error)?;
         let bytes = read_response(response, accept, maximum)?;
         write_cache(&path, &bytes)?;
         self.prune_cache()?;
@@ -523,12 +523,21 @@ pub enum RegistryError {
     QueueFull,
     #[error("registry worker stopped")]
     Stopped,
-    #[error("registry HTTP failed: {0}")]
+    #[error("{0}")]
     Http(String),
     #[error("registry I/O failed: {0}")]
     Io(#[source] Arc<std::io::Error>),
     #[error("registry worker thread failed: {0}")]
     Thread(#[source] Arc<std::io::Error>),
+}
+/// reqwest's own text is mostly the URL and leaves the reason in its source chain.
+fn http_error(error: reqwest::Error) -> RegistryError {
+    let error = error.without_url();
+    let mut cause: &dyn std::error::Error = &error;
+    while let Some(source) = cause.source() {
+        cause = source;
+    }
+    RegistryError::Http(cause.to_string())
 }
 fn io_error(value: std::io::Error) -> RegistryError {
     RegistryError::Io(Arc::new(value))

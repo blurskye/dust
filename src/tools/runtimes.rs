@@ -161,11 +161,12 @@ pub(super) fn run_managed(
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .env_clear()
         .envs(&effective_environment)
         .spawn()
         .map_err(|error| format!("failed to launch managed {}: {error}", program.display()))?;
+    let installer_output = child.stderr.take().map(read_installer_output);
     let deadline = Instant::now() + TOOL_INSTALL_TIMEOUT;
     loop {
         if cancellations.try_recv().is_ok() {
@@ -181,17 +182,60 @@ pub(super) fn run_managed(
         match child.try_wait() {
             Ok(Some(status)) if status.success() => return Ok(()),
             Ok(Some(status)) => {
+                let output = installer_output
+                    .and_then(|output| output.recv_timeout(Duration::from_secs(1)).ok())
+                    .unwrap_or_default();
                 return Err(format!(
-                    "managed installer `{}` exited with {}",
+                    "managed installer `{}` exited with {}{}",
                     program.display(),
                     status
                         .code()
-                        .map_or_else(|| "signal".into(), |code| code.to_string())
+                        .map_or_else(|| "signal".into(), |code| code.to_string()),
+                    output
                 ));
             }
             Ok(None) => thread::sleep(Duration::from_millis(50)),
             Err(error) => return Err(format!("failed to wait for managed installer: {error}")),
         }
+    }
+}
+
+/// Read what an installer prints on its own thread, so a full pipe cannot stall it, and hand
+/// back the end of it: that is where installers say what went wrong.
+fn read_installer_output(mut stream: impl std::io::Read + Send + 'static) -> Receiver<String> {
+    const KEPT_BYTES: usize = 4096;
+    let (sender, receiver) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let mut kept = Vec::new();
+        let mut chunk = [0; 4096];
+        while let Ok(read) = stream.read(&mut chunk) {
+            if read == 0 {
+                break;
+            }
+            kept.extend_from_slice(&chunk[..read]);
+            kept.drain(..kept.len().saturating_sub(KEPT_BYTES));
+        }
+        let _ = sender.send(installer_failure_detail(&String::from_utf8_lossy(&kept)));
+    });
+    receiver
+}
+
+fn installer_failure_detail(output: &str) -> String {
+    let lines = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    let detail = lines[lines.len().saturating_sub(3)..]
+        .join(" ")
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(400)
+        .collect::<String>();
+    if detail.is_empty() {
+        detail
+    } else {
+        format!(": {detail}")
     }
 }
 
@@ -661,4 +705,28 @@ pub(super) fn uninstall_nix_lsp_tool(
     // partially removed tool launchable.
     uninstall_managed_tool(definition, root)?;
     uninstall_nix_lsp_profile(definition, root)
+}
+
+#[cfg(test)]
+mod installer_output_tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_installer_reports_the_end_of_what_it_printed() {
+        let (reader, mut writer) = std::io::pipe().expect("pipe");
+        let output = read_installer_output(reader);
+        std::io::Write::write_all(&mut writer, b"fetching\n\nbuilding\nerror: no such attribute\n\n")
+            .expect("write");
+        std::io::Write::write_all(&mut writer, b"exit 1\n").expect("write");
+        drop(writer);
+        assert_eq!(
+            output.recv_timeout(Duration::from_secs(5)).expect("output"),
+            ": building error: no such attribute exit 1"
+        );
+    }
+
+    #[test]
+    fn a_silent_installer_adds_nothing_to_the_exit_message() {
+        assert_eq!(installer_failure_detail(" \n\n"), "");
+    }
 }
