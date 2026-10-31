@@ -31,6 +31,22 @@ pub(super) fn register_commands(
             "Select next tool",
             AppEffect::MoveToolMenu(1),
         ),
+        ("tools.search", "Search the tool manager", AppEffect::ToolSearch),
+        (
+            "tools.search.delete",
+            "Delete the last character of the tool search",
+            AppEffect::ToolSearchDelete,
+        ),
+        (
+            "tools.search.done",
+            "Stop typing and keep the tools filtered",
+            AppEffect::ToolSearchStop { keep: true },
+        ),
+        (
+            "tools.search.cancel",
+            "Clear the tool search",
+            AppEffect::ToolSearchStop { keep: false },
+        ),
         (
             "tools.menu.previous",
             "Select previous tool",
@@ -295,6 +311,14 @@ pub(super) fn register_commands(
             move |_| effect.clone(),
         )?;
     }
+    register(
+        registry,
+        "tools.search.insert",
+        "Type into the tool search",
+        ContextRequirement::Application,
+        ArgumentSchema::default().field("text", ArgumentType::String, true),
+        |invocation| Ok(AppEffect::ToolSearchInsert(string_arg(invocation, "text")?.to_owned())),
+    )?;
     for (id, title, effect) in [
         (
             "diagnostic.next",

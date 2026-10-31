@@ -124,6 +124,8 @@ fn every_managed_catalog_lsp_language_has_a_reachable_document_mapping() {
         ("css", "style.css"),
         ("scss", "style.scss"),
         ("less", "style.less"),
+        ("sass", "style.sass"),
+        ("toml", "Cargo.toml"),
         ("json", "data.json"),
         ("jsonc", "data.jsonc"),
         ("yaml", "data.yaml"),
@@ -142,7 +144,7 @@ fn every_managed_catalog_lsp_language_has_a_reachable_document_mapping() {
         .into_iter()
         .filter(|tool| tool.kind == ToolKind::Lsp && tool.install.is_some())
         .collect::<Vec<_>>();
-    assert_eq!(servers.len(), 17);
+    assert_eq!(servers.len(), 19);
     for server in servers {
         assert!(!server.project_root_markers.is_empty(), "{}", server.id);
         for language in &server.languages {

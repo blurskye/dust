@@ -77,7 +77,7 @@ use crate::language::lsp::{
     LspProgressKind, LspWorkspaceEdit, file_uri, language_id_for_path, path_from_file_uri,
 };
 use crate::language::syntax::{
-    SyntaxLanguage, SyntaxSupport, builtin_languages, language_for_path,
+    SyntaxSupport, builtin_languages, language_for_document,
 };
 use crate::persistence::{
     PersistedLargeFileOverride, PersistedLocation, PersistedSession, PersistedState,

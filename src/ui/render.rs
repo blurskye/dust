@@ -473,6 +473,8 @@ pub struct PickerTextPreview {
     pub lines: Vec<String>,
     pub first_line: usize,
     pub highlight_line: Option<usize>,
+    /// The language the lines are coloured as, when the previewed file has a grammar.
+    pub language: Option<crate::language::syntax::SyntaxLanguage>,
 }
 
 /// How a diff line relates to the comparison.
@@ -1044,6 +1046,9 @@ pub struct ToolMenuState {
     pub scroll: usize,
     pub rows: Vec<ToolMenuRow>,
     pub runtime_picker: Option<ToolRuntimePickerState>,
+    /// What `/` typed: rows are filtered by name, id and language.
+    pub query: String,
+    pub searching: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

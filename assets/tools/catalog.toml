@@ -166,6 +166,40 @@ method = "npm_package"
 packages = ["vscode-langservers-extracted@4.10.0"]
 
 [[tool]]
+id = "tailwindcss-language-server"
+name = "Tailwind CSS Language Server"
+kind = "lsp"
+languages = ["html", "css", "scss", "sass", "less", "javascript", "javascriptreact", "typescript", "typescriptreact", "vue", "svelte", "astro", "php"]
+executable = "tailwindcss-language-server"
+version = "0.16.0"
+launch_args = ["--stdio"]
+project_root_markers = ["tailwind.config.js", "tailwind.config.ts", "tailwind.config.cjs", "tailwind.config.mjs", "package.json", ".git"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["@tailwindcss/language-server@0.16.0"]
+
+[[tool]]
+id = "taplo"
+name = "Taplo"
+kind = "lsp"
+languages = ["toml"]
+executable = "taplo"
+version = "0.10.0"
+launch_args = ["lsp", "stdio"]
+probe_args = ["--version"]
+project_root_markers = [".taplo.toml", "taplo.toml", "Cargo.toml", "pyproject.toml", ".git"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "archive"
+url = "https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-linux-x86_64.gz"
+sha256 = "8fe196b894ccf9072f98d4e1013a180306e17d244830b03986ee5e8eabeb6156"
+archive = "gzip"
+executable_path = "taplo"
+
+[[tool]]
 id = "vscode-css-language-server"
 name = "VS Code CSS Language Server"
 kind = "lsp"

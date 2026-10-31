@@ -1314,3 +1314,31 @@ fn plugin_workspace_preview_uses_invocation_source_and_retires_on_dismissal() {
     assert!(app.workspace_edits.proposal().is_none());
     app.extension.close_edits();
 }
+
+#[test]
+fn slash_searches_the_tool_manager_by_name_and_language() {
+    let mut app = app();
+    app.open_tool_menu("all".into());
+    app.handle_configured_key(KeyEvent::character('/'));
+    assert_eq!(app.active_input_context(), "tool_manager_search");
+    for key in "tailwind".chars() {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    let menu = app.ui.tool_menu.as_ref().expect("menu");
+    assert_eq!(menu.query, "tailwind");
+    assert!(!menu.rows.is_empty());
+    assert!(menu.rows.iter().all(|row| row.id.contains("tailwind") || row.name.to_lowercase().contains("tailwind")));
+    app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Enter));
+    assert_eq!(app.active_input_context(), "tool_manager");
+    // A search reaches servers outside the default list, as Mason does.
+    app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Escape));
+    assert!(app.ui.tool_menu.as_ref().is_some_and(|menu| menu.query.is_empty()));
+    app.handle_configured_key(KeyEvent::character('/'));
+    for key in "zls".chars() {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    assert!(app.ui.tool_menu.as_ref().expect("menu").rows.iter().any(|row| row.id == "zls"));
+    app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Escape));
+    app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Escape));
+    assert!(app.ui.tool_menu.is_none());
+}

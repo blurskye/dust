@@ -1,16 +1,28 @@
 ; Properties
 ;-----------
 
-(bare_key) @type
+; Upstream captures the whole pair, which painted every value in the key's colour.
+; Dust captures the keys alone, so strings, numbers and booleans keep their own.
+(table
+  [(bare_key) (quoted_key)] @keyword)
 
-(quoted_key) @string
+(table
+  (dotted_key
+    [(bare_key) (quoted_key)] @keyword))
+
+(table_array_element
+  [(bare_key) (quoted_key)] @keyword)
+
+(table_array_element
+  (dotted_key
+    [(bare_key) (quoted_key)] @keyword))
 
 (pair
-  (bare_key)) @property
+  [(bare_key) (quoted_key)] @type)
 
 (pair
   (dotted_key
-    (bare_key) @property))
+    [(bare_key) (quoted_key)] @type))
 
 ; Literals
 ;---------

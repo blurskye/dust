@@ -5473,6 +5473,56 @@ context = "explorer_search"
 keys = "ctrl-p"
 command = "explorer.previous"
 
+# `/` in the tool manager filters the tools by name or language, like Mason.
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-search.slash"
+context = "tool_manager"
+keys = "/"
+command = "tools.search"
+desc = "Search"
+
+[[keymap]]
+id = "builtin.tool-manager-search.delete.backspace"
+context = "tool_manager_search"
+keys = "backspace"
+command = "tools.search.delete"
+
+[[keymap]]
+id = "builtin.tool-manager-search.done.enter"
+context = "tool_manager_search"
+keys = "enter"
+command = "tools.search.done"
+
+[[keymap]]
+id = "builtin.tool-manager-search.cancel.escape"
+context = "tool_manager_search"
+keys = "escape"
+command = "tools.search.cancel"
+
+[[keymap]]
+id = "builtin.tool-manager-search.next.down"
+context = "tool_manager_search"
+keys = "down"
+command = "tools.menu.next"
+
+[[keymap]]
+id = "builtin.tool-manager-search.previous.up"
+context = "tool_manager_search"
+keys = "up"
+command = "tools.menu.previous"
+
+[[keymap]]
+id = "builtin.tool-manager-search.next.ctrl-n"
+context = "tool_manager_search"
+keys = "ctrl-n"
+command = "tools.menu.next"
+
+[[keymap]]
+id = "builtin.tool-manager-search.previous.ctrl-p"
+context = "tool_manager_search"
+keys = "ctrl-p"
+command = "tools.menu.previous"
+
 # Vim keys LazyVim users expect: the jump list, paragraphs, case operators and Visual-mode edits.
 [[keymap]]
 id = "builtin.editor.normal.jump-back.ctrl-o"

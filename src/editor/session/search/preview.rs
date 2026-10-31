@@ -105,7 +105,6 @@ impl SearchSession {
             return (None, None);
         }
         let retired = self.clear_preview();
-        self.preview_path = Some(path);
         self.preview_scope = Some((scope, configuration));
         self.preview = Some(PickerPreview {
             title,
@@ -113,8 +112,10 @@ impl SearchSession {
                 lines: vec![loading],
                 first_line: 0,
                 highlight_line: None,
+                language: crate::language::syntax::language_for_path(&path),
             }),
         });
+        self.preview_path = Some(path);
         (retired, Some(PreviewTicket(self.preview_epoch.clone())))
     }
     pub(in crate::editor::session) fn admit_preview(
@@ -169,6 +170,12 @@ impl SearchSession {
                 ),
                 Err(error) => vec![format!("preview unavailable: {error}")],
             };
+            if text.language.is_none() {
+                text.language = crate::language::syntax::language_for_document(
+                    None,
+                    text.lines.first().map_or("", String::as_str),
+                );
+            }
         }
         true
     }
@@ -218,6 +225,7 @@ pub(super) fn search_picker_preview(
             lines,
             first_line,
             highlight_line: Some(found.line),
+            language: crate::language::syntax::language_for_path(&found.relative_path),
         }),
     }
 }

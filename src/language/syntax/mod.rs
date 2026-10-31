@@ -27,8 +27,85 @@ pub enum SyntaxLanguage {
     Json,
     Toml,
     Markdown,
+    Bash,
+    C,
+    Cpp,
+    CSharp,
+    Css,
+    Html,
+    Python,
+    Yaml,
+    Lua,
+    Nix,
+    Java,
+    Ruby,
+    Php,
+    Zig,
+    Haskell,
+    Elixir,
+    OCaml,
+    Scala,
+    Swift,
+    Kotlin,
+    Dart,
+    Make,
+    CMake,
+    Xml,
+    Diff,
+    Ini,
+    Proto,
+    Sql,
+    Erlang,
+    R,
+    Julia,
+    Vue,
 }
 impl SyntaxLanguage {
+    /// The name people know the language by, as shown in `:health`.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Rust => "Rust",
+            Self::TypeScript => "TypeScript",
+            Self::Tsx => "TSX",
+            Self::JavaScript => "JavaScript / JSX",
+            Self::Go => "Go",
+            Self::Json => "JSON / JSONC",
+            Self::Toml => "TOML",
+            Self::Markdown => "Markdown",
+            Self::Bash => "Bash / Shell",
+            Self::C => "C",
+            Self::Cpp => "C++",
+            Self::CSharp => "C#",
+            Self::Css => "CSS",
+            Self::Html => "HTML",
+            Self::Python => "Python",
+            Self::Yaml => "YAML",
+            Self::Lua => "Lua",
+            Self::Nix => "Nix",
+            Self::Java => "Java",
+            Self::Ruby => "Ruby",
+            Self::Php => "PHP",
+            Self::Zig => "Zig",
+            Self::Haskell => "Haskell",
+            Self::Elixir => "Elixir",
+            Self::OCaml => "OCaml",
+            Self::Scala => "Scala",
+            Self::Swift => "Swift",
+            Self::Kotlin => "Kotlin",
+            Self::Dart => "Dart",
+            Self::Make => "Make",
+            Self::CMake => "CMake",
+            Self::Xml => "XML",
+            Self::Diff => "Diff",
+            Self::Ini => "INI",
+            Self::Proto => "Protocol Buffers",
+            Self::Sql => "SQL",
+            Self::Erlang => "Erlang",
+            Self::R => "R",
+            Self::Julia => "Julia",
+            Self::Vue => "Vue",
+        }
+    }
     pub const fn id(self) -> &'static str {
         match self {
             Self::Rust => "rust",
@@ -39,6 +116,38 @@ impl SyntaxLanguage {
             Self::Json => "json",
             Self::Toml => "toml",
             Self::Markdown => "markdown",
+            Self::Bash => "bash",
+            Self::C => "c",
+            Self::Cpp => "cpp",
+            Self::CSharp => "c_sharp",
+            Self::Css => "css",
+            Self::Html => "html",
+            Self::Python => "python",
+            Self::Yaml => "yaml",
+            Self::Lua => "lua",
+            Self::Nix => "nix",
+            Self::Java => "java",
+            Self::Ruby => "ruby",
+            Self::Php => "php",
+            Self::Zig => "zig",
+            Self::Haskell => "haskell",
+            Self::Elixir => "elixir",
+            Self::OCaml => "ocaml",
+            Self::Scala => "scala",
+            Self::Swift => "swift",
+            Self::Kotlin => "kotlin",
+            Self::Dart => "dart",
+            Self::Make => "make",
+            Self::CMake => "cmake",
+            Self::Xml => "xml",
+            Self::Diff => "diff",
+            Self::Ini => "ini",
+            Self::Proto => "proto",
+            Self::Sql => "sql",
+            Self::Erlang => "erlang",
+            Self::R => "r",
+            Self::Julia => "julia",
+            Self::Vue => "vue",
         }
     }
 }
@@ -60,7 +169,7 @@ pub struct SyntaxLanguageInfo {
     pub id: &'static str,
     pub capabilities: SyntaxCapabilities,
 }
-const BUILTIN_LANGUAGES: [SyntaxLanguage; 8] = [
+const BUILTIN_LANGUAGES: [SyntaxLanguage; 40] = [
     SyntaxLanguage::Rust,
     SyntaxLanguage::TypeScript,
     SyntaxLanguage::Tsx,
@@ -69,6 +178,38 @@ const BUILTIN_LANGUAGES: [SyntaxLanguage; 8] = [
     SyntaxLanguage::Json,
     SyntaxLanguage::Toml,
     SyntaxLanguage::Markdown,
+    SyntaxLanguage::Bash,
+    SyntaxLanguage::C,
+    SyntaxLanguage::Cpp,
+    SyntaxLanguage::CSharp,
+    SyntaxLanguage::Css,
+    SyntaxLanguage::Html,
+    SyntaxLanguage::Python,
+    SyntaxLanguage::Yaml,
+    SyntaxLanguage::Lua,
+    SyntaxLanguage::Nix,
+    SyntaxLanguage::Java,
+    SyntaxLanguage::Ruby,
+    SyntaxLanguage::Php,
+    SyntaxLanguage::Zig,
+    SyntaxLanguage::Haskell,
+    SyntaxLanguage::Elixir,
+    SyntaxLanguage::OCaml,
+    SyntaxLanguage::Scala,
+    SyntaxLanguage::Swift,
+    SyntaxLanguage::Kotlin,
+    SyntaxLanguage::Dart,
+    SyntaxLanguage::Make,
+    SyntaxLanguage::CMake,
+    SyntaxLanguage::Xml,
+    SyntaxLanguage::Diff,
+    SyntaxLanguage::Ini,
+    SyntaxLanguage::Proto,
+    SyntaxLanguage::Sql,
+    SyntaxLanguage::Erlang,
+    SyntaxLanguage::R,
+    SyntaxLanguage::Julia,
+    SyntaxLanguage::Vue,
 ];
 pub fn validate_builtin_queries() -> Result<(), String> {
     for info in builtin_languages() {
@@ -80,7 +221,7 @@ pub fn validate_builtin_queries() -> Result<(), String> {
         let highlights = Query::new(&descriptor.language, descriptor.highlights)
             .map_err(|error| format!("{} highlights: {error}", info.id))?;
         for capture in highlights.capture_names() {
-            if role(capture).is_none() && capture.split('.').next() != Some("none") {
+            if role(capture).is_none() && !uncoloured_capture(capture) {
                 return Err(format!(
                     "{} highlights: unsupported capture {capture}",
                     info.id
@@ -111,10 +252,21 @@ pub const fn language_info(language: SyntaxLanguage) -> SyntaxLanguageInfo {
             folds: SyntaxSupport::Full,
             indents: SyntaxSupport::Unsupported,
         },
-        _ => SyntaxCapabilities {
+        SyntaxLanguage::Rust
+        | SyntaxLanguage::TypeScript
+        | SyntaxLanguage::Tsx
+        | SyntaxLanguage::JavaScript
+        | SyntaxLanguage::Go
+        | SyntaxLanguage::Json => SyntaxCapabilities {
             highlights: SyntaxSupport::Full,
             folds: SyntaxSupport::Full,
             indents: SyntaxSupport::Full,
+        },
+        // The other grammars bring their upstream highlight query only.
+        _ => SyntaxCapabilities {
+            highlights: SyntaxSupport::Full,
+            folds: SyntaxSupport::Unsupported,
+            indents: SyntaxSupport::Unsupported,
         },
     };
     SyntaxLanguageInfo {
@@ -181,6 +333,198 @@ fn descriptor(language: SyntaxLanguage) -> Descriptor {
             language: tree_sitter_md_025::LANGUAGE.into(),
             highlights: include_str!("../../../assets/syntax/markdown/highlights.scm"),
             folds: Some(include_str!("../../../assets/syntax/markdown/folds.scm")),
+            indents: None,
+        },
+        SyntaxLanguage::Bash => Descriptor {
+            language: tree_sitter_bash::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/bash/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::C => Descriptor {
+            language: tree_sitter_c::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/c/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Cpp => Descriptor {
+            language: tree_sitter_cpp::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/cpp/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::CSharp => Descriptor {
+            language: tree_sitter_c_sharp::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/c_sharp/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Css => Descriptor {
+            language: tree_sitter_css::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/css/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Html => Descriptor {
+            language: tree_sitter_html::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/html/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Python => Descriptor {
+            language: tree_sitter_python::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/python/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Yaml => Descriptor {
+            language: tree_sitter_yaml::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/yaml/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Lua => Descriptor {
+            language: tree_sitter_lua::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/lua/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Nix => Descriptor {
+            language: tree_sitter_nix::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/nix/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Java => Descriptor {
+            language: tree_sitter_java::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/java/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Ruby => Descriptor {
+            language: tree_sitter_ruby::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/ruby/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Php => Descriptor {
+            language: tree_sitter_php::LANGUAGE_PHP.into(),
+            highlights: include_str!("../../../assets/syntax/php/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Zig => Descriptor {
+            language: tree_sitter_zig::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/zig/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Haskell => Descriptor {
+            language: tree_sitter_haskell::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/haskell/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Elixir => Descriptor {
+            language: tree_sitter_elixir::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/elixir/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::OCaml => Descriptor {
+            language: tree_sitter_ocaml::LANGUAGE_OCAML.into(),
+            highlights: include_str!("../../../assets/syntax/ocaml/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Scala => Descriptor {
+            language: tree_sitter_scala::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/scala/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Swift => Descriptor {
+            language: tree_sitter_swift::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/swift/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Kotlin => Descriptor {
+            language: tree_sitter_kotlin_sg::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/kotlin/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Dart => Descriptor {
+            language: tree_sitter_dart::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/dart/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Make => Descriptor {
+            language: tree_sitter_make::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/make/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::CMake => Descriptor {
+            language: tree_sitter_cmake::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/cmake/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Xml => Descriptor {
+            language: tree_sitter_xml::LANGUAGE_XML.into(),
+            highlights: include_str!("../../../assets/syntax/xml/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Diff => Descriptor {
+            language: tree_sitter_diff::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/diff/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Ini => Descriptor {
+            language: tree_sitter_ini::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/ini/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Proto => Descriptor {
+            language: tree_sitter_proto::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/proto/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Sql => Descriptor {
+            language: tree_sitter_sequel::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/sql/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Erlang => Descriptor {
+            language: tree_sitter_erlang::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/erlang/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::R => Descriptor {
+            language: tree_sitter_r::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/r/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Julia => Descriptor {
+            language: tree_sitter_julia::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/julia/highlights.scm"),
+            folds: None,
+            indents: None,
+        },
+        SyntaxLanguage::Vue => Descriptor {
+            language: tree_sitter_vue_next::LANGUAGE.into(),
+            highlights: include_str!("../../../assets/syntax/vue/highlights.scm"),
+            folds: None,
             indents: None,
         },
     }
@@ -429,12 +773,54 @@ pub fn language_for_fence(name: &str) -> Option<SyntaxLanguage> {
         "javascript" | "node" => Some(SyntaxLanguage::JavaScript),
         "golang" => Some(SyntaxLanguage::Go),
         "markdown" => Some(SyntaxLanguage::Markdown),
+        "shell" | "console" | "shellsession" => Some(SyntaxLanguage::Bash),
+        "python" | "python3" => Some(SyntaxLanguage::Python),
+        "csharp" | "c#" => Some(SyntaxLanguage::CSharp),
+        "kotlin" => Some(SyntaxLanguage::Kotlin),
+        "ruby" => Some(SyntaxLanguage::Ruby),
+        "haskell" => Some(SyntaxLanguage::Haskell),
+        "elixir" => Some(SyntaxLanguage::Elixir),
+        "ocaml" => Some(SyntaxLanguage::OCaml),
+        "erlang" => Some(SyntaxLanguage::Erlang),
+        "julia" => Some(SyntaxLanguage::Julia),
+        "makefile" => Some(SyntaxLanguage::Make),
         other => language_for_path(Path::new(&format!("fence.{other}"))),
     }
 }
 
+/// The language of a document: by its file name, else by a `#!` line, as Neovim does for
+/// scripts without an extension.
+#[must_use]
+pub fn language_for_document(path: Option<&Path>, start: &str) -> Option<SyntaxLanguage> {
+    path.and_then(language_for_path).or_else(|| {
+        let line = start.lines().next()?.strip_prefix("#!")?;
+        let mut words = line.split_whitespace();
+        let mut program = words.next()?.rsplit('/').next()?;
+        if program == "env" {
+            program = words.find(|word| !word.starts_with('-'))?;
+        }
+        match program.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.') {
+            "sh" | "bash" | "zsh" | "ksh" | "dash" => Some(SyntaxLanguage::Bash),
+            "python" => Some(SyntaxLanguage::Python),
+            "node" | "deno" | "bun" => Some(SyntaxLanguage::JavaScript),
+            "ruby" => Some(SyntaxLanguage::Ruby),
+            "lua" => Some(SyntaxLanguage::Lua),
+            "make" => Some(SyntaxLanguage::Make),
+            _ => None,
+        }
+    })
+}
+
 #[must_use]
 pub fn language_for_path(path: &Path) -> Option<SyntaxLanguage> {
+    match path.file_name().and_then(|name| name.to_str()) {
+        Some(".bashrc") | Some(".bash_profile") | Some(".zshrc") | Some(".profile") | Some("PKGBUILD") => return Some(SyntaxLanguage::Bash),
+        Some("Gemfile") | Some("Rakefile") => return Some(SyntaxLanguage::Ruby),
+        Some("Makefile") | Some("makefile") | Some("GNUmakefile") => return Some(SyntaxLanguage::Make),
+        Some("CMakeLists.txt") => return Some(SyntaxLanguage::CMake),
+        Some(".gitconfig") | Some(".editorconfig") => return Some(SyntaxLanguage::Ini),
+        _ => {}
+    }
     let extension = path.extension()?.to_str()?.to_ascii_lowercase();
     match extension.as_str() {
         "rs" => Some(SyntaxLanguage::Rust),
@@ -445,8 +831,48 @@ pub fn language_for_path(path: &Path) -> Option<SyntaxLanguage> {
         "json" | "jsonc" => Some(SyntaxLanguage::Json),
         "toml" => Some(SyntaxLanguage::Toml),
         "md" | "markdown" => Some(SyntaxLanguage::Markdown),
+        "sh" | "bash" | "zsh" | "ksh" => Some(SyntaxLanguage::Bash),
+        "c" | "h" => Some(SyntaxLanguage::C),
+        "cc" | "cpp" | "cxx" | "c++" | "hh" | "hpp" | "hxx" | "ipp" => Some(SyntaxLanguage::Cpp),
+        "cs" | "csx" => Some(SyntaxLanguage::CSharp),
+        "css" | "scss" | "less" | "pcss" | "postcss" => Some(SyntaxLanguage::Css),
+        "html" | "htm" | "xhtml" => Some(SyntaxLanguage::Html),
+        "py" | "pyi" | "pyw" => Some(SyntaxLanguage::Python),
+        "yaml" | "yml" => Some(SyntaxLanguage::Yaml),
+        "lua" => Some(SyntaxLanguage::Lua),
+        "nix" => Some(SyntaxLanguage::Nix),
+        "java" => Some(SyntaxLanguage::Java),
+        "rb" | "rake" | "gemspec" => Some(SyntaxLanguage::Ruby),
+        "php" => Some(SyntaxLanguage::Php),
+        "zig" | "zon" => Some(SyntaxLanguage::Zig),
+        "hs" => Some(SyntaxLanguage::Haskell),
+        "ex" | "exs" => Some(SyntaxLanguage::Elixir),
+        "ml" => Some(SyntaxLanguage::OCaml),
+        "scala" | "sc" | "sbt" => Some(SyntaxLanguage::Scala),
+        "swift" => Some(SyntaxLanguage::Swift),
+        "kt" | "kts" => Some(SyntaxLanguage::Kotlin),
+        "dart" => Some(SyntaxLanguage::Dart),
+        "mk" | "mak" => Some(SyntaxLanguage::Make),
+        "cmake" => Some(SyntaxLanguage::CMake),
+        "xml" | "svg" | "xsd" | "xsl" | "plist" | "csproj" => Some(SyntaxLanguage::Xml),
+        "diff" | "patch" => Some(SyntaxLanguage::Diff),
+        "ini" | "cfg" | "desktop" | "service" => Some(SyntaxLanguage::Ini),
+        "proto" => Some(SyntaxLanguage::Proto),
+        "sql" => Some(SyntaxLanguage::Sql),
+        "erl" | "hrl" => Some(SyntaxLanguage::Erlang),
+        "r" => Some(SyntaxLanguage::R),
+        "jl" => Some(SyntaxLanguage::Julia),
+        "vue" => Some(SyntaxLanguage::Vue),
         _ => None,
     }
+}
+/// Captures upstream queries use for predicates, spelling or errors, which take no colour.
+fn uncoloured_capture(name: &str) -> bool {
+    name.starts_with('_')
+        || matches!(
+            name.split('.').next(),
+            Some("none" | "spell" | "nospell" | "error" | "conceal" | "local")
+        )
 }
 fn role(name: &str) -> Option<SyntaxRole> {
     match name {
@@ -461,13 +887,20 @@ fn role(name: &str) -> Option<SyntaxRole> {
         "comment" => Some(SyntaxRole::Comment),
         "string" | "character" | "text" | "escape" => Some(SyntaxRole::String),
         "number" | "float" => Some(SyntaxRole::Number),
-        "keyword" | "operator" | "punctuation" | "tag" | "label" | "boolean" => {
-            Some(SyntaxRole::Keyword)
-        }
+        "keyword" | "operator" | "punctuation" | "tag" | "label" | "boolean" | "conditional"
+        | "repeat" | "exception" | "include" | "import" | "preproc" | "storageclass"
+        | "delimiter" | "charset" | "keyframes" | "media" | "supports" => Some(SyntaxRole::Keyword),
         "type" | "constructor" | "module" | "namespace" => Some(SyntaxRole::Type),
-        "variable" | "function" | "method" | "property" | "constant" | "attribute" | "embedded" => {
-            Some(SyntaxRole::Variable)
-        }
+        "variable" | "function" | "method" | "property" | "constant" | "attribute" | "embedded"
+        | "field" | "parameter" => Some(SyntaxRole::Variable),
+        "markup" => Some(match name {
+            "markup.heading" => SyntaxRole::Heading,
+            "markup.strong" | "markup.bold" => SyntaxRole::Strong,
+            "markup.italic" | "markup.emphasis" => SyntaxRole::Emphasis,
+            "markup.link" | "markup.link.url" => SyntaxRole::Link,
+            "markup.quote" => SyntaxRole::Quote,
+            _ => SyntaxRole::String,
+        }),
         _ => None,
     }
 }
@@ -488,11 +921,26 @@ fn parse(request: Request) -> SyntaxEvent {
     let Some(tree) = parser.parse(&request.source, None) else {
         return failed(&request, "parser returned no tree".into());
     };
-    let query = match Query::new(&descriptor.language, descriptor.highlights) {
-        Ok(query) => query,
-        Err(error) => return failed(&request, format!("highlight query: {error}")),
+    // Compiling a large query costs more than the parse, so each worker keeps its own.
+    thread_local! {
+        static QUERIES: std::cell::RefCell<HashMap<SyntaxLanguage, Query>> = Default::default();
+    }
+    let spans = QUERIES.with_borrow_mut(|queries| {
+        let query = match queries.entry(request.language) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(Query::new(&descriptor.language, descriptor.highlights)?)
+            }
+        };
+        Ok(highlight_spans(query, &tree, &request.source, request.policy.maximum_spans))
+    });
+    let spans = match spans {
+        Ok(spans) => spans,
+        Err(error) => {
+            let error: tree_sitter::QueryError = error;
+            return failed(&request, format!("highlight query: {error}"));
+        }
     };
-    let spans = highlight_spans(&query, &tree, &request.source, request.policy.maximum_spans);
     let folds = match query_rows(
         &descriptor.language,
         descriptor.folds,
@@ -620,6 +1068,61 @@ mod tests {
                 |span| source.is_char_boundary(span.start) && source.is_char_boundary(span.end)
             ));
         }
+    }
+    #[test]
+    fn every_bundled_query_compiles_and_colours_its_language() {
+        validate_builtin_queries().expect("bundled queries");
+        for (path, word) in [
+            ("run.sh", "echo"),
+            ("main.py", "def"),
+            ("index.html", "div"),
+            ("site.css", "color"),
+            ("ci.yaml", "name"),
+            ("main.c", "return"),
+            ("main.cpp", "return"),
+            ("flake.nix", "inputs"),
+            ("Makefile", "all"),
+        ] {
+            let source = match path {
+                "run.sh" => "echo \"hi\" # note\n",
+                "main.py" => "def f():\n    return 1  # note\n",
+                "index.html" => "<div class=\"a\">hi</div>\n",
+                "site.css" => "a { color: red; }\n",
+                "ci.yaml" => "name: build # note\n",
+                "main.c" | "main.cpp" => "int main() { return 0; }\n",
+                "flake.nix" => "{ inputs = { }; }\n",
+                _ => "all:\n\techo hi\n",
+            };
+            let language = language_for_path(Path::new(path)).expect(path);
+            let at = source.find(word).expect(word);
+            assert!(
+                highlight(language, source).iter().any(|span| span.start <= at && at < span.end),
+                "{path}: `{word}` is coloured"
+            );
+        }
+    }
+    #[test]
+    fn toml_values_keep_their_own_colour_next_to_keys() {
+        let source = "[package]\nname = \"dust\"\nversion = 2\n";
+        let spans = highlight(SyntaxLanguage::Toml, source);
+        let role_at = |word: &str| {
+            let at = source.find(word).expect(word);
+            spans.iter().find(|span| span.start <= at && at < span.end).map(|span| span.role)
+        };
+        assert_eq!(role_at("package"), Some(SyntaxRole::Keyword));
+        assert_eq!(role_at("name"), Some(SyntaxRole::Type));
+        assert_eq!(role_at("\"dust\""), Some(SyntaxRole::String));
+        assert_eq!(role_at("2"), Some(SyntaxRole::Number));
+    }
+    #[test]
+    fn scripts_without_an_extension_are_known_by_their_first_line() {
+        let script = Path::new("scripts/ui-shot");
+        assert_eq!(language_for_document(Some(script), "#!/usr/bin/env bash\nset -e\n"), Some(SyntaxLanguage::Bash));
+        assert_eq!(language_for_document(Some(script), "#!/usr/bin/python3 -u\n"), Some(SyntaxLanguage::Python));
+        assert_eq!(language_for_document(Some(script), "#!/usr/bin/env -S node --flag\n"), Some(SyntaxLanguage::JavaScript));
+        assert_eq!(language_for_document(Some(script), "echo hi\n"), None);
+        // The file name wins over the first line.
+        assert_eq!(language_for_document(Some(Path::new("a.py")), "#!/bin/sh\n"), Some(SyntaxLanguage::Python));
     }
     #[test]
     fn oversized_source_falls_back() {

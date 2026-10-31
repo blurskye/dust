@@ -8,10 +8,10 @@ use super::{
     LspProgressKind, LspRuntimeSource, LspWorkspaceEdit, MappingResolution, MatcherSource,
     NativeSurfaceTarget, PersistedLocation, PickerAction, PickerItem, PickerItemId, PickerPayload,
     PickerSurfaceKind, PositionCodec, PositionEncoding, Precondition, PromptKind, PtyId,
-    ResourceIntentKind, RestoreContext, RestoreUpdate, SyntaxDocument, SyntaxLanguage,
+    ResourceIntentKind, RestoreContext, RestoreUpdate, SyntaxDocument,
     SyntaxSupport, TerminalInput, TerminalPanelMode, TextBuffer, TextEdit, TextEditSet, UiEvent,
     UiFold, UiInlayHint, UiSyntaxSpan, UndoPolicy, VfsResult, WindowRect, command,
-    discover_executable, explorer_watch_policy, language_for_path, mode_name, path_from_file_uri,
+    discover_executable, explorer_watch_policy, language_for_document, mode_name, path_from_file_uri,
     rect_contains_point, semantic_role, terminal_tab_at_column,
 };
 
@@ -620,8 +620,8 @@ impl InteractiveApplication {
             }
             .into();
         }
-        if self.ui.tool_menu.is_some() {
-            return "tool_manager".into();
+        if let Some(menu) = &self.ui.tool_menu {
+            return if menu.searching { "tool_manager_search" } else { "tool_manager" }.into();
         }
         if self.keyboard_terminal().is_some() && self.terminal_window_rect().is_some() {
             return self
@@ -1909,22 +1909,6 @@ fn explorer_delete_message_uses_truthful_path_debug_escaping() {
 }
 
 impl InteractiveApplication {
-    pub(super) fn syntax_language_label(&self, language: SyntaxLanguage) -> String {
-        self.message(
-            match language {
-                SyntaxLanguage::Rust => "syntax_language_rust",
-                SyntaxLanguage::TypeScript => "syntax_language_typescript",
-                SyntaxLanguage::Tsx => "syntax_language_tsx",
-                SyntaxLanguage::JavaScript => "syntax_language_javascript",
-                SyntaxLanguage::Go => "syntax_language_go",
-                SyntaxLanguage::Json => "syntax_language_json",
-                SyntaxLanguage::Toml => "syntax_language_toml",
-                SyntaxLanguage::Markdown => "syntax_language_markdown",
-            },
-            &[],
-        )
-    }
-
     pub(super) fn syntax_support_label(&self, support: SyntaxSupport) -> String {
         self.message(
             match support {
@@ -1946,7 +1930,10 @@ impl InteractiveApplication {
         let Some(buffer) = self.state.buffers.get(buffer_id) else {
             return;
         };
-        let Some(language) = buffer.path.as_deref().and_then(language_for_path) else {
+        let Some(language) = language_for_document(
+            buffer.path.as_deref(),
+            buffer.text.chunks().next().unwrap_or_default(),
+        ) else {
             self.show_error(self.message("syntax_indent_unavailable", &[]));
             return;
         };
@@ -1965,7 +1952,7 @@ impl InteractiveApplication {
                     IndentError::Pending => self.message("syntax_indent_pending", &[]),
                     IndentError::Unsupported => self.message(
                         "syntax_indent_unsupported",
-                        &[("language", self.syntax_language_label(language))],
+                        &[("language", language.name().to_owned())],
                     ),
                     IndentError::Truncated => self.message("syntax_indent_truncated", &[]),
                 };
@@ -2037,7 +2024,10 @@ impl InteractiveApplication {
             .map(|(buffer, state)| SyntaxDocument {
                 buffer,
                 text: &state.text,
-                language: state.path.as_deref().and_then(language_for_path),
+                language: language_for_document(
+                    state.path.as_deref(),
+                    state.text.chunks().next().unwrap_or_default(),
+                ),
                 enabled: !(self.effective_large_file(buffer)
                     && self
                         .configuration

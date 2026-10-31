@@ -636,6 +636,9 @@ pub(super) fn render_picker(
                 let first_visible_offset = highlighted_offset.map_or(0, |offset| {
                     offset.saturating_add(1).saturating_sub(available_rows)
                 });
+                let line_spans = text.language.map_or_else(Vec::new, |language| {
+                    preview_line_spans(language, &text.lines)
+                });
                 for (visible_offset, (offset, line)) in text
                     .lines
                     .iter()
@@ -673,17 +676,43 @@ pub(super) fn render_picker(
                             .unwrap_or(0)
                             .saturating_add(1),
                     );
-                    frame.grid.put_text_clipped(
-                        text_left,
-                        y,
-                        line,
-                        if highlighted {
-                            Style::Selection
-                        } else {
-                            Style::Default
-                        },
-                        preview_right,
-                    );
+                    match line_spans.get(offset).filter(|_| !highlighted) {
+                        Some(spans) => {
+                            let mut x = text_left;
+                            let mut at = 0;
+                            for (range, role) in spans {
+                                x = frame.grid.put_text_clipped(
+                                    x,
+                                    y,
+                                    &line[at..range.start],
+                                    Style::Default,
+                                    preview_right,
+                                );
+                                x = frame.grid.put_text_clipped(
+                                    x,
+                                    y,
+                                    &line[range.clone()],
+                                    super::visual_rows::syntax_role_style(*role),
+                                    preview_right,
+                                );
+                                at = range.end;
+                            }
+                            frame.grid.put_text_clipped(x, y, &line[at..], Style::Default, preview_right);
+                        }
+                        None => {
+                            frame.grid.put_text_clipped(
+                                text_left,
+                                y,
+                                line,
+                                if highlighted {
+                                    Style::Selection
+                                } else {
+                                    Style::Default
+                                },
+                                preview_right,
+                            );
+                        }
+                    }
                 }
             }
             PickerPreviewBody::Diff(diff) => {
@@ -710,6 +739,48 @@ pub(super) fn render_picker(
         query_y,
         cursor_style(config.ui.cursor.prompt),
     ));
+}
+
+/// Syntax colours for preview lines, as byte ranges within each line. Captures can nest; the
+/// first one that covers a byte wins, as in markdown code blocks.
+fn preview_line_spans(
+    language: crate::language::syntax::SyntaxLanguage,
+    lines: &[String],
+) -> Vec<Vec<(std::ops::Range<usize>, crate::language::syntax::SyntaxRole)>> {
+    let source = lines.join("\n");
+    if source.len() > 512 * 1024 {
+        return Vec::new();
+    }
+    let mut spans = crate::language::syntax::highlight(language, &source);
+    spans.sort_by_key(|span| (span.start, std::cmp::Reverse(span.end)));
+    let mut per_line = vec![Vec::new(); lines.len()];
+    let mut line = 0;
+    let mut line_start = 0;
+    let mut covered = 0;
+    for span in spans {
+        if span.start < covered || span.start >= span.end {
+            continue;
+        }
+        covered = span.end;
+        let mut start = span.start;
+        while start < span.end && line < lines.len() {
+            let line_end = line_start + lines[line].len();
+            if start > line_end {
+                line_start = line_end + 1;
+                line += 1;
+                continue;
+            }
+            let end = span.end.min(line_end);
+            if start < end {
+                per_line[line].push((start - line_start..end - line_start, span.role));
+            }
+            if span.end <= line_end {
+                break;
+            }
+            start = line_end + 1;
+        }
+    }
+    per_line
 }
 
 pub(super) fn render_tool_menu(
@@ -783,7 +854,14 @@ pub(super) fn render_tool_menu(
             .set_cell(x, y, &character.to_string(), Style::Border);
     }
     let title = menu.runtime_picker.as_ref().map_or_else(
-        || format!(" {} ", configured.title),
+        || {
+            if menu.searching || !menu.query.is_empty() {
+                let cursor = if menu.searching { "▏" } else { "" };
+                format!(" {} · /{}{cursor} ", configured.title, menu.query)
+            } else {
+                format!(" {} ", configured.title)
+            }
+        },
         |picker| {
             format!(
                 " {} · {} · choose build ",

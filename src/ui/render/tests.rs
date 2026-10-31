@@ -2201,7 +2201,7 @@ fn generic_picker_is_centered_filtered_presentation_with_configured_markers() {
             selected: Some(0),
             scroll: 0,
             loading: false,
-            preview: Some(super::PickerPreview::text("health.rs", super::PickerTextPreview { lines: vec!["fn health() {}".to_string()], first_line: 0, highlight_line: Some(0) })),
+            preview: Some(super::PickerPreview::text("health.rs", super::PickerTextPreview { lines: vec!["fn health() {}".to_string()], first_line: 0, highlight_line: Some(0), language: None })),
         }),
         ..UiState::default()
     };
@@ -2232,7 +2232,7 @@ fn picker_stacks_preview_when_two_readable_columns_do_not_fit() {
             loading: false,
             preview: Some(super::PickerPreview::text("src/long.rs", super::PickerTextPreview { lines: (300..320)
                     .map(|line| format!("preview line {line} {long}"))
-                    .collect(), first_line: 300, highlight_line: Some(308) })),
+                    .collect(), first_line: 300, highlight_line: Some(308), language: None })),
         }),
         ..UiState::default()
     };

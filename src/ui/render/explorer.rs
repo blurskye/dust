@@ -203,15 +203,9 @@ pub(super) fn render_explorer_dock(
             Style::ExplorerCount,
             panel_width,
         );
-        if explorer.loading {
-            grid.put_text_clipped(
-                1,
-                1,
-                &config.ui.explorer.loading_label,
-                Style::ExplorerCount,
-                panel_width,
-            );
-        } else if focused || !explorer.query.is_empty() {
+        // What is typed stays in the bar while the tree loads; the loading line goes
+        // under the results.
+        if focused || !explorer.query.is_empty() {
             let x = grid.put_text_clipped(
                 1,
                 1,
@@ -286,6 +280,17 @@ pub(super) fn render_explorer_dock(
         }
     }
 
+    if explorer.loading && rendered_rows < available_rows {
+        let y = body_top.saturating_add(u16::try_from(rendered_rows).unwrap_or(0));
+        grid.put_text_clipped(
+            1,
+            y,
+            &config.ui.explorer.loading_label,
+            Style::ExplorerCount,
+            panel_width.saturating_sub(1),
+        );
+        rendered_rows = rendered_rows.saturating_add(1);
+    }
     if !explorer.preview_lines.is_empty() && rendered_rows < available_rows {
         let divider_y = body_top.saturating_add(u16::try_from(rendered_rows).unwrap_or(0));
         for x in 0..panel_width {

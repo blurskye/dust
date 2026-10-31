@@ -64,7 +64,7 @@ fn bundled_catalog_is_typed_and_has_real_language_and_debug_tools() {
             .iter()
             .filter(|tool| tool.kind == ToolKind::Lsp && tool.install.is_some())
             .count(),
-        17
+        19
     );
     assert!(
         catalog
@@ -290,7 +290,7 @@ fn nixos_runtime_installs_and_probes_every_managed_catalog_lsp() {
         .into_iter()
         .filter(|tool| tool.kind == ToolKind::Lsp && tool.install.is_some())
         .collect::<Vec<_>>();
-    assert_eq!(definitions.len(), 17);
+    assert_eq!(definitions.len(), 19);
     let directory = tempfile::tempdir().expect("tool store");
     let (_, cancellations) = std::sync::mpsc::channel();
     let mut report = |_: &str, _: u64, _: Option<u64>| {};
@@ -463,7 +463,7 @@ fn nixos_runtime_completes_protocol_smoke_for_every_managed_catalog_lsp() {
         .into_iter()
         .filter(|tool| tool.kind == ToolKind::Lsp && tool.install.is_some())
         .collect::<Vec<_>>();
-    assert_eq!(definitions.len(), 17);
+    assert_eq!(definitions.len(), 19);
     let directory = tempfile::tempdir().expect("tool store");
     let (_, cancellations) = std::sync::mpsc::channel();
     let mut report = |_: &str, _: u64, _: Option<u64>| {};

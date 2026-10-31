@@ -24,7 +24,7 @@ use super::{
     WorkspaceFilePolicy, WorkspaceSearchMatch, WorkspaceSearchPolicy, WorkspaceTrust,
     active_editor_pane_viewport, builtin_languages, discover_executable, editor_pane_viewport_at,
     editor_state_content_width, editor_state_gutter_width, file_uri, is_nixos_host,
-    language_for_path, language_id_for_path, lsp_runtime_source_allowed_on_host,
+    language_id_for_path, lsp_runtime_source_allowed_on_host,
     managed_tool_executable, mode_name_large,
     nix_lsp_launch_environment, nix_lsp_profile_installed,
     nix_workspace_shell_for_host, parse_ex, path_from_file_uri, tool_kind_key,
@@ -1876,8 +1876,12 @@ impl InteractiveApplication {
                 let active = self.state.active_buffer_id();
                 let active_language = active
                     .and_then(|buffer| self.state.buffers.get(buffer))
-                    .and_then(|buffer| buffer.path.as_deref())
-                    .and_then(language_for_path);
+                    .and_then(|buffer| {
+                        crate::language::syntax::language_for_document(
+                            buffer.path.as_deref(),
+                            buffer.text.chunks().next().unwrap_or_default(),
+                        )
+                    });
                 let items = builtin_languages()
                     .enumerate()
                     .map(|(index, info)| {
@@ -1919,7 +1923,7 @@ impl InteractiveApplication {
                     badge: String::new(),
                     kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("syntax:{index}:{}", info.id)),
-                                label: self.syntax_language_label(info.language),
+                                label: info.language.name().to_owned(),
                                 detail: self.message(
                                     "syntax_capabilities",
                                     &[
@@ -2578,7 +2582,30 @@ impl InteractiveApplication {
     ) -> Result<(), AppEffect> {
         match effect {
             AppEffect::OpenToolMenu(category) => self.open_tool_menu(category),
+            // Esc on a filtered list clears the search before it closes the manager.
+            AppEffect::CloseToolMenu
+                if self.ui.tool_menu.as_ref().is_some_and(|menu| !menu.query.is_empty()) =>
+            {
+                self.search_tool_menu(None, false);
+            }
             AppEffect::CloseToolMenu => self.close_tool_menu(),
+            AppEffect::ToolSearch => self.search_tool_menu(None, true),
+            AppEffect::ToolSearchInsert(text) => {
+                let query = self.ui.tool_menu.as_ref().map(|menu| format!("{}{text}", menu.query));
+                self.search_tool_menu(query, true);
+            }
+            AppEffect::ToolSearchDelete => {
+                let query = self.ui.tool_menu.as_ref().map(|menu| {
+                    let mut query = menu.query.clone();
+                    query.pop();
+                    query
+                });
+                self.search_tool_menu(query, true);
+            }
+            AppEffect::ToolSearchStop { keep } => {
+                let query = self.ui.tool_menu.as_ref().map(|menu| menu.query.clone());
+                self.search_tool_menu(query.filter(|_| keep), false);
+            }
             AppEffect::MoveToolMenu(direction) => self.move_tool_menu(direction),
             AppEffect::CycleToolCategory(direction) => self.cycle_tool_category(direction),
             AppEffect::RefreshTools => self.refresh_tools(),
@@ -9693,6 +9720,12 @@ impl InteractiveApplication {
             .as_ref()
             .filter(|menu| menu.category == category)
             .map_or(0, |menu| menu.scroll);
+        let (query, searching) = self
+            .ui
+            .tool_menu
+            .as_ref()
+            .map_or_else(Default::default, |menu| (menu.query.clone(), menu.searching));
+        let needle = query.to_lowercase();
         let category = if configured.categories.contains_key(category) {
             category.to_owned()
         } else {
@@ -9707,7 +9740,17 @@ impl InteractiveApplication {
             .iter()
             .filter(|entry| category == "all" || tool_kind_key(entry.definition.kind) == category)
             .filter(|entry| {
-                entry.definition.kind != ToolKind::Lsp
+                let definition = &entry.definition;
+                needle.is_empty()
+                    || definition.name.to_lowercase().contains(&needle)
+                    || definition.id.to_lowercase().contains(&needle)
+                    || definition.languages.iter().any(|language| language.contains(&needle))
+            })
+            // A search reaches every known server, as Mason lists them all; without one the
+            // list keeps to servers that are installed or that Dust can install.
+            .filter(|entry| {
+                !needle.is_empty()
+                    || entry.definition.kind != ToolKind::Lsp
                     || discover_executable(&entry.definition.executable).is_some()
                     || managed_tool_executable(&entry.definition).is_some()
                     || !entry.definition.managed_versions().is_empty()
@@ -9979,7 +10022,20 @@ impl InteractiveApplication {
             scroll,
             rows,
             runtime_picker,
+            query,
+            searching,
         });
+    }
+
+    /// Set the tool search and whether keys still type into it, then filter the list again.
+    pub(in crate::editor::session) fn search_tool_menu(&mut self, query: Option<String>, searching: bool) {
+        let Some(menu) = self.ui.tool_menu.as_mut() else {
+            return;
+        };
+        menu.query = query.unwrap_or_default();
+        menu.searching = searching;
+        let category = menu.category.clone();
+        self.rebuild_tool_menu(&category, None);
     }
 
     pub(in crate::editor::session) fn move_tool_menu(&mut self, direction: i8) {

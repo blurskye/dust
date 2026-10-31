@@ -31,6 +31,7 @@ const BUILTIN_SURFACES: &[&str] = &[
     "dashboard_mouse",
     "prompt_mouse",
     "tool_manager",
+    "tool_manager_search",
     "tool_manager_mouse",
     "picker_mouse",
     "key_release",
