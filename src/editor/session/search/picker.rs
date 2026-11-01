@@ -16,6 +16,8 @@ use std::{
 };
 #[derive(Clone, Debug)]
 pub(in crate::editor::session) enum PickerPayload {
+    /// A past notice, whose whole text opens in a popup.
+    Notice(String),
     /// A row that groups others and is not an action: accepting it does nothing, and
     /// selection steps over it.
     Section,

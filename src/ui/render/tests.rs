@@ -186,13 +186,8 @@ fn attach_test_compositor(
         width,
         height,
     };
-    let preliminary = snapshot.project(
-        bounds,
-        config.ui.panes.minimum_width,
-        config.ui.panes.minimum_height,
-    );
-    let (top, bottom) =
-        super::editor_workspace_insets(state, ui, config, preliminary.workspace_bounds.height);
+    let top = super::workspace_top_rows(state, ui, config);
+    let screen_bottom = super::screen_foot_rows(state, ui, config, height);
     ui.window_graph_revision = Some(1);
     ui.compositor_layout = Some(super::CompositorLayoutState {
         source_revision: state.window_revision().expect("test revision"),
@@ -202,8 +197,8 @@ fn attach_test_compositor(
             config.ui.panes.minimum_width,
             config.ui.panes.minimum_height,
             crate::ui::window::TiledInsets {
+                screen_bottom,
                 top,
-                bottom,
                 ..Default::default()
             },
         ),
@@ -1004,6 +999,7 @@ fn buffer_line_begins_after_the_explorer_dock() {
             scroll: 0,
             loading: false,
             total: 0,
+            matches: 0,
             query: String::new(),
             searching: false,
             preview_lines: Vec::new(),
@@ -1037,6 +1033,7 @@ fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity() {
             scroll: 0,
             loading: false,
             total: 0,
+            matches: 0,
             query: String::new(),
             searching: false,
             preview_lines: Vec::new(),
@@ -2283,7 +2280,7 @@ fn active_pane_viewport_uses_exact_focused_split_rectangle() {
     let mut ui = ui_with_editor_layout(&state);
     attach_test_compositor(&state, &mut ui, &loaded.config, 79, 24);
     let viewport =
-        super::active_pane_viewport(&state, &ui, &loaded.config, 79, 24).expect("focused viewport");
+        super::active_pane_viewport(&state, &ui, &loaded.config, 79, 23).expect("focused viewport");
     assert_eq!(Some(viewport.view), state.active_view);
     assert!(viewport.x > 0 && viewport.y > 0);
     assert!(viewport.width < 79 && viewport.height < 23);
@@ -2313,7 +2310,7 @@ fn completion_is_clipped_to_the_focused_split() {
     });
     attach_test_compositor(&state, &mut ui, &loaded.config, 80, 20);
     let pane =
-        super::active_pane_viewport(&state, &ui, &loaded.config, 80, 20).expect("active pane");
+        super::active_pane_viewport(&state, &ui, &loaded.config, 80, 19).expect("active pane");
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 20);
     for row in 0..20 {
         for column in 0..80 {
@@ -2401,6 +2398,7 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
             scroll: 0,
             loading: false,
             total: 2,
+            matches: 2,
             query: String::new(),
             searching: false,
             preview_lines: Vec::new(),
@@ -2601,7 +2599,7 @@ fn language_diagnostics_and_completion_are_projected_without_service_calls() {
             code: Some("E0001".into()),
             message: "problem".into(),
         }],
-        git_changed_files: 3,
+        git_branch: Some("lean".into()),
         running_tasks: 2,
         language_completion: Some(super::LanguageCompletionState {
             items: vec![CompletionItem {
@@ -2630,9 +2628,7 @@ fn language_diagnostics_and_completion_are_projected_without_service_calls() {
     assert!(frame.grid.row_text(0).contains("●● problem [E0001]"));
     assert!((0..10).any(|row| frame.grid.row_text(row).contains("better")));
     let status = frame.grid.row_text(9);
-    assert!(
-        status.contains("E1 W0") && status.contains("Git 3 files") && status.contains("Tasks 2")
-    );
+    assert!(status.contains("\u{f057} 1") && status.contains("lean") && status.contains("Tasks 2"));
 }
 
 #[test]
@@ -2783,22 +2779,25 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
         scroll: 0,
         loading: false,
         total: 0,
+        matches: 0,
         query: String::new(),
         searching: false,
         preview_lines: Vec::new(),
     });
     ui.terminal_panel = Some(terminal.clone());
-    let geometry = super::terminal_panel_geometry(&config, 20, 6).expect("terminal geometry");
-    assert_eq!(geometry.top, 14);
+    // The status line keeps the screen's last row, so the panel ends one row above it.
+    let geometry = super::terminal_panel_geometry(&config, 19, 6).expect("terminal geometry");
+    assert_eq!(geometry.top, 13);
     assert_eq!(geometry.body_height, 5);
     let panel_width = super::explorer_panel_width(&config, 80).expect("explorer width");
     let editor_width = 80_u16.saturating_sub(panel_width).saturating_sub(1);
     attach_test_compositor(&state, &mut ui, &config, 80, 20);
     let viewport = super::active_pane_viewport(&state, &ui, &config, editor_width, geometry.top)
         .expect("reduced editor viewport");
-    assert!(viewport.height < 14);
+    assert!(viewport.height <= 13);
 
     let frame = render(&state, &ui, &config, &loaded.dashboard, 80, 20);
+    assert!(frame.grid.row_text(19).contains("NORMAL"));
     assert_eq!(
         frame.grid.get(0, geometry.top).expect("full divider").style,
         crate::ui::Style::TerminalBorder
@@ -2924,6 +2923,7 @@ fn key_hints_anchor_clip_and_preserve_protected_rows() {
         scroll: 0,
         loading: false,
         total: 0,
+        matches: 0,
         query: String::new(),
         searching: false,
         preview_lines: Vec::new(),
@@ -3460,9 +3460,9 @@ fn the_debug_console_and_the_terminal_panel_are_planned_together_rather_than_col
         );
     }
     assert!(
-        frame.grid.row_text(panel_row - 2).contains("c7"),
-        "the console's LAST line sits above the status line, which sits above the panel: {:?}",
-        frame.grid.row_text(panel_row - 2)
+        frame.grid.row_text(panel_row - 1).contains("c7"),
+        "the console's LAST line sits directly above the panel: {:?}",
+        frame.grid.row_text(panel_row - 1)
     );
 }
 
@@ -3960,13 +3960,20 @@ fn the_status_line_puts_the_server_and_root_on_the_right() {
     ui.lsp_server = Some("rust-analyzer".into());
     let wide = super::render_editor_view(&state, view, &ui, &loaded.config, 80, 5);
     let status = wide.grid.row_text(4);
-    assert!(status.trim_end().ends_with("rust-analyzer  some-project  1:1"), "{status:?}");
+    assert!(status.contains("rust-analyzer  some-project"), "{status:?}");
+    assert!(status.trim_end().ends_with("Top \u{e0b2} 1:1"), "{status:?}");
+    assert_eq!(wide.grid.get(1, 4).expect("mode").style, crate::ui::Style::StatusAccent);
 
-    // The server goes first when the room runs out; the root stays.
+    // The server goes first when the room runs out, then the progress; the root stays.
     let narrow = super::render_editor_view(&state, view, &ui, &loaded.config, 42, 5);
     let status = narrow.grid.row_text(4);
-    assert!(status.trim_end().ends_with("some-project  1:1"), "{status:?}");
-    assert!(!status.contains("rust-analyzer"), "{status:?}");
+    assert!(status.trim_end().ends_with("some-project  \u{e0b2} 1:1"), "{status:?}");
+    assert!(!status.contains("rust-analyzer") && !status.contains("Top"), "{status:?}");
+
+    // Each mode shows in its own colour.
+    state.views[view].mode = crate::editor::EditorMode::Insert;
+    let insert = super::render_editor_view(&state, view, &ui, &loaded.config, 80, 5);
+    assert_eq!(insert.grid.get(1, 4).expect("mode").style, crate::ui::Style::StatusInsert);
 }
 
 #[test]

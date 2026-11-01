@@ -726,10 +726,12 @@ impl InteractiveApplication {
             AgentChoice::Resume(id) => match self.reopen_conversation(&id) {
                 Some(index) if self.agent.sessions[index].process.is_none() => {
                     self.show_agent_panel();
+                    self.agent.normal = false;
                     self.restart_active_agent()
                 }
                 Some(_) => {
                     self.show_agent_panel();
+                    self.agent.normal = false;
                     Ok(())
                 }
                 None => Err("that conversation could not be read".to_owned()),

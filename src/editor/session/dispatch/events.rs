@@ -109,11 +109,8 @@ impl InteractiveApplication {
     }
 
     pub(super) fn sync_status_summary_ui(&mut self) {
-        let changed_files = self
-            .git
-            .status()
-            .map_or(0, |snapshot| snapshot.entries.len());
-        self.ui.set(changed_files, |ui| &mut ui.git_changed_files);
+        let branch = self.git.branch().map(str::to_owned);
+        self.ui.set(branch, |ui| &mut ui.git_branch);
         let running = self.tasks.running_count();
         self.ui.set(running, |ui| &mut ui.running_tasks);
     }
@@ -254,11 +251,10 @@ impl InteractiveApplication {
         ) else {
             return false;
         };
-        let (top, bottom) = crate::ui::editor_workspace_insets(
+        let top = crate::ui::workspace_top_rows(
             &self.state,
             &self.ui,
             self.configuration.settings(),
-            bounds.height,
         );
         // The same region the renderer gives the panes: above a docked terminal panel.
         let panel_top = self
@@ -270,7 +266,7 @@ impl InteractiveApplication {
         let end = bounds.y.saturating_add(bounds.height).min(panel_top);
         let region = crate::ui::window::WindowRect {
             y: bounds.y.saturating_add(top),
-            height: end.saturating_sub(bounds.y).saturating_sub(top.saturating_add(bottom)),
+            height: end.saturating_sub(bounds.y).saturating_sub(top),
             ..bounds
         };
         let Some(pane) = crate::ui::debug_pane_tab_at(region, selected, column, row) else {
@@ -1461,13 +1457,7 @@ impl InteractiveApplication {
                     let buffer = match text
                         .and_then(|text| self.open_startup_document(text, path.clone()))
                     {
-                        Ok(buffer) => {
-                            self.notify_message(
-                                self.message("opened", &[("path", self.workspace_relative_label(&path))]),
-                                false,
-                            );
-                            Some(buffer)
-                        }
+                        Ok(buffer) => Some(buffer),
                         Err(error) => {
                             self.show_error(error);
                             None
@@ -1595,6 +1585,8 @@ impl InteractiveApplication {
                         Ok(text) => match pending {
                             Some(NavigationRead::Matcher(source)) => {
                                 let (buffer, view) = self.state.open_text(text, Some(path.clone()));
+                                self.state.buffers[buffer].read_only =
+                                    self.workspace.require_path(&path).is_err();
                                 let start = self.state.buffers[buffer]
                                     .text
                                     .line_to_byte(source.line)
@@ -2779,7 +2771,13 @@ impl InteractiveApplication {
             return;
         };
         if self.language.active() != Some(&server) {
+            // Switching servers clears completion state, including where this one started.
+            let start = self.language.completion_start();
+            let automatic = self.language.completion_automatic();
             self.select_lsp_session(&server);
+            if matches!(feature, LspFeature::Completion) {
+                self.language.begin_completion(start, automatic);
+            }
         }
         // The application owns a session record while its process is still
         // initializing. Do not expose that record as a runnable server or

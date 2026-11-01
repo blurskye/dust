@@ -6,7 +6,7 @@ use crate::{
 
 use super::{
     Frame, UiState,
-    editor::{render_editor_view, render_status_line},
+    editor::render_editor_view,
     overlays::render_content_tab_line,
 };
 
@@ -33,7 +33,6 @@ pub(super) struct PaneRect {
 pub(super) struct WorkspaceProjection {
     tab_line_visible: bool,
     buffer_line_visible: bool,
-    status_rows: u16,
     panes: Vec<PaneRect>,
     borders: Vec<crate::ui::window::ProjectedBorder>,
 }
@@ -153,8 +152,6 @@ pub(super) fn workspace_projection(
         && (!config.ui.tab_line.hide_when_single || state.tabs.len() > 1);
     let buffer_line_visible = config.ui.buffer_line.enabled
         && ui.content_tabs.len() > usize::from(config.ui.buffer_line.hide_when_single);
-    let top = u16::from(tab_line_visible).saturating_add(u16::from(buffer_line_visible));
-    let status_rows = u16::from(config.ui.status_line.enabled && height > top);
     let origin = compositor.projection.workspace_bounds;
     let panes = compositor
         .projection
@@ -189,7 +186,6 @@ pub(super) fn workspace_projection(
     Some(WorkspaceProjection {
         tab_line_visible,
         buffer_line_visible,
-        status_rows,
         panes,
         borders,
     })
@@ -351,6 +347,9 @@ pub(super) fn render_workspace(
             cursor: None,
         };
     };
+    // The status line belongs to the screen, not to a pane.
+    let mut pane_config = config.clone();
+    pane_config.ui.status_line.enabled = false;
     if pane_count == 1
         && !projection.tab_line_visible
         && !projection.buffer_line_visible
@@ -362,7 +361,7 @@ pub(super) fn render_workspace(
                 cursor: None,
             };
         };
-        return render_editor_view(state, view, ui, config, width, height);
+        return render_editor_view(state, view, ui, &pane_config, width, height);
     }
     let mut grid = CellGrid::new_with_policy(
         width,
@@ -413,8 +412,6 @@ pub(super) fn render_workspace(
         );
     }
     let mut cursor = None;
-    let mut pane_config = config.clone();
-    pane_config.ui.status_line.enabled = false;
     for rect in projection.panes {
         let frame = render_editor_view(state, rect.view, ui, &pane_config, rect.width, rect.height);
         for y in 0..rect.height {
@@ -449,11 +446,6 @@ pub(super) fn render_workspace(
                 TileAxis::Vertical => (border.x.saturating_add(offset), border.y, horizontal),
             };
             grid.set_cell(cell_x, cell_y, &symbol.to_string(), Style::Border);
-        }
-    }
-    if projection.status_rows > 0 {
-        if let Some(view) = state.active_view {
-            render_status_line(&mut grid, state, view, ui, config, width, height - 1);
         }
     }
     Frame { grid, cursor }

@@ -323,33 +323,26 @@ fn plugin_drafts_cannot_write_editor_resources_foreign_generations_tabs_or_prote
 
 #[test]
 fn body_and_notice_bounds_fail_closed_at_tiny_sizes() {
-    let mut config = load_bundled_config().config;
+    let config = load_bundled_config().config;
     for width in 0..=10 {
         for height in 0..=10 {
-            for enabled in [false, true] {
-                config.ui.status_line.enabled = enabled;
-                let rect = WindowRect {
-                    x: 5,
-                    y: 7,
-                    width,
-                    height,
-                };
-                let body = crate::ui::geometry::explorer_body_geometry(rect, &config, true);
-                assert!(body.y >= rect.y && body.y + body.height <= rect.y + height);
-                assert!(body.width <= width);
-                if let Some(notice) =
-                    crate::ui::geometry::error_notification_geometry(&config, width, height)
-                {
-                    assert!(notice.x + notice.width <= width);
-                    assert!(notice.y + notice.height <= height);
-                }
-                let rows = crate::ui::geometry::documentation_page_rows(&config, width, height);
-                assert!(
-                    rows <= usize::from(
-                        height.saturating_sub(u16::from(enabled)).saturating_sub(2)
-                    )
-                );
+            let rect = WindowRect {
+                x: 5,
+                y: 7,
+                width,
+                height,
+            };
+            let body = crate::ui::geometry::explorer_body_geometry(rect, &config, true);
+            assert!(body.y >= rect.y && body.y + body.height <= rect.y + height);
+            assert!(body.width <= width);
+            if let Some(notice) =
+                crate::ui::geometry::error_notification_geometry(&config, width, height)
+            {
+                assert!(notice.x + notice.width <= width);
+                assert!(notice.y + notice.height <= height);
             }
+            let rows = crate::ui::geometry::documentation_page_rows(&config, width, height);
+            assert!(rows <= usize::from(height.saturating_sub(2)));
         }
     }
 }
@@ -425,7 +418,7 @@ fn accepted_projection_rejects_old_source_graph_size_and_invalidation() {
         1
     );
     let body = windows.content().explorer.unwrap();
-    assert_eq!((body.y, body.height), (0, 29));
+    assert_eq!((body.y, body.height), (0, 30));
     assert_eq!(
         windows.content().documentation_rows,
         crate::ui::geometry::documentation_page_rows(&config, 75, 30)

@@ -151,7 +151,6 @@ pub fn explorer_body_geometry(rect: WindowRect, config: &Config, search_box: boo
         width: rect.width.saturating_sub(1),
         height: rect
             .height
-            .saturating_sub(u16::from(config.ui.status_line.enabled))
             .saturating_sub(header)
             .min(u16::try_from(config.ui.explorer.maximum_visible_rows).unwrap_or(u16::MAX)),
     }
@@ -162,11 +161,8 @@ pub fn documentation_page_rows(config: &Config, width: u16, height: u16) -> usiz
     if !config.ui.documentation_popup.enabled || width < 4 {
         return 0;
     }
-    usize::from(config.ui.documentation_popup.max_height.saturating_sub(2)).min(usize::from(
-        height
-            .saturating_sub(u16::from(config.ui.status_line.enabled))
-            .saturating_sub(2),
-    ))
+    usize::from(config.ui.documentation_popup.max_height.saturating_sub(2))
+        .min(usize::from(height.saturating_sub(2)))
 }
 
 pub(crate) fn error_notification_geometry(

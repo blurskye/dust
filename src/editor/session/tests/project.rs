@@ -862,7 +862,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
     wait_explorer(&mut app);
     let explorer = app.ui.explorer.as_ref().expect("explorer projection");
     assert_eq!(explorer.total, 41);
-    assert_eq!(explorer.rows.len(), 6);
+    assert_eq!(explorer.rows.len(), 7);
     assert!(explorer.rows.len() < explorer.total);
     assert_eq!(explorer.rows.iter().filter(|row| row.selected).count(), 1);
     let first_child = app.explorer.tree().selected_id().expect("first child");
@@ -883,7 +883,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
 
     app.handle_event(crate::ui::UiEvent::Resize(80, 20));
     let explorer = app.ui.explorer.as_ref().expect("grown projection");
-    assert_eq!(explorer.rows.len(), 16);
+    assert_eq!(explorer.rows.len(), 17);
     assert_eq!(explorer.rows.iter().filter(|row| row.selected).count(), 1);
     assert_eq!(
         app.explorer.tree().projection_generation(),
@@ -891,7 +891,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
     );
     app.handle_event(crate::ui::UiEvent::Resize(80, 8));
     let explorer = app.ui.explorer.as_ref().expect("shrunk projection");
-    assert_eq!(explorer.rows.len(), 4);
+    assert_eq!(explorer.rows.len(), 5);
     assert_eq!(explorer.rows.iter().filter(|row| row.selected).count(), 1);
     assert_eq!(
         app.explorer.tree().projection_generation(),
@@ -900,7 +900,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
 
     app.move_explorer_selection(30);
     let explorer = app.ui.explorer.as_ref().expect("scrolled projection");
-    assert_eq!(explorer.rows.len(), 4);
+    assert_eq!(explorer.rows.len(), 5);
     assert!(explorer.scroll > 0);
     assert!(explorer.rows.iter().any(|row| row.selected));
     let before_page = app

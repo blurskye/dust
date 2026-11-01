@@ -127,7 +127,8 @@ impl InputSession {
             },
             EditorOperation::SetSelection {
                 view,
-                selection: Some(Selection {
+                // An empty placeholder selects nothing, or typing there would grow a selection.
+                selection: (!range.is_empty()).then_some(Selection {
                     anchor: range.start,
                     head: range.end,
                     kind: SelectionKind::Character,

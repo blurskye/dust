@@ -4,7 +4,7 @@ use crossterm::cursor::SetCursorStyle;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    config::{AmbiguousWidth, Config, CursorShape, LineNumbers},
+    config::{AmbiguousWidth, Config, CursorShape, ExplorerIconMode, LineNumbers},
     editor::{
         EditorMode, EditorState, SelectionKind,
         text::{
@@ -811,7 +811,7 @@ pub(super) fn render_editor_view(
 
 /// Draw the operation bar. At narrow widths the blockers are dropped and then the phase is
 /// shortened, because the operation and the cancellation are what must not be lost.
-fn render_operation_bar(grid: &mut CellGrid, ui: &UiState, width: u16, y: u16) {
+pub(super) fn render_operation_bar(grid: &mut CellGrid, ui: &UiState, width: u16, y: u16) {
     let Some(bar) = ui.operation_bar.as_ref() else {
         return;
     };
@@ -820,6 +820,9 @@ fn render_operation_bar(grid: &mut CellGrid, ui: &UiState, width: u16, y: u16) {
     grid.put_text_clipped(0, y, &row, Style::Status, width);
 }
 
+/// One bar along the screen's foot, laid out like lualine: the mode and branch in blocks on the
+/// left, the file after them, then the server and root, and the progress and position in blocks
+/// on the right.
 pub(super) fn render_status_line(
     grid: &mut CellGrid,
     state: &EditorState,
@@ -836,23 +839,32 @@ pub(super) fn render_status_line(
         return;
     };
     grid.fill_row(status_y, Style::Status);
+    let status = &config.ui.status_line;
+    let shown = |component: &str| status.components.iter().any(|item| item == component);
     // The agent panel's input has its own Insert and Normal modes.
     let panel = ui.agent_panel.as_ref().filter(|panel| panel.view == view_id);
     let agent = panel.is_some();
-    let mode_label = config
-        .ui
-        .status_line
+    let mode_key = match panel {
+        Some(panel) if panel.normal => "normal",
+        Some(_) => "insert",
+        None => mode_name(view.mode),
+    };
+    let mode_label = status
         .mode_labels
-        .get(match panel {
-            Some(panel) if panel.normal => "normal",
-            Some(_) => "insert",
-            None => mode_name(view.mode),
-        })
+        .get(mode_key)
         .expect("resolved configuration validates mode labels");
-    let mode = format!(
-        "{}{}{}",
-        config.ui.status_line.mode_padding, mode_label, config.ui.status_line.mode_padding
-    );
+    let (mode_style, mode_edge) = status_mode_styles(mode_key);
+    let icons = config.ui.explorer.icon_mode == ExplorerIconMode::NerdFont;
+    let (end_edge, start_edge, branch_icon, error_icon, warning_icon) = if icons {
+        ("\u{e0b0}", "\u{e0b2}", "\u{e0a0} ", "\u{f057} ", "\u{f071} ")
+    } else {
+        (" ", " ", "", "E", "W")
+    };
+    let mode = if shown("mode") {
+        format!("{0}{mode_label}{0}", status.mode_padding)
+    } else {
+        String::new()
+    };
     let name = buffer
         .path
         .as_ref()
@@ -861,42 +873,24 @@ pub(super) fn render_status_line(
             || {
                 buffer
                     .virtual_owner()
-                    .unwrap_or(&config.ui.status_line.scratch_label)
+                    .unwrap_or(&status.scratch_label)
                     .to_owned()
             },
             |name| name.to_string_lossy().into_owned(),
         );
-    // The compact indicator of the same state, so the operation survives where the bar cannot be
-    // drawn in full.
-    let operation_indicator = ui
-        .operation_bar
-        .as_ref()
-        .map(|bar| format!(" {} ", bar.indicator()))
-        .unwrap_or_default();
-    let dirty = if buffer.dirty {
-        config.ui.status_line.dirty_marker.as_str()
+    let file = if shown("file") {
+        let icon = crate::files::file_icon(&name)
+            .filter(|_| icons && buffer.path.is_some())
+            .map_or_else(String::new, |icon| format!("{} ", icon.glyph));
+        let dirty = if buffer.dirty {
+            status.dirty_marker.as_str()
+        } else {
+            ""
+        };
+        format!("{icon}{name}{dirty}")
     } else {
-        ""
-    };
-    let current_line = buffer.text.byte_to_line(view.cursor).unwrap_or(0);
-    let position = if agent {
         String::new()
-    } else {
-        config
-            .ui
-            .status_line
-            .position_format
-            .replace("{line}", &(current_line + 1).to_string())
-            .replace(
-                "{column}",
-                &(byte_column(&buffer.text, view.cursor) + 1).to_string(),
-            )
     };
-    let lsp_status = ui
-        .lsp_server
-        .as_ref()
-        .map(|server| config.ui.status_line.lsp_format.replace("{server}", server))
-        .unwrap_or_default();
     let (errors, warnings) = buffer.path.as_ref().map_or((0, 0), |path| {
         ui.diagnostics
             .iter()
@@ -915,124 +909,175 @@ pub(super) fn render_status_line(
                 },
             )
     });
-    let diagnostic_status = if errors + warnings > 0 {
-        config
-            .ui
-            .status_line
-            .diagnostic_format
-            .replace("{errors}", &errors.to_string())
-            .replace("{warnings}", &warnings.to_string())
-    } else {
-        String::new()
-    };
-    let git_status = if ui.git_changed_files > 0 {
-        config
-            .ui
-            .status_line
-            .git_format
-            .replace("{count}", &ui.git_changed_files.to_string())
-    } else {
-        String::new()
-    };
-    let task_status = if ui.running_tasks > 0 {
-        config
-            .ui
-            .status_line
-            .task_format
-            .replace("{count}", &ui.running_tasks.to_string())
-    } else {
-        String::new()
-    };
-    let root_status = config
-        .ui
-        .status_line
-        .root_format
-        .replace("{root}", &workspace_title(state, config));
+    // After the file, in the configured order. These go whole or not at all.
+    let mut left_fields = Vec::new();
+    for component in &status.components {
+        match component.as_str() {
+            "diagnostics" => {
+                if errors > 0 {
+                    left_fields.push((format!("{error_icon}{errors}"), Style::StatusError));
+                }
+                if warnings > 0 {
+                    left_fields.push((format!("{warning_icon}{warnings}"), Style::StatusWarning));
+                }
+            }
+            "tasks" if ui.running_tasks > 0 => left_fields.push((
+                status
+                    .task_format
+                    .replace("{count}", &ui.running_tasks.to_string()),
+                Style::Status,
+            )),
+            "large_file" if ui.large_file_buffers.contains(&view.buffer) => left_fields.push((
+                config.editor.large_file.status_label.clone(),
+                Style::StatusWarning,
+            )),
+            _ => {}
+        }
+    }
+    let branch = ui
+        .git_branch
+        .as_ref()
+        .filter(|_| shown("git"))
+        .map(|branch| {
+            format!(
+                " {branch_icon}{} ",
+                status.git_format.replace("{branch}", branch)
+            )
+        });
     // The operation indicator is drawn FIRST, so it survives every configured component layout:
     // a paused operation must not be hidden by a user's statusline choices.
-    let mut x = if operation_indicator.is_empty() {
-        0
-    } else {
-        grid.put_text_clipped(0, status_y, &operation_indicator, Style::StatusAccent, width)
+    let operation_indicator = ui
+        .operation_bar
+        .as_ref()
+        .map(|bar| format!(" {} ", bar.indicator()))
+        .unwrap_or_default();
+    // Everything left of the file: the indicator, the mode, one blank section cell and both edges.
+    let left_fixed = text_cells(&operation_indicator, config)
+        .saturating_add(text_cells(&mode, config))
+        .saturating_add(text_cells(&file, config))
+        .saturating_add(4);
+    let cursor_line = buffer.text.byte_to_line(view.cursor).unwrap_or(0);
+    // The position always shows; the rest of the right side goes first when the left needs room.
+    let position = (!agent && shown("position")).then(|| {
+        let text = status
+            .position_format
+            .replace("{line}", &(cursor_line + 1).to_string())
+            .replace(
+                "{column}",
+                &(byte_column(&buffer.text, view.cursor) + 1).to_string(),
+            );
+        format!(" {text} ")
+    });
+    let mut right_cells = position
+        .as_deref()
+        .map_or(0, |text| text_cells(text, config).saturating_add(1));
+    let branch = branch.filter(|text| {
+        left_fixed
+            .saturating_add(text_cells(text, config))
+            .saturating_add(right_cells)
+            <= width
+    });
+    let left_needed = left_fixed.saturating_add(
+        branch
+            .as_deref()
+            .map_or(0, |text| text_cells(text, config)),
+    );
+    let mut fits = |cells: u16| {
+        let fits = left_needed.saturating_add(right_cells).saturating_add(cells) < width;
+        if fits {
+            right_cells = right_cells.saturating_add(cells);
+        }
+        fits
     };
-    let separator = &config.ui.status_line.component_separator;
+    let separator = &status.component_separator;
     let separator_cells = text_cells(separator, config);
-    // The right side holds the position, the root and the server. The field furthest from the
-    // edge goes first when the mode and the file name need the room.
-    let left_needed = text_cells(&mode, config)
-        .saturating_add(separator_cells)
-        .saturating_add(text_cells(&name, config))
-        .saturating_add(text_cells(dirty, config))
-        .saturating_add(x);
-    let mut right_cells = 0_u16;
-    let mut right_fields = Vec::new();
-    for component in config.ui.status_line.components.iter().rev() {
-        let text = match component.as_str() {
-            "position" => position.as_str(),
-            "root" => root_status.as_str(),
-            "lsp" => lsp_status.as_str(),
-            _ => continue,
-        };
-        if text.is_empty() {
-            continue;
-        }
-        let cells = text_cells(text, config).saturating_add(separator_cells);
-        if component != "position"
-            && left_needed.saturating_add(right_cells).saturating_add(cells) >= width
-        {
-            continue;
-        }
-        right_cells = right_cells.saturating_add(cells);
-        right_fields.push(text);
-    }
+    // What goes first when the room runs out: the server, then the progress, then the root.
+    let root = shown("root")
+        .then(|| status.root_format.replace("{root}", &workspace_title(state, config)))
+        .filter(|text| fits(text_cells(text, config).saturating_add(separator_cells)));
+    let progress = (!agent && shown("progress"))
+        .then(|| format!(" {} ", status_progress(cursor_line, buffer.text.visible_lines())))
+        .filter(|text| fits(text_cells(text, config).saturating_add(1)));
+    let lsp = ui
+        .lsp_server
+        .as_ref()
+        .filter(|_| shown("lsp"))
+        .map(|server| status.lsp_format.replace("{server}", server))
+        .filter(|text| fits(text_cells(text, config).saturating_add(separator_cells)));
+    let right_fields = status
+        .components
+        .iter()
+        .filter_map(|component| match component.as_str() {
+            "root" => root.as_deref(),
+            "lsp" => lsp.as_deref(),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
     let left_limit = width.saturating_sub(right_cells);
-    let mut right_x = left_limit.saturating_add(separator_cells);
-    for text in right_fields.iter().rev() {
-        right_x = grid.put_text_clipped(right_x, status_y, text, Style::Status, width);
-        right_x = right_x.saturating_add(separator_cells);
+    let mut x = grid.put_text_clipped(
+        0,
+        status_y,
+        &operation_indicator,
+        Style::StatusAccent,
+        left_limit,
+    );
+    x = grid.put_text_clipped(x, status_y, &mode, mode_style, left_limit);
+    x = grid.put_text_clipped(x, status_y, end_edge, mode_edge, left_limit);
+    x = grid.put_text_clipped(
+        x,
+        status_y,
+        branch.as_deref().unwrap_or(" "),
+        Style::StatusSection,
+        left_limit,
+    );
+    x = grid.put_text_clipped(x, status_y, end_edge, Style::StatusEdgeSection, left_limit);
+    x = x.saturating_add(1);
+    x = grid.put_text_clipped(x, status_y, &file, Style::Status, left_limit);
+    for (text, style) in &left_fields {
+        let next = x.saturating_add(separator_cells);
+        if next.saturating_add(text_cells(text, config)) > left_limit {
+            continue;
+        }
+        x = grid.put_text_clipped(next, status_y, text, *style, left_limit);
     }
-    for component in &config.ui.status_line.components {
-        let (text, style) = match component.as_str() {
-            "mode" => (mode.as_str(), Style::StatusAccent),
-            "file" => (if buffer.dirty { "" } else { name.as_str() }, Style::Status),
-            "large_file" => (
-                if ui.large_file_buffers.contains(&view.buffer) {
-                    config.editor.large_file.status_label.as_str()
-                } else {
-                    ""
-                },
-                Style::StatusAccent,
-            ),
-            "diagnostics" => (
-                diagnostic_status.as_str(),
-                if errors > 0 {
-                    Style::Error
-                } else {
-                    Style::Warning
-                },
-            ),
-            "git" => (git_status.as_str(), Style::StatusAccent),
-            "tasks" => (task_status.as_str(), Style::StatusAccent),
-            _ => continue,
-        };
-        let owned_file;
-        let text = if component == "file" && buffer.dirty {
-            owned_file = format!("{name}{dirty}");
-            owned_file.as_str()
-        } else {
-            text
-        };
-        if text.is_empty() {
-            continue;
+
+    let mut x = left_limit;
+    for text in right_fields {
+        x = grid.put_text_clipped(x, status_y, text, Style::Status, width);
+        x = x.saturating_add(separator_cells);
+    }
+    if let Some(text) = &progress {
+        x = grid.put_text_clipped(x, status_y, start_edge, Style::StatusEdgeSection, width);
+        x = grid.put_text_clipped(x, status_y, text, Style::StatusSection, width);
+    }
+    if let Some(text) = &position {
+        x = grid.put_text_clipped(x, status_y, start_edge, mode_edge, width);
+        grid.put_text_clipped(x, status_y, text, mode_style, width);
+    }
+}
+
+/// A mode's block on the status line and the edge that joins it to the next section.
+fn status_mode_styles(mode: &str) -> (Style, Style) {
+    match mode {
+        "insert" => (Style::StatusInsert, Style::StatusEdgeInsert),
+        "visual_char" | "visual_line" | "visual_block" | "multi" => {
+            (Style::StatusVisual, Style::StatusEdgeVisual)
         }
-        // The mode and the file name are cut to fit; other fields go whole or not at all.
-        if !matches!(component.as_str(), "mode" | "file")
-            && x.saturating_add(text_cells(text, config)) > left_limit
-        {
-            continue;
-        }
-        x = grid.put_text_clipped(x, status_y, text, style, left_limit);
-        x = grid.put_text_clipped(x, status_y, separator, Style::Status, left_limit);
+        "replace" => (Style::StatusReplace, Style::StatusEdgeReplace),
+        "command_line" | "prompt" => (Style::StatusCommand, Style::StatusEdgeCommand),
+        _ => (Style::StatusAccent, Style::StatusEdgeNormal),
+    }
+}
+
+/// Where the cursor is in the file, as lualine says it.
+fn status_progress(line: usize, lines: usize) -> String {
+    if line == 0 {
+        "Top".to_owned()
+    } else if line + 1 >= lines {
+        "Bot".to_owned()
+    } else {
+        format!("{}%", (line + 1) * 100 / lines)
     }
 }
 

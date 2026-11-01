@@ -846,10 +846,23 @@ impl ExplorerSession {
                 }
             })
             .collect();
+        let needle = tree.filter().to_lowercase();
+        let matches = if needle.is_empty() {
+            total
+        } else {
+            visible_ids
+                .iter()
+                .filter_map(|id| tree.node(*id))
+                .filter(|node| {
+                    node.kind != ExplorerKind::Root && node.name.to_lowercase().contains(&needle)
+                })
+                .count()
+        };
         self.set_active_scroll(scroll);
         ExplorerUiState {
             title,
             total,
+            matches,
             query: self.tree().filter().to_owned(),
             searching: self.searching,
             rows,

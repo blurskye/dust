@@ -128,7 +128,7 @@ Task output and LSP logs update while their surfaces are open and follow the tai
 - `:test.list name=<task>`
 - `:lsp.server.logs`
 
-The status line shows active diagnostics, changed Git files, running tasks, LSP identity, workspace root, and cursor position. `Git N files` is the number of changed files in the active workspace Git snapshot, not a changed-line count.
+The status line runs along the bottom of the screen, under the terminal panel. It shows the mode, Git branch, file, diagnostics and running tasks on the left, and the LSP server, workspace root, progress through the file and cursor position on the right.
 
 ## Terminal
 

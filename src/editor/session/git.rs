@@ -10,7 +10,7 @@ use crate::{
         GitMutationGeneration, GitMutationKind, GitMutationRequest, GitMutationService,
         GitRepositoryId, GitResetHunkRequest, GitStatusGeneration, GitStatusPolicy,
         GitStatusService, GitStatusSnapshot, GitUnsavedDocument, aggregate_git_status,
-        git_head_id, git_hunk_signs, git_index_fingerprint, git_staged_signs, worktree_hash,
+        git_branch_name, git_head_id, git_hunk_signs, git_index_fingerprint, git_staged_signs, index_line_in_buffer, worktree_hash,
     },
 };
 use std::{
@@ -27,6 +27,7 @@ pub(super) struct GitSession {
     status_generation: Option<GitStatusGeneration>,
     status_root_revision: Option<u64>,
     status_snapshot: Option<GitStatusSnapshot>,
+    branch: Option<String>,
     decorations: BTreeMap<PathBuf, GitFileStatus>,
     silent: bool,
     silent_attempted: Option<(u64, PathBuf)>,
@@ -39,6 +40,8 @@ pub(super) struct GitSession {
     sign_generation: Option<GitHunkGeneration>,
     /// The buffer's unstaged diff, held until the staged one is ready to go with it.
     unstaged_signs: Option<GitHunkSnapshot>,
+    /// The active buffer's last unstaged diff, which places staged lines in the buffer.
+    last_unstaged: Option<GitHunkSnapshot>,
     staged_sign_hunks: GitHunkService,
     staged_sign_generation: Option<GitHunkGeneration>,
     /// What the staged diff was read for. It doesn't change as the buffer is typed in.
@@ -108,6 +111,10 @@ impl GitSession {
     pub(super) fn status(&self) -> Option<&GitStatusSnapshot> {
         self.status_snapshot.as_ref()
     }
+    /// The checked-out branch as of the last status result.
+    pub(super) fn branch(&self) -> Option<&str> {
+        self.branch.as_deref()
+    }
     /// Hold the previewed replacement until its confirmation is answered.
     pub(super) fn set_pending_replacement(
         &mut self,
@@ -143,6 +150,15 @@ impl GitSession {
         self.sign_generation = None;
         self.sign_source = None;
         self.unstaged_signs = None;
+        self.last_unstaged = None;
+    }
+    /// Where a hunk's line sits in the buffer: a staged hunk counts the index's lines.
+    pub(super) fn line_in_buffer(&self, layer: GitDiffLayer, line: usize) -> usize {
+        self.last_unstaged
+            .as_ref()
+            .filter(|_| layer == GitDiffLayer::Staged)
+            .and_then(|unstaged| index_line_in_buffer(line, &unstaged.hunks))
+            .unwrap_or(line)
     }
     fn clear_hunks(&mut self) {
         self.hunks.cancel();
@@ -167,6 +183,7 @@ impl GitSession {
         self.status_generation = None;
         self.status_root_revision = None;
         self.status_snapshot = None;
+        self.branch = None;
         self.decorations.clear();
         self.silent = false;
     }
@@ -242,6 +259,7 @@ impl GitSession {
                     && Some(snapshot.root_revision) == self.status_root_revision =>
             {
                 self.decorations = aggregate_git_status(&snapshot.scope_root, &snapshot.entries);
+                self.branch = git_branch_name(&snapshot.repository).ok().flatten();
                 self.status_snapshot = Some(snapshot.clone());
                 self.status_generation = None;
                 self.status_root_revision = None;
@@ -377,6 +395,7 @@ impl GitSession {
                 }
                 self.sign_generation = None;
                 self.unstaged_signs = Some(snapshot.clone());
+                self.last_unstaged = Some(snapshot.clone());
             }
             Ok(None) => {}
             Err(_) => {

@@ -241,10 +241,13 @@ impl InputSession {
                     kind: crate::editor::SelectionKind::Character,
                 }),
             });
-            transaction.operations.push(EditorOperation::SetMode {
-                view: view_id,
-                mode: EditorMode::VisualChar,
-            });
+            // Dragging while typing keeps typing, so the next key replaces the selection.
+            if document.view.mode != EditorMode::Insert {
+                transaction.operations.push(EditorOperation::SetMode {
+                    view: view_id,
+                    mode: EditorMode::VisualChar,
+                });
+            }
         } else {
             transaction.operations.push(EditorOperation::SetSelection {
                 view: view_id,

@@ -515,15 +515,39 @@ pub fn permission_detail(params: &Value) -> String {
     }
     for change in call["content"].as_array().into_iter().flatten() {
         if change["type"] == "diff" {
-            let lines = |key: &str| change[key].as_str().map_or(0, |text| text.lines().count());
-            detail.push_str(&format!(
-                "\n{} lines become {} lines",
-                lines("oldText"),
-                lines("newText")
+            detail.push_str(&changed_lines(
+                change["oldText"].as_str().unwrap_or_default(),
+                change["newText"].as_str().unwrap_or_default(),
             ));
         }
     }
     detail
+}
+
+/// The lines an edit changes, between what it leaves alone at either end.
+fn changed_lines(old: &str, new: &str) -> String {
+    const SHOWN: usize = 6;
+    let old: Vec<&str> = old.lines().collect();
+    let new: Vec<&str> = new.lines().collect();
+    let front = old.iter().zip(&new).take_while(|(old, new)| old == new).count();
+    let back = old[front..]
+        .iter()
+        .rev()
+        .zip(new[front..].iter().rev())
+        .take_while(|(old, new)| old == new)
+        .count();
+    let mut text = String::new();
+    let mut side = |sign: char, lines: &[&str]| {
+        for line in lines.iter().take(SHOWN) {
+            text.push_str(&format!("\n{sign} {line}"));
+        }
+        if lines.len() > SHOWN {
+            text.push_str(&format!("\n{sign} … {} more lines", lines.len() - SHOWN));
+        }
+    };
+    side('-', &old[front..old.len() - back]);
+    side('+', &new[front..new.len() - back]);
+    text
 }
 
 #[must_use]
@@ -596,7 +620,7 @@ mod tests {
             "content": [{"type": "diff", "path": "src/main.rs", "oldText": "a\nb\n", "newText": "c\n"}],
         }});
         assert_eq!(permission_action(&edit), "change a file");
-        assert_eq!(permission_detail(&edit), "src/main.rs\n2 lines become 1 lines");
+        assert_eq!(permission_detail(&edit), "src/main.rs\n- a\n- b\n+ c");
         let run = json!({"toolCall": {"kind": "execute", "title": "Run", "rawInput": {"command": "cargo test"}}});
         assert_eq!(permission_action(&run), "run a command");
         assert_eq!(permission_detail(&run), "Run\n$ cargo test");

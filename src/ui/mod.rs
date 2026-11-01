@@ -37,7 +37,7 @@ pub use render::{
     UiColorSpan, UiGitSignKind, UiInlayHint, UiLspProgress, UiState, UiSyntaxSpan, VisualRowAnchor,
     VisualRowModel, view_pane_viewport, active_editor_pane_viewport, active_pane_viewport, confirmation_fully_visible,
     content_tab_at_column, editor_content_width, editor_gutter_width, editor_pane_viewport_at,
-    editor_state_content_width, editor_state_gutter_width, editor_workspace_insets,
+    editor_state_content_width, editor_state_gutter_width, screen_foot_rows, workspace_top_rows,
     explorer_panel_width, pane_viewports, picker_geometry, prompt_geometry,
     prompt_geometry_for_state, prompt_surface_dimensions, render, snap_display_column,
     snap_display_column_forward, terminal_panel_geometry, terminal_tab_at_column};

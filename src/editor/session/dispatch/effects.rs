@@ -4533,9 +4533,7 @@ impl InteractiveApplication {
         let view = &self.state.views[view_id];
         let buffer_id = view.buffer;
         let buffer = &self.state.buffers[buffer_id];
-        let body_height = pane_height.saturating_sub(u16::from(
-            self.configuration.settings().ui.status_line.enabled,
-        ));
+        let body_height = pane_height;
         if row >= body_height {
             return;
         }
@@ -4629,14 +4627,7 @@ impl InteractiveApplication {
         else {
             return;
         };
-        let body = usize::from(
-            viewport
-                .height
-                .saturating_sub(u16::from(
-                    self.configuration.settings().ui.status_line.enabled,
-                ))
-                .max(1),
-        );
+        let body = usize::from(viewport.height.max(1));
         let percent = if kind.starts_with("half_") {
             self.configuration.settings().editor.half_page_percent
         } else {
@@ -7003,12 +6994,14 @@ impl InteractiveApplication {
                                 status_revision: snapshot.status_revision,
                                 repository: snapshot.repository_id,
                                 hunk: hunk.id,
-                                new_line: hunk
-                                    .change_lines()
-                                    .first()
-                                    .map_or(hunk.new_start, |line| *line)
-                                    .saturating_sub(1)
-                                    as usize,
+                                new_line: self.git.line_in_buffer(
+                                    snapshot.layer,
+                                    hunk.change_lines()
+                                        .first()
+                                        .map_or(hunk.new_start, |line| *line)
+                                        .saturating_sub(1)
+                                        as usize,
+                                ),
                             },
                         )
                     })
@@ -8852,6 +8845,18 @@ impl InteractiveApplication {
             }
             Some(PickerPayload::Command(command)) if !command.is_empty() => {
                 self.run_palette_command(&command);
+            }
+            Some(PickerPayload::Notice(message)) => {
+                self.present_documentation_popup(
+                    DocumentationPopupKind::Hover,
+                    "Notification".into(),
+                    "application".into(),
+                    None,
+                    vec![LspMarkupContent {
+                        kind: crate::language::lsp::LspMarkupKind::PlainText,
+                        value: message,
+                    }],
+                );
             }
             Some(PickerPayload::PluginProviderItem { plugin, .. }) => {
                 if let Some(command) = provider_selection {
@@ -11634,6 +11639,7 @@ impl InteractiveApplication {
                             .definition
                             .automatically_supports_language(&document.language_id)
                         && entry.status == ToolStatus::Available
+                        && entry.definition.install.is_some()
                 })
                 // The most specific server: zls for Zig, not a spell checker that covers it.
                 .min_by_key(|entry| entry.definition.languages.len())
@@ -12696,7 +12702,7 @@ impl InteractiveApplication {
                                 source: "application".into(),
                                 action: PickerAction::None,
                             },
-                            PickerPayload::Command(String::new()),
+                            PickerPayload::Notice(message.clone()),
                         )
                     })
                     .collect();
@@ -13329,10 +13335,6 @@ impl InteractiveApplication {
                     return;
                 }
                 self.record_recent_file(path.clone());
-                self.notify_message(
-                    self.message("opened", &[("path", self.workspace_relative_label(&path))]),
-                    false,
-                );
             }
             DocumentChange::Reload { buffer, text, path } => {
                 if !candidate.reload_document(buffer, text, path.clone()) {

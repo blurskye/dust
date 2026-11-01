@@ -30,7 +30,7 @@ use nix::{
     poll::{PollFd, PollFlags, PollTimeout, poll},
 };
 
-use crate::config::{ColorMode, ThemeAttribute, ThemeColor, ThemeConfig};
+use crate::config::{ColorMode, ThemeAttribute, ThemeColor, ThemeConfig, ThemeStyle};
 use crate::editor::input::{KeyCode, KeyEvent, Modifiers};
 use thiserror::Error;
 
@@ -418,12 +418,29 @@ fn queue_style(
         Style::MarkupQuote => (Style::Muted, Some(Attribute::Italic)),
         other => (other, None),
     };
+    let derived;
     let configured = match style {
         Style::Default => &theme.styles.default,
         Style::Muted => &theme.styles.muted,
         Style::Accent => &theme.styles.accent,
         Style::Status => &theme.styles.status,
         Style::StatusAccent => &theme.styles.status_accent,
+        Style::StatusInsert
+        | Style::StatusVisual
+        | Style::StatusReplace
+        | Style::StatusCommand
+        | Style::StatusSection
+        | Style::StatusEdgeNormal
+        | Style::StatusEdgeInsert
+        | Style::StatusEdgeVisual
+        | Style::StatusEdgeReplace
+        | Style::StatusEdgeCommand
+        | Style::StatusEdgeSection
+        | Style::StatusError
+        | Style::StatusWarning => {
+            derived = status_bar_style(style, theme);
+            &derived
+        }
         Style::Selection => &theme.styles.selection,
         Style::Search => &theme.styles.search,
         Style::Error => &theme.styles.error,
@@ -506,6 +523,43 @@ fn queue_style(
         queue!(writer, SetAttribute(attribute))?;
     }
     Ok(())
+}
+
+/// The status bar's blocks are mixed from colours every theme already has, so a mode shows in
+/// its own colour without a theme naming each block.
+fn status_bar_style(style: Style, theme: &ThemeConfig) -> ThemeStyle {
+    type Colour = (ThemeColor, Option<ThemeColor>, Option<ThemeColor>);
+    let text = |style: &ThemeStyle| (style.foreground, style.foreground_256, style.foreground_16);
+    let fill = |style: &ThemeStyle| (style.background, style.background_256, style.background_16);
+    let styles = &theme.styles;
+    let accent = &styles.status_accent;
+    let paint = |foreground: Colour, background: Colour, attributes: Vec<_>| ThemeStyle {
+        foreground: foreground.0,
+        foreground_256: foreground.1,
+        foreground_16: foreground.2,
+        background: background.0,
+        background_256: background.1,
+        background_16: background.2,
+        attributes,
+    };
+    let block = |colour: &ThemeStyle| paint(text(accent), text(colour), accent.attributes.clone());
+    let edge = |colour: Colour| paint(colour, fill(&styles.selection), Vec::new());
+    match style {
+        Style::StatusInsert => block(&styles.syntax_string),
+        Style::StatusVisual => block(&styles.syntax_keyword),
+        Style::StatusReplace => block(&styles.error),
+        Style::StatusCommand => block(&styles.warning),
+        Style::StatusEdgeInsert => edge(text(&styles.syntax_string)),
+        Style::StatusEdgeVisual => edge(text(&styles.syntax_keyword)),
+        Style::StatusEdgeReplace => edge(text(&styles.error)),
+        Style::StatusEdgeCommand => edge(text(&styles.warning)),
+        Style::StatusEdgeSection => {
+            paint(fill(&styles.selection), fill(&styles.status), Vec::new())
+        }
+        Style::StatusError => paint(text(&styles.error), fill(&styles.status), Vec::new()),
+        Style::StatusWarning => paint(text(&styles.warning), fill(&styles.status), Vec::new()),
+        _ => edge(fill(accent)),
+    }
 }
 
 fn configured_color_tier(mode: ColorMode) -> (ColorTier, &'static str) {

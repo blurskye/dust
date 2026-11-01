@@ -525,7 +525,7 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
         &app.ui,
         app.configuration.settings(),
         app.window_session.width(),
-        app.window_session.height(),
+        app.workspace_render_height(),
     )
     .expect("focused tiny-layout viewport");
     assert_eq!(zero_viewport.width, 6);
@@ -582,6 +582,7 @@ fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
         scroll: 0,
         loading: false,
         total: 0,
+        matches: 0,
         query: String::new(),
         searching: false,
         preview_lines: Vec::new(),
@@ -657,7 +658,7 @@ fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
         &app.ui,
         app.configuration.settings(),
         app.window_session.width(),
-        app.window_session.height(),
+        app.workspace_render_height(),
     )
     .expect("focused leaf viewport");
     assert!(app.state.views[focused].scroll_column > 0);

@@ -3,7 +3,7 @@ use crate::{
     ui::{CellGrid, Style, geometry::text_width, window::WindowRect},
 };
 
-use super::{ExplorerSegmentRole, ExplorerUiState, Frame, UiState, editor::cursor_style};
+use super::{ExplorerSegmentRole, ExplorerUiState, Frame, editor::cursor_style};
 
 /// Width of the persistent explorer dock, leaving a usable editor pane.
 #[must_use]
@@ -71,7 +71,6 @@ pub(super) fn place_workspace_frame(
 pub(super) fn render_explorer_window(
     frame: &mut Frame,
     explorer: &ExplorerUiState,
-    ui: &UiState,
     config: &Config,
     rect: WindowRect,
     focused: bool,
@@ -162,11 +161,7 @@ pub(super) fn render_explorer_dock(
     if panel_width == 0 || height == 0 {
         return;
     }
-    let status_rows = u16::from(config.ui.status_line.enabled);
-    let panel_height = height.saturating_sub(status_rows);
-    if panel_height == 0 {
-        return;
-    }
+    let panel_height = height;
     let glyphs = config.ui.explorer.active_glyphs();
     for y in 0..panel_height {
         for x in 0..panel_width {
@@ -313,11 +308,11 @@ fn render_explorer_search_box(
         Style::ExplorerHeader,
         last,
     );
-    // Matches out of what is read so far while a search filters the tree.
+    // How many entries are listed, or how many match while a search filters the tree.
     let count = if explorer.query.is_empty() {
         format!("{0}/{0}", explorer.total)
     } else {
-        explorer.total.to_string()
+        explorer.matches.to_string()
     };
     let count_width =
         u16::try_from(text_width(&count, config.editor.ambiguous_width)).unwrap_or(last);

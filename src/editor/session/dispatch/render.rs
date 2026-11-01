@@ -11,7 +11,7 @@ use super::{
     EditorWindowBridge, EditorWindowLayoutState, LogLevel, NativeDescriptions,
     NativeSurfaceSignature, NativeSurfaceWindowBinding, Precondition, ProjectionRequest,
     TransactionId, UiEditorWindowBinding, UndoPolicy, ViewId, VisualRowAnchor, VisualRowModel,
-    active_editor_pane_viewport, editor_state_content_width, editor_workspace_insets,
+    active_editor_pane_viewport, editor_state_content_width, screen_foot_rows, workspace_top_rows,
     snap_display_column, snap_display_column_forward, terminal_panel_geometry,
 };
 use super::{Duration, InteractiveApplication, LiveCrashSnapshot, PluginStatus};
@@ -965,6 +965,7 @@ impl InteractiveApplication {
             scroll: 0,
             loading: false,
             total: 0,
+            matches: 0,
             query: String::new(),
             searching: false,
             preview_lines: Vec::new(),
@@ -1266,14 +1267,7 @@ impl InteractiveApplication {
         if viewport.view != view_id {
             return;
         }
-        let body_height = usize::from(
-            viewport
-                .height
-                .saturating_sub(u16::from(
-                    self.configuration.settings().ui.status_line.enabled,
-                ))
-                .max(1),
-        );
+        let body_height = usize::from(viewport.height.max(1));
         let vertical_margin = usize::from(
             self.configuration
                 .settings()
@@ -1596,7 +1590,13 @@ impl InteractiveApplication {
                         .active_tab(&(&*self.state).into())
                         .or_else(|| surfaces.workspace_tab())?;
                     let snapshot = graph.compositor_snapshot(tab)?;
-                    let preliminary = snapshot.project(
+                    let screen_bottom = screen_foot_rows(
+                        &self.state,
+                        &self.ui,
+                        self.configuration.settings(),
+                        self.window_session.height(),
+                    );
+                    let preliminary = snapshot.project_with_tiled_insets(
                         WindowRect {
                             x: 0,
                             y: 0,
@@ -1605,12 +1605,15 @@ impl InteractiveApplication {
                         },
                         self.configuration.settings().ui.panes.minimum_width,
                         self.configuration.settings().ui.panes.minimum_height,
+                        crate::ui::window::TiledInsets {
+                            screen_bottom,
+                            ..Default::default()
+                        },
                     );
-                    let (top, bottom) = editor_workspace_insets(
+                    let top = workspace_top_rows(
                         &self.state,
                         &self.ui,
                         self.configuration.settings(),
-                        preliminary.workspace_bounds.height,
                     );
                     let (left, right, bottom_panes) = self
                         .ui
@@ -1623,7 +1626,7 @@ impl InteractiveApplication {
                                 preliminary
                                     .workspace_bounds
                                     .height
-                                    .saturating_sub(top.saturating_add(bottom)),
+                                    .saturating_sub(top),
                             )
                         })
                         .unwrap_or_default();
@@ -1631,7 +1634,7 @@ impl InteractiveApplication {
                         let prompt_height = preliminary
                             .workspace_bounds
                             .height
-                            .saturating_sub(top.saturating_add(bottom));
+                            .saturating_sub(top);
                         let geometry = crate::ui::prompt_geometry_for_state(
                             self.window_session.width(),
                             prompt_height,
@@ -1655,8 +1658,9 @@ impl InteractiveApplication {
                             self.configuration.settings().ui.panes.minimum_height,
                         ),
                         insets: crate::ui::window::TiledInsets {
+                            screen_bottom,
                             top,
-                            bottom: bottom.saturating_add(bottom_panes),
+                            bottom: bottom_panes,
                             left,
                             right,
                         },

@@ -19,7 +19,7 @@ mod hunks;
 pub use hunks::{
     GitDiffLayer, GitDiffLine, GitDiffLineKind, GitHunk, GitHunkBufferInput, GitHunkError,
     GitHunkGeneration, GitHunkId, GitHunkPolicy, GitHunkService, GitHunkSign, GitHunkSignKind,
-    GitHunkSnapshot, git_hunk_signs, git_staged_signs, read_hunks,
+    GitHunkSnapshot, git_hunk_signs, git_staged_signs, index_line_in_buffer, read_hunks,
 };
 pub use branches::{
     GitBranchEntry, GitBranchError, GitBranchGeneration, GitBranchList, GitBranchListRequest,

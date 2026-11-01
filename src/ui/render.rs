@@ -1020,6 +1020,8 @@ pub struct ExplorerUiState {
     pub scroll: usize,
     pub loading: bool,
     pub total: usize,
+    /// Entries whose name holds the query; the folders above them are only context.
+    pub matches: usize,
     /// What `/` filters the tree by; empty shows everything.
     pub query: String,
     /// Whether keys type into the query.
@@ -1365,7 +1367,7 @@ pub struct UiState {
     pub git_signs: Vec<UiGitSign>,
     pub lsp_folds: Vec<UiFold>,
     pub lsp_server: Option<String>,
-    pub git_changed_files: usize,
+    pub git_branch: Option<String>,
     pub running_tasks: usize,
     pub lsp_progress: Vec<UiLspProgress>,
     pub lsp_progress_frame: usize,
@@ -1562,20 +1564,23 @@ pub fn prompt_surface_dimensions(
     (terminal_width, height)
 }
 
+/// Rows at the foot of the screen, under every dock: the status line, and above it the bar of a
+/// paused operation. The dashboard has neither.
 #[must_use]
-pub fn editor_workspace_insets(
-    state: &EditorState,
-    ui: &UiState,
-    config: &Config,
-    available_height: u16,
-) -> (u16, u16) {
+pub fn screen_foot_rows(state: &EditorState, ui: &UiState, config: &Config, height: u16) -> u16 {
+    if !config.ui.status_line.enabled || ui.dashboard || state.active_view.is_none() || height < 2 {
+        return 0;
+    }
+    1 + u16::from(ui.operation_bar.is_some() && height > 2)
+}
+
+#[must_use]
+pub fn workspace_top_rows(state: &EditorState, ui: &UiState, config: &Config) -> u16 {
     let tab_line = config.ui.tab_line.enabled
         && (!config.ui.tab_line.hide_when_single || state.tabs.len() > 1);
     let buffer_line = config.ui.buffer_line.enabled
         && ui.content_tabs.len() > usize::from(config.ui.buffer_line.hide_when_single);
-    let top = u16::from(tab_line).saturating_add(u16::from(buffer_line));
-    let bottom = u16::from(config.ui.status_line.enabled && available_height > top);
-    (top, bottom)
+    u16::from(tab_line).saturating_add(u16::from(buffer_line))
 }
 
 #[must_use]
@@ -1857,11 +1862,11 @@ pub fn render(
                 width,
                 height,
             });
-            let (top, bottom) = editor_workspace_insets(state, ui, config, area.height);
+            let top = workspace_top_rows(state, ui, config);
             let end = area.y.saturating_add(area.height).min(debug_height);
             debug_layout_in(WindowRect {
                 y: area.y.saturating_add(top),
-                height: end.saturating_sub(area.y).saturating_sub(top.saturating_add(bottom)),
+                height: end.saturating_sub(area.y).saturating_sub(top),
                 ..area
             })
         });
@@ -1920,7 +1925,6 @@ pub fn render(
         render_explorer_window(
             &mut workspace_frame,
             explorer,
-            ui,
             config,
             rect,
             ui.explorer_focused && !cloned_explorer_focused,
@@ -1943,7 +1947,6 @@ pub fn render(
                 render_explorer_window(
                     &mut workspace_frame,
                     &view.content,
-                    ui,
                     config,
                     window.rect,
                     view.focused,
@@ -1957,6 +1960,22 @@ pub fn render(
         } else {
             workspace_frame
         };
+    let fullscreen = compositor.is_some_and(|compositor| {
+        compositor
+            .projection
+            .windows
+            .iter()
+            .any(|window| window.layer == crate::ui::window::CompositorLayer::Fullscreen)
+    });
+    let foot_rows = screen_foot_rows(state, ui, config, height);
+    if !fullscreen && foot_rows > 0 {
+        if let Some(view) = state.active_view {
+            editor::render_status_line(&mut frame.grid, state, view, ui, config, width, height - 1);
+        }
+        if foot_rows > 1 {
+            editor::render_operation_bar(&mut frame.grid, ui, width, height - 2);
+        }
+    }
     if let Some(compositor) = compositor {
         let mut plugin_surfaces = ui
             .plugin_surfaces
@@ -2023,7 +2042,6 @@ pub fn render(
                     render_explorer_window(
                         &mut frame,
                         explorer,
-                        ui,
                         config,
                         projected.rect,
                         ui.explorer_focused && !cloned_explorer_focused,
@@ -2039,7 +2057,6 @@ pub fn render(
                 render_explorer_window(
                     &mut frame,
                     &view.content,
-                    ui,
                     config,
                     projected.rect,
                     view.focused,
@@ -2147,8 +2164,22 @@ pub fn render(
     let modal_open = ui.picker.is_some() || ui.tool_menu.is_some();
     // Pickers use the whole screen, so a notice below one clears the terminal dock too.
     let notice_height = if modal_open { height } else { workspace_height };
+    let terminal_floats = compositor.is_some_and(|compositor| {
+        compositor.surfaces.terminal.is_some_and(|(_, window)| {
+            compositor
+                .projection
+                .window(window)
+                .is_some_and(|window| window.layer == crate::ui::window::CompositorLayer::Floating)
+        })
+    });
+    let information = !ui.notification_error && !ui.notification_warning;
     if ui.prompt.is_some() {
         // A prompt sits where notices do, so one waits rather than being cut through.
+    } else if information
+        && ui.notification.is_some()
+        && (terminal_floats || ui.documentation_popup.is_some())
+    {
+        // What the user just opened comes first; the notice stays in `:messages`.
     } else if let Some(message) = ui.notification.as_ref() {
         // Messages show in a box at the top right, like errors, and fade after the
         // configured timeout.

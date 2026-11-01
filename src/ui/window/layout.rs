@@ -146,6 +146,8 @@ pub enum SpatialDirection {
 /// Rows and columns the tiled windows leave to the editor's own chrome and the debug panes.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct TiledInsets {
+    /// Rows at the foot of the screen that docks and tiled windows both stay above.
+    pub screen_bottom: u16,
     pub top: u16,
     pub bottom: u16,
     pub left: u16,
@@ -264,7 +266,10 @@ impl CompositorSnapshot {
                 self.focused,
             );
         } else {
-            let mut remaining = bounds;
+            let mut remaining = WindowRect {
+                height: bounds.height.saturating_sub(insets.screen_bottom),
+                ..bounds
+            };
             // Horizontal docks reserve the full width first; side docks then
             // consume only the remaining vertical workspace.
             for edge in [

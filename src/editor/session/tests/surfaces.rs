@@ -2725,7 +2725,8 @@ fn explorer_is_a_graph_dock_and_bundled_disable_is_transactional() {
         }
     ));
     let rect = app.explorer_window_rect().expect("projected explorer");
-    assert!(rect.width > 1 && rect.height == app.window_session.height());
+    // The status line keeps the last row of the screen.
+    assert!(rect.width > 1 && rect.height == app.window_session.height() - 1);
 
     let mut disabled = crate::config::load_bundled_config();
     disabled.config.ui.explorer.bundled_enabled = false;
@@ -3274,7 +3275,7 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
     app.enter_terminal_input_mode();
     app.terminal_session.select(PtyId(1));
     app.sync_terminal_panel();
-    assert_eq!(app.workspace_render_height(), 14);
+    assert_eq!(app.workspace_render_height(), 13);
     assert_eq!(app.active_input_context(), "terminal");
     assert!(
         app.ui
@@ -3365,10 +3366,10 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
         crate::editor::FocusDirection::Down,
     ));
     assert_eq!(app.window_session.terminal_height(), 12);
-    assert_eq!(app.workspace_render_height(), 12);
+    assert_eq!(app.workspace_render_height(), 11);
     app.handle_event(crate::ui::UiEvent::Resize(60, 20));
     assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (60, 11));
-    assert_eq!(app.workspace_render_height(), 8);
+    assert_eq!(app.workspace_render_height(), 7);
 
     let terminal_ids = app
         .window_session
@@ -3467,12 +3468,12 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
         edge: "right".into(),
         size: 10,
     });
-    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (10, 19));
+    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (10, 18));
     app.process_effect(crate::editor::AppEffect::TerminalDock {
         edge: "left".into(),
         size: 8,
     });
-    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (8, 19));
+    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (8, 18));
     app.process_effect(crate::editor::AppEffect::TerminalDock {
         edge: "bottom".into(),
         size: 12,

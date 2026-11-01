@@ -202,7 +202,7 @@ pub fn git_staged_signs(staged: &GitHunkSnapshot, unstaged: &GitHunkSnapshot) ->
 }
 
 /// Where a zero-based index line sits in the buffer, if it is still there.
-fn index_line_in_buffer(line: usize, unstaged: &[GitHunk]) -> Option<usize> {
+pub fn index_line_in_buffer(line: usize, unstaged: &[GitHunk]) -> Option<usize> {
     let line = u32::try_from(line + 1).ok()?;
     let mut shift = 0i64;
     for hunk in unstaged {

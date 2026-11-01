@@ -27,7 +27,7 @@ pub(super) fn render_documentation_popup(
     let Some((cursor_x, cursor_y, _)) = frame.cursor else {
         return;
     };
-    let available_height = height.saturating_sub(u16::from(config.ui.status_line.enabled));
+    let available_height = height;
     let line_count = popup.line_count();
     if !policy.enabled || line_count == 0 || editor_width < 4 || available_height < 3 {
         return;

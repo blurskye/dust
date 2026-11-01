@@ -774,7 +774,6 @@ impl Config {
             "auto_reloaded",
             "reloaded_restart",
             "reloaded",
-            "opened",
             "reloaded_file",
             "reload_closed",
             "unexpected_read",
@@ -948,6 +947,7 @@ impl Config {
             !matches!(
                 component.as_str(),
                 "mode"
+                    | "progress"
                     | "file"
                     | "large_file"
                     | "lsp"
