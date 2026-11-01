@@ -437,6 +437,88 @@ fn collect_search(
     }
 }
 
+/// A repository root that Git told to ignore `.worktree/`, with one linked worktree in it.
+fn repository_with_worktree() -> tempfile::TempDir {
+    let root = tempdir().expect("root");
+    fs::create_dir_all(root.path().join(".git/info")).expect("git");
+    fs::write(root.path().join(".git/info/exclude"), "/.worktree/\n").expect("exclude");
+    fs::write(root.path().join("main.txt"), "needle\n").expect("main");
+    let worktree = root.path().join(".worktree/feat");
+    fs::create_dir_all(&worktree).expect("worktree");
+    let link = format!("gitdir: {}/.git/worktrees/feat\n", root.path().display());
+    fs::write(worktree.join(".git"), link).expect("link");
+    fs::write(worktree.join(".gitignore"), "built.txt\n").expect("ignore");
+    fs::write(worktree.join("feat.txt"), "needle\n").expect("feat");
+    fs::write(worktree.join("built.txt"), "needle\n").expect("built");
+    root
+}
+
+#[test]
+fn a_root_shows_its_worktrees_and_a_worktree_shows_only_itself() {
+    let repository = repository_with_worktree();
+    let root = repository.path().canonicalize().expect("root");
+    let worktree = root.join(".worktree/feat");
+
+    let listing = list_scoped_directory(1, 0, &root, std::slice::from_ref(&root), false, false, 10)
+        .expect("root listing");
+    assert!(listing.entries.iter().any(|entry| entry.name == ".worktree"));
+    let inside = root.join(".worktree");
+    let listing = list_scoped_directory(1, 0, &inside, std::slice::from_ref(&root), false, false, 10)
+        .expect("worktree folder listing");
+    assert!(listing.entries.iter().any(|entry| entry.name == "feat"));
+
+    let searched = |root: &Path| {
+        let mut service = WorkspaceSearchService::default();
+        service.start(search_policy(root, "needle")).expect("start");
+        let mut paths = collect_search(&service)
+            .0
+            .into_iter()
+            .map(|found| found.relative_path.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        paths.sort();
+        paths
+    };
+    assert_eq!(searched(&root), [".worktree/feat/feat.txt", "main.txt"]);
+    assert_eq!(searched(&worktree), ["feat.txt"]);
+
+    let found = |root: &Path| {
+        let mut service = super::WorkspaceFileService::default();
+        service
+            .start(super::WorkspaceFilePolicy {
+                roots: vec![root.to_path_buf()],
+                root_revision: 1,
+                include_hidden: false,
+                include_ignored: false,
+                maximum_files: 10,
+                maximum_path_bytes: 4096,
+                batch_size: 8,
+                event_queue_capacity: 8,
+            })
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut entries = Vec::new();
+        loop {
+            match service.try_event() {
+                Some(super::WorkspaceFileEvent::Batch { entries: batch, .. }) => entries.extend(batch),
+                Some(super::WorkspaceFileEvent::Complete { .. }) => break,
+                Some(super::WorkspaceFileEvent::Failed { error, .. }) => panic!("{error}"),
+                _ => {}
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        entries
+            .iter()
+            .map(|entry: &super::WorkspaceFileEntry| entry.relative_path.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(found(&root), [".worktree/feat/feat.txt", "main.txt"]);
+    assert_eq!(found(&worktree), ["feat.txt"]);
+
+    assert_eq!(super::linked_worktree_repository(&worktree).as_deref(), root.file_name().and_then(|name| name.to_str()));
+    assert_eq!(super::linked_worktree_repository(&root), None);
+}
+
 #[test]
 fn explorer_natural_key_is_case_folded_numeric_and_stably_zero_aware() {
     let mut names = vec!["file10", "File2", "file01", "file1", "file02"];

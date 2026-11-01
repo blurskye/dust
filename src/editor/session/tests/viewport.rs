@@ -390,6 +390,7 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
         fixture.settings.editor.wrap = false;
         fixture.settings.editor.line_numbers = crate::config::LineNumbers::Off;
         fixture.settings.editor.viewport.horizontal_margin = 0;
+        fixture.settings.ui.buffer_line.hide_when_single = true;
         app.configuration.install_fixture(fixture);
     }
     app.window_session.observe_size((2, 6));

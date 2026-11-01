@@ -2956,6 +2956,18 @@ id = "builtin.terminal.surface.terminal-toggle.ctrl-backslash"
 context = "terminal"
 keys = "ctrl-\\"
 command = "terminal.toggle"
+[[keymap]]
+id = "builtin.terminal.surface.terminal-new.ctrl-t"
+context = "terminal"
+keys = "ctrl-t"
+command = "terminal.open"
+desc = "New Terminal"
+[[keymap]]
+id = "builtin.terminal.surface.terminal-quit.ctrl-q"
+context = "terminal"
+keys = "ctrl-q"
+command = "terminal.quit"
+desc = "Quit Terminal"
 
 # Focused terminal input remains typed and configurable. Spatial focus keys
 # are host commands, so they are never forwarded as terminal control bytes.
@@ -3175,6 +3187,18 @@ id = "builtin.terminal-normal.surface.terminal-toggle.ctrl-slash"
 context = "terminal_normal"
 keys = "ctrl-/"
 command = "terminal.toggle"
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-new.ctrl-t"
+context = "terminal_normal"
+keys = "ctrl-t"
+command = "terminal.open"
+desc = "New Terminal"
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-quit.ctrl-q"
+context = "terminal_normal"
+keys = "ctrl-q"
+command = "terminal.quit"
+desc = "Quit Terminal"
 [[keymap]]
 id = "builtin.terminal-normal.surface.terminal-toggle.ctrl-backslash"
 context = "terminal_normal"

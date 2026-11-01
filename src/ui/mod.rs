@@ -51,4 +51,4 @@ pub use terminal::{
     install_panic_restore_hook, normalize_event,
 };
 
-pub(crate) use render::terminal_geometry_from_rect;
+pub(crate) use render::{terminal_geometry_from_rect, workspace_title};

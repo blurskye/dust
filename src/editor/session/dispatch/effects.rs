@@ -4023,6 +4023,30 @@ impl InteractiveApplication {
                     self.terminal_session.cancel_open();
                 }
             }
+            AppEffect::TerminalQuit => {
+                let Some(id) = self.displayed_terminal() else {
+                    return Ok(());
+                };
+                if self.terminal_session.stopping(id) {
+                    return Ok(());
+                }
+                if let Err(error) = self
+                    .window_session
+                    .require_native_stop(NativeSurfaceTarget::Terminal(id.0))
+                {
+                    self.show_error(error);
+                    return Ok(());
+                }
+                self.terminal_session.cancel_open();
+                // The neighbouring tab takes over while this one stops.
+                self.terminal_session.select(id);
+                self.terminal_session.cycle(-1);
+                match self.terminal_session.selected().filter(|next| *next != id) {
+                    Some(next) => self.reveal_terminal(next),
+                    None => self.set_terminal_focus(false),
+                }
+                self.retire_terminal(id, true);
+            }
             effect => return Err(effect),
         }
         Ok(())
@@ -6399,8 +6423,13 @@ impl InteractiveApplication {
                     }
                 }
                 TerminalUpdate::Exited(id, Some(0)) if self.terminal_session.closes_on_exit(id) => {
+                    let focused = self.window_session.focused_terminal() == Some(id.0);
+                    let float = self.terminal_session.floats(id);
                     self.retire_terminal(id, false);
-                    self.set_terminal_focus(false);
+                    // A float such as lazygit returns to the source; a shell tab to its neighbour.
+                    if focused && float {
+                        self.set_terminal_focus(false);
+                    }
                 }
                 // Nothing is left to type to; keys go back to the source.
                 TerminalUpdate::Exited(id, _) if self.debug_terminal == Some(id) => {
@@ -6884,6 +6913,9 @@ impl InteractiveApplication {
                 };
                 if worktree.main {
                     detail.push_str(" · main");
+                }
+                if worktree.path.canonicalize().is_ok_and(|path| path == self.state.workspace_root) {
+                    detail.push_str(" · open here");
                 }
                 if worktree.dirty {
                     detail.push_str(" · dirty");
@@ -9565,7 +9597,7 @@ impl InteractiveApplication {
         if let Some(front) = front {
             let _ = self.state.focus_view(front);
         }
-        self.state.workspace_root = path.clone();
+        self.state.set_workspace_root(path.clone());
         self.invalidate_root_scoped_operations();
         self.start_git_status_refresh_silent();
         if let Some(location) = reopen {

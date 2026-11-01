@@ -820,7 +820,7 @@ impl InteractiveApplication {
         if self.ui.explorer.is_none() {
             return;
         }
-        let title = self.message("explorer_title", &[]);
+        let title = crate::ui::workspace_title(&self.state, self.configuration.settings());
         let explorer_windows = self
             .window_session
             .native_ids()

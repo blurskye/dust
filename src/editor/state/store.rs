@@ -110,6 +110,8 @@ pub struct EditorState {
     window_snapshot: std::sync::Arc<()>,
     editor_snapshot: std::sync::Arc<()>,
     pub workspace_root: PathBuf,
+    /// The repository a linked worktree belongs to, for showing with its name.
+    pub workspace_repository: Option<String>,
     pub buffers: SlotMap<BufferId, Buffer>,
     pub views: SlotMap<ViewId, View>,
     pub panes: SlotMap<PaneId, Pane>,
@@ -140,6 +142,7 @@ impl Clone for EditorState {
             window_snapshot: self.window_snapshot.clone(),
             editor_snapshot: self.editor_snapshot.clone(),
             workspace_root: self.workspace_root.clone(),
+            workspace_repository: self.workspace_repository.clone(),
             buffers: self.buffers.clone(),
             views: self.views.clone(),
             panes: self.panes.clone(),
@@ -159,12 +162,18 @@ impl Clone for EditorState {
 }
 
 impl EditorState {
+    pub fn set_workspace_root(&mut self, root: PathBuf) {
+        self.workspace_repository = crate::files::linked_worktree_repository(&root);
+        self.workspace_root = root;
+    }
+
     #[must_use]
     pub fn new(workspace_root: PathBuf) -> Self {
         Self {
             window_identity: std::sync::Arc::new(()),
             window_snapshot: std::sync::Arc::new(()),
             editor_snapshot: std::sync::Arc::new(()),
+            workspace_repository: crate::files::linked_worktree_repository(&workspace_root),
             workspace_root,
             buffers: SlotMap::with_key(),
             views: SlotMap::with_key(),

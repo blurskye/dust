@@ -320,6 +320,7 @@ pub enum AppEffect {
     },
     TerminalUnfocus,
     TerminalClose,
+    TerminalQuit,
     FormatRun(String),
     LintRun(String),
     LintClear(String),

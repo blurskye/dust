@@ -141,6 +141,7 @@ pub struct StatusLineConfig {
     pub git_format: String,
     pub task_format: String,
     pub root_format: String,
+    pub worktree_format: String,
 }
 
 impl Default for StatusLineConfig {
@@ -159,6 +160,7 @@ impl Default for StatusLineConfig {
             git_format: "Git {count} files".into(),
             task_format: "Tasks {count}".into(),
             root_format: "{root}".into(),
+            worktree_format: "{repository} › {worktree}".into(),
         }
     }
 }
@@ -641,9 +643,7 @@ pub struct TerminalPanelConfig {
     pub minimum_workspace_height: u16,
     pub resize_step: u16,
     pub divider: String,
-    pub title_format: String,
     pub tab_separator: String,
-    pub input_mode_label: String,
     pub normal_mode_label: String,
     pub visual_mode_label: String,
 }
@@ -657,9 +657,7 @@ impl Default for TerminalPanelConfig {
             minimum_workspace_height: 3,
             resize_step: 2,
             divider: "─".into(),
-            title_format: "{id}: {profile}".into(),
             tab_separator: " │ ".into(),
-            input_mode_label: "TERMINAL".into(),
             normal_mode_label: "NORMAL".into(),
             visual_mode_label: "VISUAL".into(),
         }

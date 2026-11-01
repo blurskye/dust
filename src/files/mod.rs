@@ -21,7 +21,7 @@ pub use project_root::{
     ProjectRootService, ProjectRootStrategy,
 };
 mod directory;
-pub use directory::{DirectoryEntry, DirectoryEntryKind, DirectoryListing, DirectoryService};
+pub use directory::{linked_worktree_repository, DirectoryEntry, DirectoryEntryKind, DirectoryListing, DirectoryService};
 mod watch;
 pub use watch::{
     ExplorerDirectoryFingerprint, ExplorerWatchBatch, ExplorerWatchEntryFingerprint,

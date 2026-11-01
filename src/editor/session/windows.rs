@@ -247,10 +247,10 @@ impl WindowSession {
                     x: rect.x,
                     y: rect
                         .y
-                        .saturating_add(2)
+                        .saturating_add(1)
                         .min(rect.y.saturating_add(rect.height)),
                     width: rect.width,
-                    height: rect.height.saturating_sub(2),
+                    height: rect.height.saturating_sub(1),
                 }),
             documentation_rows: documentation_page_rows(
                 config,

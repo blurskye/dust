@@ -8,6 +8,8 @@ use ignore::WalkBuilder;
 
 use super::{error::VfsError, vfs::canonical_path};
 
+pub(super) const WORKTREE_DIRECTORY: &str = ".worktree";
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DirectoryEntryKind {
     Directory,
@@ -187,6 +189,31 @@ pub(super) fn natural_name_key(value: &str) -> String {
     key
 }
 
+/// Git's linked worktrees for a repository root, kept in `.worktree/`. Git ignores that folder,
+/// but from the repository's root the tree, the finder and grep still show what's in it.
+pub(super) fn root_worktrees(root: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(root.join(WORKTREE_DIRECTORY)) else {
+        return Vec::new();
+    };
+    let mut worktrees = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.join(".git").is_file())
+        .collect::<Vec<_>>();
+    worktrees.sort();
+    worktrees
+}
+
+/// The repository a folder is a linked worktree of: Git leaves a `.git` file there pointing at
+/// `<repository>/.git/worktrees/<name>`.
+#[must_use]
+pub fn linked_worktree_repository(root: &Path) -> Option<String> {
+    let link = std::fs::read_to_string(root.join(".git")).ok()?;
+    let git_directory = Path::new(link.strip_prefix("gitdir:")?.trim());
+    let repository = git_directory.ancestors().nth(3)?;
+    Some(repository.file_name()?.to_string_lossy().into_owned())
+}
+
 pub(super) fn list_scoped_directory(
     generation: u64,
     root_revision: u64,
@@ -230,6 +257,17 @@ pub(super) fn list_scoped_directory(
             name: entry.file_name().to_string_lossy().into_owned(),
             path: entry.into_path(),
             kind,
+        });
+    }
+    let worktrees = directory.join(WORKTREE_DIRECTORY);
+    if roots.contains(&directory)
+        && !root_worktrees(&directory).is_empty()
+        && !entries.iter().any(|entry| entry.path == worktrees)
+    {
+        entries.push(DirectoryEntry {
+            name: WORKTREE_DIRECTORY.to_owned(),
+            path: worktrees,
+            kind: DirectoryEntryKind::Directory,
         });
     }
     let mut keyed_entries = entries

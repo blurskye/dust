@@ -943,14 +943,11 @@ pub(super) fn render_status_line(
     } else {
         String::new()
     };
-    let root_status = config.ui.status_line.root_format.replace(
-        "{root}",
-        &state
-            .workspace_root
-            .file_name()
-            .unwrap_or(state.workspace_root.as_os_str())
-            .to_string_lossy(),
-    );
+    let root_status = config
+        .ui
+        .status_line
+        .root_format
+        .replace("{root}", &workspace_title(state, config));
     // The operation indicator is drawn FIRST, so it survives every configured component layout:
     // a paused operation must not be hidden by a user's statusline choices.
     let mut x = if operation_indicator.is_empty() {
@@ -958,21 +955,46 @@ pub(super) fn render_status_line(
     } else {
         grid.put_text_clipped(0, status_y, &operation_indicator, Style::StatusAccent, width)
     };
-    let left_limit = if config.ui.status_line.components.iter().any(|c| c == "position") {
-        let position_width =
-            u16::try_from(text_width(&position, config.editor.ambiguous_width)).unwrap_or(0);
-        width.saturating_sub(position_width.saturating_add(1))
-    } else {
-        width
-    };
+    let separator = &config.ui.status_line.component_separator;
+    let separator_cells = text_cells(separator, config);
+    // The right side holds the position, the root and the server. The field furthest from the
+    // edge goes first when the mode and the file name need the room.
+    let left_needed = text_cells(&mode, config)
+        .saturating_add(separator_cells)
+        .saturating_add(text_cells(&name, config))
+        .saturating_add(text_cells(dirty, config))
+        .saturating_add(x);
+    let mut right_cells = 0_u16;
+    let mut right_fields = Vec::new();
+    for component in config.ui.status_line.components.iter().rev() {
+        let text = match component.as_str() {
+            "position" => position.as_str(),
+            "root" => root_status.as_str(),
+            "lsp" => lsp_status.as_str(),
+            _ => continue,
+        };
+        if text.is_empty() {
+            continue;
+        }
+        let cells = text_cells(text, config).saturating_add(separator_cells);
+        if component != "position"
+            && left_needed.saturating_add(right_cells).saturating_add(cells) >= width
+        {
+            continue;
+        }
+        right_cells = right_cells.saturating_add(cells);
+        right_fields.push(text);
+    }
+    let left_limit = width.saturating_sub(right_cells);
+    let mut right_x = left_limit.saturating_add(separator_cells);
+    for text in right_fields.iter().rev() {
+        right_x = grid.put_text_clipped(right_x, status_y, text, Style::Status, width);
+        right_x = right_x.saturating_add(separator_cells);
+    }
     for component in &config.ui.status_line.components {
-        let (text, style, right_aligned) = match component.as_str() {
-            "mode" => (mode.as_str(), Style::StatusAccent, false),
-            "file" => (
-                if buffer.dirty { "" } else { name.as_str() },
-                Style::Status,
-                false,
-            ),
+        let (text, style) = match component.as_str() {
+            "mode" => (mode.as_str(), Style::StatusAccent),
+            "file" => (if buffer.dirty { "" } else { name.as_str() }, Style::Status),
             "large_file" => (
                 if ui.large_file_buffers.contains(&view.buffer) {
                     config.editor.large_file.status_label.as_str()
@@ -980,9 +1002,7 @@ pub(super) fn render_status_line(
                     ""
                 },
                 Style::StatusAccent,
-                false,
             ),
-            "lsp" => (lsp_status.as_str(), Style::StatusAccent, false),
             "diagnostics" => (
                 diagnostic_status.as_str(),
                 if errors > 0 {
@@ -990,12 +1010,9 @@ pub(super) fn render_status_line(
                 } else {
                     Style::Warning
                 },
-                false,
             ),
-            "git" => (git_status.as_str(), Style::StatusAccent, false),
-            "tasks" => (task_status.as_str(), Style::StatusAccent, false),
-            "root" => (root_status.as_str(), Style::Muted, false),
-            "position" => (position.as_str(), Style::Status, true),
+            "git" => (git_status.as_str(), Style::StatusAccent),
+            "tasks" => (task_status.as_str(), Style::StatusAccent),
             _ => continue,
         };
         let owned_file;
@@ -1008,30 +1025,36 @@ pub(super) fn render_status_line(
         if text.is_empty() {
             continue;
         }
-        if right_aligned {
-            let component_width =
-                u16::try_from(text_width(text, config.editor.ambiguous_width)).unwrap_or(0);
-            if width > component_width {
-                grid.put_text(width - component_width, status_y, text, style);
-            }
-        } else {
-            // The mode and the file name are cut to fit; other fields go whole or not at all.
-            let text_cells =
-                u16::try_from(text_width(text, config.editor.ambiguous_width)).unwrap_or(u16::MAX);
-            if !matches!(component.as_str(), "mode" | "file")
-                && x.saturating_add(text_cells) > left_limit
-            {
-                continue;
-            }
-            x = grid.put_text_clipped(x, status_y, text, style, left_limit);
-            x = grid.put_text_clipped(
-                x,
-                status_y,
-                &config.ui.status_line.component_separator,
-                Style::Status,
-                left_limit,
-            );
+        // The mode and the file name are cut to fit; other fields go whole or not at all.
+        if !matches!(component.as_str(), "mode" | "file")
+            && x.saturating_add(text_cells(text, config)) > left_limit
+        {
+            continue;
         }
+        x = grid.put_text_clipped(x, status_y, text, style, left_limit);
+        x = grid.put_text_clipped(x, status_y, separator, Style::Status, left_limit);
+    }
+}
+
+fn text_cells(text: &str, config: &Config) -> u16 {
+    u16::try_from(text_width(text, config.editor.ambiguous_width)).unwrap_or(u16::MAX)
+}
+
+/// The open folder's name; a linked worktree also names its repository.
+pub(crate) fn workspace_title(state: &EditorState, config: &Config) -> String {
+    let folder = state
+        .workspace_root
+        .file_name()
+        .unwrap_or(state.workspace_root.as_os_str())
+        .to_string_lossy();
+    match &state.workspace_repository {
+        Some(repository) => config
+            .ui
+            .status_line
+            .worktree_format
+            .replace("{repository}", repository)
+            .replace("{worktree}", &folder),
+        None => folder.into_owned(),
     }
 }
 

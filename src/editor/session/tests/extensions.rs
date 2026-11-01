@@ -175,7 +175,7 @@ fn selected_yes_refuses_one_row_and_one_column_visibility_boundaries() {
                 .first()
                 .copied()
                 .expect("protected confirmation bounds");
-            assert_eq!(protected.height, 3);
+            assert_eq!(protected.height, 2);
             let frame = crate::ui::render(
                 &app.state,
                 &app.ui,

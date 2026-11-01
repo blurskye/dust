@@ -915,22 +915,21 @@ fn terminal_panel_policy_is_typed_bounded_and_strict() {
     let path = root.path().join("config.toml");
     fs::write(
             &path,
-            "[ui.terminal_panel]\nheight=9\nminimum_height=4\nmaximum_height=20\nminimum_workspace_height=2\nresize_step=3\ndivider='-'\ntitle_format='{id}: {profile}'\ntab_separator=' | '\ninput_mode_label='TERM'\nnormal_mode_label='NORMAL'\nvisual_mode_label='VISUAL'\n",
+            "[ui.terminal_panel]\nheight=9\nminimum_height=4\nmaximum_height=20\nminimum_workspace_height=2\nresize_step=3\ndivider='-'\ntab_separator=' | '\nnormal_mode_label='NORMAL'\nvisual_mode_label='VISUAL'\n",
         )
         .expect("valid terminal panel");
     let loaded = load_config(&path);
     assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
     assert_eq!(loaded.config.ui.terminal_panel.height, 9);
     assert_eq!(loaded.config.ui.terminal_panel.resize_step, 3);
-    assert_eq!(loaded.config.ui.terminal_panel.input_mode_label, "TERM");
+    assert_eq!(loaded.config.ui.terminal_panel.tab_separator, " | ");
 
     for (index, invalid) in [
         "height=2",
         "height=9\nminimum_height=10",
         "maximum_height=201",
         "divider='界'",
-        "title_format='missing placeholders'",
-        "input_mode_label=''",
+        "normal_mode_label=''",
         "resize_step=0",
     ]
     .into_iter()

@@ -33,18 +33,22 @@ pub(crate) fn terminal_geometry_from_rect(rect: WindowRect) -> Option<TerminalPa
         top: rect.y,
         height: rect.height,
         body_top: rect.y.saturating_add(1),
-        body_height: rect.height.saturating_sub(2),
-        status_y: rect.y.saturating_add(rect.height).saturating_sub(1),
+        body_height: rect.height.saturating_sub(1),
     })
 }
 
-pub(super) fn terminal_tab_label(tab: &TerminalTabState, config: &Config) -> String {
-    let mut title = config
-        .ui
-        .terminal_panel
-        .title_format
-        .replace("{id}", &tab.id.to_string())
-        .replace("{profile}", &tab.profile);
+/// A tab's name: its profile, numbered when an earlier tab has the same one.
+pub(super) fn terminal_tab_label(tabs: &[TerminalTabState], tab: &TerminalTabState) -> String {
+    let earlier = tabs
+        .iter()
+        .take_while(|other| other.id != tab.id)
+        .filter(|other| other.profile == tab.profile)
+        .count();
+    let mut title = if earlier == 0 {
+        tab.profile.clone()
+    } else {
+        format!("{} {}", tab.profile, earlier + 1)
+    };
     if let Some(status) = match tab.phase {
         TerminalPhase::Preflight => Some(" [preflight]"),
         TerminalPhase::Starting => Some(" [starting]"),
@@ -82,7 +86,7 @@ pub fn terminal_tab_at_column(
                 .unwrap_or(u16::MAX),
             );
         }
-        let label = terminal_tab_label(tab, config);
+        let label = terminal_tab_label(&terminal.tabs, tab);
         let end = x
             .saturating_add(
                 u16::try_from(text_width(&label, config.editor.ambiguous_width))
@@ -151,7 +155,7 @@ pub(super) fn dock_terminal_panel(
                 right,
             );
         }
-        let title = terminal_tab_label(tab, config);
+        let title = terminal_tab_label(&terminal.tabs, tab);
         title_x = grid.put_text_clipped(
             title_x,
             geometry.top,
@@ -163,6 +167,25 @@ pub(super) fn dock_terminal_panel(
             },
             right,
         );
+    }
+    // Input is the usual mode, so only the others are named, at the end of the tab row.
+    let mode = match terminal.mode {
+        TerminalPanelMode::Input => None,
+        TerminalPanelMode::Normal => Some(config.ui.terminal_panel.normal_mode_label.as_str()),
+        TerminalPanelMode::Visual => Some(config.ui.terminal_panel.visual_mode_label.as_str()),
+    };
+    let notice = [mode, terminal.truncated.then_some("output truncated")]
+        .into_iter()
+        .flatten()
+        .map(|text| format!(" {text} "))
+        .collect::<String>();
+    if !notice.is_empty() {
+        let notice_width =
+            u16::try_from(text_width(&notice, config.editor.ambiguous_width)).unwrap_or(u16::MAX);
+        let notice_x = right.saturating_sub(notice_width.saturating_add(1));
+        if notice_x > title_x {
+            grid.put_text_clipped(notice_x, geometry.top, &notice, Style::TerminalTitle, right);
+        }
     }
 
     let visible_rows = usize::from(geometry.body_height).min(terminal.cells.len());
@@ -207,41 +230,13 @@ pub(super) fn dock_terminal_panel(
         }
     }
 
-    for x in geometry.x..right {
-        grid.set_cell(x, geometry.status_y, " ", Style::TerminalStatus);
-    }
-    let mode = match terminal.mode {
-        TerminalPanelMode::Input => &config.ui.terminal_panel.input_mode_label,
-        TerminalPanelMode::Normal => &config.ui.terminal_panel.normal_mode_label,
-        TerminalPanelMode::Visual => &config.ui.terminal_panel.visual_mode_label,
-    };
-    let mut status_line = if terminal.focused {
-        format!(" {mode}  {}: {}", terminal.id, terminal.profile)
-    } else {
-        format!(" {}: {}", terminal.id, terminal.profile)
-    };
-    if terminal.truncated {
-        status_line.push_str(" · output truncated");
-    }
-    grid.put_text_clipped(
-        geometry.x,
-        geometry.status_y,
-        &status_line,
-        if terminal.focused {
-            Style::TerminalStatusAccent
-        } else {
-            Style::TerminalStatus
-        },
-        right,
-    );
-
     let cursor = if terminal.focused {
         terminal.cursor.and_then(|(column, source_row)| {
             let projected_row = source_row.checked_sub(source_start)?;
             let y = geometry
                 .body_top
                 .saturating_add(u16::try_from(projected_row).ok()?);
-            (column < usize::from(geometry.width) && y < geometry.status_y).then_some((
+            (column < usize::from(geometry.width) && y < bottom).then_some((
                 geometry.x.saturating_add(u16::try_from(column).ok()?),
                 y,
                 crossterm::cursor::SetCursorStyle::SteadyBlock,

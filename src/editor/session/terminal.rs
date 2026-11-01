@@ -135,6 +135,9 @@ impl TerminalSession {
     pub(in crate::editor::session) fn contains(&self, id: PtyId) -> bool {
         self.tabs.contains_key(&id)
     }
+    pub(in crate::editor::session) fn floats(&self, id: PtyId) -> bool {
+        self.tabs.get(&id).is_some_and(|tab| tab.float)
+    }
     pub(in crate::editor::session) fn closes_on_exit(&self, id: PtyId) -> bool {
         self.tabs.get(&id).is_some_and(|tab| tab.close_on_exit)
     }
@@ -403,6 +406,7 @@ impl TerminalSession {
             TerminalRuntime {
                 profile: source.token.profile,
                 close_on_exit: config.close_on_exit,
+                float,
                 pty: None,
                 scope: source.scope,
                 epoch: source.epoch,
@@ -906,6 +910,7 @@ fn acknowledge_resize(
 struct TerminalRuntime {
     profile: String,
     close_on_exit: bool,
+    float: bool,
     pty: Option<PtyId>,
     scope: WorkspaceVersion,
     epoch: Arc<()>,
@@ -965,6 +970,7 @@ impl TerminalSession {
             TerminalRuntime {
                 profile: fixture.profile,
                 close_on_exit: false,
+                float: false,
                 pty: None,
                 scope,
                 epoch: self.epoch.clone(),

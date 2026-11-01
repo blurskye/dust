@@ -330,6 +330,9 @@ pub(super) fn run_workspace_search(
     for root in roots.iter().skip(1) {
         builder.add(root);
     }
+    for worktree in roots.iter().flat_map(|root| super::directory::root_worktrees(root)) {
+        builder.add(worktree);
+    }
     builder
         .follow_links(false)
         .hidden(!policy.include_hidden)

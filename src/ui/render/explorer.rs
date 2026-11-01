@@ -104,7 +104,6 @@ pub(super) fn render_explorer_window(
         panel_width,
         rect.height,
         local_body,
-        focused,
     );
     for y in 0..rect.height {
         for x in 0..rect.width {
@@ -121,12 +120,12 @@ pub(super) fn render_explorer_window(
         }
     }
     if focused && explorer.searching {
-        // Typing goes to the search bar under the title.
+        // Typing goes to the search bar in the header.
         let typed = text_width(&config.ui.explorer.focus_marker, config.editor.ambiguous_width)
             + 1
             + text_width(&explorer.query, config.editor.ambiguous_width);
         let x = u16::try_from(typed).unwrap_or(u16::MAX).saturating_add(1).min(panel_width.saturating_sub(1));
-        frame.cursor = (rect.height > 1).then(|| (rect.x.saturating_add(x), rect.y.saturating_add(1), cursor_style(config.ui.cursor.insert)));
+        frame.cursor = Some((rect.x.saturating_add(x), rect.y, cursor_style(config.ui.cursor.insert)));
     } else if focused {
         frame.cursor = explorer
             .rows
@@ -151,7 +150,6 @@ pub(super) fn render_explorer_dock(
     panel_width: u16,
     height: u16,
     body: WindowRect,
-    focused: bool,
 ) {
     if panel_width == 0 || height == 0 {
         return;
@@ -174,58 +172,38 @@ pub(super) fn render_explorer_dock(
         );
     }
 
-    let title = format!(" {} ", explorer.title);
-    let title_width = u16::try_from(text_width(&title, config.editor.ambiguous_width))
-        .unwrap_or(panel_width)
-        .min(panel_width);
-    let title_left = panel_width.saturating_sub(title_width) / 2;
     for x in 0..panel_width {
-        grid.set_cell(x, 0, &glyphs.panel_horizontal, Style::ExplorerBorder);
+        grid.set_cell(x, 0, " ", Style::ExplorerHeader);
     }
-    grid.put_text_clipped(title_left, 0, &title, Style::ExplorerHeader, panel_width);
-
-    if panel_height > 1 {
-        for x in 0..panel_width {
-            grid.set_cell(x, 1, " ", Style::ExplorerHeader);
-        }
-        // Matches out of what is read so far while a search filters the tree.
-        let count = if explorer.query.is_empty() {
-            format!("{0}/{0}", explorer.total)
-        } else {
-            format!("{}", explorer.total)
-        };
-        let count_width =
-            u16::try_from(text_width(&count, config.editor.ambiguous_width)).unwrap_or(panel_width);
-        grid.put_text_clipped(
-            panel_width.saturating_sub(count_width).saturating_sub(1),
+    // Matches out of what is read so far while a search filters the tree.
+    let count = if explorer.query.is_empty() {
+        String::new()
+    } else {
+        explorer.total.to_string()
+    };
+    let count_width =
+        u16::try_from(text_width(&count, config.editor.ambiguous_width)).unwrap_or(panel_width);
+    let text_right = panel_width.saturating_sub(count_width).saturating_sub(1);
+    grid.put_text_clipped(text_right, 0, &count, Style::ExplorerCount, panel_width);
+    // What is typed stays in the bar while the tree loads; the loading line goes under the
+    // results.
+    if explorer.searching || !explorer.query.is_empty() {
+        let x = grid.put_text_clipped(
             1,
-            &count,
-            Style::ExplorerCount,
+            0,
+            &config.ui.explorer.focus_marker,
+            Style::ExplorerHeader,
             panel_width,
         );
-        // What is typed stays in the bar while the tree loads; the loading line goes
-        // under the results.
-        if focused || !explorer.query.is_empty() {
-            let x = grid.put_text_clipped(
-                1,
-                1,
-                &config.ui.explorer.focus_marker,
-                Style::ExplorerHeader,
-                panel_width,
-            );
-            grid.put_text_clipped(
-                x.saturating_add(1),
-                1,
-                &explorer.query,
-                Style::ExplorerHeader,
-                panel_width.saturating_sub(count_width).saturating_sub(2),
-            );
-        }
-    }
-    if panel_height > 2 {
-        for x in 0..panel_width {
-            grid.set_cell(x, 2, &glyphs.panel_horizontal, Style::ExplorerBorder);
-        }
+        grid.put_text_clipped(
+            x.saturating_add(1),
+            0,
+            &explorer.query,
+            Style::ExplorerHeader,
+            text_right.saturating_sub(1),
+        );
+    } else {
+        grid.put_text_clipped(1, 0, &explorer.title, Style::ExplorerHeader, text_right);
     }
 
     let body_top = body.y;

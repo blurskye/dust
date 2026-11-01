@@ -862,7 +862,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
     wait_explorer(&mut app);
     let explorer = app.ui.explorer.as_ref().expect("explorer projection");
     assert_eq!(explorer.total, 40);
-    assert_eq!(explorer.rows.len(), 6);
+    assert_eq!(explorer.rows.len(), 8);
     assert!(explorer.rows.len() < explorer.total);
     assert_eq!(explorer.rows.iter().filter(|row| row.selected).count(), 1);
     let first_child = app.explorer.tree().selected_id().expect("first child");
@@ -879,7 +879,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
 
     app.handle_event(crate::ui::UiEvent::Resize(80, 20));
     let explorer = app.ui.explorer.as_ref().expect("grown projection");
-    assert_eq!(explorer.rows.len(), 16);
+    assert_eq!(explorer.rows.len(), 18);
     assert_eq!(explorer.rows.iter().filter(|row| row.selected).count(), 1);
     assert_eq!(
         app.explorer.tree().projection_generation(),
@@ -887,7 +887,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
     );
     app.handle_event(crate::ui::UiEvent::Resize(80, 8));
     let explorer = app.ui.explorer.as_ref().expect("shrunk projection");
-    assert_eq!(explorer.rows.len(), 4);
+    assert_eq!(explorer.rows.len(), 6);
     assert_eq!(explorer.rows.iter().filter(|row| row.selected).count(), 1);
     assert_eq!(
         app.explorer.tree().projection_generation(),
@@ -896,7 +896,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
 
     app.move_explorer_selection(30);
     let explorer = app.ui.explorer.as_ref().expect("scrolled projection");
-    assert_eq!(explorer.rows.len(), 4);
+    assert_eq!(explorer.rows.len(), 6);
     assert!(explorer.scroll > 0);
     assert!(explorer.rows.iter().any(|row| row.selected));
     let before_page = app
@@ -950,7 +950,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
     app.page_explorer_selection(1);
     assert_eq!(app.explorer.tree().selected_id(), bottom);
     let first_viewport_node = app.ui.explorer.as_ref().unwrap().rows[0].node_id;
-    app.input.observe_mouse(1, 3);
+    app.input.observe_mouse(1, 1);
     app.explorer_mouse_select();
     assert_eq!(
         app.explorer.tree().selected_id(),
@@ -4171,8 +4171,9 @@ fn the_changes_surface_renders_its_sections_columns_badge_and_footer() {
     let badge_row = u16::try_from(
         rendered
             .iter()
-            // Not the "opened …/unsaved.txt" notice at the top.
-            .position(|row| row.contains("unsaved.txt") && !row.contains("opened"))
+            .enumerate()
+            // Not the buffer tab or the "opened …/unsaved.txt" notice above the sections.
+            .position(|(row, text)| row > conflicts && text.contains("unsaved.txt") && !text.contains("opened"))
             .expect("the unsaved-only row"),
     )
     .expect("row index");

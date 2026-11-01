@@ -276,12 +276,8 @@ impl Config {
             || terminal_panel.divider.graphemes(true).count() != 1
             || UnicodeWidthStr::width(terminal_panel.divider.as_str()) != 1
             || terminal_panel.divider.chars().any(char::is_control)
-            || !terminal_panel.title_format.contains("{id}")
-            || !terminal_panel.title_format.contains("{profile}")
             || [
-                &terminal_panel.title_format,
                 &terminal_panel.tab_separator,
-                &terminal_panel.input_mode_label,
                 &terminal_panel.normal_mode_label,
                 &terminal_panel.visual_mode_label,
             ]

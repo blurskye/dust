@@ -124,13 +124,14 @@ components = ["mode", "file", "diagnostics", "git", "tasks", "large_file", "lsp"
 scratch_label = "[scratch]"
 dirty_marker = " [+]"
 mode_padding = " "
-component_separator = " "
+component_separator = "  "
 position_format = "{line}:{column} "
-lsp_format = "LSP {server}"
+lsp_format = "{server}"
 diagnostic_format = "E{errors} W{warnings}"
 git_format = "Git {count} files"
 task_format = "Tasks {count}"
 root_format = "{root}"
+worktree_format = "{repository} › {worktree}"
 
 [ui.status_line.mode_labels]
 normal = "NORMAL"
@@ -161,7 +162,7 @@ custom_icon = "󰈔"
 agent_icon = "󰚩"
 # Per-extension overrides; otherwise the explorer's file icons are used.
 extension_icons = {}
-hide_when_single = true
+hide_when_single = false
 active_format = " {title}{dirty}  "
 inactive_format = " {title}{dirty}  "
 separator = "│"
@@ -238,9 +239,7 @@ maximum_height = 40
 minimum_workspace_height = 3
 resize_step = 2
 divider = "─"
-title_format = "{id}: {profile}"
 tab_separator = " │ "
-input_mode_label = "TERMINAL"
 normal_mode_label = "NORMAL"
 visual_mode_label = "VISUAL"
 
@@ -402,7 +401,7 @@ environment = {}
 columns = 80
 rows = 24
 float = false
-close_on_exit = false
+close_on_exit = true
 
 [terminals.profiles.lazygit]
 program = "/bin/sh"
@@ -832,6 +831,7 @@ terminals = "terminal.list"
 terminalfocus = "terminal.focus"
 terminalsend = "terminal.send"
 terminalclose = "terminal.close"
+terminalquit = "terminal.quit"
 format = "format.run"
 lint = "lint.run"
 lintclear = "lint.clear"
@@ -1535,6 +1535,7 @@ workspace = "Project"
 "terminal.visual.start" = "Select terminal text"
 "terminal.yank" = "Yank terminal text"
 "terminal.close" = "Close focused terminal"
+"terminal.quit" = "Stop the focused terminal without asking"
 "terminal.unfocus" = "Return focus from terminal to editor"
 "format.run" = "Run configured formatter"
 "lint.run" = "Run configured linter"

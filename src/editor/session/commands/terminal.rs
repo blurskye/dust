@@ -228,5 +228,13 @@ pub(super) fn register_commands(
         ArgumentSchema::default(),
         |_| AppEffect::TerminalClose,
     )?;
+    register(
+        registry,
+        "terminal.quit",
+        "Stop the focused terminal without asking",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_| AppEffect::TerminalQuit,
+    )?;
     Ok(())
 }

@@ -354,10 +354,10 @@ fn floating_explorer_pages_cursor_and_hit_test_use_its_body_not_the_workspace_he
     session.explorer_fixture();
     session.float_explorer();
     let body = session.projection().surface_content.explorer.unwrap();
-    assert_eq!((body.x, body.y, body.height), (5, 8, 4));
+    assert_eq!((body.x, body.y, body.height), (5, 6, 6));
     assert_eq!(
         session.projection().explorer.as_ref().unwrap().rows.len(),
-        4
+        6
     );
     session.page_explorer(1);
     let explorer = session.projection().explorer.as_ref().unwrap();
@@ -395,10 +395,10 @@ fn floating_explorer_pages_cursor_and_hit_test_use_its_body_not_the_workspace_he
     loaded.config.ui.status_line.enabled = false;
     session.apply_candidate(loaded).unwrap();
     let body = session.projection().surface_content.explorer.unwrap();
-    assert_eq!(body.height, 5);
+    assert_eq!(body.height, 7);
     assert_eq!(
         session.projection().explorer.as_ref().unwrap().rows.len(),
-        5
+        7
     );
 }
 

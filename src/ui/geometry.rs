@@ -139,8 +139,8 @@ pub fn picker_content_geometry(
     })
 }
 
-/// The explorer's title, its search row and the rule under them.
-const EXPLORER_HEADER_ROWS: u16 = 3;
+/// The row that names the root and, while searching, holds the query.
+const EXPLORER_HEADER_ROWS: u16 = 1;
 
 #[must_use]
 pub fn explorer_body_geometry(rect: WindowRect, config: &Config) -> WindowRect {

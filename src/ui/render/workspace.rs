@@ -152,7 +152,7 @@ pub(super) fn workspace_projection(
     let tab_line_visible = config.ui.tab_line.enabled
         && (!config.ui.tab_line.hide_when_single || state.tabs.len() > 1);
     let buffer_line_visible = config.ui.buffer_line.enabled
-        && (!config.ui.buffer_line.hide_when_single || ui.content_tabs.len() > 1);
+        && ui.content_tabs.len() > usize::from(config.ui.buffer_line.hide_when_single);
     let top = u16::from(tab_line_visible).saturating_add(u16::from(buffer_line_visible));
     let status_rows = u16::from(config.ui.status_line.enabled && height > top);
     let origin = compositor.projection.workspace_bounds;

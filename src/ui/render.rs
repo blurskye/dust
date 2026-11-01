@@ -20,6 +20,7 @@ mod surfaces;
 mod visual_rows;
 #[cfg(test)]
 use editor::render_editor_view;
+pub(crate) use editor::workspace_title;
 #[cfg(test)]
 use overlays::{content_tab_width, render_content_tab_line};
 use surfaces::{
@@ -1085,7 +1086,6 @@ pub struct TerminalPanelGeometry {
     pub height: u16,
     pub body_top: u16,
     pub body_height: u16,
-    pub status_y: u16,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1572,7 +1572,7 @@ pub fn editor_workspace_insets(
     let tab_line = config.ui.tab_line.enabled
         && (!config.ui.tab_line.hide_when_single || state.tabs.len() > 1);
     let buffer_line = config.ui.buffer_line.enabled
-        && (!config.ui.buffer_line.hide_when_single || ui.content_tabs.len() > 1);
+        && ui.content_tabs.len() > usize::from(config.ui.buffer_line.hide_when_single);
     let top = u16::from(tab_line).saturating_add(u16::from(buffer_line));
     let bottom = u16::from(config.ui.status_line.enabled && available_height > top);
     (top, bottom)
@@ -1603,8 +1603,7 @@ pub fn terminal_panel_geometry(
         top,
         height,
         body_top: top.saturating_add(1),
-        body_height: height.saturating_sub(2),
-        status_y: terminal_height.saturating_sub(1),
+        body_height: height.saturating_sub(1),
     })
 }
 

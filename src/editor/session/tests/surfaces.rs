@@ -3355,19 +3355,19 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
 
     app.process_effect(crate::editor::AppEffect::TerminalResize(1));
     assert_eq!(app.window_session.terminal_height(), 12);
-    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (80, 10));
+    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (80, 11));
     app.process_effect(crate::editor::AppEffect::WindowResizeDirectional(
         crate::editor::FocusDirection::Up,
     ));
     assert_eq!(app.window_session.terminal_height(), 14);
-    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (80, 12));
+    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (80, 13));
     app.process_effect(crate::editor::AppEffect::WindowResizeDirectional(
         crate::editor::FocusDirection::Down,
     ));
     assert_eq!(app.window_session.terminal_height(), 12);
     assert_eq!(app.workspace_render_height(), 12);
     app.handle_event(crate::ui::UiEvent::Resize(60, 20));
-    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (60, 10));
+    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (60, 11));
     assert_eq!(app.workspace_render_height(), 8);
 
     let terminal_ids = app
@@ -3400,7 +3400,7 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
             height: 10,
         })
     );
-    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (40, 8));
+    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (40, 9));
     app.process_effect(crate::editor::AppEffect::WindowMove {
         target: "terminal".into(),
         x: 7,
@@ -3423,7 +3423,7 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
             height: 12,
         })
     );
-    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (42, 10));
+    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (42, 11));
     app.process_effect(crate::editor::AppEffect::TerminalFullscreen);
     assert_eq!(
         app.window_session.native_ids().terminal(1),
@@ -3437,7 +3437,7 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
             .placement,
         WindowPlacement::Fullscreen
     );
-    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (60, 18));
+    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (60, 19));
     app.process_effect(crate::editor::AppEffect::TerminalHide);
     assert_eq!(
         app.window_session.native_ids().terminal(1),
@@ -3462,17 +3462,17 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
         edge: "top".into(),
         size: 5,
     });
-    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (60, 3));
+    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (60, 4));
     app.process_effect(crate::editor::AppEffect::TerminalDock {
         edge: "right".into(),
         size: 10,
     });
-    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (10, 18));
+    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (10, 19));
     app.process_effect(crate::editor::AppEffect::TerminalDock {
         edge: "left".into(),
         size: 8,
     });
-    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (8, 18));
+    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (8, 19));
     app.process_effect(crate::editor::AppEffect::TerminalDock {
         edge: "bottom".into(),
         size: 12,
@@ -3481,7 +3481,7 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
         app.window_session.native_ids().terminal(1),
         Some(terminal_ids)
     );
-    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (60, 10));
+    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (60, 11));
     app.place_graph_window("terminal", WindowPlacement::Tiled)
         .expect("tile live terminal view");
     assert_eq!(

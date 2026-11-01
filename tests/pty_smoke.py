@@ -426,7 +426,7 @@ def main() -> None:
         assert code == 0, code
         dashboard = terminal_screen(snapshots[0])
         assert pathlib.Path(directory).as_posix() in dashboard
-        assert "Explorer" in dashboard
+        assert pathlib.Path(directory).name in dashboard
         assert "package activations complete" not in dashboard
         command_screen = terminal_screen(snapshots[1])
         assert "package activations complete" not in command_screen
@@ -448,7 +448,7 @@ def main() -> None:
         )
         assert code == 0
         explorer_screen = terminal_screen(snapshots[1])
-        assert "Explorer" in explorer_screen
+        assert pathlib.Path(directory).name in explorer_screen
         assert "Workspace files" not in explorer_screen
         command_screen = terminal_screen(snapshots[2])
         assert "Command" in command_screen and "buffer" in command_screen
@@ -838,11 +838,11 @@ while True:
             [(0.7,b":explore\r",None),(0.2,b"l",None),(0.7,b"j",None),(0.2,b"\r",None),(0.8,b":q\r",None)],
         )
         assert code == 0
-        assert "Explorer" in terminal_screen(snapshots[1])
+        assert pathlib.Path(directory).name in terminal_screen(snapshots[1])
         assert "nested" in terminal_screen(snapshots[1])
         assert "inside.txt" in terminal_screen(snapshots[3])
         opened_with_dock = terminal_screen(snapshots[4])
-        assert "Explorer" in opened_with_dock
+        assert pathlib.Path(directory).name in opened_with_dock
         assert "inside.txt" in opened_with_dock
         assert "explorer pty content" in opened_with_dock
         assert opened_with_dock.splitlines()[0][40] == "⎸"
@@ -854,7 +854,7 @@ while True:
         )
         assert code == 0
         split_screen = terminal_screen(snapshots[4])
-        assert "Explorer" in split_screen and "inside.txt" in split_screen
+        assert pathlib.Path(directory).name in split_screen and "inside.txt" in split_screen
         assert "explorer pty content" in split_screen
         assert split_screen.splitlines()[0][40] == "⎸"
         assert_restored(output)
@@ -1004,7 +1004,7 @@ while True:
             stage_expectations={
                 1: lambda screen: "BETA-CONTENT" in screen,
                 2: lambda screen: "GAMMA-CONTENT" in screen,
-                3: lambda screen: "Explorer" in screen.splitlines()[0][:41]
+                3: lambda screen: pathlib.Path(directory).name in screen.splitlines()[0][:41]
                 and all(
                     name in screen.splitlines()[0][41:]
                     for name in ("alpha.rs", "beta.rs", "gamma.rs")
@@ -1014,7 +1014,7 @@ while True:
         assert code == 0
         opened = terminal_screen(snapshots[3])
         top = opened.splitlines()[0]
-        assert "Explorer" in top[:41]
+        assert pathlib.Path(directory).name in top[:41]
         assert all(name in top[41:] for name in ("alpha.rs", "beta.rs", "gamma.rs")), top
         assert "BETA-CONTENT" in terminal_screen(snapshots[5])
         assert "GAMMA-CONTENT" in terminal_screen(snapshots[6])
@@ -1063,29 +1063,29 @@ while True:
         assert code == 0
         focused = terminal_screen(snapshots[7], 100, 30)
         focused_rows = focused.splitlines()
-        assert "Explorer" in focused and "EDITOR-TOP" in focused
-        assert "1: shell" in focused_rows[20]
+        assert pathlib.Path(directory).name in focused and "EDITOR-TOP" in focused
+        assert "shell" in focused_rows[20]
         assert any("DOCKED-TERMINAL" in row for row in focused_rows[21:29])
         assert "[?2004h" not in focused and "[1;32m" not in focused
         assert "]0;title" not in focused
-        assert "TERMINAL" in focused_rows[29]
+        assert "TERMINAL" not in focused
         assert "unsupported" not in focused_rows[29]
         assert focused_rows[21][40] != "⎸"  # terminal spans beneath explorer
 
         hidden = terminal_screen(snapshots[8], 100, 30)
-        assert "1: shell" not in hidden
+        assert "shell" not in hidden
         assert "unsupported" not in hidden
         assert "EDITOR-TOP" in hidden
         assert terminal_cursor(snapshots[8], 100, 30)[1] < 30
 
         resized = terminal_screen(snapshots[9], 60, 20)
-        assert "1: shell" not in resized
+        assert "shell" not in resized
         assert "EDITOR-TOP" in resized
         refocused = terminal_screen(snapshots[10], 60, 20)
-        assert "TERMINAL" in refocused.splitlines()[19]
+        assert "shell" in refocused
         assert terminal_cursor(snapshots[10], 60, 20)[1] >= 11
         exited = terminal_screen(snapshots[11], 60, 20)
-        assert "1: shell" not in exited
+        assert "shell" not in exited
         assert "EXIT 0" not in exited
         assert "EDITOR-TOP" in exited
         assert_restored(output)

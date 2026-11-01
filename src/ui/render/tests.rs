@@ -290,8 +290,7 @@ fn workspace_frame_respects_nonzero_compositor_origin_for_side_and_top_docks() {
             top: 0,
             height: 10,
             body_top: 1,
-            body_height: 8,
-            status_y: 9,
+            body_height: 9,
         },
         &config,
         20,
@@ -2415,40 +2414,40 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
     assert_eq!(super::explorer_panel_width(&loaded.config, 2), None);
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 100, 20);
     assert!(frame.grid.row_text(0).contains("Explorer"));
-    assert!(frame.grid.row_text(3).contains("src"));
-    assert!(frame.grid.row_text(4).contains("main.rs"));
+    assert!(frame.grid.row_text(1).contains("src"));
+    assert!(frame.grid.row_text(2).contains("main.rs"));
     assert_eq!(
-        frame.grid.get(1, 3).expect("tree segment").style,
+        frame.grid.get(1, 1).expect("tree segment").style,
         crate::ui::Style::ExplorerTree
     );
     assert_eq!(
-        frame.grid.get(3, 3).expect("icon segment").style,
+        frame.grid.get(3, 1).expect("icon segment").style,
         crate::ui::Style::ExplorerIcon
     );
     assert_eq!(
-        frame.grid.get(5, 3).expect("directory name").style,
+        frame.grid.get(5, 1).expect("directory name").style,
         crate::ui::Style::ExplorerDirectory
     );
     assert_eq!(
-        frame.grid.get(37, 3).expect("git decoration").style,
+        frame.grid.get(37, 1).expect("git decoration").style,
         crate::ui::Style::ExplorerGit
     );
     assert_eq!(
-        frame.grid.get(38, 3).expect("diagnostic decoration").style,
+        frame.grid.get(38, 1).expect("diagnostic decoration").style,
         crate::ui::Style::ExplorerDiagnostic
     );
     assert_eq!(
-        frame.grid.get(1, 4).expect("selected row").style,
+        frame.grid.get(1, 2).expect("selected row").style,
         crate::ui::Style::ExplorerSelection
     );
     assert_eq!(
-        frame.grid.get(panel, 3).expect("dock separator").symbol,
+        frame.grid.get(panel, 1).expect("dock separator").symbol,
         "⎸"
     );
     assert_eq!(
         frame
             .grid
-            .get(panel, 4)
+            .get(panel, 2)
             .expect("preserved separator")
             .symbol,
         "⎸"
@@ -2456,12 +2455,12 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
     assert_eq!(
         frame
             .grid
-            .get(panel + 1, 4)
+            .get(panel + 1, 2)
             .expect("editor-side cell")
             .style,
         crate::ui::Style::Muted
     );
-    assert!(frame.cursor.is_some_and(|(x, y, _)| x == 1 && y == 4));
+    assert!(frame.cursor.is_some_and(|(x, y, _)| x == 1 && y == 2));
     assert!(frame.grid.row_text(19).contains("NORMAL"));
     let mut editor_ui = ui.clone();
     editor_ui.explorer_focused = false;
@@ -2790,7 +2789,7 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
     ui.terminal_panel = Some(terminal.clone());
     let geometry = super::terminal_panel_geometry(&config, 20, 6).expect("terminal geometry");
     assert_eq!(geometry.top, 14);
-    assert_eq!(geometry.body_height, 4);
+    assert_eq!(geometry.body_height, 5);
     let panel_width = super::explorer_panel_width(&config, 80).expect("explorer width");
     let editor_width = 80_u16.saturating_sub(panel_width).saturating_sub(1);
     attach_test_compositor(&state, &mut ui, &config, 80, 20);
@@ -2849,18 +2848,10 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
     assert!(frame.cursor.is_some_and(|(x, y, _)| {
         x == u16::try_from(cursor_column).unwrap() && y == geometry.body_top
     }));
-    assert!(
-        frame
-            .grid
-            .row_text(geometry.status_y)
-            .contains("TERMINAL  7: shell")
-    );
-    assert!(
-        !frame
-            .grid
-            .row_text(geometry.status_y)
-            .contains("unsupported")
-    );
+    let tab_row = frame.grid.row_text(geometry.top);
+    assert!(tab_row.contains("shell"));
+    assert!(!tab_row.contains("TERMINAL"));
+    assert!(!frame.grid.row_text(19).contains("TERMINAL"));
 
     let mut editor_ui = ui;
     editor_ui.terminal_panel.as_mut().expect("terminal").focused = false;
@@ -2871,8 +2862,8 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
             .is_some_and(|(_, y, _)| y < geometry.top)
     );
     let tab_row = editor_frame.grid.row_text(geometry.top);
-    assert!(tab_row.contains("7: shell"));
-    assert!(tab_row.contains("8: logs [exit 2]"));
+    assert!(tab_row.contains("shell"));
+    assert!(tab_row.contains("logs [exit 2]"));
 }
 
 #[test]
@@ -3940,6 +3931,52 @@ fn a_notification_too_long_to_show_points_at_the_messages_list() {
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 60, 20);
     let text: Vec<String> = (0..20).map(|row| frame.grid.row_text(row)).collect();
     assert!(text.iter().any(|row| row.contains("… :messages")), "{text:#?}");
+}
+
+#[test]
+fn terminal_tabs_are_named_by_profile_and_numbered_when_repeated() {
+    let tab = |id, profile: &str| super::TerminalTabState {
+        phase: super::TerminalPhase::Running,
+        id,
+        profile: profile.into(),
+        running: true,
+        exit_code: None,
+    };
+    let tabs = vec![tab(3, "shell"), tab(4, "lazygit"), tab(9, "shell")];
+    let names = tabs
+        .iter()
+        .map(|current| super::terminal::terminal_tab_label(&tabs, current))
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["shell", "lazygit", "shell 2"]);
+}
+
+#[test]
+fn the_status_line_puts_the_server_and_root_on_the_right() {
+    let mut state = EditorState::new(PathBuf::from("/tmp/some-project"));
+    let (_, view) = state.open_text(crate::editor::text::TextBuffer::from_text("x"), None);
+    let loaded = crate::config::load_bundled_config();
+    let mut ui = ui_with_editor_layout(&state);
+    ui.lsp_server = Some("rust-analyzer".into());
+    let wide = super::render_editor_view(&state, view, &ui, &loaded.config, 80, 5);
+    let status = wide.grid.row_text(4);
+    assert!(status.trim_end().ends_with("rust-analyzer  some-project  1:1"), "{status:?}");
+
+    // The server goes first when the room runs out; the root stays.
+    let narrow = super::render_editor_view(&state, view, &ui, &loaded.config, 42, 5);
+    let status = narrow.grid.row_text(4);
+    assert!(status.trim_end().ends_with("some-project  1:1"), "{status:?}");
+    assert!(!status.contains("rust-analyzer"), "{status:?}");
+}
+
+#[test]
+fn the_status_line_names_a_worktree_with_its_repository() {
+    let mut state = EditorState::new(PathBuf::from("/tmp/repo/.worktree/feature"));
+    state.workspace_repository = Some("repo".into());
+    let (_, view) = state.open_text(crate::editor::text::TextBuffer::from_text("x"), None);
+    let loaded = crate::config::load_bundled_config();
+    let ui = ui_with_editor_layout(&state);
+    let frame = super::render_editor_view(&state, view, &ui, &loaded.config, 80, 5);
+    assert!(frame.grid.row_text(4).contains("repo › feature"));
 }
 
 #[test]
