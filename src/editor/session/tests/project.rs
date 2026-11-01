@@ -4646,6 +4646,7 @@ fn staging_a_row_moves_it_to_the_staged_section_of_the_open_list() {
         app.ui.picker.as_ref().expect("picker").rows.iter().map(|row| row.label.clone()).collect()
     };
     assert!(labels(&app).iter().any(|label| label == "Unstaged 1"), "{:?}", labels(&app));
+    app.input.set_picker_normal(true);
     app.invoke(
         crate::editor::CommandInvocation::new("workspace.git.file.stage", InvocationSource::Test)
             .expect("static command"),
@@ -4659,6 +4660,40 @@ fn staging_a_row_moves_it_to_the_staged_section_of_the_open_list() {
     }
     assert!(!labels(&app).iter().any(|label| label == "Unstaged 1"), "{:?}", labels(&app));
     assert!(app.ui.picker.as_ref().expect("picker").selected.is_some(), "a row stays selected");
+    assert!(app.input.picker_normal(), "the next s or u still acts instead of searching");
+}
+
+#[test]
+fn switching_up_from_a_nested_worktree_is_blocked_by_its_unsaved_file() {
+    let main = tempdir().unwrap();
+    let state_dir = tempdir().unwrap();
+    let main = main.path().canonicalize().unwrap();
+    let nested = main.join(".worktree/feature");
+    fs::create_dir_all(&nested).unwrap();
+    let mut app = InteractiveApplication::new(
+        StartupTarget::Dashboard {
+            root: nested.clone(),
+        },
+        crate::config::load_bundled_config(),
+        false,
+        state_dir.path().into(),
+        false,
+        false,
+        std::sync::Arc::new(crate::clock::SystemClock),
+    )
+    .unwrap();
+    let (buffer, _) = app
+        .state
+        .open_text(TextBuffer::from_text("unsaved\n"), Some(nested.join("notes.txt")));
+    app.state.set_buffer_dirty(buffer, true);
+
+    app.switch_workspace_root(main.clone());
+    assert!(app.ui.notification_error, "{:?}", app.ui.notification);
+    assert!(
+        app.ui.notification.as_deref().is_some_and(|text| text.contains("unsaved changes")),
+        "{:?}",
+        app.ui.notification
+    );
 }
 
 #[test]

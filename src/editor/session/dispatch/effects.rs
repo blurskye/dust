@@ -7261,7 +7261,10 @@ impl InteractiveApplication {
             self.start_git_worktrees();
         } else if self.search.picker_surface() == PickerSurfaceKind::Changes {
             // Staging from the list moves the row between its sections.
+            let normal = self.input.picker_normal();
             self.open_git_status_picker();
+            self.input.set_picker_normal(normal);
+            self.sync_picker_ui();
         }
         if self.ui.explorer.is_some() {
             self.sync_explorer_ui();
@@ -8963,6 +8966,12 @@ impl InteractiveApplication {
     }
 }
 
+/// Whether a switch from `old` to `new` leaves this file behind. Worktrees nest under the main
+/// checkout: moving down keeps files inside the new root, moving up leaves all of the old one.
+fn leaves_root(file: &Path, old: &Path, new: &Path) -> bool {
+    file.starts_with(old) && (!file.starts_with(new) || old.starts_with(new))
+}
+
 impl InteractiveApplication {
     pub(in crate::editor::session) fn add_workspace_root(&mut self, path: PathBuf) {
         let requested_path = if path.is_absolute() {
@@ -9600,15 +9609,19 @@ impl InteractiveApplication {
             .values()
             .filter(|buffer| {
                 buffer.dirty
-                    && buffer.path.as_ref().is_some_and(|file| {
-                        file.starts_with(&current_path) && !file.starts_with(&target)
-                    })
+                    && buffer
+                        .path
+                        .as_ref()
+                        .is_some_and(|file| leaves_root(file, &current_path, &target))
             })
             .count();
         if unsaved > 0 {
             self.show_error(format!(
                 "{unsaved} file(s) in {} have unsaved changes; save or close them first",
-                current_path.display()
+                current_path.file_name().map_or_else(
+                    || current_path.display().to_string(),
+                    |name| name.to_string_lossy().into_owned()
+                )
             ));
             return;
         }
@@ -9622,7 +9635,7 @@ impl InteractiveApplication {
     /// After a worktree switch: close the old root's clean buffers, move the editor's root and
     /// reopen the file that was in front at the same place in the new worktree.
     pub(in crate::editor::session) fn finish_root_switch(&mut self, path: PathBuf, old: &Path) {
-        let leaving = |file: &Path| file.starts_with(old) && !file.starts_with(&path);
+        let leaving = |file: &Path| leaves_root(file, old, &path);
         let reopen = self.current_persisted_location().and_then(|mut location| {
             let relative = location.path.strip_prefix(old).ok()?;
             if !leaving(&location.path) {
