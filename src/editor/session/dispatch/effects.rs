@@ -8023,17 +8023,31 @@ impl InteractiveApplication {
                     .diagnostics
                     .choices()
                     .enumerate()
-                    .map(|(index, (key, problem, validity))| {
+                    .map(|(index, (key, problem, _))| {
                         let id = PickerItemId(format!("diagnostic:{index}:{}", problem.uri));
-                        let path = path_from_file_uri(&problem.uri)
-                            .map_or_else(|| problem.uri.clone(), |path| path.display().to_string());
+                        let path = path_from_file_uri(&problem.uri);
+                        let line = path.as_ref().and_then(|path| {
+                            let open = self.state.buffers.iter().find(|(_, buffer)| {
+                                buffer.path.as_ref() == Some(path)
+                            });
+                            open?.1.text.byte_to_line(problem.range.start).ok()
+                        });
+                        let place = path.map_or_else(
+                            || problem.uri.clone(),
+                            |path| self.workspace_relative_label(&path),
+                        );
+                        let place = line.map_or(place.clone(), |line| {
+                            format!("{place}:{}", line + 1)
+                        });
+                        // Where comes first: at any width the row says which file to look at.
+                        let message = problem.message.lines().map(str::trim).collect::<Vec<_>>();
                         (
                             PickerItem {
                     badge: String::new(),
                     kind: crate::workspace::PickerItemKind::Entry,
                                 id,
-                                label: problem.message.clone(),
-                                detail: format!("{path} · {}", validity.label()),
+                                label: format!("{place}  {}", message.join(" ")),
+                                detail: String::new(),
                                 source: problem.source.clone(),
                                 action: PickerAction::None,
                             },

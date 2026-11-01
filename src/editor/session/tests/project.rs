@@ -84,6 +84,9 @@ fn diagnostic_navigation_filters_severity_wraps_and_expands_the_landed_line() {
     assert_eq!(app.state.views[view].cursor, ByteOffset(9));
     assert_eq!(app.state.views[view].buffer, buffer);
     app.open_builtin_picker(PickerKind::Diagnostics);
+    let rows = &app.ui.picker.as_ref().unwrap().rows;
+    assert!(rows.iter().any(|row| row.label.ends_with("diagnostic.rs:2  error")));
+    assert!(rows.iter().any(|row| row.label.ends_with("diagnostic.rs:3  warning")));
     let before = app.state.views[view].cursor;
     let replacement = crate::workspace::DiagnosticProducer::new(
         crate::workspace::DiagnosticOwner::new("lsp.fake").unwrap(),

@@ -48,16 +48,6 @@ pub(super) enum DiagnosticValidity {
     UnversionedReport,
     DiskReport,
 }
-impl DiagnosticValidity {
-    pub(super) fn label(self) -> &'static str {
-        match self {
-            Self::RequestedSnapshot => "request snapshot",
-            Self::ReportedVersion => "reported version",
-            Self::UnversionedReport => "version unreported",
-            Self::DiskReport => "disk report",
-        }
-    }
-}
 pub(super) struct DiagnosticBatch {
     pub producer: DiagnosticProducer,
     pub uri: String,

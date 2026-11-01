@@ -13,7 +13,11 @@ pub enum VfsError {
     },
     #[error("refusing to overwrite externally modified file `{}`; reload or force the write", .0.display())]
     ExternalModification(PathBuf),
-    #[error("refusing to overwrite existing save-as destination `{}` without force", .0.display())]
+    #[error(
+        "`{}` already exists in `{}`",
+        .0.file_name().unwrap_or_default().display(),
+        .0.parent().unwrap_or(std::path::Path::new("")).display()
+    )]
     DestinationExists(PathBuf),
     #[error("path is outside the permitted filesystem scope: `{}`", .0.display())]
     OutsideScope(PathBuf),
