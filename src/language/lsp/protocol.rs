@@ -694,7 +694,7 @@ pub(super) fn completion_items(result: &Value) -> Result<Vec<LspCompletionItem>,
         .ok_or_else(|| "completion response is not an item list".to_owned())?;
     items
         .iter()
-        .take(512)
+        .take(10_000)
         .map(|item| completion_item(item, false))
         .collect()
 }

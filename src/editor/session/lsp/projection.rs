@@ -578,7 +578,7 @@ impl LspSession {
         order.sort_by(|(left, left_score), (right, right_score)| {
             let rank = |index: usize| {
                 let item = &self.projection.completion_all[index].1;
-                item.sort_text.as_deref().unwrap_or(&item.label).to_owned()
+                item.sort_text.as_deref().unwrap_or(&item.label)
             };
             right_score.cmp(left_score).then_with(|| rank(*left).cmp(&rank(*right)))
         });

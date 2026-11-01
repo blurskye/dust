@@ -1292,8 +1292,16 @@ pub(super) fn render_tool_menu(
             } else {
                 Style::Default
             };
-            frame.grid.put_text(content_left, y, &clip(&row.note), note_style);
-            y += 1;
+            // Install failures explain themselves here, so the note wraps above the keys.
+            let keys_row = bottom.saturating_sub(1);
+            for line in super::wrap_card_text(&row.note, usize::from(content_width), ambiguous) {
+                if y >= keys_row {
+                    break;
+                }
+                let line: String = line.into_iter().map(|(piece, _)| piece).collect();
+                frame.grid.put_text(content_left, y, &clip(&line), note_style);
+                y += 1;
+            }
         }
         let keys = tool_row_keys(row).join(" · ");
         if y < bottom && !keys.is_empty() {

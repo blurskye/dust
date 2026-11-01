@@ -366,6 +366,9 @@ fn completion_and_workspace_edits_are_bounded_typed_data() {
         completion_items(&json!([{"label":"println","detail":"macro","insertText":"println!"}]))
             .expect("completion");
     assert_eq!(items[0].insert_text, "println!");
+    // tsserver lists auto-imports after a thousand globals, so a short list would lose them.
+    let many = (0..2_000).map(|index| json!({"label": format!("item{index}")})).collect();
+    assert_eq!(completion_items(&Value::Array(many)).expect("many").len(), 2_000);
     let edit = workspace_edit(&json!({"changes":{"file:///tmp/a.rs":[{
         "range":{"start":{"line":0,"character":0},"end":{"line":0,"character":1}},"newText":"b"
     }]}}))
