@@ -174,6 +174,7 @@ enum Pending {
 struct PermissionRequest {
     session: u64,
     id: Value,
+    action: &'static str,
     title: String,
     options: Vec<PermissionOption>,
 }
@@ -1106,10 +1107,11 @@ impl InteractiveApplication {
                     format!("{} {}", session.number, session.name)
                 });
             let title = request.title.clone();
+            let action = request.action;
             self.agent.asking = Some(request);
             self.open_confirmation_actions(
                 PromptKind::AgentPermission,
-                format!("{name} wants to run a tool"),
+                format!("{name} wants to {action}"),
                 title,
                 ConfirmationChoice::No,
                 "Allow",
@@ -1192,10 +1194,8 @@ impl InteractiveApplication {
                     self.agent.permissions.push_back(PermissionRequest {
                         session: number,
                         id,
-                        title: params["toolCall"]["title"]
-                            .as_str()
-                            .unwrap_or("a tool")
-                            .to_owned(),
+                        action: agent::permission_action(&params),
+                        title: agent::permission_detail(&params),
                         options: agent::permission_options(&params),
                     });
                 }

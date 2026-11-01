@@ -1234,6 +1234,31 @@ fn the_first_hunk_key_reads_the_hunks_and_moves_to_the_next_one() {
 }
 
 #[test]
+fn leaving_a_worktree_closes_every_clean_buffer_from_it() {
+    let mut app = app();
+    let old = app.state.workspace_root.clone();
+    let new = old.join(".worktree/topic");
+    fs::create_dir_all(&new).unwrap();
+    for name in ["first.txt", "second.txt"] {
+        fs::write(old.join(name), "text\n").unwrap();
+        app.start_open(old.join(name));
+        wait_vfs(&mut app);
+    }
+    assert_eq!(app.state.buffers.len(), 2);
+
+    app.finish_root_switch(new, &old);
+    wait_vfs(&mut app);
+
+    assert!(
+        !app.state
+            .buffers
+            .values()
+            .any(|buffer| buffer.path.as_deref().is_some_and(|path| path.starts_with(&old)
+                && !path.starts_with(old.join(".worktree")))),
+    );
+}
+
+#[test]
 fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
     let mut app = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();

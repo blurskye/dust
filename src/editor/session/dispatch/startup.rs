@@ -167,6 +167,7 @@ impl InteractiveApplication {
             tooling,
             language: super::super::lsp::LspSession::default(),
             debugger_session,
+            debug_terminal: None,
             recovery: super::super::recovery::RecoverySession::new(
                 state_directory.join("recovery"),
             ),

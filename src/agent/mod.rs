@@ -487,6 +487,45 @@ pub struct PermissionOption {
     pub kind: String,
 }
 
+/// What a permission request is for, in words, from the tool call's kind.
+#[must_use]
+pub fn permission_action(params: &Value) -> &'static str {
+    match params["toolCall"]["kind"].as_str() {
+        Some("read") => "read a file",
+        Some("edit") => "change a file",
+        Some("delete") => "delete a file",
+        Some("move") => "move a file",
+        Some("search") => "search",
+        Some("execute") => "run a command",
+        Some("fetch") => "fetch from the web",
+        _ => "run a tool",
+    }
+}
+
+/// The tool call's own title, then the command it would run and the size of an edit, which a title
+/// such as a bare path leaves out.
+#[must_use]
+pub fn permission_detail(params: &Value) -> String {
+    let call = &params["toolCall"];
+    let mut detail = call["title"].as_str().unwrap_or("a tool").to_owned();
+    if let Some(command) = call["rawInput"]["command"].as_str()
+        && !detail.contains(command)
+    {
+        detail.push_str(&format!("\n$ {command}"));
+    }
+    for change in call["content"].as_array().into_iter().flatten() {
+        if change["type"] == "diff" {
+            let lines = |key: &str| change[key].as_str().map_or(0, |text| text.lines().count());
+            detail.push_str(&format!(
+                "\n{} lines become {} lines",
+                lines("oldText"),
+                lines("newText")
+            ));
+        }
+    }
+    detail
+}
+
 #[must_use]
 pub fn permission_options(params: &Value) -> Vec<PermissionOption> {
     params["options"]
@@ -547,6 +586,21 @@ mod tests {
             parse_line(r#"{"jsonrpc":"2.0","method":"session/update","params":{}}"#),
             Some(AgentMessage::Notification { method, .. }) if method == "session/update"
         ));
+    }
+
+    #[test]
+    fn permission_requests_name_the_action_and_what_it_touches() {
+        let edit = json!({"toolCall": {
+            "kind": "edit",
+            "title": "src/main.rs",
+            "content": [{"type": "diff", "path": "src/main.rs", "oldText": "a\nb\n", "newText": "c\n"}],
+        }});
+        assert_eq!(permission_action(&edit), "change a file");
+        assert_eq!(permission_detail(&edit), "src/main.rs\n2 lines become 1 lines");
+        let run = json!({"toolCall": {"kind": "execute", "title": "Run", "rawInput": {"command": "cargo test"}}});
+        assert_eq!(permission_action(&run), "run a command");
+        assert_eq!(permission_detail(&run), "Run\n$ cargo test");
+        assert_eq!(permission_action(&json!({"toolCall": {}})), "run a tool");
     }
 
     #[test]

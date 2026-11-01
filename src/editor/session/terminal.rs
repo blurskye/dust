@@ -796,7 +796,7 @@ impl TerminalSession {
                         tab.failure = Some(message.clone());
                         tab.truncated = true;
                         updates.push(TerminalUpdate::Failed(id, message));
-                    } else if tab.exit_code.is_some_and(|code| code != 0) {
+                    } else if !stopping && tab.exit_code.is_some_and(|code| code != 0) {
                         let message = format!("terminal exited with status {:?}", tab.exit_code);
                         tab.failure = Some(message.clone());
                         updates.push(TerminalUpdate::Failed(id, message));

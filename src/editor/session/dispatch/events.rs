@@ -2188,7 +2188,15 @@ impl InteractiveApplication {
         if self.ui.language_completion.is_some() {
             self.ui.language_completion = None;
         }
-        self.close_documentation();
+        // A Git or Markdown preview doesn't come from a server, and this runs each frame in a file
+        // without one.
+        if self
+            .input
+            .documentation()
+            .is_some_and(|popup| popup.kind != DocumentationPopupKind::Git)
+        {
+            self.close_documentation();
+        }
         self.ui.set(Vec::new(), |ui| &mut ui.lsp_semantic_spans);
         self.ui.set(Vec::new(), |ui| &mut ui.lsp_highlight_spans);
         self.ui.set(Vec::new(), |ui| &mut ui.lsp_inlay_hints);

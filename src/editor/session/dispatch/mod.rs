@@ -207,6 +207,7 @@ struct InteractiveApplication {
     language: super::lsp::LspSession,
 
     debugger_session: DebugSession,
+    debug_terminal: Option<PtyId>,
     recovery: super::recovery::RecoverySession,
     next_transaction: u64,
     git: super::git::GitSession,

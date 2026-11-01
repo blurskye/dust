@@ -2138,6 +2138,7 @@ impl InteractiveApplication {
                 if let Err(error) = self.debugger_session.stop() {
                     self.show_error(error);
                 }
+                self.close_debug_terminal();
             }
             AppEffect::DapContinue => {
                 // With nothing to continue, start one, as F5 does in VS Code.
@@ -6090,6 +6091,17 @@ impl InteractiveApplication {
         }
     }
 
+    /// The program's terminal from the last run. It stays after a run ends so its output can be
+    /// read, and goes when the user stops the program or runs it again.
+    fn close_debug_terminal(&mut self) {
+        let Some(id) = self.debug_terminal.take() else {
+            return;
+        };
+        if self.terminal_session.request_stop(id).is_ok() {
+            self.sync_terminal_panel();
+        }
+    }
+
     fn open_adapter_terminal(
         &mut self,
         program: crate::config::TerminalProfileConfig,
@@ -6137,6 +6149,8 @@ impl InteractiveApplication {
                     Ok(()) => {
                         if let Some(reply) = reply {
                             self.debugger_session.register_terminal(id, reply);
+                            self.close_debug_terminal();
+                            self.debug_terminal = Some(id);
                         }
                         if self.window_session.navigation_current(
                             &open.navigation,
@@ -9394,7 +9408,7 @@ impl InteractiveApplication {
 
     /// After a worktree switch: close the old root's clean buffers, move the editor's root and
     /// reopen the file that was in front at the same place in the new worktree.
-    fn finish_root_switch(&mut self, path: PathBuf, old: &Path) {
+    pub(in crate::editor::session) fn finish_root_switch(&mut self, path: PathBuf, old: &Path) {
         let leaving = |file: &Path| file.starts_with(old) && !file.starts_with(&path);
         let reopen = self.current_persisted_location().and_then(|mut location| {
             let relative = location.path.strip_prefix(old).ok()?;
@@ -9404,25 +9418,17 @@ impl InteractiveApplication {
             location.path = path.join(relative);
             location.path.is_file().then_some(location)
         });
-        let views = self
-            .state
-            .views
-            .iter()
-            .filter_map(|(view, state)| {
-                let buffer = self.state.buffers.get(state.buffer)?;
-                (!buffer.dirty && buffer.path.as_deref().is_some_and(leaving))
-                    .then_some((view, state.buffer))
-            })
-            .collect::<Vec<_>>();
-        for (view, buffer) in views {
-            self.close_buffer_target(view, buffer);
-        }
-        // Buffers in no window go too, or a later save would land in the old checkout.
+        // Buffers in no window go first, or closing a window's buffer would put one of them on
+        // screen, and a later save would land in the old checkout.
         let hidden = self
             .state
             .buffers
             .iter()
-            .filter(|(_, buffer)| !buffer.dirty && buffer.path.as_deref().is_some_and(leaving))
+            .filter(|(id, buffer)| {
+                !buffer.dirty
+                    && buffer.path.as_deref().is_some_and(leaving)
+                    && !self.state.views.values().any(|view| view.buffer == *id)
+            })
             .map(|(id, buffer)| (id, buffer.path.clone()))
             .collect::<Vec<_>>();
         for (buffer, closed_path) in hidden {
@@ -9432,6 +9438,19 @@ impl InteractiveApplication {
                 Ok(()) => self.retire_closed_buffer(buffer, closed_path.as_deref()),
                 Err(error) => self.show_error(error),
             }
+        }
+        // A window can fall back to another window's buffer from the old tree, so go until none
+        // shows one. Each round closes a buffer or a window.
+        for _ in 0..self.state.views.len() + self.state.buffers.len() {
+            let showing = self.state.views.iter().find_map(|(view, state)| {
+                let buffer = self.state.buffers.get(state.buffer)?;
+                (!buffer.dirty && buffer.path.as_deref().is_some_and(leaving))
+                    .then_some((view, state.buffer))
+            });
+            let Some((view, buffer)) = showing else {
+                break;
+            };
+            self.close_buffer_target(view, buffer);
         }
         self.state.workspace_root = path.clone();
         self.invalidate_root_scoped_operations();
