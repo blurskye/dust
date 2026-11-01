@@ -2225,6 +2225,10 @@ fn a_failed_test_is_listed_in_problems_and_jumps_to_its_line() {
     let buffer = &app.state.buffers[view.buffer];
     assert_eq!(buffer.path.as_deref(), Some(root.path().join("a.txt").as_path()));
     assert_eq!(buffer.text.byte_to_line(view.cursor).unwrap(), 2);
+
+    // Restarting the finished task runs it again without claiming an error from the stop half.
+    app.process_effect(AppEffect::TaskRestart("unit".into()));
+    assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
 }
 
 #[cfg(unix)]
@@ -4406,14 +4410,14 @@ fn the_changes_surface_renders_its_sections_columns_badge_and_footer() {
         "the badge column carries the badge: {runs:?}"
     );
     // The footer describes the operation rather than the widget's mode.
-    assert!(has("Stage file"), "the footer names what the key does here: {rendered:?}");
-    assert!(has("Unstage file"), "the footer names the inverse action");
-    assert!(has("Switch diff"), "the footer names the focus switch");
+    assert!(has("s Stage"), "the footer names what the key does here: {rendered:?}");
+    assert!(has("u Unstage"), "the footer names the inverse action");
+    assert!(has("Tab Diff"), "the footer names the focus switch");
     // A legend that does not fit drops whole actions rather than clipping one, so no half
     // entry can be read as a different action.
     let footer_row = rendered
         .iter()
-        .find(|row| row.contains("Stage file"))
+        .find(|row| row.contains("s Stage"))
         .expect("the footer row");
     assert!(
         !footer_row.trim_end().ends_with('·'),

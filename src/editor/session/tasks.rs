@@ -512,13 +512,20 @@ impl TaskSession {
     pub(super) fn select_output(&mut self, name: Option<&str>) {
         self.active_output = name.map(str::to_owned);
     }
+    fn launch_pending(&self, name: &str) -> bool {
+        self.plans.contains_key(name)
+            || self.preflights.values().any(|step| step.requested == name)
+    }
+    pub(super) fn is_running(&self, name: &str) -> bool {
+        self.launch_pending(name) || self.running.values().any(|task| task.requested == name)
+    }
     pub(super) fn stop(&mut self, name: &str) -> Result<Option<DiagnosticProducer>, String> {
+        let pending = self.launch_pending(name);
         self.preflights.retain(|_, step| step.requested != name);
         let current = self.keys.remove(name);
         let mut producer = current.as_ref().and_then(|key| self.linters.stop_run(key));
         self.plans.remove(name);
-        self.statuses.insert(name.into(), "cancelled".into());
-        let mut found = producer.is_some();
+        let mut found = pending || producer.is_some();
         for (id, task) in &self.running {
             if task.requested == name {
                 self.jobs.cancel(*id).map_err(|e| e.to_string())?;
@@ -535,9 +542,10 @@ impl TaskSession {
             }
         }
         if found {
+            self.statuses.insert(name.into(), "cancelled".into());
             Ok(producer)
         } else {
-            Err("task is not running; pending launch retired".into())
+            Err("task is not running".into())
         }
     }
     pub(super) fn retire_workspace(&mut self) {

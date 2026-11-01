@@ -2046,7 +2046,10 @@ impl InteractiveApplication {
             AppEffect::TestList(name) => self.show_test_picker(&name),
             AppEffect::TaskList => self.show_task_picker(),
             AppEffect::TaskRestart(name) => {
-                self.stop_task(&name);
+                // A finished task has nothing to stop: restarting just runs it again.
+                if self.tasks.is_running(&name) {
+                    self.stop_task(&name);
+                }
                 self.run_trusted(TrustedAction::RunTask(name));
             }
             AppEffect::LintRun(name) => {
@@ -7446,7 +7449,7 @@ impl InteractiveApplication {
         };
         self.install_surface_picker(PickerSurfaceKind::Changes, title, items);
         self.search.set_picker_footer(
-            "s Stage file · u Unstage file · Tab Switch diff · Enter Open · Esc Esc Close".to_owned(),
+            "s Stage · u Unstage · Tab Diff · Enter Open · Esc Esc Close".to_owned(),
         );
         self.search.restore_picker_view(previous, false);
         self.sync_picker_ui();
