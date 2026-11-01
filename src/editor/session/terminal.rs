@@ -17,6 +17,9 @@ use std::{
     sync::Arc,
 };
 
+/// The profile name of a terminal a debugger opened for its program.
+pub(in crate::editor::session) const DEBUG_TERMINAL_PROFILE: &str = "debug";
+
 #[derive(Clone, Debug)]
 pub(in crate::editor::session) struct TerminalKey {
     owner: Arc<()>,
@@ -788,6 +791,9 @@ impl TerminalSession {
                         continue;
                     }
                     let stopping = tab.stopping;
+                    // A debugged program's output stays to be read until the next run, and how it
+                    // exited is the program's business, not a terminal failure.
+                    let keep_output = tab.profile == DEBUG_TERMINAL_PROFILE;
                     tab.pty = None;
                     tab.screen.finish_bytes();
                     tab.io_complete = true;
@@ -796,12 +802,14 @@ impl TerminalSession {
                         tab.failure = Some(message.clone());
                         tab.truncated = true;
                         updates.push(TerminalUpdate::Failed(id, message));
-                    } else if !stopping && tab.exit_code.is_some_and(|code| code != 0) {
+                    } else if !stopping && !keep_output && tab.exit_code.is_some_and(|code| code != 0) {
                         let message = format!("terminal exited with status {:?}", tab.exit_code);
                         tab.failure = Some(message.clone());
                         updates.push(TerminalUpdate::Failed(id, message));
                     }
-                    if stopping || (tab.failure.is_none() && tab.exit_code == Some(0)) {
+                    if stopping
+                        || (!keep_output && tab.failure.is_none() && tab.exit_code == Some(0))
+                    {
                         self.close(id);
                         updates.push(TerminalUpdate::Closed(id));
                     }

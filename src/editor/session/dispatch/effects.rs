@@ -6108,7 +6108,7 @@ impl InteractiveApplication {
         reply: crate::debugger::DapTerminalReply,
     ) {
         match self.terminal_session.open_program(
-            "debug",
+            super::super::terminal::DEBUG_TERMINAL_PROFILE,
             program,
             &self.workspace,
             self.window_session
@@ -6361,6 +6361,10 @@ impl InteractiveApplication {
                 }
                 TerminalUpdate::Exited(id, Some(0)) if self.terminal_session.closes_on_exit(id) => {
                     self.retire_terminal(id, false);
+                    self.set_terminal_focus(false);
+                }
+                // Nothing is left to type to; keys go back to the source.
+                TerminalUpdate::Exited(id, _) if self.debug_terminal == Some(id) => {
                     self.set_terminal_focus(false);
                 }
                 TerminalUpdate::Exited(_, _) | TerminalUpdate::IoComplete(_) => {}

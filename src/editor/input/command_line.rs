@@ -109,7 +109,14 @@ pub fn parse_ex(
             "search" if !rest.is_empty() => command("package.registry.search")?
                 .with_argument("query", CommandValue::String(rest.into())),
             "list" | "" => command("package.list")?,
-            _ => return Err(ExParseError::UnexpectedArguments(arguments.into())),
+            "verify" if rest.is_empty() => command("package.verify")?,
+            "rollback" if rest.is_empty() => command("package.rollback")?,
+            "gc" if rest.is_empty() => command("package.gc")?,
+            "remove" if !rest.is_empty() => command("package.remove")?
+                .with_argument("name", CommandValue::String(rest.into())),
+            _ => return Err(ExParseError::UnexpectedArguments(format!(
+                "{arguments} (try search, list, verify, rollback, gc or remove, or :pkginstall)"
+            ))),
         }
     } else if name == "config" {
         match arguments.split_once(char::is_whitespace) {
