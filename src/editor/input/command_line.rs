@@ -33,6 +33,25 @@ fn parse_substitute(input: &str) -> Option<Result<CommandInvocation, ExParseErro
     )
 }
 
+/// The pattern of a `:s` while it is being typed, so its matches can show before it runs.
+#[must_use]
+pub fn substitute_pattern(input: &str) -> Option<String> {
+    let input = input.trim_start().trim_start_matches(':');
+    let name_at = input
+        .find(|character: char| !(character.is_ascii_digit() || "%.,$'<>".contains(character)))?;
+    let rest = &input[name_at..];
+    let rest = rest
+        .strip_prefix("substitute")
+        .or_else(|| rest.strip_prefix('s'))?;
+    let delimiter = rest
+        .chars()
+        .next()
+        .filter(|character| !character.is_alphanumeric() && !character.is_whitespace())?;
+    split_unescaped(&rest[delimiter.len_utf8()..], delimiter)
+        .into_iter()
+        .next()
+}
+
 /// Splits on `delimiter`, turning `\\/` into a plain `/` and leaving other escapes for the regex.
 fn split_unescaped(text: &str, delimiter: char) -> Vec<String> {
     let mut parts = vec![String::new()];

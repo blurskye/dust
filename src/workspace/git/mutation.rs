@@ -151,6 +151,8 @@ pub struct GitResetHunkRequest {
     pub hunk_snapshot_revision: u64,
     pub hunk_id: GitHunkId,
     pub selected: GitHunk,
+    /// Positions in the hunk's `lines` to reset. Empty means all of it.
+    pub selected_lines: Vec<u32>,
     pub expected_index: Option<GitIndexFingerprint>,
     pub expected_worktree: Option<[u8; 32]>,
     pub maximum_patch_bytes: usize,
@@ -423,18 +425,30 @@ pub(super) fn reset_hunk(
     let Some(name) = r.policy.file.to_str().filter(|s| !s.contains(['\n', '\r'])) else {
         return Err(GitMutationError::Invalid);
     };
-    let mut patch = format!(
-        "diff --git a/{0} b/{0}\n--- a/{0}\n+++ b/{0}\n@@ -{1},{2} +{3},{4} @@\n",
-        name, current.new_start, current.new_lines, current.old_start, current.old_lines
-    );
-    for line in &current.lines {
-        patch.push(match line.kind {
-            GitDiffLineKind::Context => ' ',
-            GitDiffLineKind::Add => '-',
-            GitDiffLineKind::Delete => '+',
-        });
-        patch.push_str(&line.text)
+    let chosen = |index: usize| {
+        r.selected_lines.is_empty() || r.selected_lines.contains(&(index as u32))
+    };
+    // Going back: added lines come out and deleted ones return. An addition left alone stays as
+    // context, and a deletion left alone stays gone.
+    let mut body = String::new();
+    let mut kept_lines = 0u32;
+    for (index, line) in current.lines.iter().enumerate() {
+        let mark = match (line.kind, chosen(index)) {
+            (GitDiffLineKind::Context, _) | (GitDiffLineKind::Add, false) => ' ',
+            (GitDiffLineKind::Add, true) => '-',
+            (GitDiffLineKind::Delete, true) => '+',
+            (GitDiffLineKind::Delete, false) => continue,
+        };
+        if mark != '-' {
+            kept_lines += 1;
+        }
+        body.push(mark);
+        body.push_str(&line.text);
     }
+    let patch = format!(
+        "diff --git a/{0} b/{0}\n--- a/{0}\n+++ b/{0}\n@@ -{1},{2} +{1},{3} @@\n{body}",
+        name, current.new_start, current.new_lines, kept_lines
+    );
     if patch.len() > r.maximum_patch_bytes {
         return Err(GitMutationError::Invalid);
     }
@@ -460,7 +474,8 @@ pub(super) fn reset_hunk(
     }
     let remaining = read_hunks_owned(GitHunkGeneration(0), &r.policy, cancel)
         .map_err(|_| GitMutationError::Postcondition)?;
-    if remaining.hunks.iter().any(|h| h.id == r.hunk_id) {
+    // Part of a hunk can leave a hunk with the same header, and so the same id.
+    if r.selected_lines.is_empty() && remaining.hunks.iter().any(|h| h.id == r.hunk_id) {
         return Err(GitMutationError::Postcondition);
     }
     Ok(GitMutationResult {

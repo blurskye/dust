@@ -178,9 +178,25 @@ pub(super) fn render_editor_view(
         configured_start
     };
     let flash = ui.flash.as_ref().filter(|flash| flash.view == view_id);
+    // What is being typed in `/` or `:s` shows as you type, as with Vim's incsearch.
+    let typed_substitute = ui
+        .prompt
+        .as_ref()
+        .filter(|prompt| prompt.kind == crate::ui::PromptKind::Command)
+        .and_then(|prompt| crate::editor::input::substitute_pattern(&prompt.input));
+    let highlighted = match ui.prompt.as_ref() {
+        Some(prompt)
+            if matches!(
+                prompt.kind,
+                crate::ui::PromptKind::SearchForward | crate::ui::PromptKind::SearchBackward
+            ) =>
+        {
+            Some(prompt.input.as_str())
+        }
+        _ => typed_substitute.as_deref().or(ui.search_query.as_deref()),
+    };
     let search_ranges = if config.search.highlight && !large_file {
-        ui.search_query
-            .as_deref()
+        highlighted
             .filter(|query| !query.is_empty())
             .map_or_else(Vec::new, |query| {
                 // Only the lines on screen are searched, so a large file costs nothing extra.

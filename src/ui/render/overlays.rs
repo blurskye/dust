@@ -145,12 +145,18 @@ pub(super) fn render_documentation_popup(
         .filter_map(|index| popup.line_at(index))
         .enumerate()
     {
+        // A hunk preview reads as a diff.
+        let style = match line.chars().next() {
+            Some('+') if popup.provider == "Git" => Style::GitSignAdded,
+            Some('-') if popup.provider == "Git" => Style::GitSignDeleted,
+            _ => Style::DocumentationText,
+        };
         frame.grid.put_text_clipped(
             text_left,
             top.saturating_add(1)
                 .saturating_add(u16::try_from(row).unwrap_or(u16::MAX)),
             line,
-            Style::DocumentationText,
+            style,
             right
                 .saturating_sub(1)
                 .saturating_sub(policy.horizontal_padding),

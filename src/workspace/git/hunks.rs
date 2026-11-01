@@ -67,6 +67,9 @@ struct GitChangeRun {
     start: u32,
     added: u32,
     deleted: bool,
+    /// Where the run sits in the hunk's `lines`.
+    first: u32,
+    last: u32,
 }
 
 impl GitHunk {
@@ -77,23 +80,26 @@ impl GitHunk {
         let mut current: Option<GitChangeRun> = None;
         // With no lines on the new side, git names the line before the change.
         let mut next = self.new_start + u32::from(self.new_lines == 0);
-        for line in &self.lines {
-            match line.kind {
-                GitDiffLineKind::Context => {
-                    runs.extend(current.take());
-                    next += 1;
-                }
-                GitDiffLineKind::Add => {
-                    current
-                        .get_or_insert(GitChangeRun { start: next, added: 0, deleted: false })
-                        .added += 1;
-                    next += 1;
-                }
-                GitDiffLineKind::Delete => {
-                    current
-                        .get_or_insert(GitChangeRun { start: next, added: 0, deleted: false })
-                        .deleted = true;
-                }
+        for (index, line) in self.lines.iter().enumerate() {
+            let index = index as u32;
+            if line.kind == GitDiffLineKind::Context {
+                runs.extend(current.take());
+                next += 1;
+                continue;
+            }
+            let run = current.get_or_insert(GitChangeRun {
+                start: next,
+                added: 0,
+                deleted: false,
+                first: index,
+                last: index,
+            });
+            run.last = index;
+            if line.kind == GitDiffLineKind::Add {
+                run.added += 1;
+                next += 1;
+            } else {
+                run.deleted = true;
             }
         }
         runs.extend(current);
@@ -114,6 +120,26 @@ impl GitHunk {
                 }
             })
             .collect()
+    }
+
+    /// The positions in `lines` of the change on this one-based line, when the hunk holds several
+    /// changes and this line is in one of them. Empty means the hunk as a whole.
+    #[must_use]
+    pub fn change_at(&self, line: u32) -> Vec<u32> {
+        let runs = self.change_runs();
+        if runs.len() < 2 {
+            return Vec::new();
+        }
+        runs.iter()
+            .find(|run| {
+                let lands = if run.added > 0 {
+                    run.start
+                } else {
+                    run.start.saturating_sub(1).max(1)
+                };
+                line >= lands && line < lands + run.added.max(1)
+            })
+            .map_or_else(Vec::new, |run| (run.first..=run.last).collect())
     }
 
     /// Whether this one-based line is part of the hunk, its context included.

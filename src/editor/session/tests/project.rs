@@ -1233,6 +1233,94 @@ fn the_first_hunk_key_reads_the_hunks_and_moves_to_the_next_one() {
     );
 }
 
+/// A trusted repository with one file whose two changes are close enough to share a hunk.
+fn near_changes_fixture() -> (InteractiveApplication, git2::Repository, std::path::PathBuf) {
+    let mut app = app();
+    let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
+    let path = app.state.workspace_root.join("near.txt");
+    fs::write(&path, "one\ntwo\nthree\nfour\nfive\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("near.txt")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "fixture", &repo.find_tree(tree_id).unwrap(), &[])
+        .unwrap();
+    fs::write(&path, "one\nTWO\nthree\nFOUR\nfive\n").unwrap();
+    prepare_trust_identity(&mut app);
+    let root = app.workspace.roots()[0].clone();
+    app.workspace.fixture_trust_identity(root.identity.clone());
+    app.reconcile_workspace_trust();
+    app.start_open(path.clone());
+    wait_vfs(&mut app);
+    app.start_git_status_refresh_silent();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.git.status().is_none() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    (app, repo, path)
+}
+
+fn settle_git_work(app: &mut InteractiveApplication) {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.git.hunks_pending() || app.git.mutation_pending() {
+        app.process_git_hunk_events();
+        app.process_git_mutation_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    wait_vfs(app);
+}
+
+#[test]
+fn hunk_preview_and_stage_take_the_change_under_the_cursor() {
+    let (mut app, repo, _) = near_changes_fixture();
+    app.process_effect(AppEffect::GitHunkNavigate(1));
+    settle_git_work(&mut app);
+    app.process_effect(AppEffect::GitHunkNavigate(1));
+    settle_git_work(&mut app);
+
+    app.process_effect(AppEffect::GitHunkPreview);
+    let popup = app.ui.documentation_popup.as_ref().expect("preview");
+    let shown = popup.sections[0].lines.join("|");
+    assert!(shown.contains("FOUR") && !shown.contains("TWO"), "{shown}");
+
+    app.process_effect(AppEffect::GitHunkStage);
+    settle_git_work(&mut app);
+    let mut index = repo.index().unwrap();
+    index.read(true).unwrap();
+    let blob = repo
+        .find_blob(index.get_path(std::path::Path::new("near.txt"), 0).unwrap().id)
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(blob.content()),
+        "one\ntwo\nthree\nFOUR\nfive\n",
+        "{:?}",
+        app.ui.notification
+    );
+}
+
+#[test]
+fn hunk_reset_takes_the_change_under_the_cursor() {
+    let (mut app, _repo, path) = near_changes_fixture();
+    app.process_effect(AppEffect::GitHunkNavigate(1));
+    settle_git_work(&mut app);
+
+    app.process_effect(AppEffect::GitHunkReset);
+    settle_git_work(&mut app);
+    app.confirm_reset_selected_git_hunk("reset this hunk".into());
+    settle_git_work(&mut app);
+
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "one\ntwo\nthree\nFOUR\nfive\n",
+        "{:?}",
+        app.ui.notification
+    );
+}
+
 #[test]
 fn leaving_a_worktree_closes_every_clean_buffer_from_it() {
     let mut app = app();

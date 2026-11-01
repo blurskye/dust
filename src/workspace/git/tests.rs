@@ -799,6 +799,7 @@ fn reset_service_restores_only_selected_hunk_and_preserves_index() {
         hunk_snapshot_revision: 1,
         hunk_id: snapshot.hunks[0].id,
         selected: snapshot.hunks[0].clone(),
+        selected_lines: Vec::new(),
         expected_index: Some(before),
         expected_worktree: Some(hash),
         maximum_patch_bytes: 65536,

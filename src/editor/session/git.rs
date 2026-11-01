@@ -39,6 +39,8 @@ pub(super) struct GitSession {
     sign_generation: Option<GitHunkGeneration>,
     sign_source: Option<SignSource>,
     selected: Option<(GitHunkSnapshot, GitHunk, PathBuf)>,
+    /// One change inside the selected hunk, when the cursor picked one out of several.
+    selected_change: Vec<u32>,
     mutation: GitMutationService,
     mutation_generation: Option<GitMutationGeneration>,
     branches: GitBranchService,
@@ -141,6 +143,7 @@ impl GitSession {
         self.hunk_action = None;
         self.hunk_snapshot = None;
         self.selected = None;
+        self.selected_change.clear();
         self.mutation.cancel();
         self.mutation_generation = None;
         self.plan_path = None;
@@ -535,6 +538,7 @@ impl GitSession {
             return;
         };
         let path = status.scope_root.join(&snapshot.file);
+        self.selected_change = hunk.change_at(line);
         self.selected = Some((snapshot.clone(), hunk.clone(), path));
     }
     /// The file changed on disk, so the hunks have to be read again.
@@ -555,9 +559,12 @@ impl GitSession {
             .map(|(_, h, _)| h)
             .or_else(|| snapshot.hunks.first())
             .ok_or("no Git hunk is available in this buffer")?;
-        let text = hunk
-            .lines
-            .iter()
+        let change = (hunk.lines.iter().enumerate())
+            .filter(|(index, _)| {
+                self.selected_change.is_empty() || self.selected_change.contains(&(*index as u32))
+            })
+            .map(|(_, line)| line);
+        let text = change
             .map(|line| {
                 let prefix = match line.kind {
                     GitDiffLineKind::Context => ' ',
@@ -858,6 +865,7 @@ impl GitSession {
                 hunk_snapshot_revision: snapshot.revision,
                 hunk_id: hunk.id,
                 selected: hunk.clone(),
+                selected_lines: self.selected_change.clone(),
                 expected_index: Some(snapshot.index_fingerprint),
                 expected_worktree: snapshot.worktree_sha256,
                 maximum_patch_bytes: 1024 * 1024,
@@ -868,12 +876,16 @@ impl GitSession {
             return Ok(());
         }
         let plan = GitChangePlanRequest {
-            kind: GitMutationKind::StageHunk,
+            kind: if self.selected_change.is_empty() {
+                GitMutationKind::StageHunk
+            } else {
+                GitMutationKind::StageLines
+            },
             policy,
             hunk_snapshot_revision: snapshot.revision,
             hunk_id: Some(hunk.id),
             selected: Some(hunk.clone()),
-            selected_lines: Vec::new(),
+            selected_lines: self.selected_change.clone(),
             expected_index: Some(snapshot.index_fingerprint),
             expected_worktree: snapshot.worktree_sha256,
             expected_head: Self::captured_head(status)?,
