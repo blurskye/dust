@@ -574,6 +574,7 @@ fn background_confirmation_during_documentation_fails_without_overlay() {
             "newer".into(),
         )],
         &policy,
+        200,
     );
     app.project_input_documentation();
     let (manager, fixture) = crate::extensions::ExecutionFixture::new(8);

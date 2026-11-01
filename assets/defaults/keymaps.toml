@@ -3517,10 +3517,40 @@ keys = "ctrl-space"
 command = "lsp.completion.trigger"
 
 [[keymap]]
-id = "builtin.completion.surface.completion-select-next.tab"
+id = "builtin.completion.surface.completion-accept.tab"
 context = "completion"
 keys = "tab"
+command = "completion.accept"
+
+[[keymap]]
+id = "builtin.completion.surface.completion-select-next.ctrl-n"
+context = "completion"
+keys = "ctrl-n"
 command = "completion.select_next"
+
+[[keymap]]
+id = "builtin.completion.surface.completion-select-previous.ctrl-p"
+context = "completion"
+keys = "ctrl-p"
+command = "completion.select_previous"
+
+[[keymap]]
+id = "builtin.snippet.surface.snippet-next.tab"
+context = "snippet"
+keys = "tab"
+command = "snippet.next"
+
+[[keymap]]
+id = "builtin.snippet.surface.snippet-previous.shift-tab"
+context = "snippet"
+keys = "shift-tab"
+command = "snippet.previous"
+
+[[keymap]]
+id = "builtin.snippet.surface.snippet-leave.escape"
+context = "snippet"
+keys = "escape"
+command = "snippet.leave"
 
 [[keymap]]
 id = "builtin.completion.surface.completion-select-next.down"

@@ -10,7 +10,7 @@ use crate::{
         GitMutationGeneration, GitMutationKind, GitMutationRequest, GitMutationService,
         GitRepositoryId, GitResetHunkRequest, GitStatusGeneration, GitStatusPolicy,
         GitStatusService, GitStatusSnapshot, GitUnsavedDocument, aggregate_git_status,
-        git_head_id, git_hunk_signs, git_index_fingerprint, worktree_hash,
+        git_head_id, git_hunk_signs, git_index_fingerprint, git_staged_signs, worktree_hash,
     },
 };
 use std::{
@@ -37,6 +37,13 @@ pub(super) struct GitSession {
     hunk_snapshot: Option<GitHunkSnapshot>,
     sign_hunks: GitHunkService,
     sign_generation: Option<GitHunkGeneration>,
+    /// The buffer's unstaged diff, held until the staged one is ready to go with it.
+    unstaged_signs: Option<GitHunkSnapshot>,
+    staged_sign_hunks: GitHunkService,
+    staged_sign_generation: Option<GitHunkGeneration>,
+    /// What the staged diff was read for. It doesn't change as the buffer is typed in.
+    staged_sign_source: Option<(u64, u64, GitRepositoryId, PathBuf)>,
+    staged_signs: Option<GitHunkSnapshot>,
     sign_source: Option<SignSource>,
     selected: Option<(GitHunkSnapshot, GitHunk, PathBuf)>,
     /// One change inside the selected hunk, when the cursor picked one out of several.
@@ -64,8 +71,8 @@ pub(super) struct GitSession {
 pub(super) enum GitMutationOutcome {
     /// Worktree changes were discarded.
     Reset,
-    /// Index changes were applied.
-    Staged,
+    /// Index changes were applied; says which.
+    Staged(&'static str),
     /// Refused before any write because the path has unsaved editor changes.
     UnsavedDocument,
 }
@@ -135,6 +142,7 @@ impl GitSession {
         self.sign_hunks.cancel();
         self.sign_generation = None;
         self.sign_source = None;
+        self.unstaged_signs = None;
     }
     fn clear_hunks(&mut self) {
         self.hunks.cancel();
@@ -307,6 +315,7 @@ impl GitSession {
             return true;
         };
         let policy = Self::policy(status, source.3.clone(), GitDiffLayer::Unstaged);
+        let staged_policy = Self::policy(status, source.3.clone(), GitDiffLayer::Staged);
         let Some(buffer) = editor
             .buffers
             .get(source.4)
@@ -322,7 +331,14 @@ impl GitSession {
             },
         ) {
             self.sign_generation = Some(generation);
+            let staged_source = (source.0, source.1, source.2, source.3.clone());
             self.sign_source = Some(source);
+            if self.staged_sign_source.as_ref() != Some(&staged_source) {
+                // Without a staged diff the unstaged signs still show.
+                self.staged_signs = None;
+                self.staged_sign_generation = self.staged_sign_hunks.start(staged_policy).ok();
+                self.staged_sign_source = Some(staged_source);
+            }
         }
         true
     }
@@ -337,6 +353,16 @@ impl GitSession {
             self.clear_signs();
             return Some(Vec::new());
         }
+        match self.staged_sign_hunks.poll() {
+            Ok(Some(snapshot)) => {
+                if Some(snapshot.generation) == self.staged_sign_generation {
+                    self.staged_signs = Some(snapshot.clone());
+                    self.staged_sign_generation = None;
+                }
+            }
+            Ok(None) => {}
+            Err(_) => self.staged_sign_generation = None,
+        }
         match self.sign_hunks.poll() {
             Ok(Some(snapshot)) => {
                 if Some(snapshot.generation) != self.sign_generation
@@ -350,31 +376,43 @@ impl GitSession {
                     return Some(Vec::new());
                 }
                 self.sign_generation = None;
-                Some(
-                    git_hunk_signs(snapshot)
-                        .into_iter()
-                        .map(|sign| UiGitSign {
-                            buffer: source.4,
-                            buffer_revision: source.5,
-                            root_revision: source.0,
-                            status_revision: source.1,
-                            repository_id: source.2,
-                            line: sign.line,
-                            kind: match sign.kind {
-                                GitHunkSignKind::Added => UiGitSignKind::Added,
-                                GitHunkSignKind::Changed => UiGitSignKind::Changed,
-                                GitHunkSignKind::Deleted => UiGitSignKind::Deleted,
-                            },
-                        })
-                        .collect(),
-                )
+                self.unstaged_signs = Some(snapshot.clone());
             }
-            Ok(None) => None,
+            Ok(None) => {}
             Err(_) => {
                 self.clear_signs();
-                Some(Vec::new())
+                return Some(Vec::new());
             }
         }
+        if self.staged_sign_generation.is_some() {
+            return None;
+        }
+        let unstaged = self.unstaged_signs.take()?;
+        let staged = self
+            .staged_signs
+            .as_ref()
+            .map_or_else(Vec::new, |staged| git_staged_signs(staged, &unstaged));
+        let sign = |sign: crate::workspace::git::GitHunkSign, staged: bool| UiGitSign {
+            buffer: source.4,
+            buffer_revision: source.5,
+            root_revision: source.0,
+            status_revision: source.1,
+            repository_id: source.2,
+            line: sign.line,
+            kind: match sign.kind {
+                GitHunkSignKind::Added => UiGitSignKind::Added,
+                GitHunkSignKind::Changed => UiGitSignKind::Changed,
+                GitHunkSignKind::Deleted => UiGitSignKind::Deleted,
+            },
+            staged,
+        };
+        Some(
+            git_hunk_signs(&unstaged)
+                .into_iter()
+                .map(|unstaged| sign(unstaged, false))
+                .chain(staged.into_iter().map(|staged| sign(staged, true)))
+                .collect(),
+        )
     }
     // GIT_SIGN_FOREGROUND_END
 
@@ -909,10 +947,12 @@ impl GitSession {
                 if Some(result.generation) != self.mutation_generation {
                     return Ok(None);
                 }
-                let outcome = if matches!(result.kind, GitMutationKind::ResetUnstagedHunk) {
-                    GitMutationOutcome::Reset
-                } else {
-                    GitMutationOutcome::Staged
+                let outcome = match result.kind {
+                    GitMutationKind::ResetUnstagedHunk => GitMutationOutcome::Reset,
+                    GitMutationKind::StageFile => GitMutationOutcome::Staged("Git file staged"),
+                    GitMutationKind::UnstageFile => GitMutationOutcome::Staged("Git file unstaged"),
+                    GitMutationKind::UnstageHunk => GitMutationOutcome::Staged("Git hunk unstaged"),
+                    _ => GitMutationOutcome::Staged("Git hunk staged"),
                 };
                 self.clear();
                 Ok(Some(outcome))
@@ -948,7 +988,7 @@ impl GitSession {
 #[cfg(test)]
 impl GitSession {
     pub(super) fn signs_pending(&self) -> bool {
-        self.sign_generation.is_some()
+        self.sign_generation.is_some() || self.staged_sign_generation.is_some()
     }
     pub(super) fn hunks_pending(&self) -> bool {
         self.hunk_generation.is_some()

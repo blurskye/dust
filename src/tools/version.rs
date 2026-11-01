@@ -282,6 +282,7 @@ pub(super) fn probe_tool_version(
     if version.is_empty() {
         return Err("version probe produced no output".into());
     }
+    let version = version.strip_prefix("Version: ").unwrap_or(&version);
     Ok(version.chars().take(MAXIMUM_TOOL_VERSION_CHARS).collect())
 }
 

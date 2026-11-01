@@ -402,6 +402,11 @@ pub(super) fn render_editor_view(
                         (&config.editor.git_signs.deleted, "_", Style::GitSignDeleted)
                     }
                 };
+                let symbol = if sign.staged {
+                    &config.editor.git_signs.staged
+                } else {
+                    symbol
+                };
                 grid.set_cell(
                     git_sign_column,
                     screen_row,

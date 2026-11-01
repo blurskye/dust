@@ -2793,7 +2793,7 @@ impl InteractiveApplication {
                 self.project_input_documentation();
             }
             AppEffect::LspDocumentationClose => self.close_documentation(),
-            AppEffect::LspCompletionDocumentationOpen => self.open_lsp_completion_documentation(),
+            AppEffect::LspCompletionDocumentationOpen => self.open_lsp_completion_documentation(true),
             AppEffect::LspCompletionMove(direction) => self.move_lsp_completion(direction),
             AppEffect::DiagnosticNavigate { direction, filter } => {
                 self.navigate_diagnostic(direction, filter)
@@ -2812,6 +2812,10 @@ impl InteractiveApplication {
             }
             AppEffect::LspCompletionCancel => self.cancel_lsp_completion(),
             AppEffect::SnippetNavigate(direction) => self.navigate_snippet(direction),
+            AppEffect::SnippetLeave => {
+                self.input.clear_snippet();
+                self.invoke_mapped_command("input.cancel");
+            }
             AppEffect::SnippetCancel => {
                 self.input.clear_snippet();
                 if let Some(view) = self.state.active_view {
@@ -6493,7 +6497,7 @@ impl InteractiveApplication {
             .get(selected)
             .is_some_and(|item| item.documentation.is_some())
         {
-            self.open_lsp_completion_documentation();
+            self.open_lsp_completion_documentation(false);
         } else if self
             .input
             .documentation()
@@ -7113,11 +7117,11 @@ impl InteractiveApplication {
                 self.start_git_status_refresh();
                 self.notify_message("Git hunk reset".into(), false);
             }
-            Ok(Some(crate::editor::session::git::GitMutationOutcome::Staged)) => {
+            Ok(Some(crate::editor::session::git::GitMutationOutcome::Staged(message))) => {
                 self.input.clear_pending_stage();
                 self.ui.git_signs.clear();
                 self.start_git_status_refresh();
-                self.notify_message("Git hunk staged".into(), false);
+                self.notify_message(message.into(), false);
             }
             Ok(Some(crate::editor::session::git::GitMutationOutcome::UnsavedDocument)) => {
                 // A refusal, not a failure: the plan never wrote the index, so offer the
@@ -7577,23 +7581,24 @@ impl InteractiveApplication {
         }
     }
 
-    pub(in crate::editor::session) fn navigate_matcher_source(&mut self, source: MatcherSource) {
-        if !source.path.is_absolute()
-            || !self
-                .workspace
-                .roots()
-                .iter()
-                .any(|root| source.path.starts_with(&root.identity.canonical_path))
-        {
+    pub(in crate::editor::session) fn navigate_matcher_source(&mut self, mut source: MatcherSource) {
+        if !source.path.is_absolute() {
             self.show_error(self.message("navigation_outside_workspace", &[]));
             return;
         }
-        let roots = self
+        let mut roots: Vec<_> = self
             .workspace
             .roots()
             .iter()
             .map(|root| root.identity.canonical_path.clone())
             .collect();
+        // A debugger frame in a library or the toolchain opens too, read-only, as definitions do.
+        if !roots.iter().any(|root| source.path.starts_with(root)) {
+            if let Ok(real) = source.path.canonicalize() {
+                source.path = real;
+            }
+            roots.extend(source.path.parent().map(std::path::Path::to_owned));
+        }
         match self.documents.read_scoped(source.path.clone(), roots) {
             Ok(id) => {
                 self.search.register_matcher_navigation(id, source);
@@ -7888,7 +7893,10 @@ impl InteractiveApplication {
                         id,
                         label: symbol.name,
                         detail: symbol.kind.map_or_else(String::new, |kind| {
-                            self.message("picker_symbol_kind", &[("kind", kind.to_string())])
+                            self.message(
+                                "picker_symbol_kind",
+                                &[("kind", crate::language::lsp::lsp_symbol_kind_name(kind).to_owned())],
+                            )
                         }),
                         source: server.clone(),
                         action: PickerAction::None,
@@ -10838,7 +10846,7 @@ impl InteractiveApplication {
                         false,
                     );
                 } else {
-                    self.start_lsp(Some(id.into()));
+                    self.launch_lsp(Some(id.into()), true);
                 }
             } else if definition.managed_versions().is_empty() {
                 self.show_error(format!(
@@ -11208,7 +11216,7 @@ impl InteractiveApplication {
             return;
         };
         self.stop_lsp_sessions_for_server(&id);
-        self.start_lsp(Some(id.clone()));
+        self.launch_lsp(Some(id.clone()), true);
         let category = self
             .ui
             .tool_menu
@@ -11684,7 +11692,19 @@ impl InteractiveApplication {
                 .iter()
                 .any(|key| self.language.active() == Some(key))
         {
-            self.select_lsp_session(&sessions[0]);
+            // A full language server rather than a linter such as ESLint names the file's server.
+            let primary = sessions
+                .iter()
+                .find(|key| {
+                    self.language
+                        .sessions()
+                        .get(*key)
+                        .and_then(|session| session.capabilities.as_ref())
+                        .is_some_and(|capabilities| capabilities.definition)
+                })
+                .unwrap_or(&sessions[0])
+                .clone();
+            self.select_lsp_session(&primary);
         }
         self.detach_lsp_documents(buffer, detach);
         let completion_open = self.ui.language_completion.is_some()
@@ -11884,8 +11904,8 @@ impl InteractiveApplication {
     }
 
     /// `<leader>cr` and F2: the command line, ready with the name under the cursor.
-    fn open_rename_prompt(&mut self) {
-        let word = self.state.active_view.and_then(|view| self.state.views.get(view)).and_then(|view| {
+    fn word_at_cursor(&self) -> Option<String> {
+        self.state.active_view.and_then(|view| self.state.views.get(view)).and_then(|view| {
             let source = self.state.buffers.get(view.buffer)?.text.to_string();
             let cursor = view.cursor.get();
             let start = source[..cursor]
@@ -11899,8 +11919,18 @@ impl InteractiveApplication {
                 .find(|(_, character)| !completion_word_char(*character))
                 .map_or(source.len(), |(relative, _)| cursor + relative);
             Some(source[start..end].to_owned())
-        });
+        })
+    }
+
+    fn open_rename_prompt(&mut self) {
+        let word = self.word_at_cursor();
         self.open_prompt(PromptKind::Command, format!("rename {}", word.unwrap_or_default()));
+    }
+
+    /// Servers list nothing for an empty query, so `<leader>sS` asks for one.
+    pub(in crate::editor::session) fn open_workspace_symbols_prompt(&mut self) {
+        let word = self.word_at_cursor().unwrap_or_default();
+        self.open_prompt(PromptKind::Command, format!("lsp.workspace_symbols {word}"));
     }
 }
 
@@ -11974,6 +12004,11 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn start_lsp(&mut self, requested: Option<String>) {
+        self.launch_lsp(requested, false);
+    }
+
+    /// `asked` is a person starting this server, who is told when the project can't have it.
+    fn launch_lsp(&mut self, requested: Option<String>, asked: bool) {
         if !self.configuration.settings().lsp.enabled {
             self.show_error(self.message("lsp_disabled", &[]));
             return;
@@ -12151,6 +12186,7 @@ impl InteractiveApplication {
         };
         if let Err(error) = self.language.discover_launch(
             PendingLspProjectRoot {
+                asked,
                 definition,
                 launch_source,
                 root_id,

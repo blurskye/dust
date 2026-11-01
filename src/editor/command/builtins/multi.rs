@@ -150,7 +150,8 @@ pub(super) fn begin_insert(
     let Some(first) = positions.first().copied() else {
         return Ok(());
     };
-    transaction.undo_policy = UndoPolicy::Record;
+    // Merge, so the text typed next undoes together with the removal.
+    transaction.undo_policy = UndoPolicy::Merge;
     transaction.operations.push(EditorOperation::SetMode { view: view_id, mode: EditorMode::Insert });
     transaction.operations.push(EditorOperation::SetBlockInsert { view: view_id, positions });
     if placement == "change" {

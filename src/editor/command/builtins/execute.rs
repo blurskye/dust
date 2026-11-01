@@ -16,7 +16,7 @@ use super::{
     motion::{
         block_start_column, cursor_display_column, motion_target, on_last_character, operator_range, repeat_visual_ranges, visual_ranges,
     },
-    pairs::{AutoPair, auto_pair, build_surround_add, build_surround_change, empty_pair_end},
+    pairs::{AutoPair, auto_pair, auto_pair_over, build_surround_add, build_surround_change, empty_pair_end},
     text_object::text_object,
     transaction::{
         bool_argument, build_indent, build_insert_transition, build_join_lines, build_toggle_case,
@@ -194,6 +194,32 @@ pub(super) fn execute_builtin<E>(
                 UndoPolicy::Merge
             };
             let text = string_argument(invocation, "text")?;
+            if let Some(range) = insert_selection(view) {
+                let pair = state
+                    .policy
+                    .autopairs
+                    .then(|| auto_pair_over(&buffer.text, range, text))
+                    .flatten();
+                let replacement = match pair {
+                    Some(AutoPair::Open(close)) => format!("{text}{close}"),
+                    _ => text.to_owned(),
+                };
+                push_selection_replacement(
+                    &mut transaction,
+                    view_id,
+                    buffer_id,
+                    buffer.text.revision(),
+                    range,
+                    &replacement,
+                    text.len(),
+                );
+                return Ok(CommandOutcome {
+                    transaction: Some(transaction),
+                    effects: Vec::new(),
+                    message: None,
+                    follow_up: Vec::new(),
+                });
+            }
             let pair = (state.policy.autopairs && view.block_insert.is_empty())
                 .then(|| auto_pair(&buffer.text, view.cursor, text))
                 .flatten();
@@ -330,6 +356,23 @@ pub(super) fn execute_builtin<E>(
             } else {
                 UndoPolicy::Merge
             };
+            if let Some(range) = insert_selection(view) {
+                push_selection_replacement(
+                    &mut transaction,
+                    view_id,
+                    buffer_id,
+                    buffer.text.revision(),
+                    range,
+                    "",
+                    0,
+                );
+                return Ok(CommandOutcome {
+                    transaction: Some(transaction),
+                    effects: Vec::new(),
+                    message: None,
+                    follow_up: Vec::new(),
+                });
+            }
             let positions = if view.block_insert.is_empty() {
                 vec![view.cursor]
             } else {
@@ -966,6 +1009,38 @@ pub(super) fn execute_builtin<E>(
         message: None,
         follow_up: Vec::new(),
     })
+}
+
+/// A selection held while typing, which only a snippet placeholder or the mouse makes.
+fn insert_selection(view: &crate::editor::state::View) -> Option<ByteRange> {
+    let selection = view.selection.filter(|_| view.mode == EditorMode::Insert)?;
+    let (start, end) = if selection.anchor <= selection.head {
+        (selection.anchor, selection.head)
+    } else {
+        (selection.head, selection.anchor)
+    };
+    ByteRange::new(start, end).ok().filter(|range| !range.is_empty())
+}
+
+/// Typing over a selection replaces it, as a placeholder expects.
+fn push_selection_replacement(
+    transaction: &mut crate::editor::transaction::EditorTransaction,
+    view: crate::editor::ViewId,
+    buffer_id: crate::editor::BufferId,
+    revision: crate::editor::text::BufferRevision,
+    range: ByteRange,
+    text: &str,
+    cursor_step: usize,
+) {
+    transaction.operations.push(EditorOperation::ApplyEdits {
+        buffer: buffer_id,
+        edits: TextEditSet::new(revision, vec![TextEdit::new(range, text)]),
+    });
+    transaction.operations.push(EditorOperation::SetSelection { view, selection: None });
+    transaction.operations.push(EditorOperation::SetCursor {
+        view,
+        position: ByteOffset(range.start.get() + cursor_step),
+    });
 }
 
 fn character_argument(

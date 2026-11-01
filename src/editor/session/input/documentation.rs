@@ -1,10 +1,11 @@
 use super::InputSession;
+use unicode_width::UnicodeWidthStr;
 use crate::{
     config::DocumentationPopupConfig,
     editor::text::ByteRange,
     ui::{
-        DocumentationMarkupKind, DocumentationPopupKind, DocumentationPopupState,
-        DocumentationSection,
+        DocumentationLineRole, DocumentationMarkupKind, DocumentationPopupKind,
+        DocumentationPopupState, DocumentationSection,
     },
 };
 
@@ -41,6 +42,7 @@ impl InputSession {
         source_range: Option<ByteRange>,
         source_sections: impl IntoIterator<Item = (DocumentationMarkupKind, String)>,
         policy: &DocumentationPopupConfig,
+        text_width: usize,
     ) {
         self.capture_changed();
         if !policy.enabled {
@@ -56,21 +58,20 @@ impl InputSession {
             }
             let normalized = value.replace("\r\n", "\n").replace('\r', "\n");
             let mut lines = Vec::new();
-            for line in normalized.split('\n') {
+            let mut roles = Vec::new();
+            let markdown = markup == DocumentationMarkupKind::Markdown;
+            let source_rows = if markdown {
+                markdown_rows(&normalized, text_width)
+            } else {
+                normalized
+                    .split('\n')
+                    .map(|line| (line.to_owned(), DocumentationLineRole::Text))
+                    .collect()
+            };
+            for (line, role) in source_rows {
                 if remaining_lines == 0 || remaining_bytes == 0 {
                     break;
                 }
-                // The popup has no Markdown renderer: code fences and bold markers are noise.
-                let bare;
-                let line = if markup == DocumentationMarkupKind::Markdown {
-                    if line.trim_start().starts_with("```") {
-                        continue;
-                    }
-                    bare = plain_markdown(line);
-                    bare.as_str()
-                } else {
-                    line
-                };
                 let sanitized = line
                     .chars()
                     .filter(|character| !character.is_control() || *character == '\t')
@@ -81,15 +82,29 @@ impl InputSession {
                 while !sanitized.is_char_boundary(end) {
                     end = end.saturating_sub(1);
                 }
-                lines.push(sanitized[..end].to_owned());
                 remaining_bytes = remaining_bytes.saturating_sub(end);
-                remaining_lines = remaining_lines.saturating_sub(1);
+                // Code, tables and diffs keep their lines; prose fits the popup.
+                let prose = matches!(
+                    role,
+                    DocumentationLineRole::Text | DocumentationLineRole::Heading
+                ) && (markdown || kind != DocumentationPopupKind::Git);
+                let rows = if prose {
+                    wrap_prose(&sanitized[..end], text_width)
+                } else {
+                    vec![sanitized[..end].to_owned()]
+                };
+                for row in rows.into_iter().take(remaining_lines) {
+                    lines.push(row);
+                    roles.push(role);
+                    remaining_lines = remaining_lines.saturating_sub(1);
+                }
             }
             if !lines.iter().all(|line| line.trim().is_empty()) {
                 sections.push(DocumentationSection {
                     heading: None,
                     markup,
                     lines,
+                    roles,
                 });
             }
         }
@@ -108,15 +123,113 @@ impl InputSession {
     }
 }
 
+/// Markdown's blocks as display rows: no fences or heading marks, lists with bullets and
+/// tables in columns.
+fn markdown_rows(source: &str, width: usize) -> Vec<(String, DocumentationLineRole)> {
+    use DocumentationLineRole::{Code, Heading, Table, Text};
+    let mut rows = Vec::new();
+    let mut in_code = false;
+    let mut lines = source.split('\n').peekable();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim_start();
+        let indent = &line[..line.len() - trimmed.len()];
+        if trimmed.starts_with("```") {
+            in_code = !in_code;
+        } else if in_code {
+            rows.push((line.to_owned(), Code));
+        } else if trimmed.starts_with('|') {
+            let mut table = vec![trimmed];
+            while let Some(row) = lines.next_if(|row| row.trim_start().starts_with('|')) {
+                table.push(row.trim_start());
+            }
+            rows.extend(table_rows(&table).into_iter().map(|row| (row, Table)));
+        } else if let Some(heading) = heading_text(trimmed) {
+            rows.push((plain_markdown(heading), Heading));
+        } else if trimmed.len() >= 3
+            && ["-", "*", "_"].iter().any(|mark| trimmed.replace(mark, "").is_empty())
+        {
+            rows.push(("─".repeat(width.clamp(1, 40)), Text));
+        } else if let Some(item) = ["- ", "* ", "+ "].iter().find_map(|mark| trimmed.strip_prefix(mark)) {
+            rows.push((format!("{indent}• {}", plain_markdown(item)), Text));
+        } else if let Some(quote) = trimmed.strip_prefix('>') {
+            rows.push((format!("{indent}│ {}", plain_markdown(quote.trim_start())), Text));
+        } else {
+            rows.push((plain_markdown(line), Text));
+        }
+    }
+    rows
+}
+
+/// The text of an ATX heading, `## Like this ##`.
+fn heading_text(line: &str) -> Option<&str> {
+    let text = line.trim_start_matches('#');
+    let level = line.len() - text.len();
+    ((1..=6).contains(&level) && text.starts_with(' '))
+        .then(|| text.trim().trim_end_matches('#').trim_end())
+}
+
+/// A Markdown table with its columns lined up.
+fn table_rows(table: &[&str]) -> Vec<String> {
+    let parsed = table.iter().map(|row| table_cells(row)).collect::<Vec<_>>();
+    let is_rule = |cells: &[String]| {
+        cells.iter().all(|cell| !cell.is_empty() && cell.chars().all(|c| matches!(c, '-' | ':')))
+    };
+    let mut widths = Vec::new();
+    for cells in parsed.iter().filter(|cells| !is_rule(cells)) {
+        widths.resize(widths.len().max(cells.len()), 0);
+        for (width, cell) in widths.iter_mut().zip(cells) {
+            *width = cell.width().max(*width);
+        }
+    }
+    parsed
+        .iter()
+        .map(|cells| {
+            let rule = is_rule(cells);
+            let columns = widths.iter().enumerate().map(|(index, width)| {
+                if rule {
+                    "─".repeat(*width)
+                } else {
+                    let cell = cells.get(index).map_or("", String::as_str);
+                    format!("{cell}{}", " ".repeat(width.saturating_sub(cell.width())))
+                }
+            });
+            let row = columns.collect::<Vec<_>>().join(if rule { "─┼─" } else { " │ " });
+            row.trim_end().to_owned()
+        })
+        .collect()
+}
+
+/// One table row's cells. A pipe with a backslash before it is text.
+fn table_cells(row: &str) -> Vec<String> {
+    let row = row.trim().trim_start_matches('|');
+    let mut cells = Vec::new();
+    let mut cell = String::new();
+    let mut characters = row.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character == '\\' && characters.peek() == Some(&'|') {
+            cell.push('\\');
+            cell.push('|');
+            characters.next();
+        } else if character == '|' {
+            cells.push(plain_markdown(cell.trim()));
+            cell.clear();
+        } else {
+            cell.push(character);
+        }
+    }
+    if !cell.trim().is_empty() {
+        cells.push(plain_markdown(cell.trim()));
+    }
+    cells
+}
+
 /// Reduce one Markdown line to what reads well without a renderer.
 fn plain_markdown(line: &str) -> String {
-    let text = link_labels(&without_data_images(line)).replace("**", "");
+    let text = link_labels(&without_data_images(line))
+        .replace("**", "")
+        .replace('`', "");
     let text = without_emphasis(&text);
     [
-        ("\\_", "_"),
-        ("\\*", "*"),
-        ("\\<", "<"),
-        ("\\>", ">"),
         ("&lt;", "<"),
         ("&gt;", ">"),
         ("&quot;", "\""),
@@ -125,7 +238,40 @@ fn plain_markdown(line: &str) -> String {
         ("&amp;", "&"),
     ]
     .iter()
-    .fold(text, |text, (from, to)| text.replace(from, to))
+    .fold(without_escapes(&text), |text, (from, to)| text.replace(from, to))
+}
+
+/// A backslash before punctuation is Markdown's escape: `project\.` reads `project.`.
+fn without_escapes(line: &str) -> String {
+    let mut kept = String::new();
+    let mut characters = line.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character != '\\' || !characters.peek().is_some_and(char::is_ascii_punctuation) {
+            kept.push(character);
+        }
+    }
+    kept
+}
+
+/// Breaks prose at spaces to fit `width`, keeping its indent. A longer word stays whole.
+fn wrap_prose(line: &str, width: usize) -> Vec<String> {
+    if line.width() <= width {
+        return vec![line.to_owned()];
+    }
+    let indent = &line[..line.len() - line.trim_start().len()];
+    let mut lines = Vec::new();
+    let mut current = String::from(indent);
+    for word in line.split_whitespace() {
+        if current.len() > indent.len() && current.width() + 1 + word.width() > width {
+            lines.push(std::mem::replace(&mut current, String::from(indent)));
+        }
+        if current.len() > indent.len() {
+            current.push(' ');
+        }
+        current.push_str(word);
+    }
+    lines.push(current);
+    lines
 }
 
 /// `[label](target)` becomes `label`. The targets are long and can't be followed from here.
@@ -136,7 +282,7 @@ fn link_labels(line: &str) -> String {
         let (Some(open), Some(close)) = (rest[..middle].rfind('['), rest[middle..].find(')')) else {
             break;
         };
-        kept.push_str(&rest[..open]);
+        kept.push_str(rest[..open].strip_suffix('!').unwrap_or(&rest[..open]));
         kept.push_str(&rest[open + 1..middle]);
         rest = &rest[middle + close + 1..];
     }
@@ -144,18 +290,23 @@ fn link_labels(line: &str) -> String {
     kept
 }
 
-/// Drop `_` pairs that mark emphasis, and leave those inside names such as `snake_case`.
+/// Drop `_` and `*` pairs that mark emphasis, and leave those inside names such as
+/// `snake_case` or in sums such as `2 * 3`.
 fn without_emphasis(line: &str) -> String {
+    ['_', '*'].iter().fold(line.to_owned(), |text, mark| without_marks(&text, *mark))
+}
+
+fn without_marks(line: &str, mark: char) -> String {
     let characters = line.chars().collect::<Vec<_>>();
     let opens = |index: usize| {
-        characters[index] == '_'
+        characters[index] == mark
             && index.checked_sub(1).is_none_or(|before| {
                 !characters[before].is_alphanumeric() && characters[before] != '\\'
             })
             && characters.get(index + 1).is_some_and(|after| after.is_alphanumeric())
     };
     let closes = |index: usize| {
-        characters[index] == '_'
+        characters[index] == mark
             && index
                 .checked_sub(1)
                 .is_some_and(|before| !matches!(characters[before], ' ' | '\\'))
@@ -195,7 +346,47 @@ fn without_data_images(line: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::plain_markdown;
+    use super::{DocumentationLineRole as Role, markdown_rows, plain_markdown, wrap_prose};
+
+    #[test]
+    fn markdown_blocks_read_as_a_rendered_page() {
+        let rows = markdown_rows(
+            "# Title\n*em* and `code`\n- item\n> quote\n---\n```rust\nlet a = *b*;\n```\n\
+             | Name | Age |\n|---|:-:|\n| Ada | 36 |\n",
+            4,
+        );
+        let text = |text: &str, role| (text.to_owned(), role);
+        assert_eq!(
+            rows,
+            [
+                text("Title", Role::Heading),
+                text("em and code", Role::Text),
+                text("• item", Role::Text),
+                text("│ quote", Role::Text),
+                text("────", Role::Text),
+                text("let a = *b*;", Role::Code),
+                text("Name │ Age", Role::Table),
+                text("─────┼────", Role::Table),
+                text("Ada  │ 36", Role::Table),
+                text("", Role::Text),
+            ]
+        );
+    }
+
+    #[test]
+    fn emphasis_marks_leave_sums_and_pointers() {
+        assert_eq!(plain_markdown("2 * 3 * 4"), "2 * 3 * 4");
+        assert_eq!(plain_markdown("*const T and *mut U"), "*const T and *mut U");
+        assert_eq!(plain_markdown("![alt](pic.png) *note*"), "alt note");
+    }
+
+    #[test]
+    fn prose_wraps_at_spaces_and_keeps_its_indent() {
+        assert_eq!(wrap_prose("short", 10), ["short"]);
+        assert_eq!(wrap_prose("one two three", 7), ["one two", "three"]);
+        assert_eq!(wrap_prose("  one two", 5), ["  one", "  two"]);
+        assert_eq!(wrap_prose("unbreakableword x", 4), ["unbreakableword", "x"]);
+    }
 
     #[test]
     fn markdown_lines_read_as_plain_text() {
@@ -208,5 +399,7 @@ mod tests {
         assert_eq!(plain_markdown("keeps snake_case_name and a_b"), "keeps snake_case_name and a_b");
         assert_eq!(plain_markdown("![badge](data:image/svg+xml;base64,AA==) text"), " text");
         assert_eq!(plain_markdown(r"escaped \_name\_"), "escaped _name_");
+        assert_eq!(plain_markdown(r"the project\."), "the project.");
+        assert_eq!(plain_markdown(r"C:\path stays"), r"C:\path stays");
     }
 }

@@ -633,6 +633,7 @@ fn documentation_popup_preserves_lines_clamps_and_protects_status_row() {
             sections: vec![DocumentationSection {
                 heading: None,
                 markup: DocumentationMarkupKind::Markdown,
+                roles: Vec::new(),
                 lines: std::iter::once("first line".into())
                     .chain(std::iter::once("wide 界界 clipped safely".into()))
                     .chain((2..20).map(|line| format!("line {line}")))
@@ -1756,6 +1757,7 @@ fn immutable_git_signs_use_the_reserved_gutter_and_exact_buffer_revision() {
             repository_id: crate::workspace::git::GitRepositoryId(1),
             line: 0,
             kind: super::UiGitSignKind::Added,
+            staged: false,
         },
         super::UiGitSign {
             buffer,
@@ -1765,6 +1767,7 @@ fn immutable_git_signs_use_the_reserved_gutter_and_exact_buffer_revision() {
             repository_id: crate::workspace::git::GitRepositoryId(1),
             line: 1,
             kind: super::UiGitSignKind::Changed,
+            staged: false,
         },
         super::UiGitSign {
             buffer,
@@ -1774,6 +1777,7 @@ fn immutable_git_signs_use_the_reserved_gutter_and_exact_buffer_revision() {
             repository_id: crate::workspace::git::GitRepositoryId(1),
             line: 2,
             kind: super::UiGitSignKind::Deleted,
+            staged: false,
         },
     ];
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 20, 5);

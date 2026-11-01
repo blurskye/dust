@@ -357,6 +357,70 @@ method = "npm_package"
 packages = ["@astrojs/language-server@2.16.15", "typescript@5.9.3"]
 
 [[tool]]
+id = "biome"
+name = "biome"
+kind = "lsp"
+languages = ["astro", "css", "html", "javascript", "javascriptreact", "json", "jsonc", "svelte", "typescript", "typescriptreact", "vue"]
+executable = "biome"
+version = "2.6.4"
+launch_args = ["lsp-proxy"]
+probe_args = ["--version"]
+project_root_markers = ["biome.json", "biome.jsonc"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["@biomejs/biome@2.6.4"]
+
+[[tool]]
+id = "oxlint"
+name = "oxlint"
+kind = "lsp"
+languages = ["astro", "javascript", "javascriptreact", "svelte", "typescript", "typescriptreact", "vue"]
+executable = "oxlint"
+version = "1.90.0"
+launch_args = ["--lsp"]
+probe_args = ["--version"]
+project_root_markers = [".oxlintrc.json", "oxlint.config.ts"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["oxlint@1.90.0"]
+
+[[tool]]
+id = "oxfmt"
+name = "oxfmt"
+kind = "lsp"
+languages = ["astro", "css", "html", "javascript", "javascriptreact", "json", "jsonc", "markdown", "svelte", "typescript", "typescriptreact", "vue", "yaml"]
+executable = "oxfmt"
+version = "0.75.0"
+launch_args = ["--lsp"]
+probe_args = ["--version"]
+project_root_markers = [".oxfmtrc.json", ".oxfmtrc.jsonc"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["oxfmt@0.75.0"]
+
+[[tool]]
+id = "tsgo"
+name = "tsgo"
+kind = "lsp"
+languages = ["typescript", "typescriptreact", "javascript", "javascriptreact"]
+executable = "tsgo"
+version = "7.0.0-dev.20260707.2"
+launch_args = ["--lsp", "--stdio"]
+probe_args = ["--version"]
+project_root_markers = ["tsconfig.json", "jsconfig.json", "package.json"]
+project_root_strategy = "node"
+
+[tool.install]
+method = "npm_package"
+packages = ["@typescript/native-preview@7.0.0-dev.20260707.2"]
+
+[[tool]]
 id = "debugpy"
 name = "debugpy"
 kind = "dap"

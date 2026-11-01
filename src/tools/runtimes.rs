@@ -187,7 +187,7 @@ pub(super) fn run_managed(
                     .unwrap_or_default();
                 return Err(format!(
                     "managed installer `{}` exited with {}{}",
-                    program.display(),
+                    program.file_name().unwrap_or_default().to_string_lossy(),
                     status
                         .code()
                         .map_or_else(|| "signal".into(), |code| code.to_string()),
@@ -478,11 +478,14 @@ pub(super) fn install_rustup_component(
             "stable".into(),
         ];
         report("installing Rust toolchain", 0, None);
+        // One binary is both programs and goes by its name, and this copy is named `rustup`.
+        let mut init_environment = environment.clone();
+        init_environment.insert("RUSTUP_FORCE_ARG0".into(), "rustup-init".into());
         run_managed(
             &initializer,
             &arguments,
             &runtime,
-            &environment,
+            &init_environment,
             cancellations,
             compatibility,
         )?;

@@ -423,6 +423,7 @@ pub enum AppEffect {
     LspCompletionAccept,
     LspCompletionCancel,
     SnippetNavigate(i8),
+    SnippetLeave,
     SnippetCancel,
     LspFoldToggle,
     LspSelectionExpand,

@@ -288,6 +288,15 @@ pub enum DocumentationPopupKind {
     Git,
 }
 
+/// How a documentation line reads: code and tables keep their layout.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DocumentationLineRole {
+    Text,
+    Heading,
+    Code,
+    Table,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DocumentationMarkupKind {
     PlainText,
@@ -299,6 +308,8 @@ pub struct DocumentationSection {
     pub heading: Option<String>,
     pub markup: DocumentationMarkupKind,
     pub lines: Vec<String>,
+    /// One for each of `lines`; a line without one is text.
+    pub roles: Vec<DocumentationLineRole>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -319,6 +330,26 @@ impl DocumentationPopupState {
                 .saturating_add(usize::from(section.heading.is_some()))
                 .saturating_add(section.lines.len())
         })
+    }
+
+    fn role_at(&self, mut index: usize) -> DocumentationLineRole {
+        for section in &self.sections {
+            if section.heading.is_some() {
+                if index == 0 {
+                    return DocumentationLineRole::Heading;
+                }
+                index = index.saturating_sub(1);
+            }
+            if index < section.lines.len() {
+                return section
+                    .roles
+                    .get(index)
+                    .copied()
+                    .unwrap_or(DocumentationLineRole::Text);
+            }
+            index = index.saturating_sub(section.lines.len());
+        }
+        DocumentationLineRole::Text
     }
 
     fn line_at(&self, mut index: usize) -> Option<&str> {
@@ -1192,6 +1223,7 @@ pub struct UiGitSign {
     pub repository_id: crate::workspace::git::GitRepositoryId,
     pub line: usize,
     pub kind: UiGitSignKind,
+    pub staged: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1601,7 +1633,12 @@ fn render_error_notification(
             .map(|runs| runs.into_iter().map(|(piece, _)| piece).collect())
             .collect()
     };
-    let shown = usize::from(height.saturating_sub(rect.y + 2)).clamp(1, NOTIFICATION_MAX_LINES);
+    // Under a picker only the rows below it are free, so the whole text waits in :messages.
+    let shown = if at_bottom {
+        1
+    } else {
+        usize::from(height.saturating_sub(rect.y + 2)).clamp(1, NOTIFICATION_MAX_LINES)
+    };
     if lines.len() > shown {
         lines.truncate(shown);
         const MORE: &str = "… :messages";

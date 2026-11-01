@@ -1663,18 +1663,24 @@ pub(super) fn render_prompt(
             .top
             .saturating_add(3)
             .saturating_add(config.ui.command_line.attachment_gap);
-        for x in geometry.left..right {
-            frame.grid.set_cell(x, error_y, " ", Style::Default);
+        // A long error wraps below the box, since its end usually says what to do.
+        let padding = config.ui.command_line.input_padding;
+        let inner = right.saturating_sub(geometry.left).saturating_sub(padding.saturating_mul(2));
+        let ambiguous = config.editor.ambiguous_width;
+        let lines = super::wrap_card_text(error, usize::from(inner).max(1), ambiguous);
+        for (row, line) in (error_y..height).zip(lines) {
+            for x in geometry.left..right {
+                frame.grid.set_cell(x, row, " ", Style::Default);
+            }
+            let line: String = line.into_iter().map(|(piece, _)| piece).collect();
+            frame.grid.put_text_clipped(
+                geometry.left.saturating_add(padding),
+                row,
+                &line,
+                Style::Error,
+                right,
+            );
         }
-        frame.grid.put_text_clipped(
-            geometry
-                .left
-                .saturating_add(config.ui.command_line.input_padding),
-            error_y,
-            error,
-            Style::Error,
-            right,
-        );
     } else if !prompt.completions.is_empty() {
         let completion_top = geometry
             .top

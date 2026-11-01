@@ -13,6 +13,7 @@ mod origins;
 pub(crate) use origins::{ApplyEditReply, EditContext, OwnedLspEvent, PendingEditReply};
 mod model;
 pub use model::{
+    lsp_symbol_kind_name,
     LspCapabilities, LspCodeAction, LspCodeLens, LspCommand, LspCompletionItem, LspDiagnostic, LspDocument,
     LspDocumentEdit, LspEvent, LspFeature, LspColor, LspFeatureResult, LspHealth, LspHover, LspInlayHint,
     LspLocation, LspMarkupContent, LspMarkupKind, LspPolicy, LspPosition, LspProgressKind,

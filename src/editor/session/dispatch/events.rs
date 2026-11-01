@@ -295,6 +295,13 @@ impl InteractiveApplication {
         let Some(kind) = key.terminal_mouse() else {
             return false;
         };
+        if kind == crate::editor::input::TerminalMouseInput::LeftDrag
+            && let Some(last) = self.tab_drag
+        {
+            self.drag_content_tab(last, column);
+            return true;
+        }
+        self.tab_drag = None;
         if !matches!(
             kind,
             crate::editor::input::TerminalMouseInput::LeftDown
@@ -359,6 +366,9 @@ impl InteractiveApplication {
             return false;
         }
         self.reconcile_editor_windows();
+        if kind == crate::editor::input::TerminalMouseInput::LeftDown {
+            self.tab_drag = Some(column);
+        }
         if kind == crate::editor::input::TerminalMouseInput::RightDown {
             if entry.is_some_and(|entry| entry.closeable) {
                 self.close_active_buffer(false)
@@ -367,6 +377,38 @@ impl InteractiveApplication {
             }
         }
         true
+    }
+
+    /// A dragged tab moves past the tab under the mouse. Only when the mouse is moving that
+    /// way, because swapping tabs of different widths can leave it over the same tab.
+    fn drag_content_tab(&mut self, last: u16, column: u16) {
+        self.tab_drag = Some(column);
+        let Some(bounds) = self.workspace_bounds() else {
+            return;
+        };
+        let Some(over) = crate::ui::content_tab_at_column(
+            &self.ui.content_tabs,
+            self.configuration.settings(),
+            bounds.width,
+            column.saturating_sub(bounds.x),
+        ) else {
+            return;
+        };
+        let active = self.state.active_buffer_id();
+        let ids = self.window_session.editor_ids();
+        let tabs = &self.ui.content_tabs;
+        let active = tabs
+            .iter()
+            .position(|entry| ids.buffer_for_content(entry.identity.0) == active);
+        let over = tabs.iter().position(|entry| entry.identity == over);
+        let (Some(active), Some(over)) = (active, over) else {
+            return;
+        };
+        if over > active && column > last {
+            self.move_active_buffer_line(1);
+        } else if over < active && column < last {
+            self.move_active_buffer_line(-1);
+        }
     }
 
     pub(super) fn handle_event(&mut self, event: UiEvent) {
@@ -745,7 +787,14 @@ impl InteractiveApplication {
                 }
             }
         }
-        let context = self.active_input_context();
+        let mut context = self.active_input_context();
+        // While a snippet runs its keys come first; anything else is Insert as usual.
+        if context == "editor.insert"
+            && self.input.snippet_buffer().is_some()
+            && self.input.pending_context().is_none()
+        {
+            context = "snippet".into();
+        }
         self.handle_key_in_context(&context, key);
     }
 
@@ -794,6 +843,10 @@ impl InteractiveApplication {
             }
             MappingResolution::Disabled => {}
             MappingResolution::Pending | MappingResolution::Ambiguous => return,
+            MappingResolution::Missing if context == "snippet" => {
+                self.handle_key_in_context("editor.insert", key);
+                return;
+            }
             MappingResolution::Missing => {
                 let mut handled = false;
                 if let Some(character) = key.text_character() {
@@ -2696,6 +2749,10 @@ impl InteractiveApplication {
             self.process_lsp_inlay_refresh();
             return;
         }
+        if matches!(&feature, LspFeature::WorkspaceSymbols { query } if query.is_empty()) {
+            self.open_workspace_symbols_prompt();
+            return;
+        }
         self.close_documentation();
         let Some(view_id) = self.state.active_view else {
             return;
@@ -2710,9 +2767,9 @@ impl InteractiveApplication {
             // Not every server on a file formats it: Tailwind sits beside the TypeScript one.
             self.language
                 .formatting_server(buffer, &document)
-                .or_else(|| self.language.supporting_server(buffer, &document))
+                .or_else(|| self.language.supporting_server(buffer, &document, &feature))
         } else {
-            self.language.supporting_server(buffer, &document)
+            self.language.supporting_server(buffer, &document, &feature)
         };
         let Some(server) = server else {
             self.start_lsp(None);
@@ -2831,6 +2888,16 @@ impl InteractiveApplication {
             self.reconcile_editor_windows();
             self.input.hold_focus(self.window_session.capture_focus());
         }
+        let policy = &self.configuration.settings().ui.documentation_popup;
+        let available = usize::from(self.window_session.width());
+        let available = if kind == DocumentationPopupKind::Completion {
+            available / 2
+        } else {
+            available
+        };
+        let text_width = available
+            .min(usize::from(policy.max_width))
+            .saturating_sub(2 + 2 * usize::from(policy.horizontal_padding));
         self.input.present_documentation(
             kind,
             title,
@@ -2845,13 +2912,14 @@ impl InteractiveApplication {
                     source.value,
                 )
             }),
-            &self.configuration.settings().ui.documentation_popup,
+            policy,
+            text_width,
         );
         self.restore_input_focus();
         self.project_input_documentation();
     }
 
-    pub(in crate::editor::session) fn open_lsp_completion_documentation(&mut self) {
+    pub(in crate::editor::session) fn open_lsp_completion_documentation(&mut self, asked: bool) {
         let Some(selected) = self
             .ui
             .language_completion
@@ -2866,10 +2934,14 @@ impl InteractiveApplication {
         {
             Ok(value) => value,
             Err(error) => {
-                if error == "completion documentation is stale" {
+                let stale = error == "completion documentation is stale";
+                if stale {
                     self.close_documentation();
                 }
-                self.show_error(error);
+                // Docs that open by themselves simply lag the menu; that is nothing to report.
+                if !stale || asked {
+                    self.show_error(error);
+                }
                 return;
             }
         };
@@ -2962,7 +3034,12 @@ impl InteractiveApplication {
                     self.navigate_lsp_location(location);
                 }
             }
-            LspFeatureResult::Symbols(symbols) => {
+            LspFeatureResult::Symbols(mut symbols) => {
+                for location in symbols.iter_mut().filter_map(|symbol| symbol.location.as_mut()) {
+                    if location.uri.is_empty() {
+                        location.uri = uri.into();
+                    }
+                }
                 self.open_lsp_symbols_picker(server, symbols);
             }
             LspFeatureResult::WorkspaceEdit(mut edit) => {

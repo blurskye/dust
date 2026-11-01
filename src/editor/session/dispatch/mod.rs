@@ -195,6 +195,8 @@ struct InteractiveApplication {
     palette_recent: Vec<String>,
     /// The split border being dragged with the mouse: the panes on its two sides.
     border_drag: Option<(crate::editor::PaneId, crate::editor::PaneId)>,
+    /// The column a buffer tab was last dragged at with the mouse.
+    tab_drag: Option<u16>,
     /// Where `dust --remote` from Dust's own terminals reaches this session.
     remote: Option<crate::remote::RemoteServer>,
     /// The parse results and views `ui.syntax_spans` and `ui.syntax_folds` were built from.

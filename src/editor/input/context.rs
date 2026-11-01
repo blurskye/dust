@@ -11,6 +11,7 @@ const BUILTIN_SURFACES: &[&str] = &[
     "workspace_trust_prompt",
     "confirmation_prompt",
     "completion",
+    "snippet",
     "documentation",
     "picker",
     "picker_normal",

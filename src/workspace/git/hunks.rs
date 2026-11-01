@@ -184,6 +184,44 @@ pub fn git_hunk_signs(snapshot: &GitHunkSnapshot) -> Vec<GitHunkSign> {
         .collect()
 }
 
+/// Staged changes as signs on the buffer's lines. Their lines are the index's, so the
+/// unstaged diff moves them. A line it changed shows that change and has no staged sign.
+#[must_use]
+pub fn git_staged_signs(staged: &GitHunkSnapshot, unstaged: &GitHunkSnapshot) -> Vec<GitHunkSign> {
+    let changed = git_hunk_signs(unstaged)
+        .into_iter()
+        .map(|sign| sign.line)
+        .collect::<std::collections::BTreeSet<_>>();
+    git_hunk_signs(staged)
+        .into_iter()
+        .filter_map(|sign| {
+            let line = index_line_in_buffer(sign.line, &unstaged.hunks)?;
+            (!changed.contains(&line)).then_some(GitHunkSign { line, ..sign })
+        })
+        .collect()
+}
+
+/// Where a zero-based index line sits in the buffer, if it is still there.
+fn index_line_in_buffer(line: usize, unstaged: &[GitHunk]) -> Option<usize> {
+    let line = u32::try_from(line + 1).ok()?;
+    let mut shift = 0i64;
+    for hunk in unstaged {
+        // With no lines on a side, git names the line before the change.
+        let first_old = hunk.old_start + u32::from(hunk.old_lines == 0);
+        if line < first_old {
+            break;
+        }
+        let next_old = first_old + hunk.old_lines;
+        if line < next_old {
+            let kept = hunk.lines.iter().find(|diff| diff.old_line == Some(line));
+            return kept.and_then(|diff| diff.new_line).map(|new| new as usize - 1);
+        }
+        let first_new = hunk.new_start + u32::from(hunk.new_lines == 0);
+        shift = i64::from(first_new + hunk.new_lines) - i64::from(next_old);
+    }
+    usize::try_from(i64::from(line) + shift - 1).ok()
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitHunkSnapshot {
     pub generation: GitHunkGeneration,
@@ -739,4 +777,46 @@ pub(super) fn read_buffer_hunks_owned(
         worktree_sha256: None,
         hunks,
     })
+}
+
+#[cfg(test)]
+mod staged_sign_tests {
+    use super::{GitDiffLine, GitDiffLineKind, GitHunk, GitHunkId, index_line_in_buffer};
+
+    fn hunk(old: (u32, u32), new: (u32, u32), lines: Vec<GitDiffLine>) -> GitHunk {
+        GitHunk {
+            id: GitHunkId(0),
+            old_start: old.0,
+            old_lines: old.1,
+            new_start: new.0,
+            new_lines: new.1,
+            header: String::new(),
+            lines,
+        }
+    }
+
+    fn line(kind: GitDiffLineKind, old_line: Option<u32>, new_line: Option<u32>) -> GitDiffLine {
+        GitDiffLine { kind, old_line, new_line, text: String::new() }
+    }
+
+    #[test]
+    fn index_lines_follow_unstaged_changes() {
+        let inserted = [hunk((3, 0), (4, 2), Vec::new())];
+        assert_eq!(index_line_in_buffer(2, &inserted), Some(2));
+        assert_eq!(index_line_in_buffer(3, &inserted), Some(5));
+        let deleted = [hunk((3, 2), (2, 0), vec![
+            line(GitDiffLineKind::Delete, Some(3), None),
+            line(GitDiffLineKind::Delete, Some(4), None),
+        ])];
+        assert_eq!(index_line_in_buffer(1, &deleted), Some(1));
+        assert_eq!(index_line_in_buffer(2, &deleted), None);
+        assert_eq!(index_line_in_buffer(4, &deleted), Some(2));
+        let context = [hunk((5, 2), (5, 3), vec![
+            line(GitDiffLineKind::Context, Some(5), Some(5)),
+            line(GitDiffLineKind::Add, None, Some(6)),
+            line(GitDiffLineKind::Context, Some(6), Some(7)),
+        ])];
+        assert_eq!(index_line_in_buffer(5, &context), Some(6));
+        assert_eq!(index_line_in_buffer(6, &context), Some(7));
+    }
 }

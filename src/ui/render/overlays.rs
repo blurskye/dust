@@ -141,14 +141,16 @@ pub(super) fn render_documentation_popup(
     let text_left = left
         .saturating_add(1)
         .saturating_add(policy.horizontal_padding);
-    for (row, line) in (popup.scroll..popup.scroll.saturating_add(visible_rows))
-        .filter_map(|index| popup.line_at(index))
+    for (row, (index, line)) in (popup.scroll..popup.scroll.saturating_add(visible_rows))
+        .filter_map(|index| popup.line_at(index).map(|line| (index, line)))
         .enumerate()
     {
         // A hunk preview reads as a diff.
-        let style = match line.chars().next() {
-            Some('+') if popup.provider == "Git" => Style::GitSignAdded,
-            Some('-') if popup.provider == "Git" => Style::GitSignDeleted,
+        let style = match (line.chars().next(), popup.role_at(index)) {
+            (Some('+'), _) if popup.provider == "Git" => Style::GitSignAdded,
+            (Some('-'), _) if popup.provider == "Git" => Style::GitSignDeleted,
+            (_, super::DocumentationLineRole::Heading) => Style::DocumentationTitle,
+            (_, super::DocumentationLineRole::Code) => Style::DocumentationBorder,
             _ => Style::DocumentationText,
         };
         frame.grid.put_text_clipped(

@@ -140,28 +140,44 @@ impl LspSession {
         self.projection.generation = next;
         Some(next)
     }
+    /// The server for `feature` on this document: the active one when it can answer, else one
+    /// that can, full language servers before linters such as ESLint.
     pub(in crate::editor::session) fn supporting_server(
         &self,
         buffer: BufferId,
         document: &LspDocument,
+        feature: &LspFeature,
     ) -> Option<String> {
         let supports = |state: &super::LspRuntimeState| {
             state.definition.supports_language(&document.language_id)
                 && state.documents.contains_key(&buffer)
                 && document.path.starts_with(&state.root_path)
         };
-        self.active
-            .as_ref()
-            .filter(|key| self.sessions.get(*key).is_some_and(&supports))
-            .cloned()
+        let offers = |state: &super::LspRuntimeState| {
+            state.capabilities.as_ref().is_some_and(|capabilities| feature.capability(capabilities))
+        };
+        let primary = |state: &super::LspRuntimeState| {
+            state.capabilities.as_ref().is_none_or(|capabilities| !capabilities.definition)
+        };
+        let active = self.active.as_ref().filter(|key| self.sessions.get(*key).is_some_and(&supports));
+        active
+            .filter(|key| self.sessions.get(*key).is_some_and(&offers))
             .or_else(|| {
                 self.sessions
                     .iter()
-                    .filter(|(_, s)| supports(s))
+                    .filter(|(_, state)| supports(state) && offers(state))
+                    .min_by_key(|(key, state)| (primary(state), *key))
+                    .map(|(key, _)| key)
+            })
+            .or(active)
+            .or_else(|| {
+                self.sessions
+                    .iter()
+                    .filter(|(_, state)| supports(state))
                     .map(|(key, _)| key)
                     .min()
-                    .cloned()
             })
+            .cloned()
     }
     pub(in crate::editor::session) fn formatting_server(
         &self,

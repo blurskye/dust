@@ -19,6 +19,7 @@ pub(in crate::editor::session) enum LspLaunchSource {
 
 #[derive(Clone, Debug)]
 pub(in crate::editor::session) struct PendingLspProjectRoot {
+    pub(in crate::editor::session) asked: bool,
     pub(in crate::editor::session) definition: ToolDefinition,
     pub(in crate::editor::session) launch_source: LspLaunchSource,
     pub(in crate::editor::session) root_id: crate::workspace::RootId,
@@ -213,6 +214,13 @@ impl LspSession {
             return Err("language-server root source changed".into());
         }
         let Some(project_root) = resolution.project_root else {
+            if pending.asked {
+                return Err(format!(
+                    "{} starts in a project with {}",
+                    pending.definition.name,
+                    pending.definition.project_root_markers.join(" or ")
+                ));
+            }
             return Ok(());
         };
         let session_key = LspSessionKey {

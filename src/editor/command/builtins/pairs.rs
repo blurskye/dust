@@ -120,12 +120,22 @@ pub(super) enum AutoPair {
 }
 
 pub(super) fn auto_pair(text: &TextBuffer, cursor: ByteOffset, typed: &str) -> Option<AutoPair> {
+    auto_pair_over(text, ByteRange::empty(cursor), typed)
+}
+
+/// `auto_pair` for text that replaces `range`: what counts is around the range, not in it.
+pub(super) fn auto_pair_over(
+    text: &TextBuffer,
+    range: ByteRange,
+    typed: &str,
+) -> Option<AutoPair> {
     let mut characters = typed.chars();
     let typed = characters.next()?;
     if characters.next().is_some() {
         return None;
     }
-    let (next, previous) = neighbours(text, cursor);
+    let (next, _) = neighbours(text, range.end);
+    let (_, previous) = neighbours(text, range.start);
     if matches!(typed, ')' | ']' | '}' | '"' | '\'' | '`') && next == Some(typed) {
         return Some(AutoPair::Skip);
     }

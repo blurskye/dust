@@ -145,6 +145,7 @@ fn documentation_is_bounded_at_utf8_boundaries_and_scroll_accepts_explicit_conte
         None,
         [(DocumentationMarkupKind::PlainText, "éé\r\nline\x1b".into())],
         &policy,
+        200,
     );
     let popup = input.documentation().unwrap();
     assert_eq!(popup.provider.len(), 256);

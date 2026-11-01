@@ -153,6 +153,7 @@ pub struct GitSignsConfig {
     pub added: String,
     pub changed: String,
     pub deleted: String,
+    pub staged: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -181,6 +182,7 @@ impl Default for GitSignsConfig {
             added: "│".into(),
             changed: "│".into(),
             deleted: "_".into(),
+            staged: "┊".into(),
         }
     }
 }

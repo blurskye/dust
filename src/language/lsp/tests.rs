@@ -144,7 +144,7 @@ fn every_managed_catalog_lsp_language_has_a_reachable_document_mapping() {
         .into_iter()
         .filter(|tool| tool.kind == ToolKind::Lsp && tool.install.is_some())
         .collect::<Vec<_>>();
-    assert_eq!(servers.len(), 19);
+    assert_eq!(servers.len(), 23);
     for server in servers {
         assert!(!server.project_root_markers.is_empty(), "{}", server.id);
         for language in &server.languages {
@@ -358,6 +358,21 @@ fn incremental_sync_uses_the_negotiated_unicode_units() {
     assert_eq!(change.pointer("/range/start/character"), Some(&json!(3)));
     assert_eq!(change.pointer("/range/end/character"), Some(&json!(4)));
     assert_eq!(change.get("text"), Some(&json!("yz")));
+}
+
+#[test]
+fn nested_document_symbols_keep_their_positions_and_children() {
+    let range = |line: u64| json!({"start":{"line":line,"character":4},"end":{"line":line,"character":7}});
+    let found = super::protocol::symbols(&json!([{
+        "name":"Person","kind":23,"range":range(1),"selectionRange":range(1),
+        "children":[{"name":"Greet","kind":6,"range":range(5),"selectionRange":range(6)}]
+    }]))
+    .expect("symbols");
+    assert_eq!(found[0].name, "Person");
+    assert_eq!(found[1].name, "  Greet");
+    let location = found[1].location.as_ref().expect("a position");
+    assert_eq!(location.uri, "");
+    assert_eq!(location.range.start.line, 6);
 }
 
 #[test]

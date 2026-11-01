@@ -405,6 +405,11 @@ pub(super) fn register_commands(
             AppEffect::SnippetNavigate(1),
         ),
         (
+            "snippet.leave",
+            "Finish the snippet and leave Insert",
+            AppEffect::SnippetLeave,
+        ),
+        (
             "snippet.previous",
             "Previous snippet placeholder",
             AppEffect::SnippetNavigate(-1),

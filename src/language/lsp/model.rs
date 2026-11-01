@@ -432,6 +432,44 @@ pub struct LspSymbol {
     pub location: Option<LspLocation>,
 }
 
+/// The name LSP gives a symbol kind number.
+#[must_use]
+pub fn lsp_symbol_kind_name(kind: u8) -> &'static str {
+    const NAMES: [&str; 26] = [
+        "File",
+        "Module",
+        "Namespace",
+        "Package",
+        "Class",
+        "Method",
+        "Property",
+        "Field",
+        "Constructor",
+        "Enum",
+        "Interface",
+        "Function",
+        "Variable",
+        "Constant",
+        "String",
+        "Number",
+        "Boolean",
+        "Array",
+        "Object",
+        "Key",
+        "Null",
+        "EnumMember",
+        "Struct",
+        "Event",
+        "Operator",
+        "TypeParameter",
+    ];
+    usize::from(kind)
+        .checked_sub(1)
+        .and_then(|index| NAMES.get(index))
+        .copied()
+        .unwrap_or("Symbol")
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspInlayHint {
     pub position: LspPosition,
@@ -547,7 +585,7 @@ impl LspFeature {
         }
     }
 
-    pub(super) fn capability(&self, capabilities: &LspCapabilities) -> bool {
+    pub fn capability(&self, capabilities: &LspCapabilities) -> bool {
         match self {
             Self::Hover => capabilities.hover,
             Self::Completion => capabilities.completion,

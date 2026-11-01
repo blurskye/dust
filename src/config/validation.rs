@@ -639,6 +639,7 @@ impl Config {
             &self.editor.git_signs.added,
             &self.editor.git_signs.changed,
             &self.editor.git_signs.deleted,
+            &self.editor.git_signs.staged,
             &self.editor.debug_signs.breakpoint,
             &self.editor.debug_signs.execution,
         ]

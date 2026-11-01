@@ -796,28 +796,46 @@ pub(super) fn symbols(result: &Value) -> Result<Vec<LspSymbol>, String> {
     let values = result
         .as_array()
         .ok_or_else(|| "symbol response is not a list".to_owned())?;
-    values
-        .iter()
-        .take(4096)
-        .map(|value| {
-            let name = value
-                .get("name")
-                .and_then(Value::as_str)
-                .ok_or("symbol has no name")?
-                .to_owned();
-            let location = value
-                .get("location")
-                .and_then(|location| locations(location).ok()?.into_iter().next());
-            Ok(LspSymbol {
-                name,
-                kind: value
-                    .get("kind")
-                    .and_then(Value::as_u64)
-                    .and_then(|v| u8::try_from(v).ok()),
-                location,
-            })
-        })
-        .collect()
+    let mut found = Vec::new();
+    collect_symbols(values, 0, &mut found)?;
+    Ok(found)
+}
+
+/// Flat symbols carry a `location`. Nested ones hold a range in the requested document, so their
+/// URI stays empty for the caller, and their children follow them indented.
+fn collect_symbols(
+    values: &[Value],
+    depth: usize,
+    found: &mut Vec<LspSymbol>,
+) -> Result<(), String> {
+    for value in values {
+        if found.len() >= 4096 || depth > 32 {
+            break;
+        }
+        let name = value
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or("symbol has no name")?;
+        let location = value
+            .get("location")
+            .and_then(|location| locations(location).ok()?.into_iter().next())
+            .or_else(|| {
+                let range = value.get("selectionRange").or_else(|| value.get("range"))?;
+                Some(LspLocation { uri: String::new(), range: parse_range(range)? })
+            });
+        found.push(LspSymbol {
+            name: format!("{}{name}", "  ".repeat(depth)),
+            kind: value
+                .get("kind")
+                .and_then(Value::as_u64)
+                .and_then(|v| u8::try_from(v).ok()),
+            location,
+        });
+        if let Some(children) = value.get("children").and_then(Value::as_array) {
+            collect_symbols(children, depth + 1, found)?;
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn workspace_edit(value: &Value) -> Result<LspWorkspaceEdit, String> {
