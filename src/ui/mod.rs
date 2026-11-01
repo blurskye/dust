@@ -33,7 +33,7 @@ pub use render::{
     PluginSurfaceRow, PluginSurfaceUiState, PrivateSurfaceCell,
     PrivateSurfaceUiState, PromptGeometry, PromptKind, PromptState, TerminalPanelGeometry,
     TerminalPanelMode, TerminalPanelState, TerminalPhase, TerminalTabState, ToolMenuRow,
-    ToolMenuState, ToolRuntimeOption, ToolRuntimePickerState, UiDiagnostic, UiFold, UiGitSign,
+    ToolMenuState, ToolRuntimeOption, ToolRuntimePickerState, UiBreadcrumb, UiDiagnostic, UiFold, UiGitSign,
     UiColorSpan, UiGitSignKind, UiInlayHint, UiLspProgress, UiState, UiSyntaxSpan, VisualRowAnchor,
     VisualRowModel, view_pane_viewport, active_editor_pane_viewport, active_pane_viewport, confirmation_fully_visible,
     content_tab_at_column, editor_content_width, editor_gutter_width, editor_pane_viewport_at,

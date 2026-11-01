@@ -697,6 +697,10 @@ impl TaskSession {
                     };
                     self.truncated.remove(&job);
                     if !self.current(&task, workspace, configuration) {
+                        // Stopping a task can end its output early; that isn't a failure.
+                        if self.statuses.get(&task.requested).is_some_and(|status| status == "cancelled") {
+                            continue;
+                        }
                         return Some(TaskUpdate::Failed {
                             source: None,
                             message: format!("retired task {}: {message}", task.requested),

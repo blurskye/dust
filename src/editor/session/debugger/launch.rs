@@ -500,16 +500,19 @@ impl DebugSession {
                 arguments.insert("cwd".into(), serde_json::json!(launch.cwd));
                 // As in VS Code, or `input()` gets end of file.
                 let adapter_runs_terminal = launch.configuration.is_none()
-                    && matches!(launch.session.adapter.as_str(), "debugpy" | "delve");
-                if adapter_runs_terminal {
-                    if launch.session.adapter == "debugpy" {
+                    && matches!(launch.session.adapter.as_str(), "debugpy" | "delve" | "codelldb");
+                // CodeLLDB asks for a terminal without being told to.
+                match launch.session.adapter.as_str() {
+                    "debugpy" if adapter_runs_terminal => {
                         arguments.insert("console".into(), serde_json::json!("integratedTerminal"));
-                    } else {
+                    }
+                    "delve" if adapter_runs_terminal => {
                         launch
                             .adapter
                             .environment
                             .insert(crate::debugger::ADAPTER_IN_TERMINAL.into(), "1".into());
                     }
+                    _ => {}
                 }
                 // A project's virtual environment is what its imports need, as in VS Code.
                 let venv = launch.cwd.join(".venv/bin/python");

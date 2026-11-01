@@ -198,7 +198,8 @@ impl Drop for ReverseRequest {
 }
 
 /// Validate the entire request before allocating an argv/environment projection.
-/// Null environment entries (unset semantics) are deliberately unsupported.
+/// Null environment entries (unset semantics) are deliberately unsupported. An empty `cwd`, as
+/// CodeLLDB sends, leaves the directory to the client.
 pub(super) fn terminal_arguments(
     message: &Value,
 ) -> Option<(
@@ -223,7 +224,7 @@ pub(super) fn terminal_arguments(
     }
     let text = |s: &str| s.len() <= 64 * 1024 && !s.contains('\0');
     if !text(cwd)
-        || !std::path::Path::new(cwd).is_absolute()
+        || !(cwd.is_empty() || std::path::Path::new(cwd).is_absolute())
         || args.is_empty()
         || args.len() > 4096
         || env.is_some_and(|e| e.len() > 4096)

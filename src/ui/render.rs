@@ -287,6 +287,8 @@ pub enum DocumentationPopupKind {
     Signature,
     Completion,
     Git,
+    /// A notice opened from `:messages`, whatever the file under it.
+    Notice,
 }
 
 /// How a documentation line reads: code and tables keep their layout.
@@ -1216,6 +1218,14 @@ pub enum UiGitSignKind {
     Deleted,
 }
 
+/// A symbol the status line can name when the cursor is on one of its lines.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UiBreadcrumb {
+    pub name: String,
+    pub start_line: usize,
+    pub end_line: usize,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct UiGitSign {
     pub buffer: crate::editor::BufferId,
@@ -1368,6 +1378,7 @@ pub struct UiState {
     pub lsp_folds: Vec<UiFold>,
     pub lsp_server: Option<String>,
     pub git_branch: Option<String>,
+    pub breadcrumbs: Option<(crate::editor::BufferId, Vec<UiBreadcrumb>)>,
     pub running_tasks: usize,
     pub lsp_progress: Vec<UiLspProgress>,
     pub lsp_progress_frame: usize,

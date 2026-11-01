@@ -829,6 +829,10 @@ fn collect_symbols(
                 .get("kind")
                 .and_then(Value::as_u64)
                 .and_then(|v| u8::try_from(v).ok()),
+            extent: value
+                .get("range")
+                .and_then(parse_range)
+                .or_else(|| location.as_ref().map(|location| location.range.clone())),
             location,
         });
         if let Some(children) = value.get("children").and_then(Value::as_array) {

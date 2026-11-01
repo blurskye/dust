@@ -430,6 +430,8 @@ pub struct LspSymbol {
     pub name: String,
     pub kind: Option<u8>,
     pub location: Option<LspLocation>,
+    /// All of the symbol, where `location` is only its name when the server gives both.
+    pub extent: Option<LspRange>,
 }
 
 /// The name LSP gives a symbol kind number.

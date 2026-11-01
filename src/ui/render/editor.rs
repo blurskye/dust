@@ -909,10 +909,25 @@ pub(super) fn render_status_line(
                 },
             )
     });
+    let cursor_line = buffer.text.byte_to_line(view.cursor).unwrap_or(0);
     // After the file, in the configured order. These go whole or not at all.
     let mut left_fields = Vec::new();
     for component in &status.components {
         match component.as_str() {
+            "breadcrumbs" => {
+                let trail = ui
+                    .breadcrumbs
+                    .iter()
+                    .filter(|(buffer, _)| *buffer == view.buffer)
+                    .flat_map(|(_, symbols)| symbols)
+                    .filter(|symbol| (symbol.start_line..=symbol.end_line).contains(&cursor_line))
+                    .map(|symbol| symbol.name.as_str())
+                    .collect::<Vec<_>>();
+                if !trail.is_empty() {
+                    let deepest = &trail[trail.len().saturating_sub(3)..];
+                    left_fields.push((format!("\u{203a} {}", deepest.join(" \u{203a} ")), Style::Status));
+                }
+            }
             "diagnostics" => {
                 if errors > 0 {
                     left_fields.push((format!("{error_icon}{errors}"), Style::StatusError));
@@ -957,7 +972,6 @@ pub(super) fn render_status_line(
         .saturating_add(text_cells(&mode, config))
         .saturating_add(text_cells(&file, config))
         .saturating_add(4);
-    let cursor_line = buffer.text.byte_to_line(view.cursor).unwrap_or(0);
     // The position always shows; the rest of the right side goes first when the left needs room.
     let position = (!agent && shown("position")).then(|| {
         let text = status

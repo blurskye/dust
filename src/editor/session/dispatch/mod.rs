@@ -347,6 +347,7 @@ pub fn run_interactive(
         application.process_persistence_events();
         application.sync_lsp_document();
         application.process_lsp_inlay_refresh();
+        application.process_lsp_breadcrumbs();
         application.sync_lsp_status_ui();
         application.sync_status_summary_ui();
         application.update_lsp_progress_animation();

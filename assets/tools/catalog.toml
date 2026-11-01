@@ -460,7 +460,7 @@ languages = ["rust", "c", "cpp"]
 executable = "codelldb"
 version = "1.12.3"
 probe_args = ["--help"]
-launch_args = ["--connect", "{address}"]
+launch_args = ["--connect", "{port}"]
 project_root_markers = ["Cargo.toml", "compile_commands.json", "compile_flags.txt", ".clangd"]
 project_root_strategy = "marker"
 
@@ -470,6 +470,8 @@ url = "https://github.com/vadimcn/codelldb/releases/download/v1.12.3/codelldb-li
 sha256 = "1cd7f386598022b51a5b93b9ffa23e812b23f519cfe1833384ec4bef4bfd1be1"
 archive = "zip"
 executable_path = "extension/adapter/codelldb"
+# It loads liblldb from beside the adapter.
+tree = "extension"
 
 [[tool]]
 id = "lldb-dap"

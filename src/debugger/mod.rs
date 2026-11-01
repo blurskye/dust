@@ -199,6 +199,8 @@ pub const ADAPTER_SESSION_ARGUMENT: &str = "--adapter-session";
 pub const ADAPTER_BRIDGE_ARGUMENT: &str = "--adapter-bridge";
 /// In a catalog entry's `launch_args`, where the socket address of a bridged adapter goes.
 const ADAPTER_ADDRESS: &str = "{address}";
+/// The same for an adapter that takes only the port of a local socket.
+const ADAPTER_PORT: &str = "{port}";
 /// In a bridged adapter's environment, asks for the adapter to run in a terminal, so the program
 /// it launches reads and writes that terminal. VS Code runs Delve the same way.
 pub(crate) const ADAPTER_IN_TERMINAL: &str = "DUST_ADAPTER_IN_TERMINAL";
@@ -226,10 +228,15 @@ pub fn bridge_adapter_socket(
     use std::os::fd::AsFd;
     nix::unistd::setsid()?;
     let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))?;
-    let address = listener.local_addr()?.to_string();
+    let address = listener.local_addr()?;
     let arguments: Vec<String> = arguments
         .iter()
-        .map(|argument| argument.to_string_lossy().replace(ADAPTER_ADDRESS, &address))
+        .map(|argument| {
+            argument
+                .to_string_lossy()
+                .replace(ADAPTER_ADDRESS, &address.to_string())
+                .replace(ADAPTER_PORT, &address.port().to_string())
+        })
         .collect();
     let mut early = Vec::new();
     let in_terminal = std::env::var_os(ADAPTER_IN_TERMINAL).is_some()
@@ -379,7 +386,9 @@ fn adapter_command(executable: PathBuf, arguments: Vec<String>) -> Command {
     match ADAPTER_SESSION_LAUNCHER.get().filter(|binary| binary.is_file()) {
         Some(binary) => {
             let mut command = Command::new(binary);
-            let speaks_over_a_socket = arguments.iter().any(|a| a.contains(ADAPTER_ADDRESS));
+            let speaks_over_a_socket = arguments
+                .iter()
+                .any(|a| a.contains(ADAPTER_ADDRESS) || a.contains(ADAPTER_PORT));
             command
                 .arg(if speaks_over_a_socket {
                     ADAPTER_BRIDGE_ARGUMENT

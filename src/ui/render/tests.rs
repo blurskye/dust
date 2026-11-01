@@ -2632,6 +2632,38 @@ fn language_diagnostics_and_completion_are_projected_without_service_calls() {
 }
 
 #[test]
+fn status_line_names_the_symbols_around_the_cursor() {
+    let mut state = EditorState::new(PathBuf::from("/tmp"));
+    let (buffer, _) = state.open_text(
+        crate::editor::text::TextBuffer::from_text("one\ntwo\nthree\n"),
+        Some(PathBuf::from("/tmp/main.rs")),
+    );
+    let symbol = |name: &str, start_line, end_line| super::UiBreadcrumb {
+        name: name.into(),
+        start_line,
+        end_line,
+    };
+    let ui = UiState {
+        breadcrumbs: Some((
+            buffer,
+            vec![symbol("Outer", 0, 2), symbol("inner", 0, 1), symbol("elsewhere", 2, 2)],
+        )),
+        ..UiState::default()
+    };
+    let loaded = crate::config::load_bundled_config();
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 100, 10);
+    let status = frame.grid.row_text(9);
+    assert!(status.contains("\u{203a} Outer \u{203a} inner"), "{status}");
+    assert!(!status.contains("elsewhere"), "{status}");
+}
+
+#[test]
+fn wrapped_rows_end_at_words_and_break_only_long_ones() {
+    let rows = super::debug::wrap_rows(&["one two three".into(), "abcdefghijkl".into()], 8);
+    assert_eq!(rows, ["one two", "  three", "abcdefgh", "  ijkl"]);
+}
+
+#[test]
 fn focused_diagnostic_expands_all_matching_messages_as_virtual_lines() {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
     let path = PathBuf::from("/tmp/main.rs");

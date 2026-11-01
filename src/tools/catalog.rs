@@ -73,6 +73,9 @@ pub enum ToolInstall {
         sha256: String,
         archive: ToolArchiveFormat,
         executable_path: String,
+        /// The ZIP directory kept whole when the executable needs the files beside it.
+        #[serde(default)]
+        tree: Option<String>,
     },
     /// Exact npm-registry packages in a Dust-owned Bun prefix. Bun is either a
     /// checked Dust-managed runtime or a directly runnable user-provided binary

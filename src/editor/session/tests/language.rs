@@ -1445,6 +1445,53 @@ fn slash_searches_the_tool_manager_by_name_and_language() {
 }
 
 #[test]
+fn completion_keeps_its_start_when_the_request_takes_ownership_of_the_buffer() {
+    let mut app = app();
+    let definition = app
+        .tooling
+        .entries()
+        .iter()
+        .find(|entry| entry.definition.id == "rust-analyzer")
+        .expect("rust-analyzer catalog entry")
+        .definition
+        .clone();
+    let path = app.state.workspace_root.join("main.rs");
+    let (buffer, view) = app.state.open_text(
+        crate::editor::text::TextBuffer::from_text("person.na"),
+        Some(path),
+    );
+    app.state.views[view].cursor = ByteOffset(9);
+    let (_, document) = app.active_lsp_document().expect("document");
+    let key = "owner".to_owned();
+    app.language.fixture_session(
+        key.clone(),
+        crate::editor::session::dispatch::LspRuntimeState {
+            root: app.workspace.active_root().expect("workspace root"),
+            root_path: app.state.workspace_root.clone(),
+            server_id: definition.id.clone(),
+            definition,
+            launch: crate::editor::session::dispatch::LspLaunch::Direct {
+                executable: crate::tools::discover_executable("false").expect("false executable"),
+                managed: false,
+            },
+            capabilities: Some(crate::language::lsp::LspCapabilities {
+                completion: true,
+                ..Default::default()
+            }),
+            documents: HashMap::from([(buffer, document)]),
+            restart_count: 0,
+            restart_due: None,
+            circuit_open: false,
+            desired_running: true,
+            activate_on_restart: true,
+        },
+    );
+    app.mark_lsp_completion_start(false);
+    app.request_lsp(crate::language::lsp::LspFeature::Completion);
+    assert_eq!(app.language.completion_start(), Some(ByteOffset(7)));
+}
+
+#[test]
 fn completion_narrows_as_you_type_and_replaces_what_was_typed() {
     use crate::language::lsp::LspCompletionItem;
     let item = |label: &str| LspCompletionItem {

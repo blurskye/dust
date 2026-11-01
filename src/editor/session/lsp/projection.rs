@@ -23,6 +23,8 @@ const INLAY_RETRY_LIMIT: u8 = 5;
 const INLAY_STARTUP: Duration = Duration::from_secs(8);
 /// Colour requests sit between projection generations (below half) and inlay ones (above it).
 pub(in crate::editor::session) const COLOR_GENERATION: u64 = u64::MAX / 2;
+/// Answers for the status line's breadcrumbs, which never open the symbol picker.
+pub(in crate::editor::session) const BREADCRUMB_GENERATION: u64 = COLOR_GENERATION + 1;
 #[derive(Default)]
 pub(super) struct Projection {
     generation: u64,
@@ -31,6 +33,8 @@ pub(super) struct Projection {
     request: Option<(u64, LspProjectionOwner)>,
     /// Servers that have not answered the current request; completion asks every one.
     request_servers: Vec<String>,
+    breadcrumbs_asked: Option<(BufferId, u64)>,
+    breadcrumbs_seen: Option<((BufferId, u64), Instant)>,
     inlay_request: Option<(u64, LspProjectionOwner)>,
     inlay_due: Option<Instant>,
     inlay_retries: u8,
@@ -223,18 +227,22 @@ impl LspSession {
         let generation = self
             .next_generation()
             .ok_or_else(|| LspError::Busy(server.into()))?;
-        let others = if matches!(feature, LspFeature::Completion) {
-            self.attached_servers(owner.buffer, &owner.language, |c| c.completion)
+        let others: Vec<String> = match feature {
+            LspFeature::Completion => self
+                .attached_servers(owner.buffer, &owner.language, |c| c.completion)
                 .filter(|key| key != server)
-                .collect()
-        } else {
-            Vec::new()
+                .collect(),
+            LspFeature::Hover => self
+                .attached_servers(owner.buffer, &owner.language, |c| c.hover)
+                .filter(|key| key != server)
+                .collect(),
+            _ => Vec::new(),
         };
         self.service
             .request(server, feature.clone(), document.clone(), offset, generation)?;
         self.projection.request = Some((generation, owner));
         self.projection.request_servers = vec![server.to_owned()];
-        // Like VS Code, every attached server adds its items, e.g. Tailwind classes beside TypeScript.
+        // Like VS Code, every attached server answers, e.g. Tailwind classes beside TypeScript.
         for other in others {
             if self
                 .service
@@ -281,6 +289,58 @@ impl LspSession {
                     .is_ok()
             })
             .collect()
+    }
+    pub(in crate::editor::session) fn is_breadcrumb_request(&self, generation: u64) -> bool {
+        generation == BREADCRUMB_GENERATION
+    }
+    /// Asks for the document's symbols once its text has been still for a moment.
+    pub(in crate::editor::session) fn request_breadcrumbs(
+        &mut self,
+        buffer: BufferId,
+        document: &LspDocument,
+        now: Instant,
+    ) -> Option<String> {
+        const SETTLE: std::time::Duration = std::time::Duration::from_millis(400);
+        let current = (buffer, document.version);
+        if self.projection.breadcrumbs_asked == Some(current) {
+            return None;
+        }
+        match self.projection.breadcrumbs_seen {
+            Some((seen, since)) if seen == current && now.duration_since(since) >= SETTLE => {}
+            Some((seen, _)) if seen == current => return None,
+            _ => {
+                self.projection.breadcrumbs_seen = Some((current, now));
+                return None;
+            }
+        }
+        self.supporting_server(buffer, document, &LspFeature::DocumentSymbols)
+            .filter(|server| {
+                self.sessions
+                    .get(server)
+                    .and_then(|state| state.capabilities.as_ref())
+                    .is_some_and(|capabilities| capabilities.document_symbols)
+            })
+    }
+    pub(in crate::editor::session) fn send_breadcrumbs(
+        &mut self,
+        server: &str,
+        buffer: BufferId,
+        document: LspDocument,
+    ) {
+        let version = document.version;
+        if self
+            .service
+            .request(
+                server,
+                LspFeature::DocumentSymbols,
+                document,
+                ByteOffset(0),
+                BREADCRUMB_GENERATION,
+            )
+            .is_ok()
+        {
+            self.projection.breadcrumbs_asked = Some((buffer, version));
+        }
     }
     pub(in crate::editor::session) fn server_encoding(
         &self,

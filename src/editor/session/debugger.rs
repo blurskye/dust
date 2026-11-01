@@ -299,7 +299,7 @@ impl DebugSession {
         Some(TerminalProfileConfig {
             program: program.into(),
             arguments: arguments.to_vec(),
-            cwd: Some(cwd.into()),
+            cwd: (!cwd.as_os_str().is_empty()).then(|| cwd.into()),
             environment: environment
                 .iter()
                 .map(|(key, value)| (key.clone(), value.clone()))

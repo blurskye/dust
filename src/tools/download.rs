@@ -266,6 +266,51 @@ pub(super) fn extract_tar_gzip_tree(
     Ok(())
 }
 
+/// Unpacks one directory of a ZIP into `output` under the same name. The rest is left out.
+pub(super) fn extract_zip_tree(bytes: &[u8], prefix: &str, output: &Path) -> Result<(), String> {
+    let prefix = relative_catalog_path(prefix)?;
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes))
+        .map_err(|error| format!("cannot open ZIP tool artifact: {error}"))?;
+    if zip.len() > MAXIMUM_TOOL_ARCHIVE_ENTRIES {
+        return Err("tool archive has too many entries".into());
+    }
+    let mut remaining = MAXIMUM_TOOL_UNPACKED_BYTES;
+    for index in 0..zip.len() {
+        let mut entry = zip
+            .by_index(index)
+            .map_err(|error| format!("cannot read ZIP entry: {error}"))?;
+        let name = entry.name().to_owned();
+        if !Path::new(&name).starts_with(&prefix) {
+            continue;
+        }
+        let destination = output.join(relative_catalog_path(name.trim_end_matches('/'))?);
+        if entry.is_dir() {
+            fs::create_dir_all(&destination)
+                .map_err(|error| format!("cannot create tool directory: {error}"))?;
+            continue;
+        }
+        if entry.unix_mode().is_some_and(|mode| mode & 0o170_000 == 0o120_000) {
+            return Err("tool archive contains a non-regular entry".into());
+        }
+        let parent = destination.parent().ok_or("tool archive file has no parent")?;
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create tool directory: {error}"))?;
+        let mut options = fs::OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            let executable = entry.unix_mode().unwrap_or(0) & 0o111 != 0;
+            options.mode(if executable { 0o700 } else { 0o600 });
+        }
+        let mut file = options
+            .open(&destination)
+            .map_err(|error| format!("cannot create tool file: {error}"))?;
+        copy_limited_with_budget(&mut entry, &mut file, &mut remaining)?;
+    }
+    Ok(())
+}
+
 pub(super) fn replace_managed_directory(staging: &Path, destination: &Path) -> Result<(), String> {
     let backup = destination.with_file_name(format!(
         ".replace-{}-{}",

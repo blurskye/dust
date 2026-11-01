@@ -814,6 +814,7 @@ impl Config {
             "lsp_symbols",
             "lsp_code_actions",
             "lsp_no_result",
+            "task_stopped",
             "lsp_aux_result",
             "lsp_invalid_uri",
             "lsp_invalid_position",
@@ -956,6 +957,7 @@ impl Config {
                     | "tasks"
                     | "root"
                     | "position"
+                    | "breadcrumbs"
             )
         }) {
             return Err("ui.status_line.components contains an unknown component");

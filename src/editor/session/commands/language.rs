@@ -216,7 +216,7 @@ pub(super) fn register_commands(
         ),
         (
             "lsp.document_symbols",
-            "Show document symbols",
+            "Show document symbols (breadcrumbs)",
             AppEffect::LspRequest(crate::language::lsp::LspFeature::DocumentSymbols),
         ),
         (

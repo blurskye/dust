@@ -11,7 +11,7 @@ use super::{
     catalog::{NixCompatibilityRuntime, ToolDefinition, ToolInstall, write_managed_tool_version},
     compatibility::patch_nix_compatibility_tree,
     download::{
-        ToolProgressReporter, download_checked, extract_one, prepare_executable,
+        ToolProgressReporter, download_checked, extract_one, extract_zip_tree, prepare_executable,
         replace_managed_directory,
     },
     install_prepare::{ensure_private_directory, validate_tool_id},
@@ -71,10 +71,18 @@ pub(super) fn install_tool(
                 sha256,
                 archive,
                 executable_path,
+                tree,
             } => {
                 let bytes = download_checked(url, sha256, report)?;
                 report("extracting", 0, None);
-                extract_one(&bytes, *archive, executable_path, &output)?;
+                if let Some(tree) = tree {
+                    extract_zip_tree(&bytes, tree, &staging)?;
+                    // The tool finds its libraries from its real path, which a link keeps.
+                    std::os::unix::fs::symlink(Path::new("..").join(executable_path), &output)
+                        .map_err(|error| format!("cannot link installed tool: {error}"))?;
+                } else {
+                    extract_one(&bytes, *archive, executable_path, &output)?;
+                }
             }
             ToolInstall::NpmPackage { packages } => {
                 install_javascript_package(

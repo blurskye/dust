@@ -5647,6 +5647,8 @@ impl InteractiveApplication {
                 }
                 DapEvent::Failed { adapter, message } => {
                     let _ = self.debugger_session.stop();
+                    // A rejected launch leaves an empty terminal whose "exit 0" reads as a finished run.
+                    self.close_debug_terminal();
                     self.show_error(self.message(
                         "dap_failed",
                         &[("adapter", adapter), ("diagnostic", message)],
@@ -5664,11 +5666,13 @@ impl InteractiveApplication {
 impl InteractiveApplication {
     pub(super) fn stop_task(&mut self, name: &str) {
         match self.tasks.stop(name) {
-            Ok(Some(source)) => {
-                self.diagnostics.clear_source(&source);
-                self.sync_ui_diagnostics();
+            Ok(source) => {
+                if let Some(source) = source {
+                    self.diagnostics.clear_source(&source);
+                    self.sync_ui_diagnostics();
+                }
+                self.notify_message(self.message("task_stopped", &[("name", name.into())]), false);
             }
-            Ok(None) => {}
             Err(error) => self.show_error(error),
         }
     }
@@ -8848,7 +8852,7 @@ impl InteractiveApplication {
             }
             Some(PickerPayload::Notice(message)) => {
                 self.present_documentation_popup(
-                    DocumentationPopupKind::Hover,
+                    DocumentationPopupKind::Notice,
                     "Notification".into(),
                     "application".into(),
                     None,

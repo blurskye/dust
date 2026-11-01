@@ -120,7 +120,7 @@ prompt = "bar"
 
 [ui.status_line]
 enabled = true
-components = ["mode", "git", "file", "diagnostics", "tasks", "large_file", "lsp", "root", "progress", "position"]
+components = ["mode", "git", "file", "breadcrumbs", "diagnostics", "tasks", "large_file", "lsp", "root", "progress", "position"]
 scratch_label = "[scratch]"
 dirty_marker = " [+]"
 mode_padding = " "
@@ -932,6 +932,7 @@ lsp_completion = "{server} completions: {items}"
 lsp_symbols = "symbols: {symbols}"
 lsp_code_actions = "code actions: {actions}"
 lsp_no_result = "language server returned no result"
+task_stopped = "task {name} stopped"
 lsp_aux_result = "language server returned {count} item(s)"
 lsp_invalid_uri = "language server returned unsupported URI {uri}"
 lsp_invalid_position = "language server returned an invalid document position"
@@ -1436,7 +1437,7 @@ workspace = "Project"
 "lsp.selection_ranges" = "Refresh selection ranges"
 "lsp.fold.toggle" = "Toggle language fold"
 "lsp.selection.expand" = "Expand language selection"
-"lsp.document_symbols" = "Show document symbols"
+"lsp.document_symbols" = "Show document symbols (breadcrumbs)"
 "lsp.workspace_symbols" = "Show workspace symbols"
 "completion.select_next" = "Select next completion"
 "completion.select_previous" = "Select previous completion"

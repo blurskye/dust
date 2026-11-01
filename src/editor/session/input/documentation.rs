@@ -1,5 +1,5 @@
 use super::InputSession;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use crate::{
     config::DocumentationPopupConfig,
     editor::text::ByteRange,
@@ -268,7 +268,15 @@ fn wrap_prose(line: &str, width: usize) -> Vec<String> {
         if current.len() > indent.len() {
             current.push(' ');
         }
-        current.push_str(word);
+        // A word wider than the popup, such as a long path, breaks at the edge.
+        for character in word.chars() {
+            if current.len() > indent.len()
+                && current.width() + character.width().unwrap_or(0) > width
+            {
+                lines.push(std::mem::replace(&mut current, String::from(indent)));
+            }
+            current.push(character);
+        }
     }
     lines.push(current);
     lines
@@ -383,9 +391,10 @@ mod tests {
     #[test]
     fn prose_wraps_at_spaces_and_keeps_its_indent() {
         assert_eq!(wrap_prose("short", 10), ["short"]);
+        assert_eq!(wrap_prose("a abcdefgh", 3), ["a", "abc", "def", "gh"]);
         assert_eq!(wrap_prose("one two three", 7), ["one two", "three"]);
         assert_eq!(wrap_prose("  one two", 5), ["  one", "  two"]);
-        assert_eq!(wrap_prose("unbreakableword x", 4), ["unbreakableword", "x"]);
+        assert_eq!(wrap_prose("unbreakable x", 6), ["unbrea", "kable", "x"]);
     }
 
     #[test]

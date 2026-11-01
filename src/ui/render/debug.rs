@@ -145,9 +145,22 @@ pub(super) fn wrap_rows(body: &[String], width: u16) -> Vec<String> {
     let mut wrapped = Vec::new();
     for line in body {
         let chars: Vec<char> = line.chars().collect();
-        let (first, rest) = chars.split_at(width.min(chars.len()));
-        wrapped.push(first.iter().collect());
-        wrapped.extend(rest.chunks(width - 2).map(|part| format!("  {}", part.iter().collect::<String>())));
+        let mut rest = chars.as_slice();
+        let mut indent = "";
+        // Each row ends at its last space, and a word longer than a row breaks at the edge.
+        while rest.len() > width - indent.len() {
+            let room = width - indent.len();
+            let cut = rest[..=room]
+                .iter()
+                .rposition(|character| *character == ' ')
+                .filter(|space| *space > 0)
+                .map_or(room, |space| space + 1);
+            let row = rest[..cut].iter().collect::<String>();
+            wrapped.push(format!("{indent}{}", row.trim_end()));
+            rest = &rest[cut..];
+            indent = "  ";
+        }
+        wrapped.push(format!("{indent}{}", rest.iter().collect::<String>()));
     }
     wrapped
 }

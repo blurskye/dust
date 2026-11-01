@@ -2237,7 +2237,9 @@ impl InteractiveApplication {
         if self
             .input
             .documentation()
-            .is_some_and(|popup| popup.kind != DocumentationPopupKind::Git)
+            .is_some_and(|popup| {
+                !matches!(popup.kind, DocumentationPopupKind::Git | DocumentationPopupKind::Notice)
+            })
         {
             self.close_documentation();
         }
@@ -2375,6 +2377,10 @@ impl InteractiveApplication {
         method: String,
         message: String,
     ) {
+        // The status line's own request: an empty trail is the whole result.
+        if self.language.is_breadcrumb_request(generation) {
+            return;
+        }
         // A formatter that fails must not cost the save.
         if method == "textDocument/formatting" && self.format_on_save.is_some() {
             self.append_lsp_log(format!("format on save failed: {message}"));
@@ -2502,6 +2508,12 @@ impl InteractiveApplication {
                     }
                     if let LspFeatureResult::Colors(colors) = result {
                         self.install_lsp_colors(&server, &uri, colors, context.encoding());
+                        continue;
+                    }
+                    if self.language.is_breadcrumb_request(generation) {
+                        if let LspFeatureResult::Symbols(symbols) = result {
+                            self.install_lsp_breadcrumbs(symbols);
+                        }
                         continue;
                     }
                     self.refresh_lsp_projection_owner();
@@ -2673,6 +2685,47 @@ impl InteractiveApplication {
         }
     }
 
+    /// Keeps the symbols of the document on screen fresh for the status line.
+    pub(in crate::editor::session) fn process_lsp_breadcrumbs(&mut self) {
+        let settings = self.configuration.settings();
+        let shown = settings.ui.status_line.enabled
+            && settings.ui.status_line.components.iter().any(|component| component == "breadcrumbs");
+        let Some((buffer, document)) = self.active_lsp_document_without_text().filter(|_| shown)
+        else {
+            self.ui.set(None, |ui| &mut ui.breadcrumbs);
+            return;
+        };
+        if self.ui.large_file_buffers.contains(&buffer) {
+            return;
+        }
+        if let Some(server) = self.language.request_breadcrumbs(buffer, &document, Instant::now()) {
+            if let Some((_, document)) = self.active_lsp_document() {
+                self.language.send_breadcrumbs(&server, buffer, document);
+            }
+        }
+    }
+    /// The symbols a cursor can be inside, in the server's order: outer ones before inner ones.
+    fn install_lsp_breadcrumbs(&mut self, symbols: Vec<crate::language::lsp::LspSymbol>) {
+        // As LazyVim's status line: Variables and such aren't places in the file.
+        const PLACES: [u8; 12] = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 23];
+        let Some(buffer) = self.state.active_buffer_id() else {
+            return;
+        };
+        let symbols = symbols
+            .into_iter()
+            .filter(|symbol| symbol.kind.is_some_and(|kind| PLACES.contains(&kind)))
+            .filter_map(|symbol| {
+                let extent = symbol.extent?;
+                Some(crate::ui::UiBreadcrumb {
+                    name: symbol.name.trim_start().to_owned(),
+                    start_line: extent.start.line,
+                    end_line: extent.end.line,
+                })
+            })
+            .collect();
+        self.ui.set(Some((buffer, symbols)), |ui| &mut ui.breadcrumbs);
+    }
+
     /// Asks every attached server with a colour provider for the active document's colours.
     pub(in crate::editor::session) fn request_lsp_colors(&mut self) {
         let Some((buffer, document)) = self.active_lsp_document() else {
@@ -2770,14 +2823,12 @@ impl InteractiveApplication {
             self.start_lsp(None);
             return;
         };
+        // Switching the server or the buffer's owner clears completion state, including where
+        // this one started.
+        let completion = matches!(feature, LspFeature::Completion)
+            .then(|| (self.language.completion_start(), self.language.completion_automatic()));
         if self.language.active() != Some(&server) {
-            // Switching servers clears completion state, including where this one started.
-            let start = self.language.completion_start();
-            let automatic = self.language.completion_automatic();
             self.select_lsp_session(&server);
-            if matches!(feature, LspFeature::Completion) {
-                self.language.begin_completion(start, automatic);
-            }
         }
         // The application owns a session record while its process is still
         // initializing. Do not expose that record as a runnable server or
@@ -2862,6 +2913,9 @@ impl InteractiveApplication {
             };
         }
         self.refresh_lsp_projection_owner();
+        if let Some((start, automatic)) = completion {
+            self.language.begin_completion(start, automatic);
+        }
         match self
             .language
             .request_projected(&server, feature, document, offset)
@@ -2980,6 +3034,8 @@ impl InteractiveApplication {
     ) {
         let server_label = self.lsp_server_label(server);
         match result {
+            // Another server on this file already answered.
+            LspFeatureResult::Hover(_) if self.hover_is_showing() => {}
             LspFeatureResult::Hover(hover) => {
                 let source_range = hover.range.and_then(|range| {
                     let buffer_id = self.state.active_buffer_id()?;
@@ -3317,8 +3373,18 @@ impl InteractiveApplication {
             LspFeatureResult::Empty if method == "textDocument/formatting" => {
                 self.finish_format_on_save();
             }
+            // Only the last of several servers can say that nobody knows.
+            LspFeatureResult::Empty
+                if method == "textDocument/hover"
+                    && (self.language.request_pending() || self.hover_is_showing()) => {}
             LspFeatureResult::Empty => self.show_error(self.message("lsp_no_result", &[])),
         }
+    }
+
+    fn hover_is_showing(&self) -> bool {
+        self.input
+            .documentation()
+            .is_some_and(|popup| popup.kind == DocumentationPopupKind::Hover)
     }
 }
 
