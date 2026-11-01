@@ -1810,10 +1810,16 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::ShowKeymapConflicts => {
-                if self.configuration.keymaps().conflicts.is_empty() {
+                let conflicts = self
+                    .configuration
+                    .rejected_keymaps()
+                    .into_iter()
+                    .chain(self.configuration.keymaps().conflicts.iter().map(String::as_str))
+                    .collect::<Vec<_>>();
+                if conflicts.is_empty() {
                     self.notify_message(self.message("no_keymap_conflicts", &[]), false);
                 } else {
-                    self.show_error(self.configuration.keymaps().conflicts.join("; "));
+                    self.show_error(conflicts.join("; "));
                 }
             }
             AppEffect::RecoveryInspect => {
@@ -3819,6 +3825,20 @@ impl InteractiveApplication {
 }
 
 impl InteractiveApplication {
+    /// Shows a terminal and gives it the keys, bringing its window back if it was hidden.
+    fn reveal_terminal(&mut self, id: PtyId) {
+        self.terminal_session.display(id);
+        if self.terminal_window_rect().is_none() {
+            if let Err(error) = self.show_native_window(NativeSurfaceTarget::Terminal(id.0)) {
+                self.show_error(error);
+                return;
+            }
+        }
+        self.set_terminal_focus(true);
+        self.resize_active_terminal_to_panel();
+        self.sync_terminal_panel();
+    }
+
     pub(in crate::editor::session) fn process_terminal_effect(
         &mut self,
         effect: AppEffect,
@@ -3838,18 +3858,7 @@ impl InteractiveApplication {
                 if self.window_session.terminal_focused() {
                     self.place_active_terminal(WindowPlacement::Hidden);
                 } else if let Some(id) = self.terminal_session.selected() {
-                    self.terminal_session.display(id);
-                    if self.terminal_window_rect().is_none() {
-                        if let Err(error) =
-                            self.show_native_window(NativeSurfaceTarget::Terminal(id.0))
-                        {
-                            self.show_error(error);
-                            return Ok(());
-                        }
-                    }
-                    self.set_terminal_focus(true);
-                    self.resize_active_terminal_to_panel();
-                    self.sync_terminal_panel();
+                    self.reveal_terminal(id);
                 } else {
                     let profile = self
                         .configuration
@@ -3885,11 +3894,8 @@ impl InteractiveApplication {
             }
             AppEffect::TerminalFocus(id) => {
                 let id = PtyId(id);
-                if self.terminal_session.contains(id) {
-                    self.terminal_session.select(id);
-                    self.set_terminal_focus(true);
-                    self.resize_active_terminal_to_panel();
-                    self.sync_terminal_panel();
+                if self.terminal_session.select(id) {
+                    self.reveal_terminal(id);
                 } else {
                     self.show_error(self.message("terminal_missing", &[]));
                 }
@@ -3905,12 +3911,12 @@ impl InteractiveApplication {
             }
             AppEffect::TerminalCycle(direction) => {
                 let focused = self.window_session.terminal_focused();
+                let hidden = self.terminal_window_rect().is_none();
                 if !self.terminal_session.cycle(i64::from(direction)) {
                     self.show_error(self.message("terminal_missing", &[]));
+                } else if let Some(id) = self.terminal_session.selected().filter(|_| focused || hidden) {
+                    self.reveal_terminal(id);
                 } else {
-                    if focused {
-                        self.set_terminal_focus(true);
-                    }
                     self.resize_active_terminal_to_panel();
                     self.sync_terminal_panel();
                 }
@@ -4809,6 +4815,9 @@ impl InteractiveApplication {
         self.close_prompt_with_editor_close(true);
     }
     fn close_prompt_with_editor_close(&mut self, cancel_editor_close: bool) {
+        if let Some((view, cursor)) = self.input.take_search_origin() {
+            self.move_search_cursor(view, cursor);
+        }
         if self
             .input
             .prompt()
@@ -5017,10 +5026,12 @@ impl InteractiveApplication {
     pub(super) fn prompt_insert(&mut self, text: &str) {
         self.input.prompt_insert(text);
         self.refresh_completions();
+        self.preview_search();
     }
     pub(super) fn prompt_backspace(&mut self) {
         self.input.prompt_backspace();
         self.refresh_completions();
+        self.preview_search();
     }
     pub(super) fn prompt_move(&mut self, movement: PromptMove) {
         self.input.prompt_move(movement);
@@ -5030,6 +5041,7 @@ impl InteractiveApplication {
         self.input
             .prompt_history(direction, self.configuration.settings());
         self.refresh_completions();
+        self.preview_search();
     }
     pub(super) fn prompt_complete(&mut self, direction: i8) {
         self.input
@@ -5279,6 +5291,49 @@ impl InteractiveApplication {
         }
     }
 
+    /// As with Vim's incsearch: while a `/` pattern is typed the cursor sits on its next match,
+    /// and it goes back when the prompt closes.
+    fn preview_search(&mut self) {
+        let Some(prompt) = self.input.prompt().filter(|prompt| {
+            matches!(prompt.kind, PromptKind::SearchForward | PromptKind::SearchBackward)
+        }) else {
+            return;
+        };
+        let forward = prompt.kind == PromptKind::SearchForward;
+        let query = prompt.input.clone();
+        let Some(view_id) = self.state.active_view else {
+            return;
+        };
+        let buffer_id = self.state.views[view_id].buffer;
+        if self.ui.large_file_buffers.contains(&buffer_id) {
+            return;
+        }
+        let origin = self.input.search_origin(view_id, self.state.views[view_id].cursor);
+        let search = &self.configuration.settings().search;
+        let buffer = &self.state.buffers[buffer_id];
+        let matches = crate::editor::input::search_matches(
+            &buffer.text.to_string(),
+            &query,
+            search.smart_case,
+            search.regex,
+        )
+        .unwrap_or_default();
+        let target = search_target(&buffer.text, &matches, origin, forward, search.wrap);
+        self.move_search_cursor(view_id, target.map_or(origin, ByteOffset));
+    }
+
+    fn move_search_cursor(&mut self, view: crate::editor::ViewId, position: ByteOffset) {
+        if !self.state.views.contains_key(view) {
+            return;
+        }
+        let transaction = EditorTransaction::new(self.transaction_id())
+            .with_operation(EditorOperation::SetCursor { view, position })
+            .with_undo_policy(UndoPolicy::Ignore);
+        if self.state.apply_transaction(&transaction).is_ok() {
+            self.ensure_cursor_visible();
+        }
+    }
+
     pub(super) fn perform_search(&mut self, forward: bool) {
         let Some(query) = self.ui.search_query.clone() else {
             self.show_error(self.message("no_previous_search", &[]));
@@ -5307,27 +5362,7 @@ impl InteractiveApplication {
             }
         };
         let wrap = self.configuration.settings().search.wrap;
-        let cursor = cursor_offset.get().min(source.len());
-        let target = if forward {
-            let start = if cursor < source.len() {
-                crate::editor::text::next_grapheme_boundary(&buffer.text, cursor_offset).get()
-            } else {
-                cursor
-            };
-            matches
-                .iter()
-                .find(|matched| matched.start >= start)
-                .or_else(|| wrap.then(|| matches.first()).flatten())
-                .map(|matched| matched.start)
-        } else {
-            matches
-                .iter()
-                .rev()
-                .find(|matched| matched.start < cursor)
-                .or_else(|| wrap.then(|| matches.last()).flatten())
-                .map(|matched| matched.start)
-        };
-        let Some(target) = target else {
+        let Some(target) = search_target(&buffer.text, &matches, cursor_offset, forward, wrap) else {
             self.show_error(self.message("pattern_not_found", &[("query", query)]));
             return;
         };
@@ -8660,7 +8695,12 @@ impl InteractiveApplication {
                         self.lsp_position_encoding(),
                         context,
                     );
+                } else if let Some(command) = action.command {
+                    self.request_lsp(LspFeature::ExecuteCommand(command));
                 }
+            }
+            Some(PickerPayload::LspCommand(command)) => {
+                self.request_lsp(LspFeature::ExecuteCommand(command));
             }
             Some(PickerPayload::Buffer(buffer)) => {
                 if let Err(error) = self.state.show_buffer(buffer) {
@@ -8675,9 +8715,7 @@ impl InteractiveApplication {
             Some(PickerPayload::Terminal(key)) => {
                 if let Some(id) = self.terminal_session.resolve(&key) {
                     self.terminal_session.select(id);
-                    self.set_terminal_focus(true);
-                    self.resize_active_terminal_to_panel();
-                    self.sync_terminal_panel();
+                    self.reveal_terminal(id);
                 } else {
                     self.show_error(self.message("terminal_missing", &[]));
                 }
@@ -9485,7 +9523,39 @@ impl InteractiveApplication {
             let Some((view, buffer)) = showing else {
                 break;
             };
+            // Only the active window's buffer can be closed.
+            if let Err(error) = self.state.focus_view(view) {
+                self.show_error(error);
+                break;
+            }
             self.close_buffer_target(view, buffer);
+        }
+        // Windows left with nothing to show go too, down to the one the file reopens in.
+        let front = self.state.active_view;
+        let empty = self
+            .state
+            .views
+            .iter()
+            .filter(|(view, state)| {
+                Some(*view) != front
+                    && self.state.buffers.get(state.buffer).is_some_and(|buffer| {
+                        buffer.path.is_none() && !buffer.dirty && buffer.text.len_bytes() == 0
+                    })
+                    && Some(state.buffer) != self.state.kept_buffer
+            })
+            .map(|(view, state)| (view, state.buffer))
+            .collect::<Vec<_>>();
+        for (view, buffer) in empty {
+            if self.state.close_view(view).is_ok() {
+                let mut candidate = self.state.draft();
+                candidate.remove_hidden_document(buffer);
+                if let Err(error) = self.commit_editor_draft(candidate, None, false) {
+                    self.show_error(error);
+                }
+            }
+        }
+        if let Some(front) = front {
+            let _ = self.state.focus_view(front);
         }
         self.state.workspace_root = path.clone();
         self.invalidate_root_scoped_operations();
@@ -11843,6 +11913,36 @@ fn first_conflict_line(path: &std::path::Path) -> usize {
 }
 
 /// A character of an identifier, for the word completion replaces and filters on.
+/// Where a search from `cursor` lands, as a byte offset.
+fn search_target(
+    text: &TextBuffer,
+    matches: &[std::ops::Range<usize>],
+    cursor: ByteOffset,
+    forward: bool,
+    wrap: bool,
+) -> Option<usize> {
+    let offset = cursor.get().min(text.len_bytes());
+    if forward {
+        let start = if offset < text.len_bytes() {
+            crate::editor::text::next_grapheme_boundary(text, cursor).get()
+        } else {
+            offset
+        };
+        matches
+            .iter()
+            .find(|matched| matched.start >= start)
+            .or_else(|| wrap.then(|| matches.first()).flatten())
+            .map(|matched| matched.start)
+    } else {
+        matches
+            .iter()
+            .rev()
+            .find(|matched| matched.start < offset)
+            .or_else(|| wrap.then(|| matches.last()).flatten())
+            .map(|matched| matched.start)
+    }
+}
+
 fn completion_word_char(character: char) -> bool {
     character.is_alphanumeric() || character == '_' || character == '$'
 }

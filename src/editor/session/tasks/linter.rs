@@ -518,6 +518,7 @@ fn convert(
                 related: Vec::new(),
                 tags: Vec::new(),
                 fixes: Vec::new(),
+                data: None,
                 timestamp: crate::clock::system_time(),
             })
         })

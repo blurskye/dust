@@ -1684,7 +1684,9 @@
         "typescript",
         "typescriptreact"
       ],
-      "launch_args": [],
+      "launch_args": [
+        "--stdio"
+      ],
       "mason_package": "angular-language-server",
       "name": "angular-language-server",
       "project_root_markers": [
@@ -1995,7 +1997,9 @@
         "typescriptreact",
         "vue"
       ],
-      "launch_args": [],
+      "launch_args": [
+        "lsp-proxy"
+      ],
       "mason_package": "biome",
       "name": "biome",
       "project_root_markers": [
@@ -2252,7 +2256,13 @@
       "languages": [
         "*"
       ],
-      "launch_args": [],
+      "launch_args": [
+        "execute",
+        "language-server",
+        "--check-errors",
+        "ON_CHANGE",
+        "-q"
+      ],
       "mason_package": "codeql",
       "name": "codeql",
       "project_root_markers": [
@@ -2942,7 +2952,9 @@
         "typescriptreact",
         "vue"
       ],
-      "launch_args": [],
+      "launch_args": [
+        "--stdio"
+      ],
       "mason_package": "eslint-lsp",
       "name": "eslint-lsp",
       "project_root_markers": [
@@ -4421,7 +4433,9 @@
         "vue",
         "yaml"
       ],
-      "launch_args": [],
+      "launch_args": [
+        "--lsp"
+      ],
       "mason_package": "oxfmt",
       "name": "oxfmt",
       "project_root_markers": [
@@ -4440,7 +4454,9 @@
         "typescriptreact",
         "vue"
       ],
-      "launch_args": [],
+      "launch_args": [
+        "--lsp"
+      ],
       "mason_package": "oxlint",
       "name": "oxlint",
       "project_root_markers": [
@@ -5498,7 +5514,9 @@
       "languages": [
         "*"
       ],
-      "launch_args": [],
+      "launch_args": [
+        "lsp"
+      ],
       "mason_package": "sourcery",
       "name": "sourcery",
       "project_root_markers": [
@@ -6171,22 +6189,6 @@
       ]
     },
     {
-      "executable": "tsc",
-      "id": "tsc",
-      "languages": [
-        "javascript",
-        "javascriptreact",
-        "typescript",
-        "typescriptreact"
-      ],
-      "launch_args": [],
-      "mason_package": "tsc",
-      "name": "tsc",
-      "project_root_markers": [
-        ".git"
-      ]
-    },
-    {
       "executable": "tsgo",
       "id": "tsgo",
       "languages": [
@@ -6195,7 +6197,10 @@
         "typescript",
         "typescriptreact"
       ],
-      "launch_args": [],
+      "launch_args": [
+        "--lsp",
+        "--stdio"
+      ],
       "mason_package": "tsgo",
       "name": "tsgo",
       "project_root_markers": [
@@ -6470,7 +6475,9 @@
       "languages": [
         "visualforce"
       ],
-      "launch_args": [],
+      "launch_args": [
+        "--stdio"
+      ],
       "mason_package": "visualforce-language-server",
       "name": "visualforce-language-server",
       "project_root_markers": [
@@ -6559,7 +6566,9 @@
       "languages": [
         "*"
       ],
-      "launch_args": [],
+      "launch_args": [
+        "--stdio"
+      ],
       "mason_package": "wc-language-server",
       "name": "wc-language-server",
       "project_root_markers": [

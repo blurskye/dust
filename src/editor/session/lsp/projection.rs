@@ -98,12 +98,32 @@ impl LspSession {
         if self.projection.owner == current {
             return false;
         }
-        self.clear_projection();
+        // Typing moves the revision but keeps the menu: what was typed narrows it.
+        let typing = match (&self.projection.owner, &current) {
+            (Some(owner), Some(current)) => {
+                owner.server == current.server
+                    && owner.buffer == current.buffer
+                    && owner.view == current.view
+                    && owner.uri == current.uri
+            }
+            _ => false,
+        };
+        if typing {
+            if let (Some((_, owner)), Some(current)) = (&mut self.projection.completion_owner, &current) {
+                *owner = current.clone();
+            }
+        } else {
+            self.clear_completion();
+        }
+        self.clear_projection_rows();
         self.projection.owner = current;
         true
     }
     pub(in crate::editor::session) fn clear_projection(&mut self) {
         self.clear_completion();
+        self.clear_projection_rows();
+    }
+    fn clear_projection_rows(&mut self) {
         self.projection.selection_ranges.clear();
         self.projection.owner = None;
         self.projection.request = None;

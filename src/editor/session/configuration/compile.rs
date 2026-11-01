@@ -961,9 +961,13 @@ pub(in crate::editor::session) fn compile_typed_keymap_entries(
             let declared = display_key_declaration(&entry.keys, &effective_keys);
             let previous_entry = &effective_entries[previous];
             let previous_declared = display_key_declaration(&previous_entry.keys, &effective_keys);
+            // A `global` entry is one entry per context, and each of those ids ends in its context.
+            let suffix = format!(".{}", context.replace(['.', '_'], "-"));
+            let base = |id: &'_ str| id.strip_suffix(&suffix).unwrap_or(id).to_owned();
             let conflict = format!(
                 "keymap id `{}` {declared} conflicts with id `{}` {previous_declared}",
-                entry.id, previous_entry.id
+                base(&entry.id),
+                base(&previous_entry.id)
             );
             match key_conflicts.iter_mut().find(|(text, _)| *text == conflict) {
                 Some((_, contexts)) => contexts.push(context.clone()),

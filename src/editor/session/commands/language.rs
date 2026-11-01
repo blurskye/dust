@@ -211,6 +211,7 @@ pub(super) fn register_commands(
                         character: 0,
                     },
                 },
+                diagnostics: Vec::new(),
             }),
         ),
         (

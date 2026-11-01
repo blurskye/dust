@@ -1046,7 +1046,8 @@ impl InteractiveApplication {
             self.show_error("select an explorer path first");
             return;
         };
-        let text = node.path.display().to_string();
+        let node_path = node.path.clone();
+        let text = node_path.display().to_string();
         let policy = self.state.policy;
         self.state.registers.set(
             '"',
@@ -1058,7 +1059,8 @@ impl InteractiveApplication {
             policy.mirror_named_to_unnamed,
         );
         self.state.mark_editor_changed();
-        self.notify_message(format!("yanked `{text}`"), false);
+        let label = self.workspace_relative_label(&node_path);
+        self.notify_message(format!("yanked `{label}`"), false);
     }
 
     pub(in crate::editor::session) fn explorer_mouse_select(&mut self) {

@@ -715,7 +715,7 @@ while True:
             .filter_map(|line| serde_json::from_str::<Value>(line).ok())
             .any(|message| {
                 message.get("id") == Some(&json!(97))
-                    && message.get("result") == Some(&json!([null, null]))
+                    && message.get("result") == Some(&json!([{}, {}]))
             })
     );
     assert!(

@@ -785,6 +785,87 @@ fn failed_rustup_proxy_probe_is_not_a_launchable_path_runtime() {
 }
 
 #[test]
+fn typing_narrows_the_completion_menu_instead_of_closing_it() {
+    use crate::editor::text::{ByteOffset, ByteRange, TextEdit, TextEditSet};
+    let mut app = app();
+    let definition = app
+        .tooling
+        .entries()
+        .iter()
+        .find(|entry| entry.definition.id == "rust-analyzer")
+        .expect("rust-analyzer catalog entry")
+        .definition
+        .clone();
+    let path = app.state.workspace_root.join("main.rs");
+    let (buffer, view) = app.state.open_text(
+        crate::editor::text::TextBuffer::from_text("console.l"),
+        Some(path),
+    );
+    app.state.views[view].cursor = ByteOffset(9);
+    let (_, document) = app.active_lsp_document().expect("document");
+    let key = "typing".to_owned();
+    app.language.fixture_session(
+        key.clone(),
+        crate::editor::session::dispatch::LspRuntimeState {
+            root: app.workspace.active_root().expect("workspace root"),
+            root_path: app.state.workspace_root.clone(),
+            server_id: definition.id.clone(),
+            definition,
+            launch: crate::editor::session::dispatch::LspLaunch::Direct {
+                executable: crate::tools::discover_executable("false").expect("false executable"),
+                managed: false,
+            },
+            capabilities: None,
+            documents: HashMap::from([(buffer, document)]),
+            restart_count: 0,
+            restart_due: None,
+            circuit_open: false,
+            desired_running: true,
+            activate_on_restart: true,
+        },
+    );
+    app.language.select(&key);
+    app.refresh_lsp_projection_owner();
+    app.mark_lsp_completion_start(false);
+    let item = |label: &str| crate::language::lsp::LspCompletionItem {
+        label: label.into(),
+        filter_text: None,
+        sort_text: None,
+        detail: String::new(),
+        insert_text: label.into(),
+        text_edit: None,
+        additional_edits: Vec::new(),
+        kind: None,
+        snippet: false,
+        documentation: None,
+        resolve_item: None,
+        resolved: true,
+    };
+    let generation = app.language.generation();
+    app.language
+        .install_completions(&key, vec![item("log"), item("clear")], false, generation);
+    app.narrow_lsp_completion();
+    assert_eq!(app.ui.language_completion.as_ref().map(|menu| menu.items.len()), Some(2));
+
+    let revision = app.state.buffers[buffer].text.revision();
+    let at_end = ByteRange::new(ByteOffset(9), ByteOffset(9)).expect("range");
+    app.state.buffers[buffer]
+        .text
+        .apply_edits(&TextEditSet::new(revision, vec![TextEdit::new(at_end, "o")]))
+        .expect("edit");
+    app.state.views[view].cursor = ByteOffset(10);
+    app.refresh_lsp_projection_owner();
+    app.narrow_lsp_completion();
+
+    let labels = app
+        .ui
+        .language_completion
+        .as_ref()
+        .map(|menu| menu.items.iter().map(|item| item.label.clone()).collect::<Vec<_>>());
+    assert_eq!(labels, Some(vec!["log".to_owned()]));
+}
+
+#[test]
 fn lsp_status_never_labels_failed_or_backing_off_sessions_as_starting() {
     let mut app = app();
     let definition = app

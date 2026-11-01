@@ -36,6 +36,7 @@ fn diagnostic_navigation_filters_severity_wraps_and_expands_the_landed_line() {
         related: Vec::new(),
         tags: Vec::new(),
         fixes: Vec::new(),
+        data: None,
         timestamp: std::time::SystemTime::UNIX_EPOCH,
     };
     let producer = crate::workspace::DiagnosticProducer::new(

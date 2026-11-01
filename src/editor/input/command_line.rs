@@ -115,7 +115,7 @@ pub fn parse_ex(
             "remove" if !rest.is_empty() => command("package.remove")?
                 .with_argument("name", CommandValue::String(rest.into())),
             _ => return Err(ExParseError::UnexpectedArguments(format!(
-                "{arguments} (try search, list, verify, rollback, gc or remove, or :pkginstall)"
+                "{arguments}: use search list verify rollback gc remove"
             ))),
         }
     } else if name == "config" {

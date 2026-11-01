@@ -38,6 +38,8 @@ pub(super) struct InputSession {
     snippet: Option<snippets::SnippetSession>,
     mouse: mouse::MouseState,
     last_search_forward: bool,
+    /// Where the cursor was when a `/` prompt began to move it.
+    search_origin: Option<(crate::editor::ViewId, crate::editor::text::ByteOffset)>,
     modal: ModalResolver,
     sequence: KeymapSequence,
     pending: Option<PendingKeymap>,
@@ -122,6 +124,7 @@ impl InputSession {
             snippet: None,
             mouse: mouse::MouseState::default(),
             last_search_forward: true,
+            search_origin: None,
             modal: ModalResolver::with_count_limit(count_limit),
             sequence: KeymapSequence::default(),
             pending: None,

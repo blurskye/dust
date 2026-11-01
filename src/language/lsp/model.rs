@@ -55,7 +55,26 @@ impl LspServerConfiguration {
                 };
             }
         }
-        Self::standard()
+        // What nvim-lspconfig sends: these servers format and validate only when told to.
+        match server_id {
+            "vscode-json-language-server" => Self {
+                initialization_options: Some(json!({"provideFormatter":true})),
+                settings: json!({"json":{"validate":{"enable":true},"format":{"enable":true}}}),
+            },
+            "vscode-css-language-server" => Self {
+                initialization_options: Some(json!({"provideFormatter":true})),
+                settings: json!({"css":{"validate":true},"scss":{"validate":true},"less":{"validate":true}}),
+            },
+            "vscode-html-language-server" => Self {
+                initialization_options: Some(json!({
+                    "provideFormatter":true,
+                    "embeddedLanguages":{"css":true,"javascript":true},
+                    "configurationSection":["html","css","javascript"]
+                })),
+                settings: json!({}),
+            },
+            _ => Self::standard(),
+        }
     }
 
     #[must_use]
@@ -237,6 +256,7 @@ pub struct LspCapabilities {
     pub formatting: bool,
     pub range_formatting: bool,
     pub code_action: bool,
+    pub execute_command: bool,
     pub semantic_tokens: bool,
     pub inlay_hints: bool,
     pub pull_diagnostics: bool,
@@ -305,6 +325,8 @@ pub struct LspDiagnostic {
     pub code: Option<String>,
     pub source: Option<String>,
     pub message: String,
+    /// Handed back unread in a code action request; gopls and Ruff need it for their fixes.
+    pub data: Option<Value>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -425,7 +447,13 @@ pub struct LspColor {
 pub struct LspCodeLens {
     pub range: LspRange,
     pub title: String,
-    pub command: Option<String>,
+    pub command: Option<LspCommand>,
+}
+/// Something a server runs on request, through `workspace/executeCommand`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LspCommand {
+    pub command: String,
+    pub arguments: Vec<Value>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspSemanticTokens {
@@ -456,6 +484,7 @@ pub struct LspCodeAction {
     pub kind: Option<String>,
     pub preferred: bool,
     pub edit: Option<LspWorkspaceEdit>,
+    pub command: Option<LspCommand>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -474,7 +503,8 @@ pub enum LspFeature {
     Rename { new_name: String },
     Formatting,
     RangeFormatting { range: LspRange },
-    CodeAction { range: LspRange },
+    CodeAction { range: LspRange, diagnostics: Vec<LspDiagnostic> },
+    ExecuteCommand(LspCommand),
     PullDiagnostics { previous_result_id: Option<String> },
     SemanticTokensFull,
     SemanticTokensDelta { previous_result_id: String },
@@ -504,6 +534,7 @@ impl LspFeature {
             Self::Formatting => "textDocument/formatting",
             Self::RangeFormatting { .. } => "textDocument/rangeFormatting",
             Self::CodeAction { .. } => "textDocument/codeAction",
+            Self::ExecuteCommand(_) => "workspace/executeCommand",
             Self::PullDiagnostics { .. } => "textDocument/diagnostic",
             Self::SemanticTokensFull => "textDocument/semanticTokens/full",
             Self::SemanticTokensDelta { .. } => "textDocument/semanticTokens/full/delta",
@@ -533,6 +564,7 @@ impl LspFeature {
             Self::Formatting => capabilities.formatting,
             Self::RangeFormatting { .. } => capabilities.range_formatting,
             Self::CodeAction { .. } => capabilities.code_action,
+            Self::ExecuteCommand(_) => capabilities.execute_command,
             Self::PullDiagnostics { .. } => capabilities.pull_diagnostics,
             Self::SemanticTokensFull | Self::SemanticTokensDelta { .. } => {
                 capabilities.semantic_tokens

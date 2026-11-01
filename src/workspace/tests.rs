@@ -186,6 +186,7 @@ fn diagnostic(uri: &str, version: u64, start: usize, message: &str) -> Diagnosti
         related: Vec::new(),
         tags: Vec::new(),
         fixes: Vec::new(),
+        data: None,
         timestamp: crate::clock::system_time(),
     }
 }

@@ -379,6 +379,8 @@ impl EditorState {
                 return (buffer, view);
             }
         }
+        let opens_file = path.is_some();
+        let previous = self.active_view;
         let buffer = match path {
             Some(path) => self.file_buffer(text, path),
             None => Buffer::new(text, None),
@@ -386,7 +388,27 @@ impl EditorState {
         let buffer = self.buffers.insert(buffer);
         let view = self.views.insert(View::new(buffer));
         self.show_view(view);
+        if opens_file {
+            self.drop_replaced_scratch(previous);
+        }
         (buffer, view)
+    }
+
+    /// A file opened over an untouched empty buffer takes its place, as in Vim.
+    fn drop_replaced_scratch(&mut self, replaced: Option<ViewId>) {
+        let Some(buffer) = replaced.and_then(|view| self.views.get(view)).map(|view| view.buffer) else {
+            return;
+        };
+        let untouched = self.buffers.get(buffer).is_some_and(|buffer| {
+            buffer.path.is_none() && !buffer.dirty && !buffer.read_only && buffer.text.len_bytes() == 0
+        });
+        let shown = self.panes.values().any(|pane| {
+            self.views.get(pane.view).is_some_and(|view| view.buffer == buffer)
+        });
+        if untouched && !shown && Some(buffer) != self.kept_buffer {
+            self.views.retain(|_, view| view.buffer != buffer);
+            self.remove_buffer(buffer);
+        }
     }
 
     pub fn show_buffer(&mut self, buffer: BufferId) -> Result<ViewId, &'static str> {
@@ -828,6 +850,12 @@ impl EditorState {
     }
 
     pub(crate) fn close_view(&mut self, view: ViewId) -> Result<(), &'static str> {
+        self.focus_view(view)?;
+        self.close_active_view().map(|_| ())
+    }
+
+    /// Makes this view the active one, in whichever tab holds it.
+    pub(crate) fn focus_view(&mut self, view: ViewId) -> Result<(), &'static str> {
         let (tab, pane) = self
             .tabs
             .iter()
@@ -839,8 +867,7 @@ impl EditorState {
             })
             .ok_or("view is not hosted")?;
         self.active_tab = Some(tab);
-        self.set_focused_pane(tab, pane)?;
-        self.close_active_view().map(|_| ())
+        self.set_focused_pane(tab, pane)
     }
 
     pub fn close_active_view(&mut self) -> Result<ViewId, &'static str> {

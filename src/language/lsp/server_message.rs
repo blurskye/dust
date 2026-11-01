@@ -268,11 +268,16 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
                             .iter()
                             .take(256)
                             .map(|item| {
-                                let section = item.get("section").and_then(Value::as_str);
-                                section
-                                    .and_then(|section| configuration.settings.get(section))
-                                    .cloned()
-                                    .unwrap_or(Value::Null)
+                                // Empty rather than null: the CSS server reads null as no
+                                // settings at all and then validates nothing.
+                                match item.get("section").and_then(Value::as_str) {
+                                    Some(section) => configuration
+                                        .settings
+                                        .pointer(&format!("/{}", section.replace('.', "/")))
+                                        .cloned()
+                                        .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+                                    None => configuration.settings.clone(),
+                                }
                             })
                             .collect()
                     })

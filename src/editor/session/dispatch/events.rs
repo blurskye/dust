@@ -1115,27 +1115,23 @@ impl InteractiveApplication {
             }
         };
         let automatic = result.automatic;
-        let loaded = match result.candidate {
-            Ok(loaded) => loaded,
+        let outcome = match result.candidate {
+            Ok(loaded) => self.apply_configuration_candidate(loaded, automatic),
+            Err(diagnostic) => Err(diagnostic),
+        };
+        match outcome {
+            Ok(()) => self.configuration.note_rejected_keymaps(None),
             Err(diagnostic) => {
                 self.retain_configuration_watch();
+                self.configuration
+                    .note_rejected_keymaps(diagnostic.contains("keymap").then(|| diagnostic.clone()));
                 let message = if automatic {
                     "auto_reload_rejected"
                 } else {
                     "reload_rejected"
                 };
                 self.show_error(self.message(message, &[("diagnostic", diagnostic)]));
-                return;
             }
-        };
-        if let Err(diagnostic) = self.apply_configuration_candidate(loaded, automatic) {
-            self.retain_configuration_watch();
-            let message = if automatic {
-                "auto_reload_rejected"
-            } else {
-                "reload_rejected"
-            };
-            self.show_error(self.message(message, &[("diagnostic", diagnostic)]));
         }
     }
 
@@ -1850,7 +1846,7 @@ impl InteractiveApplication {
                             operation
                                 .target()
                                 .or_else(|| operation.source())
-                                .map_or_else(|| "path".into(), |path| path.display().to_string())
+                                .map_or_else(|| "path".into(), |path| self.workspace_relative_label(path))
                         ),
                         false,
                     );
@@ -2215,6 +2211,9 @@ impl InteractiveApplication {
                 .map(|(buffer, document)| (*buffer, document)),
         ) {
             self.clear_lsp_ui_rows();
+            if !self.language.completion_items().is_empty() {
+                self.project_lsp_completion();
+            }
             if self.language.projection().is_some() {
                 self.schedule_lsp_inlay_refresh(true);
             }
@@ -2756,6 +2755,40 @@ impl InteractiveApplication {
             let Ok((end_line, end_character)) = codec.byte_to_lsp(end, encoding) else {
                 return;
             };
+            // As LazyVim asks: everything on the cursor's lines, so a fix is offered from anywhere
+            // on the line that has the problem.
+            let line_end = buffer
+                .line_to_byte(end_line.saturating_add(1))
+                .unwrap_or_else(|_| ByteOffset(buffer.len_bytes()));
+            let line_start = buffer.line_to_byte(start_line).unwrap_or(start);
+            let position = |offset| {
+                codec.byte_to_lsp(offset, encoding).ok().map(|(line, character)| {
+                    crate::language::lsp::LspPosition { line, character }
+                })
+            };
+            let diagnostics = self
+                .diagnostics
+                .within(&document.uri(), line_start, line_end)
+                .into_iter()
+                .filter_map(|problem| {
+                    Some(crate::language::lsp::LspDiagnostic {
+                        range: crate::language::lsp::LspRange {
+                            start: position(problem.range.start)?,
+                            end: position(problem.range.end)?,
+                        },
+                        severity: Some(match problem.severity {
+                            crate::workspace::DiagnosticSeverity::Error => 1,
+                            crate::workspace::DiagnosticSeverity::Warning => 2,
+                            crate::workspace::DiagnosticSeverity::Information => 3,
+                            crate::workspace::DiagnosticSeverity::Hint => 4,
+                        }),
+                        code: problem.code.clone(),
+                        source: Some(problem.source.clone()),
+                        message: problem.message.clone(),
+                        data: problem.data.clone(),
+                    })
+                })
+                .collect();
             feature = LspFeature::CodeAction {
                 range: crate::language::lsp::LspRange {
                     start: crate::language::lsp::LspPosition {
@@ -2767,6 +2800,7 @@ impl InteractiveApplication {
                         character: end_character,
                     },
                 },
+                diagnostics,
             };
         }
         self.refresh_lsp_projection_owner();
@@ -3109,22 +3143,27 @@ impl InteractiveApplication {
                 let rows = items
                     .into_iter()
                     .enumerate()
-                    .map(|(index, item)| {
-                        (
+                    .filter_map(|(index, item)| {
+                        let command = item.command?;
+                        Some((
                             PickerItem {
                                 badge: String::new(),
                                 kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("code-lens:{index}")),
                                 label: item.title,
-                                detail: item.command.unwrap_or_default(),
+                                detail: command.command.clone(),
                                 source: String::new(),
                                 action: PickerAction::None,
                             },
-                            PickerPayload::Command(String::new()),
-                        )
+                            PickerPayload::LspCommand(command),
+                        ))
                     })
-                    .collect();
-                self.install_picker(self.message("picker_code_lens_title", &[]), rows);
+                    .collect::<Vec<_>>();
+                if rows.is_empty() {
+                    self.show_error(self.message("lsp_no_result", &[]));
+                } else {
+                    self.install_picker(self.message("picker_code_lens_title", &[]), rows);
+                }
             }
             LspFeatureResult::Ranges(items) => {
                 if let Some(path) = path_from_file_uri(uri) {

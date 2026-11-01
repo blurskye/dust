@@ -21,6 +21,8 @@ pub(in crate::editor::session) enum PickerPayload {
     Section,
     /// A workspace from the project list.
     Project(std::path::PathBuf),
+    /// A code lens the server runs when chosen.
+    LspCommand(crate::language::lsp::LspCommand),
     /// A row of one of the agent pickers.
     Agent(crate::editor::session::dispatch::agent::AgentChoice),
     /// A pull request number from `gh pr list`.

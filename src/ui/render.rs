@@ -2107,6 +2107,8 @@ pub fn render(
         );
     }
     let modal_open = ui.picker.is_some() || ui.tool_menu.is_some();
+    // Pickers use the whole screen, so a notice below one clears the terminal dock too.
+    let notice_height = if modal_open { height } else { workspace_height };
     if ui.prompt.is_some() {
         // A prompt sits where notices do, so one waits rather than being cut through.
     } else if let Some(message) = ui.notification.as_ref() {
@@ -2119,7 +2121,7 @@ pub fn render(
         } else {
             Style::Accent
         };
-        render_error_notification(&mut frame, message, style, config, width, workspace_height, modal_open);
+        render_error_notification(&mut frame, message, style, config, width, notice_height, modal_open);
     } else if let Some(message) = ui.config_diagnostic.as_ref() {
         render_error_notification(
             &mut frame,
@@ -2127,7 +2129,7 @@ pub fn render(
             Style::Error,
             config,
             width,
-            workspace_height,
+            notice_height,
             modal_open,
         );
     }

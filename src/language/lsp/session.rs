@@ -644,7 +644,26 @@ pub(super) fn run_session(
                 break;
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            // Its output closed: it has exited or is about to, and the session must hear so.
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                let deadline = Instant::now() + Duration::from_secs(1);
+                let status = loop {
+                    match child.try_wait() {
+                        Ok(None) if Instant::now() < deadline => {
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                        status => break status.ok().flatten(),
+                    }
+                };
+                send_event(
+                    &events,
+                    LspEvent::Stopped {
+                        server: server.clone(),
+                        success: status.is_some_and(|status| status.success()),
+                    },
+                );
+                break;
+            }
         }
         expire_requests(&server, &mut stdin, &mut pending, &events);
         match child.try_wait() {

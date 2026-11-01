@@ -218,6 +218,18 @@ impl InputSession {
             (policy.input.completion_select_first && !prompt.completions.is_empty()).then_some(0);
         true
     }
+    pub(in crate::editor::session) fn search_origin(
+        &mut self,
+        view: crate::editor::ViewId,
+        cursor: crate::editor::text::ByteOffset,
+    ) -> crate::editor::text::ByteOffset {
+        self.search_origin.get_or_insert((view, cursor)).1
+    }
+    pub(in crate::editor::session) fn take_search_origin(
+        &mut self,
+    ) -> Option<(crate::editor::ViewId, crate::editor::text::ByteOffset)> {
+        self.search_origin.take()
+    }
     pub(in crate::editor::session) fn prompt_insert(&mut self, text: &str) {
         if let Some(prompt) = &mut self.prompt {
             if prompt.confirmation.is_some() {

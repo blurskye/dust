@@ -44,6 +44,7 @@ pub struct Diagnostic {
     pub related: Vec<RelatedDiagnostic>,
     pub tags: Vec<String>,
     pub fixes: Vec<String>,
+    pub data: Option<serde_json::Value>,
     pub timestamp: SystemTime,
 }
 
@@ -56,6 +57,7 @@ pub struct ProblemRow {
     pub source: String,
     pub code: Option<String>,
     pub message: String,
+    pub data: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug)]
@@ -191,6 +193,7 @@ impl DiagnosticStore {
                         source: diagnostic.source.clone(),
                         code: diagnostic.code.clone(),
                         message: diagnostic.message.clone(),
+                        data: diagnostic.data.clone(),
                     })
             })
             .collect::<Vec<_>>();

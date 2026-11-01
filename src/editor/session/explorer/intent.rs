@@ -351,7 +351,7 @@ impl ExplorerSession {
         let notice = format!(
             "{} `{}`; select a destination and press p",
             if cut { "moving" } else { "copied" },
-            path.display()
+            path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned())
         );
         self.clipboard = Some((path, cut, scope));
         Ok(notice)

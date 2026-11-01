@@ -1815,6 +1815,7 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
                     related: Vec::new(),
                     tags: Vec::new(),
                     fixes: Vec::new(),
+                    data: None,
                     timestamp: std::time::SystemTime::UNIX_EPOCH,
                 }],
             },

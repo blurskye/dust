@@ -87,7 +87,7 @@ fn bundled_catalog_is_typed_and_has_real_language_and_debug_tools() {
 #[test]
 fn pinned_mason_snapshot_has_complete_server_and_filetype_inventories() {
     let (servers, extensions, filenames) = mason_snapshot_counts();
-    assert_eq!(servers, 292);
+    assert_eq!(servers, 291);
     assert_eq!(extensions, 1_231);
     assert_eq!(filenames, 407);
     assert!(

@@ -11,7 +11,7 @@ use super::{
     MAX_LOG_LINE_BYTES,
     markdown::sanitize_markdown,
     model::{
-        LspCapabilities, LspCodeAction, LspCodeLens, LspCompletionItem, LspDiagnostic, LspDocument,
+        LspCapabilities, LspCodeAction, LspCodeLens, LspCommand, LspCompletionItem, LspDiagnostic, LspDocument,
         LspDocumentEdit, LspEvent, LspFeature, LspColor, LspFeatureResult, LspHover, LspInlayHint,
         LspLocation, LspMarkupContent, LspMarkupKind, LspPosition, LspProgressKind,
         LspPullDiagnostics, LspRange, LspResourceOperation, LspSemanticTokenDelta,
@@ -33,7 +33,7 @@ pub(super) fn initialize_message(root: &Path, initialization_options: Option<&Va
             "workspaceFolders":[{"uri":file_uri(root),"name":root.file_name().and_then(|v|v.to_str()).unwrap_or("workspace")}],
             "capabilities":{
                 "general":{"positionEncodings":["utf-8","utf-16","utf-32"]},
-                "workspace":{"workspaceFolders":true,"configuration":true,"applyEdit":true,"symbol":{"dynamicRegistration":true}},
+                "workspace":{"workspaceFolders":true,"configuration":true,"applyEdit":true,"executeCommand":{"dynamicRegistration":false},"symbol":{"dynamicRegistration":true}},
                 "window":{"workDoneProgress":true},
                 "textDocument":{
                     "synchronization":{"didSave":true,"dynamicRegistration":true},
@@ -115,6 +115,7 @@ pub(super) fn initialize_capabilities(result: Option<&Value>) -> Result<LspCapab
         formatting: capability(capabilities, "documentFormattingProvider"),
         range_formatting: capability(capabilities, "documentRangeFormattingProvider"),
         code_action: capability(capabilities, "codeActionProvider"),
+        execute_command: capability(capabilities, "executeCommandProvider"),
         semantic_tokens: capability(capabilities, "semanticTokensProvider"),
         inlay_hints: capability(capabilities, "inlayHintProvider"),
         pull_diagnostics: capability(capabilities, "diagnosticProvider"),
@@ -272,6 +273,9 @@ pub(super) fn feature_params(
     match feature {
         LspFeature::CompletionResolve { item } => item.clone(),
         LspFeature::WorkspaceSymbols { query } => json!({"query":query}),
+        LspFeature::ExecuteCommand(command) => {
+            json!({"command":command.command,"arguments":command.arguments})
+        }
         LspFeature::DocumentSymbols | LspFeature::Formatting => json!({
             "textDocument":document,"options":{"tabSize":4,"insertSpaces":true}
         }),
@@ -284,8 +288,9 @@ pub(super) fn feature_params(
         LspFeature::RangeFormatting { range } => json!({
             "textDocument":document,"range":range_json(range),"options":{"tabSize":4,"insertSpaces":true}
         }),
-        LspFeature::CodeAction { range } => json!({
-            "textDocument":document,"range":range_json(range),"context":{"diagnostics":[]}
+        LspFeature::CodeAction { range, diagnostics } => json!({
+            "textDocument":document,"range":range_json(range),
+            "context":{"diagnostics":diagnostics.iter().map(diagnostic_json).collect::<Vec<_>>()}
         }),
         LspFeature::PullDiagnostics { previous_result_id } => json!({
             "textDocument":document,"previousResultId":previous_result_id
@@ -305,6 +310,24 @@ pub(super) fn feature_params(
         LspFeature::SelectionRanges => json!({"textDocument":document,"positions":[position]}),
         _ => json!({"textDocument":document,"position":position}),
     }
+}
+
+fn diagnostic_json(diagnostic: &LspDiagnostic) -> Value {
+    let mut value = json!({"range":range_json(&diagnostic.range),"message":diagnostic.message});
+    if let Some(severity) = diagnostic.severity {
+        value["severity"] = json!(severity);
+    }
+    if let Some(code) = &diagnostic.code {
+        // TypeScript matches its fixes on the number it sent.
+        value["code"] = code.parse::<i64>().map_or_else(|_| json!(code), |code| json!(code));
+    }
+    if let Some(source) = &diagnostic.source {
+        value["source"] = json!(source);
+    }
+    if let Some(data) = &diagnostic.data {
+        value["data"] = data.clone();
+    }
+    value
 }
 
 pub(super) fn range_json(range: &LspRange) -> Value {
@@ -501,6 +524,7 @@ pub(super) fn normalize_result(
         }
         LspFeature::InlayHints { .. } => Ok(LspFeatureResult::InlayHints(inlay_hints(result))),
         LspFeature::CodeLens => Ok(LspFeatureResult::CodeLens(code_lenses(result))),
+        LspFeature::ExecuteCommand(_) => Ok(LspFeatureResult::Empty),
         LspFeature::DocumentHighlights => Ok(LspFeatureResult::Ranges(result_ranges(result))),
         LspFeature::FoldingRanges => Ok(LspFeatureResult::Ranges(folding_ranges(result))),
         LspFeature::SelectionRanges => Ok(LspFeatureResult::Ranges(selection_ranges(result))),
@@ -629,6 +653,17 @@ pub(super) fn inlay_hints(value: &Value) -> Vec<LspInlayHint> {
         })
         .collect()
 }
+fn parse_command(value: &Value) -> Option<LspCommand> {
+    Some(LspCommand {
+        command: value.get("command")?.as_str()?.to_owned(),
+        arguments: value
+            .get("arguments")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
+    })
+}
+
 pub(super) fn code_lenses(value: &Value) -> Vec<LspCodeLens> {
     value
         .as_array()
@@ -646,10 +681,7 @@ pub(super) fn code_lenses(value: &Value) -> Vec<LspCodeLens> {
                     .chars()
                     .take(4096)
                     .collect(),
-                command: command
-                    .and_then(|value| value.get("command"))
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
+                command: command.and_then(parse_command),
             })
         })
         .collect()
@@ -899,6 +931,10 @@ pub(super) fn code_actions(value: &Value) -> Result<Vec<LspCodeAction>, String> 
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             edit: action.get("edit").map(workspace_edit).transpose()?,
+            // A server may answer with a bare command in place of an action.
+            command: action.get("command").and_then(|command| {
+                parse_command(if command.is_string() { action } else { command })
+            }),
         });
     }
     Ok(normalized)
@@ -966,6 +1002,7 @@ pub(super) fn diagnostics(value: &Value) -> Vec<LspDiagnostic> {
                         .unwrap_or_default(),
                     MAX_LOG_LINE_BYTES,
                 ),
+                data: diagnostic.get("data").cloned(),
             })
         })
         .collect()

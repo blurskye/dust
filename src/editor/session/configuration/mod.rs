@@ -72,6 +72,8 @@ pub(super) struct ConfigurationSession {
     worker: ConfigurationWorker,
     generation: u64,
     binding_revision: u64,
+    /// Why the last reload was refused over its keymaps, which are then not in effect.
+    rejected_keymaps: Option<String>,
     /// The line numbers that `<leader>ul` hid.
     hidden_line_numbers: Option<LineNumbers>,
     zen: Option<ZenRestore>,
@@ -155,6 +157,7 @@ impl ConfigurationSession {
             worker,
             generation: 0,
             binding_revision: 0,
+            rejected_keymaps: None,
             hidden_line_numbers: None,
             zen: None,
         }
@@ -167,6 +170,12 @@ impl ConfigurationSession {
     }
     pub(super) fn theme(&self) -> &crate::config::ThemeConfig {
         self.effective_theme()
+    }
+    pub(super) fn note_rejected_keymaps(&mut self, diagnostic: Option<String>) {
+        self.rejected_keymaps = diagnostic;
+    }
+    pub(super) fn rejected_keymaps(&self) -> Option<&str> {
+        self.rejected_keymaps.as_deref()
     }
     pub(super) fn keymaps(&self) -> &ResolvedKeymaps {
         &self.accepted.keymaps

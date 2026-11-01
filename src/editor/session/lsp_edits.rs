@@ -627,6 +627,7 @@ mod tests {
             kind: None,
             preferred: false,
             edit: Some(empty()),
+            command: None,
         };
         let choices = sources
             .install_actions(vec![action()], Some(packet.context.clone()), &service, 4)
@@ -822,6 +823,7 @@ impl LspEditSources {
                     related: Vec::new(),
                     tags: Vec::new(),
                     fixes: Vec::new(),
+                    data: diagnostic.data,
                     timestamp: crate::clock::system_time(),
                 })
             })
@@ -885,6 +887,7 @@ mod diagnostic_tests {
                 source: None,
                 code: None,
                 message: "message".into(),
+                data: None,
             }]
         };
         let mut owner = DiagnosticSession::new(10, 10);

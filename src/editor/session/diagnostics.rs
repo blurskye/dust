@@ -366,6 +366,16 @@ impl DiagnosticSession {
             )
         })
     }
+    /// The problems within this stretch of a file, which a code action there may fix.
+    pub(super) fn within(&self, uri: &str, start: ByteOffset, end: ByteOffset) -> Vec<&ProblemRow> {
+        self.rows
+            .iter()
+            .filter(|row| {
+                row.problem.uri == uri && row.problem.range.start <= end && row.problem.range.end >= start
+            })
+            .map(|row| &row.problem)
+            .collect()
+    }
     pub(super) fn adjacent(
         &self,
         uri: &str,
@@ -471,6 +481,7 @@ mod tests {
                     related: Vec::new(),
                     tags: Vec::new(),
                     fixes: Vec::new(),
+                    data: None,
                     timestamp: std::time::SystemTime::UNIX_EPOCH,
                 }],
             };

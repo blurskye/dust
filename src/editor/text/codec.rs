@@ -96,6 +96,7 @@ impl<'a> PositionCodec<'a> {
         character: usize,
         encoding: PositionEncoding,
     ) -> Result<ByteOffset, PositionError> {
+        // The protocol says a position past the end of a line means the end of that line.
         let text = self.buffer.line(line)?;
         let content = text.strip_suffix('\n').unwrap_or(&text);
         let mut units = 0_usize;
@@ -124,12 +125,6 @@ impl<'a> PositionCodec<'a> {
             }
             units = next_units;
             byte_column += scalar.len_utf8();
-        }
-        if units != character {
-            return Err(PositionError::OutOfBounds {
-                offset: character,
-                len: units,
-            });
         }
         self.point_to_byte(TextPoint { line, byte_column })
     }
@@ -171,5 +166,9 @@ mod tests {
             }
         }
         assert!(codec.lsp_to_byte(0, 2, PositionEncoding::Utf16).is_err());
+        assert_eq!(
+            codec.lsp_to_byte(0, 99, PositionEncoding::Utf16).expect("past the end"),
+            ByteOffset(7)
+        );
     }
 }

@@ -852,6 +852,7 @@ impl InteractiveApplication {
             self.agent.active = self.agent.sessions.iter().position(|session| session.number == shown).unwrap_or(0);
         }
         self.agent.scroll = 0;
+        self.agent.normal = false;
         self.show_agent_panel();
         Ok(())
     }
