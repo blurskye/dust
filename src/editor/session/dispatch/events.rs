@@ -411,6 +411,17 @@ impl InteractiveApplication {
         if matches!(event, UiEvent::Key { .. }) {
             self.last_key_at = Some(Instant::now());
         }
+        // Information has been read once the user moves on, and must not cover what comes next.
+        // Errors and warnings keep their time, and everything stays in `:messages`.
+        if matches!(
+            event,
+            UiEvent::Key { kind: KeyInputKind::Press | KeyInputKind::Repeat, .. }
+        ) && self.ui.notification.is_some()
+            && !self.ui.notification_error
+            && !self.ui.notification_warning
+        {
+            self.clear_notice();
+        }
         match event {
             UiEvent::Resize(width, height) => {
                 self.window_session.observe_size((width, height));

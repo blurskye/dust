@@ -411,6 +411,19 @@ fn documentation_scroll_reaches_the_last_line_in_a_short_actual_workspace() {
 }
 
 #[test]
+fn a_key_press_dismisses_information_but_not_errors() {
+    let mut session = TestSession::new(crate::config::load_bundled_config());
+    session.new_buffer();
+    session.notice("read once");
+    assert!(session.projection().notification.is_some());
+    session.key("j");
+    assert!(session.projection().notification.is_none(), "information goes");
+    session.error("broken");
+    session.key("j");
+    assert_eq!(session.projection().notification.as_deref(), Some("broken"));
+}
+
+#[test]
 fn wide_notice_text_stays_inside_its_box() {
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.ui.notifications.max_width = 8;
