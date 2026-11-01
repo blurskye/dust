@@ -196,7 +196,7 @@ impl DebugSession {
                     (entry.definition.debug_program_policy == DebugProgramPolicy::Source)
                         .then(|| path.to_path_buf())
                 })
-                .ok_or("this adapter requires a compiled program")?;
+                .ok_or("build the program, then run :dap.session.start program=<path to it>")?;
             let root_id = workspace.require_path(path).map_err(|e| e.to_string())?;
             if workspace.require_path(&program).ok() != Some(root_id) {
                 return Err("debug program is outside its original root".into());

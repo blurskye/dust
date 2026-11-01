@@ -12,7 +12,7 @@ use super::{
 };
 
 /// What fits of `text`, ending in an ellipsis when some had to go.
-fn ellipsized(text: &str, maximum: usize, ambiguous: crate::config::AmbiguousWidth) -> String {
+pub(super) fn ellipsized(text: &str, maximum: usize, ambiguous: crate::config::AmbiguousWidth) -> String {
     use unicode_segmentation::UnicodeSegmentation;
     if text_width(text, ambiguous) <= maximum || maximum == 0 {
         return if maximum == 0 { String::new() } else { text.to_owned() };

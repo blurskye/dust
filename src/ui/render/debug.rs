@@ -366,7 +366,7 @@ pub(crate) fn render_debug_panes(
                 const NEXT_PANE_HINT: &str = "· <leader>dn";
                 let hint_width = NEXT_PANE_HINT.chars().count() as u16;
                 if x.saturating_sub(strip.x + 1) + hint_width <= inner {
-                    frame.grid.put_text(x, y, NEXT_PANE_HINT, super::Style::Border);
+                    frame.grid.put_text(x, y, NEXT_PANE_HINT, super::Style::Muted);
                 }
                 let mut body = rows(panes.selected, panes);
                 body.insert(0, format!("{}:", panes.selected.label()));

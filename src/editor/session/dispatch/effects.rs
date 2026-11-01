@@ -6943,7 +6943,7 @@ impl InteractiveApplication {
         let title = format!("Git worktrees · {}", list.worktrees.len());
         self.install_picker(title, items);
         self.search
-            .set_picker_footer("Enter Switch · ctrl-x Remove · Esc Esc Close".to_owned());
+            .set_picker_footer("Enter Switch · a new name creates it · ctrl-x Remove · Esc Esc Close".to_owned());
         self.sync_picker_ui();
     }
     pub(in crate::editor::session) fn unstage_selected_git_hunk(&mut self) {
@@ -8651,6 +8651,11 @@ impl InteractiveApplication {
             return;
         }
         self.retire_stale_picker();
+        if let Some(name) = self.search.new_worktree_name() {
+            self.close_picker();
+            self.create_git_worktree(name, None);
+            return;
+        }
         if let Some(PickerPayload::Theme(key)) = self.search.selected_picker_payload() {
             match self.configuration.apply_theme(key) {
                 Ok(name) => {

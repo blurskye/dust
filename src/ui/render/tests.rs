@@ -2065,6 +2065,18 @@ fn a_long_notification_wraps_so_its_end_stays_readable() {
 }
 
 #[test]
+fn a_long_path_in_a_notification_breaks_so_its_name_stays_readable() {
+    let mut state = EditorState::new(PathBuf::from("/tmp"));
+    let _ = state.open_text(crate::editor::text::TextBuffer::from_text(""), None);
+    let loaded = crate::config::load_bundled_config();
+    let mut ui = ui_with_editor_layout(&state);
+    ui.notification = Some(format!("cannot save /{}/name.txt", "long-directory/".repeat(8)));
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 60, 20);
+    let text: Vec<String> = (0..20).map(|row| frame.grid.row_text(row)).collect();
+    assert!(text.iter().any(|row| row.contains("name.txt")), "{text:#?}");
+}
+
+#[test]
 fn wrapping_ignores_horizontal_offset() {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
     let (_, view) = state.open_text(

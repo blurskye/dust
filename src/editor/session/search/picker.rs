@@ -279,6 +279,15 @@ impl SearchSession {
                 }
             })
     }
+    /// What is typed in the worktree list when no row matches it: the name of a new worktree.
+    pub(in crate::editor::session) fn new_worktree_name(&self) -> Option<String> {
+        let picker = self.picker.interaction.as_ref()?;
+        let name = picker.state.query().trim();
+        (!name.is_empty()
+            && picker.state.selected_item().is_none()
+            && picker.payloads.contains_key(&PickerItemId("git-worktree-new".into())))
+        .then(|| name.to_owned())
+    }
     pub(in crate::editor::session) fn selected_picker_payload(&self) -> Option<&PickerPayload> {
         let picker = self.picker.interaction.as_ref()?;
         picker.payloads.get(&picker.state.selected_item()?.id)

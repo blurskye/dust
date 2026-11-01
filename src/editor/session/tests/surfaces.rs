@@ -5153,3 +5153,50 @@ fn zoom_and_zen_show_the_pane_alone_and_put_everything_back() {
     ));
     assert_eq!(app.configuration.settings().editor.line_numbers, numbers);
 }
+
+#[test]
+fn an_agent_edit_of_a_file_with_unsaved_changes_warns_in_its_approval() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("draft.txt");
+    let (buffer, _) = app.state.open_text(
+        crate::editor::text::TextBuffer::from_text("draft"),
+        Some(path.clone()),
+    );
+    let root = app.state.workspace_root.clone();
+    let request = serde_json::json!({"toolCall": {"kind": "edit", "rawInput": {"file_path": path}}});
+    assert_eq!(app.unsaved_agent_changes(&root, &request), "", "a clean file needs no warning");
+    app.state.buffers[buffer].dirty = true;
+    assert_eq!(
+        app.unsaved_agent_changes(&root, &request),
+        "! draft.txt has unsaved changes; this changes the saved copy\n"
+    );
+    let relative = serde_json::json!({"toolCall": {"kind": "edit", "locations": [{"path": "draft.txt"}]}});
+    assert!(app.unsaved_agent_changes(&root, &relative).contains("draft.txt"));
+    let read = serde_json::json!({"toolCall": {"kind": "read", "rawInput": {"file_path": path}}});
+    assert_eq!(app.unsaved_agent_changes(&root, &read), "", "a read changes nothing");
+}
+
+#[test]
+fn a_name_no_worktree_matches_is_the_name_of_a_new_one() {
+    let mut app = app();
+    let new_row = crate::workspace::PickerItem {
+        badge: String::new(),
+        kind: crate::workspace::PickerItemKind::Entry,
+        id: crate::workspace::PickerItemId("git-worktree-new".into()),
+        label: "New worktree…".into(),
+        detail: String::new(),
+        source: String::new(),
+        action: crate::workspace::PickerAction::None,
+    };
+    let payload = crate::editor::session::search::PickerPayload::Command(
+        "workspace.git.worktree.create".into(),
+    );
+    app.install_picker("Git worktrees".into(), vec![(new_row, payload)]);
+    assert_eq!(app.search.new_worktree_name(), None, "the row itself is selected");
+    for key in ["x", "y", "z"] {
+        app.handle_event(UiEvent::Key { key: key.parse().unwrap(), kind: crate::ui::KeyInputKind::Press });
+    }
+    assert_eq!(app.search.new_worktree_name().as_deref(), Some("xyz"));
+    app.install_picker("Files".into(), Vec::new());
+    assert_eq!(app.search.new_worktree_name(), None, "only the worktree list creates");
+}

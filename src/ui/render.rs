@@ -1731,8 +1731,30 @@ fn wrap_card_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<Ve
                 line.push((" ".into(), space_is_key));
                 used += 1;
             }
-            line.extend(pieces);
-            used += word_width;
+            if word_width <= width {
+                line.extend(pieces);
+                used += word_width;
+                continue;
+            }
+            // A long path breaks where it has to, so its end, the name that matters, still shows.
+            for (piece, is_key) in pieces {
+                let mut run = String::new();
+                for grapheme in unicode_segmentation::UnicodeSegmentation::graphemes(piece.as_str(), true) {
+                    let grapheme_width = text_width(grapheme, ambiguous).max(1);
+                    if used > 0 && used + grapheme_width > width {
+                        if !run.is_empty() {
+                            line.push((std::mem::take(&mut run), is_key));
+                        }
+                        lines.push(std::mem::take(&mut line));
+                        used = 0;
+                    }
+                    run.push_str(grapheme);
+                    used += grapheme_width;
+                }
+                if !run.is_empty() {
+                    line.push((run, is_key));
+                }
+            }
         }
         lines.push(line);
     }

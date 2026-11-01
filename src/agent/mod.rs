@@ -502,6 +502,26 @@ pub fn permission_action(params: &Value) -> &'static str {
     }
 }
 
+/// The files a permission request would change, as the tool call names them.
+#[must_use]
+pub fn permission_changes(params: &Value) -> Vec<PathBuf> {
+    let call = &params["toolCall"];
+    if !matches!(call["kind"].as_str(), Some("edit" | "delete" | "move")) {
+        return Vec::new();
+    }
+    let locations = call["locations"].as_array().into_iter().flatten();
+    let diffs = call["content"].as_array().into_iter().flatten().filter(|item| item["type"] == "diff");
+    let mut paths: Vec<PathBuf> = locations
+        .chain(diffs)
+        .filter_map(|item| item["path"].as_str())
+        .chain(call["rawInput"]["file_path"].as_str())
+        .map(PathBuf::from)
+        .collect();
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
 /// The tool call's own title, then the command it would run and the size of an edit, which a title
 /// such as a bare path leaves out.
 #[must_use]
@@ -625,6 +645,14 @@ mod tests {
         assert_eq!(permission_action(&run), "run a command");
         assert_eq!(permission_detail(&run), "Run\n$ cargo test");
         assert_eq!(permission_action(&json!({"toolCall": {}})), "run a tool");
+        assert_eq!(permission_changes(&edit), [PathBuf::from("src/main.rs")]);
+        assert_eq!(permission_changes(&run), [] as [PathBuf; 0]);
+        let located = json!({"toolCall": {
+            "kind": "edit",
+            "locations": [{"path": "/w/a.rs"}],
+            "rawInput": {"file_path": "/w/a.rs"},
+        }});
+        assert_eq!(permission_changes(&located), [PathBuf::from("/w/a.rs")]);
     }
 
     #[test]

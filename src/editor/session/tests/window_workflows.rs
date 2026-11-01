@@ -432,16 +432,19 @@ fn wide_notice_text_stays_inside_its_box() {
     let before = session.frame();
     session.notice("界界界界界界");
     let after = session.frame();
-    // The box is 8 wide at the top right, one cell from the edge: x 31..39, y 1..4.
+    // The box is 8 wide at the top right, one cell from the edge, and the text wraps to three
+    // lines of two: x 31..39, y 1..6.
     for y in 0..12 {
         for x in 0..40 {
-            if !((31..39).contains(&x) && (1..4).contains(&y)) {
+            if !((31..39).contains(&x) && (1..6).contains(&y)) {
                 assert_eq!(before.grid.get(x, y), after.grid.get(x, y), "outside notice at {x},{y}");
             }
         }
     }
     assert_eq!(after.grid.get(31, 1).unwrap().symbol, "╭");
-    assert_eq!(after.grid.get(33, 2).unwrap().symbol, "界");
+    for y in 2..5 {
+        assert_eq!(after.grid.get(33, y).unwrap().symbol, "界");
+    }
     assert_eq!(after.grid.get(31, 1).unwrap().style, Style::Accent);
 }
 

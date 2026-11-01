@@ -1194,11 +1194,13 @@ impl InteractiveApplication {
             AgentMessage::Request { id, method, params } => match method.as_str() {
                 "session/request_permission" => {
                     let number = session.number;
+                    let root = session.root.clone();
+                    let unsaved = self.unsaved_agent_changes(&root, &params);
                     self.agent.permissions.push_back(PermissionRequest {
                         session: number,
                         id,
                         action: agent::permission_action(&params),
-                        title: agent::permission_detail(&params),
+                        title: format!("{unsaved}{}", agent::permission_detail(&params)),
                         options: agent::permission_options(&params),
                     });
                 }
@@ -1316,6 +1318,26 @@ impl InteractiveApplication {
     }
 
     /// Open buffers are read from memory, so the agent sees unsaved edits.
+    /// A warning when a permission request touches a file with unsaved changes. Some adapters,
+    /// Claude's among them, work on the disk and never see the buffer, so the edit would land on
+    /// the saved copy and saving the draft would then conflict.
+    pub(in crate::editor::session) fn unsaved_agent_changes(&self, root: &Path, params: &Value) -> String {
+        agent::permission_changes(params)
+            .iter()
+            .filter(|path| {
+                let path = root.join(path);
+                self.state
+                    .buffers
+                    .values()
+                    .any(|buffer| buffer.dirty && buffer.path.as_ref() == Some(&path))
+            })
+            .map(|path| {
+                let name = path.file_name().unwrap_or(path.as_os_str()).to_string_lossy();
+                format!("! {name} has unsaved changes; this changes the saved copy\n")
+            })
+            .collect()
+    }
+
     fn agent_read_file(&self, params: &Value) -> Result<String, String> {
         let path = PathBuf::from(params["path"].as_str().ok_or("path is missing")?);
         let open = self

@@ -159,7 +159,10 @@ pub(super) fn render_agent_panel(
                 (Style::Accent, Style::Muted)
             };
             let x = grid.put_text_clipped(1, y, &format!("/{name}"), name_style, width - 1);
-            grid.put_text_clipped(x.saturating_add(2).max(18), y, description, text_style, width - 1);
+            let start = x.saturating_add(2).max(18);
+            let room = usize::from((width - 1).saturating_sub(start));
+            let description = super::surfaces::ellipsized(description, room, config.editor.ambiguous_width);
+            grid.put_text_clipped(start, y, &description, text_style, width - 1);
         }
     }
     if panel.input.is_empty() {
