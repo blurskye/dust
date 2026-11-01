@@ -87,10 +87,8 @@ pub(super) fn render_explorer_window(
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
     let panel_width = rect.width.saturating_sub(1);
-    let body = ui
-        .surface_content
-        .explorer
-        .unwrap_or_else(|| crate::ui::geometry::explorer_body_geometry(rect, config));
+    let search_box = focused || explorer.searching || !explorer.query.is_empty();
+    let body = crate::ui::geometry::explorer_body_geometry(rect, config, search_box);
     let local_body = WindowRect {
         x: 0,
         y: body.y.saturating_sub(rect.y),
@@ -120,12 +118,21 @@ pub(super) fn render_explorer_window(
         }
     }
     if focused && explorer.searching {
-        // Typing goes to the search bar in the header.
+        // Typing goes to the search box.
         let typed = text_width(&config.ui.explorer.focus_marker, config.editor.ambiguous_width)
             + 1
             + text_width(&explorer.query, config.editor.ambiguous_width);
-        let x = u16::try_from(typed).unwrap_or(u16::MAX).saturating_add(1).min(panel_width.saturating_sub(1));
-        frame.cursor = Some((rect.x.saturating_add(x), rect.y, cursor_style(config.ui.cursor.insert)));
+        let x = u16::try_from(typed)
+            .unwrap_or(u16::MAX)
+            .saturating_add(2)
+            .min(panel_width.saturating_sub(2));
+        frame.cursor = (rect.height > 1).then(|| {
+            (
+                rect.x.saturating_add(x),
+                rect.y.saturating_add(1),
+                cursor_style(config.ui.cursor.insert),
+            )
+        });
     } else if focused {
         frame.cursor = explorer
             .rows
@@ -134,7 +141,8 @@ pub(super) fn render_explorer_window(
             .and_then(|row| u16::try_from(row).ok())
             .map(|row| {
                 (
-                    rect.x.saturating_add(1.min(panel_width.saturating_sub(1))),
+                    // The margin left of the tree, so the cursor doesn't cover its lines.
+                    rect.x,
                     body.y.saturating_add(row),
                     cursor_style(config.ui.cursor.normal),
                 )
@@ -172,38 +180,8 @@ pub(super) fn render_explorer_dock(
         );
     }
 
-    for x in 0..panel_width {
-        grid.set_cell(x, 0, " ", Style::ExplorerHeader);
-    }
-    // Matches out of what is read so far while a search filters the tree.
-    let count = if explorer.query.is_empty() {
-        String::new()
-    } else {
-        explorer.total.to_string()
-    };
-    let count_width =
-        u16::try_from(text_width(&count, config.editor.ambiguous_width)).unwrap_or(panel_width);
-    let text_right = panel_width.saturating_sub(count_width).saturating_sub(1);
-    grid.put_text_clipped(text_right, 0, &count, Style::ExplorerCount, panel_width);
-    // What is typed stays in the bar while the tree loads; the loading line goes under the
-    // results.
-    if explorer.searching || !explorer.query.is_empty() {
-        let x = grid.put_text_clipped(
-            1,
-            0,
-            &config.ui.explorer.focus_marker,
-            Style::ExplorerHeader,
-            panel_width,
-        );
-        grid.put_text_clipped(
-            x.saturating_add(1),
-            0,
-            &explorer.query,
-            Style::ExplorerHeader,
-            text_right.saturating_sub(1),
-        );
-    } else {
-        grid.put_text_clipped(1, 0, &explorer.title, Style::ExplorerHeader, text_right);
+    if body.y >= 3 {
+        render_explorer_search_box(grid, explorer, config, panel_width);
     }
 
     let body_top = body.y;
@@ -300,6 +278,65 @@ pub(super) fn render_explorer_dock(
             );
         }
     }
+}
+
+/// The titled box at the top of the panel: the prompt, the query and how many rows match.
+fn render_explorer_search_box(
+    grid: &mut CellGrid,
+    explorer: &ExplorerUiState,
+    config: &Config,
+    panel_width: u16,
+) {
+    if panel_width < 4 {
+        return;
+    }
+    let (horizontal, vertical, top_left, top_right, bottom_left, bottom_right) =
+        config.ui.explorer.search_border.glyphs();
+    let last = panel_width - 1;
+    for x in 1..last {
+        grid.set_cell(x, 0, &horizontal.to_string(), Style::ExplorerBorder);
+        grid.set_cell(x, 1, " ", Style::ExplorerHeader);
+        grid.set_cell(x, 2, &horizontal.to_string(), Style::ExplorerBorder);
+    }
+    for (x, top, bottom) in [(0, top_left, bottom_left), (last, top_right, bottom_right)] {
+        grid.set_cell(x, 0, &top.to_string(), Style::ExplorerBorder);
+        grid.set_cell(x, 1, &vertical.to_string(), Style::ExplorerBorder);
+        grid.set_cell(x, 2, &bottom.to_string(), Style::ExplorerBorder);
+    }
+    let title = format!(" {} ", explorer.title);
+    let title_width =
+        u16::try_from(text_width(&title, config.editor.ambiguous_width)).unwrap_or(last);
+    grid.put_text_clipped(
+        panel_width.saturating_sub(title_width) / 2,
+        0,
+        &title,
+        Style::ExplorerHeader,
+        last,
+    );
+    // Matches out of what is read so far while a search filters the tree.
+    let count = if explorer.query.is_empty() {
+        format!("{0}/{0}", explorer.total)
+    } else {
+        explorer.total.to_string()
+    };
+    let count_width =
+        u16::try_from(text_width(&count, config.editor.ambiguous_width)).unwrap_or(last);
+    let count_x = last.saturating_sub(count_width).saturating_sub(1);
+    grid.put_text_clipped(count_x, 1, &count, Style::ExplorerCount, last);
+    let x = grid.put_text_clipped(
+        2,
+        1,
+        &config.ui.explorer.focus_marker,
+        Style::ExplorerHeader,
+        count_x,
+    );
+    grid.put_text_clipped(
+        x.saturating_add(1),
+        1,
+        &explorer.query,
+        Style::ExplorerHeader,
+        count_x.saturating_sub(1),
+    );
 }
 
 pub(super) fn explorer_segment_style(role: ExplorerSegmentRole) -> Style {

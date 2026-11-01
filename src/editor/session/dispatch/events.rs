@@ -519,6 +519,9 @@ impl InteractiveApplication {
                     });
                 let over_explorer = explorer_window.is_some();
                 if let Some(window) = explorer_window {
+                    // Focus opens the search box and moves the tree, so read the row first.
+                    self.explorer
+                        .set_clicked(self.explorer_row_at(window, column, row));
                     if let Ok(plan) = self.window_session.plan_focus(
                         window,
                         &self.state.window_version(),

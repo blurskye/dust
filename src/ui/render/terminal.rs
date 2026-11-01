@@ -1,7 +1,7 @@
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    config::{AmbiguousWidth, BorderStyle, Config, KeyHintAnchor},
+    config::{AmbiguousWidth, Config, KeyHintAnchor},
     editor::EditorState,
     ui::{CellGrid, Style, geometry::text_width, window::WindowRect},
 };
@@ -163,7 +163,7 @@ pub(super) fn dock_terminal_panel(
             if tab.id == terminal.id {
                 Style::TerminalTitle
             } else {
-                Style::TerminalBorder
+                Style::Muted
             },
             right,
         );
@@ -325,12 +325,8 @@ pub(super) fn render_key_hints(
             frame.grid.set_cell(x, y, " ", Style::KeyHintBackground);
         }
     }
-    let (horizontal, vertical, top_left, top_right, bottom_left, bottom_right) = match policy.border
-    {
-        BorderStyle::Double => ('═', '║', '╔', '╗', '╚', '╝'),
-        BorderStyle::Rounded => ('─', '│', '╭', '╮', '╰', '╯'),
-        BorderStyle::Single => ('─', '│', '┌', '┐', '└', '┘'),
-    };
+    let (horizontal, vertical, top_left, top_right, bottom_left, bottom_right) =
+        policy.border.glyphs();
     for x in left.saturating_add(1)..right.saturating_sub(1) {
         frame
             .grid

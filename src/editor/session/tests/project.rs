@@ -618,11 +618,11 @@ fn explorer_lazily_loads_and_opens_scoped_file() {
     wait_explorer(&mut app);
     assert_eq!(app.explorer.tree().visible().len(), 2);
     let explorer_ui = app.ui.explorer.as_ref().expect("dedicated explorer ui");
-    assert_eq!(explorer_ui.rows.len(), 1, "single root remains hidden");
-    assert!(explorer_ui.rows[0].node_id > 0);
-    assert!(explorer_ui.rows[0].selected);
+    assert_eq!(explorer_ui.rows.len(), 2, "the root and its file");
+    assert!(explorer_ui.rows[1].node_id > 0);
+    assert!(explorer_ui.rows[1].selected);
     assert!(
-        explorer_ui.rows[0]
+        explorer_ui.rows[1]
             .segments
             .iter()
             .any(|segment| segment.role == crate::ui::ExplorerSegmentRole::File)
@@ -634,7 +634,7 @@ fn explorer_lazily_loads_and_opens_scoped_file() {
     }
     app.sync_explorer_ui();
     assert!(app.ui.explorer.as_ref().is_some_and(|ui| {
-        ui.rows[0].segments.iter().any(|segment| {
+        ui.rows[1].segments.iter().any(|segment| {
             segment.role == crate::ui::ExplorerSegmentRole::Icon && segment.text == "."
         })
     }));
@@ -645,7 +645,7 @@ fn explorer_lazily_loads_and_opens_scoped_file() {
     }
     app.sync_explorer_ui();
     assert!(app.ui.explorer.as_ref().is_some_and(|ui| {
-        ui.rows[0].segments.iter().any(|segment| {
+        ui.rows[1].segments.iter().any(|segment| {
             segment.role == crate::ui::ExplorerSegmentRole::Icon && segment.text == "·"
         })
     }));
@@ -861,17 +861,21 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
     app.open_explorer();
     wait_explorer(&mut app);
     let explorer = app.ui.explorer.as_ref().expect("explorer projection");
-    assert_eq!(explorer.total, 40);
-    assert_eq!(explorer.rows.len(), 8);
+    assert_eq!(explorer.total, 41);
+    assert_eq!(explorer.rows.len(), 6);
     assert!(explorer.rows.len() < explorer.total);
     assert_eq!(explorer.rows.iter().filter(|row| row.selected).count(), 1);
     let first_child = app.explorer.tree().selected_id().expect("first child");
     let projection_generation = app.explorer.tree().projection_generation();
 
     app.move_explorer_selection(-1);
+    let root = app.explorer.tree().selected_id();
+    assert_ne!(root, Some(first_child));
+    app.move_explorer_selection(1);
     assert_eq!(app.explorer.tree().selected_id(), Some(first_child));
     app.explorer_collapse_or_parent();
-    assert_eq!(app.explorer.tree().selected_id(), Some(first_child));
+    assert_eq!(app.explorer.tree().selected_id(), root);
+    app.move_explorer_selection(1);
     assert_eq!(
         app.explorer.tree().projection_generation(),
         projection_generation
@@ -879,7 +883,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
 
     app.handle_event(crate::ui::UiEvent::Resize(80, 20));
     let explorer = app.ui.explorer.as_ref().expect("grown projection");
-    assert_eq!(explorer.rows.len(), 18);
+    assert_eq!(explorer.rows.len(), 16);
     assert_eq!(explorer.rows.iter().filter(|row| row.selected).count(), 1);
     assert_eq!(
         app.explorer.tree().projection_generation(),
@@ -887,7 +891,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
     );
     app.handle_event(crate::ui::UiEvent::Resize(80, 8));
     let explorer = app.ui.explorer.as_ref().expect("shrunk projection");
-    assert_eq!(explorer.rows.len(), 6);
+    assert_eq!(explorer.rows.len(), 4);
     assert_eq!(explorer.rows.iter().filter(|row| row.selected).count(), 1);
     assert_eq!(
         app.explorer.tree().projection_generation(),
@@ -896,7 +900,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
 
     app.move_explorer_selection(30);
     let explorer = app.ui.explorer.as_ref().expect("scrolled projection");
-    assert_eq!(explorer.rows.len(), 6);
+    assert_eq!(explorer.rows.len(), 4);
     assert!(explorer.scroll > 0);
     assert!(explorer.rows.iter().any(|row| row.selected));
     let before_page = app
@@ -950,8 +954,14 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
     app.page_explorer_selection(1);
     assert_eq!(app.explorer.tree().selected_id(), bottom);
     let first_viewport_node = app.ui.explorer.as_ref().unwrap().rows[0].node_id;
-    app.input.observe_mouse(1, 1);
-    app.explorer_mouse_select();
+    app.handle_event(UiEvent::Mouse {
+        key: KeyEvent::mouse(
+            crate::editor::input::KeyCode::MouseLeftDown,
+            crate::editor::input::Modifiers::default(),
+        ),
+        column: rect.x.saturating_add(1),
+        row: rect.y.saturating_add(3),
+    });
     assert_eq!(
         app.explorer.tree().selected_id(),
         Some(crate::workspace::ExplorerNodeId(first_viewport_node))

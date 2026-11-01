@@ -417,7 +417,11 @@ impl TestSession {
             .and_then(|projection| projection.window(ids.window))
             .expect("projected explorer fixture")
             .rect;
-        crate::ui::geometry::explorer_body_geometry(rect, self.application.configuration.settings())
+        crate::ui::geometry::explorer_body_geometry(
+            rect,
+            self.application.configuration.settings(),
+            self.application.explorer_search_box(view),
+        )
     }
     pub(super) fn explorer_graph_shape(&self) -> (usize, usize, usize) {
         let ids = self.explorer_content_ids();

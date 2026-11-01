@@ -87,12 +87,23 @@ impl InteractiveApplication {
         self.follow_agent_pane();
     }
 
+    /// The search box shows on a focused explorer and on any that holds a query.
+    pub(super) fn explorer_search_box(&self, view: u64) -> bool {
+        self.window_session.focused_explorer() == Some(view)
+            || self
+                .explorer
+                .filtering(super::super::explorer::ExplorerViewId(view))
+    }
+
     pub(super) fn refresh_window_content(&mut self) {
         self.sync_ui_diagnostics();
         self.retire_stale_picker();
         self.retire_stale_explorer_intents();
-        self.window_session
-            .project_content(self.ui.picker.as_ref(), self.configuration.settings());
+        self.window_session.project_content(
+            self.ui.picker.as_ref(),
+            self.configuration.settings(),
+            self.explorer_search_box(1),
+        );
         if let Some(geometry) = self.window_session.content().picker {
             if let Some(scroll) = self.search.picker_scroll(usize::from(geometry.list.height)) {
                 if let Some(ui) = &mut self.ui.picker {
@@ -820,7 +831,8 @@ impl InteractiveApplication {
         if self.ui.explorer.is_none() {
             return;
         }
-        let title = crate::ui::workspace_title(&self.state, self.configuration.settings());
+        let title = self.message("explorer_title", &[]);
+        let root_label = crate::ui::workspace_title(&self.state, self.configuration.settings());
         let explorer_windows = self
             .window_session
             .native_ids()
@@ -844,10 +856,18 @@ impl InteractiveApplication {
         for (view, window, rect) in explorer_windows {
             let body = if view == 1 {
                 self.window_session.content().explorer.unwrap_or_else(|| {
-                    crate::ui::geometry::explorer_body_geometry(rect, self.configuration.settings())
+                    crate::ui::geometry::explorer_body_geometry(
+                        rect,
+                        self.configuration.settings(),
+                        self.explorer_search_box(view),
+                    )
                 })
             } else {
-                crate::ui::geometry::explorer_body_geometry(rect, self.configuration.settings())
+                crate::ui::geometry::explorer_body_geometry(
+                    rect,
+                    self.configuration.settings(),
+                    self.explorer_search_box(view),
+                )
             };
             let Ok(projection) = self.explorer.projection_for(
                 super::super::explorer::ExplorerViewId(view),
@@ -855,6 +875,7 @@ impl InteractiveApplication {
                 body,
                 decorations,
                 title.clone(),
+                &root_label,
             ) else {
                 continue;
             };
@@ -884,6 +905,7 @@ impl InteractiveApplication {
                     body,
                     decorations,
                     title,
+                    &root_label,
                 )
                 .ok();
         }
@@ -1065,23 +1087,36 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn explorer_mouse_select(&mut self) {
-        let Some((column, row)) = self.input.mouse_position() else {
+        let Some(id) = self.explorer.take_clicked() else {
             return;
         };
-        let view = self.window_session.focused_explorer().unwrap_or(1);
-        let Some(ids) = self.window_session.native_ids().explorer_view(view) else {
-            return;
+        self.explorer.select(id);
+        if self.window_session.focused_explorer().unwrap_or(1) == 1 {
+            self.set_explorer_focus(true);
+        }
+        self.sync_explorer_ui();
+    }
+
+    /// The tree row under the pointer in the layout now on screen.
+    pub(super) fn explorer_row_at(
+        &self,
+        window: crate::ui::window::WindowId,
+        column: u16,
+        row: u16,
+    ) -> Option<ExplorerNodeId> {
+        let view = match self.window_session.native_ids().target_for_window(window)? {
+            NativeSurfaceTarget::Explorer => 1,
+            NativeSurfaceTarget::ExplorerView(view) => view,
+            _ => return None,
         };
-        let Some(rect) = self
-            .compositor_projection()
-            .and_then(|projection| projection.window(ids.window))
-            .map(|window| window.rect)
-        else {
-            return;
-        };
-        let body = crate::ui::geometry::explorer_body_geometry(rect, self.configuration.settings());
+        let rect = self.compositor_projection()?.window(window)?.rect;
+        let body = crate::ui::geometry::explorer_body_geometry(
+            rect,
+            self.configuration.settings(),
+            self.explorer_search_box(view),
+        );
         if !rect_contains_point(body, column, row) {
-            return;
+            return None;
         }
         let explorer_ui = if view == 1 {
             self.ui.explorer.as_ref()
@@ -1093,17 +1128,7 @@ impl InteractiveApplication {
                 .map(|candidate| &candidate.content)
         };
         let index = usize::from(row.saturating_sub(body.y));
-        let Some(id) = explorer_ui
-            .and_then(|explorer| explorer.rows.get(index))
-            .map(|row| row.node_id)
-        else {
-            return;
-        };
-        self.explorer.select(ExplorerNodeId(id));
-        if view == 1 {
-            self.set_explorer_focus(true);
-        }
-        self.sync_explorer_ui();
+        explorer_ui?.rows.get(index).map(|row| ExplorerNodeId(row.node_id))
     }
 
     pub(in crate::editor::session) fn refresh_explorer(&mut self) {

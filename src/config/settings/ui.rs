@@ -13,6 +13,18 @@ pub enum BorderStyle {
     Rounded,
 }
 
+impl BorderStyle {
+    /// Horizontal, vertical, then the top-left, top-right, bottom-left and bottom-right corners.
+    #[must_use]
+    pub fn glyphs(self) -> (char, char, char, char, char, char) {
+        match self {
+            Self::Double => ('═', '║', '╔', '╗', '╚', '╝'),
+            Self::Rounded => ('─', '│', '╭', '╮', '╰', '╯'),
+            Self::Single => ('─', '│', '┌', '┐', '└', '┘'),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PromptTextConfig {
@@ -482,6 +494,7 @@ pub struct ExplorerConfig {
     pub maximum_preview_bytes: usize,
     pub maximum_preview_lines: usize,
     pub focus_marker: String,
+    pub search_border: BorderStyle,
     pub loading_label: String,
     pub icon_mode: ExplorerIconMode,
     pub glyphs: ExplorerGlyphs,
@@ -525,6 +538,7 @@ impl Default for ExplorerConfig {
             maximum_preview_bytes: 256 * 1024,
             maximum_preview_lines: 20,
             focus_marker: ">".into(),
+            search_border: BorderStyle::Rounded,
             loading_label: "loading…".into(),
             icon_mode: ExplorerIconMode::NerdFont,
             glyphs: ExplorerGlyphs {

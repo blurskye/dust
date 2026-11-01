@@ -225,7 +225,12 @@ impl WindowSession {
         &self.content
     }
 
-    pub(super) fn project_content(&mut self, picker: Option<&PickerUiState>, config: &Config) {
+    pub(super) fn project_content(
+        &mut self,
+        picker: Option<&PickerUiState>,
+        config: &Config,
+        explorer_search_box: bool,
+    ) {
         let Some(layout) = &self.layout else {
             return;
         };
@@ -238,7 +243,7 @@ impl WindowSession {
                 .surfaces
                 .explorer
                 .and_then(rect)
-                .map(|rect| explorer_body_geometry(rect, config)),
+                .map(|rect| explorer_body_geometry(rect, config, explorer_search_box)),
             terminal: layout
                 .surfaces
                 .terminal

@@ -1008,6 +1008,7 @@ fn buffer_line_begins_after_the_explorer_dock() {
             searching: false,
             preview_lines: Vec::new(),
         }),
+        explorer_focused: true,
         ..UiState::default()
     };
     let loaded = crate::config::load_bundled_config();
@@ -2414,30 +2415,30 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
     assert_eq!(super::explorer_panel_width(&loaded.config, 2), None);
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 100, 20);
     assert!(frame.grid.row_text(0).contains("Explorer"));
-    assert!(frame.grid.row_text(1).contains("src"));
-    assert!(frame.grid.row_text(2).contains("main.rs"));
+    assert!(frame.grid.row_text(3).contains("src"));
+    assert!(frame.grid.row_text(4).contains("main.rs"));
     assert_eq!(
-        frame.grid.get(1, 1).expect("tree segment").style,
+        frame.grid.get(1, 3).expect("tree segment").style,
         crate::ui::Style::ExplorerTree
     );
     assert_eq!(
-        frame.grid.get(3, 1).expect("icon segment").style,
+        frame.grid.get(3, 3).expect("icon segment").style,
         crate::ui::Style::ExplorerIcon
     );
     assert_eq!(
-        frame.grid.get(5, 1).expect("directory name").style,
+        frame.grid.get(5, 3).expect("directory name").style,
         crate::ui::Style::ExplorerDirectory
     );
     assert_eq!(
-        frame.grid.get(37, 1).expect("git decoration").style,
+        frame.grid.get(37, 3).expect("git decoration").style,
         crate::ui::Style::ExplorerGit
     );
     assert_eq!(
-        frame.grid.get(38, 1).expect("diagnostic decoration").style,
+        frame.grid.get(38, 3).expect("diagnostic decoration").style,
         crate::ui::Style::ExplorerDiagnostic
     );
     assert_eq!(
-        frame.grid.get(1, 2).expect("selected row").style,
+        frame.grid.get(1, 4).expect("selected row").style,
         crate::ui::Style::ExplorerSelection
     );
     assert_eq!(
@@ -2460,7 +2461,7 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
             .style,
         crate::ui::Style::Muted
     );
-    assert!(frame.cursor.is_some_and(|(x, y, _)| x == 1 && y == 2));
+    assert!(frame.cursor.is_some_and(|(x, y, _)| x == 0 && y == 4));
     assert!(frame.grid.row_text(19).contains("NORMAL"));
     let mut editor_ui = ui.clone();
     editor_ui.explorer_focused = false;

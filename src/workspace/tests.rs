@@ -395,19 +395,19 @@ fn explorer_state_is_lazy_stable_and_rejects_stale_loads() {
     let nested_id = explorer.visible_ids()[2];
     explorer.select(child_id);
     let nested_generation = explorer.projection_generation();
-    explorer.move_selection_from(-1, 1);
-    assert_eq!(explorer.selected_id(), Some(child_id));
+    explorer.move_selection(-1);
+    assert_eq!(explorer.selected_id(), Some(root_id));
     assert_eq!(explorer.projection_generation(), nested_generation);
 
     explorer.select(nested_id);
-    explorer.collapse_or_parent_from(1);
+    explorer.collapse_or_parent();
     assert_eq!(explorer.selected_id(), Some(child_id));
-    explorer.collapse_or_parent_from(1);
+    explorer.collapse_or_parent();
     let collapsed_generation = explorer.projection_generation();
     assert_eq!(explorer.selected_id(), Some(child_id));
     assert_eq!(explorer.visible_ids(), &[root_id, child_id]);
-    explorer.collapse_or_parent_from(1);
-    assert_eq!(explorer.selected_id(), Some(child_id));
+    explorer.collapse_or_parent();
+    assert_eq!(explorer.selected_id(), Some(root_id));
     assert_eq!(explorer.projection_generation(), collapsed_generation);
 
     explorer.select(root_id);
@@ -420,7 +420,7 @@ fn explorer_state_is_lazy_stable_and_rejects_stale_loads() {
 }
 
 #[test]
-fn explorer_presented_range_hides_single_root_but_keeps_multi_roots_selectable() {
+fn explorer_keeps_multi_roots_selectable() {
     let first = tempdir().expect("first");
     let second = tempdir().expect("second");
     let workspace = WorkspaceState::new(
@@ -441,9 +441,9 @@ fn explorer_presented_range_hides_single_root_but_keeps_multi_roots_selectable()
     explorer.reset_roots(workspace.roots(), workspace.root_revision());
     let roots = explorer.visible_ids().to_vec();
     assert_eq!(roots.len(), 2);
-    explorer.move_selection_from(1, 0);
+    explorer.move_selection(1);
     assert_eq!(explorer.selected_id(), Some(roots[1]));
-    explorer.move_selection_from(-1, 0);
+    explorer.move_selection(-1);
     assert_eq!(explorer.selected_id(), Some(roots[0]));
 }
 

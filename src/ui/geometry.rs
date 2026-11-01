@@ -139,22 +139,20 @@ pub fn picker_content_geometry(
     })
 }
 
-/// The row that names the root and, while searching, holds the query.
-const EXPLORER_HEADER_ROWS: u16 = 1;
+/// The box around the explorer's search row.
+const EXPLORER_SEARCH_ROWS: u16 = 3;
 
 #[must_use]
-pub fn explorer_body_geometry(rect: WindowRect, config: &Config) -> WindowRect {
+pub fn explorer_body_geometry(rect: WindowRect, config: &Config, search_box: bool) -> WindowRect {
+    let header = if search_box { EXPLORER_SEARCH_ROWS } else { 0 };
     WindowRect {
         x: rect.x,
-        y: rect
-            .y
-            .saturating_add(EXPLORER_HEADER_ROWS)
-            .min(rect.y.saturating_add(rect.height)),
+        y: rect.y.saturating_add(header).min(rect.y.saturating_add(rect.height)),
         width: rect.width.saturating_sub(1),
         height: rect
             .height
             .saturating_sub(u16::from(config.ui.status_line.enabled))
-            .saturating_sub(EXPLORER_HEADER_ROWS)
+            .saturating_sub(header)
             .min(u16::try_from(config.ui.explorer.maximum_visible_rows).unwrap_or(u16::MAX)),
     }
 }

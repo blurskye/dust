@@ -438,33 +438,24 @@ impl ExplorerState {
         }
     }
     pub fn move_selection(&mut self, delta: isize) {
-        self.move_selection_from(delta, 0);
-    }
-    pub fn move_selection_from(&mut self, delta: isize, first_presented: usize) {
-        if first_presented >= self.visible_nodes.len() {
+        if self.visible_nodes.is_empty() {
             return;
         }
         let current = self
             .selected
             .and_then(|id| self.visible_positions.get(&id).copied())
-            .unwrap_or(first_presented)
-            .max(first_presented);
-        let next = (current as isize).saturating_add(delta).clamp(
-            first_presented as isize,
-            self.visible_nodes.len() as isize - 1,
-        ) as usize;
+            .unwrap_or(0);
+        let next = (current as isize)
+            .saturating_add(delta)
+            .clamp(0, self.visible_nodes.len() as isize - 1) as usize;
         self.selected = Some(self.visible_nodes[next]);
     }
-    pub fn ensure_selection_from(&mut self, first_presented: usize) {
-        if first_presented >= self.visible_nodes.len() {
-            return;
-        }
-        let selected_is_presented = self
+    pub fn ensure_selection(&mut self) {
+        let selected_is_visible = self
             .selected
-            .and_then(|id| self.visible_positions.get(&id))
-            .is_some_and(|index| *index >= first_presented);
-        if !selected_is_presented {
-            self.selected = Some(self.visible_nodes[first_presented]);
+            .is_some_and(|id| self.visible_positions.contains_key(&id));
+        if !selected_is_visible {
+            self.selected = self.visible_nodes.first().copied();
         }
     }
     pub fn select(&mut self, id: ExplorerNodeId) {
@@ -473,18 +464,11 @@ impl ExplorerState {
         }
     }
     pub fn collapse_or_parent(&mut self) {
-        self.collapse_or_parent_from(0);
-    }
-    pub fn collapse_or_parent_from(&mut self, first_presented: usize) {
         let Some(id) = self.selected else { return };
         if self.expanded.remove(&id) {
             self.rebuild_visible_projection();
         } else if let Some(parent) = self.data.nodes.get(&id).and_then(|node| node.parent) {
-            if self
-                .visible_positions
-                .get(&parent)
-                .is_some_and(|index| *index >= first_presented)
-            {
+            if self.visible_positions.contains_key(&parent) {
                 self.selected = Some(parent)
             }
         }

@@ -73,6 +73,8 @@ pub(in crate::editor::session) struct ExplorerSession {
     ignored: bool,
     /// Whether keys type into the search at the top.
     searching: bool,
+    /// The row under the last pointer press, read before focus moved the tree.
+    clicked: Option<ExplorerNodeId>,
     follow: Option<PathBuf>,
     next_load: Option<ExplorerNodeId>,
     watch: ExplorerWatchService,
@@ -107,6 +109,7 @@ impl ExplorerSession {
             hidden: false,
             ignored: false,
             searching: false,
+            clicked: None,
             follow: None,
             next_load: None,
             watch,
@@ -340,31 +343,30 @@ impl ExplorerSession {
         self.mark_view_changed();
         self.retire_changed_preview_selection();
     }
-    pub(in crate::editor::session) fn first_presented(&self) -> usize {
-        usize::from(
-            self.root_count == 1
-                && self.tree().visible_ids().first().is_some_and(|id| {
-                    self.tree()
-                        .node(*id)
-                        .is_some_and(|node| node.kind == ExplorerKind::Root)
-                }),
-        )
-    }
     pub(in crate::editor::session) fn navigate(&mut self, delta: isize) {
-        let first = self.first_presented();
-        self.tree_mut().move_selection_from(delta, first);
+        self.tree_mut().move_selection(delta);
         self.mark_view_changed();
         self.retire_changed_preview_selection();
     }
     pub(in crate::editor::session) fn parent(&mut self) {
-        let first = self.first_presented();
-        self.tree_mut().collapse_or_parent_from(first);
+        self.tree_mut().collapse_or_parent();
         self.mark_view_changed();
         self.retire_changed_preview_selection();
     }
     pub(in crate::editor::session) fn start_search(&mut self) {
         self.searching = true;
         self.mark_view_changed();
+    }
+    pub(in crate::editor::session) fn set_clicked(&mut self, clicked: Option<ExplorerNodeId>) {
+        self.clicked = clicked;
+    }
+    pub(in crate::editor::session) fn take_clicked(&mut self) -> Option<ExplorerNodeId> {
+        self.clicked.take()
+    }
+    /// Whether this view's explorer has a query, or the user is typing one.
+    pub(in crate::editor::session) fn filtering(&self, view: ExplorerViewId) -> bool {
+        (self.searching && self.active_view == view)
+            || self.tree_for(view).is_some_and(|tree| !tree.filter().is_empty())
     }
     pub(in crate::editor::session) fn searching(&self) -> bool {
         self.searching
@@ -377,17 +379,17 @@ impl ExplorerSession {
     /// Select the first match unless a match is selected; matches turn up as the
     /// background reads finish.
     pub(in crate::editor::session) fn select_search_match(&mut self) {
-        let first = self.first_presented();
         let tree = self.tree();
         let needle = tree.filter().to_lowercase();
-        let matches = |node: &crate::workspace::ExplorerNode| node.name.to_lowercase().contains(&needle);
+        let matches = |node: &crate::workspace::ExplorerNode| {
+            node.kind != ExplorerKind::Root && node.name.to_lowercase().contains(&needle)
+        };
         if needle.is_empty() || tree.selected_node().is_some_and(matches) {
             return;
         }
         let found = tree
             .visible_ids()
             .iter()
-            .skip(first)
             .find(|id| tree.node(**id).is_some_and(matches))
             .copied();
         if let Some(found) = found {
@@ -696,13 +698,14 @@ impl ExplorerSession {
         body: crate::ui::window::WindowRect,
         git_status: &BTreeMap<PathBuf, crate::workspace::git::GitFileStatus>,
         title: String,
+        root_label: &str,
     ) -> Result<ExplorerUiState, &'static str> {
         if self.tree_for(view).is_none() {
             return Err("explorer view is unavailable");
         }
         let active = self.active_view;
         self.active_view = view;
-        let projection = self.projection(config, body, git_status, title);
+        let projection = self.projection(config, body, git_status, title, root_label);
         self.active_view = active;
         Ok(projection)
     }
@@ -712,16 +715,15 @@ impl ExplorerSession {
         body: crate::ui::window::WindowRect,
         git_status: &BTreeMap<PathBuf, crate::workspace::git::GitFileStatus>,
         title: String,
+        root_label: &str,
     ) -> ExplorerUiState {
-        let hidden_root_rows = self.first_presented();
-        self.tree_mut().ensure_selection_from(hidden_root_rows);
+        self.tree_mut().ensure_selection();
         let tree = self.tree();
         let visible_ids = tree.visible_ids();
-        let total = visible_ids.len().saturating_sub(hidden_root_rows);
+        let total = visible_ids.len();
         let selected_id = tree.selected_id();
         let selected = selected_id
-            .and_then(|id| tree.visible_index(id))
-            .and_then(|index| index.checked_sub(hidden_root_rows));
+            .and_then(|id| tree.visible_index(id));
         let maximum = usize::from(body.height);
         let previous_scroll = self.active_scroll().min(total.saturating_sub(maximum));
         let scroll = selected.map_or(previous_scroll, |selected| {
@@ -737,7 +739,7 @@ impl ExplorerSession {
         let glyphs = config.active_glyphs();
         let rows = visible_ids
             .iter()
-            .skip(hidden_root_rows.saturating_add(scroll))
+            .skip(scroll)
             .take(maximum)
             .filter_map(|id| tree.node(*id))
             .map(|node| {
@@ -762,9 +764,8 @@ impl ExplorerSession {
                     ExplorerSegmentRole::Git
                 } else {
                     match node.kind {
-                        ExplorerKind::Root | ExplorerKind::Directory => {
-                            ExplorerSegmentRole::Directory
-                        }
+                        ExplorerKind::Root => ExplorerSegmentRole::IconPurple,
+                        ExplorerKind::Directory => ExplorerSegmentRole::Directory,
                         ExplorerKind::File => ExplorerSegmentRole::File,
                         ExplorerKind::Symlink => ExplorerSegmentRole::Symlink,
                     }
@@ -789,10 +790,10 @@ impl ExplorerSession {
                         (icon.glyph.into(), explorer_icon_role(icon.color))
                     }
                     (ExplorerKind::Root | ExplorerKind::Directory, _, true) => {
-                        (glyphs.directory_open.clone(), ExplorerSegmentRole::Icon)
+                        (glyphs.directory_open.clone(), ExplorerSegmentRole::IconBlue)
                     }
                     (ExplorerKind::Root | ExplorerKind::Directory, _, false) => {
-                        (glyphs.directory.clone(), ExplorerSegmentRole::Icon)
+                        (glyphs.directory.clone(), ExplorerSegmentRole::IconBlue)
                     }
                     (ExplorerKind::File, _, _) => (glyphs.file.clone(), ExplorerSegmentRole::Icon),
                     (ExplorerKind::Symlink, _, _) => {
@@ -815,7 +816,11 @@ impl ExplorerSession {
                     role: ExplorerSegmentRole::Tree,
                 });
                 segments.push(ExplorerUiSegment {
-                    text: node.name.clone(),
+                    text: if node.kind == ExplorerKind::Root && self.root_count == 1 {
+                        root_label.to_owned()
+                    } else {
+                        node.name.clone()
+                    },
                     role: name_role,
                 });
                 let right_segments = git_status
@@ -1172,6 +1177,7 @@ mod tests {
                 body,
                 &git,
                 "Files".into(),
+                "root",
             ))
             .rows
             .len();
