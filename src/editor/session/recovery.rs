@@ -42,6 +42,8 @@ pub(super) struct RecoverySession {
     records: Vec<(PathBuf, RecoveryRecord)>,
     revisions: HashMap<BufferId, BufferRevision>,
     pruned: HashMap<BufferId, BufferRevision>,
+    oversized: std::collections::HashSet<BufferId>,
+    pub(super) oversized_notice: bool,
     scheduled: HashMap<BufferId, (BufferRevision, Instant)>,
     discovery_queued: bool,
     cleanup_queued: bool,
@@ -54,6 +56,8 @@ impl RecoverySession {
             records: Vec::new(),
             revisions: HashMap::new(),
             pruned: HashMap::new(),
+            oversized: std::collections::HashSet::new(),
+            oversized_notice: false,
             scheduled: HashMap::new(),
             discovery_queued: false,
             cleanup_queued: false,
@@ -117,6 +121,11 @@ impl RecoverySession {
                 continue;
             }
             let revision = state.text.revision();
+            // Journals have a size limit: say so once rather than fail on every edit.
+            if state.dirty && !crate::files::recovery_size_allowed(state.text.len_bytes() as u64) {
+                self.oversized_notice |= self.oversized.insert(buffer);
+                continue;
+            }
             if state.dirty {
                 if !self.recorded(buffer, revision)
                     && (exiting

@@ -89,7 +89,7 @@ use crate::process::PtyId;
 use crate::telemetry::{LiveCrashSnapshot, LogLevel};
 use crate::tools::{
     PackageOperation, RegistryRequest, RegistryResult, RegistryService, ToolDefinition, ToolKind,
-    ToolOperation, ToolStatus, discover_executable, is_nixos_host, managed_tool_executable,
+    ToolOperation, ToolStatus, discover_executable, is_nixos_host, managed_formatter, managed_tool_executable,
     nix_lsp_launch_environment, nix_lsp_profile_installed,
 };
 use crate::ui::{
@@ -163,6 +163,11 @@ struct FormatOnSave {
 
 struct InteractiveApplication {
     format_on_save: Option<FormatOnSave>,
+    /// Last seen modification time and length of each open file.
+    disk_stamps: std::collections::HashMap<crate::editor::BufferId, (Option<std::time::SystemTime>, u64)>,
+    pub(super) next_disk_check: Option<std::time::Instant>,
+    /// What project replace is looking for, while it asks what to replace it with.
+    replace_query: Option<String>,
     session_load_requested: bool,
     notices: super::notifications::NoticeSession,
     clock: std::sync::Arc<dyn crate::clock::Clock>,
@@ -321,6 +326,7 @@ pub fn run_interactive(
         application.process_dap_project_root();
         application.process_lsp_events();
         application.process_format_on_save_deadline();
+        application.process_disk_changes();
         application.restart_lsp_if_due();
         application.process_dap_events();
         application.process_execution_preflight();

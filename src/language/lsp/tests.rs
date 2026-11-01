@@ -385,6 +385,7 @@ fn canonical_launch_preserves_the_requested_multicall_name() {
         version: None,
         release: None,
         launch_args: Vec::new(),
+        format_arguments: Vec::new(),
         probe_args: Vec::new(),
         debug_program_policy: crate::tools::DebugProgramPolicy::default(),
         project_root_markers: vec!["Cargo.toml".into()],
@@ -410,6 +411,7 @@ fn server_that_never_initializes_fails_within_the_request_timeout() {
         version: None,
         release: None,
         launch_args: vec!["2".into()],
+        format_arguments: Vec::new(),
         probe_args: Vec::new(),
         debug_program_policy: crate::tools::DebugProgramPolicy::default(),
         project_root_markers: vec!["Cargo.toml".into()],
@@ -513,6 +515,7 @@ while True:
         executable: python.display().to_string(),
         version: None,
         release: None,
+        format_arguments: Vec::new(),
         launch_args: vec![
             script.display().to_string(),
             trace_path.display().to_string(),

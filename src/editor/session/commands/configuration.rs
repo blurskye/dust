@@ -111,6 +111,14 @@ pub(super) fn register_commands(
     )?;
     register(
         registry,
+        "navigation.mark.jump",
+        "Jump to navigation mark",
+        ContextRequirement::Application,
+        ArgumentSchema::default().field("name", ArgumentType::String, true),
+        |invocation| Ok(AppEffect::MarkJump(string_arg(invocation, "name")?.into())),
+    )?;
+    register(
+        registry,
         "application.safe_mode.status",
         "Show safe-mode status",
         ContextRequirement::Application,
@@ -140,6 +148,22 @@ pub(super) fn register_commands(
         ContextRequirement::Workspace,
         ArgumentSchema::default(),
         |_| AppEffect::GitHunkNavigate(-1),
+    )?;
+    register(
+        registry,
+        "workspace.git.conflict.next",
+        "Go to next conflict",
+        ContextRequirement::Buffer,
+        ArgumentSchema::default(),
+        |_| AppEffect::GitConflictNavigate(1),
+    )?;
+    register(
+        registry,
+        "workspace.git.conflict.previous",
+        "Go to previous conflict",
+        ContextRequirement::Buffer,
+        ArgumentSchema::default(),
+        |_| AppEffect::GitConflictNavigate(-1),
     )?;
     register(
         registry,

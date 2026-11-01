@@ -265,7 +265,8 @@ impl TerminalSession {
         } else {
             (current + 1) % ids.len()
         };
-        self.select(PtyId(ids[next].0))
+        let id = PtyId(ids[next].0);
+        self.select(id) && self.display(id)
     }
     pub(in crate::editor::session) fn request_open(
         &mut self,

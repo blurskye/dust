@@ -841,3 +841,66 @@ fn several_cursors_change_every_match_and_type_on_every_line() {
     assert_eq!(app.state.views[view].mode, crate::editor::EditorMode::Normal);
     assert_eq!(text(&app), " bar food \n-x\n-yy\n");
 }
+
+#[test]
+fn unknown_key_after_a_prefix_ends_the_sequence_without_editing() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("prefix.txt");
+    fs::write(&path, b"Header\n").expect("file");
+    app.start_open(path);
+    wait_vfs(&mut app);
+    // Neither sequence is bound; the second key must not run as `a` or `o` would.
+    for character in ['[', 'o', ']', 'a'] {
+        app.handle_configured_key(KeyEvent::character(character));
+    }
+    assert_eq!(app.state.buffers[app.state.active_buffer_id().expect("buffer")].text.to_string(), "Header\n");
+    assert_eq!(app.state.views[app.state.active_view.expect("view")].mode, crate::editor::EditorMode::Normal);
+}
+
+#[test]
+fn conflict_keys_move_between_markers_and_wrap() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("merged.txt");
+    fs::write(&path, b"Header\n<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\nmid\n<<<<<<< ours\nc\n=======\nd\n>>>>>>> theirs\n").expect("file");
+    app.start_open(path);
+    wait_vfs(&mut app);
+    let line = |app: &mut InteractiveApplication| {
+        wait_vfs(app);
+        let view = &app.state.views[app.state.active_view.expect("view")];
+        app.state.buffers[view.buffer].text.byte_to_line(view.cursor).expect("line")
+    };
+    app.process_effect(AppEffect::GitConflictNavigate(1));
+    assert_eq!(line(&mut app), 1);
+    app.process_effect(AppEffect::GitConflictNavigate(1));
+    assert_eq!(line(&mut app), 7);
+    app.process_effect(AppEffect::GitConflictNavigate(1));
+    assert_eq!(line(&mut app), 1, "wraps to the first");
+    app.process_effect(AppEffect::GitConflictNavigate(-1));
+    assert_eq!(line(&mut app), 7, "wraps to the last");
+}
+
+#[test]
+fn clean_buffers_follow_the_disk_and_changed_ones_keep_their_text() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("watched.txt");
+    fs::write(&path, b"first\n").expect("file");
+    app.start_open(path.clone());
+    wait_vfs(&mut app);
+    let buffer = app.state.active_buffer_id().expect("buffer");
+    app.next_disk_check = None;
+    app.process_disk_changes();
+
+    // Longer content, so the length differs even if the clock did not tick.
+    fs::write(&path, b"from outside\n").expect("rewrite");
+    app.next_disk_check = None;
+    app.process_disk_changes();
+    wait_vfs(&mut app);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "from outside\n");
+
+    app.state.buffers[buffer].dirty = true;
+    fs::write(&path, b"outside again and longer\n").expect("rewrite");
+    app.next_disk_check = None;
+    app.process_disk_changes();
+    wait_vfs(&mut app);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "from outside\n", "unsaved work stays");
+}

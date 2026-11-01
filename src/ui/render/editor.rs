@@ -639,6 +639,12 @@ pub(super) fn render_editor_view(
                 x = x.saturating_add(advance);
             }
         }
+        if let Some(fold) = ui.lsp_folds.iter().chain(ui.syntax_folds.iter()).find(|fold| {
+            fold.view == view_id && fold.collapsed && fold.start_line == line_index
+        }) {
+            let hidden = fold.end_line.saturating_sub(fold.start_line);
+            x = grid.put_text_clipped(x, screen_row, &format!(" ⋯ {hidden} lines"), Style::Muted, width);
+        }
         while let Some(hint) = inlay_hints
             .get(inlay_cursor)
             .filter(|hint| hint.position <= line_end)
@@ -694,21 +700,25 @@ pub(super) fn render_editor_view(
                     .filter(|diagnostic| severities.contains(&diagnostic.severity))
                     .enumerate()
                 {
-                    if screen_row >= body_height {
-                        break;
-                    }
-                    grid.put_text_clipped(
-                        gutter_width,
-                        screen_row,
-                        &format!(
-                            "{}. {}",
-                            index.saturating_add(1),
-                            diagnostic_label(diagnostic)
-                        ),
-                        diagnostic_style(diagnostic.severity),
-                        width,
+                    let text = format!(
+                        "{}. {}",
+                        index.saturating_add(1),
+                        diagnostic_label(diagnostic)
                     );
-                    screen_row = screen_row.saturating_add(1);
+                    let lines: Vec<String> = text.lines().map(str::to_owned).collect();
+                    for row in super::debug::wrap_rows(&lines, width.saturating_sub(gutter_width)) {
+                        if screen_row >= body_height {
+                            break;
+                        }
+                        grid.put_text_clipped(
+                            gutter_width,
+                            screen_row,
+                            &row,
+                            diagnostic_style(diagnostic.severity),
+                            width,
+                        );
+                        screen_row = screen_row.saturating_add(1);
+                    }
                 }
             }
         }

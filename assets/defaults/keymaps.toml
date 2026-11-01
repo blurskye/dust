@@ -154,6 +154,7 @@ mode = "normal"
 keys = "g g"
 command = "input.motion"
 arguments = { motion = "document_start", linewise = false }
+desc = "Document start"
 
 # Counts and register/operator grammar.
 [[keymap]]
@@ -845,6 +846,7 @@ mode = "visual_char"
 keys = "g g"
 command = "input.motion"
 arguments = { motion = "document_start", linewise = false }
+desc = "Document start"
 [[keymap]]
 id = "builtin.editor.visual-line.input-motion.upper-g"
 context = "editor"
@@ -859,6 +861,7 @@ mode = "visual_line"
 keys = "g g"
 command = "input.motion"
 arguments = { motion = "document_start", linewise = false }
+desc = "Document start"
 
 # Find on line, text objects, comments and surround (LazyVim: mini.ai, mini.surround).
 [[keymap]]
@@ -1731,6 +1734,11 @@ command = "overlay.help.form"
 id = "builtin.command-prompt.surface.command-line-cancel.escape"
 context = "command_prompt"
 keys = "escape"
+command = "command_line.cancel"
+[[keymap]]
+id = "builtin.command-prompt.surface.command-line-cancel.ctrl-c"
+context = "command_prompt"
+keys = "ctrl-c"
 command = "command_line.cancel"
 [[keymap]]
 id = "builtin.command-prompt.surface.command-line-submit.enter"
@@ -3610,6 +3618,69 @@ context = "editor"
 mode = "normal"
 keys = "] h"
 command = "workspace.git.hunk.next"
+
+[[keymap]]
+id = "builtin.editor.normal.markdown-preview.leader-c-p"
+context = "editor"
+mode = "normal"
+keys = "<leader> c p"
+command = "file.markdown_preview"
+desc = "Markdown Preview"
+
+[[keymap]]
+id = "builtin.global.git-diff.leader-g-d"
+context = "global"
+keys = "<leader> g d"
+command = "workspace.git.hunks.open"
+desc = "Git Diff (hunks)"
+
+[[key_group]]
+id = "builtin.editor.group.surround"
+context = "editor"
+mode = "normal"
+prefix = "g s"
+label = "Surround"
+order = 90
+
+[[keymap]]
+id = "builtin.editor.normal.git-conflict-next.right-bracket-x"
+context = "editor"
+mode = "normal"
+keys = "] x"
+command = "workspace.git.conflict.next"
+desc = "Next Conflict"
+
+[[keymap]]
+id = "builtin.editor.normal.git-conflict-previous.left-bracket-x"
+context = "editor"
+mode = "normal"
+keys = "[ x"
+command = "workspace.git.conflict.previous"
+desc = "Previous Conflict"
+
+[[keymap]]
+id = "builtin.editor.normal.mark-set.m"
+context = "editor"
+mode = "normal"
+keys = "m"
+command = "input.mark.begin"
+arguments = { text = "navigation.mark.set" }
+
+[[keymap]]
+id = "builtin.editor.normal.mark-jump.apostrophe"
+context = "editor"
+mode = "normal"
+keys = "'"
+command = "input.mark.begin"
+arguments = { text = "navigation.mark.jump" }
+
+[[keymap]]
+id = "builtin.editor.normal.mark-jump.backtick"
+context = "editor"
+mode = "normal"
+keys = "`"
+command = "input.mark.begin"
+arguments = { text = "navigation.mark.jump" }
 
 [[keymap]]
 id = "builtin.editor.normal.git-hunk-previous.left-bracket-h"
@@ -5674,6 +5745,7 @@ mode = "normal"
 keys = "g u"
 command = "input.operator.begin"
 arguments = { operator = "lowercase" }
+desc = "Lowercase"
 [[keymap]]
 id = "builtin.editor.normal.input-operator-begin.g-upper-u"
 context = "editor"
@@ -5681,6 +5753,7 @@ mode = "normal"
 keys = "g U"
 command = "input.operator.begin"
 arguments = { operator = "uppercase" }
+desc = "Uppercase"
 [[keymap]]
 id = "builtin.editor.normal.input-operator-begin.g-tilde"
 context = "editor"
@@ -5688,6 +5761,7 @@ mode = "normal"
 keys = "g ~"
 command = "input.operator.begin"
 arguments = { operator = "toggle_case" }
+desc = "Toggle case"
 [[keymap]]
 id = "builtin.editor.visual-char.input-count.key-1"
 context = "editor"

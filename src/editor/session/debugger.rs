@@ -151,6 +151,7 @@ pub(super) struct DebugSession {
     /// What the adapter last reported about the process: threads, and the STACK of the current
     /// stop. Both are stopped data, so both go when execution runs on.
     threads: Vec<String>,
+    stopped_thread: Option<i64>,
     stack: Vec<String>,
     /// The references OPEN on the expansion path, innermost last. A reference already on this path
     /// is shown as a reference and is never expanded again.
@@ -200,6 +201,7 @@ impl DebugSession {
             issued_variables: BTreeMap::new(),
             pending_variable_pages: VecDeque::new(),
             threads: Vec::new(),
+            stopped_thread: None,
             stack: Vec::new(),
             expansion: Vec::new(),
             actor: None,
@@ -847,6 +849,9 @@ impl DebugSession {
         self.watch_values.get(expression).map(String::as_str)
     }
     /// The frame an evaluation should run in, which is what makes locals visible to it.
+    pub(in crate::editor::session) fn stopped_thread(&self) -> Option<i64> {
+        self.stopped_thread
+    }
     pub(in crate::editor::session) fn current_frame(&self) -> Option<i64> {
         self.console_frame
     }
@@ -1140,7 +1145,8 @@ impl DebugSession {
             (StopFollow::Threads(stopped), DapResponse::Threads(rows)) => {
                 self.threads = rows.iter().map(|r| format!("{} ({})", r.name, r.id)).collect();
                 self.stop_follow = StopFollow::Idle;
-                if let Some(thread_id) = stopped.or(rows.first().map(|r| r.id)) {
+                self.stopped_thread = stopped.or(rows.first().map(|r| r.id));
+                if let Some(thread_id) = self.stopped_thread {
                     self.stop_follow = StopFollow::Stack;
                     self.follow_control(DapControl::StackTrace {
                         thread_id,

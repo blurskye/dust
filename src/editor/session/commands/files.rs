@@ -63,6 +63,27 @@ pub(super) fn register_commands(
             force: optional_bool_arg(invocation, "force").unwrap_or(false),
         },
     )?;
+    for (id, title, quit_after) in [
+        ("file.save_all", "Save all files", false),
+        ("file.save_all_quit", "Save all files and quit", true),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::Application,
+            ArgumentSchema::default(),
+            move |_| AppEffect::SaveAll { quit_after },
+        )?;
+    }
+    register(
+        registry,
+        "file.markdown_preview",
+        "Preview Markdown",
+        ContextRequirement::Buffer,
+        ArgumentSchema::default(),
+        |_| AppEffect::MarkdownPreview,
+    )?;
     register(
         registry,
         "file.open",

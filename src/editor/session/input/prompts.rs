@@ -305,6 +305,8 @@ impl InputSession {
                 | PromptKind::AgentPermission
                 | PromptKind::ReviewComment
                 | PromptKind::BreakpointCondition
+                | PromptKind::ReplaceFind
+                | PromptKind::ReplaceWith
         ) {
             return;
         }
@@ -517,6 +519,8 @@ impl InputSession {
                 | PromptKind::ExplorerRename
                 | PromptKind::ReviewComment
                 | PromptKind::BreakpointCondition
+                | PromptKind::ReplaceFind
+                | PromptKind::ReplaceWith
         ) {
             return;
         }

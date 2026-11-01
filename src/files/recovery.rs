@@ -23,6 +23,11 @@ pub(super) const fn recovery_journal_size_allowed(bytes: u64) -> bool {
     bytes <= RECOVERY_JOURNAL_BYTE_CEILING
 }
 
+/// Whether a file this size fits in a recovery journal, leaving room for its path.
+pub const fn recovery_size_allowed(content_bytes: u64) -> bool {
+    recovery_payload_size_allowed(content_bytes, 4096)
+}
+
 pub(super) const fn recovery_payload_size_allowed(content_bytes: u64, path_bytes: u64) -> bool {
     content_bytes.saturating_add(path_bytes) <= RECOVERY_PAYLOAD_BYTE_CEILING
 }

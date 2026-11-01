@@ -140,7 +140,7 @@ pub fn debug_pane_tab_at(
 }
 
 /// Long values go on to the next rows, since a value's end is often the part being looked for.
-fn wrap_rows(body: &[String], width: u16) -> Vec<String> {
+pub(super) fn wrap_rows(body: &[String], width: u16) -> Vec<String> {
     let width = usize::from(width).max(3);
     let mut wrapped = Vec::new();
     for line in body {

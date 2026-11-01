@@ -86,7 +86,7 @@ impl InteractiveApplication {
             Ok(items) => {
                 self.install_picker(self.message("picker_commands_title", &[]), items);
                 self.search
-                    .set_picker_footer("Enter Run · Esc Close".to_owned());
+                    .set_picker_footer("Enter Run · Esc Esc Close".to_owned());
                 self.sync_picker_ui();
             }
             Err(error) => self.show_error(error.to_string()),

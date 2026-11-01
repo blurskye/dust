@@ -66,7 +66,7 @@ impl InputSession {
                     if line.trim_start().starts_with("```") {
                         continue;
                     }
-                    bare = line.replace("**", "");
+                    bare = without_data_images(line).replace("**", "");
                     bare.as_str()
                 } else {
                     line
@@ -106,4 +106,20 @@ impl InputSession {
             scroll: 0,
         });
     }
+}
+
+/// Language servers put badges in hover text as base64 images, which only fill a terminal with
+/// noise.
+fn without_data_images(line: &str) -> String {
+    let mut kept = String::new();
+    let mut rest = line;
+    while let Some(link) = rest.find("](data:") {
+        let (Some(open), Some(close)) = (rest[..link].rfind("!["), rest[link..].find(')')) else {
+            break;
+        };
+        kept.push_str(&rest[..open]);
+        rest = &rest[link + close + 1..];
+    }
+    kept.push_str(rest);
+    kept
 }

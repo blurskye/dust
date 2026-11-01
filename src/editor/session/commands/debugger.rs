@@ -1,6 +1,6 @@
 use super::{
     AppEffect, ArgumentSchema, ArgumentType, CommandError, CommandRegistry, ContextRequirement,
-    PathBuf, integer_arg, optional_integer_arg, optional_string_arg, register, string_arg,
+    PathBuf, optional_integer_arg, optional_string_arg, register, string_arg,
 };
 
 pub(super) fn register_commands(
@@ -63,8 +63,8 @@ pub(super) fn register_commands(
         "dap.stack",
         "Show debug stack",
         ContextRequirement::Application,
-        ArgumentSchema::default().field("thread", ArgumentType::Integer, true),
-        |invocation| Ok(AppEffect::DapStack(integer_arg(invocation, "thread")?)),
+        ArgumentSchema::default().field("thread", ArgumentType::Integer, false),
+        |invocation| Ok(AppEffect::DapStack(optional_integer_arg(invocation, "thread"))),
     )?;
     register(
         registry,

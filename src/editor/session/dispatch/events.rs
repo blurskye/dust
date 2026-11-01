@@ -778,9 +778,18 @@ impl InteractiveApplication {
                     self.handle_configured_key(key);
                 }
             }
+            // A key that finishes no sequence ends it, as in Vim: `]q` must not go on to run `q`,
+            // and `<leader>gz` must not start an operator. While typing the key is still text.
             MappingResolution::Replay(replay) => {
-                for key in replay {
-                    self.handle_configured_key(key);
+                let typing = self.state.active_view.is_some_and(|view| {
+                    matches!(self.state.views[view].mode, EditorMode::Insert | EditorMode::Replace)
+                });
+                if context.starts_with("editor.") && !typing {
+                    self.input.cancel_pending();
+                } else {
+                    for key in replay {
+                        self.handle_configured_key(key);
+                    }
                 }
             }
             MappingResolution::Disabled => {}
@@ -1319,6 +1328,9 @@ impl InteractiveApplication {
             false,
             self.documents.recovery_io(),
         );
+        if std::mem::take(&mut self.recovery.oversized_notice) {
+            self.notify_warning(self.message("recovery_too_large", &[]));
+        }
     }
     pub(in crate::editor::session) fn queue_dirty_recovery_before_exit(&mut self) {
         self.recovery.schedule(
@@ -1399,7 +1411,7 @@ impl InteractiveApplication {
                     {
                         Ok(buffer) => {
                             self.notify_message(
-                                self.message("opened", &[("path", path.display().to_string())]),
+                                self.message("opened", &[("path", self.workspace_relative_label(&path))]),
                                 false,
                             );
                             Some(buffer)
@@ -2666,6 +2678,12 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn request_lsp(&mut self, mut feature: LspFeature) {
+        if matches!(feature, LspFeature::Formatting) {
+            if let Some(tool) = self.active_formatter() {
+                self.process_effect(AppEffect::FormatRun(tool));
+                return;
+            }
+        }
         if matches!(feature, LspFeature::InlayHints { .. }) {
             self.schedule_lsp_inlay_refresh(true);
             self.process_lsp_inlay_refresh();

@@ -519,7 +519,7 @@ impl InteractiveApplication {
             .collect();
         self.install_picker("New Agent Session".to_owned(), items);
         self.search
-            .set_picker_footer("Enter Start in a new tab · Esc Close".to_owned());
+            .set_picker_footer("Enter Start in a new tab · Esc Esc Close".to_owned());
         self.sync_picker_ui();
     }
 
@@ -552,7 +552,7 @@ impl InteractiveApplication {
             })
             .collect();
         self.install_picker("Agent Sessions".to_owned(), items);
-        self.search.set_picker_footer("Enter Show · Esc Close".to_owned());
+        self.search.set_picker_footer("Enter Show · Esc Esc Close".to_owned());
         self.sync_picker_ui();
     }
 
@@ -589,7 +589,7 @@ impl InteractiveApplication {
                 .collect();
             let title = format!("{} Options", session.name);
             self.install_picker(title, items);
-            self.search.set_picker_footer("Enter Change · Esc Close".to_owned());
+            self.search.set_picker_footer("Enter Change · Esc Esc Close".to_owned());
             self.sync_picker_ui();
             return;
         };
@@ -615,7 +615,7 @@ impl InteractiveApplication {
             if !others.is_empty() {
                 let title = format!("{} Agent", session.name);
                 self.install_picker(title, others);
-                self.search.set_picker_footer("Enter Use · Esc Close".to_owned());
+                self.search.set_picker_footer("Enter Use · Esc Esc Close".to_owned());
                 self.sync_picker_ui();
                 return;
             }
@@ -646,7 +646,7 @@ impl InteractiveApplication {
             .chain(others)
             .collect();
         self.install_picker(format!("{} {}", session.name, option.name), items);
-        self.search.set_picker_footer("Enter Use · Esc Close".to_owned());
+        self.search.set_picker_footer("Enter Use · Esc Esc Close".to_owned());
         self.sync_picker_ui();
     }
 
@@ -682,7 +682,7 @@ impl InteractiveApplication {
             .collect();
         self.install_picker("Resume Agent Conversation".to_owned(), items);
         self.search
-            .set_picker_footer("Enter Resume in a tab · Esc Close".to_owned());
+            .set_picker_footer("Enter Resume in a tab · Esc Esc Close".to_owned());
         self.sync_picker_ui();
     }
 
@@ -707,7 +707,7 @@ impl InteractiveApplication {
             .collect();
         let title = format!("Sign In to {}", session.name);
         self.install_picker(title, items);
-        self.search.set_picker_footer("Enter Sign in · Esc Close".to_owned());
+        self.search.set_picker_footer("Enter Sign in · Esc Esc Close".to_owned());
         self.sync_picker_ui();
     }
 

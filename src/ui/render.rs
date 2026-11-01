@@ -74,6 +74,8 @@ pub enum PromptKind {
     AgentPermission,
     ReviewComment,
     BreakpointCondition,
+    ReplaceFind,
+    ReplaceWith,
 }
 
 impl PromptKind {
@@ -95,6 +97,8 @@ impl PromptKind {
             Self::AgentPermission => "Agent permission",
             Self::ReviewComment => "Review comment",
             Self::BreakpointCondition => "Breakpoint condition",
+            Self::ReplaceFind => "Replace in project: find",
+            Self::ReplaceWith => "Replace with",
         }
     }
 
@@ -115,7 +119,7 @@ impl PromptKind {
             | Self::GitDestructive
             | Self::AgentPermission => "",
             Self::ReviewComment => ">",
-            Self::BreakpointCondition => ">",
+            Self::BreakpointCondition | Self::ReplaceFind | Self::ReplaceWith => ">",
         }
     }
 }

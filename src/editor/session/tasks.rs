@@ -650,7 +650,9 @@ impl TaskSession {
                     if !self.current(&task, workspace, configuration) {
                         continue;
                     }
-                    if code == Some(0) && !truncated {
+                    // A run with a failing test exits non-zero, and that is the run with results
+                    // worth seeing.
+                    if !truncated {
                         self.apply_test_result(&task);
                     }
                     let next = if code == Some(0) && !truncated {
@@ -668,12 +670,11 @@ impl TaskSession {
                         task.requested.clone(),
                         if next {
                             "queued"
-                        } else if code == Some(0)
-                            && !truncated
-                            && matches!(
-                                task.adapter,
-                                AdapterContext::Formatter { .. } | AdapterContext::Linter { .. }
-                            )
+                        } else if !truncated
+                            && (code == Some(0)
+                                && matches!(task.adapter, AdapterContext::Formatter { .. })
+                                || matches!(code, Some(0 | 1))
+                                    && matches!(task.adapter, AdapterContext::Linter { .. }))
                         {
                             "process exited"
                         } else if code == Some(0) && !truncated {

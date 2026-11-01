@@ -67,8 +67,8 @@ pub(super) fn register_commands(
         ContextRequirement::Workspace,
         ArgumentSchema::default(),
         |_| AppEffect::OpenPrompt {
-            kind: PromptKind::Command,
-            initial: "workspace.replace ".into(),
+            kind: PromptKind::ReplaceFind,
+            initial: String::new(),
         },
     )?;
     register(

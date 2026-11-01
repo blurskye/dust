@@ -88,6 +88,12 @@ pub enum AppEffect {
     GitChangesLayerSwitch,
     GitHunksOpen,
     GitHunkNavigate(i8),
+    GitConflictNavigate(i8),
+    MarkdownPreview,
+    SaveAll {
+        quit_after: bool,
+    },
+    MarkJump(String),
     GitHunkPreview,
     GitHunkStage,
     GitHunkReset,
@@ -300,12 +306,8 @@ pub enum AppEffect {
         edge: String,
         size: u16,
     },
-    TerminalFloat {
-        x: u16,
-        y: u16,
-        width: u16,
-        height: u16,
-    },
+    /// Without a rectangle the terminal floats centred, at most of the screen.
+    TerminalFloat(Option<crate::ui::window::WindowRect>),
     TerminalFullscreen,
     TerminalHide,
     TerminalSend(String),
@@ -440,7 +442,7 @@ pub enum AppEffect {
     DapSessions,
     DapInspectorNext,
     DapThreads,
-    DapStack(i64),
+    DapStack(Option<i64>),
     DapScopes(Option<i64>),
     DapVariables(Option<i64>),
     DapEvaluate(String),
@@ -589,6 +591,11 @@ fn register_grammar_commands(
             "input.find.begin",
             "Find character on line",
             GrammarInput::FindBegin,
+        ),
+        (
+            "input.mark.begin",
+            "Set or jump to a mark",
+            GrammarInput::MarkBegin,
         ),
         (
             "input.surround.begin",

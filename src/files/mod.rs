@@ -5,7 +5,7 @@ pub use icons::{ExplorerIcon, ExplorerIconColor, directory_icon, file_icon};
 mod recovery;
 pub use recovery::{
     DOCUMENT_BYTE_CEILING, RECOVERY_VERSION, RecoveryCleanup, RecoveryDiscovery, RecoveryRecord,
-    cleanup_recovery, discover_recovery, write_recovery,
+    cleanup_recovery, discover_recovery, recovery_size_allowed, write_recovery,
 };
 mod explorer_intent;
 pub(crate) use explorer_intent::{ExplorerIoReply, ExplorerRenameSource, PreparedExplorerMutation};

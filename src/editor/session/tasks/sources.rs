@@ -201,7 +201,7 @@ pub(in crate::editor::session) struct FormatterSource {
     text: TextVersion,
 }
 impl FormatterSource {
-    pub(super) fn buffer(&self) -> BufferId {
+    pub(in crate::editor::session) fn buffer(&self) -> BufferId {
         self.buffer
     }
     pub(in crate::editor::session) fn capture(

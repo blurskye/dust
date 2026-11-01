@@ -187,6 +187,7 @@ pub(super) fn mason_lsp_definitions() -> Vec<ToolDefinition> {
                 version: None,
                 release: None,
                 launch_args: server.launch_args.clone(),
+                format_arguments: Vec::new(),
                 probe_args: Vec::new(),
                 debug_program_policy: DebugProgramPolicy::default(),
                 project_root_markers: server.project_root_markers.clone(),

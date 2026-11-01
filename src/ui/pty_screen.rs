@@ -264,10 +264,21 @@ impl PtyScreen {
         let columns = usize::from(columns.max(1));
         let rows = usize::from(rows.max(1));
         if rows < self.rows {
-            let drained = self.cells.drain(..self.rows - rows).collect::<Vec<_>>();
+            // Blank rows under the cursor go first, as in other terminals: only real output
+            // scrolls into history.
+            let mut excess = self.rows - rows;
+            while excess > 0
+                && self.cells.len() > self.cursor_row + 1
+                && self.cells.last().is_some_and(|row| row.iter().all(|cell| *cell == PtyCell::default()))
+            {
+                self.cells.pop();
+                excess -= 1;
+            }
+            let drained = self.cells.drain(..excess).collect::<Vec<_>>();
             for row in drained {
                 self.push_scrollback(row);
             }
+            self.cursor_row = self.cursor_row.saturating_sub(excess);
         } else {
             self.cells
                 .extend((0..rows - self.rows).map(|_| vec![PtyCell::default(); self.columns]));
@@ -894,6 +905,22 @@ mod tests {
         PtyColor, PtyInputKey, PtyMouseEvent, PtyMouseMode, PtyScreen, PtyStyle, encode_focus,
         encode_key, encode_paste, encode_sgr_mouse,
     };
+
+    #[test]
+    fn shrinking_keeps_blank_rows_out_of_history() {
+        let mut screen = PtyScreen::new(20, 10, 64);
+        screen.feed_bytes(b"prompt$ ");
+        screen.resize(20, 4);
+        assert_eq!(screen.scrollback_len(), 0, "nothing was on those rows");
+        assert_eq!(screen.lines()[0].trim_end(), "prompt$");
+        assert_eq!(screen.cursor().1, 0);
+
+        screen.feed_bytes(b"\r\n1\r\n2\r\n3");
+        screen.resize(20, 2);
+        assert_eq!(screen.scrollback_len(), 2, "output above the cursor is kept");
+        assert_eq!(screen.lines()[0].trim_end(), "prompt$");
+        assert_eq!(screen.cursor().1, 1);
+    }
 
     #[test]
     fn raw_pty_bytes_preserve_split_utf8_and_consume_shell_controls() {

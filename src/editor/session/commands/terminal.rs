@@ -1,6 +1,6 @@
 use super::{
     AppEffect, ArgumentSchema, ArgumentType, CommandError, CommandRegistry, ContextRequirement,
-    integer_arg, optional_bool_arg, optional_string_arg, register, string_arg,
+    integer_arg, optional_bool_arg, optional_integer_arg, optional_string_arg, register, string_arg,
 };
 
 pub(super) fn register_commands(
@@ -88,14 +88,17 @@ pub(super) fn register_commands(
         "Dock the selected terminal window",
         ContextRequirement::Application,
         ArgumentSchema::default()
-            .field("edge", ArgumentType::String, true)
-            .field("size", ArgumentType::Integer, true),
+            .field("edge", ArgumentType::String, false)
+            .field("size", ArgumentType::Integer, false),
         |invocation| {
-            let size = u16::try_from(integer_arg(invocation, "size")?).map_err(|_| {
-                CommandError::InvalidArguments("terminal dock size is outside u16 bounds".into())
-            })?;
+            let size = u16::try_from(optional_integer_arg(invocation, "size").unwrap_or(12))
+                .map_err(|_| {
+                    CommandError::InvalidArguments(
+                        "terminal dock size is outside u16 bounds".into(),
+                    )
+                })?;
             Ok(AppEffect::TerminalDock {
-                edge: string_arg(invocation, "edge")?.to_owned(),
+                edge: optional_string_arg(invocation, "edge").unwrap_or("bottom").to_owned(),
                 size,
             })
         },
@@ -106,11 +109,14 @@ pub(super) fn register_commands(
         "Float the selected terminal window",
         ContextRequirement::Application,
         ArgumentSchema::default()
-            .field("x", ArgumentType::Integer, true)
-            .field("y", ArgumentType::Integer, true)
-            .field("width", ArgumentType::Integer, true)
-            .field("height", ArgumentType::Integer, true),
+            .field("x", ArgumentType::Integer, false)
+            .field("y", ArgumentType::Integer, false)
+            .field("width", ArgumentType::Integer, false)
+            .field("height", ArgumentType::Integer, false),
         |invocation| {
+            if optional_integer_arg(invocation, "width").is_none() {
+                return Ok(AppEffect::TerminalFloat(None));
+            }
             let bounded = |name| {
                 u16::try_from(integer_arg(invocation, name)?).map_err(|_| {
                     CommandError::InvalidArguments(format!(
@@ -118,12 +124,12 @@ pub(super) fn register_commands(
                     ))
                 })
             };
-            Ok(AppEffect::TerminalFloat {
+            Ok(AppEffect::TerminalFloat(Some(crate::ui::window::WindowRect {
                 x: bounded("x")?,
                 y: bounded("y")?,
                 width: bounded("width")?,
                 height: bounded("height")?,
-            })
+            })))
         },
     )?;
     register(

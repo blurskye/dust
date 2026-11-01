@@ -39,6 +39,7 @@ pub enum GrammarInput {
     },
     PrefixBegin,
     ReplaceBegin,
+    MarkBegin(String),
     ReplaceText(String),
     /// `f`, `F`, `t` or `T`: the motion waits for the character to find.
     FindBegin(String),
@@ -79,6 +80,7 @@ enum CharacterTarget {
     SurroundAdd(CommandInvocation),
     SurroundDelete,
     SurroundReplace(Option<char>),
+    Mark(String),
 }
 
 impl Default for ModalResolver {
@@ -222,6 +224,10 @@ impl ModalResolver {
                 invocation.count = count_nonzero(self.take_count());
                 Ok(InputAction::Invoke(invocation))
             }
+            GrammarInput::MarkBegin(command_id) => {
+                self.await_character(CharacterTarget::Mark(command_id));
+                Ok(InputAction::Pending)
+            }
             GrammarInput::FindBegin(motion) => {
                 self.await_character(CharacterTarget::Find(motion));
                 Ok(InputAction::Pending)
@@ -267,6 +273,13 @@ impl ModalResolver {
                         self.reset_pending();
                         Ok(InputAction::Invoke(invocation.with_argument(
                             "character",
+                            CommandValue::String(character.to_string()),
+                        )))
+                    }
+                    CharacterTarget::Mark(command_id) => {
+                        self.reset_pending();
+                        Ok(InputAction::Invoke(command(&command_id)?.with_argument(
+                            "name",
                             CommandValue::String(character.to_string()),
                         )))
                     }

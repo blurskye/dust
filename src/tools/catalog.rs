@@ -115,6 +115,9 @@ pub struct ToolDefinition {
     pub release: Option<String>,
     #[serde(default)]
     pub launch_args: Vec<String>,
+    /// How a formatter takes a file on stdin and writes it to stdout; `{path}` is the file.
+    #[serde(default)]
+    pub format_arguments: Vec<String>,
     /// A bounded invocation that verifies a downloaded native artifact before activation.
     #[serde(default)]
     pub probe_args: Vec<String>,
@@ -400,6 +403,45 @@ pub(super) fn managed_executable(root: &Path, definition: &ToolDefinition) -> Op
 #[must_use]
 pub fn managed_tool_executable(definition: &ToolDefinition) -> Option<PathBuf> {
     managed_executable(&tool_store_root(), definition)
+}
+
+/// A formatter installed from the tool manager: its id, executable and arguments for `path`.
+pub struct ManagedFormatter {
+    pub id: String,
+    pub executable: PathBuf,
+    pub arguments: Vec<String>,
+    pub environment: BTreeMap<String, String>,
+}
+
+/// The installed formatter `select` picks, if any. Only the tool manager's count here: a
+/// formatter that merely happens to be on PATH was not chosen for format on save.
+pub fn managed_formatter(
+    select: impl Fn(&ToolDefinition) -> bool,
+    path: &Path,
+) -> Option<ManagedFormatter> {
+    static FORMATTERS: std::sync::OnceLock<Vec<ToolDefinition>> = std::sync::OnceLock::new();
+    let shown = path.display().to_string();
+    FORMATTERS
+        .get_or_init(|| {
+            bundled_tool_catalog()
+                .into_iter()
+                .filter(|tool| !tool.format_arguments.is_empty())
+                .collect()
+        })
+        .iter()
+        .filter(|tool| select(tool))
+        .find_map(|tool| {
+            Some(ManagedFormatter {
+                id: tool.id.clone(),
+                executable: managed_tool_executable(tool)?,
+                arguments: tool
+                    .format_arguments
+                    .iter()
+                    .map(|argument| argument.replace("{path}", &shown))
+                    .collect(),
+                environment: tool_launch_environment(tool),
+            })
+        })
 }
 
 pub(super) const MANAGED_TOOL_VERSION_FILE: &str = ".dust-version";

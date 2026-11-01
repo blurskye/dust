@@ -107,7 +107,7 @@ impl InteractiveApplication {
                         .collect();
                     self.install_picker("Pull Requests (local)".to_owned(), items);
                     self.search
-                        .set_picker_footer("Enter Open the worktree · Esc Close".to_owned());
+                        .set_picker_footer("Enter Open the worktree · Esc Esc Close".to_owned());
                     self.sync_picker_ui();
                     self.notify_warning(format!("{error} · showing local checkouts"));
                 }
@@ -134,7 +134,7 @@ impl InteractiveApplication {
                         .collect();
                     self.install_picker("Pull Requests".to_owned(), items);
                     self.search
-                        .set_picker_footer("Enter Check out in a worktree · Esc Close".to_owned());
+                        .set_picker_footer("Enter Check out in a worktree · Esc Esc Close".to_owned());
                     self.sync_picker_ui();
                 }
                 ForgeReply::CheckedOut(Ok(path)) => self.switch_workspace_root(path),
@@ -183,7 +183,7 @@ impl InteractiveApplication {
                         .collect();
                     self.install_picker("Review Comments".to_owned(), items);
                     self.search
-                        .set_picker_footer("Enter Go to line · Esc Close".to_owned());
+                        .set_picker_footer("Enter Go to line · Esc Esc Close".to_owned());
                     self.sync_picker_ui();
                 }
                 ForgeReply::Commented(Ok(())) => {

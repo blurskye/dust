@@ -828,6 +828,12 @@ impl EditorDraft {
         }
         Ok(removed)
     }
+    /// Drop a buffer no window shows. One still on screen stays.
+    pub(crate) fn remove_hidden_document(&mut self, buffer: BufferId) {
+        if !self.state.views.values().any(|view| view.buffer == buffer) {
+            self.state.remove_buffer(buffer);
+        }
+    }
     pub(crate) fn show_document(&mut self, buffer: BufferId) -> Result<ViewId, &'static str> {
         self.state.show_buffer(buffer)
     }

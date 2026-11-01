@@ -363,7 +363,12 @@ impl LspEditSources {
                 let text = TextBuffer::from_bytes(&snapshot.bytes).map_err(|e| e.to_string())?;
                 Ok(WorkspaceEditDraft {
                     canonical_path: snapshot.canonical_path.clone(),
-                    expected_revision: document.version.map(BufferRevision).or(snapshot.revision),
+                    // gopls sends version 0 for a file that is not open; only an open buffer has
+                    // a version the edit could be out of date against.
+                    expected_revision: snapshot
+                        .revision
+                        .and(document.version.map(BufferRevision))
+                        .or(snapshot.revision),
                     edits: decode_edits(document.edits, &text, request.encoding)?,
                 })
             })

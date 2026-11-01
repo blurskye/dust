@@ -25,7 +25,7 @@ use super::{
     active_editor_pane_viewport, builtin_languages, discover_executable, editor_pane_viewport_at,
     editor_state_content_width, editor_state_gutter_width, file_uri, is_nixos_host,
     language_id_for_path, lsp_runtime_source_allowed_on_host,
-    managed_tool_executable, mode_name_large,
+    managed_formatter, managed_tool_executable, mode_name_large,
     nix_lsp_launch_environment, nix_lsp_profile_installed,
     nix_workspace_shell_for_host, parse_ex, path_from_file_uri, tool_kind_key,
 };
@@ -2225,8 +2225,12 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::DapStack(thread) => {
+                let Some(thread_id) = thread.or(self.debugger_session.stopped_thread()) else {
+                    self.show_error(self.message("dap_not_paused", &[]));
+                    return Ok(());
+                };
                 if let Err(error) = self.debugger_session.control(DapControl::StackTrace {
-                    thread_id: thread,
+                    thread_id,
                     start: 0,
                     levels: 256,
                 }) {
@@ -2405,6 +2409,10 @@ impl InteractiveApplication {
                 self.install_picker(self.message("plugin_picker_title", &[]), items);
             }
             AppEffect::PluginDisable(id) => {
+                if !self.extension.statuses().contains_key(&id) {
+                    self.show_error(self.message("plugin_unknown", &[("id", id)]));
+                    return Ok(());
+                }
                 let load = self.extension.load_id(&id);
                 if let Err(error) = self.extension.disable(&id) {
                     self.show_error(error)
@@ -2860,6 +2868,18 @@ impl InteractiveApplication {
         effect: AppEffect,
     ) -> Result<(), AppEffect> {
         match effect {
+            AppEffect::MarkJump(name) => {
+                let location = self
+                    .persistence
+                    .marks()
+                    .iter()
+                    .find(|mark| mark.name == name)
+                    .map(|mark| mark.location.clone());
+                match location {
+                    Some(location) => self.navigate_persisted_location(location),
+                    None => self.show_error(self.message("mark_unset", &[("name", name)])),
+                }
+            }
             AppEffect::MarkSet(name) => {
                 if let Some(location) = self.current_persisted_location() {
                     self.persistence.set_mark(
@@ -3928,17 +3948,14 @@ impl InteractiveApplication {
                 };
                 self.place_active_terminal(WindowPlacement::Docked { edge, size });
             }
-            AppEffect::TerminalFloat {
-                x,
-                y,
-                width,
-                height,
-            } => self.place_active_terminal(WindowPlacement::Floating(WindowRect {
-                x,
-                y,
-                width,
-                height,
-            })),
+            AppEffect::TerminalFloat(rect) => {
+                let rect = rect.unwrap_or_else(|| {
+                    let (columns, rows) = (self.window_session.width(), self.window_session.height());
+                    let (width, height) = (columns * 4 / 5, rows * 4 / 5);
+                    WindowRect { x: (columns - width) / 2, y: (rows - height) / 2, width, height }
+                });
+                self.place_active_terminal(WindowPlacement::Floating(rect));
+            }
             AppEffect::TerminalFullscreen => {
                 self.place_active_terminal(WindowPlacement::Fullscreen)
             }
@@ -5099,6 +5116,8 @@ impl InteractiveApplication {
                 | PromptKind::TerminalClose
                 | PromptKind::DirtyClose
                 | PromptKind::BreakpointCondition
+                | PromptKind::ReplaceFind
+                | PromptKind::ReplaceWith
         ) {
             self.record_prompt_history(prompt.kind, &prompt.input);
         }
@@ -5193,6 +5212,19 @@ impl InteractiveApplication {
             PromptKind::ReviewComment => {
                 self.close_prompt();
                 self.submit_review_comment(prompt.input);
+            }
+            PromptKind::ReplaceFind => {
+                self.close_prompt();
+                if !prompt.input.is_empty() {
+                    self.replace_query = Some(prompt.input);
+                    self.open_prompt(PromptKind::ReplaceWith, String::new());
+                }
+            }
+            PromptKind::ReplaceWith => {
+                self.close_prompt();
+                if let Some(query) = self.replace_query.take() {
+                    self.start_workspace_search(query, Some(prompt.input));
+                }
             }
             PromptKind::BreakpointCondition => {
                 self.close_prompt();
@@ -5590,10 +5622,38 @@ impl InteractiveApplication {
         name: &str,
         adapter: AdapterContext,
     ) {
+        let managed = match &adapter {
+            AdapterContext::Formatter { source }
+                if !self.configuration.settings().tasks.contains_key(name) =>
+            {
+                let path = self.state.buffers[source.buffer()].path.clone().unwrap_or_default();
+                let Some(tool) = managed_formatter(|tool| tool.id == name, &path) else {
+                    self.show_error(self.message("formatter_missing", &[("name", name.into())]));
+                    return;
+                };
+                let mut config = self.configuration.settings().clone();
+                config.tasks.insert(
+                    name.into(),
+                    crate::config::TaskConfig {
+                        kind: crate::config::TaskKind::Formatter,
+                        executable: tool.executable,
+                        arguments: tool.arguments,
+                        cwd: None,
+                        environment: tool.environment,
+                        dependencies: Vec::new(),
+                        timeout_ms: Some(10_000),
+                        stdin: true,
+                        matcher: None,
+                    },
+                );
+                Some(config)
+            }
+            _ => None,
+        };
         match self.tasks.plan(
             name,
             &adapter,
-            self.configuration.settings(),
+            managed.as_ref().unwrap_or(self.configuration.settings()),
             &self.workspace,
             self.configuration.binding_revision(),
         ) {
@@ -5798,10 +5858,16 @@ impl InteractiveApplication {
                         {
                             self.show_error(self.message("formatter_truncated", &[]));
                         }
-                        if !matches!(
-                            task.adapter(),
-                            AdapterContext::Formatter { .. } | AdapterContext::Linter { .. }
-                        ) || code != Some(0)
+                        // Whatever the formatter did, the save it was holding back goes on.
+                        if matches!(task.adapter(), AdapterContext::Formatter { .. }) {
+                            self.finish_format_on_save();
+                        }
+                        // Linters exit 1 when they have findings; that is not a failure.
+                        let linter_ran = matches!(task.adapter(), AdapterContext::Linter { .. })
+                            && matches!(code, Some(0 | 1));
+                        if !linter_ran
+                            && (!matches!(task.adapter(), AdapterContext::Formatter { .. })
+                                || code != Some(0))
                         {
                             self.notify_message(
                                 self.message(
@@ -5820,10 +5886,7 @@ impl InteractiveApplication {
                         if truncated && matches!(task.adapter(), AdapterContext::Linter { .. }) {
                             self.show_error("linter output truncated; diagnostics not published");
                         }
-                        if code == Some(0)
-                            && !truncated
-                            && matches!(task.adapter(), AdapterContext::Linter { .. })
-                        {
+                        if linter_ran && !truncated {
                             if let Err(error) = self.tasks.begin_linter(
                                 *task,
                                 &self.state,
@@ -6790,7 +6853,7 @@ impl InteractiveApplication {
         let title = format!("Git worktrees · {}", list.worktrees.len());
         self.install_picker(title, items);
         self.search
-            .set_picker_footer("Enter Switch · ctrl-x Remove · Esc Close".to_owned());
+            .set_picker_footer("Enter Switch · ctrl-x Remove · Esc Esc Close".to_owned());
         self.sync_picker_ui();
     }
     pub(in crate::editor::session) fn unstage_selected_git_hunk(&mut self) {
@@ -6855,6 +6918,34 @@ impl InteractiveApplication {
             }
             Ok(None) => {}
             Err(error) => self.show_error(error),
+        }
+    }
+    /// Conflict markers are in the text itself, so this works in any file, staged or not.
+    fn navigate_git_conflict(&mut self, direction: i8) {
+        let Some(view) = self.state.active_view.map(|id| &self.state.views[id]) else {
+            return;
+        };
+        let buffer = &self.state.buffers[view.buffer];
+        let current = buffer.text.byte_to_line(view.cursor).unwrap_or(0);
+        let source = buffer.text.to_string();
+        let markers: Vec<usize> = source
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| line.starts_with("<<<<<<< "))
+            .map(|(index, _)| index)
+            .collect();
+        let target = if direction > 0 {
+            markers.iter().find(|line| **line > current).or(markers.first())
+        } else {
+            markers.iter().rev().find(|line| **line < current).or(markers.last())
+        };
+        match (target, buffer.path.clone()) {
+            (Some(line), Some(path)) => self.navigate_matcher_source(MatcherSource {
+                path,
+                line: *line,
+                column: 0,
+            }),
+            _ => self.notify_message(self.message("conflict_none", &[]), false),
         }
     }
     pub(in crate::editor::session) fn navigate_git_hunk(&mut self, direction: i8) {
@@ -7155,7 +7246,7 @@ impl InteractiveApplication {
         };
         self.install_surface_picker(PickerSurfaceKind::Changes, title, items);
         self.search.set_picker_footer(
-            "s Stage file · u Unstage file · Tab Switch diff · Enter Open · Esc Close".to_owned(),
+            "s Stage file · u Unstage file · Tab Switch diff · Enter Open · Esc Esc Close".to_owned(),
         );
         self.search.restore_picker_view(previous, false);
         self.sync_picker_ui();
@@ -7454,12 +7545,16 @@ impl InteractiveApplication {
     }
 
     fn go_to_persisted_location(&mut self, location: PersistedLocation) {
-        let roots = self
+        let mut roots: Vec<_> = self
             .workspace
             .roots()
             .iter()
             .map(|root| root.identity.canonical_path.clone())
             .collect();
+        // An open file was let in already, like the tutor's practice file outside the project.
+        if self.state.buffers.values().any(|buffer| buffer.path.as_ref() == Some(&location.path)) {
+            roots.extend(location.path.parent().map(Path::to_path_buf));
+        }
         match self.documents.read_scoped(location.path.clone(), roots) {
             Ok(id) => {
                 self.persistence.register_navigation_read(id, location);
@@ -7828,7 +7923,7 @@ impl InteractiveApplication {
                                             .scratch_label
                                             .clone()
                                     },
-                                    |path| path.display().to_string(),
+                                    |path| self.workspace_relative_label(path),
                                 ),
                                 detail: if state.dirty {
                                     self.configuration
@@ -7857,6 +7952,7 @@ impl InteractiveApplication {
                     .workspace
                     .seen_roots()
                     .into_iter()
+                    .chain(self.workspace.roots().iter().map(|root| root.identity.canonical_path.clone()))
                     .filter(|path| path.is_dir())
                     .collect::<Vec<_>>();
                 projects.sort();
@@ -7889,7 +7985,7 @@ impl InteractiveApplication {
                     .collect();
                 self.install_picker("Projects".to_owned(), items);
                 self.search
-                    .set_picker_footer("Enter Switch · Esc Close".to_owned());
+                    .set_picker_footer("Enter Switch · Esc Esc Close".to_owned());
                 self.sync_picker_ui();
             }
             PickerKind::Recents => {
@@ -7912,7 +8008,7 @@ impl InteractiveApplication {
                     badge: String::new(),
                     kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("recent:{index}")),
-                                label: path.display().to_string(),
+                                label: self.workspace_relative_label(&path),
                                 detail: String::new(),
                                 source: self.message("navigation_recent_source", &[]),
                                 action: PickerAction::None,
@@ -7939,7 +8035,7 @@ impl InteractiveApplication {
                                 label: mark.name,
                                 detail: format!(
                                     "{}:{}",
-                                    mark.location.path.display(),
+                                    self.workspace_relative_label(&mark.location.path),
                                     mark.location.byte
                                 ),
                                 source: self.message("navigation_mark_source", &[]),
@@ -7974,7 +8070,7 @@ impl InteractiveApplication {
                     badge: String::new(),
                     kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("navigation:{index}")),
-                                label: location.path.display().to_string(),
+                                label: self.workspace_relative_label(&location.path),
                                 detail: location.byte.to_string(),
                                 source: source.clone(),
                                 action: PickerAction::None,
@@ -9048,7 +9144,7 @@ impl InteractiveApplication {
         }
         self.install_picker(title, items);
         self.search.set_picker_footer(
-            "Enter Open · then Space g m o/t/b takes ours, theirs or both · Esc Close".to_owned(),
+            "Enter Open · then Space g m o/t/b takes ours, theirs or both · Esc Esc Close".to_owned(),
         );
         self.sync_picker_ui();
     }
@@ -9297,6 +9393,22 @@ impl InteractiveApplication {
             .collect::<Vec<_>>();
         for (view, buffer) in views {
             self.close_buffer_target(view, buffer);
+        }
+        // Buffers in no window go too, or a later save would land in the old checkout.
+        let hidden = self
+            .state
+            .buffers
+            .iter()
+            .filter(|(_, buffer)| !buffer.dirty && buffer.path.as_deref().is_some_and(leaving))
+            .map(|(id, buffer)| (id, buffer.path.clone()))
+            .collect::<Vec<_>>();
+        for (buffer, closed_path) in hidden {
+            let mut candidate = self.state.draft();
+            candidate.remove_hidden_document(buffer);
+            match self.commit_editor_draft(candidate, None, false) {
+                Ok(()) => self.retire_closed_buffer(buffer, closed_path.as_deref()),
+                Err(error) => self.show_error(error),
+            }
         }
         self.state.workspace_root = path.clone();
         self.invalidate_root_scoped_operations();
@@ -12065,6 +12177,7 @@ impl InteractiveApplication {
                     self.start_save(quit_after, path, force);
                 }
             }
+            AppEffect::SaveAll { quit_after } => self.save_all(quit_after),
             AppEffect::OpenPath(path) => self.start_open(path),
             // Settings files are optional, so the first open creates an empty one to edit.
             AppEffect::OpenUserFile(path) => {
@@ -12254,6 +12367,25 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::GitHunksOpen => self.start_git_hunks(),
+            AppEffect::GitConflictNavigate(direction) => self.navigate_git_conflict(direction),
+            AppEffect::MarkdownPreview => {
+                let Some(buffer) = self.state.active_buffer_id().map(|id| &self.state.buffers[id])
+                else {
+                    return Ok(());
+                };
+                let title = buffer
+                    .path
+                    .as_ref()
+                    .map_or_else(|| "Markdown".to_owned(), |path| self.workspace_relative_label(path));
+                let value = buffer.text.to_string();
+                self.present_documentation_popup(
+                    DocumentationPopupKind::Git,
+                    title,
+                    "Markdown".into(),
+                    None,
+                    vec![LspMarkupContent { kind: LspMarkupKind::Markdown, value }],
+                );
+            }
             AppEffect::GitHunkNavigate(direction) => self.navigate_git_hunk(direction),
             AppEffect::GitHunkPreview => self.preview_selected_git_hunk(),
             AppEffect::GitHunkStage => {
@@ -12606,23 +12738,38 @@ impl InteractiveApplication {
             Err(e) => self.show_document_failure(e),
         }
     }
+    /// The formatter from the tool manager for the active file, the way conform.nvim comes
+    /// before the language server in LazyVim.
+    pub(super) fn active_formatter(&self) -> Option<String> {
+        let buffer = &self.state.buffers[self.state.active_buffer_id()?];
+        let path = buffer.path.as_deref()?;
+        let language = language_id_for_path(path)?;
+        Some(managed_formatter(|tool| tool.supports_language(language), path)?.id)
+    }
     /// Ask the language server to format, and save when it answers. False when there is nothing
     /// to wait for, so the caller saves right away.
     fn begin_format_on_save(&mut self, quit_after: bool) -> bool {
         if !self.configuration.settings().lsp.format_on_save || self.format_on_save.is_some() {
             return false;
         }
-        let Some((buffer, document)) = self.active_lsp_document_without_text() else {
+        // An installed formatter runs as a process, which takes longer to start than a request.
+        let managed = self.workspace.execution_allowed().is_ok() && self.active_formatter().is_some();
+        let buffer = if managed {
+            self.state.active_buffer_id()
+        } else {
+            self.active_lsp_document_without_text().and_then(|(buffer, document)| {
+                self.language.formatting_server(buffer, &document).map(|_| buffer)
+            })
+        };
+        let Some(buffer) = buffer else {
             return false;
         };
-        if self.language.formatting_server(buffer, &document).is_none() {
-            return false;
-        }
         self.format_on_save = Some(super::FormatOnSave {
             buffer,
             quit_after,
             // VS Code gives formatters 750ms by default; a slow server must not hold a save back.
-            deadline: std::time::Instant::now() + std::time::Duration::from_millis(1000),
+            deadline: std::time::Instant::now()
+                + std::time::Duration::from_millis(if managed { 3000 } else { 1000 }),
         });
         self.request_lsp(LspFeature::Formatting);
         true
@@ -12636,6 +12783,52 @@ impl InteractiveApplication {
             self.start_save(pending.quit_after, None, false);
         } else {
             self.show_error(self.message("format_on_save_skipped", &[]));
+        }
+    }
+
+    /// Once a second, notice open files that changed outside Dust: lazygit, a hunk reset, a
+    /// formatter. A clean buffer takes the new text; a changed one keeps its text and says so.
+    pub(super) fn process_disk_changes(&mut self) {
+        let now = self.clock.monotonic();
+        if self.next_disk_check.is_some_and(|next| now < next) || self.documents.file_work_pending() {
+            return;
+        }
+        self.next_disk_check = Some(now + std::time::Duration::from_secs(1));
+        let open: Vec<_> = self
+            .state
+            .buffers
+            .iter()
+            .filter(|(_, buffer)| buffer.virtual_owner().is_none())
+            .filter_map(|(id, buffer)| Some((id, buffer.path.clone()?)))
+            .collect();
+        self.disk_stamps.retain(|id, _| open.iter().any(|(open, _)| open == id));
+        for (id, path) in open {
+            let Ok(metadata) = std::fs::metadata(&path) else {
+                continue;
+            };
+            let stamp = (metadata.modified().ok(), metadata.len());
+            let previous = self.disk_stamps.insert(id, stamp);
+            if previous.is_none_or(|previous| previous == stamp) {
+                continue;
+            }
+            let view = Self::document_view(id, &self.state.buffers[id]);
+            // Our own save moves the stamp too, and then the bytes on disk are what we wrote.
+            if metadata.len() == view.persisted.len() as u64
+                && std::fs::read(&path).is_ok_and(|disk| disk == view.persisted)
+            {
+                continue;
+            }
+            if view.dirty {
+                let shown = self.workspace_relative_label(&path);
+                self.notify_warning(self.message("file_changed_on_disk", &[("path", shown)]));
+                continue;
+            }
+            let editor = self.state.window_version();
+            let workspace = self.workspace.version();
+            let view = Self::document_view(id, &self.state.buffers[id]);
+            if let Err(error) = self.documents.request_reload(Some(view), false, &editor, workspace) {
+                self.show_document_failure(error);
+            }
         }
     }
 
@@ -12664,6 +12857,34 @@ impl InteractiveApplication {
         match self.request_save_buffer(buffer, quit_after, requested_path, force, None) {
             Ok(()) => self.notify_message(self.message("saving", &[]), false),
             Err(error) => self.show_document_failure(error),
+        }
+    }
+    /// Every changed file, without waiting on formatters. Quitting happens when the last save
+    /// lands, and only if nothing is left unsaved by then.
+    fn save_all(&mut self, quit_after: bool) {
+        let changed: Vec<_> = self
+            .state
+            .buffers
+            .iter()
+            .filter(|(_, buffer)| {
+                buffer.dirty && buffer.path.is_some() && buffer.virtual_owner().is_none()
+            })
+            .map(|(id, _)| id)
+            .collect();
+        let Some(last) = changed.last().copied() else {
+            if quit_after {
+                self.process_effect(AppEffect::Quit { force: false });
+            } else {
+                self.notify_message(self.message("save_all_nothing", &[]), false);
+            }
+            return;
+        };
+        self.notify_message(self.message("saving", &[]), false);
+        for buffer in changed {
+            let quit = quit_after && buffer == last;
+            if let Err(error) = self.request_save_buffer(buffer, quit, None, false, None) {
+                self.show_document_failure(error);
+            }
         }
     }
     fn request_save_buffer(
@@ -12717,6 +12938,27 @@ impl InteractiveApplication {
         }
         self.close_buffer_target(view, buffer);
     }
+    fn retire_closed_buffer(&mut self, buffer_id: crate::editor::BufferId, path: Option<&Path>) {
+        self.documents.retire_buffer(buffer_id, path);
+        if let Some(path) = path {
+            if let Some(id) = self.explorer.retire_buffer_path(path) {
+                self.documents.cancel_request(id);
+            }
+        }
+        self.extension.close_virtual_buffer(buffer_id);
+        let documents = self
+            .language
+            .sessions()
+            .iter()
+            .filter_map(|(server, state)| {
+                state
+                    .documents
+                    .get(&buffer_id)
+                    .map(|document| (server.clone(), document.uri()))
+            })
+            .collect::<Vec<_>>();
+        self.detach_lsp_documents(buffer_id, documents);
+    }
     fn close_buffer_target(
         &mut self,
         view_id: crate::editor::ViewId,
@@ -12747,26 +12989,7 @@ impl InteractiveApplication {
             return;
         }
         if removed {
-            self.documents
-                .retire_buffer(buffer_id, closed_path.as_deref());
-            if let Some(path) = &closed_path {
-                if let Some(id) = self.explorer.retire_buffer_path(path) {
-                    self.documents.cancel_request(id);
-                }
-            }
-            self.extension.close_virtual_buffer(buffer_id);
-            let documents = self
-                .language
-                .sessions()
-                .iter()
-                .filter_map(|(server, state)| {
-                    state
-                        .documents
-                        .get(&buffer_id)
-                        .map(|document| (server.clone(), document.uri()))
-                })
-                .collect::<Vec<_>>();
-            self.detach_lsp_documents(buffer_id, documents);
+            self.retire_closed_buffer(buffer_id, closed_path.as_deref());
         }
         self.set_dashboard_visibility(self.state.active_view.is_none());
         if !self.window_session.dashboard_visible() {
@@ -12862,7 +13085,7 @@ impl InteractiveApplication {
                 }
                 self.record_recent_file(path.clone());
                 self.notify_message(
-                    self.message("opened", &[("path", path.display().to_string())]),
+                    self.message("opened", &[("path", self.workspace_relative_label(&path))]),
                     false,
                 );
             }
@@ -12876,7 +13099,7 @@ impl InteractiveApplication {
                     return;
                 }
                 self.notify_message(
-                    self.message("reloaded_file", &[("path", path.display().to_string())]),
+                    self.message("reloaded_file", &[("path", self.workspace_relative_label(&path))]),
                     false,
                 );
             }
@@ -12934,11 +13157,11 @@ impl InteractiveApplication {
                             "saved_dirty",
                             &[
                                 ("revision", revision.0.to_string()),
-                                ("path", path.display().to_string()),
+                                ("path", self.workspace_relative_label(&path)),
                             ],
                         )
                     } else {
-                        self.message("saved", &[("path", path.display().to_string())])
+                        self.message("saved", &[("path", self.workspace_relative_label(&path))])
                     },
                     false,
                 );

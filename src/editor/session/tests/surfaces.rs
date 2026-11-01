@@ -3374,12 +3374,14 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
         .native_ids()
         .terminal(1)
         .expect("terminal resources");
-    app.process_effect(crate::editor::AppEffect::TerminalFloat {
-        x: 5,
-        y: 3,
-        width: 40,
-        height: 10,
-    });
+    app.process_effect(crate::editor::AppEffect::TerminalFloat(Some(
+        crate::ui::window::WindowRect {
+            x: 5,
+            y: 3,
+            width: 40,
+            height: 10,
+        },
+    )));
     assert_eq!(
         app.window_session.native_ids().terminal(1),
         Some(terminal_ids)
@@ -3573,12 +3575,14 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
         rehosted_tab
     );
     app.process_effect(crate::editor::AppEffect::TerminalFocus(2));
-    app.process_effect(crate::editor::AppEffect::TerminalFloat {
-        x: 9,
-        y: 4,
-        width: 33,
-        height: 9,
-    });
+    app.process_effect(crate::editor::AppEffect::TerminalFloat(Some(
+        crate::ui::window::WindowRect {
+            x: 9,
+            y: 4,
+            width: 33,
+            height: 9,
+        },
+    )));
     let terminal_rule = app
         .capture_window_rules()
         .into_iter()

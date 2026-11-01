@@ -448,8 +448,9 @@ component = "rustfmt"
 id = "prettier"
 name = "prettier"
 kind = "formatter"
-languages = ["typescript", "typescriptreact", "javascript", "javascriptreact", "json", "css", "html"]
+languages = ["typescript", "typescriptreact", "javascript", "javascriptreact", "json", "jsonc", "css", "scss", "less", "html", "yaml", "markdown"]
 executable = "prettier"
+format_arguments = ["--stdin-filepath", "{path}"]
 version = "3.6.2"
 probe_args = ["--version"]
 
@@ -463,6 +464,7 @@ name = "black"
 kind = "formatter"
 languages = ["python"]
 executable = "black"
+format_arguments = ["--quiet", "--stdin-filename", "{path}", "-"]
 version = "25.1.0"
 probe_args = ["--version"]
 

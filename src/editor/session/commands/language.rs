@@ -194,7 +194,7 @@ pub(super) fn register_commands(
         ),
         (
             "lsp.format",
-            "Format with language server",
+            "Format file",
             AppEffect::LspRequest(crate::language::lsp::LspFeature::Formatting),
         ),
         (

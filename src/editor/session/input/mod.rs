@@ -183,7 +183,9 @@ impl InputSession {
                 crate::ui::PromptKind::Command
                 | crate::ui::PromptKind::ExplorerRename
                 | crate::ui::PromptKind::ReviewComment
-                | crate::ui::PromptKind::BreakpointCondition => {
+                | crate::ui::PromptKind::BreakpointCondition
+                | crate::ui::PromptKind::ReplaceFind
+                | crate::ui::PromptKind::ReplaceWith => {
                     "command_prompt"
                 }
                 crate::ui::PromptKind::SearchForward | crate::ui::PromptKind::SearchBackward => {
