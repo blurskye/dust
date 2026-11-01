@@ -2179,7 +2179,9 @@ pub fn render(
     if let Some(card) = &ui.tutor {
         render_tutor_card(&mut frame, card, config, width, height, ui.key_hints.is_some());
     }
-    if config.ui.lsp_progress.enabled && !ui.lsp_progress.is_empty() {
+    let modal_open = ui.picker.is_some() || ui.tool_menu.is_some();
+    // A modal's footer is at the bottom right too, and its keys matter more.
+    if config.ui.lsp_progress.enabled && !ui.lsp_progress.is_empty() && !modal_open {
         render_lsp_progress(
             &mut frame,
             &ui.lsp_progress,
@@ -2193,7 +2195,6 @@ pub fn render(
             }),
         );
     }
-    let modal_open = ui.picker.is_some() || ui.tool_menu.is_some();
     // Pickers use the whole screen, so a notice below one clears the terminal dock too.
     let notice_height = if modal_open { height } else { workspace_height };
     let terminal_floats = compositor.is_some_and(|compositor| {

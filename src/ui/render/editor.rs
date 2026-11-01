@@ -354,6 +354,15 @@ pub(super) fn render_editor_view(
                 },
                 gutter_width,
             );
+            // Beside the number, where it takes no room and hides no sign.
+            let separator = u16::try_from(digits).unwrap_or(u16::MAX);
+            if let Some(worst) = diagnostic_lines.get(&line_index).and_then(|found| found.first())
+                && !config.editor.line_number_separator.is_empty()
+                && git_sign_column(gutter_width, &config.editor).is_none_or(|column| separator < column)
+                && separator < gutter_width
+            {
+                grid.set_cell(separator, screen_row, "●", diagnostic_style(worst.severity));
+            }
         }
         if let Some(git_sign_column) =
             git_sign_column(gutter_width, &config.editor).filter(|_| first_line_row == 0)

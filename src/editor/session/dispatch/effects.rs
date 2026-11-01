@@ -8193,11 +8193,7 @@ impl InteractiveApplication {
                     kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("mark:{index}:{}", mark.name)),
                                 label: mark.name,
-                                detail: format!(
-                                    "{}:{}",
-                                    self.workspace_relative_label(&mark.location.path),
-                                    mark.location.byte
-                                ),
+                                detail: self.persisted_location_label(&mark.location),
                                 source: self.message("navigation_mark_source", &[]),
                                 action: PickerAction::None,
                             },
@@ -8230,8 +8226,8 @@ impl InteractiveApplication {
                     badge: String::new(),
                     kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("navigation:{index}")),
-                                label: self.workspace_relative_label(&location.path),
-                                detail: location.byte.to_string(),
+                                label: self.persisted_location_label(&location),
+                                detail: String::new(),
                                 source: source.clone(),
                                 action: PickerAction::None,
                             },
@@ -8242,6 +8238,30 @@ impl InteractiveApplication {
                 self.install_picker(title, items);
             }
             PickerKind::Commands => self.open_command_palette(),
+        }
+    }
+
+    /// A saved location as `file:line`; its byte offset means nothing to a person. A file that
+    /// isn't open is read only for a nearby offset, because this runs for every row.
+    pub(in crate::editor::session) fn persisted_location_label(&self, location: &PersistedLocation) -> String {
+        const READ_CEILING: usize = 1024 * 1024;
+        let name = self.workspace_relative_label(&location.path);
+        let open = self
+            .state
+            .buffers
+            .values()
+            .find(|buffer| buffer.path.as_ref() == Some(&location.path));
+        let line = match open {
+            Some(buffer) => buffer.text.byte_to_line(ByteOffset(location.byte)).ok(),
+            None if location.byte <= READ_CEILING => std::fs::read(&location.path).ok().map(|bytes| {
+                let end = location.byte.min(bytes.len());
+                bytes[..end].iter().filter(|byte| **byte == b'\n').count()
+            }),
+            None => None,
+        };
+        match line {
+            Some(line) => format!("{name}:{}", line + 1),
+            None => name,
         }
     }
 

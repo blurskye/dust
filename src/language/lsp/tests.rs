@@ -472,6 +472,55 @@ fn server_that_never_initializes_fails_within_the_request_timeout() {
 }
 
 #[cfg(target_os = "linux")]
+#[cfg(unix)]
+#[test]
+fn stopping_does_not_wait_for_a_daemon_that_kept_the_servers_pipes() {
+    let Some(shell) = crate::tools::discover_executable("sh") else {
+        return;
+    };
+    let workspace = tempfile::tempdir().expect("workspace");
+    let script = workspace.path().join("server.sh");
+    std::fs::write(&script, "sleep 6 &\nexec sleep 6\n").expect("script");
+    let definition = ToolDefinition {
+        id: "daemonizing".into(),
+        name: "Daemonizing".into(),
+        kind: ToolKind::Lsp,
+        languages: vec!["rust".into()],
+        executable: shell.display().to_string(),
+        version: None,
+        release: None,
+        format_arguments: Vec::new(),
+        launch_args: vec![script.display().to_string()],
+        probe_args: Vec::new(),
+        debug_program_policy: crate::tools::DebugProgramPolicy::default(),
+        project_root_markers: Vec::new(),
+        project_root_strategy: crate::files::ProjectRootStrategy::Cargo,
+        install: None,
+        pins: Vec::new(),
+    };
+    let mut service = LspService::new();
+    service
+        .start_session_absolute_with_policy(super::LspSessionLaunch {
+            session_key: &definition.id,
+            definition: &definition,
+            executable: shell.clone(),
+            arguments: definition.launch_args.clone(),
+            root: workspace.path().into(),
+            document: None,
+            policy: LspPolicy {
+                request_timeout: Duration::from_millis(100),
+                maximum_log_lines: 20,
+            },
+            configuration: super::LspServerConfiguration::standard(),
+            environment: tool_launch_environment(&definition),
+        })
+        .expect("start");
+    thread::sleep(Duration::from_millis(200));
+    let started = Instant::now();
+    service.stop("daemonizing").expect("stop");
+    assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
+}
+
 #[test]
 fn deterministic_fake_server_proves_lifecycle_sync_and_features() {
     let Some(python) = crate::tools::discover_executable("python3") else {

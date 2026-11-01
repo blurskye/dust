@@ -5200,3 +5200,26 @@ fn a_name_no_worktree_matches_is_the_name_of_a_new_one() {
     app.install_picker("Files".into(), Vec::new());
     assert_eq!(app.search.new_worktree_name(), None, "only the worktree list creates");
 }
+
+#[test]
+fn a_saved_location_reads_as_file_and_line() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("marked-location.txt");
+    std::fs::write(&path, "one\nline two\nline three\n").unwrap();
+    let location = |byte| crate::persistence::PersistedLocation {
+        path: path.clone(),
+        byte,
+        anchor: byte,
+        scroll_line: 0,
+        scroll_column: 0,
+    };
+    assert!(app.persisted_location_label(&location(13)).ends_with("marked-location.txt:3"));
+    assert!(app.persisted_location_label(&location(0)).ends_with("marked-location.txt:1"));
+    std::fs::remove_file(&path).unwrap();
+    assert!(app.persisted_location_label(&location(13)).ends_with("marked-location.txt"));
+    let _ = app.state.open_text(
+        crate::editor::text::TextBuffer::from_text("one\nline two\nline three\n"),
+        Some(path.clone()),
+    );
+    assert!(app.persisted_location_label(&location(5)).ends_with("marked-location.txt:2"));
+}

@@ -2719,6 +2719,54 @@ fn wrapped_rows_end_at_words_and_break_only_long_ones() {
 }
 
 #[test]
+fn a_line_with_a_diagnostic_is_marked_in_the_gutter_with_its_worst_severity() {
+    let mut state = EditorState::new(PathBuf::from("/tmp"));
+    let path = PathBuf::from("/tmp/main.rs");
+    state.open_text(
+        crate::editor::text::TextBuffer::from_text("bad\nfine\nodd\n"),
+        Some(path.clone()),
+    );
+    let diagnostic = |severity, start, end| super::UiDiagnostic {
+        path: path.clone(),
+        severity,
+        range: crate::editor::text::ByteRange::new(
+            crate::editor::text::ByteOffset(start),
+            crate::editor::text::ByteOffset(end),
+        )
+        .expect("range"),
+        source: "rustc".into(),
+        code: None,
+        message: "problem".into(),
+    };
+    use crate::workspace::DiagnosticSeverity::{Error, Warning};
+    let ui = UiState {
+        editor_window_layout: Some(editor_layout(&state)),
+        diagnostics: vec![
+            diagnostic(Warning, 0, 1),
+            diagnostic(Error, 1, 2),
+            diagnostic(Warning, 9, 12),
+        ],
+        ..UiState::default()
+    };
+    let loaded = crate::config::load_bundled_config();
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 10);
+    let row = |text: &str| {
+        (0..10)
+            .find(|y| frame.grid.row_text(*y).contains(text))
+            .unwrap_or_else(|| panic!("{text} is shown"))
+    };
+    let mark = |y| {
+        (0..6)
+            .filter_map(|x| frame.grid.get(x, y))
+            .find(|cell| cell.symbol == "●")
+            .map(|cell| cell.style)
+    };
+    assert_eq!(mark(row("bad")), Some(super::Style::Error), "the worst severity on the line");
+    assert_eq!(mark(row("fine")), None);
+    assert_eq!(mark(row("odd")), Some(super::Style::Warning));
+}
+
+#[test]
 fn focused_diagnostic_expands_all_matching_messages_as_virtual_lines() {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
     let path = PathBuf::from("/tmp/main.rs");

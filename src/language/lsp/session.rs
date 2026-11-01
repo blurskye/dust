@@ -451,7 +451,9 @@ pub(super) fn run_session(
     };
     let stderr = child.stderr.take();
     let (messages, message_receiver) = mpsc::sync_channel(MESSAGE_QUEUE);
-    let reader = thread::spawn(move || {
+    // Neither pipe reader is ever joined. They end at end of file, which a daemon the server
+    // started and left holding its pipes, as Biome's does, can put off for as long as it lives.
+    thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
         loop {
             let message = match read_content_length_message(&mut reader) {
@@ -464,7 +466,7 @@ pub(super) fn run_session(
             }
         }
     });
-    let stderr_thread = stderr.map(|stderr| {
+    if let Some(stderr) = stderr {
         let events = events.clone();
         let server = server.clone();
         thread::spawn(move || {
@@ -484,8 +486,8 @@ pub(super) fn run_session(
                     },
                 );
             }
-        })
-    });
+        });
+    }
 
     let initialize = initialize_message(&root, configuration.initialization_options.as_ref());
     if let Err(error) = write_content_length_message(&mut stdin, &initialize) {
@@ -498,10 +500,6 @@ pub(super) fn run_session(
         );
         let _ = child.kill();
         let _ = child.wait();
-        let _ = reader.join();
-        if let Some(thread) = stderr_thread {
-            let _ = thread.join();
-        }
         return;
     }
 
@@ -718,10 +716,6 @@ pub(super) fn run_session(
     }
     let _ = child.kill();
     let _ = child.wait();
-    let _ = reader.join();
-    if let Some(thread) = stderr_thread {
-        let _ = thread.join();
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
