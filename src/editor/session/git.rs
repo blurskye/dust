@@ -100,6 +100,7 @@ pub(super) enum GitHunkAction {
     Preview,
     Stage,
     Unstage,
+    StageLines(u32, u32),
     Reset,
 }
 
@@ -611,6 +612,18 @@ impl GitSession {
         let path = status.scope_root.join(&snapshot.file);
         self.selected_change = hunk.change_at(line);
         self.selected = Some((snapshot.clone(), hunk.clone(), path));
+    }
+    /// Select the hunk with changes on these one-based lines and return those changes.
+    pub(super) fn select_lines(&mut self, start: u32, end: u32) -> Option<Vec<u32>> {
+        let snapshot = self.hunk_snapshot.as_ref()?;
+        let (hunk, lines) = snapshot.hunks.iter().find_map(|hunk| {
+            let lines = hunk.changes_on_lines(start, end);
+            (!lines.is_empty()).then_some((hunk, lines))
+        })?;
+        let path = self.status_snapshot.as_ref()?.scope_root.join(&snapshot.file);
+        self.selected_change.clear();
+        self.selected = Some((snapshot.clone(), hunk.clone(), path));
+        Some(lines)
     }
     /// The file changed on disk, so the hunks have to be read again.
     pub(super) fn forget_hunks(&mut self) {

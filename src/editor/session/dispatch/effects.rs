@@ -6994,6 +6994,9 @@ impl InteractiveApplication {
                         GitHunkAction::Preview => self.preview_selected_git_hunk(),
                         GitHunkAction::Stage => self.stage_selected_git_hunk(),
                         GitHunkAction::Unstage => self.unstage_selected_git_hunk(),
+                        GitHunkAction::StageLines(start, end) => {
+                            self.stage_git_lines(i64::from(start), i64::from(end));
+                        }
                         GitHunkAction::Reset => self.request_reset_selected_git_hunk(),
                     }
                     return;
@@ -7153,6 +7156,57 @@ impl InteractiveApplication {
         ) {
             self.show_error(error);
         }
+    }
+    /// Stage these one-based file lines. With no lines given, the selection or the cursor's line.
+    fn stage_git_lines(&mut self, start: i64, end: i64) {
+        let (start, end) = if start < 0 && end < 0 {
+            let Some((start, end, selecting)) = self.active_selected_lines() else {
+                return;
+            };
+            if selecting {
+                self.invoke_mapped_command("input.cancel");
+            }
+            (i64::from(start), i64::from(end))
+        } else {
+            (start, end)
+        };
+        self.input.set_pending_stage(AppEffect::GitLinesStage { start, end });
+        let range = u32::try_from(start)
+            .ok()
+            .zip(u32::try_from(end).ok())
+            .filter(|(start, end)| end >= start);
+        let Some((start, end)) = range else {
+            self.show_error("line range must be two non-negative integers with end >= start");
+            return;
+        };
+        let unstaged = crate::workspace::git::GitDiffLayer::Unstaged;
+        if self.git.hunks().is_none_or(|hunks| hunks.layer != unstaged) {
+            self.start_git_hunks_with_action(Some(GitHunkAction::StageLines(start, end)));
+            return;
+        }
+        let Some(lines) = self.git.select_lines(start, end) else {
+            self.show_error("no unstaged Git change on those lines");
+            return;
+        };
+        if let Err(error) = self.git.start_plan(
+            &self.state,
+            crate::workspace::git::GitMutationKind::StageLines,
+            self.workspace.root_revision(),
+            self.workspace.trust() == WorkspaceTrust::Trusted,
+            lines,
+        ) {
+            self.show_error(error);
+        }
+    }
+    /// The one-based lines of the active selection, or of the cursor, and whether it's a selection.
+    fn active_selected_lines(&self) -> Option<(u32, u32, bool)> {
+        let view = self.state.views.get(self.state.active_view?)?;
+        let text = &self.state.buffers.get(view.buffer)?.text;
+        let (anchor, head) = view
+            .selection
+            .map_or((view.cursor, view.cursor), |selection| (selection.anchor, selection.head));
+        let line = |at| text.byte_to_line(at).ok().map(|line| line as u32 + 1);
+        Some((line(anchor.min(head))?, line(anchor.max(head))?, view.selection.is_some()))
     }
     pub(in crate::editor::session) fn stage_selected_git_hunk(&mut self) {
         if self.git.hunks().is_none() {
@@ -12636,29 +12690,7 @@ impl InteractiveApplication {
                     self.show_error(error);
                 }
             }
-            AppEffect::GitLinesStage { start, end } => {
-                self.input.set_pending_stage(AppEffect::GitLinesStage { start, end });
-                let range = u32::try_from(start)
-                    .ok()
-                    .zip(u32::try_from(end).ok())
-                    .filter(|(start, end)| end >= start);
-                match range {
-                    Some((start, end)) => {
-                        if let Err(error) = self.git.start_plan(
-                            &self.state,
-                            crate::workspace::git::GitMutationKind::StageLines,
-                            self.workspace.root_revision(),
-                            self.workspace.trust() == WorkspaceTrust::Trusted,
-                            (start..=end).collect(),
-                        ) {
-                            self.show_error(error);
-                        }
-                    }
-                    None => self.show_error(
-                        "line range must be two non-negative integers with end >= start",
-                    ),
-                }
-            }
+            AppEffect::GitLinesStage { start, end } => self.stage_git_lines(start, end),
             AppEffect::GitWorktreeCreate { branch, path } => {
                 self.create_git_worktree(branch, path);
             }

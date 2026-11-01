@@ -4820,6 +4820,22 @@ command = "agent.ask"
 desc = "Ask Agent About Selection"
 
 [[keymap]]
+id = "builtin.editor.visual-char.git-lines-stage"
+context = "editor"
+mode = "visual_char"
+keys = "<leader> g h s"
+command = "workspace.git.lines.stage"
+desc = "Stage Selected Lines"
+
+[[keymap]]
+id = "builtin.editor.visual-line.git-lines-stage"
+context = "editor"
+mode = "visual_line"
+keys = "<leader> g h s"
+command = "workspace.git.lines.stage"
+desc = "Stage Selected Lines"
+
+[[keymap]]
 id = "builtin.editor.visual-line.agent-ask"
 context = "editor"
 mode = "visual_line"

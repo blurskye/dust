@@ -142,6 +142,43 @@ impl GitHunk {
             .map_or_else(Vec::new, |run| (run.first..=run.last).collect())
     }
 
+    /// The diff lines to stage for these one-based file lines. An added line brings the removed
+    /// line it replaces, and the last added line of a change brings any removed lines left over.
+    #[must_use]
+    pub fn changes_on_lines(&self, start: u32, end: u32) -> Vec<u32> {
+        let mut chosen = Vec::new();
+        for run in self.change_runs() {
+            let offsets = run.first..=run.last;
+            let of_kind = |kind: GitDiffLineKind| {
+                offsets
+                    .clone()
+                    .filter(|index| self.lines[*index as usize].kind == kind)
+                    .collect::<Vec<u32>>()
+            };
+            let (removed, added) = (of_kind(GitDiffLineKind::Delete), of_kind(GitDiffLineKind::Add));
+            if added.is_empty() {
+                let lands = run.start.saturating_sub(1).max(1);
+                if (start..=end).contains(&lands) {
+                    chosen.extend(removed);
+                }
+                continue;
+            }
+            for (position, offset) in added.iter().enumerate() {
+                if !(start..=end).contains(&(run.start + position as u32)) {
+                    continue;
+                }
+                chosen.push(*offset);
+                if position + 1 == added.len() {
+                    chosen.extend(removed.iter().skip(position));
+                } else {
+                    chosen.extend(removed.get(position));
+                }
+            }
+        }
+        chosen.sort_unstable();
+        chosen
+    }
+
     /// Whether this one-based line is part of the hunk, its context included.
     #[must_use]
     pub fn covers_line(&self, line: u32) -> bool {

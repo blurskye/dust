@@ -2405,7 +2405,7 @@ fn named_staging_commands_change_only_the_index() {
     );
     assert_eq!(fs::read_to_string(&path).unwrap(), changed);
 
-    // A line range needs a selected hunk; without one nothing is written.
+    // A line range needs loaded hunks; while they load nothing is written.
     let before = index_bytes(&app.state.workspace_root, "commands.txt");
     invoke(
         &mut app,
@@ -2443,11 +2443,12 @@ fn named_staging_commands_change_only_the_index() {
         original
     );
 
-    // The chosen addition is the only thing that reaches the index.
+    // The chosen line replaces the line it changed, and nothing else reaches the index.
     let add = snapshot.hunks[0]
         .lines
         .iter()
-        .position(|line| line.kind == crate::workspace::git::GitDiffLineKind::Add)
+        .find(|line| line.kind == crate::workspace::git::GitDiffLineKind::Add)
+        .and_then(|line| line.new_line)
         .expect("fixture adds a line") as i64;
     invoke(
         &mut app,
@@ -2457,7 +2458,7 @@ fn named_staging_commands_change_only_the_index() {
     wait_mutation(&mut app);
     assert_eq!(
         index_bytes(&app.state.workspace_root, "commands.txt"),
-        "a\nb\nB\nc\nd\ne\n"
+        "a\nB\nc\nd\ne\n"
     );
     assert_eq!(fs::read_to_string(&path).unwrap(), changed);
 }
@@ -2997,6 +2998,65 @@ fn hunk_unstage_returns_one_staged_hunk_to_head_and_refuses_the_rest() {
     invoke(&mut app, "workspace.git.hunk.stage");
     assert!(!app.git.mutation_pending(), "no plan may start");
     assert_eq!(index_bytes(&app.state.workspace_root, "unstage.txt"), before);
+}
+
+#[test]
+fn staging_one_of_two_changed_lines_keeps_the_file_in_order() {
+    let mut app = app();
+    let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
+    let path = app.state.workspace_root.join("pair.txt");
+    let original = (1..=20).map(|n| format!("line {n}\n")).collect::<String>();
+    fs::write(&path, &original).unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("pair.txt")).unwrap();
+    index.write().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
+        .unwrap();
+    drop(tree);
+    let changed = original
+        .replace("line 10\n", "changed 10\n")
+        .replace("line 11\n", "changed 11\n");
+    fs::write(&path, &changed).unwrap();
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone())
+    }
+    app.reconcile_workspace_trust();
+    app.start_open(path.clone());
+    wait_vfs(&mut app);
+    let deadline = Instant::now() + Duration::from_secs(4);
+    let settle = |app: &mut InteractiveApplication| {
+        while app.git.hunks_pending() || app.git.mutation_pending() || app.git.status_pending() {
+            app.process_git_hunk_events();
+            app.process_git_mutation_events();
+            app.process_git_status_events();
+            assert!(Instant::now() < deadline);
+            thread::yield_now()
+        }
+    };
+    app.start_git_status_refresh();
+    settle(&mut app);
+    let mut invocation =
+        crate::editor::CommandInvocation::new("workspace.git.lines.stage", InvocationSource::Test)
+            .expect("command id");
+    for (name, value) in [("start", 11), ("end", 11)] {
+        invocation
+            .arguments
+            .insert(name.into(), crate::editor::CommandValue::Integer(value));
+    }
+    app.invoke(invocation);
+    settle(&mut app);
+    let repo = git2::Repository::open(&app.state.workspace_root).unwrap();
+    let index = repo.index().unwrap();
+    let entry = index.get_path(std::path::Path::new("pair.txt"), 0).unwrap();
+    assert_eq!(
+        String::from_utf8(repo.find_blob(entry.id).unwrap().content().to_vec()).unwrap(),
+        original.replace("line 11\n", "changed 11\n"),
+        "{:?}",
+        app.ui.notification
+    );
 }
 
 #[test]

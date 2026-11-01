@@ -417,8 +417,8 @@ pub(super) fn register_commands(
         "Stage a line range inside the current Git hunk",
         ContextRequirement::Workspace,
         ArgumentSchema::default()
-            .field("start", ArgumentType::Integer, true)
-            .field("end", ArgumentType::Integer, true),
+            .field("start", ArgumentType::Integer, false)
+            .field("end", ArgumentType::Integer, false),
         |invocation| {
             let integer = |name: &str| match invocation.arguments.get(name) {
                 Some(crate::editor::CommandValue::Integer(value)) => *value,

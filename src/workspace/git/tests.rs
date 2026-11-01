@@ -2417,3 +2417,34 @@ fn a_new_worktree_creates_its_branch_at_head_and_stays_out_of_status() {
     options.include_untracked(true);
     assert!(repo.statuses(Some(&mut options)).unwrap().is_empty());
 }
+
+#[test]
+fn staging_file_lines_takes_each_added_line_with_the_removed_line_it_replaces() {
+    use super::{GitDiffLine, GitDiffLineKind, GitHunk, GitHunkId};
+    let line = |kind, new_line| GitDiffLine {
+        kind,
+        old_line: None,
+        new_line,
+        text: String::new(),
+    };
+    let hunk = GitHunk {
+        id: GitHunkId(0),
+        header: String::new(),
+        old_start: 10,
+        old_lines: 2,
+        new_start: 10,
+        new_lines: 3,
+        lines: vec![
+            line(GitDiffLineKind::Delete, None),
+            line(GitDiffLineKind::Delete, None),
+            line(GitDiffLineKind::Add, Some(10)),
+            line(GitDiffLineKind::Add, Some(11)),
+            line(GitDiffLineKind::Add, Some(12)),
+        ],
+    };
+    assert_eq!(hunk.changes_on_lines(10, 10), vec![0, 2]);
+    assert_eq!(hunk.changes_on_lines(11, 11), vec![1, 3]);
+    assert_eq!(hunk.changes_on_lines(12, 12), vec![4]);
+    assert_eq!(hunk.changes_on_lines(10, 12), vec![0, 1, 2, 3, 4]);
+    assert_eq!(hunk.changes_on_lines(13, 14), Vec::<u32>::new());
+}

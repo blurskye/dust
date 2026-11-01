@@ -744,7 +744,8 @@ fn selected_lines_patch(
     let mut old_lines = 0u32;
     let mut new_lines = 0u32;
     let mut applied = 0usize;
-    for (index, line) in hunk.lines.iter().enumerate() {
+    for index in lines_in_pairs(hunk) {
+        let line = &hunk.lines[index];
         let chosen = selected.binary_search(&(index as u32)).is_ok();
         match line.kind {
             GitDiffLineKind::Context => {
@@ -781,6 +782,32 @@ fn selected_lines_patch(
         hunk.old_start, hunk.old_start
     );
     Ok(format!("{header}{body}").into_bytes())
+}
+
+/// The hunk's lines with each removed line next to the added line that replaces it, so a removed
+/// line kept as context stays in its place relative to the chosen changes around it.
+fn lines_in_pairs(hunk: &GitHunk) -> Vec<usize> {
+    fn flush(order: &mut Vec<usize>, removed: &mut Vec<usize>, added: &mut Vec<usize>) {
+        for position in 0..removed.len().max(added.len()) {
+            order.extend(removed.get(position));
+            order.extend(added.get(position));
+        }
+        removed.clear();
+        added.clear();
+    }
+    let (mut order, mut removed, mut added) = (Vec::new(), Vec::new(), Vec::new());
+    for (index, line) in hunk.lines.iter().enumerate() {
+        match line.kind {
+            GitDiffLineKind::Delete => removed.push(index),
+            GitDiffLineKind::Add => added.push(index),
+            GitDiffLineKind::Context => {
+                flush(&mut order, &mut removed, &mut added);
+                order.push(index);
+            }
+        }
+    }
+    flush(&mut order, &mut removed, &mut added);
+    order
 }
 
 /// Build the reverse patch for one captured hunk: the sides swap and the markers invert, so
