@@ -8029,7 +8029,7 @@ impl InteractiveApplication {
     pub(in crate::editor::session) fn open_builtin_picker(&mut self, kind: PickerKind) {
         match kind {
             PickerKind::Diagnostics => {
-                let items = self
+                let mut items: Vec<_> = self
                     .diagnostics
                     .choices()
                     .enumerate()
@@ -8065,6 +8065,24 @@ impl InteractiveApplication {
                         )
                     })
                     .collect();
+                items.extend(self.tasks.failed_tests().into_iter().map(
+                    |(path, line, summary, key)| {
+                        let place = self.workspace_relative_label(&path);
+                        let summary = summary.lines().map(str::trim).collect::<Vec<_>>();
+                        (
+                            PickerItem {
+                                badge: String::new(),
+                                kind: crate::workspace::PickerItemKind::Entry,
+                                id: PickerItemId(format!("test:{}:{}", key.name, key.index)),
+                                label: format!("{place}:{}  {}", line + 1, summary.join(" ")),
+                                detail: String::new(),
+                                source: key.name.clone(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::TaskTest(key),
+                        )
+                    },
+                ));
                 self.install_surface_picker(
                     PickerSurfaceKind::Problems,
                     self.message("picker_diagnostics_title", &[]),

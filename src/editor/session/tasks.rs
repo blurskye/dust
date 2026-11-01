@@ -112,9 +112,9 @@ struct RunKey {
 }
 #[derive(Clone, Debug)]
 pub(super) struct TestKey {
-    name: String,
+    pub(super) name: String,
     run: Arc<()>,
-    index: usize,
+    pub(super) index: usize,
 }
 struct Plan {
     remaining: VecDeque<(String, TaskConfig)>,
@@ -783,6 +783,36 @@ impl TaskSession {
                 )
             })
             .collect()
+    }
+    /// Failed cases of the current runs that name a source line, for the Problems list.
+    pub(super) fn failed_tests(&self) -> Vec<(PathBuf, usize, String, TestKey)> {
+        let mut names = self.tests.keys().collect::<Vec<_>>();
+        names.sort();
+        let mut failed = Vec::new();
+        for name in names {
+            let Some(key) = self.keys.get(name) else {
+                continue;
+            };
+            for (index, case) in self.tests[name].iter().enumerate() {
+                let status = case.status.to_lowercase();
+                let Some((path, line, _)) = &case.source else {
+                    continue;
+                };
+                if status.contains("fail") || status.contains("error") {
+                    failed.push((
+                        path.clone(),
+                        *line,
+                        format!("{}: {}", case.name, case.message),
+                        TestKey {
+                            name: name.clone(),
+                            run: key.epoch.clone(),
+                            index,
+                        },
+                    ));
+                }
+            }
+        }
+        failed
     }
     pub(super) fn resolve_test(&self, key: &TestKey) -> Option<(PathBuf, usize, usize)> {
         let current = self.keys.get(&key.name)?;

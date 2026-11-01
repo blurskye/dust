@@ -2155,6 +2155,80 @@ fn task_formatter_uses_authorized_worker_and_refuses_reloaded_snapshot() {
 
 #[cfg(unix)]
 #[test]
+fn a_failed_test_is_listed_in_problems_and_jumps_to_its_line() {
+    let root = tempdir().unwrap();
+    let state_dir = tempdir().unwrap();
+    fs::write(root.path().join("a.txt"), "one\ntwo\nthree\n").unwrap();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.tasks.insert(
+        "unit".into(),
+        crate::config::TaskConfig {
+            kind: crate::config::TaskKind::Test,
+            executable: "/bin/sh".into(),
+            arguments: vec![
+                "-c".into(),
+                "printf 'FAILED adds a.txt:3 wrong sum\nok reads a.txt:1 fine\n'".into(),
+            ],
+            cwd: None,
+            environment: BTreeMap::new(),
+            dependencies: vec![],
+            timeout_ms: Some(2000),
+            stdin: false,
+            matcher: Some(crate::config::ProblemMatcherConfig {
+                pattern: r"(?m)^(?P<status>\S+) (?P<name>\S+) (?P<path>[^:]+):(?P<line>\d+) (?P<message>[^\n]+)$"
+                    .into(),
+                path_group: "path".into(),
+                line_group: "line".into(),
+                column_group: None,
+                severity_group: None,
+                message_group: "message".into(),
+                name_group: Some("name".into()),
+                status_group: Some("status".into()),
+                duration_group: None,
+            }),
+        },
+    );
+    let mut app = InteractiveApplication::new(
+        StartupTarget::Dashboard {
+            root: root.path().into(),
+        },
+        loaded,
+        false,
+        state_dir.path().into(),
+        false,
+        false,
+        std::sync::Arc::new(crate::clock::SystemClock),
+    )
+    .unwrap();
+    app.window_session.observe_size((80, 24));
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone());
+    }
+    app.reconcile_workspace_trust();
+    app.process_effect(AppEffect::TestRun("unit".into()));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.tasks.test_items("unit").is_empty() && Instant::now() < deadline {
+        app.process_execution_preflight();
+        app.process_job_events();
+        thread::sleep(Duration::from_millis(2));
+    }
+    app.open_builtin_picker(PickerKind::Diagnostics);
+    let rows = &app.ui.picker.as_ref().unwrap().rows;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].label, "a.txt:3  adds: wrong sum");
+    app.accept_picker();
+    wait_vfs(&mut app);
+    let view = &app.state.views[app.state.active_view.expect("view")];
+    let buffer = &app.state.buffers[view.buffer];
+    assert_eq!(buffer.path.as_deref(), Some(root.path().join("a.txt").as_path()));
+    assert_eq!(buffer.text.byte_to_line(view.cursor).unwrap(), 2);
+}
+
+#[cfg(unix)]
+#[test]
 fn linter_job_and_vfs_publish_only_original_source_then_recover() {
     let root = tempdir().unwrap();
     let state_dir = tempdir().unwrap();
