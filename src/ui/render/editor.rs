@@ -471,7 +471,10 @@ pub(super) fn render_editor_view(
                     tab_width: config.editor.tab_width,
                     ambiguous_wide: config.editor.ambiguous_width == AmbiguousWidth::Wide,
                 },
-            ) {
+            ) || view.multi_marks.iter().any(|mark| {
+                mark.contains(global) || (mark.is_empty() && mark.start == global)
+            }) || view.block_insert.contains(&global)
+            {
                 Style::Selection
             } else if search_ranges.iter().any(|range| range.contains(global))
                 || flash.is_some_and(|flash| flash.matches.iter().any(|range| range.contains(global)))
@@ -762,9 +765,8 @@ pub(super) fn render_editor_view(
         let configured = match view.mode {
             EditorMode::Insert => config.ui.cursor.insert,
             EditorMode::Replace => config.ui.cursor.replace,
-            EditorMode::VisualChar | EditorMode::VisualLine | EditorMode::VisualBlock => {
-                config.ui.cursor.visual
-            }
+            EditorMode::VisualChar | EditorMode::VisualLine | EditorMode::VisualBlock
+            | EditorMode::Multi => config.ui.cursor.visual,
             EditorMode::OperatorPending => config.ui.cursor.operator_pending,
             EditorMode::CommandLine => config.ui.cursor.command,
             EditorMode::Prompt => config.ui.cursor.prompt,
@@ -1227,6 +1229,7 @@ pub(super) fn mode_name(mode: EditorMode) -> &'static str {
         EditorMode::VisualChar => "visual_char",
         EditorMode::VisualLine => "visual_line",
         EditorMode::VisualBlock => "visual_block",
+        EditorMode::Multi => "multi",
         EditorMode::OperatorPending => "operator_pending",
         EditorMode::CommandLine => "command_line",
         EditorMode::Prompt => "prompt",

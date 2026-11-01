@@ -185,6 +185,7 @@ impl HeadlessEditor {
             EditorMode::VisualChar => "visual_char",
             EditorMode::VisualLine => "visual_line",
             EditorMode::VisualBlock => "visual_block",
+            EditorMode::Multi => "multi",
             EditorMode::OperatorPending => "operator_pending",
             EditorMode::CommandLine => "command_line",
             EditorMode::Prompt => "prompt",

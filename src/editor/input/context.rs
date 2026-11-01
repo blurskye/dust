@@ -49,6 +49,7 @@ const EDITOR_MODES: &[&str] = &[
     "visual_char",
     "visual_line",
     "visual_block",
+    "multi",
     "operator_pending",
 ];
 

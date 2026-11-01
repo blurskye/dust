@@ -498,6 +498,12 @@ impl DebugSession {
                 }
                 let mut arguments = serde_json::Map::from_iter(launch.session.arguments);
                 arguments.insert("cwd".into(), serde_json::json!(launch.cwd));
+                // As in VS Code, or `input()` gets end of file.
+                let adapter_runs_terminal =
+                    launch.configuration.is_none() && launch.session.adapter == "debugpy";
+                if adapter_runs_terminal {
+                    arguments.insert("console".into(), serde_json::json!("integratedTerminal"));
+                }
                 // A project's virtual environment is what its imports need, as in VS Code.
                 let venv = launch.cwd.join(".venv/bin/python");
                 if launch.session.adapter == "debugpy"
@@ -550,6 +556,7 @@ impl DebugSession {
                 // as the session lives, rather than dropping it with the intent.
                 self.configuration = launch.configuration;
                 self.terminal_profile = launch.terminal;
+                self.adapter_runs_terminal = adapter_runs_terminal;
                 self.scope = launch.scope;
                 self.target = Some(target);
                 self.choices = None;

@@ -238,6 +238,50 @@ impl InteractiveApplication {
         }
     }
 
+    fn handle_debug_tab_mouse(&mut self, key: &KeyEvent, column: u16, row: u16) -> bool {
+        if key.terminal_mouse() != Some(crate::editor::input::TerminalMouseInput::LeftDown)
+            || self.input.prompt().is_some()
+            || self.ui.picker.is_some()
+            || self.ui.tool_menu.is_some()
+            || self.ui.dashboard
+            || self.state.active_view.is_none()
+        {
+            return false;
+        }
+        let (Some(bounds), Some(selected)) = (
+            self.workspace_bounds(),
+            self.ui.debug_panes.as_ref().map(|panes| panes.selected),
+        ) else {
+            return false;
+        };
+        let (top, bottom) = crate::ui::editor_workspace_insets(
+            &self.state,
+            &self.ui,
+            self.configuration.settings(),
+            bounds.height,
+        );
+        // The same region the renderer gives the panes: above a docked terminal panel.
+        let panel_top = self
+            .ui
+            .terminal_panel
+            .as_ref()
+            .and(self.terminal_window_rect())
+            .map_or(u16::MAX, |panel| panel.y);
+        let end = bounds.y.saturating_add(bounds.height).min(panel_top);
+        let region = crate::ui::window::WindowRect {
+            y: bounds.y.saturating_add(top),
+            height: end.saturating_sub(bounds.y).saturating_sub(top.saturating_add(bottom)),
+            ..bounds
+        };
+        let Some(pane) = crate::ui::debug_pane_tab_at(region, selected, column, row) else {
+            return false;
+        };
+        if let Some(panes) = self.ui.debug_panes.as_mut() {
+            panes.selected = pane;
+        }
+        true
+    }
+
     pub(super) fn handle_content_tab_mouse(
         &mut self,
         key: &KeyEvent,
@@ -394,7 +438,8 @@ impl InteractiveApplication {
                         _ => {}
                     }
                 }
-                if self.handle_content_tab_mouse(&key, column, row)
+                if self.handle_debug_tab_mouse(&key, column, row)
+                    || self.handle_content_tab_mouse(&key, column, row)
                     || self.handle_border_drag(&key, column, row)
                 {
                     return;

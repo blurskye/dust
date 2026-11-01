@@ -93,6 +93,10 @@ pub enum EditorOperation {
         view: ViewId,
         positions: Vec<ByteOffset>,
     },
+    SetMultiMarks {
+        view: ViewId,
+        marks: Vec<crate::editor::text::ByteRange>,
+    },
     SetRegister {
         name: char,
         text: String,
@@ -342,6 +346,10 @@ fn apply_operation(
                 for position in &mut view.block_insert {
                     *position = delta.map_offset(*position, Affinity::After);
                 }
+                for mark in &mut view.multi_marks {
+                    mark.start = delta.map_offset(mark.start, Affinity::Before);
+                    mark.end = delta.map_offset(mark.end, Affinity::After);
+                }
             }
         }
         EditorOperation::SetCursor { view, position } => {
@@ -437,7 +445,7 @@ fn apply_operation(
                         kind: crate::editor::SelectionKind::Block,
                     });
                 }
-                EditorMode::Normal | EditorMode::Insert | EditorMode::Replace => {
+                EditorMode::Normal | EditorMode::Insert | EditorMode::Replace | EditorMode::Multi => {
                     target.selection = None;
                 }
                 _ => {}
@@ -447,6 +455,9 @@ fn apply_operation(
             }
             if *mode != EditorMode::Insert {
                 target.block_insert.clear();
+            }
+            if *mode != EditorMode::Multi {
+                target.multi_marks.clear();
             }
         }
         EditorOperation::PushReplaceRecord { view, record } => {
@@ -464,6 +475,13 @@ fn apply_operation(
                 .ok_or(TransactionError::MissingView)?
                 .replace_history
                 .pop();
+        }
+        EditorOperation::SetMultiMarks { view, marks } => {
+            state
+                .views
+                .get_mut(*view)
+                .ok_or(TransactionError::MissingView)?
+                .multi_marks = marks.clone();
         }
         EditorOperation::SetBlockInsert { view, positions } => {
             state

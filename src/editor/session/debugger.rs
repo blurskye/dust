@@ -173,6 +173,9 @@ pub(super) struct DebugSession {
     /// attached target's identity is not lost the moment the request goes out.
     target: Option<DapTargetIdentity>,
     terminal_profile: Option<TerminalPolicy>,
+    /// Started from the active file, with an adapter from the tool catalog. Such a session has no
+    /// configuration naming a terminal, so the adapter's program runs in one as it asks.
+    adapter_runs_terminal: bool,
     terminal_replies: HashMap<PtyId, DapTerminalReply>,
     reply_receipts: Vec<(String, i64, DapReplyReceipt)>,
     policy: DebugConfig,
@@ -215,6 +218,7 @@ impl DebugSession {
             configuration: None,
             target: None,
             terminal_profile: None,
+            adapter_runs_terminal: false,
             terminal_replies: HashMap::new(),
             reply_receipts: Vec::new(),
             policy: policy.clone(),
@@ -245,6 +249,7 @@ impl DebugSession {
         self.source = None;
         self.reject_terminals("requesting debugger retired");
         self.terminal_profile = None;
+        self.adapter_runs_terminal = false;
         match self.service.stop() {
             Err(DapError::NotRunning) if pending_launch => Ok(()),
             result => result,
@@ -276,6 +281,32 @@ impl DebugSession {
     }
     pub(in crate::editor::session) fn configuration(&self) -> Option<&str> {
         self.configuration.as_deref()
+    }
+    /// The terminal for a program an auto-started session's adapter asks to run, so that the
+    /// program can read what the user types.
+    pub(in crate::editor::session) fn adapter_terminal(
+        &self,
+        cwd: &std::path::Path,
+        arguments: &[String],
+        environment: &HashMap<String, String>,
+    ) -> Option<TerminalProfileConfig> {
+        if !self.adapter_runs_terminal {
+            return None;
+        }
+        let (program, arguments) = arguments.split_first()?;
+        Some(TerminalProfileConfig {
+            program: program.into(),
+            arguments: arguments.to_vec(),
+            cwd: Some(cwd.into()),
+            environment: environment
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+            columns: 80,
+            rows: 24,
+            float: false,
+            close_on_exit: false,
+        })
     }
     pub(in crate::editor::session) fn terminal_request(
         &self,

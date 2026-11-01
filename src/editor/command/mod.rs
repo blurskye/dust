@@ -27,6 +27,7 @@ const BUILTIN_NAMESPACES: &[&str] = &[
     "search",
     "replace",
     "mode",
+    "multi",
     "pane",
     "surface",
     "tab",

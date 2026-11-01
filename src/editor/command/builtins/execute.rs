@@ -12,6 +12,7 @@ use crate::editor::{
 use super::{
     super::{CommandError, CommandId, CommandInvocation, CommandOutcome},
     comment::build_comment_toggle,
+    multi,
     motion::{
         block_start_column, cursor_display_column, motion_target, on_last_character, operator_range, repeat_visual_ranges, visual_ranges,
     },
@@ -146,6 +147,23 @@ pub(super) fn execute_builtin<E>(
                 mode: EditorMode::Replace,
             });
         }
+        "multi.add_next" => multi::add_next(&mut transaction, view_id, view, &buffer.text)?,
+        "multi.add_below" | "multi.add_above" => multi::add_line(
+            &mut transaction,
+            view_id,
+            view,
+            &buffer.text,
+            invocation.id.as_str() == "multi.add_below",
+        )?,
+        "multi.insert" => multi::begin_insert(
+            &mut transaction,
+            view_id,
+            buffer_id,
+            view,
+            &buffer.text,
+            string_argument(invocation, "placement")?,
+        )?,
+        "multi.delete" => multi::delete(&mut transaction, view_id, buffer_id, view, &buffer.text),
         "mode.visual_char" | "mode.visual_line" | "mode.visual_block" => {
             transaction.undo_policy = UndoPolicy::Ignore;
             transaction.operations.push(EditorOperation::SetMode {

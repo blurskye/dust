@@ -275,6 +275,28 @@ impl TerminalSession {
         navigation: super::windows::NavigationStamp,
         capture: Arc<()>,
     ) -> Result<TerminalIntent, String> {
+        let config = self
+            .policy
+            .profiles
+            .get(name)
+            .ok_or("unknown terminal profile")?;
+        let root = workspace
+            .roots()
+            .iter()
+            .find(|r| Some(r.id) == workspace.active_root())
+            .ok_or("terminal has no active workspace root")?;
+        let config = expand_placeholders(config, &root.identity.canonical_path, file)?;
+        self.open_program(name, config, workspace, navigation, capture)
+    }
+    /// Opens `config` as it stands, for a program with no profile of its own.
+    pub(in crate::editor::session) fn open_program(
+        &mut self,
+        name: &str,
+        config: crate::config::TerminalProfileConfig,
+        workspace: &WorkspaceSession,
+        navigation: super::windows::NavigationStamp,
+        capture: Arc<()>,
+    ) -> Result<TerminalIntent, String> {
         if self.closed
             || self.next.is_none()
             || self.revision.is_none_or(|r| r == u64::MAX)
@@ -283,11 +305,7 @@ impl TerminalSession {
             return Err("terminal source is closed, full or exhausted".into());
         }
         self.service.check_open().map_err(|e| e.to_string())?;
-        let config = self
-            .policy
-            .profiles
-            .get(name)
-            .ok_or("unknown terminal profile")?;
+        let config = &config;
         if !(1..=1000).contains(&config.columns)
             || !(1..=1000).contains(&config.rows)
             || config.arguments.len() > 4096
@@ -307,7 +325,6 @@ impl TerminalSession {
             .iter()
             .find(|r| Some(r.id) == workspace.active_root())
             .ok_or("terminal has no active workspace root")?;
-        let config = &expand_placeholders(config, &root.identity.canonical_path, file)?;
         let cwd = config.cwd.as_ref().map_or_else(
             || root.identity.canonical_path.clone(),
             |p| {

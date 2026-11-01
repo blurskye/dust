@@ -794,3 +794,50 @@ fn markdown_lines_comment_with_html_comments() {
     press_keys(&mut app, &["g", "c", "c"]);
     assert_eq!(app.state.buffers[buffer].text.to_string(), "hello\n");
 }
+
+#[test]
+fn several_cursors_change_every_match_and_type_on_every_line() {
+    let mut app = app();
+    let (_, view) = app
+        .state
+        .open_text(TextBuffer::from_text("foo bar food foo\nx\nyy\n"), None);
+    app.set_dashboard_visibility(false);
+    let press = |app: &mut InteractiveApplication, key: &str| {
+        let event = match key.chars().collect::<Vec<_>>()[..] {
+            [character] => KeyEvent::character(character),
+            _ => key.parse().expect("key"),
+        };
+        app.handle_configured_key(event);
+    };
+    let text = |app: &InteractiveApplication| app.state.buffers[app.state.views[view].buffer].text.to_string();
+
+    // Ctrl-N takes whole words only: `food` is not a match.
+    press(&mut app, "ctrl-n");
+    press(&mut app, "ctrl-n");
+    assert_eq!(app.state.views[view].mode, crate::editor::EditorMode::Multi);
+    assert_eq!(app.state.views[view].multi_marks.len(), 2);
+    press(&mut app, "c");
+    for key in ["z", "z"] {
+        press(&mut app, key);
+    }
+    press(&mut app, "escape");
+    assert_eq!(text(&app), "zz bar food zz\nx\nyy\n");
+    assert!(app.state.views[view].multi_marks.is_empty());
+
+    // Cursors on the lines below, typing at each.
+    app.state.views[view].cursor = ByteOffset("zz bar food zz\n".len());
+    press(&mut app, "ctrl-alt-j");
+    assert_eq!(app.state.views[view].multi_marks.len(), 2);
+    press(&mut app, "i");
+    press(&mut app, "-");
+    press(&mut app, "escape");
+    assert_eq!(text(&app), "zz bar food zz\n-x\n-yy\n");
+
+    // `d` removes each match.
+    app.state.views[view].cursor = ByteOffset(0);
+    press(&mut app, "ctrl-n");
+    press(&mut app, "ctrl-n");
+    press(&mut app, "d");
+    assert_eq!(app.state.views[view].mode, crate::editor::EditorMode::Normal);
+    assert_eq!(text(&app), " bar food \n-x\n-yy\n");
+}

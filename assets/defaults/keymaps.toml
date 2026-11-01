@@ -6276,3 +6276,104 @@ context = "global"
 keys = "<leader> g m a"
 command = "workspace.git.conflict.abort"
 desc = "Abort Merge"
+
+# Several cursors. Ctrl-N is the usual Vim key for this; Ctrl-Alt-Up/Down are VS Code's.
+[[keymap]]
+id = "builtin.editor.normal.multi-add-next.ctrl-n"
+context = "editor"
+mode = "normal"
+keys = "ctrl-n"
+command = "multi.add_next"
+[[keymap]]
+id = "builtin.editor.normal.multi-add-below.ctrl-alt-j"
+context = "editor"
+mode = "normal"
+keys = "ctrl-alt-j"
+command = "multi.add_below"
+[[keymap]]
+id = "builtin.editor.normal.multi-add-below.ctrl-alt-down"
+context = "editor"
+mode = "normal"
+keys = "ctrl-alt-down"
+command = "multi.add_below"
+[[keymap]]
+id = "builtin.editor.normal.multi-add-above.ctrl-alt-k"
+context = "editor"
+mode = "normal"
+keys = "ctrl-alt-k"
+command = "multi.add_above"
+[[keymap]]
+id = "builtin.editor.normal.multi-add-above.ctrl-alt-up"
+context = "editor"
+mode = "normal"
+keys = "ctrl-alt-up"
+command = "multi.add_above"
+[[keymap]]
+id = "builtin.editor.multi.multi-add-next.ctrl-n"
+context = "editor"
+mode = "multi"
+keys = "ctrl-n"
+command = "multi.add_next"
+[[keymap]]
+id = "builtin.editor.multi.multi-add-below.ctrl-alt-j"
+context = "editor"
+mode = "multi"
+keys = "ctrl-alt-j"
+command = "multi.add_below"
+[[keymap]]
+id = "builtin.editor.multi.multi-add-below.ctrl-alt-down"
+context = "editor"
+mode = "multi"
+keys = "ctrl-alt-down"
+command = "multi.add_below"
+[[keymap]]
+id = "builtin.editor.multi.multi-add-above.ctrl-alt-k"
+context = "editor"
+mode = "multi"
+keys = "ctrl-alt-k"
+command = "multi.add_above"
+[[keymap]]
+id = "builtin.editor.multi.multi-add-above.ctrl-alt-up"
+context = "editor"
+mode = "multi"
+keys = "ctrl-alt-up"
+command = "multi.add_above"
+[[keymap]]
+id = "builtin.editor.visual-char.multi-add-next.ctrl-n"
+context = "editor"
+mode = "visual_char"
+keys = "ctrl-n"
+command = "multi.add_next"
+[[keymap]]
+id = "builtin.editor.multi.multi-insert.c.change"
+context = "editor"
+mode = "multi"
+keys = "c"
+command = "multi.insert"
+arguments = { placement = "change" }
+[[keymap]]
+id = "builtin.editor.multi.multi-insert.i.start"
+context = "editor"
+mode = "multi"
+keys = "i"
+command = "multi.insert"
+arguments = { placement = "start" }
+[[keymap]]
+id = "builtin.editor.multi.multi-insert.a.end"
+context = "editor"
+mode = "multi"
+keys = "a"
+command = "multi.insert"
+arguments = { placement = "end" }
+[[keymap]]
+id = "builtin.editor.multi.multi-delete.d"
+context = "editor"
+mode = "multi"
+keys = "d"
+command = "multi.delete"
+[[keymap]]
+id = "builtin.editor.multi.mode-normal.escape"
+context = "editor"
+mode = "multi"
+keys = "escape"
+command = "mode.normal"

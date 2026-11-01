@@ -3,7 +3,7 @@ use terminal::{active_compositor, dock_terminal_panel, render_key_hints};
 mod debug;
 mod explorer;
 use debug::{debug_layout_in, render_debug_panes};
-pub use debug::{DebugPane, DebugPanesUiState, debug_pane_insets};
+pub use debug::{DebugPane, DebugPanesUiState, debug_pane_insets, debug_pane_tab_at};
 use explorer::{place_workspace_frame, render_explorer_window};
 mod overlays;
 use super::geometry::text_width;
@@ -2087,7 +2087,9 @@ pub fn render(
             }),
         );
     }
-    if let Some(message) = ui.notification.as_ref() {
+    if ui.prompt.is_some() {
+        // A prompt sits where notices do, so one waits rather than being cut through.
+    } else if let Some(message) = ui.notification.as_ref() {
         // Messages show in a box at the top right, like errors, and fade after the
         // configured timeout.
         let style = if ui.notification_error {

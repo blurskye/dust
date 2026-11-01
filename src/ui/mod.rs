@@ -43,7 +43,7 @@ pub use render::{
     snap_display_column_forward, terminal_panel_geometry, terminal_tab_at_column};
 pub use render::{
     AgentListRow, AgentPanelUi, DebugPane, DebugPanesUiState, DebugSign, DebugSignKind, TutorCard,
-    debug_pane_insets, transcript_lines,
+    debug_pane_insets, debug_pane_tab_at, transcript_lines,
 };
 pub use diff::{emphasise_changed_spans, parse_unified_patch};
 pub use terminal::{

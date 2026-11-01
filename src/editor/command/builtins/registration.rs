@@ -25,8 +25,19 @@ pub fn register_builtin_commands<E: 'static>(
         ContextRequirement::View,
         ArgumentSchema::default().field("placement", ArgumentType::String, true),
     )?;
+    register(
+        registry,
+        "multi.insert",
+        "Type at every cursor",
+        ContextRequirement::View,
+        ArgumentSchema::default().field("placement", ArgumentType::String, true),
+    )?;
     for (id, title) in [
         ("mode.normal", "Enter Normal mode"),
+        ("multi.add_next", "Add a cursor at the next match"),
+        ("multi.add_below", "Add a cursor below"),
+        ("multi.add_above", "Add a cursor above"),
+        ("multi.delete", "Delete at every cursor"),
         ("mode.replace", "Enter Replace mode"),
         ("mode.visual_char", "Enter character Visual mode"),
         ("mode.visual_line", "Enter line Visual mode"),

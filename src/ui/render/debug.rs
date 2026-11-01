@@ -93,6 +93,65 @@ impl DebugLayout {
     }
 }
 
+/// Where a narrow terminal's strip puts each inspector's name: what is drawn is what a click finds.
+fn pane_tabs(strip: WindowRect, selected: DebugPane) -> Vec<(DebugPane, String, u16, u16)> {
+    let inner = strip.width.saturating_sub(2);
+    let mut tabs = Vec::new();
+    let mut x = strip.x + 1;
+    let mut y = strip.y;
+    for pane in DebugPane::ALL {
+        let label = if pane == selected {
+            format!("[{}]", pane.label())
+        } else {
+            pane.label().to_owned()
+        };
+        let width = label.chars().count() as u16 + 1;
+        if x > strip.x + 1 && x.saturating_sub(strip.x + 1) + width > inner {
+            y = y.saturating_add(1);
+            x = strip.x + 1;
+            if y >= strip.y.saturating_add(strip.height) {
+                break;
+            }
+        }
+        tabs.push((pane, label, x, y));
+        x = x.saturating_add(width);
+    }
+    tabs
+}
+
+/// The inspector tab under a click in a narrow terminal's strip.
+#[must_use]
+pub fn debug_pane_tab_at(
+    region: WindowRect,
+    selected: DebugPane,
+    column: u16,
+    row: u16,
+) -> Option<DebugPane> {
+    let layout = debug_layout_in(region)?;
+    if layout.mode != DebugLayoutMode::Narrow {
+        return None;
+    }
+    pane_tabs(layout.console?, selected)
+        .into_iter()
+        .find(|(_, label, x, y)| {
+            *y == row && column >= *x && column < x.saturating_add(label.chars().count() as u16)
+        })
+        .map(|(pane, ..)| pane)
+}
+
+/// Long values go on to the next rows, since a value's end is often the part being looked for.
+fn wrap_rows(body: &[String], width: u16) -> Vec<String> {
+    let width = usize::from(width).max(3);
+    let mut wrapped = Vec::new();
+    for line in body {
+        let chars: Vec<char> = line.chars().collect();
+        let (first, rest) = chars.split_at(width.min(chars.len()));
+        wrapped.push(first.iter().collect());
+        wrapped.extend(rest.chunks(width - 2).map(|part| format!("  {}", part.iter().collect::<String>())));
+    }
+    wrapped
+}
+
 /// The arrangement inside `region`, the workspace without its tab and status lines.
 pub(crate) fn debug_layout_in(region: WindowRect) -> Option<DebugLayout> {
     debug_layout(region.width, region.height).map(|layout| layout.at(region.x, region.y))
@@ -264,6 +323,7 @@ pub(crate) fn render_debug_panes(
                     body.push("watches:".to_owned());
                     body.extend(watches);
                 }
+                let body = wrap_rows(&body, right.width.saturating_sub(2));
                 draw_region(&mut frame.grid, right, "Variables · Watches", &body);
             }
             if let Some(console) = layout.console {
@@ -284,23 +344,11 @@ pub(crate) fn render_debug_panes(
                 let mut x = strip.x + 1;
                 let mut y = strip.y;
                 let mut content_top = strip.y;
-                for pane in DebugPane::ALL {
-                    let label = if pane == panes.selected {
-                        format!("[{}]", pane.label())
-                    } else {
-                        pane.label().to_owned()
-                    };
-                    let width = label.chars().count() as u16 + 1;
-                    if x > strip.x + 1 && x.saturating_sub(strip.x + 1) + width > inner {
-                        y = y.saturating_add(1);
-                        x = strip.x + 1;
-                        if y >= strip.y.saturating_add(strip.height) {
-                            break;
-                        }
-                    }
-                    frame.grid.put_text(x, y, &label, super::Style::Default);
-                    x = x.saturating_add(width);
-                    content_top = y.saturating_add(1);
+                for (_, label, tab_x, tab_y) in pane_tabs(strip, panes.selected) {
+                    frame.grid.put_text(tab_x, tab_y, &label, super::Style::Default);
+                    x = tab_x.saturating_add(label.chars().count() as u16 + 1);
+                    y = tab_y;
+                    content_top = tab_y.saturating_add(1);
                 }
                 const NEXT_PANE_HINT: &str = "· <leader>dn";
                 let hint_width = NEXT_PANE_HINT.chars().count() as u16;

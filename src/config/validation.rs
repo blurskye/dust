@@ -937,6 +937,7 @@ impl Config {
             "visual_char",
             "visual_line",
             "visual_block",
+            "multi",
             "operator_pending",
             "command_line",
             "prompt",

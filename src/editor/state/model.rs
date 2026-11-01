@@ -17,6 +17,8 @@ pub enum EditorMode {
     VisualChar,
     VisualLine,
     VisualBlock,
+    /// Several cursors marked, waiting for what to do at them.
+    Multi,
     OperatorPending,
     CommandLine,
     Prompt,
@@ -173,6 +175,8 @@ pub struct View {
     pub mode: EditorMode,
     pub replace_history: Vec<ReplaceRecord>,
     pub block_insert: Vec<ByteOffset>,
+    /// The ranges marked in `EditorMode::Multi`, in order. Empty ranges are plain cursors.
+    pub multi_marks: Vec<crate::editor::text::ByteRange>,
 }
 
 impl View {
@@ -189,6 +193,7 @@ impl View {
             mode: EditorMode::Normal,
             replace_history: Vec::new(),
             block_insert: Vec::new(),
+            multi_marks: Vec::new(),
         }
     }
 }

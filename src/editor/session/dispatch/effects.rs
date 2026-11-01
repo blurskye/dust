@@ -5421,9 +5421,11 @@ impl InteractiveApplication {
                     }
                 }
                 // "Starting" is over, and it would cover the variables the stop just filled in.
+                // Keys go back to the source, or F10 would go to the program's terminal.
                 DapEvent::Stopped { .. } => {
                     self.notices.clear_passing();
                     self.project_notice();
+                    self.set_terminal_focus(false);
                 }
                 // The panes and the execution sign show these.
                 DapEvent::Running { .. } | DapEvent::Output { .. } => {}
@@ -5532,6 +5534,12 @@ impl InteractiveApplication {
                     ..
                 } => {
                     let reply = reply.claim();
+                    if let Some(program) =
+                        self.debugger_session.adapter_terminal(&cwd, &arguments, &environment)
+                    {
+                        self.open_adapter_terminal(program, reply);
+                        continue;
+                    }
                     let profile = match self.debugger_session.terminal_request(
                         &cwd,
                         &arguments,
@@ -6018,6 +6026,27 @@ impl InteractiveApplication {
         }
     }
 
+    fn open_adapter_terminal(
+        &mut self,
+        program: crate::config::TerminalProfileConfig,
+        reply: crate::debugger::DapTerminalReply,
+    ) {
+        match self.terminal_session.open_program(
+            "debug",
+            program,
+            &self.workspace,
+            self.window_session
+                .navigation_stamp(self.state.window_version(), self.state.active_view),
+            self.input.capture_epoch(),
+        ) {
+            Ok(intent) => self.run_trusted(TrustedAction::OpenDapTerminal { intent, reply }),
+            Err(error) => {
+                let _ = reply.respond(false, Some(error.clone()));
+                self.show_error(error);
+            }
+        }
+    }
+
     pub(super) fn open_terminal_with_response(
         &mut self,
         intent: super::super::terminal::TerminalIntent,
@@ -6027,6 +6056,7 @@ impl InteractiveApplication {
             self.show_error("the debugger that asked for this terminal has stopped");
             return;
         }
+        let for_debugger = reply.is_some();
         match self.terminal_session.prepare(intent, &self.workspace)
         {
             Ok(open) => {
@@ -6057,7 +6087,10 @@ impl InteractiveApplication {
                             if open.float {
                                 self.float_terminal(id);
                             }
-                            self.set_terminal_focus(true);
+                            // A debugged program's terminal shows, and the user stays on the source.
+                            if !for_debugger {
+                                self.set_terminal_focus(true);
+                            }
                         }
                         self.resize_active_terminal_to_panel();
                         self.sync_terminal_panel();
