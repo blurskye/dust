@@ -143,15 +143,14 @@ pub fn picker_content_geometry(
 const EXPLORER_SEARCH_ROWS: u16 = 3;
 
 #[must_use]
-pub fn explorer_body_geometry(rect: WindowRect, config: &Config, search_box: bool) -> WindowRect {
-    let header = if search_box { EXPLORER_SEARCH_ROWS } else { 0 };
+pub fn explorer_body_geometry(rect: WindowRect, config: &Config) -> WindowRect {
     WindowRect {
         x: rect.x,
-        y: rect.y.saturating_add(header).min(rect.y.saturating_add(rect.height)),
+        y: rect.y.saturating_add(EXPLORER_SEARCH_ROWS).min(rect.y.saturating_add(rect.height)),
         width: rect.width.saturating_sub(1),
         height: rect
             .height
-            .saturating_sub(header)
+            .saturating_sub(EXPLORER_SEARCH_ROWS)
             .min(u16::try_from(config.ui.explorer.maximum_visible_rows).unwrap_or(u16::MAX)),
     }
 }

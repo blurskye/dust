@@ -229,7 +229,6 @@ impl WindowSession {
         &mut self,
         picker: Option<&PickerUiState>,
         config: &Config,
-        explorer_search_box: bool,
     ) {
         let Some(layout) = &self.layout else {
             return;
@@ -243,7 +242,7 @@ impl WindowSession {
                 .surfaces
                 .explorer
                 .and_then(rect)
-                .map(|rect| explorer_body_geometry(rect, config, explorer_search_box)),
+                .map(|rect| explorer_body_geometry(rect, config)),
             terminal: layout
                 .surfaces
                 .terminal

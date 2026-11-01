@@ -420,7 +420,6 @@ impl TestSession {
         crate::ui::geometry::explorer_body_geometry(
             rect,
             self.application.configuration.settings(),
-            self.application.explorer_search_box(view),
         )
     }
     pub(super) fn explorer_graph_shape(&self) -> (usize, usize, usize) {

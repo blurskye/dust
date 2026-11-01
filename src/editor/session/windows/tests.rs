@@ -332,7 +332,7 @@ fn body_and_notice_bounds_fail_closed_at_tiny_sizes() {
                 width,
                 height,
             };
-            let body = crate::ui::geometry::explorer_body_geometry(rect, &config, true);
+            let body = crate::ui::geometry::explorer_body_geometry(rect, &config);
             assert!(body.y >= rect.y && body.y + body.height <= rect.y + height);
             assert!(body.width <= width);
             if let Some(notice) =
@@ -409,7 +409,7 @@ fn accepted_projection_rejects_old_source_graph_size_and_invalidation() {
             height: 4,
         }),
     });
-    windows.project_content(None, &config, false);
+    windows.project_content(None, &config);
     assert!(windows.current(Some(1), (100, 30)).is_some());
     assert!(windows.current(Some(2), (100, 30)).is_none());
     assert!(windows.current(Some(1), (80, 24)).is_none());
@@ -418,7 +418,7 @@ fn accepted_projection_rejects_old_source_graph_size_and_invalidation() {
         1
     );
     let body = windows.content().explorer.unwrap();
-    assert_eq!((body.y, body.height), (0, 30));
+    assert_eq!((body.y, body.height), (3, 27));
     assert_eq!(
         windows.content().documentation_rows,
         crate::ui::geometry::documentation_page_rows(&config, 75, 30)

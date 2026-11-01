@@ -87,14 +87,6 @@ impl InteractiveApplication {
         self.follow_agent_pane();
     }
 
-    /// The search box shows on a focused explorer and on any that holds a query.
-    pub(super) fn explorer_search_box(&self, view: u64) -> bool {
-        self.window_session.focused_explorer() == Some(view)
-            || self
-                .explorer
-                .filtering(super::super::explorer::ExplorerViewId(view))
-    }
-
     pub(super) fn refresh_window_content(&mut self) {
         self.sync_ui_diagnostics();
         self.retire_stale_picker();
@@ -102,7 +94,6 @@ impl InteractiveApplication {
         self.window_session.project_content(
             self.ui.picker.as_ref(),
             self.configuration.settings(),
-            self.explorer_search_box(1),
         );
         if let Some(geometry) = self.window_session.content().picker {
             if let Some(scroll) = self.search.picker_scroll(usize::from(geometry.list.height)) {
@@ -859,14 +850,12 @@ impl InteractiveApplication {
                     crate::ui::geometry::explorer_body_geometry(
                         rect,
                         self.configuration.settings(),
-                        self.explorer_search_box(view),
                     )
                 })
             } else {
                 crate::ui::geometry::explorer_body_geometry(
                     rect,
                     self.configuration.settings(),
-                    self.explorer_search_box(view),
                 )
             };
             let Ok(projection) = self.explorer.projection_for(
@@ -1114,7 +1103,6 @@ impl InteractiveApplication {
         let body = crate::ui::geometry::explorer_body_geometry(
             rect,
             self.configuration.settings(),
-            self.explorer_search_box(view),
         );
         if !rect_contains_point(body, column, row) {
             return None;

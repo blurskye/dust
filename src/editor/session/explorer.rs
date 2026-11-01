@@ -364,10 +364,6 @@ impl ExplorerSession {
         self.clicked.take()
     }
     /// Whether this view's explorer has a query, or the user is typing one.
-    pub(in crate::editor::session) fn filtering(&self, view: ExplorerViewId) -> bool {
-        (self.searching && self.active_view == view)
-            || self.tree_for(view).is_some_and(|tree| !tree.filter().is_empty())
-    }
     pub(in crate::editor::session) fn searching(&self) -> bool {
         self.searching
     }

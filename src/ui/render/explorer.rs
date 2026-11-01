@@ -86,8 +86,7 @@ pub(super) fn render_explorer_window(
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
     let panel_width = rect.width.saturating_sub(1);
-    let search_box = focused || explorer.searching || !explorer.query.is_empty();
-    let body = crate::ui::geometry::explorer_body_geometry(rect, config, search_box);
+    let body = crate::ui::geometry::explorer_body_geometry(rect, config);
     let local_body = WindowRect {
         x: 0,
         y: body.y.saturating_sub(rect.y),
