@@ -3496,6 +3496,32 @@ fn the_selected_inspector_decides_the_narrow_strip_content_not_only_its_marker()
 }
 
 #[test]
+fn a_breakpoint_condition_wraps_and_a_long_frame_ends_in_an_ellipsis() {
+    use super::debug::{debug_layout, render_debug_panes, DebugPanesUiState};
+    let layout = debug_layout(120, 40).unwrap();
+    let inner = layout.left.unwrap().width as usize - 2;
+    let panes = DebugPanesUiState {
+        selected: super::debug::DebugPane::Stack,
+        target: String::new(),
+        status: String::new(),
+        variables: Vec::new(),
+        threads: Vec::new(),
+        stack: vec!["f".repeat(inner + 5)],
+        breakpoints: vec![format!("main.py:6 if {} == \"Ada\"", "person.name".repeat(2))],
+        watches: Vec::new(),
+        console: Vec::new(),
+    };
+    let mut frame = super::Frame {
+        grid: super::CellGrid::new(120, 40),
+        cursor: None,
+    };
+    render_debug_panes(&mut frame, layout, &panes);
+    let text = (0..40).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>().join("\n");
+    assert!(text.contains("\"Ada\""), "{text}");
+    assert!(text.contains(&format!("{}…", "f".repeat(inner - 1))), "{text}");
+}
+
+#[test]
 fn the_debug_console_and_the_terminal_panel_are_planned_together_rather_than_colliding() {
     // W-25 keeps the debug console and the program's terminal output as SEPARATE content; separate
     // content also needs separate ROOM. This renders through the real path with BOTH a debug

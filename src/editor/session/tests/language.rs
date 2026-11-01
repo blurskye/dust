@@ -49,6 +49,53 @@ fn installed_language_server_autostarts_after_workspace_trust_is_exact() {
 }
 
 #[test]
+fn a_server_the_user_stopped_stays_stopped_until_asked_for() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("main.rs");
+    app.state.open_text(
+        crate::editor::text::TextBuffer::from_text("fn main() {}"),
+        Some(path),
+    );
+    app.set_dashboard_visibility(false);
+    app.tooling
+        .fixture_retain(|entry| entry.definition.kind != crate::tools::ToolKind::Lsp);
+    let false_executable = crate::tools::discover_executable("false").expect("false executable");
+    app.tooling.fixture_insert(crate::tools::ToolEntry {
+        definition: crate::tools::ToolDefinition {
+            id: "automatic-rust".into(),
+            name: "Automatic Rust".into(),
+            kind: crate::tools::ToolKind::Lsp,
+            languages: vec!["rust".into()],
+            executable: false_executable.display().to_string(),
+            version: None,
+            release: None,
+            launch_args: Vec::new(),
+            format_arguments: Vec::new(),
+            probe_args: Vec::new(),
+            debug_program_policy: crate::tools::DebugProgramPolicy::default(),
+            project_root_markers: vec!["Cargo.toml".into()],
+            project_root_strategy: crate::files::ProjectRootStrategy::Cargo,
+            install: None,
+            pins: Vec::new(),
+        },
+        status: crate::tools::ToolStatus::Installed(false_executable),
+    });
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone());
+    }
+    app.reconcile_workspace_trust();
+
+    app.language.mark_stopped("automatic-rust");
+    app.sync_lsp_document();
+    assert!(!app.language.project_pending(), "a stopped server does not autostart");
+
+    app.language.clear_stopped("automatic-rust");
+    app.sync_lsp_document();
+    assert!(app.language.project_pending(), "starting it again allows autostart");
+}
+
+#[test]
 fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
     let mut app = app();
     let nested = app.state.workspace_root.join("nested");

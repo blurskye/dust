@@ -133,6 +133,8 @@ pub(super) struct LspSession {
     autostart: Option<LspAutostartObservation>,
     /// Languages already told which server to install, so the hint shows once per run.
     install_hinted: HashSet<String>,
+    /// Servers a person stopped; opening a file doesn't start them until asked again.
+    stopped: HashSet<String>,
     errors: BTreeMap<String, String>,
     navigation_reads: HashMap<
         crate::files::RequestId,
@@ -531,6 +533,18 @@ impl LspSession {
     }
     pub(super) fn hint_install_once(&mut self, language: &str) -> bool {
         self.install_hinted.insert(language.to_owned())
+    }
+    pub(super) fn mark_stopped(&mut self, server_id: &str) {
+        self.stopped.insert(server_id.to_owned());
+    }
+    pub(super) fn clear_stopped(&mut self, server_id: &str) {
+        self.stopped.remove(server_id);
+    }
+    pub(super) fn clear_all_stopped(&mut self) {
+        self.stopped.clear();
+    }
+    pub(super) fn is_stopped(&self, server_id: &str) -> bool {
+        self.stopped.contains(server_id)
     }
     pub(super) fn reset_autostart(&mut self) {
         self.autostart = None;

@@ -2684,6 +2684,7 @@ impl InteractiveApplication {
             AppEffect::RestartSelectedLsp => self.restart_selected_lsp(),
             AppEffect::ToggleToolRuntime => self.toggle_selected_lsp_runtime(),
             AppEffect::LspStart => {
+                self.language.clear_all_stopped();
                 if let Some(key) = self.language.active().cloned() {
                     self.language.request_start(&key, None);
                 }
@@ -2691,6 +2692,14 @@ impl InteractiveApplication {
             }
             AppEffect::LspStop => {
                 if let Some(server) = self.language.active().cloned() {
+                    if let Some(id) = self
+                        .language
+                        .sessions()
+                        .get(&server)
+                        .map(|state| state.server_id.clone())
+                    {
+                        self.language.mark_stopped(&id);
+                    }
                     self.language.request_stop(&server);
                     if let Err(error) = self.language.stop(&server) {
                         self.show_error(error)
@@ -11313,6 +11322,7 @@ impl InteractiveApplication {
             return;
         };
         self.stop_lsp_sessions_for_server(&id);
+        self.language.mark_stopped(&id);
         let category = self
             .ui
             .tool_menu
@@ -11695,7 +11705,7 @@ impl InteractiveApplication {
         }
         let launchable_server = launchable
             .iter()
-            .find(|id| !attached.contains(id))
+            .find(|id| !attached.contains(id) && !self.language.is_stopped(id))
             .cloned();
         // Like mason-lspconfig, point at the server to install when none can start.
         if launchable.is_empty()
@@ -12120,6 +12130,9 @@ impl InteractiveApplication {
 
     /// `asked` is a person starting this server, who is told when the project can't have it.
     fn launch_lsp(&mut self, requested: Option<String>, asked: bool) {
+        if let Some(id) = requested.as_ref().filter(|_| asked) {
+            self.language.clear_stopped(id);
+        }
         if !self.configuration.settings().lsp.enabled {
             self.show_error(self.message("lsp_disabled", &[]));
             return;

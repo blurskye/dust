@@ -266,8 +266,14 @@ pub struct DebugPanesUiState {
     pub console: Vec<String>,
 }
 
+/// Cuts text to the width, ending in an ellipsis so a cut line doesn't read as the whole value.
 fn clip(text: &str, width: u16) -> String {
-    text.chars().take(width as usize).collect()
+    let width = width as usize;
+    if text.chars().count() <= width {
+        return text.to_owned();
+    }
+    let kept = text.chars().take(width.saturating_sub(1));
+    kept.chain((width > 0).then_some('…')).collect()
 }
 
 fn fill(grid: &mut super::CellGrid, rect: WindowRect) {
@@ -320,7 +326,11 @@ pub(crate) fn render_debug_panes(
                     ("stack:", DebugPane::Stack),
                     ("breakpoints:", DebugPane::Breakpoints),
                 ] {
-                    let values = rows(pane, panes);
+                    let mut values = rows(pane, panes);
+                    // A condition is what the breakpoint means, so it wraps rather than cuts.
+                    if pane == DebugPane::Breakpoints {
+                        values = wrap_rows(&values, left.width.saturating_sub(2));
+                    }
                     if !values.is_empty() {
                         body.push(title.to_owned());
                         body.extend(values);
