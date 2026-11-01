@@ -3902,3 +3902,49 @@ fn indent_guides_inside_a_multiline_string_keep_the_guide_colour() {
     assert_ne!(guide.symbol, " ");
     assert!(matches!(guide.style, crate::ui::Style::Border | crate::ui::Style::Muted), "{:?}", guide.style);
 }
+
+#[test]
+fn a_long_path_in_a_picker_row_keeps_its_end() {
+    let ambiguous = crate::config::load_bundled_config().config.editor.ambiguous_width;
+    let path = "/tmp/a/very/long/prefix/that/repeats/on/every/row/src/main.py:12";
+    let (label, detail) =
+        super::surfaces::fitted_picker_row(path, "print(name)", 40, ambiguous);
+    assert!(label.starts_with('…') && label.ends_with("main.py:12"), "{label}");
+    assert_eq!(detail, "print(name)");
+    let (label, detail) =
+        super::surfaces::fitted_picker_row("main", "/tmp/a/very/long/prefix/main.go:7:2", 24, ambiguous);
+    assert_eq!(label, "main");
+    assert!(detail.starts_with('…') && detail.ends_with("main.go:7:2"), "{detail}");
+    let (label, _) = super::surfaces::fitted_picker_row("Git: stage/unstage all", "", 12, ambiguous);
+    assert_eq!(label, "Git: stage/unstage all", "ordinary text is not a path");
+}
+
+#[test]
+fn key_help_breaks_between_items_and_keeps_its_end() {
+    let ambiguous = crate::config::load_bundled_config().config.editor.ambiguous_width;
+    let rows = super::surfaces::wrapped_key_help("j/k move · Enter install · r refresh · Esc close", 26, ambiguous);
+    assert_eq!(rows, ["j/k move · Enter install", "r refresh · Esc close"]);
+}
+
+#[test]
+fn a_notification_too_long_to_show_points_at_the_messages_list() {
+    let mut state = EditorState::new(PathBuf::from("/tmp"));
+    let _ = state.open_text(crate::editor::text::TextBuffer::from_text(""), None);
+    let loaded = crate::config::load_bundled_config();
+    let mut ui = ui_with_editor_layout(&state);
+    ui.notification = Some("conflict ".repeat(200));
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 60, 20);
+    let text: Vec<String> = (0..20).map(|row| frame.grid.row_text(row)).collect();
+    assert!(text.iter().any(|row| row.contains("… :messages")), "{text:#?}");
+}
+
+#[test]
+fn the_status_line_keeps_fields_from_running_into_the_position() {
+    let mut state = EditorState::new(PathBuf::from("/tmp/a-rather-long-project-name"));
+    let (_, view) = state.open_text(crate::editor::text::TextBuffer::from_text("x"), None);
+    let loaded = crate::config::load_bundled_config();
+    let ui = ui_with_editor_layout(&state);
+    let frame = super::render_editor_view(&state, view, &ui, &loaded.config, 22, 5);
+    let status = frame.grid.row_text(4);
+    assert!(status.trim_end().ends_with(" 1:1"), "{status:?}");
+}

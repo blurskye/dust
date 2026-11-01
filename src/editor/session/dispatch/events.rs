@@ -2923,7 +2923,7 @@ impl InteractiveApplication {
                 if locations.is_empty() {
                     self.show_error(self.message("lsp_no_result", &[]));
                 } else if method == "textDocument/references" || locations.len() > 1 {
-                    self.open_lsp_locations_picker(server, locations);
+                    self.open_lsp_locations_picker(locations);
                 } else if let Some(location) = locations.first() {
                     self.navigate_lsp_location(location);
                 }

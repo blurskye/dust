@@ -8,8 +8,98 @@ use crate::{
 use super::{
     CellAlign, DiffLayout, DiffPreview, DiffRow, DiffRowKind, DiffSideRow, Frame, PickerPreviewBody,
     PickerRowKind, PickerUiState, PluginSurfaceUiState, PrivateSurfaceUiState, PromptState,
-    ToolMenuState, editor::cursor_style,
+    ToolMenuState, editor::cursor_style, overlays::truncate_content_title,
 };
+
+/// What fits of `text`, ending in an ellipsis when some had to go.
+fn ellipsized(text: &str, maximum: usize, ambiguous: crate::config::AmbiguousWidth) -> String {
+    use unicode_segmentation::UnicodeSegmentation;
+    if text_width(text, ambiguous) <= maximum || maximum == 0 {
+        return if maximum == 0 { String::new() } else { text.to_owned() };
+    }
+    let mut kept = String::new();
+    let mut width = 1;
+    for grapheme in text.graphemes(true) {
+        width += text_width(grapheme, ambiguous).max(1);
+        if width > maximum {
+            break;
+        }
+        kept.push_str(grapheme);
+    }
+    format!("{kept}…")
+}
+
+fn looks_like_path(text: &str) -> bool {
+    text.contains('/') && !text.contains(char::is_whitespace)
+}
+
+/// A `Label  /some/path` detail row keeps its label and the end of its path.
+fn clip_path_tail(
+    line: &str,
+    maximum: usize,
+    ambiguous: crate::config::AmbiguousWidth,
+) -> String {
+    let path = line.rsplit(' ').next().unwrap_or_default();
+    let label = &line[..line.len() - path.len()];
+    let room = maximum.saturating_sub(text_width(label, ambiguous));
+    format!("{label}{}", truncate_content_title(path, room, ambiguous))
+}
+
+/// A picker row's label and detail within `available` cells. A long path loses its start, since
+/// its end is what tells two rows apart.
+pub(super) fn fitted_picker_row(
+    label: &str,
+    detail: &str,
+    available: usize,
+    ambiguous: crate::config::AmbiguousWidth,
+) -> (String, String) {
+    let label_width = text_width(label, ambiguous);
+    let detail_width = text_width(detail, ambiguous);
+    if label_width + 2 + detail_width <= available || detail.is_empty() && label_width <= available {
+        return (label.to_owned(), detail.to_owned());
+    }
+    let label = if looks_like_path(label) {
+        let room = if detail.is_empty() { available } else { available * 2 / 3 };
+        truncate_content_title(label, room, ambiguous)
+    } else {
+        label.to_owned()
+    };
+    let room = available.saturating_sub(text_width(&label, ambiguous) + 2);
+    let detail = if looks_like_path(detail) {
+        truncate_content_title(detail, room, ambiguous)
+    } else {
+        detail.to_owned()
+    };
+    (label, detail)
+}
+
+/// Key hints broken between items into at most two rows, so narrow screens keep them all.
+pub(super) fn wrapped_key_help(
+    help: &str,
+    maximum: usize,
+    ambiguous: crate::config::AmbiguousWidth,
+) -> Vec<String> {
+    const SEPARATOR: &str = " · ";
+    let mut first = String::new();
+    let mut rest = Vec::new();
+    for item in help.split(SEPARATOR) {
+        let candidate = if first.is_empty() {
+            item.to_owned()
+        } else {
+            format!("{first}{SEPARATOR}{item}")
+        };
+        if rest.is_empty() && text_width(&candidate, ambiguous) <= maximum {
+            first = candidate;
+        } else {
+            rest.push(item);
+        }
+    }
+    let mut rows = vec![ellipsized(&first, maximum, ambiguous)];
+    if !rest.is_empty() {
+        rows.push(ellipsized(&rest.join(SEPARATOR), maximum, ambiguous));
+    }
+    rows
+}
 
 /// Draw a diff that was carried as structure rather than flattened text.
 ///
@@ -502,17 +592,11 @@ pub(super) fn render_picker(
         } else {
             &configured.row_marker
         };
-        let detail = if row.detail.is_empty() {
-            String::new()
-        } else {
-            format!("  {}", row.detail)
-        };
         let source = if row.source.is_empty() {
             String::new()
         } else {
             format!("{}{}", configured.source_separator, row.source)
         };
-        let text = format!("{} {}{}", marker, row.label, detail);
         // Every picker uses the same trailing provenance column. Reserve at
         // most a third of the row so long sources cannot crowd out the label.
         let source_right = list_right.saturating_sub(1);
@@ -524,6 +608,19 @@ pub(super) fn render_picker(
             list_right
         } else {
             source_x.saturating_sub(1)
+        };
+        let ambiguous = config.editor.ambiguous_width;
+        let (label, detail) = fitted_picker_row(
+            &row.label,
+            &row.detail,
+            usize::from(label_right.saturating_sub(content_left))
+                .saturating_sub(text_width(marker, ambiguous) + 1),
+            ambiguous,
+        );
+        let text = if detail.is_empty() {
+            format!("{marker} {label}")
+        } else {
+            format!("{marker} {label}  {detail}")
         };
         if selected {
             for x in left + 1..list_right {
@@ -872,25 +969,24 @@ pub(super) fn render_tool_menu(
     frame.grid.put_text(left + 2, top, &title, Style::Accent);
     let content_left = left + 2;
     let content_width = width.saturating_sub(4);
-    let clip = |text: &str| {
-        text.chars()
-            .take(usize::from(content_width))
-            .collect::<String>()
-    };
+    let ambiguous = config.editor.ambiguous_width;
+    let clip = |text: &str| ellipsized(text, usize::from(content_width), ambiguous);
     let clip_indented = |text: &str| {
-        text.chars()
-            .take(usize::from(content_width.saturating_sub(2)))
-            .collect::<String>()
+        truncate_content_title(text, usize::from(content_width.saturating_sub(2)), ambiguous)
     };
     let mut y = top + 1;
 
     if let Some(picker) = &menu.runtime_picker {
-        frame.grid.put_text(
-            content_left,
-            y,
-            &clip("j/k move · Enter use this build · i install · u uninstall · r refresh · Esc back"),
-            Style::Muted,
-        );
+        for (row, help) in wrapped_key_help(
+            "j/k move · Enter use this build · i install · u uninstall · r refresh · Esc back",
+            usize::from(content_width),
+            ambiguous,
+        )
+        .iter()
+        .enumerate()
+        {
+            frame.grid.put_text(content_left, y + row as u16, help, Style::Muted);
+        }
         y += 2;
         let picker_version_x = content_left.saturating_add(2);
         let picker_release_x = content_left.saturating_add(content_width.saturating_mul(22) / 100);
@@ -945,21 +1041,38 @@ pub(super) fn render_tool_menu(
                 }
             }
             frame.grid.put_text(content_left, y, marker, style);
-            frame
-                .grid
-                .put_text(picker_version_x, y, &option.version, style);
+            let column = |text: &str, from: u16, to: u16| {
+                ellipsized(text, usize::from(to.saturating_sub(from).saturating_sub(1)), ambiguous)
+            };
+            frame.grid.put_text(
+                picker_version_x,
+                y,
+                &column(&option.version, picker_version_x, picker_release_x),
+                style,
+            );
             let release = if option.release == "catalog build" {
                 "—"
             } else {
                 option.release.as_str()
             };
-            frame.grid.put_text(picker_release_x, y, release, style);
-            frame
-                .grid
-                .put_text(picker_source_x, y, &option.label, style);
-            frame
-                .grid
-                .put_text(picker_state_x, y, &option.status, style);
+            frame.grid.put_text(
+                picker_release_x,
+                y,
+                &column(release, picker_release_x, picker_source_x),
+                style,
+            );
+            frame.grid.put_text(
+                picker_source_x,
+                y,
+                &column(&option.label, picker_source_x, picker_state_x),
+                style,
+            );
+            frame.grid.put_text(
+                picker_state_x,
+                y,
+                &column(&option.status, picker_state_x, picker_active_x),
+                style,
+            );
             frame.grid.put_text(picker_active_x, y, active, style);
             y += 1;
             if option.installed {
@@ -1011,9 +1124,12 @@ pub(super) fn render_tool_menu(
         return;
     }
 
-    frame
-        .grid
-        .put_text(content_left, y, &clip(&configured.help), Style::Muted);
+    for (row, help) in wrapped_key_help(&configured.help, usize::from(content_width), ambiguous)
+        .iter()
+        .enumerate()
+    {
+        frame.grid.put_text(content_left, y + row as u16, help, Style::Muted);
+    }
     y += 2;
     let mut tab_x = content_left;
     for category in &configured.category_order {
@@ -1073,9 +1189,12 @@ pub(super) fn render_tool_menu(
         let (glyph, glyph_style) = tool_state_glyph(row);
         frame.grid.put_text(content_left, y, glyph, glyph_style);
         let name_right = version_x.saturating_sub(2);
+        let column = |text: &str, from: u16, to: u16| {
+            ellipsized(text, usize::from(to.saturating_sub(from)), ambiguous)
+        };
         frame
             .grid
-            .put_text_clipped(name_x, y, &row.name, style, name_right);
+            .put_text(name_x, y, &column(&row.name, name_x, name_right), style);
         let languages_x = name_x
             .saturating_add(u16::try_from(text_width(&row.name, config.editor.ambiguous_width)).unwrap_or(0))
             .saturating_add(2);
@@ -1083,25 +1202,26 @@ pub(super) fn render_tool_menu(
             frame.grid.put_text_clipped(
                 languages_x,
                 y,
-                &row.languages,
+                &column(&row.languages, languages_x, name_right),
                 if selected { Style::Selection } else { Style::Muted },
                 name_right,
             );
         }
+        let runtime_right = runtime_x.saturating_sub(1);
         frame
             .grid
-            .put_text_clipped(version_x, y, &row.version, style, runtime_x.saturating_sub(1));
+            .put_text(version_x, y, &column(&row.version, version_x, runtime_right), style);
+        let state_left = state_x.saturating_sub(1);
         frame
             .grid
-            .put_text_clipped(runtime_x, y, &row.runtime, style, state_x.saturating_sub(1));
+            .put_text(runtime_x, y, &column(&row.runtime, runtime_x, state_left), style);
         // The list shows the short state; byte counts stay in the detail pane.
         let state = row.lifecycle.split(" (").next().unwrap_or_default();
-        frame.grid.put_text_clipped(
+        frame.grid.put_text(
             state_x,
             y,
-            state,
+            &column(state, state_x, right),
             if selected { Style::Selection } else { glyph_style },
-            right,
         );
         y += 1;
     }
@@ -1157,7 +1277,12 @@ pub(super) fn render_tool_menu(
             if y >= bottom {
                 break;
             }
-            frame.grid.put_text(content_left, y, &clip(&line), Style::Muted);
+            let line = if looks_like_path(line.rsplit(' ').next().unwrap_or_default()) {
+                clip_path_tail(&line, usize::from(content_width), ambiguous)
+            } else {
+                clip(&line)
+            };
+            frame.grid.put_text(content_left, y, &line, Style::Muted);
             y += 1;
         }
         y += 1;

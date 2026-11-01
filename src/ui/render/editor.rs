@@ -952,6 +952,13 @@ pub(super) fn render_status_line(
     } else {
         grid.put_text_clipped(0, status_y, &operation_indicator, Style::StatusAccent, width)
     };
+    let left_limit = if config.ui.status_line.components.iter().any(|c| c == "position") {
+        let position_width =
+            u16::try_from(text_width(&position, config.editor.ambiguous_width)).unwrap_or(0);
+        width.saturating_sub(position_width.saturating_add(1))
+    } else {
+        width
+    };
     for component in &config.ui.status_line.components {
         let (text, style, right_aligned) = match component.as_str() {
             "mode" => (mode.as_str(), Style::StatusAccent, false),
@@ -1002,12 +1009,21 @@ pub(super) fn render_status_line(
                 grid.put_text(width - component_width, status_y, text, style);
             }
         } else {
-            x = grid.put_text(x, status_y, text, style);
-            x = grid.put_text(
+            // The mode and the file name are cut to fit; other fields go whole or not at all.
+            let text_cells =
+                u16::try_from(text_width(text, config.editor.ambiguous_width)).unwrap_or(u16::MAX);
+            if !matches!(component.as_str(), "mode" | "file")
+                && x.saturating_add(text_cells) > left_limit
+            {
+                continue;
+            }
+            x = grid.put_text_clipped(x, status_y, text, style, left_limit);
+            x = grid.put_text_clipped(
                 x,
                 status_y,
                 &config.ui.status_line.component_separator,
                 Style::Status,
+                left_limit,
             );
         }
     }

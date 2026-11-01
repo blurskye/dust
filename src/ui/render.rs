@@ -1583,6 +1583,7 @@ fn render_error_notification(
     config: &Config,
     width: u16,
     height: u16,
+    at_bottom: bool,
 ) {
     let Some(mut rect) = super::geometry::error_notification_geometry(config, width, height) else {
         return;
@@ -1590,15 +1591,26 @@ fn render_error_notification(
     // A long message wraps instead of losing its end, which is usually the part that says why.
     let ambiguous = config.editor.ambiguous_width;
     let inner = usize::from(rect.width.saturating_sub(4)).max(1);
-    let lines: Vec<String> = if text_width(message, ambiguous) <= inner {
+    let mut lines: Vec<String> = if text_width(message, ambiguous) <= inner {
         vec![message.to_owned()]
     } else {
         wrap_card_text(message, inner, ambiguous)
             .into_iter()
             .map(|runs| runs.into_iter().map(|(piece, _)| piece).collect())
-            .take(usize::from(height.saturating_sub(rect.y + 2)).clamp(1, NOTIFICATION_MAX_LINES))
             .collect()
     };
+    let shown = usize::from(height.saturating_sub(rect.y + 2)).clamp(1, NOTIFICATION_MAX_LINES);
+    if lines.len() > shown {
+        lines.truncate(shown);
+        const MORE: &str = "… :messages";
+        if let Some(last) = lines.last_mut() {
+            while !last.is_empty() && text_width(last, ambiguous) + MORE.len() + 1 > inner {
+                last.pop();
+            }
+            last.push(' ');
+            last.push_str(MORE);
+        }
+    }
     let content_width = lines
         .iter()
         .map(|line| text_width(line, ambiguous))
@@ -1608,6 +1620,9 @@ fn render_error_notification(
         .saturating_add(4)
         .clamp(4, rect.width);
     rect.height = lines.len() as u16 + 2;
+    if at_bottom {
+        rect.y = height.saturating_sub(rect.height);
+    }
     rect.x = rect
         .x
         .saturating_add(rect.width.saturating_sub(content_width));
@@ -2091,6 +2106,7 @@ pub fn render(
             }),
         );
     }
+    let modal_open = ui.picker.is_some() || ui.tool_menu.is_some();
     if ui.prompt.is_some() {
         // A prompt sits where notices do, so one waits rather than being cut through.
     } else if let Some(message) = ui.notification.as_ref() {
@@ -2103,7 +2119,7 @@ pub fn render(
         } else {
             Style::Accent
         };
-        render_error_notification(&mut frame, message, style, config, width, workspace_height);
+        render_error_notification(&mut frame, message, style, config, width, workspace_height, modal_open);
     } else if let Some(message) = ui.config_diagnostic.as_ref() {
         render_error_notification(
             &mut frame,
@@ -2112,6 +2128,7 @@ pub fn render(
             config,
             width,
             workspace_height,
+            modal_open,
         );
     }
     if let Some(prompt) = &ui.prompt {

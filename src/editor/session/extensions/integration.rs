@@ -433,6 +433,11 @@ impl ExtensionSession {
                     }
                     if let Some(lock) = result.lock {
                         updates.push(ExtensionUpdate::Lock(lock));
+                    } else if result.operation == "verify" && result.verified == Some(0) {
+                        updates.push(ExtensionUpdate::Message(
+                            "package_nothing_to_verify",
+                            Vec::new(),
+                        ));
                     } else if !prepared_operation && !activation_operation {
                         updates.push(ExtensionUpdate::Message(
                             "package_operation_complete",

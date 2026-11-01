@@ -301,8 +301,11 @@ impl LspSession {
             .ok_or("language-server document closed")?;
         document.version = current.text.revision().0;
         document.text = current.text.to_string();
-        self.sync_owned(key, document, (buffer, current.text.source_version()))
-            .map_err(|error| error.to_string())?;
+        match self.sync_owned(key, document, (buffer, current.text.source_version())) {
+            // The server went away since it was looked up. Its next start opens this document.
+            Err(crate::language::lsp::LspError::NotRunning(_)) => return Ok(()),
+            result => result.map_err(|error| error.to_string())?,
+        }
         if editor.active_buffer_id() == Some(buffer) {
             self.select(key);
         }

@@ -73,14 +73,16 @@ pub fn compile_keymaps(
                     policy,
                 },
             ) {
-                Ok(bundled) => (
-                    bundled,
-                    Some(format!(
+                Ok(mut bundled) => {
+                    let message = format!(
                         "invalid {}; keeping bundled keymaps: {}",
                         loaded.path.display(),
                         diagnostics.join("; ")
-                    )),
-                ),
+                    );
+                    // `:keymap.conflicts` answers for what the user wrote, not what replaced it.
+                    bundled.conflicts.extend(diagnostics);
+                    (bundled, Some(message))
+                }
                 Err(_) => (
                     ResolvedKeymaps::default(),
                     Some(format!(
@@ -891,6 +893,8 @@ pub(in crate::editor::session) fn compile_typed_keymap_entries(
 ) -> Result<ResolvedKeymaps, Vec<String>> {
     let mut result = ResolvedKeymaps::default();
     let mut diagnostics = Vec::new();
+    // A key declared twice meets again in every context it expands to; say so once.
+    let mut key_conflicts: Vec<(String, Vec<String>)> = Vec::new();
     if entries.len() != entry_origins.len() || groups.len() != group_origins.len() {
         return Err(vec!["keymap contribution provenance is incomplete".into()]);
     }
@@ -957,10 +961,14 @@ pub(in crate::editor::session) fn compile_typed_keymap_entries(
             let declared = display_key_declaration(&entry.keys, &effective_keys);
             let previous_entry = &effective_entries[previous];
             let previous_declared = display_key_declaration(&previous_entry.keys, &effective_keys);
-            diagnostics.push(format!(
-                "keymap id `{}` {declared} conflicts with id `{}` {previous_declared} in `{context}`",
+            let conflict = format!(
+                "keymap id `{}` {declared} conflicts with id `{}` {previous_declared}",
                 entry.id, previous_entry.id
-            ));
+            );
+            match key_conflicts.iter_mut().find(|(text, _)| *text == conflict) {
+                Some((_, contexts)) => contexts.push(context.clone()),
+                None => key_conflicts.push((conflict, vec![context.clone()])),
+            }
             continue;
         }
         if contribution_layer != InputContextLayer::Bundled {
@@ -1190,6 +1198,15 @@ pub(in crate::editor::session) fn compile_typed_keymap_entries(
                 .then_with(|| left.id.cmp(&right.id))
         });
     }
+    diagnostics.extend(key_conflicts.into_iter().map(|(conflict, contexts)| {
+        match contexts.as_slice() {
+            [only] => format!("{conflict} in `{only}`"),
+            [first, rest @ ..] => {
+                format!("{conflict} in `{first}` and {} other contexts", rest.len())
+            }
+            [] => conflict,
+        }
+    }));
     if diagnostics.is_empty() {
         Ok(result)
     } else {

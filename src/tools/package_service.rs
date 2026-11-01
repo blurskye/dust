@@ -290,6 +290,10 @@ impl PackageManager {
         Ok(removed)
     }
     pub fn verify(&self) -> Result<usize, PackageError> {
+        // No lock file means nothing was ever installed.
+        if !self.lock_path().exists() {
+            return Ok(0);
+        }
         verify_lock_store(
             &self.lock_path(),
             &self.root.join("store"),

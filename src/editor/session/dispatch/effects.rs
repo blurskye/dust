@@ -7764,29 +7764,32 @@ impl InteractiveApplication {
 
     pub(in crate::editor::session) fn open_lsp_locations_picker(
         &mut self,
-        server: &str,
         locations: Vec<crate::language::lsp::LspLocation>,
     ) {
-        let server = self.lsp_server_label(server);
+        let mut files = std::collections::HashMap::new();
         let items = locations
             .into_iter()
             .enumerate()
             .map(|(index, location)| {
-                let path = path_from_file_uri(&location.uri)
-                    .map_or_else(|| location.uri.clone(), |path| path.display().to_string());
+                let line = location.range.start.line as usize;
+                let path = path_from_file_uri(&location.uri);
+                let code = path
+                    .as_deref()
+                    .map(|path| self.source_line_at(path, line, &mut files))
+                    .unwrap_or_default();
+                let path = path.map_or_else(
+                    || location.uri.clone(),
+                    |path| self.workspace_relative_label(&path),
+                );
                 let id = PickerItemId(format!("location:{index}:{}", location.uri));
                 (
                     PickerItem {
                     badge: String::new(),
                     kind: crate::workspace::PickerItemKind::Entry,
                         id,
-                        label: path,
-                        detail: format!(
-                            "{}:{}",
-                            location.range.start.line + 1,
-                            location.range.start.character + 1
-                        ),
-                        source: server.clone(),
+                        label: format!("{path}:{}", line + 1),
+                        detail: code,
+                        source: String::new(),
                         action: PickerAction::None,
                     },
                     PickerPayload::LspLocation(location),
@@ -7794,6 +7797,34 @@ impl InteractiveApplication {
             })
             .collect();
         self.install_picker(self.message("picker_references_title", &[]), items);
+    }
+
+    /// The line a location points at, from its open buffer or a file small enough to read here.
+    fn source_line_at(
+        &self,
+        path: &std::path::Path,
+        line: usize,
+        files: &mut std::collections::HashMap<std::path::PathBuf, Option<String>>,
+    ) -> String {
+        const MAXIMUM_FILE: u64 = 1024 * 1024;
+        if let Some((_, buffer)) = self
+            .state
+            .buffers
+            .iter()
+            .find(|(_, buffer)| buffer.path.as_deref() == Some(path))
+        {
+            return buffer.text.line(line).map_or_else(|_| String::new(), |line| line.trim().to_owned());
+        }
+        let contents = files.entry(path.to_owned()).or_insert_with(|| {
+            std::fs::metadata(path)
+                .is_ok_and(|metadata| metadata.len() <= MAXIMUM_FILE)
+                .then(|| std::fs::read_to_string(path).ok())
+                .flatten()
+        });
+        contents
+            .as_deref()
+            .and_then(|contents| contents.lines().nth(line))
+            .map_or_else(String::new, |line| line.trim().to_owned())
     }
 
     pub(in crate::editor::session) fn open_lsp_symbols_picker(

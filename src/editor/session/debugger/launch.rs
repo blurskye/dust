@@ -499,10 +499,17 @@ impl DebugSession {
                 let mut arguments = serde_json::Map::from_iter(launch.session.arguments);
                 arguments.insert("cwd".into(), serde_json::json!(launch.cwd));
                 // As in VS Code, or `input()` gets end of file.
-                let adapter_runs_terminal =
-                    launch.configuration.is_none() && launch.session.adapter == "debugpy";
+                let adapter_runs_terminal = launch.configuration.is_none()
+                    && matches!(launch.session.adapter.as_str(), "debugpy" | "delve");
                 if adapter_runs_terminal {
-                    arguments.insert("console".into(), serde_json::json!("integratedTerminal"));
+                    if launch.session.adapter == "debugpy" {
+                        arguments.insert("console".into(), serde_json::json!("integratedTerminal"));
+                    } else {
+                        launch
+                            .adapter
+                            .environment
+                            .insert(crate::debugger::ADAPTER_IN_TERMINAL.into(), "1".into());
+                    }
                 }
                 // A project's virtual environment is what its imports need, as in VS Code.
                 let venv = launch.cwd.join(".venv/bin/python");

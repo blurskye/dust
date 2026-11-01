@@ -708,3 +708,15 @@ fn a_declared_attach_session_sends_attach_and_needs_no_program() {
         "and NOT `launch`, so the two are not the same request wearing different names: {log:?}"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn the_bridge_reads_one_whole_message_at_a_time() {
+    let first = "Content-Length: 2\r\n\r\n{}";
+    let mut input = std::io::Cursor::new(format!("{first}Content-Length: 1\r\n\r\n1").into_bytes());
+    let frame = read_adapter_frame(&mut input).unwrap();
+    assert_eq!(frame, first.as_bytes());
+    assert_eq!(frame_body_length(&frame), 2);
+    assert_eq!(read_adapter_frame(&mut input).unwrap().last(), Some(&b'1'));
+    assert!(read_adapter_frame(&mut input).is_err());
+}

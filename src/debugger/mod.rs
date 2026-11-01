@@ -199,6 +199,9 @@ pub const ADAPTER_SESSION_ARGUMENT: &str = "--adapter-session";
 pub const ADAPTER_BRIDGE_ARGUMENT: &str = "--adapter-bridge";
 /// In a catalog entry's `launch_args`, where the socket address of a bridged adapter goes.
 const ADAPTER_ADDRESS: &str = "{address}";
+/// In a bridged adapter's environment, asks for the adapter to run in a terminal, so the program
+/// it launches reads and writes that terminal. VS Code runs Delve the same way.
+pub(crate) const ADAPTER_IN_TERMINAL: &str = "DUST_ADAPTER_IN_TERMINAL";
 /// How long an adapter gets to answer `initialize` before Dust says it is not working.
 const ADAPTER_ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long a stopping adapter gets to end its program and clean up before it is killed.
@@ -224,24 +227,38 @@ pub fn bridge_adapter_socket(
     nix::unistd::setsid()?;
     let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))?;
     let address = listener.local_addr()?.to_string();
-    let mut adapter = Command::new(program)
-        .args(
-            arguments
-                .iter()
-                .map(|argument| argument.to_string_lossy().replace(ADAPTER_ADDRESS, &address)),
+    let arguments: Vec<String> = arguments
+        .iter()
+        .map(|argument| argument.to_string_lossy().replace(ADAPTER_ADDRESS, &address))
+        .collect();
+    let mut early = Vec::new();
+    let in_terminal = std::env::var_os(ADAPTER_IN_TERMINAL).is_some()
+        && adapter_opened_in_terminal(program, &arguments, &mut early)?;
+    let mut adapter = if in_terminal {
+        None
+    } else {
+        Some(
+            Command::new(program)
+                .args(&arguments)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .spawn()?,
         )
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .spawn()?;
+    };
     listener.set_nonblocking(true)?;
     let deadline = Instant::now() + ADAPTER_ANSWER_TIMEOUT;
     let socket = loop {
         match listener.accept() {
             Ok((socket, _)) => break socket,
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                if adapter.try_wait()?.is_some() || Instant::now() >= deadline {
-                    let _ = adapter.kill();
-                    let _ = adapter.wait();
+                let exited = adapter
+                    .as_mut()
+                    .is_some_and(|adapter| !matches!(adapter.try_wait(), Ok(None)));
+                if exited || Instant::now() >= deadline {
+                    if let Some(adapter) = adapter.as_mut() {
+                        let _ = adapter.kill();
+                        let _ = adapter.wait();
+                    }
                     return Err(std::io::Error::other("the adapter did not connect"));
                 }
                 std::thread::sleep(Duration::from_millis(20));
@@ -253,6 +270,9 @@ pub fn bridge_adapter_socket(
     socket.set_nodelay(true)?;
     let to_adapter = socket.try_clone()?;
     std::thread::spawn(move || {
+        if std::io::Write::write_all(&mut &to_adapter, &early).is_err() {
+            return;
+        }
         relay_adapter_messages(std::io::stdin().lock(), &to_adapter);
         let _ = to_adapter.shutdown(std::net::Shutdown::Write);
     });
@@ -260,11 +280,72 @@ pub fn bridge_adapter_socket(
     let stdout = std::fs::File::from(std::io::stdout().as_fd().try_clone_to_owned()?);
     relay_adapter_messages(&socket, stdout);
     // The connection closes before Delve has deleted its debug binary.
-    if !adapter_exited_within(&mut adapter, ADAPTER_EXIT_GRACE / 2) {
-        let _ = adapter.kill();
+    if let Some(mut adapter) = adapter {
+        if !adapter_exited_within(&mut adapter, ADAPTER_EXIT_GRACE / 2) {
+            let _ = adapter.kill();
+        }
+        let _ = adapter.wait();
     }
-    let _ = adapter.wait();
     Ok(())
+}
+/// Ask Dust to run the adapter in a terminal, holding on to what Dust sends meanwhile, which is
+/// for the adapter. False when Dust refused, and the adapter then runs without one.
+#[cfg(unix)]
+fn adapter_opened_in_terminal(
+    program: &std::ffi::OsStr,
+    arguments: &[String],
+    early: &mut Vec<u8>,
+) -> std::io::Result<bool> {
+    use std::io::Write;
+    use std::os::fd::AsFd;
+    let args: Vec<String> = std::iter::once(program.to_string_lossy().into_owned())
+        .chain(arguments.iter().cloned())
+        .collect();
+    let request = json!({
+        "seq": 1,
+        "type": "request",
+        "command": "runInTerminal",
+        "arguments": {"kind": "integrated", "cwd": std::env::current_dir()?, "args": args},
+    })
+    .to_string();
+    let mut stdout = std::fs::File::from(std::io::stdout().as_fd().try_clone_to_owned()?);
+    write!(stdout, "Content-Length: {}\r\n\r\n{request}", request.len())?;
+    let mut stdin = std::io::stdin().lock();
+    loop {
+        let frame = read_adapter_frame(&mut stdin)?;
+        let body = frame.split_at(frame.len() - frame_body_length(&frame)).1;
+        let message: Value = serde_json::from_slice(body)?;
+        if message.get("type").and_then(Value::as_str) == Some("response") {
+            return Ok(message.get("success").and_then(Value::as_bool) == Some(true));
+        }
+        early.extend_from_slice(&frame);
+    }
+}
+/// One whole DAP message as it arrived, headers included.
+#[cfg(unix)]
+fn read_adapter_frame(from: &mut impl std::io::BufRead) -> std::io::Result<Vec<u8>> {
+    let mut frame = Vec::new();
+    loop {
+        let start = frame.len();
+        if from.read_until(b'\n', &mut frame)? == 0 {
+            return Err(std::io::ErrorKind::UnexpectedEof.into());
+        }
+        if frame[start..].iter().all(u8::is_ascii_whitespace) {
+            break;
+        }
+    }
+    let start = frame.len();
+    frame.resize(start + frame_body_length(&frame), 0);
+    from.read_exact(&mut frame[start..])?;
+    Ok(frame)
+}
+#[cfg(unix)]
+fn frame_body_length(frame: &[u8]) -> usize {
+    String::from_utf8_lossy(frame)
+        .lines()
+        .take_while(|line| !line.is_empty())
+        .find_map(|line| line.strip_prefix("Content-Length:")?.trim().parse().ok())
+        .unwrap_or(0)
 }
 fn adapter_exited_within(adapter: &mut std::process::Child, grace: Duration) -> bool {
     let deadline = Instant::now() + grace;
