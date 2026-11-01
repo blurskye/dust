@@ -30,6 +30,7 @@ use super::{
     nix_workspace_shell_for_host, parse_ex, path_from_file_uri, tool_kind_key,
 };
 use crate::editor::session::extensions::{VirtualContext, VirtualOpen, VirtualPublication};
+use crate::editor::session::git::GitHunkAction;
 use crate::workspace::search_workflow::{
     ABS_MAX_BYTES, SearchMatcherKind, SearchPresenterKind, SearchRequestId, SearchSourceKind,
     SearchStreamGeneration, SearchWorkflowBroker, SearchWorkflowChunk, SearchWorkflowError,
@@ -6680,12 +6681,15 @@ impl InteractiveApplication {
     pub(in crate::editor::session) fn start_git_hunks(&mut self) {
         self.start_git_hunks_with_action(None);
     }
-    pub(in crate::editor::session) fn start_git_hunks_with_action(&mut self, action: Option<i8>) {
+    pub(in crate::editor::session) fn start_git_hunks_with_action(
+        &mut self,
+        action: Option<GitHunkAction>,
+    ) {
         self.start_git_hunks_with_layer(action, crate::workspace::git::GitDiffLayer::Unstaged);
     }
     pub(in crate::editor::session) fn start_git_hunks_with_layer(
         &mut self,
-        action: Option<i8>,
+        action: Option<GitHunkAction>,
         layer: crate::workspace::git::GitDiffLayer,
     ) {
         let path = self
@@ -6871,10 +6875,11 @@ impl InteractiveApplication {
         match self.git.poll_hunks() {
             Ok(Some(ready)) => {
                 if let Some(action) = ready.action {
-                    if action == 0 {
-                        self.preview_selected_git_hunk();
-                    } else {
-                        self.navigate_git_hunk(action);
+                    match action {
+                        GitHunkAction::Move(direction) => self.navigate_git_hunk(direction),
+                        GitHunkAction::Preview => self.preview_selected_git_hunk(),
+                        GitHunkAction::Stage => self.stage_selected_git_hunk(),
+                        GitHunkAction::Reset => self.request_reset_selected_git_hunk(),
                     }
                     return;
                 }
@@ -6909,7 +6914,12 @@ impl InteractiveApplication {
                                 status_revision: snapshot.status_revision,
                                 repository: snapshot.repository_id,
                                 hunk: hunk.id,
-                                new_line: hunk.new_start.saturating_sub(1) as usize,
+                                new_line: hunk
+                                    .change_lines()
+                                    .first()
+                                    .map_or(hunk.new_start, |line| *line)
+                                    .saturating_sub(1)
+                                    as usize,
                             },
                         )
                     })
@@ -6950,11 +6960,21 @@ impl InteractiveApplication {
     }
     pub(in crate::editor::session) fn navigate_git_hunk(&mut self, direction: i8) {
         if self.git.hunks().is_none() {
-            self.start_git_hunks_with_action(Some(direction.signum()));
+            self.start_git_hunks_with_action(Some(GitHunkAction::Move(direction.signum())));
             return;
         }
-        let line = self
-            .state
+        match self.git.navigate(direction, self.cursor_line_number()) {
+            Ok((path, line)) => self.navigate_matcher_source(MatcherSource {
+                path,
+                line,
+                column: 0,
+            }),
+            Err(error) => self.show_error(error),
+        }
+    }
+    /// The one-based line under the cursor in the active window.
+    fn cursor_line_number(&self) -> u32 {
+        self.state
             .active_view
             .and_then(|id| {
                 let view = &self.state.views[id];
@@ -6964,21 +6984,14 @@ impl InteractiveApplication {
                     .ok()
             })
             .unwrap_or(0) as u32
-            + 1;
-        match self.git.navigate(direction, line) {
-            Ok((path, line)) => self.navigate_matcher_source(MatcherSource {
-                path,
-                line,
-                column: 0,
-            }),
-            Err(error) => self.show_error(error),
-        }
+            + 1
     }
     pub(in crate::editor::session) fn preview_selected_git_hunk(&mut self) {
         if self.git.hunks().is_none() {
-            self.start_git_hunks_with_action(Some(0));
+            self.start_git_hunks_with_action(Some(GitHunkAction::Preview));
             return;
         }
+        self.git.select_at(self.cursor_line_number());
         match self.git.preview() {
             Ok((header, text)) => self.present_documentation_popup(
                 DocumentationPopupKind::Git,
@@ -6998,6 +7011,11 @@ impl InteractiveApplication {
             self.show_error("Git reset requires a trusted workspace");
             return;
         }
+        if self.git.hunks().is_none() {
+            self.start_git_hunks_with_action(Some(GitHunkAction::Reset));
+            return;
+        }
+        self.git.select_at(self.cursor_line_number());
         if !self.git.has_selection() {
             self.show_error("select a current Git hunk first");
             return;
@@ -7020,6 +7038,11 @@ impl InteractiveApplication {
         }
     }
     pub(in crate::editor::session) fn stage_selected_git_hunk(&mut self) {
+        if self.git.hunks().is_none() {
+            self.start_git_hunks_with_action(Some(GitHunkAction::Stage));
+            return;
+        }
+        self.git.select_at(self.cursor_line_number());
         if let Err(error) = self.git.mutate(
             &self.state,
             false,
@@ -13098,6 +13121,7 @@ impl InteractiveApplication {
                     self.show_error(e);
                     return;
                 }
+                self.git.forget_hunks();
                 self.notify_message(
                     self.message("reloaded_file", &[("path", self.workspace_relative_label(&path))]),
                     false,
@@ -13151,6 +13175,7 @@ impl InteractiveApplication {
                         text: buffer_state.text.to_string(),
                     })
                 });
+                self.git.forget_hunks();
                 self.notify_message(
                     if still_dirty {
                         self.message(

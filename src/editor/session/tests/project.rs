@@ -1184,6 +1184,56 @@ fn active_tracked_buffer_starts_git_status_and_updates_unsaved_signs_without_exp
 }
 
 #[test]
+fn the_first_hunk_key_reads_the_hunks_and_moves_to_the_next_one() {
+    let mut app = app();
+    let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
+    let path = app.state.workspace_root.join("hunks.txt");
+    fs::write(&path, "one\ntwo\nthree\nfour\nfive\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("hunks.txt")).unwrap();
+    index.write().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
+        .unwrap();
+    drop(tree);
+    fs::write(&path, "one\ntwo changed\nthree\nfour\nfive\n").unwrap();
+    app.start_open(path);
+    wait_vfs(&mut app);
+    app.start_git_status_refresh_silent();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.git.status().is_none() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+
+    app.process_effect(AppEffect::GitHunkNavigate(1));
+    assert!(app.git.hunks_pending(), "{:?}", app.ui.notification);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.git.hunks_pending() {
+        app.process_git_hunk_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    wait_vfs(&mut app);
+    assert!(app.git.has_selection(), "{:?}", app.ui.notification);
+    let view = &app.state.views[app.state.active_view.expect("view")];
+    assert_eq!(
+        app.state.buffers[view.buffer].text.byte_to_line(view.cursor).expect("line"),
+        1,
+        "{:?}",
+        app.ui.notification
+    );
+
+    app.process_effect(AppEffect::GitHunkPreview);
+    assert_eq!(
+        app.ui.documentation_popup.as_ref().map(|popup| popup.kind),
+        Some(crate::ui::DocumentationPopupKind::Git)
+    );
+}
+
+#[test]
 fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
     let mut app = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
@@ -1353,8 +1403,8 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
     assert!(app.ui.notification_error);
 
     app.set_explorer_focus(false);
-    app.handle_configured_key(KeyEvent::character('d'));
-    app.handle_configured_key(KeyEvent::character('d'));
+    // The hunk key landed on the added line. Deleting all of it would match the index again.
+    app.handle_configured_key(KeyEvent::character('x'));
     let active = app.state.active_buffer_id().unwrap();
     assert!(app.state.buffers[active].dirty);
     let dirty_revision = app.state.buffers[active].text.revision().0;

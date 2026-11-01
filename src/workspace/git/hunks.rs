@@ -61,47 +61,95 @@ pub struct GitHunkSign {
     pub kind: GitHunkSignKind,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct GitChangeRun {
+    /// One-based line on the new side where the run starts.
+    start: u32,
+    added: u32,
+    deleted: bool,
+}
+
+impl GitHunk {
+    /// Git keeps context around changes and joins near ones into one hunk, so a hunk can hold
+    /// several separate changes.
+    fn change_runs(&self) -> Vec<GitChangeRun> {
+        let mut runs = Vec::new();
+        let mut current: Option<GitChangeRun> = None;
+        // With no lines on the new side, git names the line before the change.
+        let mut next = self.new_start + u32::from(self.new_lines == 0);
+        for line in &self.lines {
+            match line.kind {
+                GitDiffLineKind::Context => {
+                    runs.extend(current.take());
+                    next += 1;
+                }
+                GitDiffLineKind::Add => {
+                    current
+                        .get_or_insert(GitChangeRun { start: next, added: 0, deleted: false })
+                        .added += 1;
+                    next += 1;
+                }
+                GitDiffLineKind::Delete => {
+                    current
+                        .get_or_insert(GitChangeRun { start: next, added: 0, deleted: false })
+                        .deleted = true;
+                }
+            }
+        }
+        runs.extend(current);
+        runs
+    }
+
+    /// The one-based lines a person lands on for each change in this hunk. A deletion has no line
+    /// of its own, so it lands on the line above.
+    #[must_use]
+    pub fn change_lines(&self) -> Vec<u32> {
+        self.change_runs()
+            .into_iter()
+            .map(|run| {
+                if run.added > 0 {
+                    run.start
+                } else {
+                    run.start.saturating_sub(1).max(1)
+                }
+            })
+            .collect()
+    }
+
+    /// Whether this one-based line is part of the hunk, its context included.
+    #[must_use]
+    pub fn covers_line(&self, line: u32) -> bool {
+        line >= self.new_start && line < self.new_start + self.new_lines.max(1)
+    }
+}
+
 #[must_use]
 pub fn git_hunk_signs(snapshot: &GitHunkSnapshot) -> Vec<GitHunkSign> {
     let mut signs = std::collections::BTreeMap::new();
-    for hunk in &snapshot.hunks {
-        let has_add = hunk
-            .lines
-            .iter()
-            .any(|line| line.kind == GitDiffLineKind::Add);
-        let has_delete = hunk
-            .lines
-            .iter()
-            .any(|line| line.kind == GitDiffLineKind::Delete);
-        let kind = match (has_add, has_delete) {
-            (true, false) => GitHunkSignKind::Added,
-            (false, true) => GitHunkSignKind::Deleted,
-            _ => GitHunkSignKind::Changed,
-        };
-        let mut inserted = false;
-        for line in &hunk.lines {
-            if let Some(line_number) = line.new_line.filter(|_| line.kind == GitDiffLineKind::Add) {
-                let line = line_number.saturating_sub(1) as usize;
-                signs
-                    .entry(line)
-                    .and_modify(|existing| {
-                        if kind > *existing {
-                            *existing = kind;
-                        }
-                    })
-                    .or_insert(kind);
-                inserted = true;
+    let mut mark = |line: usize, kind: GitHunkSignKind| {
+        signs
+            .entry(line)
+            .and_modify(|existing| {
+                if kind > *existing {
+                    *existing = kind;
+                }
+            })
+            .or_insert(kind);
+    };
+    for run in snapshot.hunks.iter().flat_map(GitHunk::change_runs) {
+        let first = run.start.saturating_sub(1) as usize;
+        match (run.added, run.deleted) {
+            (0, _) => mark(first.saturating_sub(1), GitHunkSignKind::Deleted),
+            (added, deleted) => {
+                let kind = if deleted {
+                    GitHunkSignKind::Changed
+                } else {
+                    GitHunkSignKind::Added
+                };
+                for line in first..first + added as usize {
+                    mark(line, kind);
+                }
             }
-        }
-        if !inserted {
-            signs
-                .entry(hunk.new_start.saturating_sub(1) as usize)
-                .and_modify(|existing| {
-                    if kind > *existing {
-                        *existing = kind;
-                    }
-                })
-                .or_insert(kind);
         }
     }
     signs

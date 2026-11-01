@@ -33,7 +33,7 @@ pub(super) struct GitSession {
     hunks: GitHunkService,
     hunk_generation: Option<GitHunkGeneration>,
     hunk_expected: Option<(u64, u64, GitRepositoryId, PathBuf, GitDiffLayer)>,
-    hunk_action: Option<i8>,
+    hunk_action: Option<GitHunkAction>,
     hunk_snapshot: Option<GitHunkSnapshot>,
     sign_hunks: GitHunkService,
     sign_generation: Option<GitHunkGeneration>,
@@ -81,9 +81,18 @@ pub(super) enum GitBranchOutcome {
     Changed,
 }
 
+/// What a key asked for while the hunks were still being read.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum GitHunkAction {
+    Move(i8),
+    Preview,
+    Stage,
+    Reset,
+}
+
 pub(super) struct HunkReady {
     pub path: PathBuf,
-    pub action: Option<i8>,
+    pub action: Option<GitHunkAction>,
 }
 
 impl GitSession {
@@ -388,7 +397,7 @@ impl GitSession {
         &mut self,
         path: Option<&Path>,
         revision: u64,
-        action: Option<i8>,
+        action: Option<GitHunkAction>,
         layer: GitDiffLayer,
     ) -> Result<(), String> {
         self.clear_hunks();
@@ -492,29 +501,47 @@ impl GitSession {
             .hunk_snapshot
             .as_ref()
             .ok_or("Git hunks are unavailable")?;
-        let hunk = if direction < 0 {
-            snapshot
-                .hunks
-                .iter()
-                .rev()
-                .find(|h| h.new_start < line)
-                .or_else(|| snapshot.hunks.last())
+        let changes = snapshot
+            .hunks
+            .iter()
+            .flat_map(|hunk| hunk.change_lines().into_iter().map(move |at| (at, hunk)))
+            .collect::<Vec<_>>();
+        let (target, hunk) = if direction < 0 {
+            changes.iter().rev().find(|(at, _)| *at < line).or_else(|| changes.last())
         } else {
-            snapshot
-                .hunks
-                .iter()
-                .find(|h| h.new_start > line)
-                .or_else(|| snapshot.hunks.first())
+            changes.iter().find(|(at, _)| *at > line).or_else(|| changes.first())
         }
+        .copied()
         .ok_or("no Git hunk is available in this buffer")?;
         let status = self
             .status_snapshot
             .as_ref()
             .ok_or("Git status is not ready; is this a Git repository?")?;
         let path = status.scope_root.join(&snapshot.file);
-        let line = hunk.new_start.saturating_sub(1) as usize;
+        let line = target.saturating_sub(1) as usize;
         self.selected = Some((snapshot.clone(), hunk.clone(), path.clone()));
         Ok((path, line))
+    }
+    /// Select the hunk under the cursor, as gitsigns acts on the hunk you are in. Elsewhere the
+    /// earlier selection stands.
+    pub(super) fn select_at(&mut self, line: u32) {
+        let Some(snapshot) = self.hunk_snapshot.as_ref() else {
+            return;
+        };
+        let Some(hunk) = snapshot.hunks.iter().find(|hunk| hunk.covers_line(line)) else {
+            return;
+        };
+        let Some(status) = self.status_snapshot.as_ref() else {
+            return;
+        };
+        let path = status.scope_root.join(&snapshot.file);
+        self.selected = Some((snapshot.clone(), hunk.clone(), path));
+    }
+    /// The file changed on disk, so the hunks have to be read again.
+    pub(super) fn forget_hunks(&mut self) {
+        if self.mutation_generation.is_none() {
+            self.clear_hunks();
+        }
     }
     pub(super) fn preview(&mut self) -> Result<(String, String), String> {
         let snapshot = self
