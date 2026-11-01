@@ -492,6 +492,30 @@ fn diagnostics_replace_by_owner_reject_stale_and_obey_bounds() {
 }
 
 #[test]
+fn typing_selects_the_best_match_instead_of_keeping_the_old_row() {
+    let mut picker = PickerState::new(4, "Worktrees".into(), 3);
+    let item = |id: &str, label: &str, detail: &str| PickerItem {
+        badge: String::new(),
+        kind: crate::workspace::PickerItemKind::Entry,
+        id: PickerItemId(id.into()),
+        label: label.into(),
+        detail: detail.into(),
+        source: "fake".into(),
+        action: PickerAction::None,
+    };
+    assert!(picker.append(
+        4,
+        [item("new", "New worktree", "check out a branch in its own directory"), item("o", "other", "")],
+        true
+    ));
+    assert_eq!(picker.selected_item().map(|item| item.id.0.as_str()), Some("new"));
+    picker.insert_query("other");
+    assert_eq!(picker.selected_item().map(|item| item.id.0.as_str()), Some("o"));
+    picker.backspace_query();
+    assert_eq!(picker.selected_item().map(|item| item.id.0.as_str()), Some("o"));
+}
+
+#[test]
 fn picker_rejects_stale_streams_deduplicates_and_filters_stably() {
     let mut picker = PickerState::new(4, "References".into(), 3);
     assert!(!picker.append(3, Vec::new(), true));

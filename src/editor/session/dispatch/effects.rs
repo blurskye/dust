@@ -6410,6 +6410,10 @@ impl InteractiveApplication {
         if updates.is_empty() {
             return;
         }
+        // What ran there may have committed or switched branch.
+        let ended = updates.iter().any(|update| {
+            matches!(update, TerminalUpdate::Exited(..) | TerminalUpdate::IoComplete(_) | TerminalUpdate::Closed(_))
+        });
         for update in updates {
             match update {
                 TerminalUpdate::Started(id) => {
@@ -6462,6 +6466,9 @@ impl InteractiveApplication {
                 }
                 TerminalUpdate::Changed => {}
             }
+        }
+        if ended {
+            self.start_git_status_refresh_with_feedback(false);
         }
         self.sync_terminal_panel();
         self.resize_active_terminal_to_panel();
@@ -7230,6 +7237,9 @@ impl InteractiveApplication {
             self.open_git_status_picker();
         } else if self.git.take_show_worktrees() {
             self.start_git_worktrees();
+        } else if self.search.picker_surface() == PickerSurfaceKind::Changes {
+            // Staging from the list moves the row between its sections.
+            self.open_git_status_picker();
         }
         if self.ui.explorer.is_some() {
             self.sync_explorer_ui();

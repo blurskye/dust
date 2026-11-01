@@ -137,9 +137,13 @@ impl PickerState {
         self.scroll = 0;
     }
 
+    /// Typing narrows to what is being looked for, so the best match is the one to accept.
+    /// Deleting keeps the row, so clearing the query returns to where the list was.
     pub fn insert_query(&mut self, text: &str) {
         self.query.push_str(text);
         self.recompute();
+        self.selected = self.first_entry();
+        self.scroll = 0;
     }
 
     pub fn backspace_query(&mut self) {
@@ -219,11 +223,11 @@ impl PickerState {
         self.selected = self.visible.len().checked_sub(1);
     }
 
+    /// A row that has gone leaves the selection where the list put it, so there is still one.
     pub fn select_id(&mut self, id: &PickerItemId) {
-        self.selected = self
-            .visible
-            .iter()
-            .position(|index| &self.items[*index].id == id);
+        if let Some(position) = self.visible.iter().position(|index| &self.items[*index].id == id) {
+            self.selected = Some(position);
+        }
     }
 
     pub fn ensure_selected_visible(&mut self, visible_rows: usize) {

@@ -4478,6 +4478,52 @@ fn staging_from_the_change_surface_acts_on_the_focused_row_not_the_active_buffer
 /// save-and-stage choice, and the index is not written — for the FOCUSED row, which is not
 /// the active buffer.
 #[test]
+fn staging_a_row_moves_it_to_the_staged_section_of_the_open_list() {
+    let mut app = app();
+    let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
+    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let path = app.state.workspace_root.join("changed.txt");
+    fs::write(&path, "base\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("changed.txt")).unwrap();
+    index.write().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "base", &tree, &[]).unwrap();
+    drop(tree);
+    fs::write(&path, "changed\n").unwrap();
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone())
+    }
+    app.reconcile_workspace_trust();
+    app.start_git_status_refresh();
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now()
+    }
+    app.open_git_status_picker();
+    let labels = |app: &InteractiveApplication| -> Vec<String> {
+        app.ui.picker.as_ref().expect("picker").rows.iter().map(|row| row.label.clone()).collect()
+    };
+    assert!(labels(&app).iter().any(|label| label == "Unstaged 1"), "{:?}", labels(&app));
+    app.invoke(
+        crate::editor::CommandInvocation::new("workspace.git.file.stage", InvocationSource::Test)
+            .expect("static command"),
+    );
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while !labels(&app).iter().any(|label| label == "Staged 1") {
+        app.process_git_mutation_events();
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline, "{:?}", labels(&app));
+        thread::yield_now()
+    }
+    assert!(!labels(&app).iter().any(|label| label == "Unstaged 1"), "{:?}", labels(&app));
+    assert!(app.ui.picker.as_ref().expect("picker").selected.is_some(), "a row stays selected");
+}
+
+#[test]
 fn staging_an_unsaved_focused_row_offers_the_choice_and_writes_nothing() {
     let mut app = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
