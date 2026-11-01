@@ -769,7 +769,8 @@ impl LspEditSources {
             .buffers
             .get(*id)
             .ok_or("diagnostic document closed")?;
-        if buffer.text.source_version() != *text
+        let source = buffer.text.source_version();
+        if !(if pull { source == *text } else { source.same_incarnation(text) })
             || buffer
                 .path
                 .as_ref()
@@ -777,20 +778,35 @@ impl LspEditSources {
         {
             return Err("diagnostic document changed since its source context".into());
         }
-        if version.is_some_and(|v| v != buffer.text.revision().0) {
-            return Err("diagnostic reported version is stale".into());
+        let revision = buffer.text.revision();
+        if version.is_some_and(|v| v > revision.0) {
+            return Err("diagnostic reported version was never sent".into());
         }
+        // Servers report only when the result changes, so one about text typed past since is the
+        // last word until it changes again. It stands, as in VS Code and Neovim, or a fixed error
+        // would stay on screen. Only what no longer fits the text is left out.
+        let behind = !pull && version.is_some_and(|v| v < revision.0);
         let producer = context
             .diagnostic_producer(if pull { "lsp-pull:" } else { "lsp." })
             .map_err(|e| e.to_string())?;
         let codec = PositionCodec::new(&buffer.text);
         let version = if pull {
-            Some(buffer.text.revision())
+            Some(revision)
+        } else if behind {
+            None
         } else {
             version.map(BufferRevision)
         };
+        let fits = |position: &crate::language::lsp::LspPosition| {
+            codec
+                .lsp_to_byte(position.line, position.character, context.encoding())
+                .is_ok()
+        };
         let items = diagnostics
             .into_iter()
+            .filter(|diagnostic| {
+                !behind || (fits(&diagnostic.range.start) && fits(&diagnostic.range.end))
+            })
             .take(maximum)
             .map(|diagnostic| {
                 let start = codec
@@ -963,6 +979,47 @@ mod diagnostic_tests {
             .diagnostic_producer("owned-edit-fixture", "lsp-pull:")
             .unwrap();
         assert!(activated.same(&pull.producer));
+        // A report about text typed past since still replaces the last one.
+        let revision = editor.buffers[buffer].text.revision();
+        let at_end = crate::editor::text::ByteOffset("éab".len());
+        editor
+            .apply_transaction(&EditorTransaction::new(TransactionId(9)).with_operation(
+                EditorOperation::ApplyEdits {
+                    buffer,
+                    edits: TextEditSet::new(
+                        revision,
+                        vec![TextEdit::new(ByteRange::new(at_end, at_end).unwrap(), " ")],
+                    ),
+                },
+            ))
+            .unwrap();
+        for (reported, expected) in [(Vec::new(), 0), (raw(), 1)] {
+            let behind = LspEditSources::diagnostic_batch(
+                &event.context,
+                &service,
+                &editor,
+                (&uri, Some(revision.0), reported),
+                false,
+                10,
+                "fixture",
+            )
+            .unwrap();
+            assert_eq!(behind.items.len(), expected);
+            assert_eq!(behind.validity, DiagnosticValidity::UnversionedReport);
+        }
+        let mut gone = raw();
+        gone[0].range.end.line = 9;
+        let behind = LspEditSources::diagnostic_batch(
+            &event.context,
+            &service,
+            &editor,
+            (&uri, Some(revision.0), gone),
+            false,
+            10,
+            "fixture",
+        )
+        .unwrap();
+        assert!(behind.items.is_empty(), "what no longer fits is left out");
         editor.buffers[buffer].text = TextBuffer::from_text("éab");
         endpoint.observe_diagnostic_document(
             &uri,

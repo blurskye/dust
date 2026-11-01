@@ -814,6 +814,7 @@ impl Config {
             "lsp_symbols",
             "lsp_code_actions",
             "lsp_no_result",
+            "syntax_no_fold",
             "task_stopped",
             "lsp_aux_result",
             "lsp_invalid_uri",

@@ -230,21 +230,26 @@ impl InputSession {
                 }
             }
         }
+        let growth = |range: &ByteRange| replacement.len() as i128 - range.len() as i128;
         let shift = |position: ByteOffset| {
             let mut value = position.get() as i128;
             for range in &mirrors {
                 if range.end <= position {
-                    value += replacement.len() as i128 - range.len() as i128;
+                    value += growth(range);
                 }
             }
             ByteOffset(value.max(0) as usize)
         };
         let mut groups = Vec::with_capacity(session.groups.len());
-        for group in &session.groups {
+        for (index, group) in session.groups.iter().enumerate() {
             let mut updated = Vec::with_capacity(group.len());
             for range in group {
-                if mirrors.contains(range) {
-                    let start = shift(range.start);
+                if index == session.current {
+                    // Only the mirrors before this one move it: an empty placeholder ends where
+                    // it starts, and must not push itself past the text typed into it.
+                    let before = mirrors.iter().take_while(|mirror| *mirror != range);
+                    let start = range.start.get() as i128 + before.map(growth).sum::<i128>();
+                    let start = ByteOffset(start.max(0) as usize);
                     updated.push(
                         ByteRange::new(start, ByteOffset(start.get() + replacement.len())).ok()?,
                     );
@@ -283,6 +288,52 @@ mod tests {
             text: &state.buffers[buffer].text,
             view: state.active_view,
         }
+    }
+    #[test]
+    fn typing_into_an_empty_placeholder_keeps_it_around_the_typed_text() {
+        let mut state = EditorState::new("/workspace".into());
+        let (buffer, _) = state.open_text(TextBuffer::from_text("fn () {}"), None);
+        let mut input = InputSession::new(100);
+        let source = state.window_version();
+        input.install_snippet(
+            document(&state, buffer, &source),
+            ByteOffset(0),
+            [(1, 3, 3), (2, 4, 4)],
+        );
+        for (at, typed) in [(3, "q"), (4, "a")] {
+            let source = state.window_version();
+            let position = ByteOffset(at);
+            let mut transaction = EditorTransaction::new(TransactionId(at as u64)).with_operation(
+                EditorOperation::ApplyEdits {
+                    buffer,
+                    edits: TextEditSet::new(
+                        state.buffers[buffer].text.revision(),
+                        vec![TextEdit::new(
+                            ByteRange::new(position, position).unwrap(),
+                            typed,
+                        )],
+                    ),
+                },
+            );
+            let update = input
+                .prepare_snippet_mirror(Some(document(&state, buffer, &source)), &mut transaction)
+                .unwrap();
+            state.apply_transaction(&transaction).unwrap();
+            let source = state.window_version();
+            assert!(input.accept_snippet_edit(update, Some(document(&state, buffer, &source))));
+        }
+        assert_eq!(state.buffers[buffer].text.to_string(), "fn qa() {}");
+        let session = input.snippet.as_ref().unwrap();
+        assert_eq!(
+            session.groups[0][0],
+            ByteRange::new(ByteOffset(3), ByteOffset(5)).unwrap(),
+            "going back selects exactly the name"
+        );
+        assert_eq!(
+            session.groups[1][0],
+            ByteRange::new(ByteOffset(6), ByteOffset(6)).unwrap(),
+            "the next placeholder stays inside the parentheses"
+        );
     }
     #[test]
     fn mirrors_are_input_owned_and_only_the_matching_post_commit_reply_advances_ranges() {

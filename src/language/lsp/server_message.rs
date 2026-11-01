@@ -70,7 +70,7 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
                         || version.is_some_and(|version| {
                             documents
                                 .get(uri)
-                                .is_none_or(|document| document.version != version)
+                                .is_none_or(|document| document.version < version)
                         }));
             // Header/source refusal precedes per-diagnostic string/range normalization.
             // Unowned public-service notifications retain their compatibility payload.

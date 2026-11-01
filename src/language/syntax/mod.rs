@@ -262,10 +262,10 @@ pub const fn language_info(language: SyntaxLanguage) -> SyntaxLanguageInfo {
             folds: SyntaxSupport::Full,
             indents: SyntaxSupport::Full,
         },
-        // The other grammars bring their upstream highlight query only.
+        // The other grammars bring their upstream highlight query only, and fold by indentation.
         _ => SyntaxCapabilities {
             highlights: SyntaxSupport::Full,
-            folds: SyntaxSupport::Unsupported,
+            folds: SyntaxSupport::Partial,
             indents: SyntaxSupport::Unsupported,
         },
     };
@@ -941,12 +941,17 @@ fn parse(request: Request) -> SyntaxEvent {
             return failed(&request, format!("highlight query: {error}"));
         }
     };
-    let folds = match query_rows(
-        &descriptor.language,
-        descriptor.folds,
-        &tree,
-        &request.source,
-        request.policy.maximum_folds,
+    let folds = match descriptor.folds.map_or_else(
+        || Ok(indentation_folds(&request.source, request.policy.maximum_folds)),
+        |query| {
+            query_rows(
+                &descriptor.language,
+                Some(query),
+                &tree,
+                &request.source,
+                request.policy.maximum_folds,
+            )
+        },
     ) {
         Ok(rows) => rows,
         Err(error) => return failed(&request, format!("fold query: {error}")),
@@ -1018,6 +1023,40 @@ fn query_rows(
     }
     Ok(output)
 }
+/// Folds what is indented under a line, as Vim's `foldmethod=indent`, for grammars with no fold
+/// query. The line closing a block at its own indentation folds with it.
+fn indentation_folds(source: &str, limit: usize) -> Vec<SyntaxFold> {
+    let mut folds = Vec::new();
+    let mut open: Vec<(usize, usize)> = Vec::new();
+    let mut previous = 0;
+    for (row, line) in source.lines().enumerate() {
+        let body = line.trim_start();
+        if body.is_empty() {
+            continue;
+        }
+        let indent = line.len() - body.len();
+        let closes = body.starts_with(['}', ')', ']'])
+            || body.starts_with("</")
+            || body.split(|c: char| !c.is_alphanumeric()).next() == Some("end");
+        while let Some(&(opened, start)) = open.last().filter(|(opened, _)| *opened >= indent) {
+            open.pop();
+            let end = if opened == indent && closes { row } else { previous };
+            if end > start {
+                folds.push(SyntaxFold { start_row: start, end_row: end });
+            }
+        }
+        open.push((indent, row));
+        previous = row;
+    }
+    for (_, start) in open {
+        if previous > start {
+            folds.push(SyntaxFold { start_row: start, end_row: previous });
+        }
+    }
+    folds.sort_by_key(|fold| fold.start_row);
+    folds.truncate(limit);
+    folds
+}
 fn failed(request: &Request, diagnostic: String) -> SyntaxEvent {
     SyntaxEvent::Failed {
         document: request.document,
@@ -1031,6 +1070,25 @@ fn failed(request: &Request, diagnostic: String) -> SyntaxEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn languages_without_a_fold_query_fold_by_indentation() {
+        let rows = |source: &str| {
+            indentation_folds(source, 10)
+                .into_iter()
+                .map(|fold| (fold.start_row, fold.end_row))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            rows("def main():\n    a = 1\n\n    if a:\n        b\n    return a\n\nrest\n"),
+            [(0, 5), (3, 4)]
+        );
+        assert_eq!(rows("void f() {\n  x;\n}\nnext\n"), [(0, 2)]);
+        assert_eq!(rows("if a then\n  b\nend\n"), [(0, 2)]);
+        assert_eq!(rows("<div>\n  <p>\n</div>\n"), [(0, 2)]);
+        assert!(rows("one\ntwo\n").is_empty());
+        assert_eq!(rows("class A:\n  def b():\n    c\n"), [(0, 2), (1, 2)]);
+        assert_eq!(indentation_folds("a\n b\nc\n d\n", 1).len(), 1);
+    }
     #[test]
     fn builtins_parse_unicode_and_queries() {
         for (language, source) in [

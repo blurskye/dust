@@ -1222,8 +1222,7 @@ pub enum UiGitSignKind {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiBreadcrumb {
     pub name: String,
-    pub start_line: usize,
-    pub end_line: usize,
+    pub range: crate::editor::text::ByteRange,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

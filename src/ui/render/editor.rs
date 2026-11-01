@@ -920,7 +920,9 @@ pub(super) fn render_status_line(
                     .iter()
                     .filter(|(buffer, _)| *buffer == view.buffer)
                     .flat_map(|(_, symbols)| symbols)
-                    .filter(|symbol| (symbol.start_line..=symbol.end_line).contains(&cursor_line))
+                    .filter(|symbol| {
+                        symbol.range.start <= view.cursor && view.cursor < symbol.range.end
+                    })
                     .map(|symbol| symbol.name.as_str())
                     .collect::<Vec<_>>();
                 if !trail.is_empty() {

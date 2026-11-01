@@ -2512,7 +2512,7 @@ impl InteractiveApplication {
                     }
                     if self.language.is_breadcrumb_request(generation) {
                         if let LspFeatureResult::Symbols(symbols) = result {
-                            self.install_lsp_breadcrumbs(symbols);
+                            self.install_lsp_breadcrumbs(symbols, context.encoding());
                         }
                         continue;
                     }
@@ -2705,21 +2705,27 @@ impl InteractiveApplication {
         }
     }
     /// The symbols a cursor can be inside, in the server's order: outer ones before inner ones.
-    fn install_lsp_breadcrumbs(&mut self, symbols: Vec<crate::language::lsp::LspSymbol>) {
+    fn install_lsp_breadcrumbs(
+        &mut self,
+        symbols: Vec<crate::language::lsp::LspSymbol>,
+        encoding: PositionEncoding,
+    ) {
         // As LazyVim's status line: Variables and such aren't places in the file.
         const PLACES: [u8; 12] = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 23];
         let Some(buffer) = self.state.active_buffer_id() else {
             return;
         };
+        let codec = PositionCodec::new(&self.state.buffers[buffer].text);
         let symbols = symbols
             .into_iter()
             .filter(|symbol| symbol.kind.is_some_and(|kind| PLACES.contains(&kind)))
             .filter_map(|symbol| {
                 let extent = symbol.extent?;
+                let start = codec.lsp_to_byte(extent.start.line, extent.start.character, encoding);
+                let end = codec.lsp_to_byte(extent.end.line, extent.end.character, encoding);
                 Some(crate::ui::UiBreadcrumb {
                     name: symbol.name.trim_start().to_owned(),
-                    start_line: extent.start.line,
-                    end_line: extent.end.line,
+                    range: ByteRange::new(start.ok()?, end.ok()?).ok()?,
                 })
             })
             .collect();
@@ -3377,6 +3383,11 @@ impl InteractiveApplication {
             LspFeatureResult::Empty
                 if method == "textDocument/hover"
                     && (self.language.request_pending() || self.hover_is_showing()) => {}
+            // Completion asks by itself as you type, and nothing to offer is no news.
+            LspFeatureResult::Empty
+                if method == "textDocument/completion"
+                    && (self.language.request_pending()
+                        || self.language.completion_automatic()) => {}
             LspFeatureResult::Empty => self.show_error(self.message("lsp_no_result", &[])),
         }
     }

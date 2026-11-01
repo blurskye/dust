@@ -24,9 +24,6 @@ pub(super) fn render_documentation_popup(
 ) {
     let policy = &config.ui.documentation_popup;
     let editor_right = editor_left.saturating_add(editor_width);
-    let Some((cursor_x, cursor_y, _)) = frame.cursor else {
-        return;
-    };
     let available_height = height;
     let line_count = popup.line_count();
     if !policy.enabled || line_count == 0 || editor_width < 4 || available_height < 3 {
@@ -62,6 +59,14 @@ pub(super) fn render_documentation_popup(
     if box_width < 4 || box_height < 3 {
         return;
     }
+    // The dashboard has no cursor to sit beside, so the box goes mid-screen there.
+    let (cursor_x, cursor_y) = frame.cursor.map_or(
+        (
+            editor_left.saturating_add(editor_width.saturating_sub(box_width) / 2),
+            (available_height.saturating_sub(box_height) / 2).saturating_sub(1),
+        ),
+        |(x, y, _)| (x, y),
+    );
     let below = cursor_y.saturating_add(1);
     let room_below = available_height.saturating_sub(below);
     let top = if (policy.preferred_below && room_below >= box_height) || cursor_y < box_height {

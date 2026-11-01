@@ -370,6 +370,10 @@ impl ModalResolver {
         if self.operator.is_some() {
             let count = self.combined_count()?;
             let mut invocation = self.operator_invocation(motion, linewise, count)?;
+            // A typed 1 still counts: `d1G` deletes to line 1, not to the end.
+            if self.count.is_some() || self.operator_count.is_some() {
+                invocation.count = NonZeroU64::new(count);
+            }
             if let Some(character) = character {
                 invocation = invocation
                     .with_argument("character", CommandValue::String(character.to_string()));
@@ -388,7 +392,8 @@ impl ModalResolver {
             invocation =
                 invocation.with_argument("character", CommandValue::String(character.to_string()));
         }
-        invocation.count = count_nonzero(self.take_count());
+        // A typed 1 still counts: `1G` goes to line 1, not to the end.
+        invocation.count = self.count.take().and_then(NonZeroU64::new);
         Ok(InputAction::Invoke(invocation))
     }
 
@@ -506,6 +511,49 @@ mod tests {
             resolver.feed(EditorMode::Normal, GrammarInput::Count(3)),
             Err(super::InputError::CountOverflow(2))
         ));
+    }
+
+    #[test]
+    fn a_typed_count_of_one_is_not_the_same_as_no_count() {
+        let motion = || GrammarInput::Motion {
+            motion: "document_end".into(),
+            linewise: false,
+        };
+        let count = |resolver: &mut ModalResolver, mode| {
+            let InputAction::Invoke(invocation) = resolver.feed(mode, motion()).expect("motion")
+            else {
+                panic!("expected command")
+            };
+            invocation.count
+        };
+        let mut resolver = ModalResolver::default();
+        assert_eq!(count(&mut resolver, EditorMode::Normal), None);
+        resolver
+            .feed(EditorMode::Normal, GrammarInput::Count(1))
+            .expect("count");
+        assert_eq!(count(&mut resolver, EditorMode::Normal), NonZeroU64::new(1));
+        for typed_first in [false, true] {
+            if typed_first {
+                resolver
+                    .feed(EditorMode::Normal, GrammarInput::Count(1))
+                    .expect("count");
+            }
+            resolver
+                .feed(
+                    EditorMode::Normal,
+                    GrammarInput::OperatorBegin("delete".into()),
+                )
+                .expect("operator");
+            if !typed_first {
+                resolver
+                    .feed(EditorMode::OperatorPending, GrammarInput::Count(1))
+                    .expect("motion count");
+            }
+            assert_eq!(
+                count(&mut resolver, EditorMode::OperatorPending),
+                NonZeroU64::new(1)
+            );
+        }
     }
 
     #[test]

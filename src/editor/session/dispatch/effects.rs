@@ -1944,6 +1944,8 @@ impl InteractiveApplication {
                                     SyntaxFoldAction::Close => true,
                                     _ => !fold.collapsed,
                                 };
+                            } else {
+                                self.notify_message(self.message("syntax_no_fold", &[]), false);
                             }
                         }
                     }

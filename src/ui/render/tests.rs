@@ -655,6 +655,40 @@ fn documentation_popup_preserves_lines_clamps_and_protects_status_row() {
 }
 
 #[test]
+fn notice_popup_shows_on_the_dashboard_without_a_cursor() {
+    let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
+    let ui = UiState {
+        documentation_popup: Some(DocumentationPopupState {
+            kind: DocumentationPopupKind::Notice,
+            title: "Notification".into(),
+            provider: "application".into(),
+            source_range: None,
+            sections: vec![DocumentationSection {
+                heading: None,
+                markup: DocumentationMarkupKind::PlainText,
+                roles: Vec::new(),
+                lines: vec!["the whole message".into()],
+            }],
+            scroll: 0,
+        }),
+        ..UiState::default()
+    };
+    let config = crate::config::load_bundled_config().config;
+    let dashboard = crate::config::load_bundled_config().dashboard;
+    let frame = render(&state, &ui, &config, &dashboard, 80, 24);
+    assert!(frame.cursor.is_none());
+    let screen = (0..24)
+        .map(|y| {
+            (0..80)
+                .map(|x| frame.grid.get(x, y).map_or("", |cell| cell.symbol.as_str()))
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+    assert!(screen.iter().any(|line| line.contains("Notification")));
+    assert!(screen.iter().any(|line| line.contains("the whole message")));
+}
+
+#[test]
 fn completion_attaches_below_globally_centered_prompt() {
     let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
     let mut prompt = PromptState::new(PromptKind::Command);
@@ -2638,15 +2672,23 @@ fn status_line_names_the_symbols_around_the_cursor() {
         crate::editor::text::TextBuffer::from_text("one\ntwo\nthree\n"),
         Some(PathBuf::from("/tmp/main.rs")),
     );
-    let symbol = |name: &str, start_line, end_line| super::UiBreadcrumb {
+    let symbol = |name: &str, start, end| super::UiBreadcrumb {
         name: name.into(),
-        start_line,
-        end_line,
+        range: crate::editor::text::ByteRange::new(
+            crate::editor::text::ByteOffset(start),
+            crate::editor::text::ByteOffset(end),
+        )
+        .unwrap(),
     };
     let ui = UiState {
         breadcrumbs: Some((
             buffer,
-            vec![symbol("Outer", 0, 2), symbol("inner", 0, 1), symbol("elsewhere", 2, 2)],
+            vec![
+                symbol("Outer", 0, 14),
+                symbol("inner", 0, 3),
+                symbol("sibling", 2, 3),
+                symbol("elsewhere", 8, 13),
+            ],
         )),
         ..UiState::default()
     };
@@ -2654,6 +2696,7 @@ fn status_line_names_the_symbols_around_the_cursor() {
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 100, 10);
     let status = frame.grid.row_text(9);
     assert!(status.contains("\u{203a} Outer \u{203a} inner"), "{status}");
+    assert!(!status.contains("sibling"), "same line, but the cursor is not in it: {status}");
     assert!(!status.contains("elsewhere"), "{status}");
 }
 
