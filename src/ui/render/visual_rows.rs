@@ -106,6 +106,7 @@ impl<'a> VisualRowModel<'a> {
             let mut hints = ui
                 .lsp_inlay_hints
                 .iter()
+                .chain(&ui.substitute_preview)
                 .filter(|hint| hint.buffer == buffer && hint.revision == revision)
                 .take(10_000)
                 .collect::<Vec<_>>();

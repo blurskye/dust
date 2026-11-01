@@ -286,6 +286,7 @@ pub(super) fn render_editor_view(
     let mut inlay_hints = ui
         .lsp_inlay_hints
         .iter()
+        .chain(&ui.substitute_preview)
         .filter(|hint| hint.buffer == view.buffer && hint.revision == buffer.text.revision())
         .collect::<Vec<_>>();
     inlay_hints.sort_unstable_by_key(|hint| hint.position);
@@ -1090,6 +1091,7 @@ fn editor_cursor(context: EditorCursorContext<'_>) -> Option<(u16, u16)> {
         let mut hints = ui
             .lsp_inlay_hints
             .iter()
+            .chain(&ui.substitute_preview)
             .filter(|hint| {
                 hint.buffer == view.buffer
                     && hint.revision == buffer.text.revision()

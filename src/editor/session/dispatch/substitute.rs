@@ -3,7 +3,7 @@
 
 use super::{
     ByteOffset, ByteRange, EditorMode, EditorOperation, EditorTransaction, InteractiveApplication,
-    Precondition, TextEdit, TextEditSet,
+    Precondition, PromptKind, TextEdit, TextEditSet,
 };
 use crate::editor::text::TextBuffer;
 
@@ -103,7 +103,52 @@ fn substitution_edits(
     Ok((edits, changed))
 }
 
+/// The edits a `:s` makes in `view`, and how many lines they change.
+fn view_substitution(
+    view: &crate::editor::state::View,
+    text: &TextBuffer,
+    (range, pattern, replacement, flags): (&str, &str, &str, &str),
+) -> Result<(Vec<TextEdit>, usize), String> {
+    let line_of = |offset| text.byte_to_line(offset).unwrap_or(0);
+    let selection = view
+        .selection
+        .map(|selection| (line_of(selection.anchor), line_of(selection.head)));
+    let last = text.visible_lines().saturating_sub(1);
+    let lines = range_lines(range, line_of(view.cursor), selection, last)?;
+    substitution_edits(text, lines, pattern, replacement, flags)
+}
+
 impl InteractiveApplication {
+    /// Shows what a `:s` being typed puts in place of each match, as with Vim's inccommand.
+    pub(super) fn preview_substitute(&mut self) {
+        let preview = self.typed_substitute_hints().unwrap_or_default();
+        self.ui.set(preview, |ui| &mut ui.substitute_preview);
+    }
+
+    fn typed_substitute_hints(&self) -> Option<Vec<crate::ui::UiInlayHint>> {
+        let prompt = self.input.prompt().filter(|prompt| prompt.kind == PromptKind::Command)?;
+        let (range, pattern, replacement, flags) =
+            crate::editor::input::typed_substitution(&prompt.input)?;
+        let view = self.state.views.get(self.state.active_view?)?;
+        if self.ui.large_file_buffers.contains(&view.buffer) {
+            return None;
+        }
+        let text = &self.state.buffers[view.buffer].text;
+        let parts = (range.as_str(), pattern.as_str(), replacement.as_str(), flags.as_str());
+        let (edits, _) = view_substitution(view, text, parts).ok()?;
+        Some(
+            edits
+                .iter()
+                .map(|edit| crate::ui::UiInlayHint {
+                    buffer: view.buffer,
+                    revision: text.revision(),
+                    position: edit.range().end,
+                    label: format!("→{}", edit.replacement().replace('\n', "⏎")),
+                })
+                .collect(),
+        )
+    }
+
     pub(super) fn run_substitute(
         &mut self,
         range: &str,
@@ -118,14 +163,8 @@ impl InteractiveApplication {
         let buffer_id = view.buffer;
         let text = &self.state.buffers[buffer_id].text;
         let revision = text.revision();
-        let line_of = |offset| text.byte_to_line(offset).unwrap_or(0);
-        let selection = view
-            .selection
-            .map(|selection| (line_of(selection.anchor), line_of(selection.head)));
-        let last = text.visible_lines().saturating_sub(1);
-        let result = range_lines(range, line_of(view.cursor), selection, last).and_then(|lines| {
-            substitution_edits(text, lines, pattern, replacement, flags)
-        });
+        let selection = view.selection.is_some();
+        let result = view_substitution(view, text, (range, pattern, replacement, flags));
         let (edits, lines) = match result {
             Ok(found) => found,
             Err(error) => {
@@ -152,7 +191,7 @@ impl InteractiveApplication {
             self.show_error(error);
             return;
         }
-        if selection.is_some() {
+        if selection {
             self.set_mode(EditorMode::Normal);
         }
         self.notify_message(format!("{count} substitutions on {lines} lines"), false);
@@ -181,6 +220,22 @@ mod tests {
         assert_eq!(applied("foo bar\n", (0, 0), r"(\w+) (\w+)", r"\2 \1 &", ""), "bar foo foo bar\n");
         assert_eq!(applied("cat scatter\n", (0, 0), r"\<cat\>", "dog", "g"), "dog scatter\n");
         assert_eq!(applied("A\n", (0, 0), "a", "$1", "i"), "$1\n");
+    }
+
+    #[test]
+    fn a_substitution_being_typed_has_parts_once_its_replacement_begins() {
+        use crate::editor::input::typed_substitution as typed;
+        assert_eq!(typed("%s/foo"), None);
+        assert_eq!(typed("s//x"), None);
+        assert_eq!(
+            typed("%s/foo/b"),
+            Some(("%".into(), "foo".into(), "b".into(), String::new()))
+        );
+        assert_eq!(
+            typed("2,3s/a/b/g"),
+            Some(("2,3".into(), "a".into(), "b".into(), "g".into()))
+        );
+        assert_eq!(typed("set wrap"), None);
     }
 
     #[test]

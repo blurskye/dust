@@ -7,7 +7,7 @@ mod key;
 mod keymap;
 mod search;
 
-pub use command_line::{ExParseError, parse_ex, substitute_pattern};
+pub use command_line::{ExParseError, parse_ex, substitute_pattern, typed_substitution};
 pub use context::{
     InputContextDescriptor, InputContextError, InputContextLayer, InputContextPolicy,
     InputContextRegistry,

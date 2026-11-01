@@ -129,6 +129,7 @@ impl InteractiveApplication {
     pub(super) fn project_input_prompt(&mut self) {
         let prompt = self.input.prompt().cloned();
         self.ui.set(prompt, |ui| &mut ui.prompt);
+        self.preview_substitute();
     }
     pub(super) fn prompt_help(&mut self, help: String) {
         self.input.prompt_help(help);

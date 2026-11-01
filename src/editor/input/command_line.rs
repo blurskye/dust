@@ -3,8 +3,9 @@ use std::collections::BTreeMap;
 use crate::editor::{CommandError, CommandInvocation, CommandValue, InvocationSource};
 use thiserror::Error;
 
-/// `:s/a/b/g` with an optional range: `%`, `'<,'>`, `5,9`, `.,$`. Anything else isn't a substitution.
-fn parse_substitute(input: &str) -> Option<Result<CommandInvocation, ExParseError>> {
+/// The range and the delimited parts of `:s/a/b/g`, with an optional range: `%`, `'<,'>`, `5,9`,
+/// `.,$`. Anything else isn't a substitution.
+fn substitute_parts(input: &str) -> Option<(&str, Vec<String>)> {
     let name_at = input
         .find(|character: char| !(character.is_ascii_digit() || "%.,$'<>".contains(character)))?;
     let (range, rest) = input.split_at(name_at);
@@ -15,7 +16,11 @@ fn parse_substitute(input: &str) -> Option<Result<CommandInvocation, ExParseErro
         .chars()
         .next()
         .filter(|character| !character.is_alphanumeric() && !character.is_whitespace())?;
-    let parts = split_unescaped(&rest[delimiter.len_utf8()..], delimiter);
+    Some((range, split_unescaped(&rest[delimiter.len_utf8()..], delimiter)))
+}
+
+fn parse_substitute(input: &str) -> Option<Result<CommandInvocation, ExParseError>> {
+    let (range, parts) = substitute_parts(input)?;
     let mut parts = parts.into_iter();
     let pattern = parts.next().unwrap_or_default();
     let replacement = parts.next().unwrap_or_default();
@@ -37,19 +42,20 @@ fn parse_substitute(input: &str) -> Option<Result<CommandInvocation, ExParseErro
 #[must_use]
 pub fn substitute_pattern(input: &str) -> Option<String> {
     let input = input.trim_start().trim_start_matches(':');
-    let name_at = input
-        .find(|character: char| !(character.is_ascii_digit() || "%.,$'<>".contains(character)))?;
-    let rest = &input[name_at..];
-    let rest = rest
-        .strip_prefix("substitute")
-        .or_else(|| rest.strip_prefix('s'))?;
-    let delimiter = rest
-        .chars()
-        .next()
-        .filter(|character| !character.is_alphanumeric() && !character.is_whitespace())?;
-    split_unescaped(&rest[delimiter.len_utf8()..], delimiter)
-        .into_iter()
-        .next()
+    let (_, parts) = substitute_parts(input)?;
+    let pattern = parts.into_iter().next()?;
+    Some(pattern.replace(r"\<", r"\b").replace(r"\>", r"\b"))
+}
+
+/// Range, pattern, replacement and flags of a `:s` being typed, once its replacement has begun.
+#[must_use]
+pub fn typed_substitution(input: &str) -> Option<(String, String, String, String)> {
+    let input = input.trim_start().trim_start_matches(':');
+    let (range, parts) = substitute_parts(input)?;
+    let mut parts = parts.into_iter();
+    let pattern = parts.next().filter(|pattern| !pattern.is_empty())?;
+    let replacement = parts.next()?;
+    Some((range.to_owned(), pattern, replacement, parts.next().unwrap_or_default()))
 }
 
 /// Splits on `delimiter`, turning `\\/` into a plain `/` and leaving other escapes for the regex.

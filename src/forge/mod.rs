@@ -266,6 +266,9 @@ fn tea_list(root: &Path) -> Result<Vec<PullRequest>, String> {
 fn forge(root: &Path) -> Result<Forge, String> {
     let url = run(root, "git", &["remote", "get-url", "origin"])
         .map_err(|_| "this repository has no `origin` remote".to_owned())?;
+    if remote_is_path(url.trim()) {
+        return Err("`origin` is a local path, so it has no pull requests".to_owned());
+    }
     Ok(if remote_host(url.trim()).contains("github") {
         Forge::GitHub
     } else {
@@ -283,6 +286,11 @@ fn with_forge<T>(root: &Path, job: impl Fn(Forge) -> Result<T, String>) -> Resul
         Forge::Gitea => Forge::GitHub,
     };
     job(first).or_else(|error| job(other).map_err(|_| error))
+}
+
+/// A remote on this machine: a path or `file://`. Host forms always hold a colon.
+fn remote_is_path(url: &str) -> bool {
+    url.starts_with("file://") || !url.contains(':')
 }
 
 /// The host of a remote URL: `https://host/…`, `ssh://user@host:port/…` or `user@host:path`.
@@ -480,6 +488,10 @@ mod tests {
         assert_eq!(remote_host("https://github.com/a/b"), "github.com");
         assert_eq!(remote_host("ssh://git@forgejo.example.org/a/b.git"), "forgejo.example.org");
         assert_eq!(remote_host("ssh://git@codeberg.org:2222/a/b"), "codeberg.org");
+        assert!(remote_is_path("/srv/git/a.git"));
+        assert!(remote_is_path("../a.git"));
+        assert!(remote_is_path("file:///srv/git/a.git"));
+        assert!(!remote_is_path("git@github.com:a/b.git"));
     }
 
     #[test]

@@ -1327,6 +1327,8 @@ pub struct UiState {
     pub lsp_semantic_spans: Vec<UiSyntaxSpan>,
     pub lsp_highlight_spans: Vec<UiSyntaxSpan>,
     pub lsp_inlay_hints: Vec<UiInlayHint>,
+    /// What a `:s` being typed would put after each match.
+    pub substitute_preview: Vec<UiInlayHint>,
     pub lsp_colors: Vec<UiColorSpan>,
     pub git_signs: Vec<UiGitSign>,
     pub lsp_folds: Vec<UiFold>,
