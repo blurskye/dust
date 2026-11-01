@@ -6963,6 +6963,18 @@ impl InteractiveApplication {
         self.sync_picker_ui();
     }
     pub(in crate::editor::session) fn unstage_selected_git_hunk(&mut self) {
+        use crate::workspace::git::GitDiffLayer;
+        if self.git.hunks().is_none_or(|hunks| hunks.layer != GitDiffLayer::Staged) {
+            self.start_git_hunks_with_layer(Some(GitHunkAction::Unstage), GitDiffLayer::Staged);
+            return;
+        }
+        self.git.select_at(self.cursor_line_number());
+        if !self.git.has_selection() {
+            // The staged list isn't what ]h and the signs should keep following.
+            self.git.forget_hunks();
+            self.show_error("no staged Git hunk on this line");
+            return;
+        }
         if let Err(error) = self.git.start_plan(
             &self.state,
             crate::workspace::git::GitMutationKind::UnstageHunk,
@@ -6981,6 +6993,7 @@ impl InteractiveApplication {
                         GitHunkAction::Move(direction) => self.navigate_git_hunk(direction),
                         GitHunkAction::Preview => self.preview_selected_git_hunk(),
                         GitHunkAction::Stage => self.stage_selected_git_hunk(),
+                        GitHunkAction::Unstage => self.unstage_selected_git_hunk(),
                         GitHunkAction::Reset => self.request_reset_selected_git_hunk(),
                     }
                     return;

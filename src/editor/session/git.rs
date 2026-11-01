@@ -99,6 +99,7 @@ pub(super) enum GitHunkAction {
     Move(i8),
     Preview,
     Stage,
+    Unstage,
     Reset,
 }
 
@@ -588,7 +589,20 @@ impl GitSession {
         let Some(snapshot) = self.hunk_snapshot.as_ref() else {
             return;
         };
-        let Some(hunk) = snapshot.hunks.iter().find(|hunk| hunk.covers_line(line)) else {
+        // A staged hunk counts index lines, which unstaged changes above it shift in the buffer.
+        let staged_line = |hunk: &GitHunk| {
+            (hunk.new_start..hunk.new_start + hunk.new_lines.max(1)).find(|at| {
+                self.line_in_buffer(GitDiffLayer::Staged, at.saturating_sub(1) as usize) as u32 + 1
+                    == line
+            })
+        };
+        let Some((hunk, line)) = snapshot.hunks.iter().find_map(|hunk| {
+            if snapshot.layer == GitDiffLayer::Staged {
+                staged_line(hunk).map(|at| (hunk, at))
+            } else {
+                hunk.covers_line(line).then_some((hunk, line))
+            }
+        }) else {
             return;
         };
         let Some(status) = self.status_snapshot.as_ref() else {

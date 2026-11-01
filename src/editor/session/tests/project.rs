@@ -2963,7 +2963,8 @@ fn hunk_unstage_returns_one_staged_hunk_to_head_and_refuses_the_rest() {
         "the other staged hunk stays staged"
     );
 
-    // Unstaging an unstaged selection is refused and writes nothing.
+    // Unstaging where only an unstaged hunk is selected finds no staged hunk on the line,
+    // refuses and writes nothing.
     let before = index_bytes(&app.state.workspace_root, "unstage.txt");
     load_hunks(&mut app, "workspace.git.hunks.open");
     let unstaged = app.git.hunks().expect("unstaged hunks").clone();
@@ -2975,8 +2976,12 @@ fn hunk_unstage_returns_one_staged_hunk_to_head_and_refuses_the_rest() {
         &path,
         unstaged.hunks[0].id
     ));
-    invoke(&mut app, "workspace.git.hunk.unstage");
+    load_hunks(&mut app, "workspace.git.hunk.unstage");
     assert!(!app.git.mutation_pending(), "no plan may start");
+    assert_eq!(
+        app.ui.notification.as_deref(),
+        Some("no staged Git hunk on this line")
+    );
     assert_eq!(index_bytes(&app.state.workspace_root, "unstage.txt"), before);
 
     // Staging a hunk that is already staged is refused, not reapplied.
@@ -2992,6 +2997,65 @@ fn hunk_unstage_returns_one_staged_hunk_to_head_and_refuses_the_rest() {
     invoke(&mut app, "workspace.git.hunk.stage");
     assert!(!app.git.mutation_pending(), "no plan may start");
     assert_eq!(index_bytes(&app.state.workspace_root, "unstage.txt"), before);
+}
+
+#[test]
+fn the_unstage_key_undoes_the_hunk_just_staged_under_the_cursor() {
+    let mut app = app();
+    let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
+    let path = app.state.workspace_root.join("undo.txt");
+    let original = (1..=40).map(|n| format!("line {n}\n")).collect::<String>();
+    fs::write(&path, &original).unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("undo.txt")).unwrap();
+    index.write().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
+        .unwrap();
+    drop(tree);
+    let changed = original
+        .replace("line 2\n", "changed 2\n")
+        .replace("line 38\n", "changed 38\n");
+    fs::write(&path, &changed).unwrap();
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone())
+    }
+    app.reconcile_workspace_trust();
+    app.start_open(path.clone());
+    wait_vfs(&mut app);
+    let deadline = Instant::now() + Duration::from_secs(4);
+    let settle = |app: &mut InteractiveApplication| {
+        while app.git.hunks_pending() || app.git.mutation_pending() || app.git.status_pending() {
+            app.process_git_hunk_events();
+            app.process_git_mutation_events();
+            app.process_git_status_events();
+            assert!(Instant::now() < deadline);
+            thread::yield_now()
+        }
+    };
+    let indexed = |app: &InteractiveApplication| {
+        let repo = git2::Repository::open(&app.state.workspace_root).unwrap();
+        let index = repo.index().unwrap();
+        let entry = index.get_path(std::path::Path::new("undo.txt"), 0).unwrap();
+        String::from_utf8(repo.find_blob(entry.id).unwrap().content().to_vec()).unwrap()
+    };
+    let invoke = |app: &mut InteractiveApplication, id: &str| {
+        app.invoke(
+            crate::editor::CommandInvocation::new(id, InvocationSource::Test).expect("command id"),
+        );
+    };
+    app.start_git_status_refresh();
+    settle(&mut app);
+
+    invoke(&mut app, "workspace.git.hunk.stage");
+    settle(&mut app);
+    assert_eq!(indexed(&app), original.replace("line 2\n", "changed 2\n"));
+
+    invoke(&mut app, "workspace.git.hunk.unstage");
+    settle(&mut app);
+    assert_eq!(indexed(&app), original, "{:?}", app.ui.notification);
 }
 
 
