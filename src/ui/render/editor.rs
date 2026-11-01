@@ -944,11 +944,12 @@ pub(super) fn render_status_line(
                 status.git_format.replace("{branch}", branch)
             )
         });
-    // The operation indicator is drawn FIRST, so it survives every configured component layout:
-    // a paused operation must not be hidden by a user's statusline choices.
+    // The operation's bar sits above this row whenever there is a row for it. Without one the
+    // indicator is drawn FIRST, so a paused operation is not hidden by a user's component choices.
     let operation_indicator = ui
         .operation_bar
         .as_ref()
+        .filter(|_| status_y < 2)
         .map(|bar| format!(" {} ", bar.indicator()))
         .unwrap_or_default();
     // Everything left of the file: the indicator, the mode, one blank section cell and both edges.

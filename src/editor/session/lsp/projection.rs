@@ -565,14 +565,21 @@ impl LspSession {
         &self,
         typed: impl Fn(&str, &LspCompletionItem) -> String,
     ) -> Vec<Option<i64>> {
-        self.projection
-            .completion_all
-            .iter()
-            .map(|(server, item)| {
-                let target = item.filter_text.as_deref().unwrap_or(&item.label);
-                crate::workspace::fuzzy_score(&typed(server, item), target, "")
-            })
-            .collect()
+        hide_scattered_matches(
+            self.projection
+                .completion_all
+                .iter()
+                .map(|(server, item)| {
+                    let target = item.filter_text.as_deref().unwrap_or(&item.label);
+                    let query = typed(server, item);
+                    let score = starts_at_a_word(&query, target)
+                        .then(|| crate::workspace::fuzzy_score(&query, target, ""))
+                        .flatten();
+                    let whole = target.to_lowercase().contains(&query.to_lowercase());
+                    (score, whole)
+                })
+                .collect(),
+        )
     }
     /// Keeps the matching items, best first and in the server's order among equals. A selection
     /// the user moved stays on its item while that item is still listed.
@@ -1234,5 +1241,80 @@ mod tests {
                 data: vec![1, 2, 3]
             }
         ));
+    }
+}
+
+/// Scattered letters only help when nothing holds the typed text in one piece: `gret` finds
+/// `greeting`, and once `greet` does, `SVGGraphicsElement` stops being listed under it.
+fn hide_scattered_matches(matches: Vec<(Option<i64>, bool)>) -> Vec<Option<i64>> {
+    let any_whole = matches.iter().any(|(score, whole)| score.is_some() && *whole);
+    matches
+        .into_iter()
+        .map(|(score, whole)| score.filter(|_| whole || !any_whole))
+        .collect()
+}
+
+/// Whether the typed letters can match from the start of a word in the item, as VS Code asks of
+/// completions: `greet` finds `greetingResult` and not the scattered letters of `ProgressEvent`.
+fn starts_at_a_word(query: &str, target: &str) -> bool {
+    let mut letters = query.chars().flat_map(char::to_lowercase);
+    let Some(first) = letters.next() else {
+        return true;
+    };
+    let rest = letters.collect::<Vec<_>>();
+    let chars = target.chars().collect::<Vec<_>>();
+    (0..chars.len()).any(|index| {
+        let word_start = index == 0 || {
+            let previous = chars[index - 1];
+            let next_is_lower = chars.get(index + 1).is_some_and(|next| next.is_lowercase());
+            !previous.is_alphanumeric()
+                || (chars[index].is_uppercase() && (previous.is_lowercase() || next_is_lower))
+        };
+        word_start
+            && chars[index].to_lowercase().eq(first.to_lowercase())
+            && {
+                let mut remaining = chars[index + 1..].iter().flat_map(|c| c.to_lowercase());
+                rest.iter().all(|letter| remaining.any(|c| c == *letter))
+            }
+    })
+}
+
+#[cfg(test)]
+mod completion_filter_tests {
+    use super::{hide_scattered_matches, starts_at_a_word};
+
+    #[test]
+    fn scattered_matches_show_only_when_nothing_matches_in_one_piece() {
+        assert_eq!(
+            hide_scattered_matches(vec![(Some(9), true), (Some(5), false), (None, false)]),
+            vec![Some(9), None, None]
+        );
+        assert_eq!(
+            hide_scattered_matches(vec![(Some(5), false), (None, true)]),
+            vec![Some(5), None]
+        );
+    }
+
+    #[test]
+    fn typed_letters_must_start_at_a_word_of_the_item() {
+        for (query, target) in [
+            ("greet", "greeting"),
+            ("greet", "greetingResult"),
+            ("res", "greetingResult"),
+            ("str", "toString"),
+            ("bar", "foo_bar"),
+            ("el", "SVGRectElement"),
+            ("", "anything"),
+        ] {
+            assert!(starts_at_a_word(query, target), "{query} {target}");
+        }
+        for (query, target) in [
+            ("greet", "SVGRectElement"),
+            ("greet", "ProgressEvent"),
+            ("greet", "HTMLProgressElement"),
+            ("ing", "toString"),
+        ] {
+            assert!(!starts_at_a_word(query, target), "{query} {target}");
+        }
     }
 }

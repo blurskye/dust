@@ -1153,9 +1153,13 @@ pub(super) fn render_tool_menu(
     let runtime_x = content_left.saturating_add(content_width.saturating_mul(64) / 100);
     let state_x = content_left.saturating_add(content_width.saturating_mul(78) / 100);
     let right = content_left.saturating_add(content_width);
+    // Too narrow for every column: the version and source stay in the details below.
+    let compact = content_width < 70;
     frame.grid.put_text(name_x, y, "NAME", Style::Muted);
-    frame.grid.put_text(version_x, y, "VERSION", Style::Muted);
-    frame.grid.put_text(runtime_x, y, "SOURCE", Style::Muted);
+    if !compact {
+        frame.grid.put_text(version_x, y, "VERSION", Style::Muted);
+        frame.grid.put_text(runtime_x, y, "SOURCE", Style::Muted);
+    }
     frame.grid.put_text(state_x, y, "STATE", Style::Muted);
     y += 1;
 
@@ -1163,7 +1167,10 @@ pub(super) fn render_tool_menu(
         .saturating_add(height)
         .saturating_sub(1)
         .saturating_sub(y);
-    let detail_rows = 9u16.min(remaining.saturating_sub(1));
+    // A short window keeps what the user can act on, the note and the keys, and gives the list
+    // the rest.
+    let short = remaining < 12;
+    let detail_rows = if short { 5u16 } else { 9 }.min(remaining.saturating_sub(1));
     let list_bottom = top + height - 1 - detail_rows;
     let visible_rows = usize::from(list_bottom.saturating_sub(y));
     for (index, row) in menu
@@ -1188,7 +1195,7 @@ pub(super) fn render_tool_menu(
         }
         let (glyph, glyph_style) = tool_state_glyph(row);
         frame.grid.put_text(content_left, y, glyph, glyph_style);
-        let name_right = version_x.saturating_sub(2);
+        let name_right = if compact { state_x } else { version_x }.saturating_sub(2);
         let column = |text: &str, from: u16, to: u16| {
             ellipsized(text, usize::from(to.saturating_sub(from)), ambiguous)
         };
@@ -1207,14 +1214,16 @@ pub(super) fn render_tool_menu(
                 name_right,
             );
         }
-        let runtime_right = runtime_x.saturating_sub(1);
-        frame
-            .grid
-            .put_text(version_x, y, &column(&row.version, version_x, runtime_right), style);
-        let state_left = state_x.saturating_sub(1);
-        frame
-            .grid
-            .put_text(runtime_x, y, &column(&row.runtime, runtime_x, state_left), style);
+        if !compact {
+            let runtime_right = runtime_x.saturating_sub(1);
+            frame
+                .grid
+                .put_text(version_x, y, &column(&row.version, version_x, runtime_right), style);
+            let state_left = state_x.saturating_sub(1);
+            frame
+                .grid
+                .put_text(runtime_x, y, &column(&row.runtime, runtime_x, state_left), style);
+        }
         // The list shows the short state; byte counts stay in the detail pane.
         let state = row.lifecycle.split(" (").next().unwrap_or_default();
         frame.grid.put_text(
@@ -1250,7 +1259,7 @@ pub(super) fn render_tool_menu(
                 .put_text_clipped(x, y, &row.languages, Style::Muted, status_x.saturating_sub(1));
         }
         frame.grid.put_text(status_x, y, &row.lifecycle, state_style);
-        y += 2;
+        y += if short { 1 } else { 2 };
         let mut details = Vec::new();
         if row.installed {
             let location = if row.executable.is_empty() {
@@ -1273,6 +1282,9 @@ pub(super) fn render_tool_menu(
             details.push(format!("Sessions  {}", row.sessions.join(" · ")));
         }
         let bottom = top + height - 1;
+        if short {
+            details.clear();
+        }
         for line in details {
             if y >= bottom {
                 break;
@@ -1285,7 +1297,7 @@ pub(super) fn render_tool_menu(
             frame.grid.put_text(content_left, y, &line, Style::Muted);
             y += 1;
         }
-        y += 1;
+        y += u16::from(!short);
         if y < bottom {
             let note_style = if state_style == Style::Error {
                 Style::Error

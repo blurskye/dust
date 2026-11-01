@@ -843,7 +843,7 @@ fn typing_narrows_the_completion_menu_instead_of_closing_it() {
     };
     let generation = app.language.generation();
     app.language
-        .install_completions(&key, vec![item("log"), item("clear")], false, generation);
+        .install_completions(&key, vec![item("log"), item("list")], false, generation);
     app.narrow_lsp_completion();
     assert_eq!(app.ui.language_completion.as_ref().map(|menu| menu.items.len()), Some(2));
 
