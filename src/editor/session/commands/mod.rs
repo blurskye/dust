@@ -145,6 +145,8 @@ pub enum AppEffect {
     },
     PromptInsert(String),
     PromptBackspace,
+    PromptDeleteWord,
+    PromptDeleteToStart,
     PromptMove(PromptMove),
     PromptHistory(i8),
     PromptComplete(i8),

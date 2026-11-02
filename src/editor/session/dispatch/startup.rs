@@ -160,6 +160,8 @@ impl InteractiveApplication {
             remote: None,
             syntax_spans_source: (Vec::new(), Vec::new()),
             format_on_save: None,
+            lsp_asked: None,
+            lsp_waiting: None,
             disk_stamps: std::collections::HashMap::new(),
             next_disk_check: None,
             git_stamp: None,

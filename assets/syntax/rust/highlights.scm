@@ -153,8 +153,10 @@
 
 (escape_sequence) @escape
 
-(attribute_item) @attribute
-(inner_attribute_item) @attribute
+; Like Neovim: the attribute's name, and the names it is given, such as derived traits.
+(attribute (identifier) @attribute)
+(attribute (scoped_identifier name: (identifier) @attribute))
+(attribute arguments: (token_tree (identifier) @type))
 
 "*" @operator
 "&" @operator

@@ -537,6 +537,11 @@ pub enum SyntaxRole {
     Keyword,
     Type,
     Variable,
+    Function,
+    /// Fields and properties.
+    Property,
+    /// Attributes, decorators and annotations.
+    Attribute,
     /// Markup: headings, bold and italic text, code, links and quotes.
     Heading,
     Strong,
@@ -891,8 +896,10 @@ fn role(name: &str) -> Option<SyntaxRole> {
         | "repeat" | "exception" | "include" | "import" | "preproc" | "storageclass"
         | "delimiter" | "charset" | "keyframes" | "media" | "supports" => Some(SyntaxRole::Keyword),
         "type" | "constructor" | "module" | "namespace" => Some(SyntaxRole::Type),
-        "variable" | "function" | "method" | "property" | "constant" | "attribute" | "embedded"
-        | "field" | "parameter" => Some(SyntaxRole::Variable),
+        "function" | "method" => Some(SyntaxRole::Function),
+        "property" | "field" => Some(SyntaxRole::Property),
+        "attribute" => Some(SyntaxRole::Attribute),
+        "variable" | "constant" | "embedded" | "parameter" => Some(SyntaxRole::Variable),
         "markup" => Some(match name {
             "markup.heading" => SyntaxRole::Heading,
             "markup.strong" | "markup.bold" => SyntaxRole::Strong,

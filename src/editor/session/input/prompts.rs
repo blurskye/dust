@@ -205,6 +205,7 @@ impl InputSession {
             })
             .take(policy.runtime.completion_limit)
             .map(|path| CompletionItem {
+                icon: None,
                 color: None,
                 label: path
                     .strip_prefix(root)
@@ -253,18 +254,43 @@ impl InputSession {
     }
 
     pub(in crate::editor::session) fn prompt_backspace(&mut self) {
+        self.prompt_delete_back(|before| {
+            before
+                .grapheme_indices(true)
+                .next_back()
+                .map_or(before.len(), |(index, _)| index)
+        });
+    }
+
+    /// Vim's ctrl-w: the word or run of punctuation before the cursor, and the spaces after it.
+    pub(in crate::editor::session) fn prompt_delete_word(&mut self) {
+        self.prompt_delete_back(|before| {
+            let trimmed = before.trim_end();
+            let word = |c: char| c.is_alphanumeric() || c == '_';
+            let in_word = trimmed.chars().next_back().is_some_and(word);
+            trimmed
+                .char_indices()
+                .rev()
+                .take_while(|(_, c)| !c.is_whitespace() && word(*c) == in_word)
+                .last()
+                .map_or(trimmed.len(), |(index, _)| index)
+        });
+    }
+
+    /// Vim's ctrl-u: everything before the cursor.
+    pub(in crate::editor::session) fn prompt_delete_to_start(&mut self) {
+        self.prompt_delete_back(|_| 0);
+    }
+
+    fn prompt_delete_back(&mut self, start: impl FnOnce(&str) -> usize) {
         if let Some(prompt) = &mut self.prompt {
             if prompt.confirmation.is_some() {
                 return;
             }
-            let before = &prompt.input[..prompt.cursor];
-            let previous = before
-                .grapheme_indices(true)
-                .next_back()
-                .map(|(index, _)| index);
-            if let Some(previous) = previous {
-                prompt.input.replace_range(previous..prompt.cursor, "");
-                prompt.cursor = previous;
+            let start = start(&prompt.input[..prompt.cursor]);
+            if start < prompt.cursor {
+                prompt.input.replace_range(start..prompt.cursor, "");
+                prompt.cursor = start;
                 prompt.error = None;
                 prompt.selected_completion = None;
             }
@@ -498,7 +524,7 @@ impl InputSession {
             prompt.completions = ordered
                 .into_iter()
                 .take(policy.runtime.completion_limit)
-                .map(|(label, detail)| CompletionItem { label, detail, color: None })
+                .map(|(label, detail)| CompletionItem { icon: None, label, detail, color: None })
                 .collect();
             if prompt
                 .selected_completion

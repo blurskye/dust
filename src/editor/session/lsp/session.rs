@@ -7,7 +7,7 @@ pub(in crate::editor::session) use launch::{
 mod projection;
 // LSP runtime bookkeeping and accepted document lineage. No mutable editor authority.
 use super::{
-    lsp_edits::{CodeActionChoice, CodeActionKey, EditDocument, LspEditSources, SourcePlan},
+    lsp_edits::{CodeActionChoice, CodeActionKey, EditDocument, OfferedAction, LspEditSources, SourcePlan},
     workspace_edits::{OriginKey, PreparedFiles},
 };
 use crate::{
@@ -219,14 +219,27 @@ impl LspSession {
     pub(super) fn health(&self, server: &str) -> Result<(), LspError> {
         self.service.health(server)
     }
-    pub(super) fn install_actions(
+    pub(super) fn offer_actions(
         &mut self,
+        server: &str,
         actions: Vec<LspCodeAction>,
         context: Option<EditContext>,
+    ) {
+        self.edits.offer_actions(server, actions, context);
+    }
+    pub(super) fn clear_offered_actions(&mut self) {
+        self.edits.clear_offered_actions();
+    }
+    pub(super) fn has_offered_actions(&self) -> bool {
+        self.edits.has_offered_actions()
+    }
+    pub(super) fn install_offered_actions(
+        &mut self,
         maximum: usize,
     ) -> Result<Vec<CodeActionChoice>, String> {
+        let first = self.active.as_deref();
         self.edits
-            .install_actions(actions, context, &self.service, maximum)
+            .install_offered_actions(first, &self.service, maximum)
     }
     pub(super) fn retain_actions<'a>(
         &mut self,
@@ -240,7 +253,7 @@ impl LspSession {
     pub(super) fn take_action(
         &mut self,
         key: &CodeActionKey,
-    ) -> Result<(LspCodeAction, Option<EditContext>), String> {
+    ) -> Result<OfferedAction, String> {
         self.edits.take_action(key, &self.service)
     }
     pub(super) fn poll_event(&self) -> Option<OwnedLspEvent> {

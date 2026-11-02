@@ -7,7 +7,8 @@ use crate::{
         text::{BufferRevision, ByteOffset, ByteRange, PositionCodec},
     },
     language::lsp::{
-        LspCompletionItem, LspDocument, LspError, LspFeature, LspMarkupContent, LspProgressKind,
+        LspCompletionItem, LspDocument, LspError, LspFeature, LspMarkupContent, LspMarkupKind,
+        LspProgressKind,
         LspSemanticTokenDelta, LspSemanticTokens,
     },
     ui::UiLspProgress,
@@ -234,6 +235,10 @@ impl LspSession {
                 .collect(),
             LspFeature::Hover => self
                 .attached_servers(owner.buffer, &owner.language, |c| c.hover)
+                .filter(|key| key != server)
+                .collect(),
+            LspFeature::CodeAction { .. } => self
+                .attached_servers(owner.buffer, &owner.language, |c| c.code_action)
                 .filter(|key| key != server)
                 .collect(),
             _ => Vec::new(),
@@ -748,10 +753,18 @@ impl LspSession {
             .completion_items
             .get(selected)
             .ok_or("selected completion has no documentation")?;
-        let documentation = item
-            .documentation
-            .clone()
-            .ok_or("selected completion has no documentation")?;
+        let documentation = match (item.signature(), item.documentation.clone()) {
+            (Some(signature), documentation) => LspMarkupContent {
+                kind: LspMarkupKind::Markdown,
+                value: format!(
+                    "```{}\n{signature}\n```{}",
+                    owner.language,
+                    documentation.map_or(String::new(), |doc| format!("\n\n{}", doc.value))
+                ),
+            },
+            (None, Some(documentation)) => documentation,
+            (None, None) => return Err("selected completion has no documentation"),
+        };
         let server = self
             .completion_server(selected)
             .unwrap_or(&owner.server)

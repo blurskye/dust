@@ -255,7 +255,9 @@ impl TestSession {
     }
     pub(super) fn background_completion_fixture(&mut self) {
         self.application.ui.language_completion = Some(crate::ui::LanguageCompletionState {
+            typed: 0,
             items: vec![crate::ui::CompletionItem {
+                icon: None,
                 color: None,
                 label: "background editor suggestion".into(),
                 detail: String::new(),

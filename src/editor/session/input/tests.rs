@@ -18,6 +18,15 @@ fn prompt_edits_preserve_grapheme_boundaries_and_history_policy() {
     assert_eq!(input.prompt().unwrap().cursor, 2);
     input.prompt_move(PromptMove::Right);
     assert_eq!(input.prompt().unwrap().cursor, "ø界".len());
+    input.open_prompt(PromptKind::Command, "e src/main.rs  ".into(), None);
+    input.prompt_delete_word();
+    assert_eq!(input.prompt().unwrap().input, "e src/main.");
+    input.prompt_delete_word();
+    assert_eq!(input.prompt().unwrap().input, "e src/main");
+    input.prompt_move(PromptMove::Left);
+    input.prompt_delete_to_start();
+    assert_eq!(input.prompt().unwrap().input, "n");
+    assert_eq!(input.prompt().unwrap().cursor, 0);
     policy.history.command.maximum_entries = 2;
     for entry in ["one", "two", "two", "three"] {
         input.record_prompt_history(PromptKind::Command, entry, &policy);

@@ -194,6 +194,13 @@ pub struct ThemeStyles {
     pub syntax_keyword: ThemeStyle,
     pub syntax_type: ThemeStyle,
     pub syntax_variable: ThemeStyle,
+    /// Left out, these draw like variables.
+    #[serde(default)]
+    pub syntax_function: Option<ThemeStyle>,
+    #[serde(default)]
+    pub syntax_property: Option<ThemeStyle>,
+    #[serde(default)]
+    pub syntax_attribute: Option<ThemeStyle>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -275,7 +282,17 @@ impl ThemeConfig {
             ("syntax_keyword", &self.styles.syntax_keyword),
             ("syntax_type", &self.styles.syntax_type),
             ("syntax_variable", &self.styles.syntax_variable),
-        ];
+        ]
+        .into_iter()
+        .chain(
+            [
+                ("syntax_function", &self.styles.syntax_function),
+                ("syntax_property", &self.styles.syntax_property),
+                ("syntax_attribute", &self.styles.syntax_attribute),
+            ]
+            .into_iter()
+            .filter_map(|(name, style)| Some((name, style.as_ref()?))),
+        );
         for (name, style) in styles {
             if style.foreground == style.background && style.foreground != ThemeColor::Reset {
                 return Err(format!(

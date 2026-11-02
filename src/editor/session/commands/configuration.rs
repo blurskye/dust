@@ -553,6 +553,16 @@ pub(super) fn register_commands(
             AppEffect::PromptBackspace,
         ),
         (
+            "command_line.delete_word",
+            "Prompt delete word",
+            AppEffect::PromptDeleteWord,
+        ),
+        (
+            "command_line.delete_to_start",
+            "Prompt delete to start",
+            AppEffect::PromptDeleteToStart,
+        ),
+        (
             "command_line.move_left",
             "Prompt left",
             AppEffect::PromptMove(PromptMove::Left),

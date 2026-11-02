@@ -47,51 +47,88 @@ pub(super) struct CodeActionChoice {
     pub key: CodeActionKey,
     pub title: String,
     pub detail: String,
+    pub server: String,
+}
+/// A code action and the server that offered it, which is the one that can read its positions.
+pub(super) struct OfferedAction {
+    pub server: String,
+    pub action: crate::language::lsp::LspCodeAction,
+    pub context: Option<EditContext>,
 }
 struct CodeActions {
     key: std::sync::Arc<()>,
-    actions: Vec<crate::language::lsp::LspCodeAction>,
-    context: Option<EditContext>,
+    actions: Vec<OfferedAction>,
 }
 #[derive(Default)]
 pub(super) struct LspEditSources {
     actions: Option<CodeActions>,
+    /// What the attached servers have answered so far to the current request.
+    offered: Vec<OfferedAction>,
     active: Option<Request>,
     replies: VecDeque<PendingEditReply>,
 }
 impl LspEditSources {
-    pub(super) fn install_actions(
+    pub(super) fn offer_actions(
         &mut self,
+        server: &str,
         actions: Vec<crate::language::lsp::LspCodeAction>,
         context: Option<EditContext>,
+    ) {
+        self.offered.extend(actions.into_iter().map(|action| OfferedAction {
+            server: server.to_owned(),
+            action,
+            context: context.clone(),
+        }));
+    }
+    pub(super) fn clear_offered_actions(&mut self) {
+        self.offered.clear();
+    }
+    pub(super) fn has_offered_actions(&self) -> bool {
+        !self.offered.is_empty()
+    }
+    /// Installs what the servers offered, `first`'s actions on top. A server that went away since
+    /// it answered takes its actions with it.
+    pub(super) fn install_offered_actions(
+        &mut self,
+        first: Option<&str>,
         service: &LspService,
         maximum: usize,
     ) -> Result<Vec<CodeActionChoice>, String> {
-        if actions.len() > maximum
-            || context
+        let mut offered = std::mem::take(&mut self.offered);
+        offered.sort_by_key(|offered| Some(offered.server.as_str()) != first);
+        self.install_actions(offered, service, maximum)
+    }
+    pub(super) fn install_actions(
+        &mut self,
+        mut actions: Vec<OfferedAction>,
+        service: &LspService,
+        maximum: usize,
+    ) -> Result<Vec<CodeActionChoice>, String> {
+        let offered = actions.len();
+        actions.retain(|offered| {
+            offered
+                .context
                 .as_ref()
-                .is_some_and(|context| !service.edit_context_current(context))
-        {
+                .is_none_or(|context| service.edit_context_current(context))
+        });
+        if actions.len() > maximum || (offered > 0 && actions.is_empty()) {
             return Err("code-action source retired or exceeded its item limit".into());
         }
         let key = std::sync::Arc::new(());
         let rows = actions
             .iter()
             .enumerate()
-            .map(|(index, action)| CodeActionChoice {
+            .map(|(index, offered)| CodeActionChoice {
                 key: CodeActionKey {
                     set: key.clone(),
                     index,
                 },
-                title: action.title.clone(),
-                detail: action.kind.clone().unwrap_or_default(),
+                title: offered.action.title.clone(),
+                detail: offered.action.kind.clone().unwrap_or_default(),
+                server: offered.server.clone(),
             })
             .collect();
-        self.actions = Some(CodeActions {
-            key,
-            actions,
-            context,
-        });
+        self.actions = Some(CodeActions { key, actions });
         Ok(rows)
     }
     pub(super) fn retain_actions<'a>(
@@ -113,25 +150,24 @@ impl LspEditSources {
         &mut self,
         key: &CodeActionKey,
         service: &LspService,
-    ) -> Result<(crate::language::lsp::LspCodeAction, Option<EditContext>), String> {
+    ) -> Result<OfferedAction, String> {
         let set = self.actions.as_ref().ok_or("code actions closed")?;
         if !std::sync::Arc::ptr_eq(&set.key, &key.set)
-            || key.index >= set.actions.len()
-            || set
-                .context
-                .as_ref()
-                .is_some_and(|context| !service.edit_context_current(context))
+            || set.actions.get(key.index).is_none_or(|offered| {
+                offered
+                    .context
+                    .as_ref()
+                    .is_some_and(|context| !service.edit_context_current(context))
+            })
         {
             return Err("code-action source retired".into());
         }
         let set = self.actions.take().expect("checked action source");
-        Ok((
-            set.actions
-                .into_iter()
-                .nth(key.index)
-                .expect("checked action index"),
-            set.context,
-        ))
+        Ok(set
+            .actions
+            .into_iter()
+            .nth(key.index)
+            .expect("checked action index"))
     }
     // Reserve space for the active request's eventual response. Stop draining the
     // bounded backend event channel rather than dropping critical reply obligations.
@@ -630,7 +666,15 @@ mod tests {
             command: None,
         };
         let choices = sources
-            .install_actions(vec![action()], Some(packet.context.clone()), &service, 4)
+            .install_actions(
+                vec![OfferedAction {
+                    server: "server".into(),
+                    action: action(),
+                    context: Some(packet.context.clone()),
+                }],
+                &service,
+                4,
+            )
             .unwrap();
         let old_action = choices[0].key.clone();
         let mut replacement = service.replace_edit_source_fixture(
@@ -678,7 +722,15 @@ mod tests {
             panic!("request");
         };
         let choices = sources
-            .install_actions(vec![action()], Some(packet.context.clone()), &service, 4)
+            .install_actions(
+                vec![OfferedAction {
+                    server: "server".into(),
+                    action: action(),
+                    context: Some(packet.context.clone()),
+                }],
+                &service,
+                4,
+            )
             .unwrap();
         let key = choices[0].key.clone();
         assert!(sources.take_action(&old_action, &service).is_err());

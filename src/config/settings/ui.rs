@@ -87,6 +87,8 @@ pub struct CommandLineConfig {
     pub input_padding: u16,
     pub attachment_gap: u16,
     pub completion_detail_gap: u16,
+    /// Glyphs by language-server completion kind, drawn before a completion's label.
+    pub completion_kind_icons: std::collections::BTreeMap<String, String>,
     pub title_min_width: u16,
     pub text: PromptTextConfig,
 }
@@ -105,6 +107,7 @@ impl Default for CommandLineConfig {
             input_padding: 2,
             attachment_gap: 0,
             completion_detail_gap: 2,
+            completion_kind_icons: std::collections::BTreeMap::new(),
             title_min_width: 10,
             text: PromptTextConfig::default(),
         }

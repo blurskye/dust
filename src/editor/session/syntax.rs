@@ -278,16 +278,25 @@ impl SyntaxSession {
     }
 }
 
-pub(super) fn semantic_role(name: &str) -> crate::language::syntax::SyntaxRole {
+/// A token type this doesn't know, such as rust-analyzer's punctuation kinds, keeps the
+/// tree-sitter colour under it.
+pub(super) fn semantic_role(name: &str) -> Option<crate::language::syntax::SyntaxRole> {
     use crate::language::syntax::SyntaxRole;
-    match name {
+    Some(match name {
         "comment" => SyntaxRole::Comment,
-        "string" => SyntaxRole::String,
-        "number" => SyntaxRole::Number,
-        "keyword" | "modifier" | "operator" => SyntaxRole::Keyword,
-        "type" | "class" | "enum" | "interface" | "struct" => SyntaxRole::Type,
-        _ => SyntaxRole::Variable,
-    }
+        "string" | "character" => SyntaxRole::String,
+        "number" | "boolean" => SyntaxRole::Number,
+        "keyword" | "modifier" | "operator" | "selfKeyword" => SyntaxRole::Keyword,
+        "type" | "class" | "enum" | "interface" | "struct" | "union" | "typeAlias"
+        | "typeParameter" | "builtinType" | "selfTypeKeyword" | "namespace" | "derive" => {
+            SyntaxRole::Type
+        }
+        "function" | "method" | "macro" | "procMacro" => SyntaxRole::Function,
+        "property" => SyntaxRole::Property,
+        "attribute" | "decorator" | "builtinAttribute" | "deriveHelper" => SyntaxRole::Attribute,
+        "variable" | "parameter" => SyntaxRole::Variable,
+        _ => return None,
+    })
 }
 
 #[cfg(test)]

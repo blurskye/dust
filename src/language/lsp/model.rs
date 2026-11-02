@@ -372,6 +372,12 @@ pub struct LspCompletionItem {
 }
 
 impl LspCompletionItem {
+    /// What the menu row has no room for: a signature that says more than the label.
+    #[must_use]
+    pub fn signature(&self) -> Option<&str> {
+        (!self.detail.is_empty() && !self.label.starts_with(&self.detail))
+            .then_some(self.detail.as_str())
+    }
     /// The colour of a Color-kind item. Servers put it in the documentation or
     /// detail as `#rrggbb` or `rgb(...)`, which is what VS Code reads too.
     #[must_use]

@@ -1751,6 +1751,16 @@ context = "command_prompt"
 keys = "backspace"
 command = "command_line.backspace"
 [[keymap]]
+id = "builtin.command-prompt.surface.command-line-delete-word.ctrl-w"
+context = "command_prompt"
+keys = "ctrl-w"
+command = "command_line.delete_word"
+[[keymap]]
+id = "builtin.command-prompt.surface.command-line-delete-to-start.ctrl-u"
+context = "command_prompt"
+keys = "ctrl-u"
+command = "command_line.delete_to_start"
+[[keymap]]
 id = "builtin.command-prompt.surface.command-line-move-left.left"
 context = "command_prompt"
 keys = "left"
@@ -1806,6 +1816,16 @@ id = "builtin.search-prompt.surface.command-line-backspace.backspace"
 context = "search_prompt"
 keys = "backspace"
 command = "command_line.backspace"
+[[keymap]]
+id = "builtin.search-prompt.surface.command-line-delete-word.ctrl-w"
+context = "search_prompt"
+keys = "ctrl-w"
+command = "command_line.delete_word"
+[[keymap]]
+id = "builtin.search-prompt.surface.command-line-delete-to-start.ctrl-u"
+context = "search_prompt"
+keys = "ctrl-u"
+command = "command_line.delete_to_start"
 [[keymap]]
 id = "builtin.search-prompt.surface.command-line-move-left.left"
 context = "search_prompt"

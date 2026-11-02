@@ -92,11 +92,13 @@ pub(super) fn render_documentation_popup(
     };
     let (left, top) = completion_menu
         .filter(|_| popup.kind == DocumentationPopupKind::Completion)
-        .filter(|menu| boxes_overlap((left, top), (box_width, box_height), *menu))
         .and_then(|menu| {
             let beside_right = menu.x.saturating_add(menu.width);
             let below_menu = menu.y.saturating_add(menu.height);
             [
+                (beside_right, menu.y),
+                (menu.x.saturating_sub(box_width), menu.y),
+                (left, top),
                 (beside_right, top),
                 (menu.x.saturating_sub(box_width), top),
                 (left, below_menu.max(cursor_y.saturating_add(1))),
@@ -263,28 +265,47 @@ pub(super) fn render_language_completion(
         scroll = selected.saturating_add(1).saturating_sub(rows);
     }
     let visible = completion.items.iter().skip(scroll).take(rows);
+    let ambiguous = config.editor.ambiguous_width;
+    let gap = usize::from(config.ui.command_line.completion_detail_gap);
+    let icon_width = if completion.items.iter().any(|item| item.icon.is_some()) {
+        2u16
+    } else {
+        0
+    };
+    let swatch = |item: &crate::ui::CompletionItem| {
+        if item.color.is_some() { SWATCH_WIDTH } else { 0 }
+    };
+    // Measured over every item, so the menu keeps its width while it scrolls.
+    let label_width = completion
+        .items
+        .iter()
+        .map(|item| text_width(&item.label, ambiguous).saturating_add(swatch(item)))
+        .max()
+        .unwrap_or(1);
+    let source_width = completion
+        .items
+        .iter()
+        .map(|item| text_width(&item.detail, ambiguous))
+        .max()
+        .unwrap_or(0);
     let maximum_content_width = if bounds.width >= 12 {
-        bounds.width / 2
+        bounds.width.saturating_mul(2) / 3
     } else {
         bounds.width
     }
     .saturating_sub(2);
-    let content_width = visible
-        .clone()
-        .map(|item| {
-            text_width(&item.label, config.editor.ambiguous_width)
-                .saturating_add(config.ui.command_line.completion_detail_gap.into())
-                .saturating_add(if item.color.is_some() { SWATCH_WIDTH } else { 0 })
-                .saturating_add(text_width(&item.detail, config.editor.ambiguous_width))
-        })
-        .max()
-        .unwrap_or(1)
+    let content_width = usize::from(icon_width)
+        .saturating_add(label_width)
+        .saturating_add(if source_width > 0 { gap + source_width } else { 0 })
         .min(usize::from(maximum_content_width));
     let panel_width = u16::try_from(content_width)
         .unwrap_or(bounds.width)
         .saturating_add(2)
         .min(bounds.width);
     let left = cursor_x
+        .saturating_sub(completion.typed)
+        .saturating_sub(icon_width)
+        .saturating_sub(1)
         .max(bounds.x)
         .min(right.saturating_sub(panel_width));
     let row_count = u16::try_from(rows).unwrap_or(bounds.height);
@@ -294,43 +315,55 @@ pub(super) fn render_language_completion(
     } else {
         cursor_y.saturating_sub(row_count).max(bounds.y)
     };
+    let content_right = left.saturating_add(panel_width).saturating_sub(1);
     for (row, item) in visible.enumerate() {
         let y = top.saturating_add(u16::try_from(row).unwrap_or(0));
-        let style = if scroll.saturating_add(row) == selected {
-            Style::Selection
-        } else {
-            Style::Status
-        };
+        let selected = scroll.saturating_add(row) == selected;
+        let styled = |style| if selected { Style::Selection } else { style };
+        let fill = styled(Style::DocumentationBackground);
         for x in left..left.saturating_add(panel_width) {
-            frame.grid.set_cell(x, y, " ", style);
+            frame.grid.set_cell(x, y, " ", fill);
         }
+        if let Some(icon) = &item.icon {
+            frame.grid.put_text_clipped(
+                left.saturating_add(1),
+                y,
+                icon,
+                styled(Style::DocumentationTitle),
+                content_right,
+            );
+        }
+        let label_x = left.saturating_add(1).saturating_add(icon_width);
+        let label_end = label_x
+            .saturating_add(u16::try_from(text_width(&item.label, ambiguous)).unwrap_or(u16::MAX));
         frame.grid.put_text_clipped(
-            left.saturating_add(1),
+            label_x,
             y,
             &item.label,
-            style,
-            left.saturating_add(panel_width).saturating_sub(1),
+            styled(Style::DocumentationText),
+            content_right,
         );
-        let mut detail_x = left
-            .saturating_add(1)
-            .saturating_add(
-                u16::try_from(text_width(&item.label, config.editor.ambiguous_width)).unwrap_or(0),
-            )
-            .saturating_add(config.ui.command_line.completion_detail_gap);
+        let mut used = label_end;
         if let Some(rgb) = item.color {
+            let swatch_x = label_end.saturating_add(1);
             let swatch = color_swatch_style(rgb);
-            for x in detail_x..detail_x.saturating_add(2).min(right.saturating_sub(1)) {
+            for x in swatch_x..swatch_x.saturating_add(2).min(content_right) {
                 frame.grid.set_cell(x, y, " ", swatch);
             }
-            detail_x = detail_x.saturating_add(SWATCH_WIDTH as u16);
+            used = swatch_x.saturating_add(2);
         }
-        frame.grid.put_text_clipped(
-            detail_x,
-            y,
-            &item.detail,
-            Style::Muted,
-            left.saturating_add(panel_width).saturating_sub(1),
-        );
+        // Right-aligned, and left out of a row whose label needs the room.
+        let source_x = content_right
+            .saturating_sub(u16::try_from(text_width(&item.detail, ambiguous)).unwrap_or(u16::MAX));
+        if !item.detail.is_empty() && source_x > used {
+            frame.grid.put_text_clipped(
+                source_x,
+                y,
+                &item.detail,
+                styled(Style::DocumentationBorder),
+                content_right,
+            );
+        }
     }
     Some(WindowRect {
         x: left,
@@ -338,6 +371,29 @@ pub(super) fn render_language_completion(
         width: panel_width,
         height: row_count,
     })
+}
+
+/// A small box on the row below the cursor, or above it on the bottom row.
+pub(super) fn render_lsp_loading(frame: &mut Frame, text: &str, config: &Config) {
+    let Some((cursor_x, cursor_y, _)) = frame.cursor else {
+        return;
+    };
+    let width = u16::try_from(text_width(text, config.editor.ambiguous_width))
+        .unwrap_or(u16::MAX)
+        .saturating_add(2);
+    let left = cursor_x.min(frame.grid.width().saturating_sub(width));
+    let below = cursor_y.saturating_add(1);
+    let y = if below < frame.grid.height().saturating_sub(2) {
+        below
+    } else {
+        cursor_y.saturating_sub(1)
+    };
+    for x in left..left.saturating_add(width) {
+        frame.grid.set_cell(x, y, " ", Style::DocumentationBackground);
+    }
+    frame
+        .grid
+        .put_text(left.saturating_add(1), y, text, Style::DocumentationText);
 }
 
 pub(super) fn render_dashboard(

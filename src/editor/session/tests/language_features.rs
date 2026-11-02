@@ -248,7 +248,9 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
             resolved: true,
         }]);
     app.ui.language_completion = Some(crate::ui::LanguageCompletionState {
+        typed: 0,
         items: vec![crate::ui::CompletionItem {
+            icon: None,
             color: None,
             label: "value".into(),
             detail: "usize".into(),
@@ -371,6 +373,69 @@ fn a_format_result_applies_without_a_review_and_finishes_the_waiting_save() {
     assert_eq!(app.state.buffers[buffer].text.to_string(), "a b\n");
     super::wait_vfs(&mut app);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "a b\n");
+}
+
+#[test]
+fn an_empty_answer_while_the_server_loads_says_it_is_loading() {
+    use crate::language::lsp::{LspFeatureResult, LspProgressKind};
+    let (mut app, _, _, uri) = app_waiting_to_save_formatted("loading.rs");
+    app.format_on_save = None;
+    app.update_lsp_progress(
+        "server".into(),
+        "token".into(),
+        LspProgressKind::Begin,
+        "Indexing".into(),
+        "4/330".into(),
+        Some(1),
+    );
+    app.present_lsp_result("server", 1, "textDocument/hover", &uri, LspFeatureResult::Empty);
+    assert!(!app.ui.notification_error);
+    assert!(app.ui.lsp_loading.as_deref().is_some_and(|text| text.contains("Loading")));
+    assert!(app.lsp_waiting.is_none(), "nothing was asked for");
+    app.update_lsp_progress(
+        "server".into(),
+        "token".into(),
+        LspProgressKind::End,
+        String::new(),
+        String::new(),
+        None,
+    );
+
+    app.present_lsp_result("other", 1, "textDocument/hover", &uri, LspFeatureResult::Empty);
+    assert!(app.ui.notification_error);
+}
+
+#[test]
+fn code_actions_wait_for_every_server_and_list_them_together() {
+    use crate::language::lsp::{LspCodeAction, LspFeatureResult, LspWorkspaceEdit};
+    let (mut app, _, _, uri) = app_waiting_to_save_formatted("actions.py");
+    app.format_on_save = None;
+    let action = |title: &str| LspCodeAction {
+        title: title.into(),
+        kind: Some("quickfix".into()),
+        preferred: false,
+        edit: Some(LspWorkspaceEdit { resources: Vec::new(), documents: Vec::new() }),
+        command: None,
+    };
+    app.language.offer_actions("types", vec![action("from types")], None);
+    app.present_lsp_result(
+        "linter",
+        1,
+        "textDocument/codeAction",
+        &uri,
+        LspFeatureResult::CodeActions(vec![action("from linter")]),
+    );
+    let labels = app
+        .ui
+        .picker
+        .as_ref()
+        .unwrap()
+        .rows
+        .iter()
+        .map(|row| row.label.clone())
+        .collect::<Vec<_>>();
+    assert!(labels.contains(&"from types".to_owned()), "{labels:?}");
+    assert!(labels.contains(&"from linter".to_owned()), "{labels:?}");
 }
 
 #[test]

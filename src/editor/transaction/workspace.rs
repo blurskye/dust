@@ -181,6 +181,7 @@ impl EditorState {
             let replacement = TextBuffer::from_bytes(&file.proposed_bytes)
                 .map_err(|e| e.to_string())?
                 .to_string();
+            let spans = changed_spans(&draft.state.buffers[buffer].text.to_string(), &replacement);
             edits
                 .preconditions
                 .push(Precondition::BufferRevision { buffer, revision });
@@ -191,14 +192,17 @@ impl EditorState {
                 buffer,
                 edits: TextEditSet::new(
                     revision,
-                    vec![crate::editor::text::TextEdit::new(
-                        crate::editor::text::ByteRange::new(
-                            ByteOffset(0),
-                            ByteOffset(draft.state.buffers[buffer].text.len_bytes()),
-                        )
-                        .map_err(|e| e.to_string())?,
-                        replacement,
-                    )],
+                    spans
+                        .into_iter()
+                        .map(|(range, text)| {
+                            crate::editor::text::ByteRange::new(
+                                ByteOffset(range.start),
+                                ByteOffset(range.end),
+                            )
+                            .map(|range| crate::editor::text::TextEdit::new(range, text))
+                            .map_err(|e| e.to_string())
+                        })
+                        .collect::<Result<_, _>>()?,
                 ),
             });
         }
@@ -208,6 +212,78 @@ impl EditorState {
         }
         Ok(draft)
     }
+}
+
+/// Only what differs between the texts, so cursors and marks elsewhere stay where they are.
+/// Replaces the whole text when a line diff can't describe the change, as with binary content.
+fn changed_spans(before: &str, after: &str) -> Vec<(std::ops::Range<usize>, String)> {
+    let spans = line_diff_spans(before, after).filter(|spans| {
+        let mut rebuilt = String::with_capacity(after.len());
+        let mut position = 0;
+        for (range, text) in spans {
+            rebuilt.push_str(&before[position..range.start]);
+            rebuilt.push_str(text);
+            position = range.end;
+        }
+        rebuilt.push_str(&before[position..]);
+        !spans.is_empty() && rebuilt == after
+    });
+    spans.unwrap_or_else(|| vec![(0..before.len(), after.to_owned())])
+}
+
+fn line_diff_spans(before: &str, after: &str) -> Option<Vec<(std::ops::Range<usize>, String)>> {
+    let mut options = git2::DiffOptions::new();
+    options.context_lines(0);
+    let patch = git2::Patch::from_buffers(
+        before.as_bytes(),
+        None,
+        after.as_bytes(),
+        None,
+        Some(&mut options),
+    )
+    .ok()?;
+    let mut line_starts = vec![0];
+    line_starts.extend(before.match_indices('\n').map(|(index, _)| index + 1));
+    let line_start = |line: usize| line_starts.get(line).copied().unwrap_or(before.len());
+    let mut spans = Vec::new();
+    for index in 0..patch.num_hunks() {
+        let (hunk, lines) = patch.hunk(index).ok()?;
+        let removed = usize::try_from(hunk.old_lines()).ok()?;
+        // With nothing removed, the hunk's old line is the one it inserts after.
+        let first = usize::try_from(hunk.old_start())
+            .ok()?
+            .saturating_sub(usize::from(removed > 0));
+        let mut added = Vec::new();
+        for line in 0..lines {
+            let line = patch.line_in_hunk(index, line).ok()?;
+            if line.origin() == '+' {
+                added.extend_from_slice(line.content());
+            }
+        }
+        let added = String::from_utf8(added).ok()?;
+        let (start, end) = (line_start(first), line_start(first.saturating_add(removed)));
+        let old = before.get(start..end)?;
+        let mut prefix = old.bytes().zip(added.bytes()).take_while(|(a, b)| a == b).count();
+        while !old.is_char_boundary(prefix) || !added.is_char_boundary(prefix) {
+            prefix -= 1;
+        }
+        let mut suffix = old[prefix..]
+            .bytes()
+            .rev()
+            .zip(added[prefix..].bytes().rev())
+            .take_while(|(a, b)| a == b)
+            .count();
+        while !old.is_char_boundary(old.len() - suffix)
+            || !added.is_char_boundary(added.len() - suffix)
+        {
+            suffix -= 1;
+        }
+        spans.push((
+            start + prefix..end - suffix,
+            added[prefix..added.len() - suffix].to_owned(),
+        ));
+    }
+    Some(spans)
 }
 
 /// Borrowed accepted editor projection; EditorDraft does not expose this view.
@@ -326,5 +402,37 @@ impl WorkspaceSnapshot {
             );
         }
         Ok(self.file)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::changed_spans;
+
+    #[test]
+    fn only_what_differs_is_replaced() {
+        let before = "let old = 1;\nkeep\nuse(old);\n";
+        let after = "let name = 1;\nkeep\nuse(name);\n";
+        assert_eq!(
+            changed_spans(before, after),
+            vec![(4..7, "name".to_owned()), (22..25, "name".to_owned())]
+        );
+        assert_eq!(
+            changed_spans("a\nb\n", "new\na\nb\n"),
+            vec![(0..0, "new\n".to_owned())]
+        );
+        assert_eq!(
+            changed_spans("a\nb", "a\nb\nc\n"),
+            vec![(3..3, "\nc\n".to_owned())]
+        );
+        assert_eq!(changed_spans("é\n", "è\n"), vec![(0..2, "è".to_owned())]);
+    }
+
+    #[test]
+    fn text_a_line_diff_cannot_describe_is_replaced_whole() {
+        assert_eq!(
+            changed_spans("a\0b\n", "a\0c\n"),
+            vec![(0..4, "a\0c\n".to_owned())]
+        );
     }
 }

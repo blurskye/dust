@@ -513,3 +513,30 @@ background_256 = "indexed:235"
 foreground_16 = "white"
 background_16 = "black"
 attributes = []
+
+[styles.syntax_function]
+foreground = "#b8bb26"
+background = "#282828"
+foreground_256 = "indexed:142"
+background_256 = "indexed:235"
+foreground_16 = "blue"
+background_16 = "black"
+attributes = []
+
+[styles.syntax_property]
+foreground = "#83a598"
+background = "#282828"
+foreground_256 = "indexed:108"
+background_256 = "indexed:235"
+foreground_16 = "cyan"
+background_16 = "black"
+attributes = []
+
+[styles.syntax_attribute]
+foreground = "#8ec07c"
+background = "#282828"
+foreground_256 = "indexed:108"
+background_256 = "indexed:235"
+foreground_16 = "magenta"
+background_16 = "black"
+attributes = []

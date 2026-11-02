@@ -832,6 +832,9 @@ impl InteractiveApplication {
         if context != "documentation" && !scrolls_completion_documentation {
             self.close_documentation();
         }
+        self.ui.lsp_loading = None;
+        self.lsp_asked = None;
+        self.lsp_waiting = None;
         self.diagnostics.dismiss_expansion();
         self.ui.expanded_diagnostic = None;
         let context = context.to_owned();
@@ -2425,8 +2428,14 @@ impl InteractiveApplication {
     }
     fn project_lsp_progress(&mut self) {
         let (rows, frame) = self.language.progress();
+        let was_loading = self.ui.lsp_progress.iter().any(|row| !row.done);
         if self.ui.lsp_progress != rows {
             self.ui.lsp_progress = rows.to_vec();
+        }
+        if was_loading && self.ui.lsp_progress.iter().all(|row| row.done) {
+            if let Some(feature) = self.lsp_waiting.take() {
+                self.request_lsp(feature);
+            }
         }
         self.ui.set(frame, |ui| &mut ui.lsp_progress_frame);
     }
@@ -2436,6 +2445,25 @@ impl InteractiveApplication {
             Instant::now(),
         );
         self.project_lsp_progress();
+    }
+    /// Whether the server is still working through its project.
+    fn lsp_server_loading(&self, server: &str) -> bool {
+        self.ui
+            .lsp_progress
+            .iter()
+            .any(|row| row.server_key == server && !row.done)
+    }
+    fn show_lsp_loading(&mut self) {
+        self.ui.lsp_loading = Some(self.message("lsp_loading", &[]));
+    }
+    /// An empty answer from a server still loading its project says nothing about the code.
+    pub(in crate::editor::session) fn show_lsp_no_result(&mut self, server: &str) {
+        if self.lsp_server_loading(server) {
+            self.show_lsp_loading();
+            self.lsp_waiting = self.lsp_asked.clone();
+        } else {
+            self.show_error(self.message("lsp_no_result", &[]));
+        }
     }
     pub(in crate::editor::session) fn handle_lsp_request_failure(
         &mut self,
@@ -2448,6 +2476,7 @@ impl InteractiveApplication {
         if self.language.is_breadcrumb_request(generation) {
             return;
         }
+        self.ui.lsp_loading = None;
         // A formatter that fails must not cost the save.
         if method == "textDocument/formatting" && self.format_on_save.is_some() {
             self.append_lsp_log(format!("format on save failed: {message}"));
@@ -2470,6 +2499,28 @@ impl InteractiveApplication {
         let secondary = method == "textDocument/completion"
             && (self.language.completion_automatic()
                 || self.language.active().is_some_and(|active| *active != server));
+        // A server that fails code actions must not hide what the others offered.
+        if method == "textDocument/codeAction" {
+            self.language.forget_request(&server, generation);
+            let main = self.language.active().is_some_and(|active| *active == server);
+            let label = self.lsp_server_label(&server);
+            if main {
+                self.show_error(self.message(
+                    "lsp_request_failed",
+                    &[
+                        ("server", label),
+                        ("method", method),
+                        ("diagnostic", message),
+                    ],
+                ));
+            } else {
+                self.append_lsp_log(format!("{label}: {method} failed: {message}"));
+            }
+            if !self.language.request_pending() && (!main || self.language.has_offered_actions()) {
+                self.open_lsp_code_actions_picker(&server);
+            }
+            return;
+        }
         if method == "textDocument/documentColor" || secondary {
             self.language.forget_request(&server, generation);
             let server = self.lsp_server_label(&server);
@@ -2508,8 +2559,12 @@ impl InteractiveApplication {
                     server,
                     capabilities,
                 } => {
+                    self.ui.lsp_loading = None;
                     if self.language.running(&server, capabilities) {
                         self.schedule_lsp_inlay_startup_refresh();
+                    }
+                    if let Some(feature) = self.lsp_waiting.take() {
+                        self.request_lsp(feature);
                     }
                     self.request_lsp_colors();
                     // Successful lifecycle transitions are reflected by the
@@ -2892,8 +2947,26 @@ impl InteractiveApplication {
         } else {
             self.language.supporting_server(buffer, &document, &feature)
         };
+        // Someone is waiting on these, unlike a save's format or what the editor asks by itself.
+        let asked = !self.format_on_save.is_some()
+            && !matches!(
+                feature,
+                LspFeature::SemanticTokensFull | LspFeature::SemanticTokensDelta { .. }
+            )
+            && !(matches!(feature, LspFeature::Completion)
+                && self.language.completion_automatic());
         let Some(server) = server else {
             self.start_lsp(None);
+            if asked
+                && self
+                    .language
+                    .sessions()
+                    .values()
+                    .any(|session| session.capabilities.is_none())
+            {
+                self.show_lsp_loading();
+                self.lsp_waiting = Some(feature);
+            }
             return;
         };
         // Switching the server or the buffer's owner clears completion state, including where
@@ -2918,9 +2991,21 @@ impl InteractiveApplication {
             .get(&server)
             .is_none_or(|session| session.capabilities.is_none())
         {
+            if asked {
+                self.show_lsp_loading();
+                self.lsp_waiting = Some(feature);
+            }
             return;
         }
+        if asked && (matches!(feature, LspFeature::Completion) || self.lsp_server_loading(&server))
+        {
+            self.show_lsp_loading();
+        }
+        if asked {
+            self.lsp_asked = Some(feature.clone());
+        }
         if matches!(feature, LspFeature::CodeAction { .. }) {
+            self.language.clear_offered_actions();
             let encoding = self
                 .language
                 .capabilities()
@@ -3110,6 +3195,7 @@ impl InteractiveApplication {
         result: LspFeatureResult,
         context: Option<crate::language::lsp::EditContext>,
     ) {
+        self.ui.lsp_loading = None;
         let server_label = self.lsp_server_label(server);
         match result {
             // Another server on this file already answered.
@@ -3152,7 +3238,7 @@ impl InteractiveApplication {
                     && !self.language.request_pending()
                     && !self.language.completion_automatic()
                 {
-                    self.show_error(self.message("lsp_no_result", &[]));
+                    self.show_lsp_no_result(server);
                 }
             }
             LspFeatureResult::CompletionResolved(item) => {
@@ -3162,7 +3248,7 @@ impl InteractiveApplication {
             }
             LspFeatureResult::Locations(locations) => {
                 if locations.is_empty() {
-                    self.show_error(self.message("lsp_no_result", &[]));
+                    self.show_lsp_no_result(server);
                 } else if method == "textDocument/references" || locations.len() > 1 {
                     self.open_lsp_locations_picker(locations);
                 } else if let Some(location) = locations.first() {
@@ -3224,7 +3310,10 @@ impl InteractiveApplication {
                 );
             }
             LspFeatureResult::CodeActions(actions) => {
-                self.open_lsp_code_actions_picker(server, actions, context);
+                self.language.offer_actions(server, actions, context);
+                if !self.language.request_pending() {
+                    self.open_lsp_code_actions_picker(server);
+                }
             }
             LspFeatureResult::PullDiagnostics(result) => {
                 if let Some(id) = result.result_id.clone() {
@@ -3284,7 +3373,9 @@ impl InteractiveApplication {
                             } else {
                                 token[1] as usize
                             };
-                            let Some(name) = legend.get(token[3] as usize) else {
+                            let Some(role) =
+                                legend.get(token[3] as usize).and_then(|name| semantic_role(name))
+                            else {
                                 continue;
                             };
                             let Ok(start) = codec.lsp_to_byte(line, character, encoding) else {
@@ -3304,7 +3395,7 @@ impl InteractiveApplication {
                                 buffer: buffer_id,
                                 revision: buffer.text.revision(),
                                 range,
-                                role: semantic_role(name),
+                                role,
                             });
                         }
                         self.ui.lsp_semantic_spans = spans;
@@ -3383,7 +3474,7 @@ impl InteractiveApplication {
                     })
                     .collect::<Vec<_>>();
                 if rows.is_empty() {
-                    self.show_error(self.message("lsp_no_result", &[]));
+                    self.show_lsp_no_result(server);
                 } else {
                     self.install_picker(self.message("picker_code_lens_title", &[]), rows);
                 }
@@ -3471,7 +3562,7 @@ impl InteractiveApplication {
                 if method == "textDocument/completion"
                     && (self.language.request_pending()
                         || self.language.completion_automatic()) => {}
-            LspFeatureResult::Empty => self.show_error(self.message("lsp_no_result", &[])),
+            LspFeatureResult::Empty => self.show_lsp_no_result(server),
         }
     }
 

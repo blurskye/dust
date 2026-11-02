@@ -76,6 +76,9 @@ pub enum Style {
     SyntaxKeyword,
     SyntaxType,
     SyntaxVariable,
+    SyntaxFunction,
+    SyntaxProperty,
+    SyntaxAttribute,
     /// Markup styles reuse a theme color and add an attribute, so themes need no entries.
     MarkupHeading,
     MarkupStrong,

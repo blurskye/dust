@@ -8,7 +8,8 @@ use explorer::{place_workspace_frame, render_explorer_window};
 mod overlays;
 use super::geometry::text_width;
 use overlays::{
-    render_dashboard, render_documentation_popup, render_language_completion, render_lsp_progress,
+    render_dashboard, render_documentation_popup, render_language_completion, render_lsp_loading,
+    render_lsp_progress,
 };
 mod workspace;
 use workspace::{
@@ -127,6 +128,8 @@ impl PromptKind {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompletionItem {
+    /// The kind's glyph, drawn before the label.
+    pub icon: Option<String>,
     pub label: String,
     pub detail: String,
     /// A swatch drawn after the label, for colour completions such as Tailwind classes.
@@ -374,6 +377,8 @@ impl DocumentationPopupState {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LanguageCompletionState {
+    /// Columns already typed of the word being completed, so labels line up with it.
+    pub typed: u16,
     pub items: Vec<CompletionItem>,
     pub selected: usize,
     pub scroll: usize,
@@ -1373,6 +1378,8 @@ pub struct UiState {
     pub dashboard_actions: Vec<DashboardAction>,
     pub tool_menu: Option<ToolMenuState>,
     pub language_completion: Option<LanguageCompletionState>,
+    /// Shown at the cursor while a language server is too busy loading to answer.
+    pub lsp_loading: Option<String>,
     pub documentation_popup: Option<DocumentationPopupState>,
     pub diagnostics: Vec<UiDiagnostic>,
     pub expanded_diagnostic: Option<ExpandedDiagnosticState>,
@@ -2187,6 +2194,9 @@ pub fn render(
             },
         )
     });
+    if let (Some(text), None) = (&ui.lsp_loading, completion_menu) {
+        render_lsp_loading(&mut frame, text, config);
+    }
     if let Some(documentation) = &ui.documentation_popup {
         render_documentation_popup(
             &mut frame,

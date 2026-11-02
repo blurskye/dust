@@ -5131,7 +5131,10 @@ impl InteractiveApplication {
         self.preview_search();
     }
     pub(super) fn prompt_backspace(&mut self) {
-        self.input.prompt_backspace();
+        self.prompt_delete(|input| input.prompt_backspace());
+    }
+    pub(super) fn prompt_delete(&mut self, delete: impl FnOnce(&mut super::super::input::InputSession)) {
+        delete(&mut self.input);
         self.refresh_completions();
         self.preview_search();
     }
@@ -6561,11 +6564,8 @@ impl InteractiveApplication {
 }
 
 impl InteractiveApplication {
-    pub(in crate::editor::session) fn lsp_completion_detail(
-        item: &crate::language::lsp::LspCompletionItem,
-        server: &str,
-    ) -> String {
-        let kind = match item.kind {
+    fn lsp_completion_kind(item: &crate::language::lsp::LspCompletionItem) -> &'static str {
+        match item.kind {
             Some(1) => "Text",
             Some(2) => "Method",
             Some(3) => "Function",
@@ -6585,19 +6585,14 @@ impl InteractiveApplication {
             Some(17) => "File",
             Some(18) => "Reference",
             Some(19) => "Folder",
-            Some(20) => "Enum member",
+            Some(20) => "EnumMember",
             Some(21) => "Constant",
             Some(22) => "Struct",
             Some(23) => "Event",
             Some(24) => "Operator",
-            Some(25) => "Type parameter",
+            Some(25) => "TypeParameter",
             _ => "Item",
-        };
-        [kind, item.detail.as_str(), server]
-            .into_iter()
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>()
-            .join(" · ")
+        }
     }
 
     pub(in crate::editor::session) fn refresh_lsp_completion_documentation(&mut self) {
@@ -6613,7 +6608,7 @@ impl InteractiveApplication {
             .language
             .completion_items()
             .get(selected)
-            .is_some_and(|item| item.documentation.is_some())
+            .is_some_and(|item| item.documentation.is_some() || item.signature().is_some())
         {
             self.open_lsp_completion_documentation(false);
         } else if self
@@ -8109,12 +8104,8 @@ impl InteractiveApplication {
     pub(in crate::editor::session) fn open_lsp_code_actions_picker(
         &mut self,
         server: &str,
-        actions: Vec<crate::language::lsp::LspCodeAction>,
-        context: Option<crate::language::lsp::EditContext>,
     ) {
-        let choices = match self.language.install_actions(
-            actions,
-            context,
+        let choices = match self.language.install_offered_actions(
             self.configuration.settings().workspace.maximum_picker_items,
         ) {
             Ok(choices) => choices,
@@ -8123,7 +8114,10 @@ impl InteractiveApplication {
                 return;
             }
         };
-        let server = self.lsp_server_label(server);
+        if choices.is_empty() {
+            self.show_lsp_no_result(server);
+            return;
+        }
         let items = choices
             .into_iter()
             .enumerate()
@@ -8135,7 +8129,7 @@ impl InteractiveApplication {
                         id: PickerItemId(format!("code-action:{index}:{}", choice.title)),
                         label: choice.title,
                         detail: choice.detail,
-                        source: server.clone(),
+                        source: self.lsp_server_label(&choice.server),
                         action: PickerAction::None,
                     },
                     PickerPayload::CodeAction(choice.key),
@@ -8927,22 +8921,24 @@ impl InteractiveApplication {
                 }
             }
             Some(PickerPayload::CodeAction(_)) => {
-                let (action, context) = match code_action.expect("selected code action") {
-                    Ok(action) => action,
+                let offered = match code_action.expect("selected code action") {
+                    Ok(offered) => offered,
                     Err(error) => {
                         self.show_error(error);
                         return;
                     }
                 };
+                let action = offered.action;
                 if let Some(edit) = action.edit {
                     self.begin_workspace_proposal_owned(
                         action.title,
                         edit,
                         None,
-                        self.lsp_position_encoding(),
-                        context,
+                        self.language.server_encoding(&offered.server),
+                        offered.context,
                     );
                 } else if let Some(command) = action.command {
+                    self.select_lsp_session(&offered.server);
                     self.request_lsp(LspFeature::ExecuteCommand(command));
                 }
             }
@@ -12149,27 +12145,65 @@ impl InteractiveApplication {
 
     /// Mirrors the current items into the menu the renderer draws.
     pub(in crate::editor::session) fn project_lsp_completion(&mut self) {
+        let icons = &self.configuration.settings().ui.command_line.completion_kind_icons;
         let items = self
             .language
             .completion_items()
             .iter()
             .enumerate()
-            .map(|(index, item)| CompletionItem {
-                label: item.label.clone(),
-                detail: Self::lsp_completion_detail(
-                    item,
-                    &self.lsp_server_label(self.language.completion_server(index).unwrap_or_default()),
-                ),
-                color: item.color(),
+            .map(|(index, item)| {
+                let kind = Self::lsp_completion_kind(item);
+                CompletionItem {
+                    icon: icons.get(kind).cloned(),
+                    label: item.label.clone(),
+                    detail: if kind == "Snippet" {
+                        kind.to_owned()
+                    } else {
+                        self.lsp_server_label(self.language.completion_server(index).unwrap_or_default())
+                    },
+                    color: item.color(),
+                }
             })
             .collect::<Vec<_>>();
+        let typed = self.lsp_completion_typed_columns();
         let (selected, scroll) = self.language.completion_position();
         self.ui.language_completion = (!items.is_empty()).then_some(LanguageCompletionState {
+            typed,
             items,
             selected,
             scroll,
         });
+        if self.ui.language_completion.is_some() {
+            self.ui.lsp_loading = None;
+        }
         self.refresh_lsp_completion_documentation();
+    }
+
+    /// How much of the word being completed is already on the line.
+    fn lsp_completion_typed_columns(&self) -> u16 {
+        let Some(view) = self.state.active_view.and_then(|view| self.state.views.get(view)) else {
+            return 0;
+        };
+        let Some(start) = self.language.completion_start() else {
+            return 0;
+        };
+        let text = &self.state.buffers[view.buffer].text;
+        if start > view.cursor
+            || text.byte_to_line(start).ok() != text.byte_to_line(view.cursor).ok()
+        {
+            return 0;
+        }
+        let Ok(line) = text.byte_to_line(start) else {
+            return 0;
+        };
+        let (Ok(line_start), Ok(content)) = (text.line_to_byte(line), text.line(line)) else {
+            return 0;
+        };
+        let from = start.get().saturating_sub(line_start.get());
+        let to = view.cursor.get().saturating_sub(line_start.get());
+        content
+            .get(from..to)
+            .map_or(0, |typed| u16::try_from(typed.chars().count()).unwrap_or(0))
     }
 
     /// `<leader>cr` and F2: the command line, ready with the name under the cursor.
@@ -12883,6 +12917,10 @@ impl InteractiveApplication {
             AppEffect::OpenPrompt { kind, initial } => self.open_prompt(kind, initial),
             AppEffect::PromptInsert(text) => self.prompt_insert(&text),
             AppEffect::PromptBackspace => self.prompt_backspace(),
+            AppEffect::PromptDeleteWord => self.prompt_delete(|input| input.prompt_delete_word()),
+            AppEffect::PromptDeleteToStart => {
+                self.prompt_delete(|input| input.prompt_delete_to_start());
+            }
             AppEffect::PromptMove(movement) => self.prompt_move(movement),
             AppEffect::PromptHistory(direction) => self.prompt_history(direction),
             AppEffect::PromptComplete(direction) => self.prompt_complete(direction),

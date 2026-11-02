@@ -493,6 +493,21 @@ fn queue_style(
         Style::SyntaxKeyword => &theme.styles.syntax_keyword,
         Style::SyntaxType => &theme.styles.syntax_type,
         Style::SyntaxVariable => &theme.styles.syntax_variable,
+        Style::SyntaxFunction => theme
+            .styles
+            .syntax_function
+            .as_ref()
+            .unwrap_or(&theme.styles.syntax_variable),
+        Style::SyntaxProperty => theme
+            .styles
+            .syntax_property
+            .as_ref()
+            .unwrap_or(&theme.styles.syntax_variable),
+        Style::SyntaxAttribute => theme
+            .styles
+            .syntax_attribute
+            .as_ref()
+            .unwrap_or(&theme.styles.syntax_variable),
         Style::MarkupHeading
         | Style::MarkupStrong
         | Style::MarkupEmphasis

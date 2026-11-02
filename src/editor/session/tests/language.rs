@@ -661,7 +661,9 @@ fn lsp_completion_applies_through_one_validated_transaction() {
             resolved: false,
         }]);
     app.ui.language_completion = Some(crate::ui::LanguageCompletionState {
+        typed: 0,
         items: vec![crate::ui::CompletionItem {
+            icon: None,
             color: None,
             label: "main".into(),
             detail: "function".into(),
@@ -685,8 +687,10 @@ fn lsp_completion_selection_scrolls_and_wraps_inside_the_visible_window() {
         app.configuration.install_fixture(fixture);
     }
     app.ui.language_completion = Some(crate::ui::LanguageCompletionState {
+        typed: 0,
         items: (0..5)
             .map(|index| crate::ui::CompletionItem {
+                icon: None,
                 color: None,
                 label: format!("item-{index}"),
                 detail: String::new(),
@@ -1536,6 +1540,7 @@ fn completion_keeps_its_start_when_the_request_takes_ownership_of_the_buffer() {
     app.mark_lsp_completion_start(false);
     app.request_lsp(crate::language::lsp::LspFeature::Completion);
     assert_eq!(app.language.completion_start(), Some(ByteOffset(7)));
+    assert!(app.ui.lsp_loading.is_some());
 }
 
 #[test]

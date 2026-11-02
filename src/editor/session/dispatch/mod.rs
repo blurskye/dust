@@ -163,6 +163,11 @@ struct FormatOnSave {
 
 struct InteractiveApplication {
     format_on_save: Option<FormatOnSave>,
+    /// The last request someone asked for, until their next key.
+    lsp_asked: Option<crate::language::lsp::LspFeature>,
+    /// Asked for before its server could answer, and sent again once it has started and
+    /// finished loading.
+    lsp_waiting: Option<crate::language::lsp::LspFeature>,
     /// Last seen modification time and length of each open file.
     disk_stamps: std::collections::HashMap<crate::editor::BufferId, (Option<std::time::SystemTime>, u64)>,
     pub(super) next_disk_check: Option<std::time::Instant>,
