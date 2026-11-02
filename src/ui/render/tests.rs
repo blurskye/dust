@@ -627,7 +627,7 @@ fn documentation_popup_preserves_lines_clamps_and_protects_status_row() {
             sections: vec![DocumentationSection {
                 heading: None,
                 markup: DocumentationMarkupKind::Markdown,
-                roles: Vec::new(),
+                spans: Vec::new(),
                 lines: std::iter::once("first line".into())
                     .chain(std::iter::once("wide 界界 clipped safely".into()))
                     .chain((2..20).map(|line| format!("line {line}")))
@@ -666,7 +666,7 @@ fn notice_popup_shows_on_the_dashboard_without_a_cursor() {
             sections: vec![DocumentationSection {
                 heading: None,
                 markup: DocumentationMarkupKind::PlainText,
-                roles: Vec::new(),
+                spans: Vec::new(),
                 lines: vec!["the whole message".into()],
             }],
             scroll: 0,
@@ -2823,7 +2823,7 @@ fn completion_documentation_never_covers_the_candidates_on_a_narrow_screen() {
             sections: vec![DocumentationSection {
                 heading: None,
                 markup: DocumentationMarkupKind::Markdown,
-                roles: Vec::new(),
+                spans: Vec::new(),
                 lines: vec!["#eff6ff with a line wide enough to fill the box".into()],
             }],
             scroll: 0,

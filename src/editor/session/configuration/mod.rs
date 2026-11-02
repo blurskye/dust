@@ -44,7 +44,7 @@ pub(in crate::editor::session) use validation::{
 };
 mod compile;
 pub(in crate::editor::session) use compile::{
-    KeymapCompilation, compile_keymap_entries, display_key_sequence,
+    KeymapCompilation, compile_keymap_entries, display_key_sequence, literal_key_sequence,
 };
 pub use compile::{
     compile_keymaps, compile_keymaps_with_plugin_catalog, compile_keymaps_with_plugin_index,

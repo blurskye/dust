@@ -24,7 +24,7 @@ pub use render::{
     DiffPreview,
     DiffSideCell, DiffSideRow,
     DiffSpan, DocumentationMarkupKind, DocumentationPopupKind,
-    DocumentationLineRole, DocumentationPopupState, DocumentationSection, EditorWindowBinding, EditorWindowLayoutState,
+    DocumentationPopupState, DocumentationSection, EditorWindowBinding, EditorWindowLayoutState,
     ExpandedDiagnosticState, ExplorerSegmentRole, ExplorerUiRow, ExplorerUiSegment,
     ExplorerUiState, ExplorerWindowUiState, Frame, KeyHintUiRow, KeyHintUiState,
     LanguageCompletionState, NativeSurfaceWindowBinding, PaneViewport, PickerCell, PickerPreview,

@@ -447,6 +447,12 @@ fn parsed_text(key: &str, value: &SettingsValue, text: &str) -> Result<Option<to
                 .map(|item| toml::Value::String(item.into()))
                 .collect(),
         ),
+        // Keys are checked here because a bad one only fails when the keymaps are rebuilt.
+        _ if matches!(key, "input.keymaps.leader" | "input.keymaps.local_leader") => {
+            crate::editor::session::configuration::literal_key_sequence(key, text)
+                .map_err(|_| "Enter a key such as space or , (up to 4, separated by spaces)".to_owned())?;
+            toml::Value::String(text.into())
+        }
         _ => toml::Value::String(text.into()),
     }))
 }

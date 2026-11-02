@@ -72,6 +72,8 @@ pub enum Style {
     Terminal(PtyStyle),
     /// A Neovim highlight group, coloured by the theme's `[highlights]`.
     Syntax(crate::language::syntax::Highlight),
+    /// A syntax group drawn on the documentation popup's background.
+    DocumentationSyntax(crate::language::syntax::Highlight),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

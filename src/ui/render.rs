@@ -309,14 +309,6 @@ pub enum DocumentationPopupKind {
     Notice,
 }
 
-/// How a documentation line reads: code and tables keep their layout.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DocumentationLineRole {
-    Text,
-    Heading,
-    Code,
-    Table,
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DocumentationMarkupKind {
@@ -329,8 +321,9 @@ pub struct DocumentationSection {
     pub heading: Option<String>,
     pub markup: DocumentationMarkupKind,
     pub lines: Vec<String>,
-    /// One for each of `lines`; a line without one is text.
-    pub roles: Vec<DocumentationLineRole>,
+    /// Styled runs of rendered Markdown, as byte ranges in their line, by line; a line
+    /// without any is drawn in its role's style.
+    pub spans: Vec<Vec<(std::ops::Range<usize>, crate::language::syntax::Highlight)>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -353,36 +346,41 @@ impl DocumentationPopupState {
         })
     }
 
-    fn role_at(&self, mut index: usize) -> DocumentationLineRole {
+    /// Whether the line at `index` is a section's heading.
+    fn heading_at(&self, mut index: usize) -> bool {
         for section in &self.sections {
             if section.heading.is_some() {
                 if index == 0 {
-                    return DocumentationLineRole::Heading;
+                    return true;
                 }
                 index = index.saturating_sub(1);
             }
             if index < section.lines.len() {
-                return section
-                    .roles
-                    .get(index)
-                    .copied()
-                    .unwrap_or(DocumentationLineRole::Text);
+                return false;
             }
             index = index.saturating_sub(section.lines.len());
         }
-        DocumentationLineRole::Text
+        false
     }
 
-    fn line_at(&self, mut index: usize) -> Option<&str> {
+    fn line_at(&self, index: usize) -> Option<&str> {
+        self.at(index).map(|(line, _)| line)
+    }
+
+    /// The line at `index` and its styled runs.
+    fn at(
+        &self,
+        mut index: usize,
+    ) -> Option<(&str, &[(std::ops::Range<usize>, crate::language::syntax::Highlight)])> {
         for section in &self.sections {
             if let Some(heading) = &section.heading {
                 if index == 0 {
-                    return Some(heading);
+                    return Some((heading, &[]));
                 }
                 index = index.saturating_sub(1);
             }
             if let Some(line) = section.lines.get(index) {
-                return Some(line);
+                return Some((line, section.spans.get(index).map_or(&[][..], Vec::as_slice)));
             }
             index = index.saturating_sub(section.lines.len());
         }

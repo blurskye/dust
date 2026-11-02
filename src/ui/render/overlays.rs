@@ -220,28 +220,36 @@ pub(super) fn render_documentation_popup(
     let text_left = left
         .saturating_add(1)
         .saturating_add(DOCUMENTATION_PADDING);
-    for (row, (index, line)) in (popup.scroll..popup.scroll.saturating_add(visible_rows))
-        .filter_map(|index| popup.line_at(index).map(|line| (index, line)))
+    for (row, (index, (line, spans))) in (popup.scroll..popup.scroll.saturating_add(visible_rows))
+        .filter_map(|index| popup.at(index).map(|line| (index, line)))
         .enumerate()
     {
         // A hunk preview reads as a diff.
-        let style = match (line.chars().next(), popup.role_at(index)) {
-            (Some('+'), _) if popup.provider == "Git" => Style::GitSignAdded,
-            (Some('-'), _) if popup.provider == "Git" => Style::GitSignDeleted,
-            (_, super::DocumentationLineRole::Heading) => Style::DocumentationTitle,
-            (_, super::DocumentationLineRole::Code) => Style::DocumentationBorder,
+        let style = match line.chars().next() {
+            Some('+') if popup.provider == "Git" => Style::GitSignAdded,
+            Some('-') if popup.provider == "Git" => Style::GitSignDeleted,
+            _ if popup.heading_at(index) => Style::DocumentationTitle,
             _ => Style::DocumentationText,
         };
-        frame.grid.put_text_clipped(
-            text_left,
-            top.saturating_add(1)
-                .saturating_add(u16::try_from(row).unwrap_or(u16::MAX)),
-            line,
-            style,
-            right
-                .saturating_sub(1)
-                .saturating_sub(DOCUMENTATION_PADDING),
-        );
+        let y = top
+            .saturating_add(1)
+            .saturating_add(u16::try_from(row).unwrap_or(u16::MAX));
+        let limit = right.saturating_sub(1).saturating_sub(DOCUMENTATION_PADDING);
+        // Rendered Markdown: the runs between styled ones keep the line's style.
+        let mut x = text_left;
+        let mut at = 0;
+        for (range, role) in spans {
+            let (Some(before), Some(styled)) = (line.get(at..range.start), line.get(range.clone()))
+            else {
+                continue;
+            };
+            x = frame.grid.put_text_clipped(x, y, before, style, limit);
+            x = frame
+                .grid
+                .put_text_clipped(x, y, styled, Style::DocumentationSyntax(*role), limit);
+            at = range.end;
+        }
+        frame.grid.put_text_clipped(x, y, line.get(at..).unwrap_or(""), style, limit);
     }
     if scrollable {
         let footer = format!(

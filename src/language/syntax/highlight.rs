@@ -13,7 +13,7 @@ use crate::config::HighlightDefinition;
 const DEFAULTS: &str = include_str!("../../../assets/defaults/highlights.toml");
 
 /// Groups Dust's own surfaces draw with, registered first so each has a fixed id.
-const BUILTIN: [&str; 15] = [
+const BUILTIN: [&str; 16] = [
     "@comment",
     "@string",
     "@number",
@@ -29,6 +29,7 @@ const BUILTIN: [&str; 15] = [
     "@markup.raw",
     "@markup.link",
     "@markup.quote",
+    "@markup.strikethrough",
 ];
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -50,6 +51,7 @@ impl Highlight {
     pub const RAW: Self = Self(12);
     pub const LINK: Self = Self(13);
     pub const QUOTE: Self = Self(14);
+    pub const STRIKETHROUGH: Self = Self(15);
 
     #[must_use]
     pub fn named(name: &str) -> Option<Self> {

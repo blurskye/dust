@@ -12580,19 +12580,19 @@ impl InteractiveApplication {
                                 "stopped"
                             },
                             match session.restart_count {
-                                0 => String::new(),
-                                1 => " · restarted once".into(),
-                                count => format!(" · restarted {count} times"),
+                                1 => " · 1 restart".into(),
+                                count => format!(" · {count} restarts"),
                             }
                         ),
-                        // The folder it serves; the session key is internal.
+                        // The folder it serves, as a path; the session key is internal.
                         source: self
                             .workspace
                             .roots()
                             .iter()
                             .find(|root| root.id == session.root)
-                            .and_then(|root| root.identity.canonical_path.file_name())
-                            .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+                            .map_or_else(String::new, |root| {
+                                root.identity.canonical_path.display().to_string()
+                            }),
                         action: PickerAction::None,
                     },
                     PickerPayload::LspSession(key.clone()),

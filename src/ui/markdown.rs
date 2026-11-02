@@ -59,6 +59,15 @@ type Segment = (String, Option<Highlight>);
 
 /// Append `source` rendered for a column `width` cells wide.
 pub fn render(out: &mut Styled, source: &str, width: usize) {
+    render_blocks(out, source, width, true);
+}
+
+/// Like `render`, for a small popup: code blocks are not framed by rules.
+pub fn render_compact(out: &mut Styled, source: &str, width: usize) {
+    render_blocks(out, source, width, false);
+}
+
+fn render_blocks(out: &mut Styled, source: &str, width: usize, framed: bool) {
     let width = width.max(8);
     let lines = source.lines().collect::<Vec<_>>();
     let mut index = 0;
@@ -76,7 +85,7 @@ pub fn render(out: &mut Styled, source: &str, width: usize) {
                 }
                 body.push(*candidate);
             }
-            code_block(out, info, &body, width);
+            code_block(out, info, &body, width, framed);
         } else if trimmed.starts_with('|') && lines.get(index).is_some_and(|next| is_table_separator(next)) {
             let mut rows = vec![trimmed];
             index += 1;
@@ -104,6 +113,9 @@ pub fn render(out: &mut Styled, source: &str, width: usize) {
             );
         } else if trimmed.is_empty() {
             out.push("\n", None);
+        } else if lines.get(index).is_some_and(|next| is_setext_underline(next.trim())) {
+            index += 1;
+            wrap(out, &inline(trimmed, Some(Highlight::HEADING)), width, ("", None), ("", None));
         } else {
             wrap(out, &inline(trimmed, None), width, (indent, None), (indent, None));
         }
@@ -128,6 +140,11 @@ fn heading(line: &str) -> Option<&str> {
     let rest = &line[level..];
     ((1..=6).contains(&level) && (rest.is_empty() || rest.starts_with(' ')))
         .then(|| rest.trim().trim_end_matches('#').trim_end())
+}
+
+/// The `===` or `---` line under a heading written the other way.
+fn is_setext_underline(line: &str) -> bool {
+    !line.is_empty() && (line.chars().all(|c| c == '=') || line.chars().all(|c| c == '-'))
 }
 
 fn is_rule(line: &str) -> bool {
@@ -173,12 +190,14 @@ fn list_item<'a>(line: &'a str, indent: &str) -> Option<(String, &'a str)> {
     Some((format!("{}{marker} ", "  ".repeat(depth)), text))
 }
 
-fn code_block(out: &mut Styled, info: &str, body: &[&str], width: usize) {
+fn code_block(out: &mut Styled, info: &str, body: &[&str], width: usize, framed: bool) {
     let name = info.split_whitespace().next().unwrap_or("");
-    let label = if name.is_empty() { String::new() } else { format!(" {name} ") };
-    let rest = width.saturating_sub(2 + UnicodeWidthStr::width(label.as_str()));
-    out.push(&format!("──{label}{}", "─".repeat(rest)), Some(Highlight::COMMENT));
-    out.push("\n", None);
+    if framed {
+        let label = if name.is_empty() { String::new() } else { format!(" {name} ") };
+        let rest = width.saturating_sub(2 + UnicodeWidthStr::width(label.as_str()));
+        out.push(&format!("──{label}{}", "─".repeat(rest)), Some(Highlight::COMMENT));
+        out.push("\n", None);
+    }
     let mut code = body.join("\n");
     code.push('\n');
     let start = out.text.len();
@@ -196,7 +215,9 @@ fn code_block(out: &mut Styled, info: &str, body: &[&str], width: usize) {
             }
         }
     }
-    out.rule(width);
+    if framed {
+        out.rule(width);
+    }
 }
 
 fn table(out: &mut Styled, rows: &[&str], width: usize) {
@@ -308,7 +329,7 @@ fn inline(text: &str, base: Option<Highlight>) -> Vec<Segment> {
                 if let Some(close) = opens.then(|| closing(text, at + length, marker)).flatten() {
                     flush(&mut segments, &mut plain);
                     let role = match (character, length) {
-                        ('~', _) => base,
+                        ('~', _) => Some(Highlight::STRIKETHROUGH),
                         (_, 2) => Some(Highlight::STRONG),
                         _ => Some(Highlight::ITALIC),
                     };
@@ -351,6 +372,17 @@ fn inline(text: &str, base: Option<Highlight>) -> Vec<Segment> {
                 segments.push((url.to_owned(), Some(Highlight::LINK)));
                 at += url.len();
                 continue;
+            }
+            '&' => {
+                // The entities language servers write in hover text.
+                let entity = [("&lt;", '<'), ("&gt;", '>'), ("&quot;", '"'), ("&#39;", '\''), ("&nbsp;", ' '), ("&amp;", '&')]
+                    .into_iter()
+                    .find(|(name, _)| rest.starts_with(name));
+                if let Some((name, decoded)) = entity {
+                    plain.push(decoded);
+                    at += name.len();
+                    continue;
+                }
             }
             _ => {}
         }

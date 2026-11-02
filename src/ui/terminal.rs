@@ -488,6 +488,19 @@ fn queue_style(
         Style::TerminalStatusAccent => &theme.styles.terminal_status_accent,
         Style::Terminal(_) => unreachable!("terminal cells are handled above"),
         Style::Syntax(group) => theme.highlight(group).unwrap_or(&theme.styles.default),
+        Style::DocumentationSyntax(group) => {
+            let popup = &theme.styles.documentation_text;
+            derived = theme.highlight(group).map_or_else(
+                || popup.clone(),
+                |style| crate::config::ThemeStyle {
+                    background: popup.background,
+                    background_256: popup.background_256,
+                    background_16: popup.background_16,
+                    ..style.clone()
+                },
+            );
+            &derived
+        }
     };
     queue!(
         writer,
