@@ -323,6 +323,19 @@ pub(super) fn effective_capabilities<'a>(
             "textDocument/selectionRange" => value.selection_ranges = true,
             "textDocument/completion" => value.completion = true,
             "textDocument/hover" => value.hover = true,
+            "textDocument/signatureHelp" => value.signature_help = true,
+            "textDocument/definition" => value.definition = true,
+            "textDocument/declaration" => value.declaration = true,
+            "textDocument/typeDefinition" => value.type_definition = true,
+            "textDocument/implementation" => value.implementation = true,
+            "textDocument/references" => value.references = true,
+            "textDocument/documentSymbol" => value.document_symbols = true,
+            "workspace/symbol" => value.workspace_symbols = true,
+            "textDocument/rename" => value.rename = true,
+            "textDocument/formatting" => value.formatting = true,
+            "textDocument/rangeFormatting" => value.range_formatting = true,
+            "textDocument/codeAction" => value.code_action = true,
+            "workspace/executeCommand" => value.execute_command = true,
             _ => {}
         }
     }

@@ -5835,6 +5835,7 @@ impl InteractiveApplication {
 
     pub(super) fn apply_formatter_result(&mut self, task: &RunningTask) {
         let transaction = self.transaction_id();
+        let positions = self.view_positions(|_| true);
         match self.tasks.formatter_transaction(
             task,
             &self.state,
@@ -5848,7 +5849,10 @@ impl InteractiveApplication {
                 .map_err(|e| e.to_string())
                 .and_then(|draft| self.commit_editor_draft(draft, None, false))
             {
-                Ok(()) => self.notify_message(self.message("formatter_applied", &[]), false),
+                Ok(()) => {
+                    self.restore_view_positions(positions);
+                    self.notify_message(self.message("formatter_applied", &[]), false);
+                }
                 Err(error) => self.show_error(error),
             },
             Ok(None) => {}

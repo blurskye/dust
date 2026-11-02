@@ -162,6 +162,16 @@ fn every_managed_catalog_lsp_language_has_a_reachable_document_mapping() {
 }
 
 #[test]
+fn a_server_can_register_formatting_after_it_starts() {
+    let registered = super::server_message::effective_capabilities(
+        &super::LspCapabilities::default(),
+        ["textDocument/formatting", "textDocument/rangeFormatting"].into_iter(),
+    );
+    assert!(registered.formatting && registered.range_formatting);
+    assert!(!registered.rename);
+}
+
+#[test]
 fn work_done_progress_preserves_token_kind_and_bounded_one_line_content() {
     let event = lsp_progress_event(
         "root:1:rust-analyzer",

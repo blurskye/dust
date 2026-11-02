@@ -1013,6 +1013,45 @@ impl InteractiveApplication {
 
     /// Vim never leaves the Normal-mode cursor on the empty line after a final newline; `dd`
     /// on the last line lands on the line above instead.
+    /// Where views stand on lines a formatter is replacing. The edit alone would send each to
+    /// the end of what it replaced, so `restore_view_positions` puts them back.
+    pub(super) fn view_positions(
+        &self,
+        replaced: impl Fn(usize) -> bool,
+    ) -> Vec<(crate::editor::ViewId, crate::editor::text::BufferRevision, usize, usize)> {
+        self.state
+            .views
+            .iter()
+            .filter_map(|(id, view)| {
+                let text = &self.state.buffers.get(view.buffer)?.text;
+                let (line, column) = PositionCodec::new(text)
+                    .byte_to_lsp(view.cursor, PositionEncoding::Utf32)
+                    .ok()?;
+                replaced(line).then(|| (id, text.revision(), line, column))
+            })
+            .collect()
+    }
+    pub(super) fn restore_view_positions(
+        &mut self,
+        positions: Vec<(crate::editor::ViewId, crate::editor::text::BufferRevision, usize, usize)>,
+    ) {
+        for (id, revision, line, column) in positions {
+            let Some(view) = self.state.views.get(id) else {
+                continue;
+            };
+            let text = &self.state.buffers[view.buffer].text;
+            if text.revision() == revision {
+                continue;
+            }
+            let line = line.min(text.visible_lines().saturating_sub(1));
+            if let Ok(cursor) =
+                PositionCodec::new(text).lsp_to_byte(line, column, PositionEncoding::Utf32)
+            {
+                self.state.views[id].cursor = cursor;
+            }
+        }
+        self.ensure_cursor_visible();
+    }
     pub(super) fn keep_cursor_off_final_newline(&mut self) {
         let Some(view_id) = self.state.active_view else {
             return;
@@ -2861,7 +2900,12 @@ impl InteractiveApplication {
         // this one started.
         let completion = matches!(feature, LspFeature::Completion)
             .then(|| (self.language.completion_start(), self.language.completion_automatic()));
-        if self.language.active() != Some(&server) {
+        // A formatter beside the file's main server, such as Ruff by basedpyright, doesn't replace it.
+        let formats = matches!(
+            feature,
+            LspFeature::Formatting | LspFeature::RangeFormatting { .. }
+        );
+        if !formats && self.language.active() != Some(&server) {
             self.select_lsp_session(&server);
         }
         // The application owns a session record while its process is still
@@ -3152,10 +3196,21 @@ impl InteractiveApplication {
                     });
                     let has_edits = edit.documents.iter().any(|document| !document.edits.is_empty());
                     if edit_is_current && has_edits {
-                        let encoding = self.lsp_position_encoding();
+                        let encoding = self.language.server_encoding(server);
+                        let replaced = edit
+                            .documents
+                            .iter()
+                            .flat_map(|document| &document.edits)
+                            .filter(|edit| edit.range.end.line > edit.range.start.line)
+                            .map(|edit| edit.range.start.line..=edit.range.end.line)
+                            .collect::<Vec<_>>();
+                        let positions = self.view_positions(|line| {
+                            replaced.iter().any(|lines| lines.contains(&line))
+                        });
                         if let Err(error) = self.apply_lsp_workspace_edit(edit, encoding) {
                             self.show_error(error);
                         }
+                        self.restore_view_positions(positions);
                     }
                     self.finish_format_on_save();
                     return;

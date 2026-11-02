@@ -374,6 +374,47 @@ fn a_format_result_applies_without_a_review_and_finishes_the_waiting_save() {
 }
 
 #[test]
+fn a_format_replacing_the_whole_file_keeps_the_cursor_on_its_line() {
+    use crate::language::lsp::{
+        LspDocumentEdit, LspFeatureResult, LspPosition, LspRange, LspTextEdit, LspWorkspaceEdit,
+    };
+    let mut app = app();
+    let path = app.state.workspace_root.join("whole.py");
+    let source = "x  =  1\ny  =  2\nz  =  3\n";
+    std::fs::write(&path, source).unwrap();
+    let (buffer, view) = app.state.open_text(
+        crate::editor::text::TextBuffer::from_text(source),
+        Some(path.clone()),
+    );
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    app.state.views[view].cursor = crate::editor::text::ByteOffset(8);
+    app.present_lsp_result(
+        "formatter",
+        1,
+        "textDocument/formatting",
+        &format!("file://{}", path.display()),
+        LspFeatureResult::WorkspaceEdit(LspWorkspaceEdit {
+            resources: Vec::new(),
+            documents: vec![LspDocumentEdit {
+                uri: String::new(),
+                version: None,
+                edits: vec![LspTextEdit {
+                    range: LspRange {
+                        start: LspPosition { line: 0, character: 0 },
+                        end: LspPosition { line: 3, character: 0 },
+                    },
+                    new_text: "x = 1\ny = 2\nz = 3\n".into(),
+                }],
+            }],
+        }),
+    );
+    let text = &app.state.buffers[buffer].text;
+    assert_eq!(text.to_string(), "x = 1\ny = 2\nz = 3\n");
+    assert_eq!(text.byte_to_line(app.state.views[view].cursor).unwrap(), 1);
+}
+
+#[test]
 fn a_save_still_happens_when_the_formatter_has_nothing_fails_or_is_slow() {
     let (mut app, _, path, uri) = app_waiting_to_save_formatted("nothing.txt");
     app.present_lsp_result(
