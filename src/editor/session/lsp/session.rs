@@ -1,5 +1,11 @@
 #[path = "launch.rs"]
 mod launch;
+
+pub(crate) const LSP_REQUEST_TIMEOUT_MS: u64 = 10_000;
+pub(crate) const LSP_RESTART_LIMIT: u8 = 3;
+pub(crate) const LSP_RESTART_BACKOFF_MS: u64 = 250;
+pub(crate) const LSP_MAXIMUM_LOG_LINES: usize = 200;
+
 pub(in crate::editor::session) use launch::{
     LaunchContext, LspLaunchRequest, LspLaunchSource, PendingLspProjectRoot,
 };
@@ -11,7 +17,6 @@ use super::{
     workspace_edits::{OriginKey, PreparedFiles},
 };
 use crate::{
-    config::LspConfig,
     editor::{
         BufferId, EditorState, ViewId,
         text::{BufferRevision, TextVersion},
@@ -483,21 +488,19 @@ impl LspSession {
     pub(super) fn schedule_restart(
         &mut self,
         key: &str,
-        config: &LspConfig,
         now: Instant,
     ) -> Option<String> {
         let state = self.sessions.get_mut(key)?;
         if !state.desired_running || state.restart_due.is_some() {
             return None;
         }
-        if state.restart_count >= config.restart_limit {
+        if state.restart_count >= LSP_RESTART_LIMIT {
             state.circuit_open = true;
             return Some(state.server_id.clone());
         }
         state.restart_count = state.restart_count.saturating_add(1);
         let exponent = u32::from(state.restart_count.saturating_sub(1)).min(8);
-        let delay = config
-            .restart_backoff_ms
+        let delay = LSP_RESTART_BACKOFF_MS
             .saturating_mul(2_u64.saturating_pow(exponent))
             .min(60_000);
         state.restart_due = Some(now + Duration::from_millis(delay));

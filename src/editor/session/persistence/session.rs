@@ -1,7 +1,6 @@
 //! Session history and source-bound restore obligations.
 use super::PersistenceSession;
 use crate::{
-    config::PersistenceConfig,
     editor::{
         EditorDraft, EditorState, EditorVersion,
         session::{
@@ -363,7 +362,6 @@ impl PersistenceSession {
     pub(in crate::editor::session) fn restore_history(
         &mut self,
         state: &mut PersistedState,
-        config: &PersistenceConfig,
     ) {
         // Loaded history is older than edits made while the read was in flight.
         self.jump_index = None;
@@ -372,7 +370,7 @@ impl PersistenceSession {
             .into_iter()
             .chain(std::mem::take(&mut state.recent_files))
             .filter(|path| seen.insert(path.clone()))
-            .take(config.recent_files)
+            .take(super::RECENT_FILE_LIMIT)
             .collect();
         let mut seen = std::collections::HashSet::new();
         self.marks = std::mem::take(&mut self.marks)
@@ -380,19 +378,19 @@ impl PersistenceSession {
             .rev()
             .chain(std::mem::take(&mut state.marks).into_iter().rev())
             .filter(|mark| seen.insert(mark.name.clone()))
-            .take(config.marks)
+            .take(super::MARK_LIMIT)
             .collect();
         self.marks.reverse();
         for (current, mut past, maximum) in [
             (
                 &mut self.jumps,
                 std::mem::take(&mut state.jumps),
-                config.jumps,
+                super::JUMP_LIMIT,
             ),
             (
                 &mut self.changes,
                 std::mem::take(&mut state.changes),
-                config.changes,
+                super::CHANGE_LIMIT,
             ),
         ] {
             past.append(current);

@@ -1,7 +1,7 @@
 use super::{
     AppEffect, BTreeSet, CommandRegistry, ConfigurationSources, DashboardAction, KeymapCompilation,
     LoadedConfig, PathBuf, ResolvedConfiguration, UnicodeSegmentation, UnicodeWidthStr,
-    compile_keymap_entries, compile_keymaps, keymap_entries_for_policy, plugin_owner_from_id,
+    compile_keymap_entries, compile_keymaps, keymap_entries, plugin_owner_from_id,
     register_app_commands, register_builtin_commands, validate_configured_commands,
 };
 
@@ -72,7 +72,7 @@ pub(in crate::editor::session) fn resolve_configuration(
         base_safe_keymaps(&loaded);
     let (keymaps, keymap_diagnostic) = if strict {
         let (entries, bundled_count, groups, bundled_group_count) =
-            keymap_entries_for_policy(&base_keymaps, &loaded.config.input.keymaps);
+            keymap_entries(&base_keymaps);
         match compile_keymap_entries(
             commands,
             KeymapCompilation {
@@ -113,9 +113,6 @@ pub(in crate::editor::session) fn resolve_configuration(
             .windows
             .rules
             .retain(|rule| !rule.content_type.starts_with("plugin."));
-    }
-    for alias in &settings.input.disabled_command_aliases {
-        settings.input.command_aliases.remove(alias);
     }
     let keymap_source = if loaded.keymaps.bundled_count > 0
         && loaded.keymaps.entries.len() == loaded.keymaps.bundled_count

@@ -332,11 +332,11 @@ fn body_and_notice_bounds_fail_closed_at_tiny_sizes() {
                 width,
                 height,
             };
-            let body = crate::ui::geometry::explorer_body_geometry(rect, &config);
+            let body = crate::ui::geometry::explorer_body_geometry(rect);
             assert!(body.y >= rect.y && body.y + body.height <= rect.y + height);
             assert!(body.width <= width);
             if let Some(notice) =
-                crate::ui::geometry::error_notification_geometry(&config, width, height)
+                crate::ui::geometry::error_notification_geometry(width, height)
             {
                 assert!(notice.x + notice.width <= width);
                 assert!(notice.y + notice.height <= height);

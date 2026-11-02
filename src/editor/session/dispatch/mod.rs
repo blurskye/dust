@@ -6,7 +6,6 @@ use super::configuration::{
     validate_configured_commands,
 };
 use super::documents::{DocumentEvent, DocumentSession, LargeFileOverride, mode_name_large};
-use super::explorer::explorer_watch_policy;
 use super::input::InputSession;
 use super::lsp::{LspAutostartObservation, LspLaunch};
 use super::lsp::{LspLaunchRequest, LspLaunchSource, PendingLspProjectRoot};
@@ -101,7 +100,7 @@ use crate::ui::{
     ToolRuntimeOption, ToolRuntimePickerState, UiEvent, UiFold, UiInlayHint, UiState, UiSyntaxSpan,
     VisualRowAnchor, VisualRowModel, active_editor_pane_viewport, editor_pane_viewport_at,
     editor_state_content_width, editor_state_gutter_width, screen_foot_rows, workspace_top_rows,
-    explorer_panel_width, render, snap_display_column, snap_display_column_forward,
+    explorer_panel_width, render as render_frame, snap_display_column, snap_display_column_forward,
     terminal_panel_geometry, terminal_tab_at_column,
 };
 use crate::workspace::{
@@ -116,6 +115,13 @@ use crate::editor::{ApplicationError, StartupTarget, build_state};
 use crate::ui::window::{
     CompositorProjection, DockEdge, SpatialDirection, WindowPlacement, WindowRect,
 };
+
+pub(crate) const EVENT_POLL_MS: u64 = 16;
+pub(crate) const MACRO_RECURSION_LIMIT: usize = 16;
+pub(crate) const MACRO_STEP_LIMIT: usize = 10_000;
+pub(crate) const REPEAT_STEP_LIMIT: usize = 10_000;
+pub(crate) const HALF_PAGE_PERCENT: u8 = 50;
+pub(crate) const FULL_PAGE_PERCENT: u8 = 100;
 
 /// A value that counts how often it was borrowed mutably. The main loop rebuilds the frame
 /// only when the editor or UI state was touched (or input arrived), so an idle editor does
@@ -295,9 +301,9 @@ pub fn run_interactive(
     let mut terminal = TerminalSession::enter(
         TerminalOptions {
             color_mode: terminal_ui.color_mode,
-            alternate_screen: terminal_ui.alternate_screen,
-            bracketed_paste: terminal_ui.bracketed_paste,
-            focus_events: terminal_ui.focus_events,
+            alternate_screen: true,
+            bracketed_paste: true,
+            focus_events: true,
             mouse: terminal_ui.mouse,
         },
         application.configuration.theme().clone(),
@@ -391,7 +397,7 @@ pub fn run_interactive(
         );
         let painted = if input_arrived || terminal.needs_full_draw() || drawn != Some(inputs) {
             drawn = Some(inputs);
-            let frame = render(
+            let frame = render_frame(
                 &application.state,
                 &application.ui,
                 application.configuration.settings(),
@@ -407,7 +413,7 @@ pub fn run_interactive(
         application.queue_startup_reads();
         application.schedule_recovery_work();
         still_polls = if painted { 0 } else { still_polls.saturating_add(1) };
-        let poll = Duration::from_millis(application.configuration.settings().runtime.event_poll_ms);
+        let poll = Duration::from_millis(EVENT_POLL_MS);
         let poll = if still_polls < IDLE_AFTER { poll } else { poll.max(IDLE_POLL) };
         if let Some(event) = terminal.poll_event(poll)? {
             still_polls = 0;

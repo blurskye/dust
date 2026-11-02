@@ -1,3 +1,13 @@
+use crate::editor::session::diagnostics::MAXIMUM_DIAGNOSTICS;
+use crate::editor::session::dispatch::{FULL_PAGE_PERCENT, HALF_PAGE_PERCENT, MACRO_RECURSION_LIMIT, MACRO_STEP_LIMIT, REPEAT_STEP_LIMIT};
+use crate::editor::session::persistence::{CHANGE_LIMIT, JUMP_LIMIT, MARK_LIMIT, RECENT_FILE_LIMIT, STATE_ENTRY_LIMIT, STATE_MAXIMUM_BYTES};
+use crate::editor::session::search::{
+    MAXIMUM_PICKER_ITEMS, SEARCH_BATCH_SIZE, SEARCH_MAXIMUM_FILE_BYTES, SEARCH_MAXIMUM_FILES,
+    SEARCH_QUEUE_CAPACITY,
+};
+use crate::ui::render::{COMPLETION_MAX_ROWS, SCRATCH_LABEL};
+use crate::ui::render::editor::STATUS_DIRTY_MARKER;
+use crate::ui::render::surfaces::{PICKER_MAXIMUM_PREVIEW_BYTES, TOOL_CATEGORY_ORDER, TOOL_MANAGER_MINIMUM_HEIGHT};
 use super::super::configuration::{configured_grapheme_width, configured_text_width};
 use super::{
     AdapterContext, AppEffect, ArgumentSchema, BTreeMap, BTreeSet, ByteOffset, ByteRange,
@@ -481,7 +491,7 @@ impl InteractiveApplication {
                 VirtualContext {
                     editor: &self.state,
                     windows: &self.window_session,
-                    scratch: &self.configuration.settings().ui.buffer_line.scratch_label,
+                    scratch: &SCRATCH_LABEL,
                 },
                 descriptions,
             )
@@ -1010,7 +1020,7 @@ impl InteractiveApplication {
                         VirtualContext {
                             editor: &self.state,
                             windows: &self.window_session,
-                            scratch: &self.configuration.settings().ui.buffer_line.scratch_label,
+                            scratch: &SCRATCH_LABEL,
                         },
                     )
                     .and_then(|staged| {
@@ -1134,11 +1144,7 @@ impl InteractiveApplication {
                 prepared.sources,
             )?;
             let maximum = usize::try_from(
-                self.configuration
-                    .settings()
-                    .workspace
-                    .search
-                    .maximum_file_bytes,
+                SEARCH_MAXIMUM_FILE_BYTES,
             )
             .unwrap_or(usize::MAX);
             let roots = self
@@ -1250,8 +1256,8 @@ impl InteractiveApplication {
 
     pub(super) fn persistence_policy(&self) -> PersistencePolicy {
         PersistencePolicy {
-            maximum_file_bytes: self.configuration.settings().persistence.maximum_file_bytes,
-            maximum_entries: self.configuration.settings().persistence.maximum_entries,
+            maximum_file_bytes: STATE_MAXIMUM_BYTES,
+            maximum_entries: STATE_ENTRY_LIMIT,
         }
     }
 
@@ -1378,9 +1384,7 @@ impl InteractiveApplication {
     }
 
     pub(super) fn save_persistence(&mut self) {
-        if self.configuration.settings().persistence.save_on_exit {
-            self.write_persistence();
-        }
+        self.write_persistence();
     }
 
     fn write_persistence(&mut self) {
@@ -1413,16 +1417,8 @@ impl InteractiveApplication {
             marks: self.persistence.marks().to_vec(),
             jumps: self.persistence.jumps().to_vec(),
             changes: self.persistence.changes().to_vec(),
-            command_history: if configured.persist_command_history {
-                self.input.command_history().to_vec()
-            } else {
-                Vec::new()
-            },
-            search_history: if configured.persist_search_history {
-                self.input.search_history().to_vec()
-            } else {
-                Vec::new()
-            },
+            command_history: self.input.command_history().to_vec(),
+            search_history: self.input.search_history().to_vec(),
             breakpoints: self.debugger_session.persisted_breakpoints(),
             large_file_overrides: self
                 .documents
@@ -1434,7 +1430,7 @@ impl InteractiveApplication {
                         mode: mode_name_large(mode).into(),
                     })
                 })
-                .take(configured.maximum_entries)
+                .take(STATE_ENTRY_LIMIT)
                 .collect(),
             watches: self.debugger_session.persisted_watches(),
             metadata,
@@ -1468,8 +1464,7 @@ impl InteractiveApplication {
                     if let Some(session) = &session {
                         self.report_unavailable_persisted_content(session);
                     }
-                    let configured = &self.configuration.settings().persistence;
-                    self.persistence.restore_history(&mut state, configured);
+                    self.persistence.restore_history(&mut state);
                     self.debugger_session.restore(
                         state.breakpoints,
                         state.watches,
@@ -1484,7 +1479,6 @@ impl InteractiveApplication {
                     self.input.restore_history(
                         state.command_history,
                         state.search_history,
-                        configured,
                     );
                     let requested = std::mem::take(&mut self.session_load_requested);
                     let found = session.is_some();
@@ -1530,7 +1524,7 @@ impl InteractiveApplication {
                 windows: &self.window_session,
                 configuration: self.configuration.binding_revision(),
             },
-            self.configuration.settings().persistence.maximum_entries,
+            STATE_ENTRY_LIMIT,
         ) {
             Ok(Some(paths)) => paths,
             Ok(None) => return,
@@ -1623,7 +1617,7 @@ impl InteractiveApplication {
                     let transition = self.window_session.prepare_restore_transition(
                         draft,
                         (&current, catalog.clone()),
-                        &self.configuration.settings().ui.buffer_line.scratch_label,
+                        &SCRATCH_LABEL,
                         descriptions,
                         &self.extension.window_generations(),
                         RestoreWindowPolicy {
@@ -1673,7 +1667,7 @@ impl InteractiveApplication {
     }
     pub(super) fn record_recent_file(&mut self, path: PathBuf) {
         self.persistence
-            .record_recent(path, self.configuration.settings().persistence.recent_files);
+            .record_recent(path, RECENT_FILE_LIMIT);
     }
 }
 
@@ -1720,8 +1714,7 @@ impl InteractiveApplication {
         }
     }
     fn finish_theme_choice(&mut self, name: &str) {
-        let saving = self.configuration.settings().persistence.enabled
-            && self.configuration.settings().persistence.save_on_exit;
+        let saving = self.configuration.settings().persistence.enabled;
         if saving {
             self.persistence.request_save();
         }
@@ -2518,7 +2511,7 @@ impl InteractiveApplication {
                         VirtualContext {
                             editor: &self.state,
                             windows: &self.window_session,
-                            scratch: &self.configuration.settings().ui.buffer_line.scratch_label,
+                            scratch: &SCRATCH_LABEL,
                         },
                     )
                     .and_then(|staged| {
@@ -2553,11 +2546,7 @@ impl InteractiveApplication {
                 self.refresh_plugin_host_events();
                 self.retire_plugin_edit_sources();
                 let maximum = usize::try_from(
-                    self.configuration
-                        .settings()
-                        .workspace
-                        .search
-                        .maximum_file_bytes,
+                    SEARCH_MAXIMUM_FILE_BYTES,
                 )
                 .unwrap_or(usize::MAX);
                 let input_capture = self.input.capture_epoch();
@@ -2865,10 +2854,9 @@ impl InteractiveApplication {
             }
             AppEffect::LspDocumentationScroll(direction) => {
                 self.reconcile_editor_windows();
-                let policy = &self.configuration.settings().ui.documentation_popup;
                 self.input.scroll_documentation(
                     direction,
-                    policy.scroll_step,
+                    crate::ui::render::overlays::DOCUMENTATION_SCROLL_STEP,
                     self.window_session.content().documentation_rows.max(1),
                 );
                 self.project_input_documentation();
@@ -2978,7 +2966,7 @@ impl InteractiveApplication {
                     self.persistence.set_mark(
                         name,
                         location,
-                        self.configuration.settings().persistence.marks,
+                        MARK_LIMIT,
                     );
                 }
             }
@@ -3273,10 +3261,10 @@ impl InteractiveApplication {
             root_revision,
             include_hidden: configured.include_hidden,
             include_ignored: configured.include_ignored,
-            maximum_files: configured.maximum_files,
+            maximum_files: SEARCH_MAXIMUM_FILES,
             maximum_path_bytes: 16 * 1024 * 1024,
-            batch_size: configured.batch_size,
-            event_queue_capacity: configured.event_queue_capacity,
+            batch_size: SEARCH_BATCH_SIZE,
+            event_queue_capacity: SEARCH_QUEUE_CAPACITY,
         };
         match self.search.start_files(
             policy,
@@ -3363,8 +3351,7 @@ impl InteractiveApplication {
         query: String,
         replacement: Option<String>,
     ) {
-        let regex = self.configuration.settings().workspace.search.regex;
-        self.start_search(query, replacement, regex);
+        self.start_search(query, replacement, false);
     }
 
     fn start_search(&mut self, query: String, replacement: Option<String>, regex: bool) {
@@ -3378,19 +3365,19 @@ impl InteractiveApplication {
                 .collect(),
             query,
             regex,
-            smart_case: configured.smart_case,
-            whole_word: configured.whole_word,
-            include_globs: configured.include_globs.clone(),
+            smart_case: true,
+            whole_word: false,
+            include_globs: Vec::new(),
             exclude_globs: configured.exclude_globs.clone(),
             include_hidden: configured.include_hidden,
             include_ignored: configured.include_ignored,
-            maximum_files: configured.maximum_files,
-            maximum_results: configured.maximum_results,
-            maximum_file_bytes: configured.maximum_file_bytes,
-            maximum_total_bytes: configured.maximum_total_bytes,
-            maximum_preview_bytes: configured.maximum_preview_bytes,
-            batch_size: configured.batch_size,
-            event_queue_capacity: configured.event_queue_capacity,
+            maximum_files: SEARCH_MAXIMUM_FILES,
+            maximum_results: 10_000,
+            maximum_file_bytes: SEARCH_MAXIMUM_FILE_BYTES as u64,
+            maximum_total_bytes: 512 * 1024 * 1024,
+            maximum_preview_bytes: 4096,
+            batch_size: SEARCH_BATCH_SIZE,
+            event_queue_capacity: SEARCH_QUEUE_CAPACITY,
         };
         match self.search.start(
             policy,
@@ -3765,11 +3752,7 @@ impl InteractiveApplication {
             operation,
             context,
             self.workspace.roots(),
-            self.configuration
-                .settings()
-                .workspace
-                .search
-                .maximum_file_bytes,
+            SEARCH_MAXIMUM_FILE_BYTES as u64,
             confirmation,
         )?;
         let result = if rename_prompt {
@@ -3828,11 +3811,7 @@ impl InteractiveApplication {
                 .inspect_explorer_rename(
                     request.path,
                     request.roots,
-                    self.configuration
-                        .settings()
-                        .workspace
-                        .search
-                        .maximum_file_bytes,
+                    SEARCH_MAXIMUM_FILE_BYTES as u64,
                 )
                 .map_err(|error| error.to_string())?;
             inspection.register(id);
@@ -4018,11 +3997,7 @@ impl InteractiveApplication {
                     let result = if self.compositor_projection().is_none() {
                         Err("universal compositor projection is missing or stale".into())
                     } else {
-                        self.window_session.resize_terminal(
-                            id.0,
-                            rows,
-                            &self.configuration.settings().ui.terminal_panel,
-                        )
+                        self.window_session.resize_terminal(id.0, rows)
                     };
                     if let Err(error) = result {
                         self.show_error(error);
@@ -4200,7 +4175,7 @@ impl InteractiveApplication {
     }
 
     pub(super) fn repeat_last_change(&mut self) {
-        let limit = self.configuration.settings().runtime.repeat_step_limit;
+        let limit = REPEAT_STEP_LIMIT;
         match self.input.repeat_plan(limit) {
             Ok(invocations) => {
                 for invocation in invocations {
@@ -4229,7 +4204,7 @@ impl InteractiveApplication {
             .input
             .begin_macro_replay(
                 register,
-                self.configuration.settings().runtime.macro_recursion_limit,
+                MACRO_RECURSION_LIMIT,
             )
             .is_err()
         {
@@ -4238,10 +4213,7 @@ impl InteractiveApplication {
                     "macro_recursion_limit",
                     &[(
                         "limit",
-                        self.configuration
-                            .settings()
-                            .runtime
-                            .macro_recursion_limit
+                        MACRO_RECURSION_LIMIT
                             .to_string(),
                     )],
                 ),
@@ -4251,17 +4223,14 @@ impl InteractiveApplication {
         for invocation in invocations {
             let Ok(invocation) = self.input.macro_step(
                 invocation,
-                self.configuration.settings().runtime.macro_step_limit,
+                MACRO_STEP_LIMIT,
             ) else {
                 self.show_error(
                     self.message(
                         "macro_step_limit",
                         &[(
                             "limit",
-                            self.configuration
-                                .settings()
-                                .runtime
-                                .macro_step_limit
+                            MACRO_STEP_LIMIT
                                 .to_string(),
                         )],
                     ),
@@ -4407,7 +4376,7 @@ impl InteractiveApplication {
                 plan,
                 (&current, &catalog),
                 candidate,
-                &self.configuration.settings().ui.buffer_line.scratch_label,
+                &SCRATCH_LABEL,
                 descriptions,
             )?
         } else if activate_document {
@@ -4415,7 +4384,7 @@ impl InteractiveApplication {
                 candidate,
                 &current,
                 catalog.clone(),
-                &self.configuration.settings().ui.buffer_line.scratch_label,
+                &SCRATCH_LABEL,
                 descriptions,
             )?
         } else {
@@ -4423,7 +4392,7 @@ impl InteractiveApplication {
                 candidate,
                 &current,
                 catalog.clone(),
-                &self.configuration.settings().ui.buffer_line.scratch_label,
+                &SCRATCH_LABEL,
                 Some(descriptions),
             )?
         };
@@ -4478,7 +4447,6 @@ impl InteractiveApplication {
         let plan = match self.window_session.plan_layout(
             action,
             &(&*self.state).into(),
-            self.configuration.settings(),
             self.extension.contributions().version(),
         ) {
             Ok(plan) => plan,
@@ -4641,8 +4609,7 @@ impl InteractiveApplication {
             return;
         }
         let wrap_enabled = self.configuration.settings().editor.wrap
-            && !(self.ui.large_file_buffers.contains(&buffer_id)
-                && self.configuration.settings().editor.large_file.disable_wrap);
+            && !(self.ui.large_file_buffers.contains(&buffer_id));
         let visual_rows = VisualRowModel::new_for_state(
             &self.state,
             &buffer.text,
@@ -4717,9 +4684,9 @@ impl InteractiveApplication {
         };
         let body = usize::from(viewport.height.max(1));
         let percent = if kind.starts_with("half_") {
-            self.configuration.settings().editor.half_page_percent
+            HALF_PAGE_PERCENT
         } else {
-            self.configuration.settings().editor.full_page_percent
+            FULL_PAGE_PERCENT
         };
         let amount = body.saturating_mul(usize::from(percent)) / 100;
         let amount = amount
@@ -4733,8 +4700,7 @@ impl InteractiveApplication {
         );
         let wrap_enabled = available > 0
             && self.configuration.settings().editor.wrap
-            && !(self.ui.large_file_buffers.contains(&view.buffer)
-                && self.configuration.settings().editor.large_file.disable_wrap);
+            && !(self.ui.large_file_buffers.contains(&view.buffer));
         let visual_rows = VisualRowModel::new_for_state(
             &self.state,
             &buffer.text,
@@ -5096,7 +5062,6 @@ impl InteractiveApplication {
                     target,
                     discarded,
                     &(&*self.state).into(),
-                    self.configuration.settings(),
                     self.extension.contributions().version(),
                 );
                 match plan {
@@ -5149,13 +5114,13 @@ impl InteractiveApplication {
     }
     pub(super) fn prompt_history(&mut self, direction: i8) {
         self.input
-            .prompt_history(direction, self.configuration.settings());
+            .prompt_history(direction);
         self.refresh_completions();
         self.preview_search();
     }
     pub(super) fn prompt_complete(&mut self, direction: i8) {
         self.input
-            .prompt_complete(direction, self.configuration.settings());
+            .prompt_complete(direction);
         self.project_input_prompt();
     }
     pub(super) fn accept_completion(&mut self) -> bool {
@@ -5167,7 +5132,7 @@ impl InteractiveApplication {
     }
     pub(super) fn record_prompt_history(&mut self, kind: PromptKind, input: &str) {
         self.input
-            .record_prompt_history(kind, input, self.configuration.settings());
+            .record_prompt_history(kind, input);
     }
     pub(super) fn refresh_completions(&mut self) {
         if let Some(request) = self.input.refresh_completions(
@@ -5191,13 +5156,7 @@ impl InteractiveApplication {
     }
 
     pub(super) fn submit_prompt(&mut self) {
-        if self
-            .configuration
-            .settings()
-            .input
-            .completion_accept_on_submit
-            && self.accept_completion()
-        {
+        if self.accept_completion() {
             // A chosen command runs at once, as Enter does in Vim's wildmenu; a chosen path
             // waits, so a directory can be completed further.
             let command = self.input.prompt().is_some_and(|prompt| {
@@ -5375,23 +5334,6 @@ impl InteractiveApplication {
                     self.prompt_error(message);
                     return;
                 }
-                if self.configuration.settings().search.regex {
-                    let source = self
-                        .state
-                        .active_buffer_id()
-                        .and_then(|buffer| self.state.buffers.get(buffer))
-                        .map(|buffer| buffer.text.to_string())
-                        .unwrap_or_default();
-                    if let Err(error) = crate::editor::input::search_matches(
-                        &source,
-                        &prompt.input,
-                        self.configuration.settings().search.smart_case,
-                        true,
-                    ) {
-                        self.prompt_error(error.to_string());
-                        return;
-                    }
-                }
                 let forward = prompt.kind == PromptKind::SearchForward;
                 self.ui.search_query = Some(prompt.input);
                 self.input.remember_search(forward);
@@ -5425,7 +5367,7 @@ impl InteractiveApplication {
             &buffer.text.to_string(),
             &query,
             search.smart_case,
-            search.regex,
+            false,
         )
         .unwrap_or_default();
         let target = search_target(&buffer.text, &matches, origin, forward, search.wrap);
@@ -5463,7 +5405,7 @@ impl InteractiveApplication {
             &source,
             &query,
             self.configuration.settings().search.smart_case,
-            self.configuration.settings().search.regex,
+            false,
         ) {
             Ok(matches) => matches,
             Err(error) => {
@@ -6049,12 +5991,8 @@ impl InteractiveApplication {
                                 self.configuration.binding_revision(),
                                 &self.diagnostics,
                                 (
-                                    self.configuration.settings().workspace.maximum_diagnostics,
-                                    self.configuration
-                                        .settings()
-                                        .workspace
-                                        .search
-                                        .maximum_file_bytes,
+                                    MAXIMUM_DIAGNOSTICS,
+                                    SEARCH_MAXIMUM_FILE_BYTES as u64,
                                 ),
                             ) {
                                 self.show_error(error);
@@ -6419,7 +6357,6 @@ impl InteractiveApplication {
                         match self.tasks.launch(
                             step,
                             ready,
-                            &self.configuration.settings().processes,
                             &self.state,
                             &self.workspace,
                             self.configuration.binding_revision(),
@@ -6628,11 +6565,7 @@ impl InteractiveApplication {
 
     pub(in crate::editor::session) fn move_lsp_completion(&mut self, direction: i8) {
         let rows = usize::from(
-            self.configuration
-                .settings()
-                .ui
-                .command_line
-                .completion_max_rows
+            COMPLETION_MAX_ROWS
                 .max(1),
         );
         if let Some((selected, scroll)) = self.language.move_completion(direction, rows) {
@@ -7756,7 +7689,7 @@ impl InteractiveApplication {
             self.persistence.record_location(
                 location,
                 false,
-                self.configuration.settings().persistence.jumps,
+                JUMP_LIMIT,
             );
         }
     }
@@ -7764,7 +7697,7 @@ impl InteractiveApplication {
     /// `ctrl-o` (back) and `ctrl-i` (forward) through the jump list.
     pub(in crate::editor::session) fn walk_jumps(&mut self, back: bool) {
         let current = self.current_persisted_location();
-        let maximum = self.configuration.settings().persistence.jumps;
+        let maximum = JUMP_LIMIT;
         if let Some(location) = self.persistence.walk_jumps(current, back, maximum) {
             self.go_to_persisted_location(location);
         }
@@ -7775,7 +7708,7 @@ impl InteractiveApplication {
             self.persistence.record_location(
                 location,
                 true,
-                self.configuration.settings().persistence.changes,
+                CHANGE_LIMIT,
             );
         }
     }
@@ -7961,7 +7894,7 @@ impl InteractiveApplication {
                 query,
                 complete,
             },
-            self.configuration.settings().workspace.maximum_picker_items,
+            MAXIMUM_PICKER_ITEMS,
             self.workspace.version(),
             self.configuration.binding_revision(),
         ) {
@@ -8112,7 +8045,7 @@ impl InteractiveApplication {
         server: &str,
     ) {
         let choices = match self.language.install_offered_actions(
-            self.configuration.settings().workspace.maximum_picker_items,
+            MAXIMUM_PICKER_ITEMS,
         ) {
             Ok(choices) => choices,
             Err(error) => {
@@ -8261,22 +8194,12 @@ impl InteractiveApplication {
                                 id,
                                 label: state.path.as_ref().map_or_else(
                                     || {
-                                        self.configuration
-                                            .settings()
-                                            .ui
-                                            .status_line
-                                            .scratch_label
-                                            .clone()
+                                        SCRATCH_LABEL.to_owned()
                                     },
                                     |path| self.workspace_relative_label(path),
                                 ),
                                 detail: if state.dirty {
-                                    self.configuration
-                                        .settings()
-                                        .ui
-                                        .status_line
-                                        .dirty_marker
-                                        .clone()
+                                    STATUS_DIRTY_MARKER.to_owned()
                                 } else {
                                     String::new()
                                 },
@@ -8557,7 +8480,7 @@ impl InteractiveApplication {
         self.retire_stale_picker();
         self.search.picker_move(
             direction,
-            self.configuration.settings().workspace.picker_wrap,
+            true,
         );
         self.sync_picker_ui();
     }
@@ -8709,11 +8632,7 @@ impl InteractiveApplication {
             PickerPayload::WorkspaceSearch(key) => {
                 if let Some(id) = self.search.preview_match(
                     &key,
-                    self.configuration
-                        .settings()
-                        .ui
-                        .picker
-                        .maximum_preview_bytes,
+                    PICKER_MAXIMUM_PREVIEW_BYTES,
                 ) {
                     self.documents.cancel_request(id);
                 }
@@ -8722,12 +8641,7 @@ impl InteractiveApplication {
                 let (retired, ticket) = self.search.prepare_preview(
                     source.path.clone(),
                     label,
-                    self.configuration
-                        .settings()
-                        .ui
-                        .picker
-                        .loading_label
-                        .clone(),
+                    "loading…".into(),
                     self.workspace.version(),
                     self.configuration.binding_revision(),
                 );
@@ -8743,12 +8657,7 @@ impl InteractiveApplication {
                     .iter()
                     .map(|root| root.identity.canonical_path.clone())
                     .collect();
-                let maximum = self
-                    .configuration
-                    .settings()
-                    .ui
-                    .picker
-                    .maximum_preview_bytes;
+                let maximum = PICKER_MAXIMUM_PREVIEW_BYTES;
                 match self
                     .documents
                     .read_scoped_bounded(source.path, roots, maximum as u64)
@@ -9936,7 +9845,6 @@ impl InteractiveApplication {
         self.retire_workspace_resources("workspace changed");
         self.retire_plugin_edit_sources();
         self.retire_explorer_intents();
-        self.clear_explorer_preview();
         self.explorer
             .reset_roots(self.workspace.roots(), self.workspace.root_revision());
         self.ui.explorer = None;
@@ -10106,13 +10014,13 @@ impl InteractiveApplication {
 
 impl InteractiveApplication {
     fn tool_menu_height(&self) -> u16 {
-        let configured = &self.configuration.settings().ui.tool_manager;
-        let height =
-            (u32::from(self.window_session.height()) * u32::from(configured.height_percent) / 100)
+        let height = (u32::from(self.window_session.height())
+            * u32::from(crate::ui::render::surfaces::TOOL_MANAGER_HEIGHT_PERCENT)
+            / 100)
                 .try_into()
                 .unwrap_or(self.window_session.height());
         height
-            .max(configured.minimum_height.min(self.window_session.height()))
+            .max(crate::ui::render::surfaces::TOOL_MANAGER_MINIMUM_HEIGHT.min(self.window_session.height()))
             .min(self.window_session.height())
     }
 
@@ -10134,7 +10042,7 @@ impl InteractiveApplication {
             .unwrap_or(u16::MAX)
             .saturating_mul(2)
             .saturating_add(11)
-            .max(self.configuration.settings().ui.tool_manager.minimum_height);
+            .max(TOOL_MANAGER_MINIMUM_HEIGHT);
         usize::from(
             self.tool_menu_height()
                 .min(compact_height)
@@ -10706,7 +10614,7 @@ impl InteractiveApplication {
                         .get(tool_kind_key(definition.kind))
                         .cloned()
                         .unwrap_or_else(|| definition.kind.label().into()),
-                    languages: definition.languages.join(&configured.language_separator),
+                    languages: definition.languages.join(crate::ui::render::surfaces::TOOL_LANGUAGE_SEPARATOR),
                     version,
                     release,
                     runtime,
@@ -10845,7 +10753,7 @@ impl InteractiveApplication {
         if menu.runtime_picker.is_some() {
             return;
         }
-        let order = &self.configuration.settings().ui.tool_manager.category_order;
+        let order = &TOOL_CATEGORY_ORDER;
         let current = order
             .iter()
             .position(|category| category == &menu.category)
@@ -10859,8 +10767,8 @@ impl InteractiveApplication {
         } else {
             (current + 1) % order.len()
         };
-        let category = order[next].clone();
-        self.rebuild_tool_menu(&category, None);
+        let category = order[next];
+        self.rebuild_tool_menu(category, None);
     }
 
     pub(in crate::editor::session) fn selected_tool_id(&self) -> Option<String> {
@@ -12743,7 +12651,7 @@ impl InteractiveApplication {
             AppEffect::CloseBuffer { force } => self.close_active_buffer(force),
             AppEffect::CycleBuffer(offset) => match self.state.cycle_buffer(
                 offset,
-                self.configuration.settings().editor.buffer_navigation_wrap,
+                true,
             ) {
                 Ok(_) => {
                     self.set_dashboard_visibility(false);

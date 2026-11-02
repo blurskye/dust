@@ -1,9 +1,13 @@
+use crate::editor::session::diagnostics::MAXIMUM_DIAGNOSTICS_PER_URI;
+use crate::editor::session::lsp::LSP_MAXIMUM_LOG_LINES;
+use crate::ui::render::{TERMINAL_PANEL_MAXIMUM_HEIGHT, TERMINAL_PANEL_MINIMUM_HEIGHT};
+use crate::ui::window::PANE_DEFAULT_RATIO;
 use super::{
-    AppEffect, BTreeMap, BufferRevision, ByteOffset, ByteRange, CommandInvocation, CommandValue,
+    AppEffect, BufferRevision, ByteOffset, ByteRange, CommandInvocation, CommandValue,
     DiagnosticOwner, DocumentEvent, DocumentationMarkupKind,
     DocumentationPopupKind, Duration, EditorMode, EditorOperation, EditorTransaction,
-    ExplorerMutation, ExplorerWatchService, HashSet, IndentError, Instant, InteractiveApplication,
-    InteractiveError, KeyEvent, KeyInputKind, LoadedConfig, LogLevel,
+    ExplorerMutation, HashSet, IndentError, Instant, InteractiveApplication,
+    InteractiveError, KeyEvent, KeyInputKind, LoadedConfig,
     LspEvent, LspFeature, LspFeatureResult, LspLaunch, LspMarkupContent, LspMarkupKind,
     LspProgressKind, LspRuntimeSource, LspWorkspaceEdit, MappingResolution, MatcherSource,
     NativeSurfaceTarget, PersistedLocation, PickerAction, PickerItem, PickerItemId, PickerPayload,
@@ -11,7 +15,7 @@ use super::{
     ResourceIntentKind, RestoreContext, RestoreUpdate, SyntaxDocument,
     SyntaxSupport, TerminalInput, TerminalPanelMode, TextBuffer, TextEdit, TextEditSet, UiEvent,
     UiFold, UiInlayHint, UiSyntaxSpan, UndoPolicy, VfsResult, WindowRect, command,
-    discover_executable, explorer_watch_policy, language_for_document, mode_name, path_from_file_uri,
+    discover_executable, language_for_document, mode_name, path_from_file_uri,
     rect_contains_point, terminal_tab_at_column,
 };
 
@@ -313,9 +317,7 @@ impl InteractiveApplication {
         let Some(bounds) = self.workspace_bounds() else {
             return false;
         };
-        let tab_line = self.configuration.settings().ui.tab_line.enabled
-            && (!self.configuration.settings().ui.tab_line.hide_when_single
-                || self.state.tabs.len() > 1);
+        let tab_line = self.state.tabs.len() > 1;
         let buffer_line = self.configuration.settings().ui.buffer_line.enabled
             && (!self
                 .configuration
@@ -435,14 +437,7 @@ impl InteractiveApplication {
                 self.resize_active_terminal_to_panel();
                 self.sync_terminal_panel();
                 self.sync_explorer_ui();
-                if self
-                    .configuration
-                    .settings()
-                    .ui
-                    .keep_cursor_visible_on_resize
-                {
-                    self.ensure_cursor_visible();
-                }
+                self.ensure_cursor_visible();
             }
             UiEvent::Key { key, kind } => match kind {
                 KeyInputKind::Press | KeyInputKind::Repeat if self.flash.is_some() => {
@@ -1292,18 +1287,6 @@ impl InteractiveApplication {
         let candidate =
             self.configuration
                 .prepare(loaded, &self.commands, self.extension.contributions())?;
-        let replacement_explorer_watch = if candidate.view().settings.ui.explorer.watch
-            != self.configuration.settings().ui.explorer.watch
-        {
-            Some(
-                ExplorerWatchService::start(explorer_watch_policy(
-                    &candidate.view().settings.ui.explorer.watch,
-                ))
-                .map_err(|error| error.to_string())?,
-            )
-        } else {
-            None
-        };
         let window_candidate = (candidate.view().settings.windows
             != self.configuration.settings().windows)
             .then(|| self.prepare_configured_window_rules(&candidate.view().settings.windows))
@@ -1314,42 +1297,8 @@ impl InteractiveApplication {
             self.window_session
                 .accept_current(window_candidate, &self.state.window_version())?;
         }
-        let restart_required = candidate.view().settings.runtime.vfs_queue_capacity
-            != self.configuration.settings().runtime.vfs_queue_capacity
-            || candidate.view().settings.ui.alternate_screen
-                != self.configuration.settings().ui.alternate_screen
-            || candidate.view().settings.ui.bracketed_paste
-                != self.configuration.settings().ui.bracketed_paste
-            || candidate.view().settings.ui.focus_events
-                != self.configuration.settings().ui.focus_events;
-        self.state.policy = crate::editor::EditingPolicy {
-            tab_width: candidate.view().settings.editor.tab_width,
-            indent_width: candidate.view().settings.editor.indent_width,
-            expand_tabs: candidate.view().settings.editor.expand_tabs,
-            undo_break_on_text_commit: candidate.view().settings.editor.undo_break_on_text_commit,
-            registers_enabled: candidate.view().settings.editor.registers.storage
-                == crate::config::RegisterStorage::Internal,
-            mirror_named_to_unnamed: candidate
-                .view()
-                .settings
-                .editor
-                .registers
-                .mirror_named_to_unnamed,
-            ambiguous_width_wide: candidate.view().settings.editor.ambiguous_width
-                == crate::config::AmbiguousWidth::Wide,
-            autopairs: candidate.view().settings.editor.autopairs,
-        };
+        self.state.policy = candidate.view().settings.editor.editing_policy();
         self.state.mark_editor_changed();
-        if candidate.view().settings.observability != self.configuration.settings().observability {
-            self.notices
-                .configure_logs(&candidate.view().settings, true);
-            self.notices.record(
-                LogLevel::Info,
-                "configuration",
-                "logging-reconfigured",
-                BTreeMap::new(),
-            );
-        }
         self.recovery.configure(
             &self.configuration.settings().recovery,
             &candidate.view().settings.recovery,
@@ -1367,20 +1316,13 @@ impl InteractiveApplication {
                 self.diagnostics.clear_owner(&owner);
             }
         }
-        self.diagnostics.set_limits(
-            self.configuration.settings().workspace.maximum_diagnostics,
-            self.configuration
-                .settings()
-                .workspace
-                .maximum_diagnostics_per_owner_uri,
-        );
         self.sync_ui_diagnostics();
         if self.workspace_edits.preparing() || self.workspace_edits.proposal().is_some() {
             self.reject_workspace_proposal();
         }
         self.retire_workspace_resources("configuration changed");
         self.retire_plugin_edit_sources();
-        self.input.reconfigure(self.configuration.settings());
+        self.input.reconfigure();
         if self
             .terminal_session
             .configure(&self.configuration.settings().terminals)
@@ -1409,23 +1351,11 @@ impl InteractiveApplication {
             let _ = self.language.configure(&key, configuration);
         }
         self.schedule_lsp_inlay_refresh(true);
-        self.explorer.reconfigure_watch(replacement_explorer_watch);
-        if !self.configuration.settings().ui.explorer.bundled_enabled {
-            self.ui.explorer = None;
-            self.set_explorer_focus(false);
-        }
+        self.explorer.reset_watch_observation();
         self.reconcile_explorer_watch();
         self.window_session.constrain_terminal_height(
-            self.configuration
-                .settings()
-                .ui
-                .terminal_panel
-                .minimum_height,
-            self.configuration
-                .settings()
-                .ui
-                .terminal_panel
-                .maximum_height,
+            TERMINAL_PANEL_MINIMUM_HEIGHT,
+            TERMINAL_PANEL_MAXIMUM_HEIGHT,
         );
         self.resize_active_terminal_to_panel();
         self.sync_terminal_panel();
@@ -1439,16 +1369,11 @@ impl InteractiveApplication {
         // The Settings page shows the new values itself; a toast for each change is noise.
         if self.ui.settings.is_some() {
             self.refresh_settings();
-            if restart_required {
-                self.settings_status(self.message("reloaded_restart", &[]), false);
-            }
             self.ensure_cursor_visible();
             return Ok(());
         }
         self.notify_message(
-            if restart_required {
-                self.message("reloaded_restart", &[])
-            } else if automatic {
+            if automatic {
                 self.message("auto_reloaded", &[])
             } else {
                 self.message("reloaded", &[])
@@ -1537,7 +1462,6 @@ impl InteractiveApplication {
                     }
                     self.recovery.stopped();
                     self.search.clear_preview();
-                    self.explorer.clear_preview();
                     self.explorer.retire_intents();
                     self.persistence.restore_transport_stopped();
                     if self.workspace_edits.proposal().is_some() || self.workspace_edits.preparing()
@@ -1651,15 +1575,6 @@ impl InteractiveApplication {
                         self.configuration.binding_revision(),
                     ) {
                         self.sync_picker_ui();
-                        continue;
-                    }
-                    if self.explorer.accept_preview(
-                        id,
-                        &result,
-                        self.workspace.version(),
-                        self.configuration.binding_revision(),
-                    ) {
-                        self.sync_explorer_ui();
                         continue;
                     }
                     let pending = self
@@ -1904,7 +1819,7 @@ impl InteractiveApplication {
             if activate {
                 if reply.split && self.state.active_view.is_some() {
                     if let Err(error) =
-                        draft.split_document(self.configuration.settings().ui.panes.default_ratio)
+                        draft.split_document(PANE_DEFAULT_RATIO)
                     {
                         self.show_error(error);
                         return;
@@ -2238,13 +2153,7 @@ impl InteractiveApplication {
                     state.path.as_deref(),
                     state.text.chunks().next().unwrap_or_default(),
                 ),
-                enabled: !(self.effective_large_file(buffer)
-                    && self
-                        .configuration
-                        .settings()
-                        .editor
-                        .large_file
-                        .disable_syntax),
+                enabled: !self.effective_large_file(buffer),
             })
             .collect::<Vec<_>>();
         let too_large = self.message("syntax_source_too_large", &[]);
@@ -2368,6 +2277,7 @@ impl InteractiveApplication {
             }
             if self.language.projection().is_some() {
                 self.schedule_lsp_inlay_refresh(true);
+        self.explorer.reset_watch_observation();
             }
         }
     }
@@ -2428,7 +2338,7 @@ impl InteractiveApplication {
 
     pub(in crate::editor::session) fn append_lsp_log(&mut self, line: String) {
         self.language
-            .append_log(line, self.configuration.settings().lsp.maximum_log_lines);
+            .append_log(line, LSP_MAXIMUM_LOG_LINES);
         if self.search.picker_surface() == PickerSurfaceKind::Logs && self.ui.picker.is_some() {
             self.show_lsp_logs();
         }
@@ -2470,6 +2380,7 @@ impl InteractiveApplication {
             }
             // Hints asked for while the server was indexing or checking come back empty.
             self.schedule_lsp_inlay_refresh(true);
+        self.explorer.reset_watch_observation();
         }
         self.ui.set(frame, |ui| &mut ui.lsp_progress_frame);
     }
@@ -2619,6 +2530,7 @@ impl InteractiveApplication {
                 } => {
                     if self.language.running(&server, capabilities) {
                         self.schedule_lsp_inlay_refresh(true);
+        self.explorer.reset_watch_observation();
                     }
                     self.request_lsp_colors();
                 }
@@ -2626,6 +2538,7 @@ impl InteractiveApplication {
                 LspEvent::InlayHintsRefresh { server } => {
                     if self.language.active().map(String::as_str) == Some(&server) {
                         self.schedule_lsp_inlay_refresh(true);
+        self.explorer.reset_watch_observation();
                     }
                 }
                 LspEvent::Diagnostics {
@@ -2642,10 +2555,7 @@ impl InteractiveApplication {
                             (&uri, version, diagnostics),
                             (
                                 false,
-                                self.configuration
-                                    .settings()
-                                    .workspace
-                                    .maximum_diagnostics_per_owner_uri,
+                                MAXIMUM_DIAGNOSTICS_PER_URI,
                                 &self.lsp_server_label(&server),
                             ),
                         )
@@ -2811,7 +2721,7 @@ impl InteractiveApplication {
     pub(in crate::editor::session) fn schedule_lsp_restart(&mut self, key: String) {
         if let Some(server) =
             self.language
-                .schedule_restart(&key, &self.configuration.settings().lsp, Instant::now())
+                .schedule_restart(&key, Instant::now())
         {
             self.show_error(self.message("lsp_restart_disabled", &[("server", server)]));
         }
@@ -2964,6 +2874,7 @@ impl InteractiveApplication {
         }
         if matches!(feature, LspFeature::InlayHints { .. }) {
             self.schedule_lsp_inlay_refresh(true);
+        self.explorer.reset_watch_observation();
             self.process_lsp_inlay_refresh();
             return;
         }
@@ -3156,8 +3067,8 @@ impl InteractiveApplication {
             available
         };
         let text_width = available
-            .min(usize::from(policy.max_width))
-            .saturating_sub(2 + 2 * usize::from(policy.horizontal_padding));
+            .min(usize::from(crate::ui::render::overlays::DOCUMENTATION_MAX_WIDTH))
+            .saturating_sub(2 + 2 * usize::from(crate::ui::render::overlays::DOCUMENTATION_PADDING));
         self.input.present_documentation(
             kind,
             title,
@@ -3374,10 +3285,7 @@ impl InteractiveApplication {
                             (uri, None, result.items),
                             (
                                 true,
-                                self.configuration
-                                    .settings()
-                                    .workspace
-                                    .maximum_diagnostics_per_owner_uri,
+                                MAXIMUM_DIAGNOSTICS_PER_URI,
                                 &server_label,
                             ),
                         )
@@ -3696,11 +3604,7 @@ impl InteractiveApplication {
             }
         };
         let maximum = usize::try_from(
-            self.configuration
-                .settings()
-                .workspace
-                .search
-                .maximum_file_bytes,
+            crate::editor::session::search::SEARCH_MAXIMUM_FILE_BYTES,
         )
         .unwrap_or(usize::MAX);
         let roots = self

@@ -1,9 +1,12 @@
 //! Content rectangles shared by surface painting and interaction.
 use crate::{
     config::{AmbiguousWidth, Config},
+    ui::render::{explorer::EXPLORER_MAXIMUM_VISIBLE_ROWS, overlays::DOCUMENTATION_MAX_HEIGHT},
     ui::{PickerSurfaceKind, PickerUiState, window::WindowRect},
 };
 use unicode_width::UnicodeWidthStr;
+
+pub(crate) const NOTIFICATION_MAX_WIDTH: u16 = 120;
 
 pub(crate) fn text_width(text: &str, ambiguous_width: AmbiguousWidth) -> usize {
     if ambiguous_width == AmbiguousWidth::Wide {
@@ -28,10 +31,9 @@ pub struct PickerContentGeometry {
 #[must_use]
 pub(crate) fn picker_window_geometry(
     picker: &PickerUiState,
-    config: &Config,
     bounds: WindowRect,
 ) -> Option<WindowRect> {
-    let mut rect = crate::ui::picker_geometry(config, bounds)?;
+    let mut rect = crate::ui::picker_geometry(bounds)?;
     if picker.surface == crate::ui::PickerSurfaceKind::Theme {
         rect.width = rect.width.min(64);
         rect.height = rect
@@ -158,7 +160,7 @@ pub fn picker_content_geometry(
 const EXPLORER_SEARCH_ROWS: u16 = 3;
 
 #[must_use]
-pub fn explorer_body_geometry(rect: WindowRect, config: &Config) -> WindowRect {
+pub fn explorer_body_geometry(rect: WindowRect) -> WindowRect {
     WindowRect {
         x: rect.x,
         y: rect.y.saturating_add(EXPLORER_SEARCH_ROWS).min(rect.y.saturating_add(rect.height)),
@@ -166,7 +168,7 @@ pub fn explorer_body_geometry(rect: WindowRect, config: &Config) -> WindowRect {
         height: rect
             .height
             .saturating_sub(EXPLORER_SEARCH_ROWS)
-            .min(u16::try_from(config.ui.explorer.maximum_visible_rows).unwrap_or(u16::MAX)),
+            .min(u16::try_from(EXPLORER_MAXIMUM_VISIBLE_ROWS).unwrap_or(u16::MAX)),
     }
 }
 
@@ -175,20 +177,16 @@ pub fn documentation_page_rows(config: &Config, width: u16, height: u16) -> usiz
     if !config.ui.documentation_popup.enabled || width < 4 {
         return 0;
     }
-    usize::from(config.ui.documentation_popup.max_height.saturating_sub(2))
+    usize::from(DOCUMENTATION_MAX_HEIGHT.saturating_sub(2))
         .min(usize::from(height.saturating_sub(2)))
 }
 
 pub(crate) fn error_notification_geometry(
-    config: &Config,
     width: u16,
     height: u16,
 ) -> Option<WindowRect> {
     let margin = 1_u16.min(width / 2);
-    let available = config
-        .ui
-        .notifications
-        .max_width
+    let available = NOTIFICATION_MAX_WIDTH
         .min(width.saturating_sub(margin.saturating_mul(2)));
     (available >= 4 && height >= 3).then_some(WindowRect {
         x: width.saturating_sub(margin).saturating_sub(available),

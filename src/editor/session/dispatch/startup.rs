@@ -1,10 +1,18 @@
+use crate::editor::session::diagnostics::{MAXIMUM_DIAGNOSTICS, MAXIMUM_DIAGNOSTICS_PER_URI};
+use crate::editor::session::documents::VFS_QUEUE_CAPACITY;
+use crate::editor::input::ABSOLUTE_MAX_COUNT;
+use crate::editor::session::persistence::{
+    PERSISTENCE_QUEUE_CAPACITY, STATE_FILE, STATE_MAXIMUM_BYTES,
+};
+use crate::editor::session::syntax::SYNTAX_QUEUE_CAPACITY;
+use crate::editor::session::workspace::TRUST_QUEUE_CAPACITY;
 use super::super::configuration::resolve_configuration;
 use super::{
     CommandRegistry, ConfigurationSession, DebugSession, DocumentSession, ExplorerWatchService,
     InputSession, InteractiveApplication, InteractiveError, LoadedConfig, PathBuf,
     PersistenceService, RegistryService, RootIdentity, StartupTarget, SyntaxSession, TextBuffer,
     UiState, VfsWorker, WindowSession, WorkspaceId, WorkspaceState, build_state,
-    explorer_watch_policy, register_app_commands, register_builtin_commands,
+    register_app_commands, register_builtin_commands,
 };
 
 impl InteractiveApplication {
@@ -37,26 +45,11 @@ impl InteractiveApplication {
                     (resolved, Some(message))
                 }
             };
-        state.policy = crate::editor::EditingPolicy {
-            tab_width: configuration.settings.editor.tab_width,
-            indent_width: configuration.settings.editor.indent_width,
-            expand_tabs: configuration.settings.editor.expand_tabs,
-            undo_break_on_text_commit: configuration.settings.editor.undo_break_on_text_commit,
-            registers_enabled: configuration.settings.editor.registers.storage
-                == crate::config::RegisterStorage::Internal,
-            mirror_named_to_unnamed: configuration
-                .settings
-                .editor
-                .registers
-                .mirror_named_to_unnamed,
-            ambiguous_width_wide: configuration.settings.editor.ambiguous_width
-                == crate::config::AmbiguousWidth::Wide,
-            autopairs: configuration.settings.editor.autopairs,
-        };
+        state.policy = configuration.settings.editor.editing_policy();
         let persistence = &configuration.settings.persistence;
         state.undo_directory = (persistence.enabled && persistence.undo_history)
             .then(|| state_directory.join("undo"));
-        state.undo_maximum_bytes = persistence.maximum_file_bytes;
+        state.undo_maximum_bytes = STATE_MAXIMUM_BYTES;
         let dashboard_visible = matches!(startup, StartupTarget::Dashboard { .. })
             && configuration.settings.startup.show_dashboard;
         if matches!(startup, StartupTarget::Dashboard { .. }) && !dashboard_visible {
@@ -74,28 +67,23 @@ impl InteractiveApplication {
         )
         .map_err(|error| InteractiveError::Configuration(error.to_string()))?;
         let diagnostics = super::super::diagnostics::DiagnosticSession::new(
-            configuration.settings.workspace.maximum_diagnostics,
-            configuration
-                .settings
-                .workspace
-                .maximum_diagnostics_per_owner_uri,
+            MAXIMUM_DIAGNOSTICS,
+            MAXIMUM_DIAGNOSTICS_PER_URI,
         );
-        let vfs_queue_capacity = configuration.settings.runtime.vfs_queue_capacity;
-        let syntax_queue_capacity = configuration.settings.syntax.queue_capacity;
-        let persistence_queue_capacity = configuration.settings.persistence.queue_capacity;
-        let process_event_capacity = configuration.settings.processes.event_capacity;
+        let vfs_queue_capacity = VFS_QUEUE_CAPACITY;
+        let syntax_queue_capacity = SYNTAX_QUEUE_CAPACITY;
+        let persistence_queue_capacity = PERSISTENCE_QUEUE_CAPACITY;
         let tasks = crate::editor::session::tasks::TaskSession::new(&configuration.settings);
-        let persistence_path = state_directory.join(&configuration.settings.persistence.state_file);
+        let persistence_path = state_directory.join(STATE_FILE);
         let workspace = super::super::workspace::WorkspaceSession::new(
             workspace,
             state_directory.join("trusted-workspaces.toml"),
-            configuration.settings.workspace.trust_state_queue_capacity,
+            TRUST_QUEUE_CAPACITY,
             initialize_trust,
             safe_mode,
-            process_event_capacity,
+            crate::editor::session::tasks::PROCESS_EVENT_CAPACITY,
         );
         let notices = super::super::notifications::NoticeSession::new(
-            &configuration.settings,
             persist_logs,
             state_directory.join("live-health.json"),
             clock.monotonic(),
@@ -103,16 +91,14 @@ impl InteractiveApplication {
         let plugin_queue_capacity = configuration.settings.plugins.queue_capacity;
         let plugin_storage_root = state_directory.join("plugin-data-v1");
         let registry = RegistryService::start(
-            configuration.settings.packages.registry.clone(),
+            crate::tools::RegistryPolicy::default(),
             state_directory.join("packages/registry-cache"),
         )
         .map_err(|error| InteractiveError::Configuration(error.to_string()))?;
         let terminal_session =
             super::super::terminal::TerminalSession::new(&configuration.settings.terminals);
         let terminal_panel_height = configuration.settings.ui.terminal_panel.height;
-        let explorer_watch = ExplorerWatchService::start(explorer_watch_policy(
-            &configuration.settings.ui.explorer.watch,
-        ))
+        let explorer_watch = ExplorerWatchService::start(crate::files::ExplorerWatchPolicy::default())
         .map_err(|error| InteractiveError::Configuration(error.to_string()))?;
         let documents = DocumentSession::new(
             VfsWorker::start(vfs_queue_capacity),
@@ -140,7 +126,7 @@ impl InteractiveApplication {
             diagnostics,
             workspace_edits: super::super::workspace_edits::WorkspaceEditSession::default(),
             commands,
-            input: InputSession::new(configuration.settings.input.count_limit),
+            input: InputSession::new(ABSOLUTE_MAX_COUNT),
             configuration: ConfigurationSession::new(configuration, use_user_configuration),
             ui: super::Tracked::new(UiState {
                 config_diagnostic,

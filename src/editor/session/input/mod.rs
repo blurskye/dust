@@ -3,6 +3,10 @@ mod mouse;
 mod prompts;
 mod replay;
 mod snippets;
+
+pub(crate) const COMPLETION_LIMIT: usize = 1000;
+pub(crate) const HISTORY_LIMIT: usize = 100;
+
 pub(in crate::editor::session) use mouse::{MouseDocument, MouseGeometry};
 pub(in crate::editor::session) use replay::ReplayError;
 pub(in crate::editor::session) use snippets::SnippetDocument;
@@ -211,11 +215,9 @@ impl InputSession {
             .filter(|popup| popup.kind != crate::ui::DocumentationPopupKind::Completion)
             .map(|_| "documentation")
     }
-    pub(super) fn reconfigure(&mut self, policy: &crate::config::Config) {
-        self.modal.set_count_limit(policy.input.count_limit);
+    pub(super) fn reconfigure(&mut self) {
         self.cancel_mapping();
         self.cancel_prompt_completions();
-        self.configure_history(&policy.history);
         self.close_documentation();
         if let Some(prompt) = &mut self.prompt {
             prompt.completions.clear();
@@ -357,18 +359,19 @@ impl InputSession {
                 let group = row.group_id.is_some();
                 KeyHintUiRow {
                     next_key: row.next_key,
-                    label: if group || (row.direct && policy.show_command_titles) {
+                    label: if group || row.direct {
                         row.label
                     } else {
-                        policy.fallback_label.clone()
+                        crate::ui::render::terminal::KEY_HINT_FALLBACK_LABEL.into()
                     },
-                    icon: (group && policy.show_group_icons)
-                        .then_some(row.icon)
-                        .flatten(),
+                    icon: if group { row.icon } else { None },
                     group,
                 }
             })
-            .take(usize::from(policy.max_rows) * usize::from(policy.max_columns))
+            .take(
+                usize::from(crate::ui::render::terminal::KEY_HINT_MAX_ROWS)
+                    * usize::from(crate::ui::render::terminal::KEY_HINT_MAX_COLUMNS),
+            )
             .collect::<Vec<_>>();
         if !rows.is_empty() {
             self.hints = Some(KeyHintUiState {

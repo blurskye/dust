@@ -5,6 +5,11 @@
 //! overlay, and hidden windows together; the bundled explorer and PTYs are
 //! ordinary graph resources, while editor layout mutation remains transitional.
 
+pub(crate) const PANE_DEFAULT_RATIO: u16 = 500;
+pub(crate) const PANE_RESIZE_STEP: u16 = 50;
+pub(crate) const PANE_MINIMUM_WIDTH: u16 = 8;
+pub(crate) const PANE_MINIMUM_HEIGHT: u16 = 3;
+
 const MAXIMUM_CONTENT_TYPE_ID_BYTES: usize = 128;
 const MAXIMUM_OWNER_BYTES: usize = 128;
 const MAXIMUM_TITLE_BYTES: usize = 4 * 1024;

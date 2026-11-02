@@ -305,21 +305,6 @@ fn theme_picker_previews_cancels_applies_and_never_overwrites_a_newer_reload() {
 }
 
 #[test]
-fn configured_notification_timeout_expires_visible_message() {
-    let mut app = app();
-    {
-        let mut fixture = app.configuration.fixture_snapshot();
-        fixture.settings.ui.notifications.timeout_ms = 1;
-        app.configuration.install_fixture(fixture);
-    }
-    app.notify_message("transient".into(), false);
-    app.update_notification_timer();
-    std::thread::sleep(Duration::from_millis(2));
-    app.update_notification_timer();
-    assert!(app.ui.notification.is_none());
-}
-
-#[test]
 fn stale_configuration_generations_are_never_applied() {
     assert!(super::configuration_generation_is_newer(4, 5));
     assert!(!super::configuration_generation_is_newer(5, 5));
@@ -332,13 +317,13 @@ fn complete_configuration_reload_is_atomic() {
     let original_theme = app.configuration.theme().clone();
     let explanation = app
         .configuration
-        .explain("ui.command_line.width")
+        .explain("editor.tab_width")
         .expect("explanation");
     assert_eq!(explanation.source, "bundled defaults");
     assert_eq!(explanation.contributors, vec!["bundled defaults"]);
-    let original_width = app.configuration.settings().ui.command_line.width;
+    let original_width = app.configuration.settings().editor.tab_width;
     let mut invalid = crate::config::load_bundled_config();
-    invalid.config.ui.command_line.width = original_width + 1;
+    invalid.config.editor.tab_width = original_width + 1;
     invalid
         .config
         .input
@@ -346,18 +331,18 @@ fn complete_configuration_reload_is_atomic() {
         .insert("editor.insert".into(), "unknown.command".into());
     assert!(app.apply_configuration_candidate(invalid, false).is_err());
     assert_eq!(
-        app.configuration.settings().ui.command_line.width,
+        app.configuration.settings().editor.tab_width,
         original_width
     );
     assert_eq!(app.configuration.theme(), &original_theme);
 
     let mut valid = crate::config::load_bundled_config();
-    valid.config.ui.command_line.width = original_width + 1;
+    valid.config.editor.tab_width = original_width + 1;
     valid.dashboard.identity = "CUSTOM DASH".into();
     app.apply_configuration_candidate(valid, false)
         .expect("valid complete snapshot");
     assert_eq!(
-        app.configuration.settings().ui.command_line.width,
+        app.configuration.settings().editor.tab_width,
         original_width + 1
     );
     assert_eq!(app.configuration.dashboard().identity, "CUSTOM DASH");
@@ -530,7 +515,6 @@ fn symbolic_leaders_expand_before_dispatch_and_preserve_literal_space_actions() 
     });
     loaded.bundled_count = bundled_count;
     let policy = crate::config::KeymapPolicyConfig {
-        load_bundled_defaults: true,
         leader: "\\".into(),
         local_leader: ";".into(),
     };
@@ -629,37 +613,6 @@ fn invalid_leader_policy_rejects_the_complete_configuration_transactionally() {
 }
 
 #[test]
-fn disabling_bundled_keymaps_keeps_only_explicit_user_declarations() {
-    let app = app();
-    let mut loaded = crate::config::load_bundled_config().keymaps;
-    loaded.entries.push(crate::config::KeymapEntry {
-        id: "user.test.disabling-bundled-keymaps-keeps-only-explicit-user-declarations".into(),
-        context: Some("dashboard".into()),
-        mode: String::new(),
-        keys: Some("<leader> z".into()),
-        command: Some("health.open".into()),
-        arguments: Default::default(),
-        unmap: false,
-        disable: false,
-        pass_through: false,
-        desc: None,
-    });
-    let policy = crate::config::KeymapPolicyConfig {
-        load_bundled_defaults: false,
-        leader: ",".into(),
-        local_leader: ";".into(),
-    };
-    let (keymaps, diagnostic) = compile_keymaps(&app.commands, &loaded, &policy);
-    assert!(diagnostic.is_none(), "{diagnostic:?}");
-    assert!(
-        keymaps
-            .binding_for("editor.normal", "buffer.picker.open")
-            .is_none()
-    );
-    assert_eq!(keymaps.binding_for("dashboard", "health.open"), Some(", z"));
-}
-
-#[test]
 fn identity_rebind_moves_a_bundled_mapping_without_leaving_the_old_sequence() {
     let app = app();
     let target = "builtin.global.files-buffers.editor-normal";
@@ -742,8 +695,7 @@ fn identity_disable_inherits_symbolic_location_and_tracks_leader_changes() {
     });
     for leader in [",", ";"] {
         let policy = crate::config::KeymapPolicyConfig {
-            load_bundled_defaults: true,
-            leader: leader.into(),
+                leader: leader.into(),
             local_leader: "\\".into(),
         };
         let (keymaps, diagnostic) = compile_keymaps(&app.commands, &loaded, &policy);
@@ -782,16 +734,13 @@ fn identity_disable_inherits_symbolic_location_and_tracks_leader_changes() {
 fn identity_disable_rejects_unknown_omitted_and_overdeclared_targets() {
     let app = app();
     let target = "builtin.global.files-explorer.editor-normal";
-    for (load_bundled_defaults, id, context, expected) in [
+    for (id, context, expected) in [
         (
-            true,
             "user.missing.binding",
             None,
             "targets no lower contribution",
         ),
-        (false, target, None, "targets no lower contribution"),
         (
-            true,
             target,
             Some("editor".to_owned()),
             "must contain only `id` and `disable = true`",
@@ -810,10 +759,7 @@ fn identity_disable_rejects_unknown_omitted_and_overdeclared_targets() {
             pass_through: false,
             desc: None,
         });
-        let policy = crate::config::KeymapPolicyConfig {
-            load_bundled_defaults,
-            ..crate::config::KeymapPolicyConfig::default()
-        };
+        let policy = crate::config::KeymapPolicyConfig::default();
         let (_, diagnostic) = compile_keymaps(&app.commands, &loaded, &policy);
         assert!(
             diagnostic

@@ -4,6 +4,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     config::{AmbiguousWidth, Config, EditorConfig, LineNumbers},
+    ui::render::editor::{GUTTER_PADDING, LINE_NUMBER_SEPARATOR},
     editor::{
         EditorState,
         text::{ByteOffset, ByteRange, DisplayWidthPolicy, display_column_at},
@@ -728,17 +729,14 @@ pub(super) fn configured_editor_gutter_width(
     }
     line_number_digits(text)
         .max(minimum_digits)
-        .saturating_add(text_width(
-            &config.line_number_separator,
-            config.ambiguous_width,
-        ))
+        .saturating_add(text_width(LINE_NUMBER_SEPARATOR, config.ambiguous_width))
         .saturating_add(usize::from(config.git_signs.enabled))
-        .saturating_add(usize::from(config.gutter_padding))
+        .saturating_add(usize::from(GUTTER_PADDING))
 }
 
 pub(super) fn git_sign_column(gutter_width: u16, config: &EditorConfig) -> Option<u16> {
     config.git_signs.enabled.then(|| {
-        let trailing_padding = config.gutter_padding.min(gutter_width.saturating_sub(1));
+        let trailing_padding = GUTTER_PADDING.min(gutter_width.saturating_sub(1));
         gutter_width
             .saturating_sub(trailing_padding)
             .saturating_sub(1)

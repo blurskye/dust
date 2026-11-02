@@ -36,6 +36,20 @@ pub struct ExplorerWatchPolicy {
     pub maximum_path_bytes: usize,
     pub queue_capacity: usize,
 }
+impl Default for ExplorerWatchPolicy {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            poll_interval: Duration::from_millis(500),
+            debounce: Duration::from_millis(100),
+            maximum_directories: 128,
+            maximum_entries_per_directory: 10_000,
+            maximum_events: 128,
+            maximum_path_bytes: 65_536,
+            queue_capacity: 8,
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ExplorerWatchGeneration(pub u64);
 #[derive(Clone, Debug, Eq, PartialEq)]

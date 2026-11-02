@@ -1,4 +1,5 @@
 mod commands;
+use crate::ui::window::{PANE_DEFAULT_RATIO, PANE_RESIZE_STEP};
 use super::NativeSurfaceTarget;
 use super::{EditorTopology, EditorWindowCandidate, NativeDescriptions, WindowSession};
 use crate::ui::window::{ContentTypeId, WindowTarget};
@@ -614,22 +615,20 @@ impl WindowSession {
         &self,
         action: LayoutAction,
         source: &EditorTopology<'_>,
-        policy: &crate::config::Config,
         catalog: PluginCatalogVersion,
     ) -> Result<WindowPlan, LayoutPlanError> {
-        self.plan_layout_inner(action, source, policy, catalog, true)
+        self.plan_layout_inner(action, source, catalog, true)
     }
     pub(in crate::editor::session) fn plan_accepted_editor_close(
         &self,
         target: EditorCloseTarget,
         discarded: Vec<BufferId>,
         source: &EditorTopology<'_>,
-        policy: &crate::config::Config,
         catalog: PluginCatalogVersion,
     ) -> Result<WindowPlan, LayoutPlanError> {
         let mut plan = match target {
             EditorCloseTarget::Layout(action) => {
-                self.plan_layout_inner(action, source, policy, catalog, false)?
+                self.plan_layout_inner(action, source, catalog, false)?
             }
             EditorCloseTarget::Window { pane, window } => {
                 let mut plan = self
@@ -675,7 +674,6 @@ impl WindowSession {
         &self,
         action: LayoutAction,
         source: &EditorTopology<'_>,
-        policy: &crate::config::Config,
         catalog: PluginCatalogVersion,
         reject_dirty: bool,
     ) -> Result<WindowPlan, LayoutPlanError> {
@@ -713,23 +711,23 @@ impl WindowSession {
         plan.operations.push(match action {
             LayoutAction::Split(axis) => EditorOperation::SplitPane {
                 axis,
-                ratio: policy.ui.panes.default_ratio,
+                ratio: PANE_DEFAULT_RATIO,
             },
             LayoutAction::ClosePane => EditorOperation::ClosePane,
             LayoutAction::ResizePane(direction) => EditorOperation::ResizePane {
                 delta: i16::from(direction)
-                    .saturating_mul(i16::try_from(policy.ui.panes.resize_step).unwrap_or(i16::MAX)),
+                    .saturating_mul(i16::try_from(PANE_RESIZE_STEP).unwrap_or(i16::MAX)),
             },
             LayoutAction::FocusPane(offset) => EditorOperation::FocusPane {
                 offset,
-                wrap: policy.ui.panes.focus_wrap,
+                wrap: true,
             },
             LayoutAction::NewTab => EditorOperation::NewTab,
             LayoutAction::CloseTab => EditorOperation::CloseTab,
             LayoutAction::Zoom => EditorOperation::ToggleZoom,
             LayoutAction::FocusTab(offset) => EditorOperation::FocusTab {
                 offset,
-                wrap: policy.ui.tab_line.focus_wrap,
+                wrap: true,
             },
         });
         plan.hide_dashboard = true;

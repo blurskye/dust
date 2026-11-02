@@ -34,10 +34,6 @@ pub struct DebugSessionConfig {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DebugConfig {
-    pub maximum_arguments: usize,
-    pub maximum_environment: usize,
-    pub maximum_breakpoints: usize,
-    pub maximum_watches: usize,
     #[serde(default)]
     pub adapters: BTreeMap<String, DebugAdapterConfig>,
     #[serde(default)]
@@ -46,10 +42,6 @@ pub struct DebugConfig {
 impl Default for DebugConfig {
     fn default() -> Self {
         Self {
-            maximum_arguments: 4096,
-            maximum_environment: 4096,
-            maximum_breakpoints: 10000,
-            maximum_watches: 1000,
             adapters: BTreeMap::new(),
             sessions: BTreeMap::new(),
         }

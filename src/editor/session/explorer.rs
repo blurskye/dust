@@ -1,6 +1,5 @@
-//! Explorer tree, directory lane, preview, watch and viewport ownership.
+//! Explorer tree, directory lane, watch and viewport ownership.
 mod intent;
-mod preview;
 use super::workspace::WorkspaceVersion;
 use crate::files::{
     DirectoryEntryKind, DirectoryService, ExplorerWatchBatch, ExplorerWatchEvent,
@@ -58,7 +57,6 @@ pub(in crate::editor::session) struct ExplorerSession {
     next_view: u64,
     view_identity: Arc<()>,
     view_source: Arc<()>,
-    preview: Option<preview::Preview>,
     mutation: Option<intent::MutationIntent>,
     rename: Option<intent::RenamePrompt>,
     open: Option<intent::OpenIntent>,
@@ -95,7 +93,6 @@ impl ExplorerSession {
             next_view: PRIMARY_EXPLORER_VIEW.0,
             view_identity: Arc::new(()),
             view_source: Arc::new(()),
-            preview: None,
             mutation: None,
             rename: None,
             open: None,
@@ -238,7 +235,6 @@ impl ExplorerSession {
         if self.active_view != view {
             self.active_view = view;
             self.mark_view_changed();
-            self.retire_changed_preview_selection();
         }
         Ok(())
     }
@@ -331,27 +327,22 @@ impl ExplorerSession {
     pub(in crate::editor::session) fn select(&mut self, id: ExplorerNodeId) {
         self.tree_mut().select(id);
         self.mark_view_changed();
-        self.retire_changed_preview_selection();
     }
     pub(in crate::editor::session) fn select_first_child(&mut self) {
         self.tree_mut().select_first_child();
         self.mark_view_changed();
-        self.retire_changed_preview_selection();
     }
     pub(in crate::editor::session) fn toggle_loaded(&mut self, id: ExplorerNodeId) {
         self.tree_mut().toggle_loaded(id);
         self.mark_view_changed();
-        self.retire_changed_preview_selection();
     }
     pub(in crate::editor::session) fn navigate(&mut self, delta: isize) {
         self.tree_mut().move_selection(delta);
         self.mark_view_changed();
-        self.retire_changed_preview_selection();
     }
     pub(in crate::editor::session) fn parent(&mut self) {
         self.tree_mut().collapse_or_parent();
         self.mark_view_changed();
-        self.retire_changed_preview_selection();
     }
     pub(in crate::editor::session) fn start_search(&mut self) {
         self.searching = true;
@@ -392,7 +383,6 @@ impl ExplorerSession {
             self.tree_mut().select(found);
         }
         self.mark_view_changed();
-        self.retire_changed_preview_selection();
     }
     /// Stop typing; `keep` leaves the tree filtered so `j`/`k` and enter work on the matches.
     pub(in crate::editor::session) fn stop_search(&mut self, keep: bool) {
@@ -510,7 +500,6 @@ impl ExplorerSession {
                 self.synchronize_tree_data(source_view);
                 self.mark_view_changed();
                 if root_selected && self.root_count == 1 && self.active_view == source_view {
-                    self.retire_changed_preview_selection();
                 }
                 Some(Ok(()))
             }
@@ -550,7 +539,6 @@ impl ExplorerSession {
         if let Some(id) = self.tree().id_for_path(&target) {
             self.tree_mut().select(id);
             self.mark_view_changed();
-            self.retire_changed_preview_selection();
             self.follow = None;
             return Ok(None);
         }
@@ -564,7 +552,6 @@ impl ExplorerSession {
         };
         self.tree_mut().select(id);
         self.mark_view_changed();
-        self.retire_changed_preview_selection();
         if self
             .tree()
             .node(id)
@@ -676,15 +663,7 @@ impl ExplorerSession {
         }
         self.tree().unloaded_directory(SEARCH_ENTRY_LIMIT)
     }
-    pub(in crate::editor::session) fn reconfigure_watch(
-        &mut self,
-        watch: Option<ExplorerWatchService>,
-    ) {
-        if let Some(watch) = watch {
-            self.watch = watch;
-            self.watch_generation = None;
-            self.watch_reload.clear();
-        }
+    pub(in crate::editor::session) fn reset_watch_observation(&mut self) {
         self.watch_observation = None;
     }
     pub(in crate::editor::session) fn projection_for(
@@ -864,7 +843,6 @@ impl ExplorerSession {
             rows,
             scroll,
             loading: self.pending.is_some(),
-            preview_lines: self.preview_lines(),
         }
     }
     #[cfg(test)]
@@ -898,20 +876,6 @@ fn explorer_icon_role(color: crate::files::ExplorerIconColor) -> ExplorerSegment
     }
 }
 
-pub(in crate::editor::session) fn explorer_watch_policy(
-    config: &crate::config::ExplorerWatchConfig,
-) -> crate::files::ExplorerWatchPolicy {
-    crate::files::ExplorerWatchPolicy {
-        enabled: config.enabled,
-        poll_interval: std::time::Duration::from_millis(config.poll_interval_ms),
-        debounce: std::time::Duration::from_millis(config.debounce_ms),
-        maximum_directories: config.maximum_directories,
-        maximum_entries_per_directory: config.maximum_entries_per_directory,
-        maximum_events: config.maximum_events,
-        maximum_path_bytes: config.maximum_path_bytes,
-        queue_capacity: config.queue_capacity,
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -932,9 +896,8 @@ mod tests {
             false,
             1,
         );
-        let config = crate::config::load_bundled_config();
         let mut owner = ExplorerSession::new(
-            ExplorerWatchService::start(explorer_watch_policy(&config.config.ui.explorer.watch))
+            ExplorerWatchService::start(crate::files::ExplorerWatchPolicy::default())
                 .unwrap(),
         );
         owner.reset_roots(workspace.roots(), workspace.root_revision());
@@ -967,8 +930,7 @@ mod tests {
         assert!(owner.tree().id_for_path(&path).is_some());
     }
     #[test]
-    fn retired_directory_policy_and_preview_selection_have_terminal_dispositions() {
-        use crate::files::RequestId;
+    fn retired_directory_policy_has_terminal_dispositions() {
         let root = tempfile::tempdir().unwrap();
         let a = root.path().join("a.txt");
         let b = root.path().join("b.txt");
@@ -996,51 +958,6 @@ mod tests {
             owner.tree().node(node).unwrap().load,
             ExplorerLoadState::Loaded
         );
-        let a = owner.tree().id_for_path(&a).unwrap();
-        let b = owner.tree().id_for_path(&b).unwrap();
-        let policy = crate::config::ExplorerConfig {
-            preview_enabled: true,
-            maximum_preview_bytes: 16,
-            maximum_preview_lines: 2,
-            ..Default::default()
-        };
-        owner.select(a);
-        let request = owner
-            .prepare_preview(source.clone(), 2, &policy, "binary", "failed: {diagnostic}")
-            .1
-            .unwrap();
-        assert!(owner.admit_preview(request.ticket, Ok(RequestId(1))));
-        owner.select(b);
-        owner.select(a); // Selecting the same path again cannot revive the retired ticket.
-        assert!(owner.accept_preview(RequestId(1), &Ok(vec![255; 32]), source.clone(), 2));
-        assert!(owner.preview_lines().is_empty());
-        let request = owner
-            .prepare_preview(source.clone(), 2, &policy, "binary", "failed: {diagnostic}")
-            .1
-            .unwrap();
-        assert!(owner.admit_preview(request.ticket, Ok(RequestId(2))));
-        assert!(owner.accept_preview(
-            RequestId(2),
-            &Ok(b"one\0\ntwo\nthree".to_vec()),
-            source.clone(),
-            2
-        ));
-        assert_eq!(owner.preview_lines(), ["one", "two"]);
-        assert!(!owner.accept_preview(RequestId(2), &Ok(b"duplicate".to_vec()), source.clone(), 2));
-        owner.clear_preview();
-        let request = owner
-            .prepare_preview(source.clone(), 2, &policy, "binary", "failed: {diagnostic}")
-            .1
-            .unwrap();
-        assert!(owner.admit_preview(request.ticket, Ok(RequestId(3))));
-        assert!(owner.accept_preview(RequestId(3), &Ok(vec![255; 32]), source.clone(), 2));
-        assert_eq!(
-            owner.preview_lines(),
-            ["failed: preview exceeds admitted byte limit"]
-        );
-        owner.reconcile_watch(true).unwrap();
-        owner.reconcile_watch(false).unwrap();
-        assert!(owner.preview_lines().is_empty());
     }
     #[test]
     fn cloned_explorer_views_share_tree_data_but_own_projection_state() {

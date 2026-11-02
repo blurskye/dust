@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use crate::editor::input::ABSOLUTE_MAX_COUNT;
 use std::{collections::HashMap, path::PathBuf};
 
 use crate::{
@@ -35,25 +36,14 @@ impl HeadlessEditor {
         register_builtin_commands(&mut registry).expect("built-in registry must be valid");
         register_app_commands(&mut registry).expect("application registry must be valid");
         let loaded = load_bundled_config();
-        state.policy = crate::editor::EditingPolicy {
-            tab_width: loaded.config.editor.tab_width,
-            indent_width: loaded.config.editor.indent_width,
-            expand_tabs: loaded.config.editor.expand_tabs,
-            undo_break_on_text_commit: loaded.config.editor.undo_break_on_text_commit,
-            registers_enabled: loaded.config.editor.registers.storage
-                == crate::config::RegisterStorage::Internal,
-            mirror_named_to_unnamed: loaded.config.editor.registers.mirror_named_to_unnamed,
-            ambiguous_width_wide: loaded.config.editor.ambiguous_width
-                == crate::config::AmbiguousWidth::Wide,
-            autopairs: loaded.config.editor.autopairs,
-        };
+        state.policy = loaded.config.editor.editing_policy();
         let (keymaps, diagnostic) =
             compile_keymaps(&registry, &loaded.keymaps, &loaded.config.input.keymaps);
         assert!(diagnostic.is_none(), "bundled keymaps must compile");
         Self {
             state,
             registry,
-            input: ModalResolver::with_count_limit(loaded.config.input.count_limit),
+            input: ModalResolver::with_count_limit(ABSOLUTE_MAX_COUNT),
             keymaps,
             sequences: HashMap::new(),
             config: loaded.config,

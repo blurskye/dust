@@ -9,6 +9,11 @@ use crate::{
     },
 };
 
+/// Hover and completion documentation is cut to these bounds before it is laid out.
+pub(crate) const DOCUMENTATION_MAXIMUM_SECTIONS: usize = 16;
+pub(crate) const DOCUMENTATION_MAXIMUM_LINES: usize = 512;
+pub(crate) const DOCUMENTATION_MAXIMUM_BYTES: usize = 64 * 1024;
+
 impl InputSession {
     pub(in crate::editor::session) fn documentation(&self) -> Option<&DocumentationPopupState> {
         self.documentation.as_ref()
@@ -49,10 +54,10 @@ impl InputSession {
             self.documentation = None;
             return;
         }
-        let mut remaining_lines = policy.maximum_lines;
-        let mut remaining_bytes = policy.maximum_bytes;
+        let mut remaining_lines = DOCUMENTATION_MAXIMUM_LINES;
+        let mut remaining_bytes = DOCUMENTATION_MAXIMUM_BYTES;
         let mut sections = Vec::new();
-        for (markup, value) in source_sections.into_iter().take(policy.maximum_sections) {
+        for (markup, value) in source_sections.into_iter().take(DOCUMENTATION_MAXIMUM_SECTIONS) {
             if remaining_lines == 0 || remaining_bytes == 0 {
                 break;
             }

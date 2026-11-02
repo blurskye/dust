@@ -1,6 +1,7 @@
 //! The Settings page: a float with the sections down the left and every setting with its value
 //! on the right, laid out like VS Code's settings editor.
 
+use crate::ui::render::editor::PROMPT_CURSOR;
 use crate::config::{AmbiguousWidth, Config};
 use crate::language::syntax::Highlight;
 use crate::ui::{Style, geometry::text_width};
@@ -228,6 +229,8 @@ pub(super) fn render_settings(
     let Some(layout) = settings_layout(width, height) else {
         return;
     };
+    // The page covers the editor, so its cursor would show through; search and text fields set their own.
+    frame.cursor = None;
     let ambiguous = config.editor.ambiguous_width;
     let right = layout.left + layout.width;
     draw_box(frame, layout.left, layout.top, layout.width, layout.height);
@@ -283,7 +286,7 @@ pub(super) fn render_settings(
             count_x,
         );
         if page.searching {
-            frame.cursor = Some((end.min(count_x), search_y, cursor_style(config.ui.cursor.prompt)));
+            frame.cursor = Some((end.min(count_x), search_y, cursor_style(PROMPT_CURSOR)));
         }
     }
 
@@ -403,7 +406,7 @@ pub(super) fn render_settings(
                             );
                             let cursor_x = x + 1 + width_of(&before[skip..], ambiguous);
                             frame.cursor =
-                                Some((cursor_x, y, cursor_style(config.ui.cursor.prompt)));
+                                Some((cursor_x, y, cursor_style(PROMPT_CURSOR)));
                             x
                         }
                         _ => {

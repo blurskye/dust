@@ -143,8 +143,8 @@ impl DebugSession {
                         .ok_or("launch debug configuration requires program")?,
                 ),
             };
-            if adapter.arguments.len() > policy.maximum_arguments
-                || adapter.environment.len() > policy.maximum_environment
+            if adapter.arguments.len() > super::MAXIMUM_DEBUG_ARGUMENTS
+                || adapter.environment.len() > super::MAXIMUM_DEBUG_ENVIRONMENT
             {
                 return Err("debug configuration exceeds admission bounds".into());
             }

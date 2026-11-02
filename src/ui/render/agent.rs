@@ -4,6 +4,7 @@
 //! place of the pane that holds it, so the pane still moves, resizes and zooms like any
 //! other window.
 
+use crate::ui::render::{CONTROL_CHARACTER_REPLACEMENT, ZERO_WIDTH_REPLACEMENT};
 use std::ops::Range;
 
 use crossterm::cursor::SetCursorStyle;
@@ -96,8 +97,8 @@ pub(super) fn render_agent_panel(
     let mut grid = CellGrid::new_with_policy(
         width,
         height,
-        &config.editor.control_character_replacement,
-        &config.editor.zero_width_replacement,
+        &CONTROL_CHARACTER_REPLACEMENT,
+        &ZERO_WIDTH_REPLACEMENT,
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
     // The last row is left for the status line the caller draws there.

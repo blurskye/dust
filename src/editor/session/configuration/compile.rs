@@ -2,7 +2,7 @@ use super::{
     AppEffect, BTreeMap, CommandInvocation, CommandRegistry, CommandValue, FromStr, HashMap,
     InputContextLayer, InputContextRegistry, InvocationSource, KeyEvent, KeymapInspection,
     KeymapLayer, KeymapOperation, ResolvedKeyGroup, ResolvedKeymaps, ReverseBinding,
-    configured_context, invocation_fingerprint, keymap_entries_for_policy,
+    configured_context, invocation_fingerprint, keymap_entries,
 };
 
 pub fn reload_keymaps(
@@ -12,7 +12,7 @@ pub fn reload_keymaps(
     policy: &crate::config::KeymapPolicyConfig,
 ) -> (ResolvedKeymaps, Option<String>) {
     let (entries, bundled_count, groups, bundled_group_count) =
-        keymap_entries_for_policy(candidate, policy);
+        keymap_entries(candidate);
     match compile_keymap_entries(
         commands,
         KeymapCompilation {
@@ -44,7 +44,7 @@ pub fn compile_keymaps(
     policy: &crate::config::KeymapPolicyConfig,
 ) -> (ResolvedKeymaps, Option<String>) {
     let (entries, bundled_count, groups, bundled_group_count) =
-        keymap_entries_for_policy(loaded, policy);
+        keymap_entries(loaded);
     match compile_keymap_entries(
         commands,
         KeymapCompilation {
@@ -777,21 +777,9 @@ pub fn compile_keymaps_with_plugin_catalog(
     let contexts = catalog
         .context_snapshot()
         .map_err(|error| vec![error.to_string()])?;
-    let bundled_count = if policy.load_bundled_defaults {
-        loaded.bundled_count
-    } else {
-        0
-    };
-    let bundled_group_count = if policy.load_bundled_defaults {
-        loaded.bundled_group_count
-    } else {
-        0
-    };
-    let mut entries = if policy.load_bundled_defaults {
-        loaded.entries[..loaded.bundled_count].to_vec()
-    } else {
-        Vec::new()
-    };
+    let bundled_count = loaded.bundled_count;
+    let bundled_group_count = loaded.bundled_group_count;
+    let mut entries = loaded.entries[..loaded.bundled_count].to_vec();
     let mut entry_origins = standard_contribution_origins(
         bundled_count,
         bundled_count,
@@ -830,11 +818,7 @@ pub fn compile_keymaps_with_plugin_catalog(
         &loaded.user_spans,
         "declaration",
     ));
-    let mut groups = if policy.load_bundled_defaults {
-        loaded.groups[..loaded.bundled_group_count].to_vec()
-    } else {
-        Vec::new()
-    };
+    let mut groups = loaded.groups[..loaded.bundled_group_count].to_vec();
     let mut group_origins = standard_contribution_origins(
         bundled_group_count,
         bundled_group_count,

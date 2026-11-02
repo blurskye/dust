@@ -12,6 +12,14 @@ use crate::workspace::search_workflow::{
     SearchSourceKind, SearchStreamGeneration, SearchWorkflowBroker, SearchWorkflowChunk,
     SearchWorkflowId, SearchWorkflowItem, SearchWorkflowSpec,
 };
+
+pub(crate) const MAXIMUM_PICKER_ITEMS: usize = 10_000;
+/// Bounds for walking the workspace in the file picker and project search.
+pub(crate) const SEARCH_MAXIMUM_FILES: usize = 100_000;
+pub(crate) const SEARCH_MAXIMUM_FILE_BYTES: usize = 8 * 1024 * 1024;
+pub(crate) const SEARCH_BATCH_SIZE: usize = 128;
+pub(crate) const SEARCH_QUEUE_CAPACITY: usize = 8;
+
 pub(in crate::editor::session) use picker::{
     MatcherSource, PickerContent, PickerOrigin, PickerPayload,
 };

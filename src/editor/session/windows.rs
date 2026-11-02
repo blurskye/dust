@@ -243,7 +243,7 @@ impl WindowSession {
                 .surfaces
                 .explorer
                 .and_then(rect)
-                .map(|rect| explorer_body_geometry(rect, config)),
+                .map(|rect| explorer_body_geometry(rect)),
             terminal: layout
                 .surfaces
                 .terminal

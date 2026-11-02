@@ -161,7 +161,7 @@ fn stable_clock_pure_prefix_rejection_replacement_and_focus_loss_use_the_real_co
     assert_eq!(session.prefix(), Some("z"));
     assert!(session.projection().key_hints.is_some());
     let mut invalid = loaded.clone();
-    invalid.config.input.count_limit = 0;
+    invalid.config.input.keymaps.leader = String::new();
     assert!(session.apply_candidate(invalid).is_err());
     assert_eq!(session.prefix(), Some("z"));
     session.apply_candidate(loaded.clone()).unwrap();

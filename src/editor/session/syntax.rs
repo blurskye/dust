@@ -15,6 +15,10 @@ use crate::{
     },
 };
 
+pub(crate) const SYNTAX_QUEUE_CAPACITY: usize = 8;
+/// How long typing must pause before a buffer is parsed again.
+const SYNTAX_DEBOUNCE_MS: u64 = 75;
+
 pub(super) struct SyntaxDocument<'a> {
     pub buffer: BufferId,
     pub text: &'a TextBuffer,
@@ -125,9 +129,9 @@ impl SyntaxSession {
             let due = self
                 .due
                 .entry(doc.buffer)
-                .or_insert((revision, now + Duration::from_millis(config.debounce_ms)));
+                .or_insert((revision, now + Duration::from_millis(SYNTAX_DEBOUNCE_MS)));
             if due.0 != revision {
-                *due = (revision, now + Duration::from_millis(config.debounce_ms));
+                *due = (revision, now + Duration::from_millis(SYNTAX_DEBOUNCE_MS));
                 continue;
             }
             if now < due.1 {
@@ -141,10 +145,10 @@ impl SyntaxSession {
             let generation = self.next_generation;
             self.next_generation = self.next_generation.saturating_add(1);
             let policy = SyntaxPolicy {
-                maximum_source_bytes: config.maximum_source_bytes,
-                maximum_spans: config.maximum_spans,
-                maximum_folds: config.maximum_folds,
-                maximum_indent_rows: config.maximum_indent_rows,
+                maximum_source_bytes: 8 * 1024 * 1024,
+                maximum_spans: 100_000,
+                maximum_folds: 10_000,
+                maximum_indent_rows: 100_000,
             };
             materialized += 1;
             if self
@@ -294,12 +298,11 @@ mod tests {
             language: Some(SyntaxLanguage::Rust),
             enabled: true,
         }];
-        let config = SyntaxConfig {
-            debounce_ms: 0,
-            ..Default::default()
-        };
+        let config = SyntaxConfig::default();
         let mut session = SyntaxSession::new(2);
-        let now = Instant::now();
+        let start = Instant::now();
+        assert_eq!(session.tick(&documents, &config, start, "too large"), 0);
+        let now = start + std::time::Duration::from_millis(SYNTAX_DEBOUNCE_MS);
         assert_eq!(session.tick(&documents, &config, now, "too large"), 1);
         for _ in 0..100 {
             assert_eq!(session.tick(&documents, &config, now, "too large"), 0);

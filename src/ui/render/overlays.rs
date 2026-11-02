@@ -1,3 +1,4 @@
+use crate::ui::render::{COMPLETION_DETAIL_GAP, COMPLETION_MAX_ROWS, CONTROL_CHARACTER_REPLACEMENT, ZERO_WIDTH_REPLACEMENT};
 use std::path::Path;
 
 use unicode_segmentation::UnicodeSegmentation;
@@ -14,6 +15,34 @@ use super::{
     editor::cursor_style,
 };
 
+pub(crate) const BUFFER_NAME_MAX_WIDTH: u16 = 32;
+pub(crate) const BUFFER_TAB_FORMAT: &str = " {title}{dirty}  ";
+pub(crate) const BUFFER_SEPARATOR: &str = "│";
+pub(crate) const BUFFER_DIRTY_MARKER: &str = " ●";
+pub(crate) const BUFFER_PIN_MARKER: &str = "P";
+pub(crate) const BUFFER_CLOSE_MARKER: &str = "x";
+pub(crate) const BUFFER_ERROR_MARKER: &str = "E";
+pub(crate) const BUFFER_WARNING_MARKER: &str = "W";
+pub(crate) const BUFFER_OVERFLOW_LEFT: &str = "‹ ";
+pub(crate) const BUFFER_OVERFLOW_RIGHT: &str = " ›";
+pub(crate) const SCRATCH_ICON: &str = "\u{f039a}";
+pub(crate) const VIRTUAL_ICON: &str = "\u{f0219}";
+pub(crate) const TERMINAL_ICON: &str = "\u{f489}";
+pub(crate) const CUSTOM_ICON: &str = "\u{f0214}";
+pub(crate) const AGENT_ICON: &str = "\u{f06a9}";
+pub(crate) const DOCUMENTATION_MAX_WIDTH: u16 = 72;
+pub(crate) const DOCUMENTATION_MAX_HEIGHT: u16 = 18;
+pub(crate) const DOCUMENTATION_PADDING: u16 = 1;
+pub(crate) const DOCUMENTATION_SCROLL_STEP: usize = 4;
+pub(crate) const LSP_PROGRESS_MAX_ROWS: u16 = 8;
+pub(crate) const LSP_PROGRESS_MAX_WIDTH: u16 = 72;
+pub(crate) const LSP_PROGRESS_RIGHT_MARGIN: u16 = 1;
+pub(crate) const LSP_PROGRESS_ROWS_FROM_BOTTOM: u16 = 1;
+pub(crate) const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+pub(crate) const SPINNER_INTERVAL_MS: u64 = 80;
+pub(crate) const LSP_PROGRESS_DONE: &str = "✓";
+pub(crate) const LSP_PROGRESS_DONE_TIMEOUT_MS: u64 = 3_000;
+
 pub(super) fn render_documentation_popup(
     frame: &mut Frame,
     popup: &DocumentationPopupState,
@@ -23,11 +52,11 @@ pub(super) fn render_documentation_popup(
     height: u16,
     completion_menu: Option<WindowRect>,
 ) {
-    let policy = &config.ui.documentation_popup;
+    let enabled = config.ui.documentation_popup.enabled;
     let editor_right = editor_left.saturating_add(editor_width);
     let available_height = height;
     let line_count = popup.line_count();
-    if !policy.enabled || line_count == 0 || editor_width < 4 || available_height < 3 {
+    if !enabled || line_count == 0 || editor_width < 4 || available_height < 3 {
         return;
     }
     let page_rows = crate::ui::geometry::documentation_page_rows(config, editor_width, height);
@@ -41,7 +70,7 @@ pub(super) fn render_documentation_popup(
         .chain(scrollable.then_some(UnicodeWidthStr::width("j/k or wheel · 0000-0000/0000")))
         .max()
         .unwrap_or(1)
-        .saturating_add(usize::from(policy.horizontal_padding).saturating_mul(2))
+        .saturating_add(usize::from(DOCUMENTATION_PADDING).saturating_mul(2))
         .saturating_add(2);
     let width_limit = if popup.kind == DocumentationPopupKind::Completion {
         editor_width.saturating_div(2).max(4)
@@ -49,13 +78,13 @@ pub(super) fn render_documentation_popup(
         editor_width
     };
     let mut box_width = u16::try_from(widest)
-        .unwrap_or(policy.max_width)
-        .min(policy.max_width)
+        .unwrap_or(DOCUMENTATION_MAX_WIDTH)
+        .min(DOCUMENTATION_MAX_WIDTH)
         .min(width_limit);
     let mut visible_rows = line_count.saturating_sub(popup.scroll).min(page_rows);
     let mut box_height = u16::try_from(visible_rows.saturating_add(2))
-        .unwrap_or(policy.max_height)
-        .min(policy.max_height)
+        .unwrap_or(DOCUMENTATION_MAX_HEIGHT)
+        .min(DOCUMENTATION_MAX_HEIGHT)
         .min(available_height);
     if box_width < 4 || box_height < 3 {
         return;
@@ -70,7 +99,7 @@ pub(super) fn render_documentation_popup(
     );
     let below = cursor_y.saturating_add(1);
     let room_below = available_height.saturating_sub(below);
-    let top = if (policy.preferred_below && room_below >= box_height) || cursor_y < box_height {
+    let top = if room_below >= box_height || cursor_y < box_height {
         below.min(available_height.saturating_sub(box_height))
     } else {
         cursor_y.saturating_sub(box_height)
@@ -147,12 +176,8 @@ pub(super) fn render_documentation_popup(
                 .set_cell(x, y, " ", Style::DocumentationBackground);
         }
     }
-    let (horizontal, vertical, top_left, top_right, bottom_left, bottom_right) = match policy.border
-    {
-        BorderStyle::Double => ('═', '║', '╔', '╗', '╚', '╝'),
-        BorderStyle::Rounded => ('─', '│', '╭', '╮', '╰', '╯'),
-        BorderStyle::Single => ('─', '│', '┌', '┐', '└', '┘'),
-    };
+    let (horizontal, vertical, top_left, top_right, bottom_left, bottom_right) =
+        BorderStyle::Rounded.glyphs();
     for x in left.saturating_add(1)..right.saturating_sub(1) {
         frame
             .grid
@@ -194,7 +219,7 @@ pub(super) fn render_documentation_popup(
     );
     let text_left = left
         .saturating_add(1)
-        .saturating_add(policy.horizontal_padding);
+        .saturating_add(DOCUMENTATION_PADDING);
     for (row, (index, line)) in (popup.scroll..popup.scroll.saturating_add(visible_rows))
         .filter_map(|index| popup.line_at(index).map(|line| (index, line)))
         .enumerate()
@@ -215,7 +240,7 @@ pub(super) fn render_documentation_popup(
             style,
             right
                 .saturating_sub(1)
-                .saturating_sub(policy.horizontal_padding),
+                .saturating_sub(DOCUMENTATION_PADDING),
         );
     }
     if scrollable {
@@ -275,7 +300,7 @@ pub(super) fn render_language_completion(
     let rows = completion
         .items
         .len()
-        .min(usize::from(config.ui.command_line.completion_max_rows))
+        .min(usize::from(COMPLETION_MAX_ROWS))
         .min(usize::from(bounds.height.saturating_sub(1)));
     if rows == 0 {
         return None;
@@ -290,7 +315,7 @@ pub(super) fn render_language_completion(
     }
     let visible = completion.items.iter().skip(scroll).take(rows);
     let ambiguous = config.editor.ambiguous_width;
-    let gap = usize::from(config.ui.command_line.completion_detail_gap);
+    let gap = usize::from(COMPLETION_DETAIL_GAP);
     let icon_width = if completion.items.iter().any(|item| item.icon.is_some()) {
         2u16
     } else {
@@ -432,8 +457,8 @@ pub(super) fn render_dashboard(
     let mut grid = CellGrid::new_with_policy(
         width,
         height,
-        &editor_config.editor.control_character_replacement,
-        &editor_config.editor.zero_width_replacement,
+        &CONTROL_CHARACTER_REPLACEMENT,
+        &ZERO_WIDTH_REPLACEMENT,
         ambiguous == AmbiguousWidth::Wide,
     );
     let measure = |text: &str| u16::try_from(text_width(text, ambiguous)).unwrap_or(u16::MAX);
@@ -571,35 +596,30 @@ pub(super) fn render_lsp_progress(
     config: &Config,
     bounds: WindowRect,
 ) {
-    let policy = &config.ui.lsp_progress;
-    let available_rows = bounds.height.saturating_sub(policy.rows_from_bottom);
-    let row_count = usize::from(policy.max_rows.min(available_rows)).min(progress.len());
+    let available_rows = bounds.height.saturating_sub(LSP_PROGRESS_ROWS_FROM_BOTTOM);
+    let row_count = usize::from(LSP_PROGRESS_MAX_ROWS.min(available_rows)).min(progress.len());
     if row_count == 0 {
         return;
     }
-    let available_width = bounds.width.saturating_sub(policy.right_margin);
-    let maximum_width = usize::from(policy.max_width.min(available_width));
+    let available_width = bounds.width.saturating_sub(LSP_PROGRESS_RIGHT_MARGIN);
+    let maximum_width = usize::from(LSP_PROGRESS_MAX_WIDTH.min(available_width));
     if maximum_width == 0 {
         return;
     }
-    let spinner = &policy.spinner_frames[spinner_frame % policy.spinner_frames.len()];
+    let spinner = SPINNER_FRAMES[spinner_frame % SPINNER_FRAMES.len()];
     let right = bounds
         .x
         .saturating_add(bounds.width)
-        .saturating_sub(policy.right_margin);
+        .saturating_sub(LSP_PROGRESS_RIGHT_MARGIN);
     let top = bounds
         .y
         .saturating_add(bounds.height)
-        .saturating_sub(policy.rows_from_bottom)
+        .saturating_sub(LSP_PROGRESS_ROWS_FROM_BOTTOM)
         .saturating_sub(u16::try_from(row_count).unwrap_or(u16::MAX));
     let first = progress.len().saturating_sub(row_count);
 
     for (row, item) in progress[first..].iter().enumerate() {
-        let marker = if item.done {
-            &policy.completed_symbol
-        } else {
-            spinner
-        };
+        let marker = if item.done { LSP_PROGRESS_DONE } else { spinner };
         let activity = match (item.title.is_empty(), item.message.is_empty()) {
             (false, false) if item.title != item.message => {
                 format!("{}: {}", item.title, item.message)
@@ -661,24 +681,17 @@ pub(super) fn formatted_content_tab(
     entry: &ContentTabEntry,
     config: &Config,
 ) -> (String, String, String, Style) {
-    let format = if entry.active {
-        &config.ui.buffer_line.active_format
-    } else {
-        &config.ui.buffer_line.inactive_format
-    };
     let title = truncate_content_title(
         &entry.title,
-        usize::from(config.ui.buffer_line.maximum_name_width),
+        usize::from(BUFFER_NAME_MAX_WIDTH),
         config.editor.ambiguous_width,
     );
-    let format = format.replace("{title}", &title);
-    let (before, after) = format
-        .split_once("{dirty}")
-        .expect("validated buffer-line format");
+    let format = BUFFER_TAB_FORMAT.replace("{title}", &title);
+    let (before, after) = format.split_once("{dirty}").expect("buffer tab format has {dirty}");
     (
         before.to_owned(),
         if entry.dirty {
-            config.ui.buffer_line.dirty_marker.clone()
+            BUFFER_DIRTY_MARKER.to_owned()
         } else {
             String::new()
         },
@@ -697,48 +710,31 @@ pub(super) fn content_tab_segments(
 ) -> Vec<(String, Style)> {
     let (before, dirty, after, style) = formatted_content_tab(entry, config);
     let mut segments = Vec::with_capacity(8);
-    if config.ui.buffer_line.show_pins && entry.pinned {
-        segments.push((
-            format!("{} ", config.ui.buffer_line.pin_marker),
-            Style::BufferLinePin,
-        ));
+    if entry.pinned {
+        segments.push((format!("{BUFFER_PIN_MARKER} "), Style::BufferLinePin));
     }
     // Inactive tabs are drawn in one quiet style so the active one stands out.
     let accent = |role| if entry.active { role } else { style };
-    if config.ui.buffer_line.show_icons {
-        segments.push((format!(" {} ", entry.icon), accent(Style::BufferLineIcon)));
-    }
+    segments.push((format!(" {} ", entry.icon), accent(Style::BufferLineIcon)));
     segments.push((before, style));
     if !dirty.is_empty() {
         segments.push((dirty, Style::BufferLineDirty));
     }
-    if config.ui.buffer_line.show_diagnostics {
-        if let Some(diagnostic) = entry.diagnostic {
-            let marker = match diagnostic.severity {
-                ContentTabDiagnosticSeverity::Error => {
-                    &config.ui.buffer_line.diagnostic_error_marker
-                }
-                ContentTabDiagnosticSeverity::Warning => {
-                    &config.ui.buffer_line.diagnostic_warning_marker
-                }
-            };
-            segments.push((
-                format!(" {marker}{}", diagnostic.count),
-                Style::BufferLineDiagnostic,
-            ));
-        }
-    }
-    if config.ui.buffer_line.show_close && entry.closeable {
+    if let Some(diagnostic) = entry.diagnostic {
+        let marker = match diagnostic.severity {
+            ContentTabDiagnosticSeverity::Error => BUFFER_ERROR_MARKER,
+            ContentTabDiagnosticSeverity::Warning => BUFFER_WARNING_MARKER,
+        };
         segments.push((
-            format!(" {}", config.ui.buffer_line.close_marker),
-            accent(Style::BufferLineClose),
+            format!(" {marker}{}", diagnostic.count),
+            Style::BufferLineDiagnostic,
         ));
     }
+    if entry.closeable {
+        segments.push((format!(" {BUFFER_CLOSE_MARKER}"), accent(Style::BufferLineClose)));
+    }
     segments.push((after, style));
-    segments.push((
-        config.ui.buffer_line.separator.clone(),
-        Style::BufferLineSeparator,
-    ));
+    segments.push((BUFFER_SEPARATOR.to_owned(), Style::BufferLineSeparator));
     segments
 }
 pub(super) fn content_tab_width(entry: &ContentTabEntry, config: &Config) -> usize {
@@ -760,11 +756,11 @@ pub fn content_tab_at_column(
     }
     let active = entries.iter().position(|e| e.active).unwrap_or(0);
     let left = text_width(
-        &config.ui.buffer_line.overflow_left,
+        &BUFFER_OVERFLOW_LEFT,
         config.editor.ambiguous_width,
     );
     let right = text_width(
-        &config.ui.buffer_line.overflow_right,
+        &BUFFER_OVERFLOW_RIGHT,
         config.editor.ambiguous_width,
     );
     let available = usize::from(width);
@@ -823,11 +819,11 @@ pub(super) fn render_content_tab_line(
     }
     let active = entries.iter().position(|entry| entry.active).unwrap_or(0);
     let left_width = text_width(
-        &config.ui.buffer_line.overflow_left,
+        &BUFFER_OVERFLOW_LEFT,
         config.editor.ambiguous_width,
     );
     let right_width = text_width(
-        &config.ui.buffer_line.overflow_right,
+        &BUFFER_OVERFLOW_RIGHT,
         config.editor.ambiguous_width,
     );
     let available = usize::from(width);
@@ -854,7 +850,7 @@ pub(super) fn render_content_tab_line(
         x = grid.put_text_clipped(
             x,
             row,
-            &config.ui.buffer_line.overflow_left,
+            &BUFFER_OVERFLOW_LEFT,
             Style::BufferLineSeparator,
             width,
         );
@@ -884,7 +880,7 @@ pub(super) fn render_content_tab_line(
         grid.put_text_clipped(
             marker_x,
             row,
-            &config.ui.buffer_line.overflow_right,
+            &BUFFER_OVERFLOW_RIGHT,
             Style::BufferLineSeparator,
             width,
         );

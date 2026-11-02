@@ -1,5 +1,6 @@
 //! Restricted driver for migrated input/configuration workflows. It deliberately
 //! offers no mutable application, editor, configuration, registry or UI access.
+use crate::editor::session::persistence::STATE_FILE;
 use super::InteractiveApplication;
 use crate::{
     clock::{Clock, ManualClock},
@@ -44,8 +45,7 @@ pub(super) struct TestSession {
     _state: TempDir,
 }
 impl TestSession {
-    pub(super) fn new(mut loaded: LoadedConfig) -> Self {
-        loaded.config.runtime.vfs_queue_capacity = 2;
+    pub(super) fn new(loaded: LoadedConfig) -> Self {
         loaded
             .config
             .validate()
@@ -421,7 +421,6 @@ impl TestSession {
             .rect;
         crate::ui::geometry::explorer_body_geometry(
             rect,
-            self.application.configuration.settings(),
         )
     }
     pub(super) fn explorer_graph_shape(&self) -> (usize, usize, usize) {
@@ -785,12 +784,7 @@ impl TestSession {
                 ._state
                 .path()
                 .join(
-                    &self
-                        .application
-                        .configuration
-                        .settings()
-                        .persistence
-                        .state_file
+                    &STATE_FILE
                 )
                 .exists(),
             "expired shutdown wrote an exit snapshot"

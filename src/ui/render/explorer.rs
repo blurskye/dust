@@ -1,3 +1,5 @@
+use crate::ui::render::{CONTROL_CHARACTER_REPLACEMENT, ZERO_WIDTH_REPLACEMENT};
+use crate::ui::window::PANE_MINIMUM_WIDTH;
 use crate::{
     config::{AmbiguousWidth, Config},
     ui::{CellGrid, Style, geometry::text_width, window::WindowRect},
@@ -6,11 +8,17 @@ use crate::{
 use super::{ExplorerSegmentRole, ExplorerUiState, Frame, editor::cursor_style};
 use crate::language::syntax::Highlight;
 
+pub(crate) const EXPLORER_MAXIMUM_VISIBLE_ROWS: usize = 200;
+pub(crate) const EXPLORER_MINIMUM_WIDTH: u16 = 28;
+pub(crate) const EXPLORER_MAXIMUM_WIDTH: u16 = 60;
+pub(crate) const EXPLORER_FOCUS_MARKER: &str = ">";
+pub(crate) const EXPLORER_LOADING_LABEL: &str = "loading…";
+
 /// Width of the persistent explorer dock, leaving a usable editor pane.
 #[must_use]
 pub fn explorer_panel_width(config: &Config, terminal_width: u16) -> Option<u16> {
     let separator = 1;
-    let minimum_editor = config.ui.panes.minimum_width.max(20);
+    let minimum_editor = PANE_MINIMUM_WIDTH.max(20);
     if terminal_width < 3 {
         return None;
     }
@@ -24,8 +32,8 @@ pub fn explorer_panel_width(config: &Config, terminal_width: u16) -> Option<u16>
             .explorer
             .width
             .clamp(
-                config.ui.explorer.minimum_width,
-                config.ui.explorer.maximum_width,
+                EXPLORER_MINIMUM_WIDTH,
+                EXPLORER_MAXIMUM_WIDTH,
             )
             .min(maximum_panel),
     )
@@ -41,8 +49,8 @@ pub(super) fn place_workspace_frame(
     let mut grid = CellGrid::new_with_policy(
         width,
         height,
-        &config.editor.control_character_replacement,
-        &config.editor.zero_width_replacement,
+        &CONTROL_CHARACTER_REPLACEMENT,
+        &ZERO_WIDTH_REPLACEMENT,
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
     for y in 0..content.grid.height().min(bounds.height) {
@@ -82,12 +90,12 @@ pub(super) fn render_explorer_window(
     let mut local = CellGrid::new_with_policy(
         rect.width,
         rect.height,
-        &config.editor.control_character_replacement,
-        &config.editor.zero_width_replacement,
+        &CONTROL_CHARACTER_REPLACEMENT,
+        &ZERO_WIDTH_REPLACEMENT,
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
     let panel_width = rect.width.saturating_sub(1);
-    let body = crate::ui::geometry::explorer_body_geometry(rect, config);
+    let body = crate::ui::geometry::explorer_body_geometry(rect);
     let local_body = WindowRect {
         x: 0,
         y: body.y.saturating_sub(rect.y),
@@ -118,7 +126,7 @@ pub(super) fn render_explorer_window(
     }
     if focused && explorer.searching {
         // Typing goes to the search box.
-        let typed = text_width(&config.ui.explorer.focus_marker, config.editor.ambiguous_width)
+        let typed = text_width(&EXPLORER_FOCUS_MARKER, config.editor.ambiguous_width)
             + 1
             + text_width(&explorer.query, config.editor.ambiguous_width);
         let x = u16::try_from(typed)
@@ -162,17 +170,16 @@ pub(super) fn render_explorer_dock(
         return;
     }
     let panel_height = height;
-    let glyphs = config.ui.explorer.active_glyphs();
+    let border = if config.ui.explorer.icon_mode == crate::config::ExplorerIconMode::Ascii {
+        "|"
+    } else {
+        "│"
+    };
     for y in 0..panel_height {
         for x in 0..panel_width {
             grid.set_cell(x, y, " ", Style::ExplorerBackground);
         }
-        grid.set_cell(
-            panel_width,
-            y,
-            &glyphs.panel_vertical,
-            Style::ExplorerBorder,
-        );
+        grid.set_cell(panel_width, y, border, Style::ExplorerBorder);
     }
 
     if body.y >= 3 {
@@ -236,42 +243,10 @@ pub(super) fn render_explorer_dock(
         grid.put_text_clipped(
             1,
             y,
-            &config.ui.explorer.loading_label,
+            &EXPLORER_LOADING_LABEL,
             Style::ExplorerCount,
             panel_width.saturating_sub(1),
         );
-        rendered_rows = rendered_rows.saturating_add(1);
-    }
-    if !explorer.preview_lines.is_empty() && rendered_rows < available_rows {
-        let divider_y = body_top.saturating_add(u16::try_from(rendered_rows).unwrap_or(0));
-        for x in 0..panel_width {
-            grid.set_cell(
-                x,
-                divider_y,
-                &glyphs.panel_horizontal,
-                Style::ExplorerBorder,
-            );
-        }
-        for (index, line) in explorer
-            .preview_lines
-            .iter()
-            .take(
-                available_rows
-                    .saturating_sub(rendered_rows)
-                    .saturating_sub(1),
-            )
-            .enumerate()
-        {
-            grid.put_text_clipped(
-                1,
-                divider_y
-                    .saturating_add(1)
-                    .saturating_add(u16::try_from(index).unwrap_or(0)),
-                line,
-                Style::ExplorerDecoration,
-                panel_width.saturating_sub(1),
-            );
-        }
     }
 }
 
@@ -286,7 +261,7 @@ fn render_explorer_search_box(
         return;
     }
     let (horizontal, vertical, top_left, top_right, bottom_left, bottom_right) =
-        config.ui.explorer.search_border.glyphs();
+        crate::config::BorderStyle::Rounded.glyphs();
     let last = panel_width - 1;
     for x in 1..last {
         grid.set_cell(x, 0, &horizontal.to_string(), Style::ExplorerBorder);
@@ -321,7 +296,7 @@ fn render_explorer_search_box(
     let x = grid.put_text_clipped(
         2,
         1,
-        &config.ui.explorer.focus_marker,
+        &EXPLORER_FOCUS_MARKER,
         Style::ExplorerHeader,
         count_x,
     );

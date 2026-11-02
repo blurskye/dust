@@ -1,5 +1,5 @@
 use super::{PackageManifest, PackageSource};
-use crate::{config::PackageRegistryConfig, extensions::PluginManifest};
+use crate::extensions::PluginManifest;
 use reqwest::{
     Url,
     blocking::{Client, Response},
@@ -21,6 +21,40 @@ use std::{
 use thiserror::Error;
 
 pub const OFFICIAL_REGISTRY: &str = "https://dust.blurskye.dev/registry/v1";
+
+/// Network and cache limits for the official package registry.
+#[derive(Clone, Debug)]
+pub struct RegistryPolicy {
+    pub base_url: String,
+    pub offline: bool,
+    pub redirect_limit: u8,
+    pub connect_timeout_ms: u64,
+    pub request_timeout_ms: u64,
+    pub maximum_metadata_bytes: usize,
+    pub maximum_artifact_bytes: usize,
+    pub maximum_cache_bytes: u64,
+    pub maximum_cache_entries: usize,
+    pub maximum_search_results: usize,
+    pub queue_capacity: usize,
+}
+
+impl Default for RegistryPolicy {
+    fn default() -> Self {
+        Self {
+            base_url: OFFICIAL_REGISTRY.into(),
+            offline: false,
+            redirect_limit: 0,
+            connect_timeout_ms: 5_000,
+            request_timeout_ms: 30_000,
+            maximum_metadata_bytes: 1024 * 1024,
+            maximum_artifact_bytes: 64 * 1024 * 1024,
+            maximum_cache_bytes: 512 * 1024 * 1024,
+            maximum_cache_entries: 4096,
+            maximum_search_results: 100,
+            queue_capacity: 8,
+        }
+    }
+}
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RegistryPackageSummary {
@@ -83,11 +117,11 @@ pub struct RegistryService {
     ids: Arc<dyn crate::clock::IdSource>,
 }
 impl RegistryService {
-    pub fn start(policy: PackageRegistryConfig, cache: PathBuf) -> Result<Self, RegistryError> {
+    pub fn start(policy: RegistryPolicy, cache: PathBuf) -> Result<Self, RegistryError> {
         Self::start_with_ids(policy, cache, Arc::new(crate::clock::AtomicIds::new(1)))
     }
     pub fn start_with_ids(
-        policy: PackageRegistryConfig,
+        policy: RegistryPolicy,
         cache: PathBuf,
         ids: Arc<dyn crate::clock::IdSource>,
     ) -> Result<Self, RegistryError> {
@@ -137,13 +171,13 @@ impl RegistryService {
     }
 }
 struct RegistryClient {
-    policy: PackageRegistryConfig,
+    policy: RegistryPolicy,
     base: Url,
     cache: PathBuf,
     http: Client,
 }
 impl RegistryClient {
-    fn new(policy: PackageRegistryConfig, cache: PathBuf) -> Result<Self, RegistryError> {
+    fn new(policy: RegistryPolicy, cache: PathBuf) -> Result<Self, RegistryError> {
         validate_policy(&policy)?;
         let base = Url::parse(&format!("{}/", policy.base_url.trim_end_matches('/')))
             .map_err(|_| RegistryError::Policy)?;
@@ -280,7 +314,7 @@ impl RegistryClient {
         Ok(())
     }
 }
-fn validate_policy(policy: &PackageRegistryConfig) -> Result<(), RegistryError> {
+fn validate_policy(policy: &RegistryPolicy) -> Result<(), RegistryError> {
     if policy.base_url != OFFICIAL_REGISTRY
         || policy.redirect_limit != 0
         || policy.offline && policy.maximum_cache_entries == 0

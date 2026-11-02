@@ -1,3 +1,4 @@
+use crate::ui::render::overlays::{CUSTOM_ICON, SCRATCH_ICON, VIRTUAL_ICON};
 use super::*;
 
 #[test]
@@ -80,7 +81,6 @@ fn dashboard_and_picker_are_stable_graph_overlays_with_projected_geometry() {
         .picker()
         .expect("picker resources");
     let expected = crate::ui::picker_geometry(
-        app.configuration.settings(),
         WindowRect {
             x: 0,
             y: 0,
@@ -328,7 +328,6 @@ fn protected_prompt_region_blocks_ordinary_compositor_hit_testing() {
     let geometry = crate::ui::prompt_geometry(
         app.window_session.width(),
         app.workspace_render_height(),
-        &app.configuration.settings().ui.command_line,
         false,
     );
     let point = (
@@ -493,7 +492,7 @@ fn health_virtual_dogfood_opens_refreshes_and_remains_read_only() {
     );
     assert!(app.state.buffers[buffer].is_virtual_read_only());
     app.reconcile_editor_windows();
-    assert!(app.ui.content_tabs.iter().any(|entry| entry.icon == app.configuration.settings().ui.buffer_line.virtual_icon
+    assert!(app.ui.content_tabs.iter().any(|entry| entry.icon == VIRTUAL_ICON
         && entry.closeable
         && entry.kind == ContentTabKind::VirtualDocument));
     let virtual_content = app
@@ -1040,11 +1039,6 @@ fn virtual_read_only_origin_never_queues_save_reload_or_recovery_io() {
         app.configuration.install_fixture(fixture);
     }
     app.recovery.skip_maintenance();
-    {
-        let mut fixture = app.configuration.fixture_snapshot();
-        fixture.settings.recovery.cleanup_enabled = false;
-        app.configuration.install_fixture(fixture);
-    }
     app.schedule_recovery_work();
     assert!(!app.recovery.scheduled().contains_key(&buffer));
     app.queue_dirty_recovery_before_exit();
@@ -1058,12 +1052,11 @@ fn configured_file_format_policy_is_applied_at_save_boundary() {
     let configured = crate::config::EditorConfig {
         line_endings: crate::config::LineEndingPolicy::Lf,
         final_newline: crate::config::FinalNewlinePolicy::Insert,
-        utf8_bom: crate::config::BomPolicy::Always,
         ..crate::config::EditorConfig::default()
     };
     assert_eq!(
         super::configured_file_bytes(&text, &configured),
-        b"\xEF\xBB\xBFa\nb\n"
+        b"a\nb\n"
     );
 }
 
@@ -1417,36 +1410,8 @@ fn configured_text_and_dashboard_commands_are_schema_validated() {
 }
 
 #[test]
-fn command_and_search_histories_have_independent_configured_bounds() {
-    let mut app = app();
-    {
-        let mut fixture = app.configuration.fixture_snapshot();
-        fixture.settings.history.command.maximum_entries = 1;
-        fixture.settings.history.search.maximum_entries = 2;
-        app.configuration.install_fixture(fixture);
-    }
-    app.record_prompt_history(crate::ui::PromptKind::Command, "first");
-    app.record_prompt_history(crate::ui::PromptKind::Command, "second");
-    app.record_prompt_history(crate::ui::PromptKind::SearchForward, "needle");
-    assert_eq!(app.input.command_history(), vec!["second"]);
-    assert_eq!(app.input.search_history(), vec!["needle"]);
-    {
-        let mut fixture = app.configuration.fixture_snapshot();
-        fixture.settings.history.search.enabled = false;
-        app.configuration.install_fixture(fixture);
-    }
-    app.record_prompt_history(crate::ui::PromptKind::SearchBackward, "ignored");
-    assert_eq!(app.input.search_history(), vec!["needle"]);
-}
-
-#[test]
 fn recovery_debounce_coalesces_revisions_and_clean_state_deletes_last_journal() {
     let mut app = app();
-    {
-        let mut fixture = app.configuration.fixture_snapshot();
-        fixture.settings.recovery.write_debounce_ms = 10;
-        app.configuration.install_fixture(fixture);
-    }
     app.recovery.skip_maintenance();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("base"), None);
@@ -1462,7 +1427,9 @@ fn recovery_debounce_coalesces_revisions_and_clean_state_deletes_last_journal() 
     assert_eq!(app.recovery.scheduled().len(), 1);
     assert_eq!(app.recovery.scheduled()[&buffer].0, latest_revision);
     assert!(!app.recovery.writing(None));
-    std::thread::sleep(Duration::from_millis(12));
+    std::thread::sleep(Duration::from_millis(
+        crate::editor::session::recovery::WRITE_DEBOUNCE_MS + 10,
+    ));
     app.schedule_recovery_work();
     wait_vfs(&mut app);
     let journal = app.recovery.path(buffer);
@@ -1476,11 +1443,6 @@ fn recovery_debounce_coalesces_revisions_and_clean_state_deletes_last_journal() 
     assert!(!journal.exists());
     assert!(!app.recovery.revisions().contains_key(&buffer));
 
-    {
-        let mut fixture = app.configuration.fixture_snapshot();
-        fixture.settings.recovery.write_debounce_ms = 0;
-        app.configuration.install_fixture(fixture);
-    }
     app.invoke_insert_text("X".into());
     let revision = app.state.buffers[buffer].text.revision();
     app.schedule_recovery_work();
@@ -1493,18 +1455,16 @@ fn recovery_debounce_coalesces_revisions_and_clean_state_deletes_last_journal() 
 #[test]
 fn recovery_delete_completion_cannot_forget_a_newer_queued_write() {
     let mut app = app();
-    {
-        let mut fixture = app.configuration.fixture_snapshot();
-        fixture.settings.recovery.write_debounce_ms = 0;
-        fixture.settings.recovery.cleanup_enabled = false;
-        app.configuration.install_fixture(fixture);
-    }
     app.recovery.skip_maintenance();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("base"), None);
     app.set_dashboard_visibility(false);
     let buffer = app.state.active_buffer_id().expect("buffer");
     app.invoke_insert_text("A".into());
+    app.schedule_recovery_work();
+    std::thread::sleep(Duration::from_millis(
+        crate::editor::session::recovery::WRITE_DEBOUNCE_MS + 10,
+    ));
     app.schedule_recovery_work();
     wait_vfs(&mut app);
 
@@ -1516,6 +1476,10 @@ fn recovery_delete_completion_cannot_forget_a_newer_queued_write() {
     app.invoke_insert_text("B".into());
     let latest = app.state.buffers[buffer].text.revision();
     app.schedule_recovery_work();
+    std::thread::sleep(Duration::from_millis(
+        crate::editor::session::recovery::WRITE_DEBOUNCE_MS + 10,
+    ));
+    app.schedule_recovery_work();
     assert_eq!(app.recovery.revisions().get(&buffer), Some(&latest));
     app.recovery.check_foreign_completions();
     wait_vfs(&mut app);
@@ -1526,38 +1490,6 @@ fn recovery_delete_completion_cannot_forget_a_newer_queued_write() {
     assert_eq!(app.recovery.revisions().get(&buffer), Some(&latest));
     app.schedule_recovery_work();
     assert!(!app.recovery.writing(None));
-}
-
-#[test]
-fn retention_pruning_suppresses_only_the_pruned_live_revision_without_churn() {
-    let mut app = app();
-    {
-        let mut fixture = app.configuration.fixture_snapshot();
-        fixture.settings.recovery.write_debounce_ms = 0;
-        fixture.settings.recovery.maximum_retained_records = 0;
-        fixture.settings.recovery.maximum_age_days = 0;
-        app.configuration.install_fixture(fixture);
-    }
-    app.recovery.skip_maintenance();
-    app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("base"), None);
-    let buffer = app.state.active_buffer_id().expect("buffer");
-    app.invoke_insert_text("A".into());
-    let pruned_revision = app.state.buffers[buffer].text.revision();
-    app.schedule_recovery_work();
-    wait_vfs(&mut app);
-    app.schedule_recovery_work();
-    wait_vfs(&mut app);
-    assert!(!app.recovery.path(buffer).exists());
-    assert_eq!(app.recovery.pruned().get(&buffer), Some(&pruned_revision));
-    app.schedule_recovery_work();
-    assert!(!app.recovery.writing(None));
-
-    app.invoke_insert_text("B".into());
-    let newer = app.state.buffers[buffer].text.revision();
-    app.schedule_recovery_work();
-    assert_ne!(newer, pruned_revision);
-    assert!(app.recovery.writing(Some(newer)));
 }
 
 #[test]
@@ -1624,9 +1556,7 @@ fn buffer_line_mouse_selects_and_right_click_closes_with_dirty_safety() {
         .unwrap();
     let row = bounds.y
         + u16::from(
-            app.configuration.settings().ui.tab_line.enabled
-                && (!app.configuration.settings().ui.tab_line.hide_when_single
-                    || app.state.tabs.len() > 1),
+            app.state.tabs.len() > 1,
         );
     let left = KeyEvent::mouse(
         crate::editor::input::KeyCode::MouseLeftDown,
@@ -1703,7 +1633,7 @@ fn content_line_pins_reorder_middle_mouse_and_survive_bridge_reset() {
         app.ui
             .content_tabs
             .iter()
-            .any(|entry| entry.icon == app.configuration.settings().ui.buffer_line.scratch_icon && entry.kind == ContentTabKind::Text)
+            .any(|entry| entry.icon == SCRATCH_ICON && entry.kind == ContentTabKind::Text)
     );
     app.state.show_buffer(b).unwrap();
     app.reconcile_editor_windows();
@@ -1748,9 +1678,7 @@ fn content_line_pins_reorder_middle_mouse_and_survive_bridge_reset() {
         .unwrap();
     let row = bounds.y
         + u16::from(
-            app.configuration.settings().ui.tab_line.enabled
-                && (!app.configuration.settings().ui.tab_line.hide_when_single
-                    || app.state.tabs.len() > 1),
+            app.state.tabs.len() > 1,
         );
     let middle = KeyEvent::mouse(
         crate::editor::input::KeyCode::MouseMiddleDown,
@@ -1879,7 +1807,7 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
     assert_eq!(
         (custom_entry.icon.as_str(), custom_entry.closeable),
         (
-            app.configuration.settings().ui.buffer_line.custom_icon.as_str(),
+            CUSTOM_ICON,
             false
         )
     );
@@ -1900,9 +1828,7 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
         .unwrap();
     let row = bounds.y
         + u16::from(
-            app.configuration.settings().ui.tab_line.enabled
-                && (!app.configuration.settings().ui.tab_line.hide_when_single
-                    || app.state.tabs.len() > 1),
+            app.state.tabs.len() > 1,
         );
     let right = KeyEvent::mouse(
         crate::editor::input::KeyCode::MouseRightDown,
@@ -2685,16 +2611,15 @@ fn editor_window_revision_skips_idle_rebuilds_and_tracks_projection_changes() {
         split_count + 2
     );
 
-    let before_label = app.window_session.editor_ids().reconciliation_count();
+    let before_reload = app.window_session.editor_ids().reconciliation_count();
     {
-        let mut fixture = app.configuration.fixture_snapshot();
-        fixture.settings.ui.buffer_line.scratch_label = "[untitled]".into();
+        let fixture = app.configuration.fixture_snapshot();
         app.configuration.install_fixture(fixture);
     }
     app.reconcile_editor_windows();
     assert_eq!(
         app.window_session.editor_ids().reconciliation_count(),
-        before_label + 1
+        before_reload
     );
     app.window_session
         .graph()
@@ -2727,44 +2652,6 @@ fn explorer_is_a_graph_dock_and_bundled_disable_is_transactional() {
     let rect = app.explorer_window_rect().expect("projected explorer");
     // The status line keeps the last row of the screen.
     assert!(rect.width > 1 && rect.height == app.window_session.height() - 1);
-
-    let mut disabled = crate::config::load_bundled_config();
-    disabled.config.ui.explorer.bundled_enabled = false;
-    app.apply_configuration_candidate(disabled, false)
-        .expect("disable bundled explorer");
-    assert!(app.ui.explorer.is_none());
-    assert!(app.state.active_view.is_some());
-    app.open_explorer();
-    assert!(app.ui.explorer.is_none());
-    assert!(
-        app.ui
-            .notification
-            .as_deref()
-            .is_some_and(|message| message.contains("disabled"))
-    );
-    app.reconcile_editor_windows();
-    assert_eq!(
-        app.window_session
-            .graph()
-            .window(ids.window)
-            .expect("hidden explorer")
-            .placement,
-        WindowPlacement::Hidden
-    );
-
-    let enabled = crate::config::load_bundled_config();
-    app.apply_configuration_candidate(enabled, false)
-        .expect("re-enable bundled explorer");
-    app.open_explorer();
-    assert_eq!(app.window_session.native_ids().explorer(), Some(ids));
-    assert!(matches!(
-        app.window_session
-            .graph()
-            .window(ids.window)
-            .expect("shown explorer")
-            .placement,
-        WindowPlacement::Docked { .. }
-    ));
 }
 
 #[test]
@@ -3183,11 +3070,7 @@ fn configured_window_rule_candidate_is_cloned_validated_and_published_atomically
 #[test]
 fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
     let mut loaded = crate::config::load_bundled_config();
-    loaded.config.runtime.vfs_queue_capacity = 2;
     loaded.config.ui.terminal_panel.height = 10;
-    loaded.config.ui.terminal_panel.minimum_height = 4;
-    loaded.config.ui.terminal_panel.maximum_height = 20;
-    loaded.config.ui.terminal_panel.resize_step = 2;
     let workspace = tempdir().unwrap();
     let state = tempdir().unwrap();
     let mut app = InteractiveApplication::new(
@@ -4221,43 +4104,6 @@ fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
     );
     assert_eq!(driver.terminal_exit_code(), Some(7));
 
-    loaded.config.terminals.maximum_output_bytes = 4;
-    loaded.config.terminals.scrollback_bytes = 4;
-    loaded.config.terminals.profiles.insert(
-        "reader-failure".into(),
-        crate::config::TerminalProfileConfig {
-            program: "/bin/sh".into(),
-            arguments: vec!["-c".into(), "printf 123456789".into()],
-            cwd: None,
-            environment: Default::default(),
-            columns: 40,
-            rows: 8,
-            float: false,
-            close_on_exit: false,
-        },
-    );
-    let mut failed = TestSession::new(loaded.clone());
-    failed.new_buffer();
-    failed.trust_owned_terminal_fixture();
-    failed.terminal_open("reader-failure");
-    let deadline = Instant::now() + Duration::from_secs(4);
-    loop {
-        failed.pump_terminal();
-        if failed.terminal_pending() == 0
-            && failed.terminal_phase() == Some(crate::ui::TerminalPhase::Failed)
-        {
-            break;
-        }
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(2));
-    }
-    assert_eq!(
-        failed.terminal_phase(),
-        Some(crate::ui::TerminalPhase::Failed)
-    );
-
-    loaded.config.terminals.maximum_output_bytes = 32 * 1024 * 1024;
-    loaded.config.terminals.scrollback_bytes = 8 * 1024 * 1024;
     loaded.config.terminals.profiles.insert(
         "stale-close".into(),
         crate::config::TerminalProfileConfig {
@@ -4371,8 +4217,7 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
             path_maps: Default::default(),
         },
     );
-    let mut replacement = loaded.clone();
-    replacement.config.debug.maximum_watches += 1;
+    let replacement = loaded.clone();
     let mut driver = TestSession::new(loaded);
     driver.new_buffer();
     driver.debug_program_fixture();
@@ -4774,7 +4619,7 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
         ..PersistedState::default()
     };
     app.persistence
-        .restore_history(&mut saved, &app.configuration.settings().persistence);
+        .restore_history(&mut saved);
     assert_eq!(
         app.persistence
             .marks()

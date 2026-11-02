@@ -977,7 +977,6 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
     let projected_before_rejection = app.ui.explorer.clone();
     let mut invalid = crate::config::load_bundled_config();
     invalid.config.ui.explorer.icon_mode = crate::config::ExplorerIconMode::Ascii;
-    invalid.config.ui.explorer.maximum_visible_rows = 2;
     invalid
         .config
         .input
@@ -992,11 +991,10 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
 
     let mut valid = crate::config::load_bundled_config();
     valid.config.ui.explorer.icon_mode = crate::config::ExplorerIconMode::Ascii;
-    valid.config.ui.explorer.maximum_visible_rows = 2;
     app.apply_configuration_candidate(valid, false)
         .expect("valid explorer reload");
     let explorer = app.ui.explorer.as_ref().expect("reconfigured projection");
-    assert_eq!(explorer.rows.len(), 2);
+    assert_eq!(explorer.rows.len(), 5);
     assert_eq!(explorer.rows.iter().filter(|row| row.selected).count(), 1);
     assert!(explorer.rows.iter().all(|row| {
         row.segments.iter().any(|segment| {
@@ -1829,16 +1827,11 @@ fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
 #[test]
 fn workspace_search_streams_exact_batches_and_root_changes_cancel() {
     let mut app = app();
-    {
-        let mut fixture = app.configuration.fixture_snapshot();
-        fixture.settings.workspace.search.batch_size = 1;
-        app.configuration.install_fixture(fixture);
-    }
     fs::write(app.state.workspace_root.join("one.txt"), "needle\n").unwrap();
     fs::write(app.state.workspace_root.join("two.txt"), "needle\n").unwrap();
     app.start_workspace_search("needle".into(), None);
     wait_workspace_search(&mut app);
-    assert_eq!(app.search.sequence(), 2);
+    assert_eq!(app.search.sequence(), 1);
     let broker = app.search.workflow().unwrap();
     let snapshot = broker.snapshot_if_changed(0).unwrap();
     assert!(snapshot.complete);
@@ -1999,24 +1992,6 @@ fn dirty_quit_is_blocked_but_forced_quit_succeeds() {
         .with_argument("force", CommandValue::Bool(true));
     app.invoke(force);
     assert!(app.should_quit);
-}
-
-#[test]
-fn invalid_configured_regex_keeps_search_prompt_input() {
-    let mut app = app();
-    app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("abc"), None);
-    app.set_dashboard_visibility(false);
-    {
-        let mut fixture = app.configuration.fixture_snapshot();
-        fixture.settings.search.regex = true;
-        app.configuration.install_fixture(fixture);
-    }
-    app.open_prompt(crate::ui::PromptKind::SearchForward, "[".into());
-    app.submit_prompt();
-    let prompt = app.ui.prompt.clone().expect("invalid regex prompt remains open");
-    assert_eq!(prompt.input, "[");
-    assert!(prompt.error.is_some());
 }
 
 #[test]

@@ -71,15 +71,6 @@ pub(in crate::editor::session) fn validate_configured_commands(
         }
     }
     for (alias, command_id) in &loaded.config.input.command_aliases {
-        if loaded
-            .config
-            .input
-            .disabled_command_aliases
-            .iter()
-            .any(|disabled| disabled == alias)
-        {
-            continue;
-        }
         if alias.is_empty() || alias.chars().any(char::is_whitespace) || alias.contains('.') {
             errors.push(format!("invalid command alias `{alias}`"));
             continue;
@@ -161,28 +152,18 @@ pub(in crate::editor::session) fn invocation_fingerprint(invocation: &CommandInv
     fingerprint
 }
 
-pub(in crate::editor::session) fn keymap_entries_for_policy<'a>(
+pub(in crate::editor::session) fn keymap_entries<'a>(
     loaded: &'a crate::config::LoadedKeymaps,
-    policy: &crate::config::KeymapPolicyConfig,
 ) -> (
     &'a [crate::config::KeymapEntry],
     usize,
     &'a [crate::config::KeyGroupEntry],
     usize,
 ) {
-    if policy.load_bundled_defaults {
-        (
-            &loaded.entries,
-            loaded.bundled_count,
-            &loaded.groups,
-            loaded.bundled_group_count,
-        )
-    } else {
-        (
-            &loaded.entries[loaded.bundled_count..],
-            0,
-            &loaded.groups[loaded.bundled_group_count..],
-            0,
-        )
-    }
+    (
+        &loaded.entries,
+        loaded.bundled_count,
+        &loaded.groups,
+        loaded.bundled_group_count,
+    )
 }

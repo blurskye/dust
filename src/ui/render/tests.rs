@@ -1,3 +1,6 @@
+use crate::ui::render::CONTROL_CHARACTER_REPLACEMENT;
+use crate::ui::render::overlays::BUFFER_OVERFLOW_LEFT;
+use crate::ui::window::{PANE_MINIMUM_HEIGHT, PANE_MINIMUM_WIDTH};
 use std::path::PathBuf;
 
 use crate::editor::EditorState;
@@ -105,7 +108,6 @@ fn attach_test_compositor(
         .map(|terminal| (terminal.id, crate::ui::window::WindowId(10_002)));
     if let Some((_, window)) = terminal_window {
         let size = super::terminal_panel_geometry(
-            config,
             height,
             ui.terminal_panel
                 .as_ref()
@@ -143,7 +145,6 @@ fn attach_test_compositor(
         .and_then(|picker| {
             crate::ui::geometry::picker_window_geometry(
                 picker,
-                config,
                 crate::ui::window::WindowRect {
                     x: 0,
                     y: 0,
@@ -194,8 +195,8 @@ fn attach_test_compositor(
         graph_revision: 1,
         projection: snapshot.project_with_tiled_insets(
             bounds,
-            config.ui.panes.minimum_width,
-            config.ui.panes.minimum_height,
+            PANE_MINIMUM_WIDTH,
+            PANE_MINIMUM_HEIGHT,
             crate::ui::window::TiledInsets {
                 screen_bottom,
                 top,
@@ -303,12 +304,11 @@ fn workspace_frame_respects_nonzero_compositor_origin_for_side_and_top_docks() {
 
 #[test]
 fn prompt_is_globally_centered_and_clamped() {
-    let configured = crate::config::CommandLineConfig::default();
-    let geometry = prompt_geometry(120, 40, &configured, false);
+    let geometry = prompt_geometry(120, 40, false);
     assert_eq!(geometry.left, 30);
     assert_eq!(geometry.top, 2);
     assert_eq!(geometry.width, 60);
-    let narrow = prompt_geometry(30, 8, &configured, false);
+    let narrow = prompt_geometry(30, 8, false);
     assert_eq!(narrow.left, 1);
     assert_eq!(narrow.width, 28);
 }
@@ -331,10 +331,10 @@ fn workspace_trust_prompt_is_one_centered_confirmation_panel() {
         100,
         20,
     );
-    let geometry = prompt_geometry(100, 20, &loaded.config.ui.command_line, true);
+    let geometry = prompt_geometry(100, 20, true);
 
     assert_eq!(geometry.left, 20);
-    assert_eq!(geometry.top, loaded.config.ui.command_line.top_rows);
+    assert_eq!(geometry.top, 2);
     assert_eq!(geometry.height, 4);
     assert!(
         frame
@@ -558,7 +558,7 @@ fn prompt_clears_and_clips_the_editor_layer_beneath_its_box() {
         editor_window_layout: Some(editor_layout(&state)),
         ..UiState::default()
     };
-    let geometry = prompt_geometry(100, 20, &loaded.config.ui.command_line, false);
+    let geometry = prompt_geometry(100, 20, false);
     let probe_x = geometry.left + geometry.width - 2;
     let probe_y = geometry.top + 1;
     let base = render(&state, &base_ui, &loaded.config, &loaded.dashboard, 100, 20);
@@ -718,7 +718,7 @@ fn completion_attaches_below_globally_centered_prompt() {
     let config = loaded.config;
     let dashboard = loaded.dashboard;
     let frame = render(&state, &ui, &config, &dashboard, 100, 20);
-    let geometry = prompt_geometry(100, 20, &config.ui.command_line, false);
+    let geometry = prompt_geometry(100, 20, false);
     assert_eq!(geometry.left, 20);
     assert!(frame.grid.row_text(geometry.top + 3).contains("Open file"));
 }
@@ -727,7 +727,8 @@ fn completion_attaches_below_globally_centered_prompt() {
 fn prompt_completion_viewport_follows_a_selected_item_beyond_its_first_page() {
     let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
     let mut prompt = PromptState::new(PromptKind::Command);
-    prompt.completions = (0..6)
+    let count = usize::from(super::COMPLETION_MAX_ROWS) * 2;
+    prompt.completions = (0..count)
         .map(|index| CompletionItem {
             icon: None,
             color: None,
@@ -735,21 +736,21 @@ fn prompt_completion_viewport_follows_a_selected_item_beyond_its_first_page() {
             detail: format!("detail-{index}"),
         })
         .collect();
-    prompt.selected_completion = Some(5);
+    prompt.selected_completion = Some(count - 1);
     let ui = UiState {
         dashboard: true,
         prompt: Some(prompt),
         ..UiState::default()
     };
     let loaded = crate::config::load_bundled_config();
-    let mut config = loaded.config;
-    config.ui.command_line.completion_max_rows = 3;
+    let config = loaded.config;
     let frame = render(&state, &ui, &config, &loaded.dashboard, 100, 20);
     let screen = (0..frame.grid.height())
         .map(|y| frame.grid.row_text(y))
         .collect::<Vec<_>>();
 
-    assert!(screen.iter().any(|line| line.contains("candidate-5")));
+    let last = format!("candidate-{}", count - 1);
+    assert!(screen.iter().any(|line| line.contains(&last)));
     assert!(!screen.iter().any(|line| line.contains("candidate-0")));
 }
 
@@ -820,13 +821,11 @@ fn split_tree_and_tab_line_render_real_independent_views() {
         .split_active(crate::editor::Axis::Horizontal, 500)
         .expect("split");
     let loaded = crate::config::load_bundled_config();
-    let mut config = loaded.config;
-    config.ui.tab_line.hide_when_single = false;
+    let config = loaded.config;
     let ui = ui_with_editor_layout(&state);
     let frame = render(&state, &ui, &config, &loaded.dashboard, 20, 8);
-    assert!(frame.grid.row_text(0).contains("[scratch]"));
     assert_eq!(frame.grid.get(9, 2).expect("split border").symbol, "│");
-    assert!(frame.cursor.is_some_and(|(x, y, _)| x > 9 && y > 0));
+    assert!(frame.cursor.is_some_and(|(x, _, _)| x > 9));
 }
 
 #[test]
@@ -846,9 +845,7 @@ fn buffer_line_lists_unique_dirty_content_and_follows_active_overflow() {
     );
     state.buffers[first].dirty = true;
     let loaded = crate::config::load_bundled_config();
-    let mut config = loaded.config;
-    config.ui.tab_line.enabled = false;
-    config.ui.buffer_line.maximum_name_width = 18;
+    let config = loaded.config;
     let entries = vec![
         super::ContentTabEntry {
             identity: super::ContentTabIdentity(crate::ui::window::ContentId(1)),
@@ -890,7 +887,7 @@ fn buffer_line_lists_unique_dirty_content_and_follows_active_overflow() {
         ..UiState::default()
     };
 
-    let frame = render(&state, &ui, &config, &loaded.dashboard, 24, 7);
+    let frame = render(&state, &ui, &config, &loaded.dashboard, 40, 7);
     let line = frame.grid.row_text(0);
     assert!(line.contains("buffer-name.rs"), "{line:?}");
     assert!(line.contains('‹'));
@@ -906,9 +903,7 @@ fn buffer_line_lists_unique_dirty_content_and_follows_active_overflow() {
 #[test]
 fn content_line_segment_width_and_hit_testing_share_exact_boundaries() {
     let loaded = crate::config::load_bundled_config();
-    let mut config = loaded.config;
-    config.ui.buffer_line.active_format = "{title}{dirty}".into();
-    config.ui.buffer_line.inactive_format = "{title}{dirty}".into();
+    let config = loaded.config;
     let entry = super::ContentTabEntry {
         identity: super::ContentTabIdentity(crate::ui::window::ContentId(9)),
         kind: super::ContentTabKind::Text,
@@ -965,7 +960,7 @@ fn content_line_segment_width_and_hit_testing_share_exact_boundaries() {
         entry.active = index == 2;
     }
     let left = super::text_width(
-        &config.ui.buffer_line.overflow_left,
+        &BUFFER_OVERFLOW_LEFT,
         config.editor.ambiguous_width,
     );
     for column in 0..u16::try_from(left).unwrap() {
@@ -982,10 +977,6 @@ fn content_line_segment_width_and_hit_testing_share_exact_boundaries() {
         entry.dirty = false;
         entry.closeable = false;
     }
-    config.ui.buffer_line.show_icons = false;
-    config.ui.buffer_line.show_pins = false;
-    config.ui.buffer_line.show_diagnostics = false;
-    config.ui.buffer_line.show_close = false;
     let first = super::content_tab_width(&right_entries[0], &config);
     assert_eq!(
         super::content_tab_at_column(&right_entries, &config, 5, u16::try_from(first).unwrap()),
@@ -1039,7 +1030,6 @@ fn buffer_line_begins_after_the_explorer_dock() {
             matches: 0,
             query: String::new(),
             searching: false,
-            preview_lines: Vec::new(),
         }),
         explorer_focused: true,
         ..UiState::default()
@@ -1073,7 +1063,6 @@ fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity() {
             matches: 0,
             query: String::new(),
             searching: false,
-            preview_lines: Vec::new(),
         }),
         lsp_progress: vec![
             super::UiLspProgress {
@@ -1277,7 +1266,7 @@ fn grapheme_atomic_rows_match_render_cursor_and_tiny_pane_policy() {
     let tiny = render(&state, &ui, &config, &loaded.dashboard, 1, 2);
     assert_eq!(
         tiny.grid.get(0, 0).unwrap().symbol,
-        config.editor.control_character_replacement
+        CONTROL_CHARACTER_REPLACEMENT
     );
     assert_eq!(tiny.grid.get(0, 1).unwrap().symbol, "a");
 }
@@ -1643,16 +1632,6 @@ fn active_indent_scope_guide_is_subtly_elevated_from_normal_guides() {
     );
     assert_eq!(frame.grid.get(0, 5).expect("closing brace").symbol, "}");
 
-    config.editor.indent_guides.active_scope = false;
-    let inactive_only = super::render_editor_view(&state, view, &ui, &config, 30, 7);
-    assert_eq!(
-        inactive_only
-            .grid
-            .get(0, 4)
-            .expect("inactive-only guide")
-            .style,
-        crate::ui::Style::Border
-    );
 }
 
 #[test]
@@ -1985,8 +1964,6 @@ fn concrete_gutter_reserves_content_at_zero_one_and_two_cell_widths() {
     let mut config = loaded.config;
     config.editor.wrap = false;
     config.editor.line_numbers = crate::config::LineNumbers::Absolute;
-    config.editor.line_number_separator = "1234567890123456".into();
-    config.editor.gutter_padding = 20;
     config.ui.status_line.enabled = false;
 
     assert_eq!(
@@ -2008,8 +1985,6 @@ fn concrete_gutter_reserves_content_at_zero_one_and_two_cell_widths() {
         .split_active(crate::editor::Axis::Horizontal, 100)
         .expect("minimum-ratio split");
     split_state.focus_pane(-1, false).expect("zero-width leaf");
-    config.ui.panes.minimum_width = 3;
-    config.ui.panes.minimum_height = 2;
     let mut split_ui = ui_with_editor_layout(&split_state);
     attach_test_compositor(&split_state, &mut split_ui, &config, 6, 2);
     let zero_leaf = super::active_pane_viewport(&split_state, &split_ui, &config, 6, 2)
@@ -2175,7 +2150,7 @@ fn theme_geometry_is_compact_and_bounded_without_resizing_other_pickers() {
             };
             picker.surface = PickerSurfaceKind::Theme;
             if let Some(rect) =
-                crate::ui::geometry::picker_window_geometry(&picker, &config, bounds)
+                crate::ui::geometry::picker_window_geometry(&picker, bounds)
             {
                 assert!(rect.width <= 64 && rect.height <= 12);
                 assert!(rect.x >= bounds.x && rect.y >= bounds.y);
@@ -2190,8 +2165,8 @@ fn theme_geometry_is_compact_and_bounded_without_resizing_other_pickers() {
             }
             picker.surface = PickerSurfaceKind::Generic;
             assert_eq!(
-                crate::ui::geometry::picker_window_geometry(&picker, &config, bounds),
-                super::picker_geometry(&config, bounds)
+                crate::ui::geometry::picker_window_geometry(&picker, bounds),
+                super::picker_geometry(bounds)
             );
         }
     }
@@ -2452,7 +2427,6 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
             matches: 2,
             query: String::new(),
             searching: false,
-            preview_lines: Vec::new(),
         }),
         explorer_focused: true,
         ..UiState::default()
@@ -2492,7 +2466,7 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
     );
     assert_eq!(
         frame.grid.get(panel, 1).expect("dock separator").symbol,
-        "⎸"
+        "│"
     );
     assert_eq!(
         frame
@@ -2500,7 +2474,7 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
             .get(panel, 2)
             .expect("preserved separator")
             .symbol,
-        "⎸"
+        "│"
     );
     assert_eq!(
         frame
@@ -2544,7 +2518,7 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
             .get(panel, 3)
             .expect("Unicode separator")
             .symbol,
-        "⎸"
+        "│"
     );
 }
 
@@ -2893,8 +2867,7 @@ fn language_completion_keeps_the_selected_item_inside_its_bounded_viewport() {
         ..UiState::default()
     };
     let loaded = crate::config::load_bundled_config();
-    let mut config = loaded.config;
-    config.ui.command_line.completion_max_rows = 4;
+    let config = loaded.config;
     let frame = render(&state, &ui, &config, &loaded.dashboard, 40, 10);
     let selected_row = (0..10)
         .find(|row| frame.grid.row_text(*row).contains("item-15"))
@@ -2921,7 +2894,6 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
     let loaded = crate::config::load_bundled_config();
     let mut config = loaded.config;
     config.ui.terminal_panel.height = 6;
-    config.ui.terminal_panel.minimum_height = 4;
     let mut screen = crate::ui::PtyScreen::new(80, 4, 100);
     screen.feed("\u{1b}[31;1mRED\u{1b}[0m 界");
     let (cursor_column, cursor_row) = screen.cursor();
@@ -2978,11 +2950,10 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
         matches: 0,
         query: String::new(),
         searching: false,
-        preview_lines: Vec::new(),
     });
     ui.terminal_panel = Some(terminal.clone());
     // The status line keeps the screen's last row, so the panel ends one row above it.
-    let geometry = super::terminal_panel_geometry(&config, 19, 6).expect("terminal geometry");
+    let geometry = super::terminal_panel_geometry(19, 6).expect("terminal geometry");
     assert_eq!(geometry.top, 13);
     assert_eq!(geometry.body_height, 5);
     let panel_width = super::explorer_panel_width(&config, 80).expect("explorer width");
@@ -3066,15 +3037,12 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
 fn key_hints_anchor_clip_and_preserve_protected_rows() {
     let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
     let loaded = crate::config::load_bundled_config();
-    let mut config = loaded.config;
-    config.ui.key_hints.max_rows = 2;
-    config.ui.key_hints.max_columns = 2;
-    config.ui.key_hints.max_width = 44;
-    let mut ui = UiState {
+    let config = loaded.config;
+    let ui = UiState {
         dashboard: true,
         key_hints: Some(super::KeyHintUiState {
             prefix: "space f".into(),
-            rows: (0..8)
+            rows: (0..30)
                 .map(|index| super::KeyHintUiRow {
                     next_key: char::from(b'a' + index).to_string(),
                     label: format!("Action {index}"),
@@ -3110,33 +3078,7 @@ fn key_hints_anchor_clip_and_preserve_protected_rows() {
             )
         })
     }));
-    assert!(!(0..20).any(|row| right.grid.row_text(row).contains("Action 4")));
-
-    config.ui.key_hints.anchor = crate::config::KeyHintAnchor::BottomLeft;
-    ui.explorer = Some(super::ExplorerUiState {
-        title: "Files".into(),
-        rows: Vec::new(),
-        scroll: 0,
-        loading: false,
-        total: 0,
-        matches: 0,
-        query: String::new(),
-        searching: false,
-        preview_lines: Vec::new(),
-    });
-    let left = render(&state, &ui, &config, &loaded.dashboard, 80, 20);
-    let panel = super::explorer_panel_width(&config, 80).expect("panel");
-    let leftmost_hint = (0..80)
-        .find(|x| {
-            (0..19).any(|y| {
-                left.grid
-                    .get(*x, y)
-                    .is_some_and(|cell| cell.style == crate::ui::Style::KeyHintBorder)
-            })
-        })
-        .expect("left anchored hint");
-    assert_eq!(leftmost_hint, panel + 1);
-    assert!(leftmost_hint < right_prefix_x);
+    assert!(!(0..20).any(|row| right.grid.row_text(row).contains("Action 29")));
 
     let tiny = render(&state, &ui, &config, &loaded.dashboard, 10, 3);
     assert!(!(0..3).any(|row| tiny.grid.row_text(row).contains("space f")));
@@ -3162,7 +3104,7 @@ fn dashboard_and_prompt_render_at_multiple_sizes() {
         );
         ui.prompt = Some(PromptState::new(PromptKind::Command));
         let prompt = render(&state, &ui, &config, &dashboard_config, width, height);
-        let geometry = prompt_geometry(width, height, &config.ui.command_line, false);
+        let geometry = prompt_geometry(width, height, false);
         if height > 2 && width > 2 {
             assert!(prompt.grid.row_text(geometry.top).contains("Command") || width < 20);
         }

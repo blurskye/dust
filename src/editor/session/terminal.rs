@@ -10,6 +10,12 @@ use crate::{
         window::ContentLifecycle,
     },
 };
+
+pub(crate) const TERMINAL_QUEUE_CAPACITY: usize = 256;
+pub(crate) const TERMINAL_MAXIMUM_OUTPUT_BYTES: usize = 32 * 1024 * 1024;
+pub(crate) const TERMINAL_MAXIMUM_INPUT_BYTES: usize = 1024 * 1024;
+pub(crate) const TERMINAL_SCROLLBACK_BYTES: usize = 8 * 1024 * 1024;
+
 pub(in crate::editor::session) use input::TerminalInput;
 use input::{clamp_terminal_cursor, keep_terminal_cursor_visible};
 use std::{
@@ -96,7 +102,7 @@ impl TerminalSession {
 
     pub(in crate::editor::session) fn new(policy: &TerminalsConfig) -> Self {
         Self {
-            service: PtyService::start(policy.queue_capacity),
+            service: PtyService::start(TERMINAL_QUEUE_CAPACITY),
             preflights: HashMap::new(),
             tabs: HashMap::new(),
             selected: None,
@@ -307,7 +313,7 @@ impl TerminalSession {
         if self.closed
             || self.next.is_none()
             || self.revision.is_none_or(|r| r == u64::MAX)
-            || self.tabs.len() >= self.policy.queue_capacity.clamp(1, 256)
+            || self.tabs.len() >= TERMINAL_QUEUE_CAPACITY
         {
             return Err("terminal source is closed, full or exhausted".into());
         }
@@ -391,7 +397,7 @@ impl TerminalSession {
             || source.scope != workspace.version()
             || !Arc::ptr_eq(&source.epoch, &self.epoch)
             || self.revision.is_none_or(|r| r == u64::MAX)
-            || self.tabs.len() >= self.policy.queue_capacity.clamp(1, 256)
+            || self.tabs.len() >= TERMINAL_QUEUE_CAPACITY
         {
             return Err("terminal intent retired, foreign, full or exhausted".into());
         }
@@ -417,8 +423,7 @@ impl TerminalSession {
                 screen: PtyScreen::new(
                     config.columns,
                     config.rows,
-                    self.policy
-                        .scrollback_bytes
+                    TERMINAL_SCROLLBACK_BYTES
                         .saturating_div(usize::from(config.columns.max(1)))
                         .max(1),
                 ),
@@ -530,10 +535,10 @@ impl TerminalSession {
             rows: tab.requested_size.1,
             root_revision: result.root_revision,
             policy: PtyPolicy {
-                maximum_output_bytes: self.policy.maximum_output_bytes,
-                maximum_input_bytes: self.policy.maximum_input_bytes,
-                event_capacity: self.policy.queue_capacity,
-                scrollback_bytes: self.policy.scrollback_bytes,
+                maximum_output_bytes: TERMINAL_MAXIMUM_OUTPUT_BYTES,
+                maximum_input_bytes: TERMINAL_MAXIMUM_INPUT_BYTES,
+                event_capacity: TERMINAL_QUEUE_CAPACITY,
+                scrollback_bytes: TERMINAL_SCROLLBACK_BYTES,
             },
         };
         let pty = admission

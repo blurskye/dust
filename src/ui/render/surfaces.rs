@@ -1,3 +1,5 @@
+use crate::ui::render::{COMPLETION_DETAIL_GAP, COMPLETION_MAX_ROWS};
+use crate::ui::render::editor::PROMPT_CURSOR;
 use crossterm::cursor::SetCursorStyle;
 
 use crate::{
@@ -10,6 +12,19 @@ use super::{
     PickerRowKind, PickerUiState, PluginSurfaceUiState, PrivateSurfaceUiState, PromptState,
     ToolMenuState, editor::cursor_style, overlays::truncate_content_title,
 };
+
+pub(crate) const PICKER_MAXIMUM_PREVIEW_BYTES: usize = 256 * 1024;
+pub(crate) const PROMPT_INPUT_PADDING: u16 = 2;
+pub(crate) const PROMPT_TITLE_MIN_WIDTH: u16 = 10;
+pub(crate) const TOOL_MANAGER_MINIMUM_HEIGHT: u16 = 14;
+pub(crate) const TOOL_MANAGER_MINIMUM_WIDTH: u16 = 48;
+pub(crate) const TOOL_MANAGER_WIDTH_PERCENT: u16 = 82;
+pub(crate) const TOOL_MANAGER_HEIGHT_PERCENT: u16 = 84;
+pub(crate) const TOOL_MANAGER_TITLE: &str = "Tools";
+pub(crate) const TOOL_MANAGER_HELP: &str =
+    "j/k move · / search · Tab category · Enter install or start · r refresh · Esc close";
+pub(crate) const TOOL_LANGUAGE_SEPARATOR: &str = ", ";
+pub(crate) const TOOL_CATEGORY_ORDER: &[&str] = &["all", "lsp", "dap", "linter", "formatter", "agent"];
 
 /// What fits of `text`, ending in an ellipsis when some had to go.
 pub(super) fn ellipsized(text: &str, maximum: usize, ambiguous: crate::config::AmbiguousWidth) -> String {
@@ -370,16 +385,15 @@ pub(super) fn render_private_surface(
 }
 
 #[must_use]
-pub fn picker_geometry(config: &Config, bounds: WindowRect) -> Option<WindowRect> {
-    let configured = &config.ui.picker;
-    let width = u16::try_from(u32::from(bounds.width) * u32::from(configured.width_percent) / 100)
+pub fn picker_geometry(bounds: WindowRect) -> Option<WindowRect> {
+    let width = u16::try_from(u32::from(bounds.width) * 88 / 100)
         .unwrap_or(bounds.width)
-        .max(configured.minimum_width.min(bounds.width))
+        .max(40.min(bounds.width))
         .min(bounds.width);
     let height =
-        u16::try_from(u32::from(bounds.height) * u32::from(configured.height_percent) / 100)
+        u16::try_from(u32::from(bounds.height) * 82 / 100)
             .unwrap_or(bounds.height)
-            .max(configured.minimum_height.min(bounds.height))
+            .max(10.min(bounds.height))
             .min(bounds.height);
     if width < 4 || height < 6 {
         return None;
@@ -403,7 +417,6 @@ pub(super) fn render_picker(
     rect: WindowRect,
     geometry: Option<crate::ui::geometry::PickerContentGeometry>,
 ) {
-    let configured = &config.ui.picker;
     let WindowRect {
         x: left,
         y: top,
@@ -419,11 +432,7 @@ pub(super) fn render_picker(
         }
     }
     let (horizontal, vertical, top_left, top_right, bottom_left, bottom_right) =
-        match configured.border {
-            BorderStyle::Double => ('═', '║', '╔', '╗', '╚', '╝'),
-            BorderStyle::Rounded => ('─', '│', '╭', '╮', '╰', '╯'),
-            BorderStyle::Single => ('─', '│', '┌', '┐', '└', '┘'),
-        };
+        BorderStyle::Single.glyphs();
     for x in left..left + width {
         frame
             .grid
@@ -538,7 +547,7 @@ pub(super) fn render_picker(
         picker.rows.len()
     );
     let status = if picker.loading {
-        format!("{}  {count}", configured.loading_label)
+        format!("loading…  {count}")
     } else {
         count
     };
@@ -590,15 +599,11 @@ pub(super) fn render_picker(
     {
         let y = first_row + u16::try_from(display_row).unwrap_or(0);
         let selected = picker.selected == Some(index);
-        let marker = if selected {
-            &configured.selected_marker
-        } else {
-            &configured.row_marker
-        };
+        let marker = if selected { ">" } else { " " };
         let source = if row.source.is_empty() {
             String::new()
         } else {
-            format!("{}{}", configured.source_separator, row.source)
+            row.source.clone()
         };
         // Every picker uses the same trailing provenance column. Reserve at
         // most a third of the row so long sources cannot crowd out the label.
@@ -837,7 +842,7 @@ pub(super) fn render_picker(
     frame.cursor = Some((
         cursor_x.min(query_right.saturating_sub(1)),
         query_y,
-        cursor_style(config.ui.cursor.prompt),
+        cursor_style(PROMPT_CURSOR),
     ));
 }
 
@@ -890,25 +895,24 @@ pub(super) fn render_tool_menu(
     terminal_width: u16,
     terminal_height: u16,
 ) {
-    let configured = &config.ui.tool_manager;
-    let width = (u32::from(terminal_width) * u32::from(configured.width_percent) / 100)
+    let width = (u32::from(terminal_width) * u32::from(TOOL_MANAGER_WIDTH_PERCENT) / 100)
         .try_into()
         .unwrap_or(terminal_width);
-    let height = (u32::from(terminal_height) * u32::from(configured.height_percent) / 100)
+    let height = (u32::from(terminal_height) * u32::from(TOOL_MANAGER_HEIGHT_PERCENT) / 100)
         .try_into()
         .unwrap_or(terminal_height);
     let width = width
-        .max(configured.minimum_width.min(terminal_width))
+        .max(TOOL_MANAGER_MINIMUM_WIDTH.min(terminal_width))
         .min(terminal_width);
     let mut height = height
-        .max(configured.minimum_height.min(terminal_height))
+        .max(TOOL_MANAGER_MINIMUM_HEIGHT.min(terminal_height))
         .min(terminal_height);
     if let Some(picker) = &menu.runtime_picker {
         let compact_height = u16::try_from(picker.options.len())
             .unwrap_or(u16::MAX)
             .saturating_mul(2)
             .saturating_add(11)
-            .max(configured.minimum_height);
+            .max(TOOL_MANAGER_MINIMUM_HEIGHT);
         height = height.min(compact_height);
     }
     if width < 4 || height < 6 {
@@ -922,11 +926,7 @@ pub(super) fn render_tool_menu(
         }
     }
     let (horizontal, vertical, top_left, top_right, bottom_left, bottom_right) =
-        match configured.border {
-            BorderStyle::Double => ('═', '║', '╔', '╗', '╚', '╝'),
-            BorderStyle::Rounded => ('─', '│', '╭', '╮', '╰', '╯'),
-            BorderStyle::Single => ('─', '│', '┌', '┐', '└', '┘'),
-        };
+        BorderStyle::Single.glyphs();
     for x in left..left + width {
         frame
             .grid
@@ -957,15 +957,15 @@ pub(super) fn render_tool_menu(
         || {
             if menu.searching || !menu.query.is_empty() {
                 let cursor = if menu.searching { "▏" } else { "" };
-                format!(" {} · /{}{cursor} ", configured.title, menu.query)
+                format!(" {} · /{}{cursor} ", TOOL_MANAGER_TITLE, menu.query)
             } else {
-                format!(" {} ", configured.title)
+                format!(" {} ", TOOL_MANAGER_TITLE)
             }
         },
         |picker| {
             format!(
                 " {} · {} · choose build ",
-                configured.title, picker.server_id
+                TOOL_MANAGER_TITLE, picker.server_id
             )
         },
     );
@@ -1023,11 +1023,7 @@ pub(super) fn render_tool_menu(
             .take(visible)
         {
             let focused = index == picker.selected;
-            let marker = if focused {
-                &configured.selected_marker
-            } else {
-                &configured.row_marker
-            };
+            let marker = if focused { ">" } else { " " };
             let active = if option.selected && option.installed { "●" } else { "" };
             let style = if focused {
                 Style::Selection
@@ -1127,7 +1123,7 @@ pub(super) fn render_tool_menu(
         return;
     }
 
-    for (row, help) in wrapped_key_help(&configured.help, usize::from(content_width), ambiguous)
+    for (row, help) in wrapped_key_help(TOOL_MANAGER_HELP, usize::from(content_width), ambiguous)
         .iter()
         .enumerate()
     {
@@ -1135,12 +1131,13 @@ pub(super) fn render_tool_menu(
     }
     y += 2;
     let mut tab_x = content_left;
-    for category in &configured.category_order {
-        let label = configured
+    for category in TOOL_CATEGORY_ORDER {
+        let label = config
+            .ui
+            .tool_manager
             .categories
-            .get(category)
-            .map(String::as_str)
-            .unwrap_or(category);
+            .get(*category)
+            .map_or(*category, String::as_str);
         let text = format!(" {label} ");
         let style = if category == &menu.category {
             Style::StatusAccent
@@ -1488,16 +1485,12 @@ pub(super) fn render_prompt(
                 )
                 .min(right.saturating_sub(1)),
             geometry.top,
-            cursor_style(config.ui.cursor.prompt),
+            cursor_style(PROMPT_CURSOR),
         ));
         return;
     }
     let (horizontal, vertical, top_left, top_right, bottom_left, bottom_right) =
-        match config.ui.command_line.border {
-            BorderStyle::Double => ('═', '║', '╔', '╗', '╚', '╝'),
-            BorderStyle::Rounded => ('─', '│', '╭', '╮', '╰', '╯'),
-            BorderStyle::Single => ('─', '│', '┌', '┐', '└', '┘'),
-        };
+        BorderStyle::Single.glyphs();
     let show_help = prompt.confirmation.is_none()
         && prompt.error.is_none()
         && prompt.help.is_some()
@@ -1556,7 +1549,7 @@ pub(super) fn render_prompt(
             Style::Border,
         );
     }
-    if config.ui.command_line.show_title && geometry.width > config.ui.command_line.title_min_width
+    if geometry.width > PROMPT_TITLE_MIN_WIDTH
     {
         let title = format!(
             " {} ",
@@ -1666,7 +1659,7 @@ pub(super) fn render_prompt(
     }
     let input_x = geometry
         .left
-        .saturating_add(config.ui.command_line.input_padding);
+        .saturating_add(PROMPT_INPUT_PADDING);
     let input_y = geometry.top.saturating_add(if show_help { 2 } else { 1 });
     let content_right = right.saturating_sub(1);
     if show_help {
@@ -1697,10 +1690,9 @@ pub(super) fn render_prompt(
     if let Some(error) = &prompt.error {
         let error_y = geometry
             .top
-            .saturating_add(3)
-            .saturating_add(config.ui.command_line.attachment_gap);
+            .saturating_add(3);
         // A long error wraps below the box, since its end usually says what to do.
-        let padding = config.ui.command_line.input_padding;
+        let padding = PROMPT_INPUT_PADDING;
         let inner = right.saturating_sub(geometry.left).saturating_sub(padding.saturating_mul(2));
         let ambiguous = config.editor.ambiguous_width;
         let lines = super::wrap_card_text(error, usize::from(inner).max(1), ambiguous);
@@ -1720,12 +1712,11 @@ pub(super) fn render_prompt(
     } else if !prompt.completions.is_empty() {
         let completion_top = geometry
             .top
-            .saturating_add(3)
-            .saturating_add(config.ui.command_line.attachment_gap);
+            .saturating_add(3);
         let available = height.saturating_sub(completion_top);
         let rows = u16::try_from(prompt.completions.len())
             .unwrap_or(u16::MAX)
-            .min(config.ui.command_line.completion_max_rows)
+            .min(COMPLETION_MAX_ROWS)
             .min(available);
         let rows = usize::from(rows);
         let maximum_scroll = prompt.completions.len().saturating_sub(rows);
@@ -1755,13 +1746,13 @@ pub(super) fn render_prompt(
             let item = &prompt.completions[index];
             let label_x = geometry
                 .left
-                .saturating_add(config.ui.command_line.input_padding);
+                .saturating_add(PROMPT_INPUT_PADDING);
             let detail_x = label_x
                 .saturating_add(
                     u16::try_from(text_width(&item.label, config.editor.ambiguous_width))
                         .unwrap_or(0),
                 )
-                .saturating_add(config.ui.command_line.completion_detail_gap);
+                .saturating_add(COMPLETION_DETAIL_GAP);
             frame
                 .grid
                 .put_text_clipped(label_x, y, &item.label, style, right);
@@ -1777,6 +1768,6 @@ pub(super) fn render_prompt(
     frame.cursor = Some((
         cursor_x.min(geometry.left + geometry.width.saturating_sub(2)),
         input_y,
-        cursor_style(config.ui.cursor.prompt),
+        cursor_style(PROMPT_CURSOR),
     ));
 }

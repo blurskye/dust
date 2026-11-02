@@ -24,7 +24,7 @@ impl TerminalSession {
         }
         let pty = tab.pty.ok_or("terminal has not started")?;
         let admission = self.service.reserve_input(pty).map_err(|e| e.to_string())?;
-        let ceiling = self.policy.maximum_input_bytes;
+        let ceiling = super::TERMINAL_MAXIMUM_INPUT_BYTES;
         let bytes = match input {
             TerminalInput::Text(text) => {
                 if text.len() > ceiling {

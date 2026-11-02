@@ -1,3 +1,4 @@
+use crate::editor::input::ABSOLUTE_MAX_COUNT;
 use super::InputSession;
 use crate::{
     config::load_bundled_config,
@@ -9,7 +10,6 @@ use std::path::Path;
 #[test]
 fn prompt_edits_preserve_grapheme_boundaries_and_history_policy() {
     let mut input = InputSession::new(100);
-    let mut policy = load_bundled_config().config;
     input.open_prompt(PromptKind::Command, "é界".into(), None);
     input.prompt_move(PromptMove::Left);
     input.prompt_backspace();
@@ -27,20 +27,14 @@ fn prompt_edits_preserve_grapheme_boundaries_and_history_policy() {
     input.prompt_delete_to_start();
     assert_eq!(input.prompt().unwrap().input, "n");
     assert_eq!(input.prompt().unwrap().cursor, 0);
-    policy.history.command.maximum_entries = 2;
     for entry in ["one", "two", "two", "three"] {
-        input.record_prompt_history(PromptKind::Command, entry, &policy);
+        input.record_prompt_history(PromptKind::Command, entry);
     }
-    input.record_prompt_history(PromptKind::WorkspaceTrust, "secret confirmation", &policy);
-    assert_eq!(input.command_history(), ["two", "three"]);
+    input.record_prompt_history(PromptKind::WorkspaceTrust, "secret confirmation");
+    assert_eq!(input.command_history(), ["one", "two", "three"]);
     assert!(input.search_history().is_empty());
-    policy.history.command.maximum_entries = 1;
-    input.configure_history(&policy.history);
-    input.prompt_history(-1, &policy);
+    input.prompt_history(-1);
     assert_eq!(input.prompt().unwrap().input, "three");
-    policy.history.command.enabled = false;
-    input.configure_history(&policy.history);
-    assert!(input.command_history().is_empty());
 }
 
 #[test]
@@ -83,12 +77,11 @@ fn confirmation_choice_is_typed_and_does_not_accept_text() {
 
 #[test]
 fn closed_reopened_and_reconfigured_prompt_rejects_the_old_directory_reply() {
-    let mut policy = load_bundled_config().config;
-    policy.input.completion_select_first = true;
+    let policy = load_bundled_config().config;
     let mut registry = CommandRegistry::default();
     register_builtin_commands(&mut registry).unwrap();
     register_app_commands(&mut registry).unwrap();
-    let mut input = InputSession::new(policy.input.count_limit);
+    let mut input = InputSession::new(ABSOLUTE_MAX_COUNT);
     let root = Path::new("/isolated");
     input.open_prompt(PromptKind::Command, "e foo".into(), None);
     let old = input
@@ -120,8 +113,9 @@ fn closed_reopened_and_reconfigured_prompt_rejects_the_old_directory_reply() {
         input.prompt().unwrap().completions[0].label,
         "foo-current.rs"
     );
+    input.prompt_complete(1);
     assert_eq!(input.prompt().unwrap().selected_completion, Some(0));
-    input.reconfigure(&policy);
+    input.reconfigure();
     assert_eq!(input.prompt().unwrap().input, "e foo");
     assert_eq!(input.prompt().unwrap().selected_completion, None);
     assert!(!input.accept_prompt_paths(
@@ -144,9 +138,7 @@ fn closed_reopened_and_reconfigured_prompt_rejects_the_old_directory_reply() {
 #[test]
 fn documentation_is_bounded_at_utf8_boundaries_and_scroll_accepts_explicit_content_rows() {
     let mut input = InputSession::new(100);
-    let mut policy = load_bundled_config().config.ui.documentation_popup;
-    policy.maximum_bytes = 3;
-    policy.maximum_lines = 2;
+    let policy = load_bundled_config().config.ui.documentation_popup;
     input.present_documentation(
         DocumentationPopupKind::Hover,
         "Hover".into(),
@@ -158,9 +150,24 @@ fn documentation_is_bounded_at_utf8_boundaries_and_scroll_accepts_explicit_conte
     );
     let popup = input.documentation().unwrap();
     assert_eq!(popup.provider.len(), 256);
-    assert_eq!(popup.sections[0].lines, ["é", "l"]);
+    assert_eq!(popup.sections[0].lines, ["éé", "line"]);
+    let long = format!("{}\n", "é".repeat(4000)).repeat(40);
+    input.present_documentation(
+        DocumentationPopupKind::Git,
+        "Diff".into(),
+        "provider".into(),
+        None,
+        [(DocumentationMarkupKind::PlainText, long)],
+        &policy,
+        200,
+    );
+    let lines = &input.documentation().unwrap().sections[0].lines;
+    let bytes = lines.iter().map(String::len).sum::<usize>();
+    assert!(bytes <= super::documentation::DOCUMENTATION_MAXIMUM_BYTES && bytes > 60_000);
+    assert!(lines.iter().all(|line| line.chars().all(|c| c == 'é')));
     input.scroll_documentation(1, 100, 1);
-    assert_eq!(input.documentation().unwrap().scroll, 1);
+    let popup = input.documentation().unwrap();
+    assert_eq!(popup.scroll, popup.line_count() - 1);
     input.scroll_documentation(-1, 100, 1);
     assert_eq!(input.documentation().unwrap().scroll, 0);
     input.close_documentation();

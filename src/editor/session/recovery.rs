@@ -37,6 +37,13 @@ pub(super) enum RecoveryUpdate {
     CrashCleared,
 }
 
+/// Journals Dust lists at startup, keeps on disk, and how old one may get before cleanup.
+const MAXIMUM_DISCOVERED_JOURNALS: usize = 100;
+const MAXIMUM_RETAINED_JOURNALS: usize = 100;
+const MAXIMUM_JOURNAL_AGE_DAYS: u64 = 30;
+/// How long an edit waits before its journal is written.
+pub(super) const WRITE_DEBOUNCE_MS: u64 = 250;
+
 pub(super) struct RecoverySession {
     directory: PathBuf,
     records: Vec<(PathBuf, RecoveryRecord)>,
@@ -100,22 +107,22 @@ impl RecoverySession {
             return;
         }
         if !self.discovery_queued {
-            if let Ok(id) = io.discover(&self.directory, config.maximum_discovered_records) {
+            if let Ok(id) = io.discover(&self.directory, MAXIMUM_DISCOVERED_JOURNALS) {
                 self.discovery_queued = true;
                 self.pending.insert(id, Pending::Discovery);
             }
         }
-        if config.cleanup_enabled && !self.cleanup_queued {
+        if !self.cleanup_queued {
             if let Ok(id) = io.cleanup(
                 &self.directory,
-                config.maximum_retained_records,
-                config.maximum_age_days,
+                MAXIMUM_RETAINED_JOURNALS,
+                MAXIMUM_JOURNAL_AGE_DAYS,
             ) {
                 self.cleanup_queued = true;
                 self.pending.insert(id, Pending::Cleanup);
             }
         }
-        let debounce = Duration::from_millis(config.write_debounce_ms);
+        let debounce = Duration::from_millis(WRITE_DEBOUNCE_MS);
         for (buffer, state) in &editor.buffers {
             if state.is_virtual_read_only() {
                 continue;
@@ -142,23 +149,21 @@ impl RecoverySession {
             } else {
                 self.scheduled.remove(&buffer);
                 self.pruned.remove(&buffer);
-                if config.delete_clean_journals {
-                    if let Some(revision) = self.revisions.get(&buffer).copied() {
-                        let path = self.path(buffer);
-                        if !self
-                            .pending
-                            .values()
-                            .any(|p| matches!(p, Pending::Delete { path: p, .. } if *p == path))
-                        {
-                            if let Ok(id) = io.delete(&path) {
-                                self.pending.insert(
-                                    id,
-                                    Pending::Delete {
-                                        path,
-                                        buffer: Some((buffer, revision)),
-                                    },
-                                );
-                            }
+                if let Some(revision) = self.revisions.get(&buffer).copied() {
+                    let path = self.path(buffer);
+                    if !self
+                        .pending
+                        .values()
+                        .any(|p| matches!(p, Pending::Delete { path: p, .. } if *p == path))
+                    {
+                        if let Ok(id) = io.delete(&path) {
+                            self.pending.insert(
+                                id,
+                                Pending::Delete {
+                                    path,
+                                    buffer: Some((buffer, revision)),
+                                },
+                            );
                         }
                     }
                 }
@@ -347,9 +352,6 @@ impl RecoverySession {
     }
     pub(super) fn revisions(&self) -> &HashMap<BufferId, BufferRevision> {
         &self.revisions
-    }
-    pub(super) fn pruned(&self) -> &HashMap<BufferId, BufferRevision> {
-        &self.pruned
     }
     pub(super) fn writing(&self, revision: Option<BufferRevision>) -> bool {
         self.pending.values().any(|p| matches!(p, Pending::Write { revision: r, .. } if revision.is_none_or(|revision| *r == revision)))

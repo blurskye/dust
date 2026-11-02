@@ -471,33 +471,35 @@ fn a_key_press_dismisses_information_but_not_errors() {
 
 #[test]
 fn wide_notice_text_stays_inside_its_box() {
-    let mut loaded = crate::config::load_bundled_config();
-    loaded.config.ui.notifications.max_width = 8;
+    let loaded = crate::config::load_bundled_config();
     let mut session = TestSession::new(loaded);
     session.resize(40, 12);
     let before = session.frame();
-    session.notice("界界界界界界");
+    session.notice(&"界".repeat(30));
     let after = session.frame();
-    // The box is 8 wide at the top right, one cell from the edge, and the text wraps to three
-    // lines of two: x 31..39, y 1..6.
+    let symbol = |x: u16, y: u16| after.grid.get(x, y).unwrap().symbol.clone();
+    let left = (0..40).find(|x| symbol(*x, 1) == "╭").expect("top left corner");
+    let right = (left..40).find(|x| symbol(*x, 1) == "╮").expect("top right corner");
+    let bottom = (2..12).find(|y| symbol(left, *y) == "╰").expect("bottom corner");
+    assert!(right < 40 && bottom >= 4, "the text wraps inside the screen");
     for y in 0..12 {
         for x in 0..40 {
-            if !((31..39).contains(&x) && (1..6).contains(&y)) {
+            if !((left..=right).contains(&x) && (1..=bottom).contains(&y)) {
                 assert_eq!(before.grid.get(x, y), after.grid.get(x, y), "outside notice at {x},{y}");
             }
         }
     }
-    assert_eq!(after.grid.get(31, 1).unwrap().symbol, "╭");
-    for y in 2..5 {
-        assert_eq!(after.grid.get(33, y).unwrap().symbol, "界");
-    }
-    assert_eq!(after.grid.get(31, 1).unwrap().style, Style::Accent);
+    let wide = (2..bottom)
+        .flat_map(|y| (left..right).map(move |x| (x, y)))
+        .filter(|(x, y)| symbol(*x, *y) == "界")
+        .count();
+    assert_eq!(wide, 30);
+    assert_eq!(after.grid.get(left, 1).unwrap().style, Style::Accent);
 }
 
 #[test]
 fn errors_render_as_top_right_bordered_notifications() {
-    let mut loaded = crate::config::load_bundled_config();
-    loaded.config.ui.notifications.max_width = 20;
+    let loaded = crate::config::load_bundled_config();
     let mut session = TestSession::new(loaded);
     session.resize(40, 12);
     session.error("bad");
@@ -597,8 +599,7 @@ fn stacked_picker_selected_row_and_late_preview_share_the_painted_capacity_after
     assert!(session.projection().surface_content.picker.is_none());
     session.grep_snapshot_fixture();
     assert!(session.projection().picker.is_some());
-    let mut candidate = crate::config::load_bundled_config();
-    candidate.config.workspace.maximum_picker_items += 1;
+    let candidate = crate::config::load_bundled_config();
     session.apply_candidate(candidate).unwrap();
     session.frame();
     assert!(

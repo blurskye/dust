@@ -1,11 +1,11 @@
-mod terminal;
+pub(crate) mod terminal;
 use terminal::{active_compositor, dock_terminal_panel, render_key_hints};
 mod debug;
-mod explorer;
+pub(crate) mod explorer;
 use debug::{debug_layout_in, render_debug_panes};
 pub use debug::{DebugPane, DebugPanesUiState, debug_pane_insets, debug_pane_tab_at};
 use explorer::{place_workspace_frame, render_explorer_window};
-mod overlays;
+pub(crate) mod overlays;
 use super::geometry::text_width;
 use overlays::{
     render_dashboard, render_documentation_popup, render_language_completion, render_lsp_loading,
@@ -16,9 +16,9 @@ use workspace::{
     render_non_tiled_editor_window, render_non_tiled_editor_windows, render_workspace,
 };
 mod agent;
-mod editor;
+pub(crate) mod editor;
 mod settings;
-mod surfaces;
+pub(crate) mod surfaces;
 mod visual_rows;
 #[cfg(test)]
 use editor::render_editor_view;
@@ -53,7 +53,7 @@ pub use workspace::{
 
 use std::time::Instant;
 
-use crate::config::{AmbiguousWidth, CommandLineConfig, Config, DashboardConfig, PromptTextConfig};
+use crate::config::{AmbiguousWidth, Config, DashboardConfig, PromptTextConfig};
 use crate::editor::EditorState;
 use crate::editor::text::{ByteOffset, ByteRange};
 use crate::ui::window::{
@@ -63,6 +63,16 @@ use crossterm::cursor::SetCursorStyle;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::ui::{CellGrid, Style};
+
+pub(crate) const CONTROL_CHARACTER_REPLACEMENT: &str = "�";
+pub(crate) const ZERO_WIDTH_REPLACEMENT: &str = "◌";
+pub(crate) const SCRATCH_LABEL: &str = "[scratch]";
+pub(crate) const TERMINAL_PANEL_MINIMUM_HEIGHT: u16 = 4;
+pub(crate) const TERMINAL_PANEL_MAXIMUM_HEIGHT: u16 = 40;
+pub(crate) const TERMINAL_PANEL_MINIMUM_WORKSPACE_HEIGHT: u16 = 3;
+pub(crate) const TERMINAL_PANEL_RESIZE_STEP: u16 = 2;
+pub(crate) const COMPLETION_MAX_ROWS: u16 = 12;
+pub(crate) const COMPLETION_DETAIL_GAP: u16 = 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PromptKind {
@@ -1072,7 +1082,6 @@ pub struct ExplorerUiState {
     pub query: String,
     /// Whether keys type into the query.
     pub searching: bool,
-    pub preview_lines: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1465,23 +1474,23 @@ pub struct PromptGeometry {
 pub fn prompt_geometry(
     terminal_width: u16,
     terminal_height: u16,
-    configured: &CommandLineConfig,
     has_error: bool,
 ) -> PromptGeometry {
-    let margins = configured.outer_margin.saturating_mul(2);
-    let width = if terminal_width < configured.narrow_width_threshold {
+    const WIDTH: u16 = 60;
+    const MINIMUM_WIDTH: u16 = 36;
+    const NARROW_TERMINAL: u16 = 40;
+    const TOP_ROWS: u16 = 2;
+    let margins = 2;
+    let width = if terminal_width < NARROW_TERMINAL {
         terminal_width.saturating_sub(margins).max(1)
     } else {
-        configured
-            .width
+        WIDTH
             .min(terminal_width.saturating_sub(margins))
-            .max(configured.minimum_width.min(terminal_width.max(1)))
+            .max(MINIMUM_WIDTH.min(terminal_width.max(1)))
     };
     let height = if has_error { 4 } else { 3 }.min(terminal_height.max(1));
     let left = terminal_width.saturating_sub(width) / 2;
-    let top = configured
-        .top_rows
-        .min(terminal_height.saturating_sub(height));
+    let top = TOP_ROWS.min(terminal_height.saturating_sub(height));
     PromptGeometry {
         left,
         top,
@@ -1506,8 +1515,8 @@ fn confirmation_lines(text: &str, width: u16, config: &Config) -> (Vec<Confirmat
     let policy = CellGrid::new_with_policy(
         0,
         0,
-        &config.editor.control_character_replacement,
-        &config.editor.zero_width_replacement,
+        &CONTROL_CHARACTER_REPLACEMENT,
+        &ZERO_WIDTH_REPLACEMENT,
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
     let mut lines = Vec::new();
@@ -1562,7 +1571,6 @@ pub(crate) fn confirmation_layout(
     let mut geometry = prompt_geometry(
         terminal_width,
         terminal_height,
-        &config.ui.command_line,
         prompt.error.is_some() || prompt.help.is_some(),
     );
     let Some(confirmation) = &prompt.confirmation else {
@@ -1578,11 +1586,7 @@ pub(crate) fn confirmation_layout(
         .unwrap_or(u16::MAX)
         .saturating_add(3);
     geometry.height = desired_height.min(terminal_height.max(1));
-    geometry.top = config
-        .ui
-        .command_line
-        .top_rows
-        .min(terminal_height.saturating_sub(geometry.height));
+    geometry.top = 2.min(terminal_height.saturating_sub(geometry.height));
     let buttons = format!(
         "[ {} ] [ {} ]",
         confirmation.positive_label, confirmation.negative_label
@@ -1646,8 +1650,7 @@ pub fn screen_foot_rows(state: &EditorState, ui: &UiState, config: &Config, heig
 
 #[must_use]
 pub fn workspace_top_rows(state: &EditorState, ui: &UiState, config: &Config) -> u16 {
-    let tab_line = config.ui.tab_line.enabled
-        && (!config.ui.tab_line.hide_when_single || state.tabs.len() > 1);
+    let tab_line = state.tabs.len() > 1;
     let buffer_line = config.ui.buffer_line.enabled
         && ui.content_tabs.len() > usize::from(config.ui.buffer_line.hide_when_single);
     u16::from(tab_line).saturating_add(u16::from(buffer_line))
@@ -1655,20 +1658,17 @@ pub fn workspace_top_rows(state: &EditorState, ui: &UiState, config: &Config) ->
 
 #[must_use]
 pub fn terminal_panel_geometry(
-    config: &Config,
     terminal_height: u16,
     requested_height: u16,
 ) -> Option<TerminalPanelGeometry> {
     if terminal_height < 3 {
         return None;
     }
-    let policy = &config.ui.terminal_panel;
-    let workspace_minimum = policy
-        .minimum_workspace_height
-        .min(terminal_height.saturating_sub(3));
+    let workspace_minimum =
+        TERMINAL_PANEL_MINIMUM_WORKSPACE_HEIGHT.min(terminal_height.saturating_sub(3));
     let maximum_panel = terminal_height.saturating_sub(workspace_minimum);
     let height = requested_height
-        .clamp(policy.minimum_height, policy.maximum_height)
+        .clamp(TERMINAL_PANEL_MINIMUM_HEIGHT, TERMINAL_PANEL_MAXIMUM_HEIGHT)
         .min(maximum_panel)
         .max(3);
     let top = terminal_height.saturating_sub(height);
@@ -1693,7 +1693,7 @@ fn render_error_notification(
     height: u16,
     at_bottom: bool,
 ) {
-    let Some(mut rect) = super::geometry::error_notification_geometry(config, width, height) else {
+    let Some(mut rect) = super::geometry::error_notification_geometry(width, height) else {
         return;
     };
     // A long message wraps instead of losing its end, which is usually the part that says why.
@@ -1898,8 +1898,8 @@ pub fn render(
             grid: CellGrid::new_with_policy(
                 width,
                 height,
-                &config.editor.control_character_replacement,
-                &config.editor.zero_width_replacement,
+                &CONTROL_CHARACTER_REPLACEMENT,
+                &ZERO_WIDTH_REPLACEMENT,
                 config.editor.ambiguous_width == AmbiguousWidth::Wide,
             ),
             cursor: None,
@@ -2234,7 +2234,6 @@ pub fn render(
         render_key_hints(
             &mut frame,
             key_hints,
-            config,
             workspace.map_or(0, |bounds| bounds.x),
             content_width,
             workspace_height,

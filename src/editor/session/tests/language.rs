@@ -1,3 +1,5 @@
+use crate::ui::render::overlays::{LSP_PROGRESS_DONE, LSP_PROGRESS_DONE_TIMEOUT_MS, SPINNER_FRAMES, SPINNER_INTERVAL_MS};
+use crate::ui::render::COMPLETION_MAX_ROWS;
 use super::*;
 use crate::editor::text::PositionEncoding;
 
@@ -579,21 +581,12 @@ fn lsp_progress_hides_transport_keys_preserves_begin_titles_and_animates() {
     assert_eq!(progress.percentage, Some(72));
     assert!(!progress.server.contains("root:1"));
     assert!(
-        app.configuration
-            .settings()
-            .ui
-            .lsp_progress
-            .spinner_frames
+        SPINNER_FRAMES
             .iter()
-            .any(|frame| frame == "⠇")
+            .any(|frame| *frame == "⠇")
     );
-    {
-        let mut fixture = app.configuration.fixture_snapshot();
-        fixture.settings.ui.lsp_progress.spinner_interval_ms = 1_000;
-        app.configuration.install_fixture(fixture);
-    }
     app.language
-        .fixture_progress_epoch(Instant::now() - Duration::from_millis(1_500));
+        .fixture_progress_epoch(Instant::now() - Duration::from_millis(SPINNER_INTERVAL_MS * 3 / 2));
     app.update_lsp_progress_animation();
     assert_eq!(app.ui.lsp_progress_frame, 1);
 
@@ -605,18 +598,9 @@ fn lsp_progress_hides_transport_keys_preserves_begin_titles_and_animates() {
         "Finished".into(),
         None,
     );
-    let timeout = app
-        .configuration
-        .settings()
-        .ui
-        .lsp_progress
-        .completed_timeout_ms;
+    let timeout = LSP_PROGRESS_DONE_TIMEOUT_MS;
     assert_eq!(
-        app.configuration
-            .settings()
-            .ui
-            .lsp_progress
-            .completed_symbol,
+        LSP_PROGRESS_DONE,
         "✓"
     );
     let completed = app.ui.lsp_progress.first_mut().expect("completed progress");
@@ -681,14 +665,10 @@ fn lsp_completion_applies_through_one_validated_transaction() {
 #[test]
 fn lsp_completion_selection_scrolls_and_wraps_inside_the_visible_window() {
     let mut app = app();
-    {
-        let mut fixture = app.configuration.fixture_snapshot();
-        fixture.settings.ui.command_line.completion_max_rows = 3;
-        app.configuration.install_fixture(fixture);
-    }
+    let count = usize::from(COMPLETION_MAX_ROWS) + 2;
     app.ui.language_completion = Some(crate::ui::LanguageCompletionState {
         typed: 0,
-        items: (0..5)
+        items: (0..count)
             .map(|index| crate::ui::CompletionItem {
                 icon: None,
                 color: None,
@@ -700,7 +680,7 @@ fn lsp_completion_selection_scrolls_and_wraps_inside_the_visible_window() {
         scroll: 0,
     });
     app.language.fixture_completion_items(
-        (0..5)
+        (0..count)
             .map(|index| crate::language::lsp::LspCompletionItem {
                 label: format!("item-{index}"),
                 filter_text: None,
@@ -717,17 +697,17 @@ fn lsp_completion_selection_scrolls_and_wraps_inside_the_visible_window() {
             })
             .collect(),
     );
-    for _ in 0..4 {
+    for _ in 1..count {
         app.move_lsp_completion(1);
     }
     let completion = app.ui.language_completion.as_ref().expect("completion");
-    assert_eq!((completion.selected, completion.scroll), (4, 2));
+    assert_eq!((completion.selected, completion.scroll), (count - 1, 2));
     app.move_lsp_completion(1);
     let completion = app.ui.language_completion.as_ref().expect("completion");
     assert_eq!((completion.selected, completion.scroll), (0, 0));
     app.move_lsp_completion(-1);
     let completion = app.ui.language_completion.as_ref().expect("completion");
-    assert_eq!((completion.selected, completion.scroll), (4, 2));
+    assert_eq!((completion.selected, completion.scroll), (count - 1, 2));
 }
 
 #[test]
@@ -965,19 +945,15 @@ fn lsp_status_never_labels_failed_or_backing_off_sessions_as_starting() {
     assert!(app.language.capabilities().is_none());
     let now = Instant::now();
     app.language.request_start(&key, None);
-    let policy = crate::config::LspConfig {
-        restart_limit: 1,
-        restart_backoff_ms: 10,
-        ..Default::default()
-    };
-    assert!(app.language.schedule_restart(&key, &policy, now).is_none());
-    assert!(app.language.restart_due(now).is_none());
+    let mut due = now;
+    for attempt in 0..crate::editor::session::lsp::LSP_RESTART_LIMIT {
+        assert!(app.language.schedule_restart(&key, due).is_none());
+        assert!(app.language.restart_due(due).is_none());
+        due += Duration::from_millis(crate::editor::session::lsp::LSP_RESTART_BACKOFF_MS << attempt);
+        assert_eq!(app.language.restart_due(due), Some(key.clone()));
+    }
     assert_eq!(
-        app.language.restart_due(now + Duration::from_millis(10)),
-        Some(key.clone())
-    );
-    assert_eq!(
-        app.language.schedule_restart(&key, &policy, now),
+        app.language.schedule_restart(&key, due),
         Some("rust-analyzer".into())
     );
     app.language.request_stop(&key);
@@ -1186,12 +1162,11 @@ fn tool_menu_navigation_keeps_the_selected_server_inside_the_rendered_list() {
     for _ in 0..row_count {
         app.move_tool_menu(1);
         let menu = app.ui.tool_menu.as_ref().expect("menu");
-        let configured = &app.configuration.settings().ui.tool_manager;
         let modal_height = (u32::from(app.window_session.height())
-            * u32::from(configured.height_percent)
+            * u32::from(crate::ui::render::surfaces::TOOL_MANAGER_HEIGHT_PERCENT)
             / 100) as u16;
         let modal_height = modal_height
-            .max(configured.minimum_height.min(app.window_session.height()))
+            .max(crate::ui::render::surfaces::TOOL_MANAGER_MINIMUM_HEIGHT.min(app.window_session.height()))
             .min(app.window_session.height());
         let visible = usize::from(modal_height.saturating_sub(18)).max(1);
         assert!(menu.selected >= menu.scroll);

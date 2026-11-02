@@ -10,6 +10,7 @@
 //! back to the agent that asked. Agents' own subagent tools are turned off in the default
 //! profiles, so every agent gets the same subagents.
 
+use crate::ui::render::overlays::{AGENT_ICON, SPINNER_FRAMES};
 use std::{
     collections::{BTreeMap, VecDeque},
     path::{Path, PathBuf},
@@ -1727,13 +1728,12 @@ impl InteractiveApplication {
     /// The tab line, the subagent list and the spinner, which change without the
     /// transcript changing.
     fn sync_agent_chrome(&mut self) {
-        let frames = &self.configuration.settings().ui.lsp_progress.spinner_frames;
+        let frames = SPINNER_FRAMES;
         let millis = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_millis());
         let frame = usize::try_from(millis / SPINNER_FRAME_MILLIS).unwrap_or(0) % frames.len().max(1);
-        let spinner = frames.get(frame).map_or("…", String::as_str);
-        let icon = &self.configuration.settings().ui.buffer_line.agent_icon;
+        let spinner = frames.get(frame).copied().unwrap_or("…");
         let entry = |index: usize, title: String, closeable: bool| ContentTabEntry {
             identity: ContentTabIdentity(ContentId(index as u64)),
             kind: ContentTabKind::VirtualDocument,
@@ -1742,7 +1742,7 @@ impl InteractiveApplication {
             dirty: false,
             pinned: false,
             diagnostic: None,
-            icon: icon.clone(),
+            icon: AGENT_ICON.into(),
             closeable,
         };
         let mut tabs = self

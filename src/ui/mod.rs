@@ -5,7 +5,7 @@ mod diff;
 mod grid;
 pub mod markdown;
 mod pty_screen;
-mod render;
+pub(crate) mod render;
 mod terminal;
 pub mod window;
 

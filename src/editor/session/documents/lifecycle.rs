@@ -452,7 +452,7 @@ pub(in crate::editor::session) fn configured_file_bytes(
     text: &TextBuffer,
     configured: &crate::config::EditorConfig,
 ) -> Vec<u8> {
-    use crate::config::{BomPolicy, FinalNewlinePolicy, LineEndingPolicy};
+    use crate::config::{FinalNewlinePolicy, LineEndingPolicy};
     let mut source = text.to_string();
     match configured.final_newline {
         FinalNewlinePolicy::Preserve => {}
@@ -465,11 +465,6 @@ pub(in crate::editor::session) fn configured_file_bytes(
         FinalNewlinePolicy::Insert => {}
     }
     let mut format = text.format().clone();
-    format.utf8_bom = match configured.utf8_bom {
-        BomPolicy::Preserve => format.utf8_bom,
-        BomPolicy::Always => true,
-        BomPolicy::Never => false,
-    };
     let configured_ending = match configured.line_endings {
         LineEndingPolicy::Preserve => None,
         LineEndingPolicy::Lf => Some(crate::editor::text::LineEnding::Lf),

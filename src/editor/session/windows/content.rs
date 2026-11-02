@@ -1,3 +1,4 @@
+use crate::ui::render::overlays::{CUSTOM_ICON, SCRATCH_ICON, TERMINAL_ICON, VIRTUAL_ICON};
 use super::{EditorTopology, WindowSession};
 use crate::{
     config::Config,
@@ -183,19 +184,19 @@ impl WindowSession {
                             let icon = match content.adapter {
                                 crate::ui::window::ContentAdapterKind::TerminalSession
                                 | crate::ui::window::ContentAdapterKind::ExternalTui => {
-                                    config.ui.buffer_line.terminal_icon.clone()
+                                    TERMINAL_ICON.to_owned()
                                 }
                                 crate::ui::window::ContentAdapterKind::VirtualDocument => {
-                                    config.ui.buffer_line.virtual_icon.clone()
+                                    VIRTUAL_ICON.to_owned()
                                 }
-                                _ => config.ui.buffer_line.custom_icon.clone(),
+                                _ => CUSTOM_ICON.to_owned(),
                             };
                             (icon, None, false)
                         },
                         |buffer| {
                             let state = &state.buffers()[buffer];
                             let icon = if state.is_virtual_read_only() {
-                                config.ui.buffer_line.virtual_icon.clone()
+                                VIRTUAL_ICON.to_owned()
                             } else if let Some(extension) = state
                                 .path
                                 .as_ref()
@@ -214,9 +215,9 @@ impl WindowSession {
                                         crate::files::file_icon(name)
                                             .map(|icon| icon.glyph.to_owned())
                                     })
-                                    .unwrap_or_else(|| config.ui.buffer_line.custom_icon.clone())
+                                    .unwrap_or_else(|| CUSTOM_ICON.to_owned())
                             } else {
-                                config.ui.buffer_line.scratch_icon.clone()
+                                SCRATCH_ICON.to_owned()
                             };
                             let diagnostic = state
                                 .path

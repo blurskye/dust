@@ -1,5 +1,7 @@
+use crate::ui::render::{CONTROL_CHARACTER_REPLACEMENT, SCRATCH_LABEL, ZERO_WIDTH_REPLACEMENT};
+use crate::ui::render::editor::END_OF_BUFFER_MARKER;
 use crate::{
-    config::{AmbiguousWidth, BorderStyle, Config},
+    config::{AmbiguousWidth, Config},
     editor::EditorState,
     ui::{CellGrid, Style, window::TileAxis},
 };
@@ -148,8 +150,7 @@ pub(super) fn workspace_projection(
     {
         return None;
     }
-    let tab_line_visible = config.ui.tab_line.enabled
-        && (!config.ui.tab_line.hide_when_single || state.tabs.len() > 1);
+    let tab_line_visible = state.tabs.len() > 1;
     let buffer_line_visible = config.ui.buffer_line.enabled
         && ui.content_tabs.len() > usize::from(config.ui.buffer_line.hide_when_single);
     let origin = compositor.projection.workspace_bounds;
@@ -324,11 +325,11 @@ pub(super) fn render_workspace(
         let mut grid = CellGrid::new_with_policy(
             width,
             height,
-            &config.editor.control_character_replacement,
-            &config.editor.zero_width_replacement,
+            &CONTROL_CHARACTER_REPLACEMENT,
+            &ZERO_WIDTH_REPLACEMENT,
             config.editor.ambiguous_width == AmbiguousWidth::Wide,
         );
-        grid.put_text(0, 0, &config.editor.end_of_buffer_marker, Style::Muted);
+        grid.put_text(0, 0, &END_OF_BUFFER_MARKER, Style::Muted);
         return Frame { grid, cursor: None };
     };
     let Some(tab) = state.tabs.get(tab_id) else {
@@ -366,8 +367,8 @@ pub(super) fn render_workspace(
     let mut grid = CellGrid::new_with_policy(
         width,
         height,
-        &config.editor.control_character_replacement,
-        &config.editor.zero_width_replacement,
+        &CONTROL_CHARACTER_REPLACEMENT,
+        &ZERO_WIDTH_REPLACEMENT,
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
     if projection.tab_line_visible {
@@ -382,25 +383,25 @@ pub(super) fn render_workspace(
                 .and_then(|buffer| buffer.path.as_ref())
                 .and_then(|path| path.file_name())
                 .map_or_else(
-                    || config.ui.tab_line.scratch_label.clone(),
+                    || SCRATCH_LABEL.to_owned(),
                     |name| name.to_string_lossy().into_owned(),
                 );
-            let format = if candidate == tab_id {
-                &config.ui.tab_line.active_format
+            let label = if candidate == tab_id {
+                format!("[{title}]")
             } else {
-                &config.ui.tab_line.inactive_format
+                format!(" {title} ")
             };
             x = grid.put_text(
                 x,
                 0,
-                &format.replace("{title}", &title),
+                &label,
                 if candidate == tab_id {
                     Style::StatusAccent
                 } else {
                     Style::Status
                 },
             );
-            x = grid.put_text(x, 0, &config.ui.tab_line.separator, Style::Status);
+            x = grid.put_text(x, 0, "│", Style::Status);
         }
     }
     if projection.buffer_line_visible {
@@ -435,10 +436,7 @@ pub(super) fn render_workspace(
             }
         }
     }
-    let (horizontal, vertical) = match config.ui.panes.border {
-        BorderStyle::Double => ('═', '║'),
-        BorderStyle::Single | BorderStyle::Rounded => ('─', '│'),
-    };
+    let (horizontal, vertical) = ('─', '│');
     for border in projection.borders {
         for offset in 0..border.length {
             let (cell_x, cell_y, symbol) = match border.axis {

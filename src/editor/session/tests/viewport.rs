@@ -1,3 +1,5 @@
+use crate::ui::render::overlays::DOCUMENTATION_SCROLL_STEP;
+use crate::editor::session::dispatch::FULL_PAGE_PERCENT;
 use super::*;
 
 #[test]
@@ -61,7 +63,7 @@ fn adversarial_grapheme_rows_make_render_mouse_and_reversed_pages_agree() {
     app.state.views[view].scroll_wrap_row = 0;
     let body = usize::from(viewport.height.max(1));
     let amount = body.saturating_mul(usize::from(
-        app.configuration.settings().editor.full_page_percent,
+        FULL_PAGE_PERCENT,
     )) / 100;
     let expected_down = {
         let model = VisualRowModel::new(
@@ -412,8 +414,6 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
     {
         let mut fixture = app.configuration.fixture_snapshot();
         fixture.settings.editor.line_numbers = crate::config::LineNumbers::Absolute;
-        fixture.settings.editor.line_number_separator = "1234567890123456".into();
-        fixture.settings.editor.gutter_padding = 20;
         app.configuration.install_fixture(fixture);
     }
     app.state.views[view].cursor = ByteOffset("a\t".len());
@@ -507,8 +507,7 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
     assert!(wide.cursor.is_some_and(|(x, _, _)| x == 0));
 
     {
-        let mut fixture = app.configuration.fixture_snapshot();
-        fixture.settings.ui.panes.minimum_width = 3;
+        let fixture = app.configuration.fixture_snapshot();
         app.configuration.install_fixture(fixture);
     }
     app.window_session
@@ -585,7 +584,6 @@ fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
         matches: 0,
         query: String::new(),
         searching: false,
-        preview_lines: Vec::new(),
     });
     app.ensure_cursor_visible();
     let docked = app.state.views[view].scroll_column;
@@ -682,9 +680,7 @@ fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
 fn documentation_keys_scroll_clamp_and_close_the_popup_context() {
     let mut app = app();
     {
-        let mut fixture = app.configuration.fixture_snapshot();
-        fixture.settings.ui.documentation_popup.max_height = 5;
-        fixture.settings.ui.documentation_popup.scroll_step = 4;
+        let fixture = app.configuration.fixture_snapshot();
         app.configuration.install_fixture(fixture);
     }
     app.present_documentation_popup(
@@ -694,7 +690,7 @@ fn documentation_keys_scroll_clamp_and_close_the_popup_context() {
         None,
         vec![crate::language::lsp::LspMarkupContent {
             kind: crate::language::lsp::LspMarkupKind::PlainText,
-            value: (0..10)
+            value: (0..200)
                 .map(|line| format!("line {line}"))
                 .collect::<Vec<_>>()
                 .join("\n"),
@@ -707,23 +703,23 @@ fn documentation_keys_scroll_clamp_and_close_the_popup_context() {
             .documentation_popup
             .as_ref()
             .map(|popup| popup.scroll),
-        Some(4)
+        Some(DOCUMENTATION_SCROLL_STEP)
     );
     app.handle_configured_key("ctrl-d".parse::<KeyEvent>().expect("Ctrl-d"));
-    assert_eq!(
-        app.ui
-            .documentation_popup
-            .as_ref()
-            .map(|popup| popup.scroll),
-        Some(7)
-    );
+    let paged = app
+        .ui
+        .documentation_popup
+        .as_ref()
+        .map(|popup| popup.scroll)
+        .expect("popup");
+    assert!(paged > DOCUMENTATION_SCROLL_STEP);
     app.handle_configured_key(KeyEvent::character('k'));
     assert_eq!(
         app.ui
             .documentation_popup
             .as_ref()
             .map(|popup| popup.scroll),
-        Some(3)
+        Some(paged - DOCUMENTATION_SCROLL_STEP)
     );
     app.handle_configured_key("ctrl-u".parse::<KeyEvent>().expect("Ctrl-u"));
     assert_eq!(
@@ -746,7 +742,7 @@ fn documentation_keys_scroll_clamp_and_close_the_popup_context() {
         None,
         vec![crate::language::lsp::LspMarkupContent {
             kind: crate::language::lsp::LspMarkupKind::PlainText,
-            value: (0..10)
+            value: (0..200)
                 .map(|line| format!("line {line}"))
                 .collect::<Vec<_>>()
                 .join("\n"),
@@ -765,7 +761,7 @@ fn documentation_keys_scroll_clamp_and_close_the_popup_context() {
             .documentation_popup
             .as_ref()
             .map(|popup| popup.scroll),
-        Some(4)
+        Some(DOCUMENTATION_SCROLL_STEP)
     );
 }
 

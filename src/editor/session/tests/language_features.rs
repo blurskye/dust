@@ -46,13 +46,6 @@ fn lsp_documentation_popup_preserves_multiline_kind_and_cancels_without_notifica
     assert_eq!(popup.kind, DocumentationPopupKind::Signature);
     assert_eq!(popup.line_count(), 3);
 
-    {
-        let mut fixture = app.configuration.fixture_snapshot();
-        fixture.settings.ui.documentation_popup.maximum_sections = 1;
-        fixture.settings.ui.documentation_popup.maximum_lines = 1;
-        fixture.settings.ui.documentation_popup.maximum_bytes = 256;
-        app.configuration.install_fixture(fixture);
-    }
     app.present_documentation_popup(
         DocumentationPopupKind::Hover,
         "bounded".into(),
@@ -70,8 +63,8 @@ fn lsp_documentation_popup_preserves_multiline_kind_and_cancels_without_notifica
         ],
     );
     let bounded = app.ui.documentation_popup.as_ref().unwrap();
-    assert_eq!(bounded.sections.len(), 1);
-    assert_eq!(bounded.line_count(), 1);
+    assert_eq!(bounded.sections.len(), 2);
+    assert_eq!(bounded.line_count(), 3);
     assert_eq!(bounded.source_range.unwrap().end, ByteOffset(1));
     app.handle_key_in_context("dashboard", KeyEvent::character('q'));
     assert!(app.ui.documentation_popup.is_none());

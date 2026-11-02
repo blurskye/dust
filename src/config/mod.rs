@@ -26,22 +26,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 mod settings;
 pub use settings::{
-    AmbiguousWidth, BomPolicy, BorderStyle, BufferLineConfig, ColorMode, CommandLineConfig,
-    ConfigWatchConfig, CursorConfig, CursorShape, DebugAdapterConfig, DebugConfig,
-    DebugRequestKind, DebugSessionConfig, DocumentationPopupConfig, EditorConfig,
-    EditorViewportConfig, ExplorerConfig, ExplorerGlyphSet, ExplorerGlyphs, ExplorerIconMode,
-    ExplorerWatchConfig, FinalNewlinePolicy, GitSignsConfig, HistoryConfig, HistoryStreamConfig,
-    IndentGuideConfig, InlayHintLevel, InputConfig, KeyHintAnchor, KeyHintConfig,
-    KeymapPolicyConfig, LargeFileConfig, LineEndingPolicy, LineNumbers, LspConfig,
-    LspProgressConfig, NotificationConfig, ObservabilityConfig, PackageRegistryConfig,
-    PackagesConfig, PaneConfig, PersistenceConfig, PickerConfig, PluginEntryConfig, PluginsConfig,
-    ProblemMatcherConfig, ProcessConfig, PromptTextConfig, RecoveryConfig, RegisterConfig,
-    ClipboardSync, RegisterStorage, RuntimeConfig, SearchConfig, StartupConfig, StatusLineConfig, SyntaxConfig,
-    TabLineConfig, TaskConfig, TaskKind, TerminalPanelConfig, TerminalProfileConfig,
-    TerminalsConfig, HighlightDefinition, ThemeAttribute, ThemeColor, ThemeConfig, ThemeStyle, ThemeStyles,
-    AgentConnection, AgentProfileConfig, AgentsConfig,
-    ToolManagerConfig, UiConfig, WindowPlacementConfig, WindowRuleConfig, WindowsConfig,
-    WorkspaceConfig, WorkspaceSearchConfig,
+    AmbiguousWidth, BorderStyle, BufferLineConfig, ColorMode, CommandLineConfig, CursorConfig, CursorShape, DebugAdapterConfig, DebugConfig, DebugRequestKind, DebugSessionConfig, DocumentationPopupConfig, EditorConfig, EditorViewportConfig, ExplorerConfig, ExplorerGlyphSet, ExplorerGlyphs, ExplorerIconMode, FinalNewlinePolicy, GitSignsConfig, IndentGuideConfig, InlayHintLevel, InputConfig, KeyHintConfig, KeymapPolicyConfig, LargeFileConfig, LineEndingPolicy, LineNumbers, LspConfig, LspProgressConfig, PersistenceConfig, PluginEntryConfig, PluginsConfig, ProblemMatcherConfig, PromptTextConfig, RecoveryConfig, RegisterConfig, ClipboardSync, SearchConfig, StartupConfig, StatusLineConfig, SyntaxConfig, TaskConfig, TaskKind, TerminalPanelConfig, TerminalProfileConfig, TerminalsConfig, HighlightDefinition, ThemeAttribute, ThemeColor, ThemeConfig, ThemeStyle, ThemeStyles, AgentConnection, AgentProfileConfig, AgentsConfig, ToolManagerConfig, UiConfig, WindowPlacementConfig, WindowRuleConfig, WindowsConfig, WorkspaceConfig, WorkspaceSearchConfig,
 };
 mod validation;
 
@@ -57,16 +42,9 @@ pub struct Config {
     pub startup: StartupConfig,
     pub input: InputConfig,
     pub search: SearchConfig,
-    pub history: HistoryConfig,
     pub recovery: RecoveryConfig,
-    pub config_watch: ConfigWatchConfig,
-    pub runtime: RuntimeConfig,
     pub lsp: LspConfig,
-    pub observability: ObservabilityConfig,
     pub persistence: PersistenceConfig,
-    pub processes: ProcessConfig,
-    #[serde(default)]
-    pub packages: PackagesConfig,
     pub plugins: PluginsConfig,
     pub debug: DebugConfig,
     #[serde(default)]

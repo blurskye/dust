@@ -472,8 +472,8 @@ impl LspSession {
         let arguments = launch.arguments(&definition);
         let environment = launch.environment(&definition)?;
         let policy = crate::language::lsp::LspPolicy {
-            request_timeout: Duration::from_millis(settings.request_timeout_ms),
-            maximum_log_lines: settings.maximum_log_lines,
+            request_timeout: Duration::from_millis(super::LSP_REQUEST_TIMEOUT_MS),
+            maximum_log_lines: super::LSP_MAXIMUM_LOG_LINES,
         };
         let configuration = if settings.inlay_hint_level == crate::config::InlayHintLevel::Max {
             crate::language::lsp::LspServerConfiguration::maximum_inlay_hints(&definition.id)

@@ -14,6 +14,9 @@ use crate::{
 };
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
+pub(crate) const MAXIMUM_DIAGNOSTICS_PER_URI: usize = 2_000;
+pub(crate) const MAXIMUM_DIAGNOSTICS: usize = 10_000;
+
 /// Captured by a source before work, or checked against its original transport context.
 #[derive(Clone, Debug)]
 pub(super) struct DiagnosticDocument {
@@ -261,17 +264,6 @@ impl DiagnosticSession {
     pub(super) fn clear_owner_uri(&mut self, owner: &DiagnosticOwner, uri: &str) {
         self.store.clear_owner_uri(owner, uri);
         self.batches.remove(&(owner.clone(), uri.into()));
-        self.changed();
-    }
-    pub(super) fn set_limits(&mut self, total: usize, per_uri: usize) {
-        if self.store.limits() == (total, per_uri) {
-            return;
-        }
-        self.store.set_limits(total, per_uri);
-        // Limit changes invalidate row indices, including formerly truncated rows.
-        for batch in self.batches.values_mut() {
-            batch.epoch = Arc::new(());
-        }
         self.changed();
     }
     fn changed(&mut self) {
@@ -533,10 +525,6 @@ mod tests {
         owner
             .publish(batch(&other, "independent", &editor), &editor)
             .unwrap();
-        let key = owner.choices().next().unwrap().0;
-        owner.set_limits(1, 1);
-        assert_eq!(owner.choices().count(), 1);
-        assert!(owner.resolve(&key, &editor).is_none());
         owner.clear_source(&other);
         owner.clear_source(&replacement);
         owner.activate(replacement.clone());

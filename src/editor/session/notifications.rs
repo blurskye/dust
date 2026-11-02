@@ -4,9 +4,8 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use crate::{
-    config::Config,
-    telemetry::{CrashSnapshotWriter, LiveCrashSnapshot, LogLevel, LogPolicy, StructuredLogs},
+use crate::telemetry::{
+    CrashSnapshotWriter, LiveCrashSnapshot, LogLevel, LogPolicy, StructuredLogs,
 };
 
 /// Owns notification insertion, expiry, history and telemetry writers.
@@ -28,14 +27,14 @@ pub(super) struct NoticeSession {
 }
 
 impl NoticeSession {
-    pub(super) fn new(config: &Config, persist: bool, crash_path: PathBuf, now: Instant) -> Self {
+    pub(super) fn new(persist: bool, crash_path: PathBuf, now: Instant) -> Self {
         Self {
             current: None,
             passing: None,
             warning: false,
             history: VecDeque::new(),
             deadline: None,
-            logs: make_logs(config, persist),
+            logs: make_logs(persist),
             crash_snapshot: CrashSnapshotWriter::start(crash_path),
             next_crash_snapshot: now,
             written_crash_snapshot: None,
@@ -113,10 +112,6 @@ impl NoticeSession {
         self.history.iter()
     }
 
-    pub(super) fn configure_logs(&mut self, config: &Config, persist: bool) {
-        self.logs = make_logs(config, persist);
-    }
-
     pub(super) fn record(
         &mut self,
         level: LogLevel,
@@ -162,19 +157,20 @@ impl NoticeSession {
     }
 }
 
-fn make_logs(config: &Config, persist: bool) -> StructuredLogs {
-    let policy = &config.observability;
+/// Structured logs kept in memory and, for a persistent session, in the state directory.
+fn make_logs(persist: bool) -> StructuredLogs {
     StructuredLogs::new(
         LogPolicy {
-            maximum_records: policy.maximum_records,
-            maximum_field_bytes: policy.maximum_field_bytes,
-            maximum_file_bytes: policy.maximum_file_bytes,
-            rotations: policy.rotations,
-            sensitive_keys: policy.sensitive_keys.clone(),
+            maximum_records: 2000,
+            maximum_field_bytes: 4096,
+            maximum_file_bytes: 8 * 1024 * 1024,
+            rotations: 3,
+            sensitive_keys: ["token", "password", "secret", "authorization", "source", "text"]
+                .map(String::from)
+                .to_vec(),
         },
-        (persist && policy.enabled)
-            .then(|| crate::config::user_state_directory().join(&policy.file_name)),
-        policy.queue_capacity,
+        persist.then(|| crate::config::user_state_directory().join("dust.jsonl")),
+        256,
     )
 }
 
@@ -188,7 +184,6 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let now = Instant::now();
         let mut notices = NoticeSession::new(
-            &crate::config::load_bundled_config().config,
             false,
             root.path().join("health.json"),
             now,
@@ -221,7 +216,6 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let now = Instant::now();
         let mut notices = NoticeSession::new(
-            &crate::config::load_bundled_config().config,
             false,
             root.path().join("health.json"),
             now,

@@ -1,3 +1,6 @@
+use crate::editor::session::search::MAXIMUM_PICKER_ITEMS;
+use crate::ui::render::{SCRATCH_LABEL, TERMINAL_PANEL_RESIZE_STEP};
+use crate::ui::window::{PANE_DEFAULT_RATIO, PANE_MINIMUM_HEIGHT, PANE_MINIMUM_WIDTH, PANE_RESIZE_STEP};
 use super::super::configuration::configured_text_width;
 use super::super::windows::{
     CommandEffect, CommandError, CommandPolicy, WindowCommand, rect_contains_point,
@@ -22,6 +25,9 @@ use crate::ui::ExplorerUiState;
 use crate::workspace::{
     ExplorerKind, ExplorerLoadState, ExplorerNodeId, PickerAction, PickerItem, PickerItemId,
 };
+
+/// How long a notice stays on screen.
+const NOTICE_TIMEOUT: Duration = Duration::from_secs(4);
 
 impl InteractiveApplication {
     pub(super) fn set_dashboard_visibility(&mut self, visible: bool) {
@@ -160,7 +166,7 @@ impl InteractiveApplication {
             message,
             error,
             self.clock.monotonic(),
-            Duration::from_millis(self.configuration.settings().ui.notifications.timeout_ms),
+            NOTICE_TIMEOUT,
         );
         self.project_notice();
     }
@@ -169,7 +175,7 @@ impl InteractiveApplication {
         self.notices.warn(
             message,
             self.clock.monotonic(),
-            Duration::from_millis(self.configuration.settings().ui.notifications.timeout_ms),
+            NOTICE_TIMEOUT,
         );
         self.project_notice();
     }
@@ -559,7 +565,7 @@ impl InteractiveApplication {
             return self.run_window_command(WindowCommand::Clone(
                 target,
                 axis,
-                self.configuration.settings().ui.panes.default_ratio,
+                PANE_DEFAULT_RATIO,
             ));
         };
         let explorer = self
@@ -573,8 +579,8 @@ impl InteractiveApplication {
                 &(&*self.state).into(),
                 CommandPolicy {
                     selected_terminal,
-                    pane_step: self.configuration.settings().ui.panes.resize_step,
-                    terminal_step: self.configuration.settings().ui.terminal_panel.resize_step,
+                    pane_step: PANE_RESIZE_STEP,
+                    terminal_step: TERMINAL_PANEL_RESIZE_STEP,
                 },
                 self.extension.contributions().version(),
             )
@@ -709,8 +715,8 @@ impl InteractiveApplication {
                 &(&*self.state).into(),
                 CommandPolicy {
                     selected_terminal: self.terminal_session.selected().map(|id| id.0),
-                    pane_step: self.configuration.settings().ui.panes.resize_step,
-                    terminal_step: self.configuration.settings().ui.terminal_panel.resize_step,
+                    pane_step: PANE_RESIZE_STEP,
+                    terminal_step: TERMINAL_PANEL_RESIZE_STEP,
                 },
                 self.extension.contributions().version(),
             )
@@ -795,7 +801,6 @@ impl InteractiveApplication {
 
     pub(in crate::editor::session) fn reconcile_explorer_watch(&mut self) {
         if self.ui.explorer.is_none() {
-            self.clear_explorer_preview();
             self.retire_explorer_intents();
         }
         if let Err(error) = self.explorer.reconcile_watch(self.ui.explorer.is_some()) {
@@ -833,7 +838,7 @@ impl InteractiveApplication {
             return;
         }
         let title = self.message("explorer_title", &[]);
-        let root_label = crate::ui::workspace_title(&self.state, self.configuration.settings());
+        let root_label = crate::ui::workspace_title(&self.state);
         let explorer_windows = self
             .window_session
             .native_ids()
@@ -848,7 +853,6 @@ impl InteractiveApplication {
                 Some((view, ids.window, rect))
             })
             .collect::<Vec<_>>();
-        self.request_explorer_preview();
         let focused = self.window_session.focused_explorer();
         let policy = &self.configuration.settings().ui.explorer;
         let decorations = self.git.decorations();
@@ -859,13 +863,11 @@ impl InteractiveApplication {
                 self.window_session.content().explorer.unwrap_or_else(|| {
                     crate::ui::geometry::explorer_body_geometry(
                         rect,
-                        self.configuration.settings(),
                     )
                 })
             } else {
                 crate::ui::geometry::explorer_body_geometry(
                     rect,
-                    self.configuration.settings(),
                 )
             };
             let Ok(projection) = self.explorer.projection_for(
@@ -914,43 +916,7 @@ impl InteractiveApplication {
         self.reconcile_editor_windows();
     }
 
-    pub(in crate::editor::session) fn clear_explorer_preview(&mut self) {
-        if let Some(id) = self.explorer.clear_preview() {
-            self.documents.cancel_request(id);
-        }
-    }
-    pub(in crate::editor::session) fn request_explorer_preview(&mut self) {
-        let settings = self.configuration.settings();
-        let (retired, request) = self.explorer.prepare_preview(
-            self.workspace.version(),
-            self.configuration.binding_revision(),
-            &settings.ui.explorer,
-            &settings.messages["explorer_preview_binary"],
-            &settings.messages["explorer_preview_failed"],
-        );
-        if let Some(id) = retired {
-            self.documents.cancel_request(id);
-        }
-        let Some(request) = request else {
-            return;
-        };
-        let result = self
-            .documents
-            .read_scoped_bounded(request.path, request.roots, request.maximum)
-            .map_err(|error| error.to_string());
-        let admitted = result.as_ref().ok().copied();
-        if !self.explorer.admit_preview(request.ticket, result) {
-            if let Some(id) = admitted {
-                self.documents.cancel_request(id);
-            }
-        }
-    }
-
     pub(in crate::editor::session) fn open_explorer(&mut self) {
-        if !self.configuration.settings().ui.explorer.bundled_enabled {
-            self.show_error("the bundled explorer contribution is disabled");
-            return;
-        }
         self.window_session.allow_explorer();
         if self.explorer.tree().root_revision() != self.workspace.root_revision()
             || self.explorer.tree().visible_ids().is_empty()
@@ -967,7 +933,6 @@ impl InteractiveApplication {
             matches: 0,
             query: String::new(),
             searching: false,
-            preview_lines: Vec::new(),
         });
         self.set_explorer_focus(true);
         self.sync_explorer_ui();
@@ -988,7 +953,7 @@ impl InteractiveApplication {
             node,
             self.workspace.version(),
             self.configuration.binding_revision(),
-            self.configuration.settings().workspace.maximum_picker_items,
+            MAXIMUM_PICKER_ITEMS,
         ) {
             Ok(()) => self.sync_explorer_ui(),
             Err(error) => self.show_error(error),
@@ -1114,7 +1079,6 @@ impl InteractiveApplication {
         let rect = self.compositor_projection()?.window(window)?.rect;
         let body = crate::ui::geometry::explorer_body_geometry(
             rect,
-            self.configuration.settings(),
         );
         if !rect_contains_point(body, column, row) {
             return None;
@@ -1134,7 +1098,6 @@ impl InteractiveApplication {
 
     pub(in crate::editor::session) fn refresh_explorer(&mut self) {
         self.retire_explorer_intents();
-        self.clear_explorer_preview();
         self.explorer
             .reset_roots(self.workspace.roots(), self.workspace.root_revision());
         self.sync_explorer_ui();
@@ -1295,8 +1258,7 @@ impl InteractiveApplication {
         );
         let wrap_enabled = available > 0
             && self.configuration.settings().editor.wrap
-            && !(self.ui.large_file_buffers.contains(&view.buffer)
-                && self.configuration.settings().editor.large_file.disable_wrap);
+            && !self.ui.large_file_buffers.contains(&view.buffer);
         let visual_rows = VisualRowModel::new_for_state(
             &self.state,
             &buffer.text,
@@ -1457,7 +1419,6 @@ impl InteractiveApplication {
             .displayed_terminal()
             .and_then(|_| {
                 terminal_panel_geometry(
-                    self.configuration.settings(),
                     self.window_session.height(),
                     self.window_session.terminal_height(),
                 )
@@ -1466,7 +1427,6 @@ impl InteractiveApplication {
         let picker_rect = self.ui.picker.as_ref().and_then(|picker| {
             crate::ui::geometry::picker_window_geometry(
                 picker,
-                self.configuration.settings(),
                 WindowRect {
                     x: 0,
                     y: 0,
@@ -1530,7 +1490,7 @@ impl InteractiveApplication {
     }
 
     pub(super) fn reconcile_editor_windows(&mut self) {
-        let scratch_label = &self.configuration.settings().ui.buffer_line.scratch_label;
+        let scratch_label = &SCRATCH_LABEL;
         let editor_current = self
             .window_session
             .editor_ids()
@@ -1614,8 +1574,8 @@ impl InteractiveApplication {
                             width: self.window_session.width(),
                             height: self.window_session.height(),
                         },
-                        self.configuration.settings().ui.panes.minimum_width,
-                        self.configuration.settings().ui.panes.minimum_height,
+                        PANE_MINIMUM_WIDTH,
+                        PANE_MINIMUM_HEIGHT,
                         crate::ui::window::TiledInsets {
                             screen_bottom,
                             ..Default::default()
@@ -1665,8 +1625,8 @@ impl InteractiveApplication {
                         graph_revision,
                         bounds: preliminary.bounds,
                         minimum_size: (
-                            self.configuration.settings().ui.panes.minimum_width,
-                            self.configuration.settings().ui.panes.minimum_height,
+                            PANE_MINIMUM_WIDTH,
+                            PANE_MINIMUM_HEIGHT,
                         ),
                         insets: crate::ui::window::TiledInsets {
                             screen_bottom,

@@ -5,6 +5,9 @@ use crate::workspace::{
     ExecutionSource, RootId, RootIdentity, TrustEvent, TrustStore, WorkspaceError, WorkspaceRoot,
     WorkspaceState, WorkspaceTrust, WorkspaceTrustService,
 };
+
+pub(crate) const TRUST_QUEUE_CAPACITY: usize = 8;
+
 pub(in crate::editor::session) use discovery::{
     DiscoveryKind, ExecutionLane, ExecutionReady, WorkspacePreflightEvent,
 };

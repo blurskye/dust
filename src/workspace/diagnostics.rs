@@ -83,21 +83,6 @@ impl DiagnosticStore {
         (self.maximum_total, self.maximum_per_owner_uri)
     }
 
-    pub fn set_limits(&mut self, maximum_total: usize, maximum_per_owner_uri: usize) {
-        self.maximum_total = maximum_total.clamp(1, ABSOLUTE_DIAGNOSTIC_LIMIT);
-        self.maximum_per_owner_uri = maximum_per_owner_uri.clamp(1, ABSOLUTE_DIAGNOSTIC_LIMIT);
-        for diagnostics in self.sets.values_mut() {
-            diagnostics.truncate(self.maximum_per_owner_uri);
-        }
-        let mut remaining = self.maximum_total;
-        self.sets.retain(|_, diagnostics| {
-            diagnostics.truncate(remaining);
-            remaining = remaining.saturating_sub(diagnostics.len());
-            !diagnostics.is_empty()
-        });
-        self.total = self.sets.values().map(Vec::len).sum();
-    }
-
     pub fn replace(
         &mut self,
         owner: DiagnosticOwner,

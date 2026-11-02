@@ -5,6 +5,16 @@ use crate::persistence::{
     PersistenceService,
 };
 use std::path::PathBuf;
+
+pub(crate) const RECENT_FILE_LIMIT: usize = 256;
+pub(crate) const MARK_LIMIT: usize = 256;
+pub(crate) const JUMP_LIMIT: usize = 1024;
+pub(crate) const CHANGE_LIMIT: usize = 1024;
+pub(crate) const STATE_ENTRY_LIMIT: usize = 10_000;
+pub(crate) const STATE_MAXIMUM_BYTES: usize = 4 * 1024 * 1024;
+pub(crate) const STATE_FILE: &str = "session.json";
+pub(crate) const PERSISTENCE_QUEUE_CAPACITY: usize = 4;
+
 #[path = "persistence/session.rs"]
 mod session;
 #[cfg(test)]

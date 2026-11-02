@@ -12,7 +12,9 @@ pub use context::{
     InputContextDescriptor, InputContextError, InputContextLayer, InputContextPolicy,
     InputContextRegistry,
 };
-pub use grammar::{GrammarInput, InputAction, InputError, ModalResolver, PendingInputContext};
+pub use grammar::{
+    ABSOLUTE_MAX_COUNT, GrammarInput, InputAction, InputError, ModalResolver, PendingInputContext,
+};
 pub use key::{
     KeyCode, KeyEvent, KeyParseError, Modifiers, TerminalMouseInput, TerminalNavigationKey,
 };

@@ -139,14 +139,13 @@ impl WindowSession {
         &mut self,
         id: u64,
         rows: i16,
-        policy: &crate::config::TerminalPanelConfig,
     ) -> Result<(), String> {
         self.require_projected_graph()?;
         let height = self.resized_terminal_height(
             rows,
-            policy.resize_step,
-            policy.minimum_height,
-            policy.maximum_height,
+            crate::ui::render::TERMINAL_PANEL_RESIZE_STEP,
+            crate::ui::render::TERMINAL_PANEL_MINIMUM_HEIGHT,
+            crate::ui::render::TERMINAL_PANEL_MAXIMUM_HEIGHT,
         );
         let target = NativeSurfaceTarget::Terminal(id);
         let placement = match self.native_placement(target)? {

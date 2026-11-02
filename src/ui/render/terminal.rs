@@ -1,7 +1,8 @@
+use crate::ui::render::{CONTROL_CHARACTER_REPLACEMENT, ZERO_WIDTH_REPLACEMENT};
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    config::{AmbiguousWidth, Config, KeyHintAnchor},
+    config::{AmbiguousWidth, Config},
     editor::EditorState,
     ui::{CellGrid, Style, geometry::text_width, window::WindowRect},
 };
@@ -10,6 +11,17 @@ use super::{
     CompositorLayoutState, Frame, KeyHintUiState, TerminalPanelGeometry, TerminalPanelMode,
     TerminalPanelState, TerminalPhase, TerminalTabState, UiState,
 };
+
+pub(crate) const KEY_HINT_MAX_ROWS: u16 = 8;
+pub(crate) const KEY_HINT_MAX_COLUMNS: u16 = 3;
+pub(crate) const KEY_HINT_MAX_WIDTH: u16 = 96;
+pub(crate) const KEY_HINT_PADDING: u16 = 1;
+pub(crate) const KEY_HINT_COLUMN_GAP: u16 = 2;
+pub(crate) const KEY_HINT_FALLBACK_LABEL: &str = "Action";
+pub(crate) const TERMINAL_PANEL_DIVIDER: &str = "─";
+pub(crate) const TERMINAL_TAB_SEPARATOR: &str = " │ ";
+pub(crate) const TERMINAL_NORMAL_LABEL: &str = "NORMAL";
+pub(crate) const TERMINAL_VISUAL_LABEL: &str = "VISUAL";
 
 pub(super) fn active_compositor<'a>(
     state: &EditorState,
@@ -80,7 +92,7 @@ pub fn terminal_tab_at_column(
         if index > 0 {
             x = x.saturating_add(
                 u16::try_from(text_width(
-                    &config.ui.terminal_panel.tab_separator,
+                    &TERMINAL_TAB_SEPARATOR,
                     config.editor.ambiguous_width,
                 ))
                 .unwrap_or(u16::MAX),
@@ -115,8 +127,8 @@ pub(super) fn dock_terminal_panel(
     let mut grid = CellGrid::new_with_policy(
         width,
         height,
-        &config.editor.control_character_replacement,
-        &config.editor.zero_width_replacement,
+        &CONTROL_CHARACTER_REPLACEMENT,
+        &ZERO_WIDTH_REPLACEMENT,
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
     for y in 0..workspace.grid.height().min(height) {
@@ -140,7 +152,7 @@ pub(super) fn dock_terminal_panel(
         grid.set_cell(
             x,
             geometry.top,
-            &config.ui.terminal_panel.divider,
+            &TERMINAL_PANEL_DIVIDER,
             Style::TerminalBorder,
         );
     }
@@ -150,7 +162,7 @@ pub(super) fn dock_terminal_panel(
             title_x = grid.put_text_clipped(
                 title_x,
                 geometry.top,
-                &config.ui.terminal_panel.tab_separator,
+                &TERMINAL_TAB_SEPARATOR,
                 Style::TerminalBorder,
                 right,
             );
@@ -171,8 +183,8 @@ pub(super) fn dock_terminal_panel(
     // Input is the usual mode, so only the others are named, at the end of the tab row.
     let mode = match terminal.mode {
         TerminalPanelMode::Input => None,
-        TerminalPanelMode::Normal => Some(config.ui.terminal_panel.normal_mode_label.as_str()),
-        TerminalPanelMode::Visual => Some(config.ui.terminal_panel.visual_mode_label.as_str()),
+        TerminalPanelMode::Normal => Some(TERMINAL_NORMAL_LABEL),
+        TerminalPanelMode::Visual => Some(TERMINAL_VISUAL_LABEL),
     };
     let notice = [mode, terminal.truncated.then_some("output truncated")]
         .into_iter()
@@ -251,12 +263,10 @@ pub(super) fn dock_terminal_panel(
 pub(super) fn render_key_hints(
     frame: &mut Frame,
     hints: &KeyHintUiState,
-    config: &Config,
     editor_left: u16,
     editor_width: u16,
     terminal_height: u16,
 ) {
-    let policy = &config.ui.key_hints;
     let available_height = terminal_height.saturating_sub(1);
     if editor_width < 12 || available_height < 4 || hints.rows.is_empty() {
         return;
@@ -264,20 +274,14 @@ pub(super) fn render_key_hints(
     let row_count = hints
         .rows
         .len()
-        .min(usize::from(policy.max_rows).saturating_mul(usize::from(policy.max_columns)));
-    let columns = usize::from(policy.max_columns)
-        .min(row_count.div_ceil(usize::from(policy.max_rows)))
+        .min(usize::from(KEY_HINT_MAX_ROWS).saturating_mul(usize::from(KEY_HINT_MAX_COLUMNS)));
+    let columns = usize::from(KEY_HINT_MAX_COLUMNS)
+        .min(row_count.div_ceil(usize::from(KEY_HINT_MAX_ROWS)))
         .max(1);
     let rows_per_column = row_count
         .div_ceil(columns)
-        .min(usize::from(policy.max_rows));
-    let row_stride = usize::from(policy.row_gap) + 1;
-    let body_height = rows_per_column
-        .saturating_mul(row_stride)
-        .saturating_sub(usize::from(policy.row_gap));
-    let desired_height = 3usize
-        .saturating_add(usize::from(policy.vertical_padding).saturating_mul(2))
-        .saturating_add(body_height);
+        .min(usize::from(KEY_HINT_MAX_ROWS));
+    let desired_height = 3usize.saturating_add(rows_per_column);
     let box_height = u16::try_from(desired_height)
         .unwrap_or(available_height)
         .min(available_height);
@@ -301,22 +305,17 @@ pub(super) fn render_key_hints(
         .unwrap_or(1);
     let desired_width = widest
         .saturating_mul(columns)
-        .saturating_add(usize::from(policy.column_gap).saturating_mul(columns.saturating_sub(1)))
-        .saturating_add(usize::from(policy.horizontal_padding).saturating_mul(2))
+        .saturating_add(usize::from(KEY_HINT_COLUMN_GAP).saturating_mul(columns.saturating_sub(1)))
+        .saturating_add(usize::from(KEY_HINT_PADDING).saturating_mul(2))
         .saturating_add(2);
     let box_width = u16::try_from(desired_width)
-        .unwrap_or(policy.max_width)
-        .min(policy.max_width)
+        .unwrap_or(KEY_HINT_MAX_WIDTH)
+        .min(KEY_HINT_MAX_WIDTH)
         .min(editor_width);
     if box_width < 12 {
         return;
     }
-    let left = match policy.anchor {
-        KeyHintAnchor::BottomLeft => editor_left,
-        KeyHintAnchor::BottomRight => {
-            editor_left.saturating_add(editor_width.saturating_sub(box_width))
-        }
-    };
+    let left = editor_left.saturating_add(editor_width.saturating_sub(box_width));
     let top = available_height.saturating_sub(box_height);
     let right = left.saturating_add(box_width);
     let bottom = top.saturating_add(box_height).saturating_sub(1);
@@ -326,7 +325,7 @@ pub(super) fn render_key_hints(
         }
     }
     let (horizontal, vertical, top_left, top_right, bottom_left, bottom_right) =
-        policy.border.glyphs();
+        crate::config::BorderStyle::Rounded.glyphs();
     for x in left.saturating_add(1)..right.saturating_sub(1) {
         frame
             .grid
@@ -366,21 +365,20 @@ pub(super) fn render_key_hints(
     );
     let inner_left = left
         .saturating_add(1)
-        .saturating_add(policy.horizontal_padding);
-    let inner_right = right.saturating_sub(1 + policy.horizontal_padding);
+        .saturating_add(KEY_HINT_PADDING);
+    let inner_right = right.saturating_sub(1 + KEY_HINT_PADDING);
     if inner_left >= inner_right {
         return;
     }
     frame.grid.put_text_clipped(
         inner_left,
-        top.saturating_add(1 + policy.vertical_padding),
+        top.saturating_add(1),
         &hints.prefix,
         Style::KeyHintPrefix,
         inner_right,
     );
-    let body_top = top.saturating_add(2 + policy.vertical_padding);
-    let gap_total = policy
-        .column_gap
+    let body_top = top.saturating_add(2);
+    let gap_total = KEY_HINT_COLUMN_GAP
         .saturating_mul(u16::try_from(columns.saturating_sub(1)).unwrap_or(0));
     let column_width = inner_right
         .saturating_sub(inner_left)
@@ -395,10 +393,10 @@ pub(super) fn render_key_hints(
         let x = inner_left.saturating_add(
             u16::try_from(column)
                 .unwrap_or(0)
-                .saturating_mul(column_width.saturating_add(policy.column_gap)),
+                .saturating_mul(column_width.saturating_add(KEY_HINT_COLUMN_GAP)),
         );
         let y = body_top.saturating_add(
-            u16::try_from(row_index.saturating_mul(row_stride)).unwrap_or(u16::MAX),
+            u16::try_from(row_index).unwrap_or(u16::MAX),
         );
         if y >= bottom {
             continue;

@@ -1,3 +1,4 @@
+use crate::ui::render::{CONTROL_CHARACTER_REPLACEMENT, SCRATCH_LABEL, ZERO_WIDTH_REPLACEMENT};
 use std::collections::BTreeMap;
 
 use crossterm::cursor::SetCursorStyle;
@@ -23,6 +24,29 @@ use super::{
         is_indent_guide_column, leading_indentation_width, one_cell_symbol,
     },
 };
+
+pub(crate) const END_OF_BUFFER_MARKER: &str = "~";
+pub(crate) const LINE_NUMBER_SEPARATOR: &str = " ";
+pub(crate) const GUTTER_PADDING: u16 = 1;
+pub(crate) const GIT_SIGN_UNCHANGED: &str = "│";
+pub(crate) const GIT_SIGN_ADDED: &str = "│";
+pub(crate) const GIT_SIGN_CHANGED: &str = "│";
+pub(crate) const GIT_SIGN_DELETED: &str = "_";
+pub(crate) const GIT_SIGN_STAGED: &str = "┊";
+pub(crate) const INDENT_GUIDE: &str = "│";
+pub(crate) const LARGE_FILE_LABEL: &str = "LARGE";
+pub(crate) const STATUS_SEPARATOR: &str = "  ";
+pub(crate) const STATUS_MODE_PADDING: &str = " ";
+pub(crate) const STATUS_DIRTY_MARKER: &str = " [+]";
+pub(crate) const STATUS_LSP_FORMAT: &str = "{server}";
+pub(crate) const STATUS_GIT_FORMAT: &str = "{branch}";
+pub(crate) const STATUS_ROOT_FORMAT: &str = "{root}";
+pub(crate) const STATUS_WORKTREE_FORMAT: &str = "{repository} › {worktree}";
+pub(crate) const REPLACE_CURSOR: CursorShape = CursorShape::Underline;
+pub(crate) const VISUAL_CURSOR: CursorShape = CursorShape::Block;
+pub(crate) const OPERATOR_PENDING_CURSOR: CursorShape = CursorShape::Block;
+pub(crate) const COMMAND_CURSOR: CursorShape = CursorShape::Bar;
+pub(crate) const PROMPT_CURSOR: CursorShape = CursorShape::Bar;
 
 fn diagnostic_style(severity: crate::workspace::DiagnosticSeverity) -> Style {
     match severity {
@@ -77,8 +101,8 @@ pub(super) fn render_editor_view(
     let mut grid = CellGrid::new_with_policy(
         width,
         height,
-        &config.editor.control_character_replacement,
-        &config.editor.zero_width_replacement,
+        &CONTROL_CHARACTER_REPLACEMENT,
+        &ZERO_WIDTH_REPLACEMENT,
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
     let Some(view) = state.views.get(view_id) else {
@@ -96,7 +120,7 @@ pub(super) fn render_editor_view(
     let content_width = editor_state_content_width(state, &buffer.text, &config.editor, width);
     let neutral_git_sign = (config.editor.git_signs.enabled && gutter_width > 0).then(|| {
         one_cell_symbol(
-            &config.editor.git_signs.unchanged,
+            &GIT_SIGN_UNCHANGED,
             "|",
             config.editor.ambiguous_width,
         )
@@ -110,46 +134,36 @@ pub(super) fn render_editor_view(
         }
     }
     let indent_guide_symbol = config.editor.indent_guides.enabled.then(|| {
-        one_cell_symbol(
-            &config.editor.indent_guides.character,
-            "|",
-            config.editor.ambiguous_width,
+        one_cell_symbol(INDENT_GUIDE, "|", config.editor.ambiguous_width)
+    });
+    let active_indent_scope = indent_guide_symbol.and_then(|_| {
+        active_indent_guide(
+            &buffer.text,
+            view.cursor,
+            current_line,
+            config.editor.tab_width,
+            config.editor.indent_width,
+            config.editor.ambiguous_width == AmbiguousWidth::Wide,
         )
     });
-    let active_indent_scope = config
-        .editor
-        .indent_guides
-        .active_scope
-        .then_some(())
-        .and(indent_guide_symbol)
-        .and_then(|_| {
-            active_indent_guide(
-                &buffer.text,
-                view.cursor,
-                current_line,
-                config.editor.tab_width,
-                config.editor.indent_width,
-                config.editor.ambiguous_width == AmbiguousWidth::Wide,
-            )
-        });
     let end_of_buffer_label = if config.editor.line_numbers == LineNumbers::Off {
-        config.editor.end_of_buffer_marker.clone()
+        END_OF_BUFFER_MARKER.to_owned()
     } else {
         let marker_width = text_width(
-            &config.editor.end_of_buffer_marker,
+            &END_OF_BUFFER_MARKER,
             config.editor.ambiguous_width,
         );
         format!(
             "{}{}{}",
             " ".repeat(digits.saturating_sub(marker_width)),
-            config.editor.end_of_buffer_marker,
-            config.editor.line_number_separator
+            END_OF_BUFFER_MARKER,
+            LINE_NUMBER_SEPARATOR
         )
     };
     let large_file = ui.large_file_buffers.contains(&view.buffer);
     let wrap_enabled = content_width > 0
         && config.editor.wrap
-        && !(large_file && config.editor.large_file.disable_wrap);
+        && !large_file;
     let visual_rows = VisualRowModel::new_for_state(
         state,
         &buffer.text,
@@ -221,7 +235,7 @@ pub(super) fn render_editor_view(
                     &source,
                     query,
                     config.search.smart_case,
-                    config.search.regex,
+                    false,
                 )
                 .unwrap_or_default()
                 .into_iter()
@@ -238,7 +252,7 @@ pub(super) fn render_editor_view(
         Vec::new()
     };
     let mut diagnostic_lines = BTreeMap::<usize, Vec<&UiDiagnostic>>::new();
-    if !(large_file && config.editor.large_file.disable_diagnostics) {
+    if !large_file {
         if let Some(path) = &buffer.path {
             for diagnostic in ui
                 .diagnostics
@@ -342,7 +356,7 @@ pub(super) fn render_editor_view(
             } else {
                 number
             };
-            let label = format!("{number:>digits$}{}", config.editor.line_number_separator);
+            let label = format!("{number:>digits$}{}", LINE_NUMBER_SEPARATOR);
             grid.put_text_clipped(
                 0,
                 screen_row,
@@ -357,7 +371,7 @@ pub(super) fn render_editor_view(
             // Beside the number, where it takes no room and hides no sign.
             let separator = u16::try_from(digits).unwrap_or(u16::MAX);
             if let Some(worst) = diagnostic_lines.get(&line_index).and_then(|found| found.first())
-                && !config.editor.line_number_separator.is_empty()
+                && !LINE_NUMBER_SEPARATOR.is_empty()
                 && git_sign_column(gutter_width, &config.editor).is_none_or(|column| separator < column)
                 && separator < gutter_width
             {
@@ -371,7 +385,7 @@ pub(super) fn render_editor_view(
                 git_sign_column,
                 screen_row,
                 one_cell_symbol(
-                    &config.editor.git_signs.unchanged,
+                    &GIT_SIGN_UNCHANGED,
                     "|",
                     config.editor.ambiguous_width,
                 ),
@@ -381,13 +395,10 @@ pub(super) fn render_editor_view(
                 sign.line == line_index && buffer.path.as_deref() == Some(sign.path.as_path())
             });
             if let Some(sign) = debug_sign {
-                let signs = &config.editor.debug_signs;
                 let (symbol, fallback, style) = match sign.kind {
-                    DebugSignKind::Breakpoint => (&signs.breakpoint, "*", Style::Error),
-                    DebugSignKind::ConditionalBreakpoint => {
-                        (&signs.conditional_breakpoint, "?", Style::Error)
-                    }
-                    DebugSignKind::Execution => (&signs.execution, ">", Style::Warning),
+                    DebugSignKind::Breakpoint => ("●", "*", Style::Error),
+                    DebugSignKind::ConditionalBreakpoint => ("◆", "?", Style::Error),
+                    DebugSignKind::Execution => ("▶", ">", Style::Warning),
                 };
                 grid.set_cell(
                     git_sign_column,
@@ -402,17 +413,17 @@ pub(super) fn render_editor_view(
             }) {
                 let (symbol, fallback, style) = match sign.kind {
                     UiGitSignKind::Added => {
-                        (&config.editor.git_signs.added, "|", Style::GitSignAdded)
+                        (&GIT_SIGN_ADDED, "|", Style::GitSignAdded)
                     }
                     UiGitSignKind::Changed => {
-                        (&config.editor.git_signs.changed, "|", Style::GitSignChanged)
+                        (&GIT_SIGN_CHANGED, "|", Style::GitSignChanged)
                     }
                     UiGitSignKind::Deleted => {
-                        (&config.editor.git_signs.deleted, "_", Style::GitSignDeleted)
+                        (&GIT_SIGN_DELETED, "_", Style::GitSignDeleted)
                     }
                 };
                 let symbol = if sign.staged {
-                    &config.editor.git_signs.staged
+                    &GIT_SIGN_STAGED
                 } else {
                     symbol
                 };
@@ -636,11 +647,11 @@ pub(super) fn render_editor_view(
                     grid.set_cell(x, screen_row, label.encode_utf8(&mut bytes), Style::StatusAccent);
                 } else if can_wrap && cells > content_width {
                     let replacement = if text_width(
-                        &config.editor.control_character_replacement,
+                        &CONTROL_CHARACTER_REPLACEMENT,
                         config.editor.ambiguous_width,
                     ) == 1
                     {
-                        config.editor.control_character_replacement.as_str()
+                        CONTROL_CHARACTER_REPLACEMENT
                     } else {
                         "?"
                     };
@@ -805,12 +816,12 @@ pub(super) fn render_editor_view(
     .map(|(x, y)| {
         let configured = match view.mode {
             EditorMode::Insert => config.ui.cursor.insert,
-            EditorMode::Replace => config.ui.cursor.replace,
+            EditorMode::Replace => REPLACE_CURSOR,
             EditorMode::VisualChar | EditorMode::VisualLine | EditorMode::VisualBlock
-            | EditorMode::Multi => config.ui.cursor.visual,
-            EditorMode::OperatorPending => config.ui.cursor.operator_pending,
-            EditorMode::CommandLine => config.ui.cursor.command,
-            EditorMode::Prompt => config.ui.cursor.prompt,
+            | EditorMode::Multi => VISUAL_CURSOR,
+            EditorMode::OperatorPending => OPERATOR_PENDING_CURSOR,
+            EditorMode::CommandLine => COMMAND_CURSOR,
+            EditorMode::Prompt => PROMPT_CURSOR,
             EditorMode::Normal => config.ui.cursor.normal,
         };
         (x, y, cursor_style(configured))
@@ -870,7 +881,7 @@ pub(super) fn render_status_line(
         (" ", " ", "", "E", "W")
     };
     let mode = if shown("mode") {
-        format!("{0}{mode_label}{0}", status.mode_padding)
+        format!("{STATUS_MODE_PADDING}{mode_label}{STATUS_MODE_PADDING}")
     } else {
         String::new()
     };
@@ -882,7 +893,7 @@ pub(super) fn render_status_line(
             || {
                 buffer
                     .virtual_owner()
-                    .unwrap_or(&status.scratch_label)
+                    .unwrap_or(SCRATCH_LABEL)
                     .to_owned()
             },
             |name| name.to_string_lossy().into_owned(),
@@ -892,7 +903,7 @@ pub(super) fn render_status_line(
             .filter(|_| icons && buffer.path.is_some())
             .map_or_else(String::new, |icon| format!("{} ", icon.glyph));
         let dirty = if buffer.dirty {
-            status.dirty_marker.as_str()
+            STATUS_DIRTY_MARKER
         } else {
             ""
         };
@@ -948,13 +959,11 @@ pub(super) fn render_status_line(
                 }
             }
             "tasks" if ui.running_tasks > 0 => left_fields.push((
-                status
-                    .task_format
-                    .replace("{count}", &ui.running_tasks.to_string()),
+                format!("Tasks {}", ui.running_tasks),
                 Style::Status,
             )),
             "large_file" if ui.large_file_buffers.contains(&view.buffer) => left_fields.push((
-                config.editor.large_file.status_label.clone(),
+                LARGE_FILE_LABEL.to_owned(),
                 Style::StatusWarning,
             )),
             _ => {}
@@ -967,7 +976,7 @@ pub(super) fn render_status_line(
         .map(|branch| {
             format!(
                 " {branch_icon}{} ",
-                status.git_format.replace("{branch}", branch)
+                STATUS_GIT_FORMAT.replace("{branch}", branch)
             )
         });
     // The operation's bar sits above this row whenever there is a row for it. Without one the
@@ -985,13 +994,11 @@ pub(super) fn render_status_line(
         .saturating_add(4);
     // The position always shows; the rest of the right side goes first when the left needs room.
     let position = (!agent && shown("position")).then(|| {
-        let text = status
-            .position_format
-            .replace("{line}", &(cursor_line + 1).to_string())
-            .replace(
-                "{column}",
-                &(byte_column(&buffer.text, view.cursor) + 1).to_string(),
-            );
+        let text = format!(
+            "{}:{}",
+            cursor_line + 1,
+            byte_column(&buffer.text, view.cursor) + 1
+        );
         format!(" {text} ")
     });
     let mut right_cells = position
@@ -1015,11 +1022,11 @@ pub(super) fn render_status_line(
         }
         fits
     };
-    let separator = &status.component_separator;
+    let separator = STATUS_SEPARATOR;
     let separator_cells = text_cells(separator, config);
     // What goes first when the room runs out: the server, then the progress, then the root.
     let root = shown("root")
-        .then(|| status.root_format.replace("{root}", &workspace_title(state, config)))
+        .then(|| STATUS_ROOT_FORMAT.replace("{root}", &workspace_title(state)))
         .filter(|text| fits(text_cells(text, config).saturating_add(separator_cells)));
     let progress = (!agent && shown("progress"))
         .then(|| format!(" {} ", status_progress(cursor_line, buffer.text.visible_lines())))
@@ -1028,7 +1035,7 @@ pub(super) fn render_status_line(
         .lsp_server
         .as_ref()
         .filter(|_| shown("lsp"))
-        .map(|server| status.lsp_format.replace("{server}", server))
+        .map(|server| STATUS_LSP_FORMAT.replace("{server}", server))
         .filter(|text| fits(text_cells(text, config).saturating_add(separator_cells)));
     let right_fields = status
         .components
@@ -1113,17 +1120,14 @@ fn text_cells(text: &str, config: &Config) -> u16 {
 }
 
 /// The open folder's name; a linked worktree also names its repository.
-pub(crate) fn workspace_title(state: &EditorState, config: &Config) -> String {
+pub(crate) fn workspace_title(state: &EditorState) -> String {
     let folder = state
         .workspace_root
         .file_name()
         .unwrap_or(state.workspace_root.as_os_str())
         .to_string_lossy();
     match &state.workspace_repository {
-        Some(repository) => config
-            .ui
-            .status_line
-            .worktree_format
+        Some(repository) => STATUS_WORKTREE_FORMAT
             .replace("{repository}", repository)
             .replace("{worktree}", &folder),
         None => folder.into_owned(),

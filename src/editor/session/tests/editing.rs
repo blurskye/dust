@@ -149,26 +149,6 @@ fn command_completion_accepts_registry_items_and_preserves_invalid_input() {
 }
 
 #[test]
-fn completion_selection_and_submit_acceptance_follow_configuration() {
-    let mut app = app();
-    {
-        let mut fixture = app.configuration.fixture_snapshot();
-        fixture.settings.input.completion_select_first = true;
-        fixture.settings.input.completion_accept_on_submit = false;
-        app.configuration.install_fixture(fixture);
-    }
-    app.open_prompt(crate::ui::PromptKind::Command, "hea".into());
-    assert_eq!(
-        app.ui.prompt.as_ref().expect("prompt").selected_completion,
-        Some(0)
-    );
-    app.submit_prompt();
-    let prompt = app.ui.prompt.as_ref().expect("prompt retained");
-    assert_eq!(prompt.input, "hea");
-    assert!(prompt.error.is_some());
-}
-
-#[test]
 fn dot_repeats_semantic_insert_session() {
     let mut app = app();
     app.state

@@ -4,7 +4,7 @@ use tempfile::tempdir;
 
 use super::load::{
     BUNDLED_CONFIG, BUNDLED_THEME, CandidateAttempt, CapturedSource, CapturedText,
-    ConfigurationSourceBundle, SourceFingerprint, WATCH_FINGERPRINT_BYTE_CEILING,
+    SourceFingerprint, WATCH_FINGERPRINT_BYTE_CEILING,
     capture_configuration_bundle_with, captured_bundle_is_stable, hash_source_bytes,
     load_consistent_candidate_with, load_theme, setting_keys, setting_spans, source_fingerprint,
 };
@@ -121,7 +121,6 @@ fn valid_partial_config_merges_with_defaults() {
     let loaded = load_config(&path);
     assert_eq!(loaded.config.editor.line_numbers, LineNumbers::Absolute);
     assert_eq!(loaded.config.editor.tab_width, 2);
-    assert_eq!(loaded.config.ui.command_line.width, 60);
     assert_eq!(loaded.config.ui.explorer.width, 40);
     assert_eq!(
         loaded.config.ui.explorer.icon_mode,
@@ -140,7 +139,7 @@ fn valid_partial_config_merges_with_defaults() {
     assert!(source.contains(":bytes "));
     assert_eq!(
         loaded
-            .explain("ui.command_line.width")
+            .explain("ui.explorer.width")
             .expect("inherited value")
             .source,
         "bundled defaults"
@@ -191,77 +190,6 @@ fn viewport_horizontal_margin_is_nested_bounded_and_has_no_flat_alias() {
 }
 
 #[test]
-fn git_sign_policy_is_nested_strict_and_display_safe() {
-    let root = tempdir().unwrap();
-    let path = root.path().join("config.toml");
-    fs::write(
-            &path,
-            "[editor.git_signs]\nenabled=false\nunchanged=\"│\"\nadded=\"A\"\nchanged=\"C\"\ndeleted=\"D\"\n",
-        )
-        .unwrap();
-    let loaded = load_config(&path);
-    assert!(loaded.diagnostic.is_none());
-    assert!(!loaded.config.editor.git_signs.enabled);
-    for invalid in [
-        "unchanged=\"\"",
-        "added=\"\"",
-        "changed=\"界\"",
-        "deleted=\"DD\"",
-    ] {
-        fs::write(&path, format!("[editor.git_signs]\n{invalid}\n")).unwrap();
-        assert!(load_config(&path).diagnostic.is_some());
-    }
-    fs::write(&path, "[editor.git_signs]\nunknown=\"x\"\n").unwrap();
-    assert!(load_config(&path).diagnostic.is_some());
-}
-
-#[test]
-fn indent_guide_policy_keeps_scope_highlighting_independently_configurable() {
-    let root = tempdir().unwrap();
-    let path = root.path().join("config.toml");
-    fs::write(
-        &path,
-        "[editor.indent_guides]\nenabled=true\nactive_scope=false\ncharacter=\"│\"\n",
-    )
-    .unwrap();
-    let loaded = load_config(&path);
-    assert!(loaded.diagnostic.is_none());
-    assert!(loaded.config.editor.indent_guides.enabled);
-    assert!(!loaded.config.editor.indent_guides.active_scope);
-    assert_eq!(loaded.config.editor.indent_guides.character, "│");
-
-    fs::write(&path, "[editor.indent_guides]\nactive_scope=\"yes\"\n").unwrap();
-    assert!(load_config(&path).diagnostic.is_some());
-    fs::write(&path, "[editor.indent_guides]\nunknown=true\n").unwrap();
-    assert!(load_config(&path).diagnostic.is_some());
-}
-
-#[test]
-fn explorer_watch_policy_is_nested_strict_and_bounded() {
-    let root = tempdir().unwrap();
-    let path = root.path().join("config.toml");
-    fs::write(
-        &path,
-        "[ui.explorer.watch]\nenabled=false\npoll_interval_ms=1000\n",
-    )
-    .unwrap();
-    let loaded = load_config(&path);
-    assert!(loaded.diagnostic.is_none());
-    assert!(!loaded.config.ui.explorer.watch.enabled);
-    for invalid in [
-        "poll_interval_ms=49",
-        "maximum_directories=0",
-        "maximum_entries_per_directory=100001",
-        "maximum_events=0",
-        "maximum_path_bytes=12",
-        "queue_capacity=0",
-    ] {
-        fs::write(&path, format!("[ui.explorer.watch]\n{invalid}\n")).unwrap();
-        assert!(load_config(&path).diagnostic.is_some());
-    }
-}
-
-#[test]
 fn unpublished_explorer_schema_rejects_removed_overlay_fields() {
     let root = tempdir().expect("tempdir");
     let removed = [
@@ -289,31 +217,13 @@ fn unpublished_explorer_schema_rejects_removed_overlay_fields() {
 }
 
 #[test]
-fn explorer_glyph_policy_rejects_wide_panel_cells_and_oversized_segments() {
+fn explorer_glyph_policy_rejects_oversized_segments() {
     let root = tempdir().expect("tempdir");
     let path = root.path().join("config.toml");
     fs::write(&path, "[editor]\nambiguous_width = \"wide\"\n").expect("write");
     let loaded = load_config(&path);
     assert!(loaded.diagnostic.is_none());
     assert_eq!(loaded.config.editor.ambiguous_width, AmbiguousWidth::Wide);
-
-    fs::write(
-        &path,
-        "[ui.explorer.glyphs.ascii]\npanel_vertical = \"||\"\n",
-    )
-    .expect("write");
-    let loaded = load_config(&path);
-    assert!(loaded.diagnostic.is_some());
-    assert_eq!(loaded.config, load_bundled_config().config);
-
-    fs::write(
-            &path,
-            "[editor]\nambiguous_width = \"wide\"\n\n[ui.explorer.glyphs.unicode]\npanel_horizontal = \"·\"\n",
-        )
-        .expect("write");
-    let loaded = load_config(&path);
-    assert!(loaded.diagnostic.is_some());
-    assert_eq!(loaded.config, load_bundled_config().config);
 
     fs::write(
         &path,
@@ -417,41 +327,6 @@ fn keymap_policy_is_typed_bounded_and_rejects_recursive_leaders() {
             loaded.diagnostic
         );
     }
-}
-
-#[test]
-fn complete_bundled_keymap_layer_can_be_omitted_without_dropping_user_maps() {
-    let config_path = PathBuf::from("config.toml");
-    let keymaps_path = PathBuf::from("keymaps.toml");
-    let bundle = ConfigurationSourceBundle {
-            config: captured(
-                config_path,
-                CapturedText::Text(
-                    "[input.keymaps]\nload_bundled_defaults=false\nleader=','\nlocal_leader=';'\n"
-                        .into(),
-                ),
-            ),
-            keymaps: captured(
-                keymaps_path,
-                CapturedText::Text(
-                    "[[keymap]]\nid='user.test.opt-out'\ncontext='dashboard'\nkeys='<leader> z'\ncommand='health.open'\n"
-                        .into(),
-                ),
-            ),
-            dashboard: captured(PathBuf::from("dashboard.toml"), CapturedText::Missing),
-            theme: captured(PathBuf::from("dust.toml"), CapturedText::Missing),
-            selected_theme: "dust".into(),
-        };
-    let loaded = bundle.into_loaded();
-    assert!(!loaded.config.input.keymaps.load_bundled_defaults);
-    assert_eq!(loaded.keymaps.bundled_count, 0);
-    assert_eq!(loaded.keymaps.bundled_group_count, 0);
-    assert!(loaded.keymaps.groups.is_empty());
-    assert_eq!(loaded.keymaps.entries.len(), 1);
-    assert_eq!(
-        loaded.keymaps.entries[0].keys.as_deref(),
-        Some("<leader> z")
-    );
 }
 
 fn captured(path: PathBuf, text: CapturedText) -> CapturedSource {
@@ -709,36 +584,6 @@ fn watcher_fingerprint_detects_same_length_content_and_sources_are_size_bounded(
 }
 
 #[test]
-fn recovery_retention_and_watcher_limits_reject_unsafe_candidates() {
-    let root = tempdir().expect("tempdir");
-    let path = root.path().join("config.toml");
-    fs::write(
-        &path,
-        "[recovery]\nmaximum_retained_records=10001\nmaximum_age_days=36501\n",
-    )
-    .expect("unsafe recovery policy");
-    let loaded = load_config(&path);
-    assert_eq!(loaded.config, load_bundled_config().config);
-    assert!(loaded.diagnostic.as_deref().is_some_and(|diagnostic| {
-        diagnostic.contains("maximum_retained_records exceeds safe ceiling")
-    }));
-
-    fs::write(
-        &path,
-        "[config_watch]\npoll_interval_ms=24\ndebounce_ms=60001\n",
-    )
-    .expect("unsafe watcher policy");
-    let loaded = load_config(&path);
-    assert_eq!(loaded.config, load_bundled_config().config);
-    assert!(
-        loaded
-            .diagnostic
-            .as_deref()
-            .is_some_and(|diagnostic| { diagnostic.contains("poll_interval_ms must be between") })
-    );
-}
-
-#[test]
 fn bundled_assets_share_the_typed_configuration_loaders() {
     let loaded = load_bundled_config();
     let declared = toml::from_str::<toml::Value>(BUNDLED_CONFIG).expect("bundled source value");
@@ -775,12 +620,9 @@ fn bundled_assets_share_the_typed_configuration_loaders() {
             .iter()
             .all(|id| id.starts_with("builtin."))
     );
-    assert!(loaded.config.input.keymaps.load_bundled_defaults);
     assert_eq!(loaded.config.input.keymaps.leader, "space");
     assert_eq!(loaded.config.input.keymaps.local_leader, "\\");
     assert!(loaded.config.editor.indent_guides.enabled);
-    assert!(loaded.config.editor.indent_guides.active_scope);
-    assert_eq!(loaded.config.editor.indent_guides.character, "│");
     assert_eq!(loaded.dashboard.action.len(), 9);
     assert!(
         loaded
@@ -789,8 +631,8 @@ fn bundled_assets_share_the_typed_configuration_loaders() {
             .iter()
             .any(|action| action.command == "explorer.open")
     );
-    let explained = loaded.explain("ui.command_line.width").expect("explain");
-    assert_eq!(explained.value, "60");
+    let explained = loaded.explain("ui.explorer.width").expect("explain");
+    assert_eq!(explained.value, "40");
     assert_eq!(explained.source, "bundled defaults");
     assert_eq!(
         loaded.config.input.text_commands.get("command_prompt"),
@@ -842,27 +684,15 @@ fn bundled_terminal_has_a_valid_configurable_default_profile() {
 }
 
 #[test]
-fn buffer_line_policy_is_typed_bounded_and_strict() {
+fn buffer_line_policy_is_typed_and_strict() {
     let root = tempdir().expect("tempdir");
     let path = root.path().join("config.toml");
-    fs::write(
-        &path,
-        "[ui.buffer_line]\nmaximum_name_width=48\ndirty_marker=' *'\n",
-    )
-    .expect("valid buffer line");
+    fs::write(&path, "[ui.buffer_line]\nhide_when_single=false\n").expect("valid buffer line");
     let loaded = load_config(&path);
     assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
-    assert_eq!(loaded.config.ui.buffer_line.maximum_name_width, 48);
-    assert_eq!(loaded.config.ui.buffer_line.dirty_marker, " *");
+    assert!(!loaded.config.ui.buffer_line.hide_when_single);
 
-    for invalid in [
-        "maximum_name_width=3",
-        "active_format='{title}'",
-        "inactive_format='{dirty}'",
-        "separator=\"bad\\nvalue\"",
-        "pin_marker='界'",
-        "extension_icons={RS='R'}",
-    ] {
+    for invalid in ["maximum_name_width=48", "extension_icons={RS='R'}"] {
         fs::write(&path, format!("[ui.buffer_line]\n{invalid}\n")).expect("invalid buffer line");
         let loaded = load_config(&path);
         assert_eq!(loaded.config, load_bundled_config().config);
@@ -910,68 +740,20 @@ fn semantic_window_rules_are_typed_bounded_and_transactional() {
 }
 
 #[test]
-fn terminal_panel_policy_is_typed_bounded_and_strict() {
+fn terminal_panel_height_is_bounded() {
     let root = tempdir().expect("tempdir");
     let path = root.path().join("config.toml");
-    fs::write(
-            &path,
-            "[ui.terminal_panel]\nheight=9\nminimum_height=4\nmaximum_height=20\nminimum_workspace_height=2\nresize_step=3\ndivider='-'\ntab_separator=' | '\nnormal_mode_label='NORMAL'\nvisual_mode_label='VISUAL'\n",
-        )
-        .expect("valid terminal panel");
+    fs::write(&path, "[ui.terminal_panel]\nheight=9\n").expect("valid terminal panel");
     let loaded = load_config(&path);
     assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
     assert_eq!(loaded.config.ui.terminal_panel.height, 9);
-    assert_eq!(loaded.config.ui.terminal_panel.resize_step, 3);
-    assert_eq!(loaded.config.ui.terminal_panel.tab_separator, " | ");
 
-    for (index, invalid) in [
-        "height=2",
-        "height=9\nminimum_height=10",
-        "maximum_height=201",
-        "divider='界'",
-        "normal_mode_label=''",
-        "resize_step=0",
-    ]
-    .into_iter()
-    .enumerate()
-    {
+    for invalid in ["height=2", "height=201", "resize_step=3"] {
         fs::write(&path, format!("[ui.terminal_panel]\n{invalid}\n"))
             .expect("invalid terminal panel");
         let loaded = load_config(&path);
-        assert_eq!(loaded.config, load_bundled_config().config, "case {index}");
-        assert!(
-            loaded
-                .diagnostic
-                .as_deref()
-                .is_some_and(|message| { message.contains("ui.terminal_panel") })
-        );
-    }
-}
-
-#[test]
-fn documentation_popup_policy_is_typed_and_bounded() {
-    let root = tempdir().expect("tempdir");
-    let path = root.path().join("config.toml");
-    for invalid in [
-        "scroll_step=0",
-        "maximum_sections=0",
-        "maximum_lines=0",
-        "maximum_bytes=255",
-        "maximum_bytes=1048577",
-    ] {
-        fs::write(&path, format!("[ui.documentation_popup]\n{invalid}\n"))
-            .expect("invalid documentation popup");
-        let loaded = load_config(&path);
-        assert!(
-            loaded
-                .diagnostic
-                .as_deref()
-                .is_some_and(|message| message.contains("ui.documentation_popup"))
-        );
-        assert_eq!(
-            loaded.config.ui.documentation_popup,
-            load_bundled_config().config.ui.documentation_popup
-        );
+        assert_eq!(loaded.config, load_bundled_config().config, "{invalid}");
+        assert!(loaded.diagnostic.is_some(), "{invalid}");
     }
 }
 
@@ -979,42 +761,16 @@ fn documentation_popup_policy_is_typed_and_bounded() {
 fn key_hint_policy_is_typed_bounded_and_transactional() {
     let root = tempdir().expect("tempdir");
     let path = root.path().join("config.toml");
-    fs::write(
-            &path,
-            "[ui.key_hints]\nenabled=false\ndelay_ms=42\nanchor='bottom_left'\nmax_rows=4\nmax_columns=2\nmax_width=50\nhorizontal_padding=2\nvertical_padding=1\nrow_gap=1\ncolumn_gap=3\nshow_group_icons=false\nshow_command_titles=false\nfallback_label='Run'\nborder='single'\n",
-        )
-        .expect("valid key hints");
+    fs::write(&path, "[ui.key_hints]\nenabled=false\ndelay_ms=42\n").expect("valid key hints");
     let loaded = load_config(&path);
     assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
     assert!(!loaded.config.ui.key_hints.enabled);
     assert_eq!(loaded.config.ui.key_hints.delay_ms, 42);
-    assert_eq!(
-        loaded.config.ui.key_hints.anchor,
-        super::KeyHintAnchor::BottomLeft
-    );
-    assert_eq!(loaded.config.ui.key_hints.fallback_label, "Run");
 
-    for invalid in [
-        "delay_ms=60001",
-        "max_rows=0",
-        "max_columns=13",
-        "max_width=11",
-        "horizontal_padding=9",
-        "vertical_padding=5",
-        "row_gap=5",
-        "column_gap=17",
-        "fallback_label=''",
-    ] {
+    for invalid in ["delay_ms=60001", "max_rows=4"] {
         fs::write(&path, format!("[ui.key_hints]\n{invalid}\n")).expect("invalid key hints");
         let loaded = load_config(&path);
-        assert!(
-            loaded
-                .diagnostic
-                .as_deref()
-                .is_some_and(|message| message.contains("ui.key_hints")),
-            "{invalid}: {:?}",
-            loaded.diagnostic
-        );
+        assert!(loaded.diagnostic.is_some(), "{invalid}");
         assert_eq!(
             loaded.config.ui.key_hints,
             load_bundled_config().config.ui.key_hints

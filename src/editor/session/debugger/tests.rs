@@ -14,14 +14,8 @@ fn debugger_owner_keeps_original_actor_stop_context_and_private_selection() {
     )
     .unwrap();
     let workspace = WorkspaceSession::new(state, root.path().join("trust"), 1, false, false, 1);
-    let policy = DebugConfig {
-        maximum_breakpoints: 1,
-        maximum_watches: 1,
-        ..DebugConfig::default()
-    };
-    let mut owner = DebugSession::new(&policy, workspace.version());
+    let mut owner = DebugSession::new(&DebugConfig::default(), workspace.version());
     owner.add_watch("value".into());
-    owner.add_watch("extra".into());
     assert_eq!(owner.watches(), ["value"]);
     let row = DapSourceBreakpoint {
         path: root.path().join("a"),
@@ -31,10 +25,7 @@ fn debugger_owner_keeps_original_actor_stop_context_and_private_selection() {
         hit_condition: None,
         log_message: None,
     };
-    owner.breakpoint(row.clone(), false).unwrap();
-    let mut other = row;
-    other.path = root.path().join("b");
-    assert!(owner.breakpoint(other, false).is_err());
+    owner.breakpoint(row, false).unwrap();
     assert_eq!(owner.persisted_breakpoints().len(), 1);
     let (service, adapter) = crate::debugger::test_session();
     owner.service = service;

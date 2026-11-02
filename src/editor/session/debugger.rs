@@ -13,6 +13,12 @@ use crate::{
     persistence::{PersistedBreakpoint, PersistedWatch},
     process::PtyId,
 };
+
+pub(crate) const MAXIMUM_BREAKPOINTS: usize = 10_000;
+pub(crate) const MAXIMUM_WATCHES: usize = 1_000;
+pub(crate) const MAXIMUM_DEBUG_ARGUMENTS: usize = 4096;
+pub(crate) const MAXIMUM_DEBUG_ENVIRONMENT: usize = 4096;
+
 pub(in crate::editor::session) use launch::DebugIntent;
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
@@ -239,7 +245,7 @@ impl DebugSession {
             let _ = self.stop();
             self.policy = policy.clone();
             self.scope = scope;
-            self.watches.truncate(policy.maximum_watches);
+            self.watches.truncate(MAXIMUM_WATCHES);
         }
     }
     pub(in crate::editor::session) fn stop(&mut self) -> Result<(), DapError> {
@@ -626,7 +632,7 @@ impl DebugSession {
         if !expression.is_empty()
             && expression.len() <= 64 * 1024
             && !expression.contains('\0')
-            && self.watches.len() < self.policy.maximum_watches
+            && self.watches.len() < MAXIMUM_WATCHES
             && !self.watches.contains(&expression)
         {
             self.watches.push(expression.clone());
@@ -667,7 +673,7 @@ impl DebugSession {
             .breakpoints
             .get(&row.path)
             .and_then(|rows| rows.iter().position(|old| old.line == row.line));
-        if existing.is_none() && count >= self.policy.maximum_breakpoints {
+        if existing.is_none() && count >= MAXIMUM_BREAKPOINTS {
             return Err("debugger breakpoint limit reached".into());
         }
         let rows = self.breakpoints.entry(row.path.clone()).or_default();
@@ -870,7 +876,7 @@ impl DebugSession {
         self.breakpoints
             .values()
             .flatten()
-            .take(self.policy.maximum_breakpoints)
+            .take(MAXIMUM_BREAKPOINTS)
             .map(|r| PersistedBreakpoint {
                 path: r.path.clone(),
                 line: r.line,
@@ -896,7 +902,7 @@ impl DebugSession {
         workspace: &WorkspaceSession,
     ) {
         self.breakpoints.clear();
-        for r in rows.into_iter().take(self.policy.maximum_breakpoints) {
+        for r in rows.into_iter().take(MAXIMUM_BREAKPOINTS) {
             if workspace.require_path(&r.path).is_err() {
                 continue;
             }
@@ -913,7 +919,7 @@ impl DebugSession {
             );
         }
         self.watches.clear();
-        for watch in watches.into_iter().take(self.policy.maximum_watches) {
+        for watch in watches.into_iter().take(MAXIMUM_WATCHES) {
             self.add_watch(watch.expression);
         }
     }

@@ -27,7 +27,6 @@ impl InteractiveApplication {
             self.show_error(notice);
         }
         self.retire_explorer_intents();
-        self.clear_explorer_preview();
         for name in self.tasks.names() {
             if let Ok(owner) = crate::workspace::DiagnosticOwner::new(format!("task:{name}")) {
                 self.diagnostics.clear_owner(&owner);
@@ -92,8 +91,7 @@ impl InteractiveApplication {
         self.finish_workspace_resource_obligations("shared shutdown deadline");
         self.documents.stop_worker();
         self.persistence.begin_shutdown(
-            self.configuration.settings().persistence.enabled
-                && self.configuration.settings().persistence.save_on_exit,
+            self.configuration.settings().persistence.enabled,
         );
         // Drain an earlier load/save without applying a late restore at exit.
         while self.persistence.pending() && Instant::now() < deadline {

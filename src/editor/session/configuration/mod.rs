@@ -39,7 +39,7 @@ pub(in crate::editor::session) use resolve::{
 };
 mod validation;
 pub(in crate::editor::session) use validation::{
-    configuration_value, invocation_fingerprint, keymap_entries_for_policy,
+    configuration_value, invocation_fingerprint, keymap_entries,
     validate_configured_commands,
 };
 mod compile;
@@ -149,7 +149,6 @@ impl ConfigurationSession {
     pub(super) fn new(accepted: ResolvedConfiguration, user_configuration: bool) -> Self {
         let worker = ConfigurationWorker::start(
             user_configuration,
-            accepted.settings.config_watch.clone(),
             accepted.settings.ui.theme.clone(),
         );
         Self {
@@ -241,10 +240,9 @@ impl ConfigurationSession {
         Ok(Some(result))
     }
     pub(super) fn retain_watch(&self) {
-        let _ = self.worker.configure_watch(
-            self.accepted.settings.config_watch.clone(),
-            self.accepted.settings.ui.theme.clone(),
-        );
+        let _ = self
+            .worker
+            .configure_watch(self.accepted.settings.ui.theme.clone());
     }
     pub(super) fn prepare(
         &self,
@@ -284,10 +282,7 @@ impl ConfigurationSession {
         self.check_stamp(&candidate.stamp)?;
         Self::check_catalog(&candidate.catalog, catalog)?;
         self.worker
-            .configure_watch(
-                candidate.resolved.settings.config_watch.clone(),
-                candidate.resolved.settings.ui.theme.clone(),
-            )
+            .configure_watch(candidate.resolved.settings.ui.theme.clone())
             .map_err(|error| error.to_string())
     }
     fn check_catalog(

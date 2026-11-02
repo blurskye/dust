@@ -60,27 +60,9 @@ pub enum FinalNewlinePolicy {
     Remove,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BomPolicy {
-    #[default]
-    Preserve,
-    Always,
-    Never,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RegisterStorage {
-    Internal,
-    Disabled,
-}
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RegisterConfig {
-    pub storage: RegisterStorage,
-    pub mirror_named_to_unnamed: bool,
     pub clipboard: ClipboardSync,
 }
 
@@ -95,8 +77,6 @@ pub enum ClipboardSync {
 impl Default for RegisterConfig {
     fn default() -> Self {
         Self {
-            storage: RegisterStorage::Internal,
-            mirror_named_to_unnamed: true,
             clipboard: ClipboardSync::Unnamedplus,
         }
     }
@@ -106,23 +86,11 @@ impl Default for RegisterConfig {
 #[serde(deny_unknown_fields)]
 pub struct LargeFileConfig {
     pub enabled: bool,
-    pub byte_threshold: usize,
-    pub line_threshold: usize,
-    pub disable_syntax: bool,
-    pub disable_diagnostics: bool,
-    pub disable_wrap: bool,
-    pub status_label: String,
 }
 impl Default for LargeFileConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            byte_threshold: 16 * 1024 * 1024,
-            line_threshold: 250_000,
-            disable_syntax: true,
-            disable_diagnostics: true,
-            disable_wrap: true,
-            status_label: "LARGE".into(),
         }
     }
 }
@@ -149,40 +117,12 @@ impl Default for EditorViewportConfig {
 #[serde(deny_unknown_fields)]
 pub struct GitSignsConfig {
     pub enabled: bool,
-    pub unchanged: String,
-    pub added: String,
-    pub changed: String,
-    pub deleted: String,
-    pub staged: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct DebugSignsConfig {
-    pub breakpoint: String,
-    pub conditional_breakpoint: String,
-    pub execution: String,
-}
-
-impl Default for DebugSignsConfig {
-    fn default() -> Self {
-        Self {
-            breakpoint: "●".into(),
-            conditional_breakpoint: "◆".into(),
-            execution: "▶".into(),
-        }
-    }
 }
 
 impl Default for GitSignsConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            unchanged: "│".into(),
-            added: "│".into(),
-            changed: "│".into(),
-            deleted: "_".into(),
-            staged: "┊".into(),
         }
     }
 }
@@ -191,16 +131,12 @@ impl Default for GitSignsConfig {
 #[serde(deny_unknown_fields)]
 pub struct IndentGuideConfig {
     pub enabled: bool,
-    pub active_scope: bool,
-    pub character: String,
 }
 
 impl Default for IndentGuideConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            active_scope: true,
-            character: "│".into(),
         }
     }
 }
@@ -212,25 +148,14 @@ pub struct EditorConfig {
     pub tab_width: usize,
     pub indent_width: usize,
     pub expand_tabs: bool,
-    pub undo_break_on_text_commit: bool,
     pub wrap: bool,
-    pub buffer_navigation_wrap: bool,
-    pub end_of_buffer_marker: String,
-    pub half_page_percent: u8,
-    pub full_page_percent: u8,
     pub line_endings: LineEndingPolicy,
     pub final_newline: FinalNewlinePolicy,
-    pub utf8_bom: BomPolicy,
-    pub line_number_separator: String,
-    pub gutter_padding: u16,
-    pub control_character_replacement: String,
-    pub zero_width_replacement: String,
     pub ambiguous_width: AmbiguousWidth,
     /// Insert the closing bracket or quote as the opening one is typed.
     pub autopairs: bool,
     pub viewport: EditorViewportConfig,
     pub git_signs: GitSignsConfig,
-    pub debug_signs: DebugSignsConfig,
     pub indent_guides: IndentGuideConfig,
     pub registers: RegisterConfig,
     pub large_file: LargeFileConfig,
@@ -245,28 +170,32 @@ impl Default for EditorConfig {
             tab_width: 4,
             indent_width: 4,
             expand_tabs: true,
-            undo_break_on_text_commit: false,
             wrap: false,
-            buffer_navigation_wrap: true,
-            end_of_buffer_marker: "~".into(),
-            half_page_percent: 50,
-            full_page_percent: 100,
             line_endings: LineEndingPolicy::Preserve,
             final_newline: FinalNewlinePolicy::Preserve,
-            utf8_bom: BomPolicy::Preserve,
-            line_number_separator: " ".into(),
-            gutter_padding: 1,
-            control_character_replacement: "�".into(),
-            zero_width_replacement: "◌".into(),
             ambiguous_width: AmbiguousWidth::Narrow,
             autopairs: true,
             viewport: EditorViewportConfig::default(),
             git_signs: GitSignsConfig::default(),
-            debug_signs: DebugSignsConfig::default(),
             indent_guides: IndentGuideConfig::default(),
             registers: RegisterConfig::default(),
             large_file: LargeFileConfig::default(),
             comments: BTreeMap::new(),
+        }
+    }
+}
+
+impl EditorConfig {
+    /// The editing rules the buffer commands follow.
+    #[must_use]
+    pub fn editing_policy(&self) -> crate::editor::EditingPolicy {
+        crate::editor::EditingPolicy {
+            tab_width: self.tab_width,
+            indent_width: self.indent_width,
+            expand_tabs: self.expand_tabs,
+            ambiguous_width_wide: self.ambiguous_width == AmbiguousWidth::Wide,
+            autopairs: self.autopairs,
+            ..crate::editor::EditingPolicy::default()
         }
     }
 }

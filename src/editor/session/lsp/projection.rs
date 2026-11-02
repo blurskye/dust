@@ -945,7 +945,7 @@ impl LspSession {
         now: Instant,
     ) {
         let (server_key, token, kind, title, message, percentage) = event;
-        if !policy.enabled || policy.max_rows == 0 {
+        if !policy.enabled {
             self.projection.progress.clear();
             self.projection.progress_frame = 0;
             return;
@@ -998,7 +998,7 @@ impl LspSession {
         }
 
         let was_empty = self.projection.progress.is_empty();
-        let maximum = usize::from(policy.max_rows);
+        let maximum = usize::from(crate::ui::render::overlays::LSP_PROGRESS_MAX_ROWS);
         while self.projection.progress.len() >= maximum {
             self.projection.progress.remove(0);
         }
@@ -1035,17 +1035,17 @@ impl LspSession {
         if self.projection.progress.is_empty() {
             return;
         }
-        if !policy.enabled || policy.max_rows == 0 {
+        if !policy.enabled {
             self.projection.progress.clear();
             self.projection.progress_frame = 0;
             return;
         }
-        let maximum = usize::from(policy.max_rows);
+        let maximum = usize::from(crate::ui::render::overlays::LSP_PROGRESS_MAX_ROWS);
         if self.projection.progress.len() > maximum {
             let excess = self.projection.progress.len().saturating_sub(maximum);
             self.projection.progress.drain(..excess);
         }
-        let completed_timeout = Duration::from_millis(policy.completed_timeout_ms);
+        let completed_timeout = Duration::from_millis(crate::ui::render::overlays::LSP_PROGRESS_DONE_TIMEOUT_MS);
         self.projection.progress.retain(|item| {
             item.completed_at.is_none_or(|completed| {
                 now.saturating_duration_since(completed) < completed_timeout
@@ -1059,9 +1059,9 @@ impl LspSession {
             return;
         }
         let elapsed = now.saturating_duration_since(self.projection.progress_epoch.unwrap_or(now));
-        let phase = elapsed.as_millis() / u128::from(policy.spinner_interval_ms.max(1));
+        let phase = elapsed.as_millis() / u128::from(crate::ui::render::overlays::SPINNER_INTERVAL_MS);
         let frame =
-            usize::try_from(phase % policy.spinner_frames.len().max(1) as u128).unwrap_or(0);
+            usize::try_from(phase % crate::ui::render::overlays::SPINNER_FRAMES.len() as u128).unwrap_or(0);
         if self.projection.progress_frame != frame {
             self.projection.progress_frame = frame;
         }

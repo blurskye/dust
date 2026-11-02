@@ -3,7 +3,7 @@ mod registry;
 pub use registry::{
     OFFICIAL_REGISTRY, RegistryError, RegistryEvent, RegistryPackageMetadata,
     RegistryPackageSummary, RegistryRequest, RegistryResult, RegistrySearchResponse,
-    RegistryService,
+    RegistryPolicy, RegistryService,
 };
 
 use std::sync::OnceLock;

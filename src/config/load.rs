@@ -15,7 +15,7 @@ use std::{
 use serde::Deserialize;
 use thiserror::Error;
 
-use super::settings::{ConfigWatchConfig, ThemeConfig};
+use super::settings::{ThemeConfig};
 use super::themes::ThemeRead;
 use super::{
     Config, DashboardConfig, KeyGroupEntry, KeymapEntry, LoadedConfig, LoadedKeymaps,
@@ -216,12 +216,7 @@ impl ConfigurationSourceBundle {
                 ..LoadedKeymaps::default()
             },
         };
-        let (bundled_entries, bundled_groups) = if loaded.config.input.keymaps.load_bundled_defaults
-        {
-            (bundled.keymaps.entries, bundled.keymaps.groups)
-        } else {
-            (Vec::new(), Vec::new())
-        };
+        let (bundled_entries, bundled_groups) = (bundled.keymaps.entries, bundled.keymaps.groups);
         let bundled_count = bundled_entries.len();
         let bundled_group_count = bundled_groups.len();
         loaded.keymaps = LoadedKeymaps {
@@ -731,22 +726,19 @@ pub(super) enum ConfigurationRequest {
     Reload,
     Themes(ThemeRead),
     ConfigureWatch {
-        watch: ConfigWatchConfig,
         theme: String,
     },
     Shutdown,
 }
 
+/// How often the user's configuration files are checked for changes, and how long they must
+/// stay unchanged before they are reloaded.
+const CONFIG_WATCH_POLL_MS: u64 = 1000;
+const CONFIG_WATCH_DEBOUNCE_MS: u64 = 100;
+
 impl ConfigurationWorker {
     #[must_use]
-    pub fn start(
-        use_user_configuration: bool,
-        mut watch: ConfigWatchConfig,
-        mut theme: String,
-    ) -> Self {
-        if !use_user_configuration {
-            watch.enabled = false;
-        }
+    pub fn start(use_user_configuration: bool, mut theme: String) -> Self {
         let (sender, requests) = mpsc::sync_channel(4);
         let (results, receiver) = mpsc::channel();
         let thread = thread::Builder::new()
@@ -760,8 +752,8 @@ impl ConfigurationWorker {
                 };
                 let mut changed_at: Option<Instant> = None;
                 loop {
-                    let request = if watch.enabled {
-                        requests.recv_timeout(Duration::from_millis(watch.poll_interval_ms))
+                    let request = if use_user_configuration {
+                        requests.recv_timeout(Duration::from_millis(CONFIG_WATCH_POLL_MS))
                     } else {
                         requests.recv().map_err(|_| RecvTimeoutError::Disconnected)
                     };
@@ -803,12 +795,9 @@ impl ConfigurationWorker {
                             }
                         }
                         Ok(ConfigurationRequest::ConfigureWatch {
-                            watch: configured,
                             theme: configured_theme,
                         }) => {
-                            watch = configured;
                             if !use_user_configuration {
-                                watch.enabled = false;
                                 theme = configured_theme;
                                 fingerprint.clear();
                                 changed_at = None;
@@ -832,7 +821,7 @@ impl ConfigurationWorker {
                                 changed_at = Some(Instant::now());
                             }
                             if changed_at.is_some_and(|changed| {
-                                changed.elapsed() >= Duration::from_millis(watch.debounce_ms)
+                                changed.elapsed() >= Duration::from_millis(CONFIG_WATCH_DEBOUNCE_MS)
                             }) {
                                 match load_consistent_configuration(use_user_configuration, &theme)
                                 {
@@ -888,13 +877,9 @@ impl ConfigurationWorker {
             .map_err(map_configuration_send_error)
     }
 
-    pub fn configure_watch(
-        &self,
-        watch: ConfigWatchConfig,
-        theme: String,
-    ) -> Result<(), ConfigurationWorkerError> {
+    pub fn configure_watch(&self, theme: String) -> Result<(), ConfigurationWorkerError> {
         self.sender
-            .try_send(ConfigurationRequest::ConfigureWatch { watch, theme })
+            .try_send(ConfigurationRequest::ConfigureWatch { theme })
             .map_err(map_configuration_send_error)
     }
 
@@ -1146,15 +1131,9 @@ pub(super) fn unknown_key_warning(source: &str) -> Option<String> {
                     | "startup"
                     | "input"
                     | "search"
-                    | "history"
                     | "recovery"
-                    | "config_watch"
-                    | "runtime"
                     | "lsp"
-                    | "observability"
                     | "persistence"
-                    | "processes"
-                    | "packages"
                     | "plugins"
                     | "debug"
                     | "tasks"

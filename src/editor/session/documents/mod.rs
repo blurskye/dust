@@ -1,6 +1,11 @@
 //! Document-owned file/startup intents and policy, with bounded VFS admission/drain.
 //! Other feature payloads still live in legacy dispatch. Queued read/write cancellation
 //! and shutdown are nonblocking; running filesystem calls are not interruptible.
+
+pub(crate) const VFS_QUEUE_CAPACITY: usize = 8;
+pub(crate) const LARGE_FILE_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const LARGE_FILE_LINES: usize = 250_000;
+
 mod lifecycle;
 mod task_io;
 use crate::editor::text::TextBuffer;
@@ -342,8 +347,8 @@ impl DocumentSession {
             LargeFileOverride::Off => false,
             LargeFileOverride::Auto => text.is_some_and(|text| {
                 policy.enabled
-                    && (text.len_bytes() >= policy.byte_threshold
-                        || text.len_lines() >= policy.line_threshold)
+                    && (text.len_bytes() >= LARGE_FILE_BYTES
+                        || text.len_lines() >= LARGE_FILE_LINES)
             }),
         }
     }

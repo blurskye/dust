@@ -1,3 +1,4 @@
+use crate::editor::session::input::COMPLETION_LIMIT;
 use super::InputSession;
 use crate::{
     editor::{EditorMode, PromptMove, ViewId},
@@ -137,37 +138,15 @@ impl InputSession {
         self.search_history.clear();
         self.history_index = None;
     }
-    pub(in crate::editor::session) fn configure_history(
-        &mut self,
-        policy: &crate::config::HistoryConfig,
-    ) {
-        for (history, configured) in [
-            (&mut self.command_history, &policy.command),
-            (&mut self.search_history, &policy.search),
-        ] {
-            if !configured.enabled {
-                history.clear();
-            } else {
-                let excess = history.len().saturating_sub(configured.maximum_entries);
-                history.drain(..excess);
-            }
-        }
-        self.history_index = None;
-    }
     pub(in crate::editor::session) fn restore_history(
         &mut self,
         commands: Vec<String>,
         searches: Vec<String>,
-        policy: &crate::config::PersistenceConfig,
     ) {
-        if policy.persist_command_history {
-            self.command_history = commands;
-        }
-        if policy.persist_search_history {
-            self.search_history = searches;
-        }
+        self.command_history = commands;
+        self.search_history = searches;
         for history in [&mut self.command_history, &mut self.search_history] {
-            let excess = history.len().saturating_sub(policy.maximum_entries);
+            let excess = history.len().saturating_sub(super::HISTORY_LIMIT);
             history.drain(..excess);
         }
         self.history_index = None;
@@ -203,7 +182,7 @@ impl InputSession {
                 path.file_name()
                     .is_some_and(|name| name.to_string_lossy().to_lowercase().starts_with(&prefix))
             })
-            .take(policy.runtime.completion_limit)
+            .take(COMPLETION_LIMIT)
             .map(|path| CompletionItem {
                 icon: None,
                 color: None,
@@ -215,8 +194,7 @@ impl InputSession {
                 detail: detail.clone(),
             })
             .collect();
-        prompt.selected_completion =
-            (policy.input.completion_select_first && !prompt.completions.is_empty()).then_some(0);
+        prompt.selected_completion = None;
         true
     }
     pub(in crate::editor::session) fn search_origin(
@@ -324,7 +302,6 @@ impl InputSession {
     pub(in crate::editor::session) fn prompt_history(
         &mut self,
         direction: i8,
-        policy: &crate::config::Config,
     ) {
         let Some(kind) = self.prompt.as_ref().map(|prompt| prompt.kind) else {
             return;
@@ -348,14 +325,11 @@ impl InputSession {
         ) {
             return;
         }
-        let (enabled, history) = if kind == PromptKind::Command {
-            (policy.history.command.enabled, &self.command_history)
+        let history = if kind == PromptKind::Command {
+            &self.command_history
         } else {
-            (policy.history.search.enabled, &self.search_history)
+            &self.search_history
         };
-        if !enabled {
-            return;
-        }
         if history.is_empty() {
             return;
         }
@@ -381,7 +355,6 @@ impl InputSession {
     pub(in crate::editor::session) fn prompt_complete(
         &mut self,
         direction: i8,
-        policy: &crate::config::Config,
     ) {
         let Some(prompt) = &mut self.prompt else {
             return;
@@ -390,14 +363,11 @@ impl InputSession {
             return;
         }
         let length = prompt.completions.len();
-        let wrap = policy.input.completion_wrap;
         prompt.selected_completion = Some(match (prompt.selected_completion, direction < 0) {
             (None, false) => 0,
             (None, true) => length - 1,
-            (Some(current), false) if wrap => (current + 1) % length,
-            (Some(current), true) if wrap => current.checked_sub(1).unwrap_or(length - 1),
-            (Some(current), false) => (current + 1).min(length - 1),
-            (Some(current), true) => current.saturating_sub(1),
+            (Some(current), false) => (current + 1) % length,
+            (Some(current), true) => current.checked_sub(1).unwrap_or(length - 1),
         });
     }
 
@@ -512,7 +482,7 @@ impl InputSession {
                         fragment: fragment.into(),
                     },
                     directory,
-                    limit: policy.runtime.completion_limit,
+                    limit: COMPLETION_LIMIT,
                 });
             }
         }
@@ -523,7 +493,7 @@ impl InputSession {
         if let Some(prompt) = &mut self.prompt {
             prompt.completions = ordered
                 .into_iter()
-                .take(policy.runtime.completion_limit)
+                .take(COMPLETION_LIMIT)
                 .map(|(label, detail)| CompletionItem { icon: None, label, detail, color: None })
                 .collect();
             if prompt
@@ -531,12 +501,6 @@ impl InputSession {
                 .is_some_and(|index| index >= prompt.completions.len())
             {
                 prompt.selected_completion = None;
-            }
-            if prompt.selected_completion.is_none()
-                && policy.input.completion_select_first
-                && !prompt.completions.is_empty()
-            {
-                prompt.selected_completion = Some(0);
             }
         }
         request
@@ -546,7 +510,6 @@ impl InputSession {
         &mut self,
         kind: PromptKind,
         input: &str,
-        policy: &crate::config::Config,
     ) {
         if input.is_empty() {
             return;
@@ -562,14 +525,6 @@ impl InputSession {
         ) {
             return;
         }
-        let configured = if kind == PromptKind::Command {
-            &policy.history.command
-        } else {
-            &policy.history.search
-        };
-        if !configured.enabled || configured.maximum_entries == 0 {
-            return;
-        }
         let history = if kind == PromptKind::Command {
             &mut self.command_history
         } else {
@@ -579,7 +534,7 @@ impl InputSession {
             return;
         }
         history.push(input.into());
-        let excess = history.len().saturating_sub(configured.maximum_entries);
+        let excess = history.len().saturating_sub(super::HISTORY_LIMIT);
         if excess > 0 {
             history.drain(..excess);
         }

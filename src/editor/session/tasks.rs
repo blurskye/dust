@@ -2,8 +2,16 @@
 use super::workspace::{WorkspaceSession, WorkspaceVersion};
 mod linter;
 mod sources;
+
+/// Limits for every task and tool process Dust runs.
+pub(crate) const PROCESS_EVENT_CAPACITY: usize = 256;
+const MAXIMUM_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
+const MAXIMUM_LINE_BYTES: usize = 1024 * 1024;
+const MAXIMUM_STDIN_BYTES: usize = 16 * 1024 * 1024;
+const MAXIMUM_TIMEOUT_MS: u64 = 300_000;
+const MAXIMUM_RUNNING: usize = 16;
 use crate::{
-    config::{Config, ProcessConfig, TaskConfig},
+    config::{Config, TaskConfig},
     editor::{
         EditorState, TransactionId,
         text::{ByteOffset, ByteRange, TextEdit, TextEditSet},
@@ -163,7 +171,7 @@ impl TaskSession {
     pub(super) fn new(config: &Config) -> Self {
         let mut owner = Self {
             linters: linter::Linters::default(),
-            jobs: JobSupervisor::new(config.processes.event_capacity),
+            jobs: JobSupervisor::new(PROCESS_EVENT_CAPACITY),
             preflights: HashMap::new(),
             running: HashMap::new(),
             keys: HashMap::new(),
@@ -182,7 +190,7 @@ impl TaskSession {
         owner
     }
     pub(super) fn configure(&mut self, config: &Config) {
-        self.maximum_output = config.processes.maximum_output_bytes;
+        self.maximum_output = MAXIMUM_OUTPUT_BYTES;
         self.matchers = config
             .tasks
             .iter()
@@ -224,7 +232,7 @@ impl TaskSession {
     ) -> Result<(), String> {
         if self.closed
             || configuration == u64::MAX
-            || self.running.len() >= config.processes.maximum_running
+            || self.running.len() >= MAXIMUM_RUNNING
             || self.keys.contains_key(name)
                 && self.statuses.get(name).is_some_and(|status| {
                     status == "queued"
@@ -375,7 +383,6 @@ impl TaskSession {
         &mut self,
         step: TaskStep,
         ready: super::workspace::ExecutionReady,
-        policy: &ProcessConfig,
         editor: &EditorState,
         workspace: &WorkspaceSession,
         configuration: u64,
@@ -387,7 +394,7 @@ impl TaskSession {
         let result = ready
             .into_execution_result(&step.request, workspace)
             .and_then(|result| {
-                self.launch_inner(step, result, policy, editor, workspace, configuration)
+                self.launch_inner(step, result, editor, workspace, configuration)
             });
         if result.is_err() {
             self.keys.remove(&name);
@@ -400,14 +407,13 @@ impl TaskSession {
         &mut self,
         step: TaskStep,
         result: ExecutionPreflightResult,
-        policy: &ProcessConfig,
         editor: &EditorState,
         workspace: &WorkspaceSession,
         configuration: u64,
     ) -> Result<Option<DiagnosticProducer>, String> {
         if !self.key_current(&step.requested, &step.key, workspace, configuration)
             || result.root_revision != workspace.root_revision()
-            || self.running.len() >= policy.maximum_running
+            || self.running.len() >= MAXIMUM_RUNNING
         {
             return Err("task launch source retired or full".into());
         }
@@ -420,7 +426,7 @@ impl TaskSession {
         let admission = self.jobs.reserve().map_err(|e| e.to_string())?;
         let stdin = match &step.adapter {
             AdapterContext::Formatter { source } if step.name == step.requested => {
-                Some(source.stdin(editor, policy.maximum_stdin_bytes)?)
+                Some(source.stdin(editor, MAXIMUM_STDIN_BYTES)?)
             }
             _ => None,
         };
@@ -452,11 +458,11 @@ impl TaskSession {
             root_revision: result.root_revision,
             stdin,
             policy: JobPolicy {
-                maximum_output_bytes: policy.maximum_output_bytes,
-                maximum_line_bytes: policy.maximum_line_bytes,
-                maximum_stdin_bytes: policy.maximum_stdin_bytes,
+                maximum_output_bytes: MAXIMUM_OUTPUT_BYTES,
+                maximum_line_bytes: MAXIMUM_LINE_BYTES,
+                maximum_stdin_bytes: MAXIMUM_STDIN_BYTES,
                 timeout: Duration::from_millis(
-                    step.task.timeout_ms.unwrap_or(policy.maximum_timeout_ms),
+                    step.task.timeout_ms.unwrap_or(MAXIMUM_TIMEOUT_MS),
                 ),
             },
         };
@@ -939,7 +945,6 @@ mod tests {
                             root_revision: workspace.root_revision()
                         }
                     ),
-                    &config.processes,
                     &editor,
                     &workspace,
                     1
