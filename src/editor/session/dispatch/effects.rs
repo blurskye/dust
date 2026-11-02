@@ -13727,6 +13727,10 @@ impl InteractiveApplication {
                     return;
                 }
                 self.record_recent_file(path.clone());
+                // "Opening file…" is done once the file is there.
+                if self.ui.notification.as_deref() == Some(self.message("opening_file", &[]).as_str()) {
+                    self.clear_notice();
+                }
             }
             DocumentChange::Reload { buffer, text, path } => {
                 if !candidate.reload_document(buffer, text, path.clone()) {

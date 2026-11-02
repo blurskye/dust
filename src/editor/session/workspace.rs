@@ -330,6 +330,15 @@ impl WorkspaceSession {
         }
         self.persist_state(Some(WorkspaceTrust::Untrusted))
     }
+    /// Forget a folder that is going away, so the trust file doesn't collect dead entries.
+    pub(in crate::editor::session) fn forget_folder(&mut self, path: &Path) -> Result<(), WorkspaceFailure> {
+        self.store.forget(path);
+        // Before the trust file has loaded, writing it would drop what it holds.
+        if !self.database_ready {
+            return Ok(());
+        }
+        self.persist_state(None)
+    }
     fn persist_state(&mut self, target: Option<WorkspaceTrust>) -> Result<(), WorkspaceFailure> {
         match self.service.persist(
             self.state_path.clone(),

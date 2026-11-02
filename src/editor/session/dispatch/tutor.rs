@@ -486,6 +486,9 @@ impl InteractiveApplication {
         let Some(practice) = self.tutor.practice.take() else {
             return;
         };
+        if let Err(error) = self.workspace.forget_folder(&practice.root) {
+            self.show_workspace_failure(error);
+        }
         if let Some(layout) = practice.layout {
             self.persistence.allow_restore(RestoreContext {
                 editor: &self.state,

@@ -64,6 +64,12 @@ impl TrustStore {
         self.trusted.remove(identity);
     }
 
+    /// Drop every record of a folder, trusted or seen, such as one that is being deleted.
+    pub fn forget(&mut self, path: &std::path::Path) {
+        self.trusted.retain(|identity| identity.canonical_path != path);
+        self.seen.retain(|identity| identity.canonical_path != path);
+    }
+
     #[must_use]
     pub fn is_trusted(&self, identity: &RootIdentity) -> bool {
         self.trusted.contains(identity)
