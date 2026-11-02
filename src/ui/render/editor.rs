@@ -1062,7 +1062,8 @@ pub(super) fn render_status_line(
     x = grid.put_text_clipped(x, status_y, &file, Style::Status, left_limit);
     for (text, style) in &left_fields {
         let next = x.saturating_add(separator_cells);
-        if next.saturating_add(text_cells(text, config)) > left_limit {
+        // At least one blank before the right side, so the two never read as one word.
+        if next.saturating_add(text_cells(text, config)) >= left_limit {
             continue;
         }
         x = grid.put_text_clipped(next, status_y, text, *style, left_limit);

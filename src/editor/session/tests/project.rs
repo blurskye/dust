@@ -1940,6 +1940,11 @@ fn save_as_reload_close_and_external_change_protection_work() {
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abc"), None);
     app.set_dashboard_visibility(false);
+    app.start_save(false, Some(PathBuf::from("missing/new.txt")), false);
+    assert_eq!(
+        app.ui.notification.as_deref(),
+        Some("can't save new.txt: the folder missing doesn't exist")
+    );
     app.start_save(false, Some(PathBuf::from("new.txt")), false);
     wait_vfs(&mut app);
     let path = root.join("new.txt");

@@ -13252,6 +13252,18 @@ impl InteractiveApplication {
             ));
             return;
         };
+        // Said up front, because the write would only report the temporary file it could not make.
+        if let Some(requested) = requested_path.as_deref() {
+            let folder = requested.parent().filter(|folder| !folder.as_os_str().is_empty());
+            if let Some(folder) = folder.filter(|f| !self.state.workspace_root.join(f).is_dir()) {
+                let name = requested.file_name().unwrap_or_default().to_string_lossy();
+                self.show_error(format!(
+                    "can't save {name}: the folder {} doesn't exist",
+                    folder.display()
+                ));
+                return;
+            }
+        }
         match self.request_save_buffer(buffer, quit_after, requested_path, force, None) {
             Ok(()) => self.notify_message(self.message("saving", &[]), false),
             Err(error) => self.show_document_failure(error),

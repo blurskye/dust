@@ -963,6 +963,18 @@ impl TestSession {
         let id = self.application.displayed_terminal()?;
         Some(self.application.terminal_session.fixture_dimensions(id))
     }
+    pub(super) fn stop_terminal_then_resize(&mut self) -> Result<(), String> {
+        let id = self.application.displayed_terminal().expect("terminal");
+        let source = self.terminal_geometry_source().expect("geometry");
+        self.application.terminal_session.request_stop(id)?;
+        self.application.terminal_session.resize(
+            id,
+            70,
+            5,
+            source,
+            &self.application.workspace,
+        )
+    }
     pub(super) fn terminal_pending_resizes(&self) -> Option<usize> {
         let id = self.application.displayed_terminal()?;
         Some(

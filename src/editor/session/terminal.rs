@@ -666,9 +666,11 @@ impl TerminalSession {
             let sequence = tab
                 .next_resize
                 .ok_or("terminal resize identity exhausted")?;
-            self.service
-                .resize_checked(pty, sequence, columns, rows)
-                .map_err(|e| e.to_string())?;
+            match self.service.resize_checked(pty, sequence, columns, rows) {
+                // A shell that is ending has no screen left to fit.
+                Err(crate::process::PtyError::Stopped) => return Ok(()),
+                result => result.map_err(|e| e.to_string())?,
+            }
             tab.next_resize = sequence.checked_add(1);
             if !same_source {
                 tab.pending_resizes.clear();

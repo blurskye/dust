@@ -139,6 +139,7 @@ pub(super) struct WindowSession {
     focus_stamp: Arc<()>,
     dashboard: bool,
     terminal_height: u16,
+    terminal_shrunk: bool,
     observed_size: (u16, u16),
     core: WindowCore,
     layout: Option<CompositorLayoutState>,

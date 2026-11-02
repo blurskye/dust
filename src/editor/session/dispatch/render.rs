@@ -193,6 +193,8 @@ impl InteractiveApplication {
         let Some(target) = target else {
             self.ui.set(None, |ui| &mut ui.debug_panes);
             if was_open {
+                self.window_session.set_debugging(false);
+                self.sync_terminal_panel();
                 // The windows make room for the panes, or take it back.
                 self.window_session.invalidate();
                 self.reconcile_editor_windows();
@@ -259,6 +261,8 @@ impl InteractiveApplication {
             console,
         });
         if !was_open {
+            self.window_session.set_debugging(true);
+            self.sync_terminal_panel();
             // The windows make room for the panes, or take it back.
             self.window_session.invalidate();
             self.reconcile_editor_windows();

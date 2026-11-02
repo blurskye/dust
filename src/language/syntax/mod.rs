@@ -1009,7 +1009,12 @@ fn query_rows(
     while let Some(item) = matches.next() {
         for capture in item.captures {
             let start = capture.node.start_position().row;
-            let end = capture.node.end_position().row;
+            let end_position = capture.node.end_position();
+            // A node that swallows its last newline, like a TOML table, ends at the start of
+            // the next line, and that line isn't part of the fold.
+            let end = end_position
+                .row
+                .saturating_sub(usize::from(end_position.column == 0));
             if end > start && seen.insert((start, end)) {
                 output.push(SyntaxFold {
                     start_row: start,
@@ -1088,6 +1093,27 @@ mod tests {
         assert!(rows("one\ntwo\n").is_empty());
         assert_eq!(rows("class A:\n  def b():\n    c\n"), [(0, 2), (1, 2)]);
         assert_eq!(indentation_folds("a\n b\nc\n d\n", 1).len(), 1);
+    }
+    #[test]
+    fn a_toml_table_fold_stops_before_the_next_table() {
+        let source = "[app]\na = 1\nb = 2\n[app.flags]\nenabled = true\n";
+        let request = Request {
+            document: SyntaxDocumentId(1),
+            generation: 2,
+            revision: 3,
+            language: SyntaxLanguage::Toml,
+            source: source.into(),
+            policy: SyntaxPolicy::default(),
+        };
+        let SyntaxEvent::Parsed(result) = parse(request) else {
+            panic!("parse toml")
+        };
+        let folds = result.folds;
+        assert!(
+            folds.iter().any(|fold| (fold.start_row, fold.end_row) == (0, 2)),
+            "{folds:?}"
+        );
+        assert!(folds.iter().all(|fold| fold.end_row != 3), "{folds:?}");
     }
     #[test]
     fn builtins_parse_unicode_and_queries() {

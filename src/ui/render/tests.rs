@@ -2810,6 +2810,56 @@ fn focused_diagnostic_expands_all_matching_messages_as_virtual_lines() {
 }
 
 #[test]
+fn completion_documentation_never_covers_the_candidates_on_a_narrow_screen() {
+    let mut state = EditorState::new(PathBuf::from("/tmp"));
+    state.open_text(
+        crate::editor::text::TextBuffer::from_text("text-blue-\nb\nc\n"),
+        Some(PathBuf::from("/tmp/index.html")),
+    );
+    if let Some(view) = state.active_view {
+        state.views[view].cursor = crate::editor::text::ByteOffset(9);
+    }
+    let ui = UiState {
+        editor_window_layout: Some(editor_layout(&state)),
+        language_completion: Some(super::LanguageCompletionState {
+            items: (0..6)
+                .map(|index| CompletionItem {
+                    color: None,
+                    label: format!("text-blue-{index}00"),
+                    detail: "Color with a long detail for the half width".into(),
+                })
+                .collect(),
+            selected: 0,
+            scroll: 0,
+        }),
+        documentation_popup: Some(DocumentationPopupState {
+            kind: DocumentationPopupKind::Completion,
+            title: "Completion".into(),
+            provider: "test".into(),
+            source_range: None,
+            sections: vec![DocumentationSection {
+                heading: None,
+                markup: DocumentationMarkupKind::Markdown,
+                roles: Vec::new(),
+                lines: vec!["#eff6ff with a line wide enough to fill the box".into()],
+            }],
+            scroll: 0,
+        }),
+        ..UiState::default()
+    };
+    let loaded = crate::config::load_bundled_config();
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 24);
+    let text = (0..24)
+        .map(|y| frame.grid.row_text(y))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for index in 0..6 {
+        assert!(text.contains(&format!("text-blue-{index}00")), "{text}");
+    }
+    assert!(text.contains("#eff6ff"), "{text}");
+}
+
+#[test]
 fn language_completion_keeps_the_selected_item_inside_its_bounded_viewport() {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
     state.open_text(

@@ -21,6 +21,7 @@ pub(super) fn render_documentation_popup(
     editor_left: u16,
     editor_width: u16,
     height: u16,
+    completion_menu: Option<WindowRect>,
 ) {
     let policy = &config.ui.documentation_popup;
     let editor_right = editor_left.saturating_add(editor_width);
@@ -89,6 +90,28 @@ pub(super) fn render_documentation_popup(
             .saturating_sub(box_width)
             .max(editor_left)
     };
+    let (left, top) = completion_menu
+        .filter(|_| popup.kind == DocumentationPopupKind::Completion)
+        .filter(|menu| boxes_overlap((left, top), (box_width, box_height), *menu))
+        .and_then(|menu| {
+            let beside_right = menu.x.saturating_add(menu.width);
+            let below_menu = menu.y.saturating_add(menu.height);
+            [
+                (beside_right, top),
+                (menu.x.saturating_sub(box_width), top),
+                (left, below_menu.max(cursor_y.saturating_add(1))),
+                (left, menu.y.min(cursor_y).saturating_sub(box_height)),
+            ]
+            .into_iter()
+            .find(|(x, y)| {
+                *x >= editor_left
+                    && x.saturating_add(box_width) <= editor_right
+                    && y.saturating_add(box_height) <= available_height
+                    && !boxes_overlap((*x, *y), (box_width, box_height), menu)
+                    && !(*y <= cursor_y && y.saturating_add(box_height) > cursor_y)
+            })
+        })
+        .unwrap_or((left, top));
     let right = left.saturating_add(box_width);
     let bottom = top.saturating_add(box_height).saturating_sub(1);
     for y in top..=bottom {
@@ -200,14 +223,22 @@ pub(super) fn color_swatch_style((red, green, blue): (u8, u8, u8)) -> Style {
     })
 }
 
+fn boxes_overlap(at: (u16, u16), size: (u16, u16), other: WindowRect) -> bool {
+    at.0 < other.x.saturating_add(other.width)
+        && other.x < at.0.saturating_add(size.0)
+        && at.1 < other.y.saturating_add(other.height)
+        && other.y < at.1.saturating_add(size.1)
+}
+
+/// Draws the menu and returns where it went, so its documentation can sit clear of it.
 pub(super) fn render_language_completion(
     frame: &mut Frame,
     completion: &LanguageCompletionState,
     config: &Config,
     bounds: WindowRect,
-) {
+) -> Option<WindowRect> {
     if completion.items.is_empty() || bounds.width < 4 || bounds.height < 2 {
-        return;
+        return None;
     }
     let (cursor_x, cursor_y, _) =
         frame
@@ -221,7 +252,7 @@ pub(super) fn render_language_completion(
         .min(usize::from(config.ui.command_line.completion_max_rows))
         .min(usize::from(bounds.height.saturating_sub(1)));
     if rows == 0 {
-        return;
+        return None;
     }
     let selected = completion.selected.min(completion.items.len() - 1);
     let maximum_scroll = completion.items.len().saturating_sub(rows);
@@ -301,6 +332,12 @@ pub(super) fn render_language_completion(
             left.saturating_add(panel_width).saturating_sub(1),
         );
     }
+    Some(WindowRect {
+        x: left,
+        y: top,
+        width: panel_width,
+        height: row_count,
+    })
 }
 
 pub(super) fn render_dashboard(

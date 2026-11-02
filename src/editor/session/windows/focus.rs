@@ -12,6 +12,9 @@ pub(in crate::editor::session) enum FocusTarget {
     Plugin(WindowId),
 }
 
+const SHRUNK_TERMINAL_HEIGHT: u16 = 5;
+const SHORT_SCREEN_HEIGHT: u16 = 30;
+
 impl WindowSession {
     pub(in crate::editor::session) fn new(dashboard: bool, terminal_height: u16) -> Self {
         Self {
@@ -121,7 +124,16 @@ impl WindowSession {
         layout.projection.spatial_neighbor(current, direction)
     }
     pub(in crate::editor::session) fn terminal_height(&self) -> u16 {
-        self.terminal_height
+        if self.terminal_shrunk {
+            self.terminal_height.min(SHRUNK_TERMINAL_HEIGHT)
+        } else {
+            self.terminal_height
+        }
+    }
+    /// On a short screen a debug session takes the terminal's room for its inspector. The
+    /// height the user chose comes back when the session ends.
+    pub(in crate::editor::session) fn set_debugging(&mut self, debugging: bool) {
+        self.terminal_shrunk = debugging && self.height() < SHORT_SCREEN_HEIGHT;
     }
     pub(in crate::editor::session) fn resize_terminal(
         &mut self,
@@ -151,6 +163,7 @@ impl WindowSession {
             self.place_native(target, placement)?;
         }
         self.terminal_height = height;
+        self.terminal_shrunk = false;
         Ok(())
     }
     pub(in crate::editor::session) fn constrain_terminal_height(
@@ -168,7 +181,7 @@ impl WindowSession {
         maximum: u16,
     ) -> u16 {
         u16::try_from(
-            i32::from(self.terminal_height)
+            i32::from(self.terminal_height())
                 .saturating_add(i32::from(rows).saturating_mul(i32::from(step)))
                 .clamp(i32::from(minimum), i32::from(maximum)),
         )

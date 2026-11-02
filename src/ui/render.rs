@@ -2139,21 +2139,20 @@ pub fn render(
             render_picker(&mut frame, picker, config, rect, ui.surface_content.picker);
         }
     }
-    if let Some(completion) = &ui.language_completion {
-        if let Some(pane) = active_editor_pane_viewport(state, ui) {
-            render_language_completion(
-                &mut frame,
-                completion,
-                config,
-                WindowRect {
-                    x: pane.x,
-                    y: pane.y,
-                    width: pane.width,
-                    height: pane.height,
-                },
-            );
-        }
-    }
+    let completion_menu = ui.language_completion.as_ref().and_then(|completion| {
+        let pane = active_editor_pane_viewport(state, ui)?;
+        render_language_completion(
+            &mut frame,
+            completion,
+            config,
+            WindowRect {
+                x: pane.x,
+                y: pane.y,
+                width: pane.width,
+                height: pane.height,
+            },
+        )
+    });
     if let Some(documentation) = &ui.documentation_popup {
         render_documentation_popup(
             &mut frame,
@@ -2162,6 +2161,7 @@ pub fn render(
             workspace.map_or(0, |bounds| bounds.x),
             content_width,
             workspace_height,
+            completion_menu,
         );
     }
     if let Some(key_hints) = &ui.key_hints {

@@ -3754,6 +3754,41 @@ fn live_pty_clone_refusal_preserves_process_screen_geometry_focus_and_sources() 
 
 #[cfg(unix)]
 #[test]
+fn resizing_a_terminal_that_is_stopping_is_not_an_error() {
+    use super::driver::TestSession;
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.terminals.profiles.insert(
+        "stopping".into(),
+        crate::config::TerminalProfileConfig {
+            program: "/bin/sh".into(),
+            arguments: vec!["-c".into(), "echo READY; sleep 30".into()],
+            cwd: None,
+            environment: Default::default(),
+            columns: 47,
+            rows: 9,
+            float: false,
+            close_on_exit: false,
+        },
+    );
+    let mut driver = TestSession::new(loaded);
+    driver.new_buffer();
+    driver.trust_owned_terminal_fixture();
+    driver.terminal_open("stopping");
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while !driver
+        .terminal_lines()
+        .iter()
+        .any(|line| line.contains("READY"))
+    {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(driver.stop_terminal_then_resize(), Ok(()));
+}
+
+#[cfg(unix)]
+#[test]
 fn real_pty_geometry_ack_focus_placement_and_cross_tab_keep_one_process() {
     use super::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
