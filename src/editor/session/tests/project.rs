@@ -1964,6 +1964,11 @@ fn save_as_reload_close_and_external_change_protection_work() {
             .as_deref()
             .is_some_and(|message| message.contains("externally modified"))
     );
+    // `:e! new.txt` on the current file takes the disk's text and drops the unsaved edit.
+    app.process_effect(AppEffect::ForceOpenPath(PathBuf::from("new.txt")));
+    wait_vfs(&mut app);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "external");
+    app.invoke_insert_text("X".into());
 
     app.start_reload(false);
     assert_eq!(app.documents.legacy_count(), 0);

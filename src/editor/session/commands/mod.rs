@@ -42,6 +42,8 @@ pub enum AppEffect {
         force: bool,
     },
     OpenPath(PathBuf),
+    /// `:e! path`: open it, and if it is the current file, reload it and drop unsaved edits.
+    ForceOpenPath(PathBuf),
     OpenUserFile(PathBuf),
     Reload {
         force: bool,
@@ -220,6 +222,8 @@ pub enum AppEffect {
     CancelPendingMapping,
     ReloadConfiguration,
     SelectTheme,
+    /// `:colorscheme name`: apply it without the list.
+    SetTheme(String),
     ExplainConfig(String),
     InspectKeymap {
         id: Option<String>,

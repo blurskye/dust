@@ -11,8 +11,13 @@ pub(super) fn register_commands(
         "theme.select",
         "Select Color Theme (Colorscheme)",
         ContextRequirement::Application,
-        ArgumentSchema::default(),
-        |_| AppEffect::SelectTheme,
+        ArgumentSchema::default().field("name", ArgumentType::String, false),
+        |invocation| {
+            Ok(match optional_string_arg(invocation, "name") {
+                Some(name) => AppEffect::SetTheme(name.to_owned()),
+                None => AppEffect::SelectTheme,
+            })
+        },
     )?;
     register(
         registry,

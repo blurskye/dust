@@ -1314,3 +1314,24 @@ fn the_agent_panel_opens_over_the_dashboard() {
     assert_eq!((panel.input.as_str(), panel.cursor), ("hi xa", 4));
     assert!(app.ui.content_tabs.iter().all(|tab| tab.title != "Agent"));
 }
+
+#[test]
+fn colorscheme_with_a_name_applies_that_theme_and_refuses_an_unknown_one() {
+    let mut app = app();
+    let set = |name: &str, app: &mut InteractiveApplication| {
+        app.process_effect(AppEffect::SetTheme(name.into()));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.ui.picker.is_some() {
+            assert!(Instant::now() < deadline, "theme list did not load");
+            app.process_theme_results();
+            thread::sleep(Duration::from_millis(2));
+        }
+    };
+    set("Catppuccin Latte", &mut app);
+    assert_eq!(app.configuration.theme().name, "catppuccin-latte");
+    set("rose pine", &mut app);
+    assert_eq!(app.configuration.theme().name, "rose-pine");
+    set("nope", &mut app);
+    assert!(app.ui.notification_error);
+    assert_eq!(app.configuration.theme().name, "rose-pine");
+}

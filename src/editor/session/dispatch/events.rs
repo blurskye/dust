@@ -996,7 +996,7 @@ impl InteractiveApplication {
 
     /// Vim never leaves the Normal-mode cursor on the empty line after a final newline; `dd`
     /// on the last line lands on the line above instead.
-    fn keep_cursor_off_final_newline(&mut self) {
+    pub(super) fn keep_cursor_off_final_newline(&mut self) {
         let Some(view_id) = self.state.active_view else {
             return;
         };

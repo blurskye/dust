@@ -18,6 +18,8 @@ pub(super) struct Themes {
     interaction: Option<ThemeInteraction>,
     restore_source: Option<Arc<()>>,
     restore: Option<ThemeRestore>,
+    /// The theme `:colorscheme name` asked for, applied once the list has loaded.
+    wanted: Option<String>,
 }
 struct ThemeRestore {
     source: Arc<()>,
@@ -253,6 +255,12 @@ impl ConfigurationSession {
         self.themes.applied = Some(choice);
         self.cancel_theme_picker();
         Ok(name)
+    }
+    pub(in crate::editor::session) fn want_theme(&mut self, name: Option<String>) {
+        self.themes.wanted = name;
+    }
+    pub(in crate::editor::session) fn take_wanted_theme(&mut self) -> Option<String> {
+        self.themes.wanted.take()
     }
     pub(in crate::editor::session) fn cancel_theme_picker(&mut self) {
         self.themes.interaction = None;

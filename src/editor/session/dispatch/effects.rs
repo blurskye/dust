@@ -1676,11 +1676,52 @@ impl InteractiveApplication {
             .configuration
             .poll_theme_picker(self.search.theme_picker_key())
         {
+            if !rows.loading
+                && let Some(wanted) = self.configuration.take_wanted_theme()
+            {
+                self.apply_wanted_theme(&wanted, &rows);
+                return;
+            }
             let previous = self.search.picker_bookmark();
             self.present_theme_picker(rows);
             self.search.restore_picker_view(previous, false);
             self.sync_picker_ui();
         }
+    }
+    fn apply_wanted_theme(
+        &mut self,
+        wanted: &str,
+        rows: &crate::editor::session::configuration::ThemeRows,
+    ) {
+        // "Rosé Pine", "rose pine" and "rose-pine" all name the same theme.
+        let plain = |name: &str| name.to_lowercase().replace('é', "e").replace(' ', "-");
+        let key = rows
+            .items
+            .iter()
+            .find(|(_, name, _)| plain(name) == plain(wanted))
+            .map(|(key, _, _)| key);
+        let applied = key.map(|key| self.configuration.apply_theme(key));
+        self.close_picker();
+        match applied {
+            Some(Ok(name)) => self.finish_theme_choice(&name),
+            Some(Err(error)) => self.show_error(error),
+            None => self.show_error(format!("no theme named {wanted}: :colorscheme lists them")),
+        }
+    }
+    fn finish_theme_choice(&mut self, name: &str) {
+        let saving = self.configuration.settings().persistence.enabled
+            && self.configuration.settings().persistence.save_on_exit;
+        if saving {
+            self.persistence.request_save();
+        }
+        self.notify_message(
+            format!(
+                "Theme {}{}",
+                crate::config::theme_display_name(name),
+                if saving { "" } else { " (not saved)" }
+            ),
+            false,
+        );
     }
     fn present_theme_picker(&mut self, rows: crate::editor::session::configuration::ThemeRows) {
         let items = rows
@@ -1723,12 +1764,16 @@ impl InteractiveApplication {
         effect: AppEffect,
     ) -> Result<(), AppEffect> {
         match effect {
-            AppEffect::SelectTheme => {
+            AppEffect::SelectTheme | AppEffect::SetTheme(_) => {
                 self.close_picker();
                 match self.configuration.begin_theme_picker() {
                     Ok(rows) => self.present_theme_picker(rows),
                     Err(error) => self.show_error(error),
                 }
+                self.configuration.want_theme(match effect {
+                    AppEffect::SetTheme(name) => Some(name),
+                    _ => None,
+                });
             }
             AppEffect::ReloadConfiguration => match self.configuration.request_reload() {
                 Ok(()) => {
@@ -8792,23 +8837,7 @@ impl InteractiveApplication {
             match self.configuration.apply_theme(key) {
                 Ok(name) => {
                     self.close_picker();
-                    let saving = self.configuration.settings().persistence.enabled
-                        && self.configuration.settings().persistence.save_on_exit;
-                    if saving {
-                        self.persistence.request_save();
-                    }
-                    self.notify_message(
-                        format!(
-                            "Theme {} applied; {}",
-                            crate::config::theme_display_name(&name),
-                            if saving {
-                                "editor-state save requested"
-                            } else {
-                                "state saving is disabled"
-                            }
-                        ),
-                        false,
-                    );
+                    self.finish_theme_choice(&name);
                 }
                 Err(error) => self.show_error(error),
             }
@@ -12601,6 +12630,19 @@ impl InteractiveApplication {
             }
             AppEffect::SaveAll { quit_after } => self.save_all(quit_after),
             AppEffect::OpenPath(path) => self.start_open(path),
+            AppEffect::ForceOpenPath(path) => {
+                let wanted = self.state.workspace_root.join(&path).canonicalize().ok();
+                let current = self
+                    .state
+                    .active_buffer_id()
+                    .and_then(|id| self.state.buffers[id].path.as_ref())
+                    .and_then(|file| file.canonicalize().ok());
+                if wanted.is_some() && wanted == current {
+                    self.start_reload(true);
+                } else {
+                    self.start_open(path);
+                }
+            }
             // Settings files are optional, so the first open creates an empty one to edit.
             AppEffect::OpenUserFile(path) => {
                 let created = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| {
@@ -13507,8 +13549,9 @@ impl InteractiveApplication {
                     return;
                 }
                 self.git.forget_hunks();
+                self.keep_cursor_off_final_newline();
                 self.notify_message(
-                    self.message("reloaded_file", &[("path", self.workspace_relative_label(&path))]),
+                    self.message("reloaded_file", &[("path", self.notice_file_label(&path))]),
                     false,
                 );
             }
@@ -13567,11 +13610,11 @@ impl InteractiveApplication {
                             "saved_dirty",
                             &[
                                 ("revision", revision.0.to_string()),
-                                ("path", self.workspace_relative_label(&path)),
+                                ("path", self.notice_file_label(&path)),
                             ],
                         )
                     } else {
-                        self.message("saved", &[("path", self.workspace_relative_label(&path))])
+                        self.message("saved", &[("path", self.notice_file_label(&path))])
                     },
                     false,
                 );

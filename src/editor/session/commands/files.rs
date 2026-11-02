@@ -89,11 +89,16 @@ pub(super) fn register_commands(
         "file.open",
         "Open file by path",
         ContextRequirement::Workspace,
-        ArgumentSchema::default().field("path", ArgumentType::String, true),
+        ArgumentSchema::default()
+            .field("path", ArgumentType::String, true)
+            .field("force", ArgumentType::Bool, false),
         |invocation| {
-            Ok(AppEffect::OpenPath(PathBuf::from(string_arg(
-                invocation, "path",
-            )?)))
+            let path = PathBuf::from(string_arg(invocation, "path")?);
+            Ok(if optional_bool_arg(invocation, "force") == Some(true) {
+                AppEffect::ForceOpenPath(path)
+            } else {
+                AppEffect::OpenPath(path)
+            })
         },
     )?;
     register(

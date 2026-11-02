@@ -233,12 +233,20 @@ pub fn parse_ex(
                     .map_err(|_| ExParseError::UnexpectedArguments(arguments.into()))?;
                 command(command_id)?.with_argument("direction", CommandValue::Integer(direction))
             }
+            "theme.select" if !arguments.is_empty() => command(command_id)?
+                .with_argument("name", CommandValue::String(arguments.to_owned())),
+            // As in Vim, `:e` with no file reloads the current one.
+            "file.open" if arguments.is_empty() => {
+                command("file.reload")?.with_argument("force", CommandValue::Bool(force))
+            }
             "file.open" => {
-                if arguments.is_empty() {
-                    return Err(ExParseError::MissingArgument("path"));
+                let invocation = command(command_id)?
+                    .with_argument("path", CommandValue::String(arguments.to_owned()));
+                if force {
+                    invocation.with_argument("force", CommandValue::Bool(true))
+                } else {
+                    invocation
                 }
-                command(command_id)?
-                    .with_argument("path", CommandValue::String(arguments.to_owned()))
             }
             "dap.session.start" => {
                 let invocation = command(command_id)?;
@@ -489,6 +497,18 @@ mod tests {
     fn rejects_unknown_and_missing_path() {
         let aliases = aliases();
         assert!(parse_ex("wat", &aliases).is_err());
-        assert!(parse_ex("e", &aliases).is_err());
+        for (line, force) in [("e", false), ("e!", true)] {
+            let reload = parse_ex(line, &aliases).expect("reload");
+            assert_eq!(reload.id.as_str(), "file.reload");
+            assert_eq!(reload.arguments.get("force"), Some(&CommandValue::Bool(force)));
+        }
+        let theme = parse_ex("theme.select nord", &aliases).expect("named theme");
+        assert_eq!(
+            theme.arguments.get("name"),
+            Some(&CommandValue::String("nord".into()))
+        );
+        let forced = parse_ex("e! a.txt", &aliases).expect("forced open");
+        assert_eq!(forced.id.as_str(), "file.open");
+        assert_eq!(forced.arguments.get("force"), Some(&CommandValue::Bool(true)));
     }
 }

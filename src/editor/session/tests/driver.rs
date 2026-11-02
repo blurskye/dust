@@ -525,6 +525,13 @@ impl TestSession {
             row,
         });
     }
+    /// Waits for the open a click started, and names the file it brought up.
+    pub(super) fn wait_for_opened_file(&mut self) -> Option<String> {
+        super::wait_vfs(&mut self.application);
+        let buffer = self.application.state.active_buffer_id()?;
+        let path = self.application.state.buffers[buffer].path.as_ref()?;
+        Some(path.file_name()?.to_string_lossy().into_owned())
+    }
     pub(super) fn grep_snapshot_fixture(&mut self) {
         // Exercise the real bounded worker/store instead of fabricating rich picker payloads.
         let text = (0..1200)

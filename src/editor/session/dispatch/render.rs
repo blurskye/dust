@@ -1089,6 +1089,8 @@ impl InteractiveApplication {
             self.set_explorer_focus(true);
         }
         self.sync_explorer_ui();
+        // As in neo-tree and VS Code, a click opens a file and toggles a folder.
+        self.explorer_open_file(false);
     }
 
     /// The tree row under the pointer in the layout now on screen.
@@ -1142,6 +1144,17 @@ impl InteractiveApplication {
 
 impl InteractiveApplication {
     /// A path as the reader knows it in the project, or whole when it lies outside.
+    /// A short name for a notification: outside the workspace a full path would fill the toast.
+    pub(super) fn notice_file_label(&self, path: &std::path::Path) -> String {
+        let label = self.workspace_relative_label(path);
+        if std::path::Path::new(&label).is_absolute() {
+            path.file_name()
+                .map_or(label, |name| name.to_string_lossy().into_owned())
+        } else {
+            label
+        }
+    }
+
     pub(super) fn workspace_relative_label(&self, path: &std::path::Path) -> String {
         self.workspace
             .roots()

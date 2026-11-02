@@ -325,15 +325,30 @@ fn explorer_mouse_and_keyboard_input_target_the_exact_cloned_or_primary_view() {
 
     let primary = session.explorer_body(1);
     session.click(primary.x, primary.y.saturating_add(2));
-    assert_eq!(session.explorer_focus(), Some(1));
     let mouse = session.explorer_selections();
     assert_ne!(mouse[&1], keyboard[&1]);
     assert_eq!(mouse[&2], keyboard[&2]);
 
+    // The click opened the file, which took focus; the primary view can be focused again.
+    session.wait_for_opened_file().expect("opened file");
+    assert_eq!(session.explorer_focus(), None);
+    session.focus_explorer(true);
+    assert_eq!(session.explorer_focus(), Some(1));
     session.key("j");
     let primary_keyboard = session.explorer_selections();
     assert_ne!(primary_keyboard[&1], mouse[&1]);
     assert_eq!(primary_keyboard[&2], mouse[&2]);
+}
+
+#[test]
+fn clicking_a_file_in_the_explorer_opens_it() {
+    let mut session = TestSession::new(crate::config::load_bundled_config());
+    session.new_buffer();
+    session.explorer_fixture();
+    let body = session.explorer_body(1);
+    session.click(body.x, body.y.saturating_add(2));
+    let opened = session.wait_for_opened_file().expect("opened file");
+    assert!(opened.starts_with("file"), "{opened}");
 }
 
 #[test]
