@@ -616,10 +616,9 @@ pub(super) fn parse_config_source(path: &Path, source: &str) -> LoadedConfig {
             theme_path: PathBuf::from("<bundled:theme:dust>"),
             theme_spans: BTreeMap::new(),
         },
-        Err(error) => fallback_config(Some(format!(
-            "invalid {}: {error}; using bundled defaults",
-            path.display()
-        ))),
+        // What happens next is the caller's to say: startup uses the bundled settings, a reload
+        // keeps the ones in use.
+        Err(error) => fallback_config(Some(format!("invalid {}: {error}", path.display()))),
     }
 }
 

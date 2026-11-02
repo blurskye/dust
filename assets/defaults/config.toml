@@ -847,6 +847,9 @@ hidden = [
   "agent.input.", "agent.escape", "tools.category.", "tools.menu.next", "tools.menu.previous",
   "tools.menu.close", "terminal.mode.", "terminal.send", "macro.", "workspace.edit.",
   "search.word", "search.repeat", "settings.page.",
+  # These act on the tool manager's selected row, so they only work inside it.
+  "tools.search", "tools.activate", "tools.install", "tools.uninstall", "tools.lsp.",
+  "tools.runtime.",
 ]
 
 # Commands that need typed text: choosing one opens the command line with this filled in.

@@ -603,10 +603,22 @@ pub(super) fn render_picker(
         // Every picker uses the same trailing provenance column. Reserve at
         // most a third of the row so long sources cannot crowd out the label.
         let source_right = list_right.saturating_sub(1);
-        let source_room = source_right.saturating_sub(content_left) / 3;
+        let mut source_room = source_right.saturating_sub(content_left) / 3;
         let source = if looks_like_path(&row.source) {
-            // A path keeps its end, which tells two rows apart.
-            truncate_content_title(&row.source, usize::from(source_room), config.editor.ambiguous_width)
+            // A path gives way to the label and detail, and keeps its end, which tells two
+            // rows apart; a path too short to say anything is left out.
+            let ambiguous = config.editor.ambiguous_width;
+            let wanted = text_width(&row.label, ambiguous)
+                + if row.detail.is_empty() { 0 } else { 2 + text_width(&row.detail, ambiguous) }
+                + 3;
+            let left_over = usize::from(source_right.saturating_sub(content_left)).saturating_sub(wanted);
+            source_room = source_room.min(u16::try_from(left_over).unwrap_or(u16::MAX));
+            if source_room < 12 {
+                source_room = 0;
+                String::new()
+            } else {
+                truncate_content_title(&row.source, usize::from(source_room), ambiguous)
+            }
         } else {
             row.source.clone()
         };
@@ -1758,9 +1770,9 @@ pub(super) fn render_prompt(
             frame
                 .grid
                 .put_text_clipped(label_x, y, &item.label, style, right);
-            frame
-                .grid
-                .put_text_clipped(detail_x, y, &item.detail, Style::Muted, right);
+            let room = usize::from(right.saturating_sub(detail_x));
+            let detail = ellipsized(&item.detail, room, config.editor.ambiguous_width);
+            frame.grid.put_text_clipped(detail_x, y, &detail, Style::Muted, right);
         }
     }
     let prefix = prompt.input.get(..prompt.cursor).unwrap_or(&prompt.input);
