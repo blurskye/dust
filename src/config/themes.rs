@@ -117,8 +117,20 @@ pub(super) fn discover(request: ThemeRead) {
             if source.len() > 128 * 1024 {
                 return Err("saved theme exceeds 128 KiB".to_string());
             }
-            let theme: ThemeConfig =
-                serde_json::from_str(source).map_err(|e| format!("invalid saved theme: {e}"))?;
+            // A bundled theme comes from this build, so a copy saved by an older one, with
+            // fields since removed, still restores and picks up the new colours.
+            #[derive(serde::Deserialize)]
+            struct Named {
+                name: String,
+            }
+            let bundled = serde_json::from_str::<Named>(source)
+                .ok()
+                .and_then(|saved| bundled_named(&saved.name));
+            let theme: ThemeConfig = match bundled {
+                Some(choice) => choice.theme,
+                None => serde_json::from_str(source)
+                    .map_err(|e| format!("invalid saved theme: {e}"))?,
+            };
             if theme.name.is_empty()
                 || theme.name.len() > 96
                 || theme.name.chars().any(|c| c.is_control())

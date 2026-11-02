@@ -1197,3 +1197,18 @@ fn highlight_groups_resolve_like_neovim() {
     // Groups without a background draw on the editor's.
     assert_eq!(dust.highlight(Highlight::STRING).unwrap().background, dust.styles.default.background);
 }
+
+#[test]
+fn a_saved_bundled_theme_restores_from_this_build() {
+    let (reply, receiver) = std::sync::mpsc::sync_channel(1);
+    // Saved by an older build, with a style field that no longer exists.
+    let saved = r##"{"name":"tokyo-night","styles":{"syntax_comment":{"foreground":"#a9b1d6"}}}"##;
+    super::themes::discover(super::themes::ThemeRead {
+        source: super::themes::ThemeReadSource::Saved(saved.into()),
+        cancelled: Default::default(),
+        reply,
+    });
+    let catalog = receiver.recv().unwrap();
+    assert!(catalog.diagnostics.is_empty(), "{:?}", catalog.diagnostics);
+    assert_eq!(catalog.choices[0].theme, super::themes::bundled_named("tokyo-night").unwrap().theme);
+}
