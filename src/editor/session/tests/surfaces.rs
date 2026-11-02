@@ -5172,3 +5172,40 @@ fn a_saved_location_reads_as_file_and_line() {
     );
     assert!(app.persisted_location_label(&location(5)).ends_with("marked-location.txt:2"));
 }
+
+#[test]
+fn a_restored_session_keeps_the_buffer_line_in_window_order() {
+    use crate::editor::session::persistence::RestoreContext;
+
+    let mut app = app();
+    let zeta = app.state.workspace_root.join("zeta.txt");
+    let alpha = app.state.workspace_root.join("alpha.txt");
+    std::fs::write(&zeta, "zeta\n").expect("zeta");
+    std::fs::write(&alpha, "alpha\n").expect("alpha");
+    app.state.open_text(TextBuffer::from_text("zeta\n"), Some(zeta.clone()));
+    app.set_dashboard_visibility(false);
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(
+        crate::editor::Axis::Horizontal,
+    )));
+    app.state.open_text(TextBuffer::from_text("alpha\n"), Some(alpha.clone()));
+    app.reconcile_editor_windows();
+    let session = app.capture_session().expect("captured session");
+    let context = RestoreContext {
+        editor: &app.state,
+        workspace: &app.workspace,
+        input: &app.input,
+        windows: &app.window_session,
+        configuration: app.configuration.binding_revision(),
+    };
+    app.persistence.fixture_restore_source(context);
+    app.restore_session(session);
+    wait_vfs(&mut app);
+    app.project_window_content_tabs();
+    let order = app
+        .window_session
+        .content_order()
+        .iter()
+        .filter_map(|buffer| app.state.buffers.get(*buffer)?.path.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(order, [zeta, alpha]);
+}

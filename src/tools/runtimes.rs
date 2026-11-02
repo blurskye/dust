@@ -308,9 +308,11 @@ pub(super) fn install_uv_tool(
     }
     fs::create_dir(&destination).map_err(|error| format!("cannot create managed tool: {error}"))?;
     let result = (|| {
-        let bin = destination.join("bin");
+        // uv links the executables into a side folder that becomes `bin` only once they are
+        // patched, so a language server can't start one while patchelf still writes it.
+        let staged_bin = destination.join(".bin-staging");
         let tools = destination.join("uv-tools");
-        fs::create_dir(&bin).map_err(|error| format!("cannot create tool bin: {error}"))?;
+        fs::create_dir(&staged_bin).map_err(|error| format!("cannot create tool bin: {error}"))?;
         let arguments = std::iter::once("tool".into())
             .chain(std::iter::once("install".into()))
             .chain(std::iter::once("--reinstall".into()))
@@ -319,7 +321,7 @@ pub(super) fn install_uv_tool(
         let environment = BTreeMap::from([
             ("HOME".into(), destination.display().to_string()),
             ("UV_TOOL_DIR".into(), tools.display().to_string()),
-            ("UV_TOOL_BIN_DIR".into(), bin.display().to_string()),
+            ("UV_TOOL_BIN_DIR".into(), staged_bin.display().to_string()),
             (
                 "UV_CACHE_DIR".into(),
                 destination.join("uv-cache").display().to_string(),
@@ -342,12 +344,13 @@ pub(super) fn install_uv_tool(
         if let Some(compatibility) = compatibility {
             patch_nix_compatibility_tree(&destination, compatibility, cancellations)?;
         }
-        let executable = bin.join(&definition.executable);
-        if !executable.is_file() {
+        if !staged_bin.join(&definition.executable).is_file() {
             return Err("managed uv installation did not produce its executable".into());
         }
         write_managed_tool_version(&destination, definition)?;
-        Ok(Some(executable))
+        let bin = destination.join("bin");
+        fs::rename(&staged_bin, &bin).map_err(|error| format!("cannot activate tool bin: {error}"))?;
+        Ok(Some(bin.join(&definition.executable)))
     })();
     if result.is_err() {
         let _ = fs::remove_dir_all(&destination);

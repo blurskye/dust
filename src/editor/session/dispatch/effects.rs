@@ -1654,6 +1654,16 @@ impl InteractiveApplication {
                 self.ui.plugin_surfaces.clear();
                 self.ui.private_surfaces.clear();
                 self.set_dashboard_visibility(false);
+                let order = paths
+                    .iter()
+                    .filter_map(|path| {
+                        self.state
+                            .buffers
+                            .iter()
+                            .find(|(_, buffer)| buffer.path.as_ref() == Some(path))
+                            .map(|(id, _)| id)
+                    })
+                    .collect();
                 for path in paths {
                     self.record_recent_file(path);
                 }
@@ -1669,6 +1679,7 @@ impl InteractiveApplication {
                     .map(|(id, _)| id)
                     .collect();
                 self.window_session.restore_pins(pinned);
+                self.window_session.restore_content_order(order);
             }
             Err(error) => self.show_error(error),
         }

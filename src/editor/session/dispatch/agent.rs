@@ -1595,9 +1595,8 @@ impl InteractiveApplication {
                     Ok(())
                 }
             };
-            match shown {
-                Ok(()) => self.set_dashboard_visibility(false),
-                Err(error) => self.show_error(error),
+            if let Err(error) = shown {
+                self.show_error(error);
             }
             // A plain split would give the panel half the screen; it opens narrower.
             if let (Some(code), Some(panel)) = (previous, self.active_tab_focus()) {
@@ -1620,6 +1619,8 @@ impl InteractiveApplication {
         if previous != Some(pane) {
             self.agent.normal = false;
         }
+        // The dashboard can be up beside a panel that already exists, as after its last tab closed.
+        self.set_dashboard_visibility(false);
         self.set_explorer_focus(false);
         let _ = self.state.focus_pane_id(pane);
         self.reconcile_editor_windows();

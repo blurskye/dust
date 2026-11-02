@@ -111,9 +111,22 @@ impl RestoreReady {
         }
         let mut draft = context.editor.draft();
         draft.restore_layout(&self.session, &self.loaded)?;
+        // Files come back in the order their windows had, which the buffer line follows.
+        let mut panes = Vec::new();
+        for tab in &self.session.tabs {
+            collect_persisted_panes(&tab.layout, &mut panes);
+        }
+        let mut paths = Vec::new();
+        for pane in panes {
+            if let Some((path, _)) = self.loaded.get(&pane.path)
+                && !paths.contains(path)
+            {
+                paths.push(path.clone());
+            }
+        }
         Ok(RestorePrepared {
             draft,
-            paths: self.loaded.into_values().map(|(path, _)| path).collect(),
+            paths,
             window_rules: self.session.window_rules,
             content_descriptors: self.session.content_descriptors,
             pinned: self.session.pinned,

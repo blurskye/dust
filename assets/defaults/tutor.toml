@@ -85,8 +85,8 @@ done = ["view.scroll kind=half_down"]
 [[step]]
 chapter = "Moving around"
 text = "Flash jumps anywhere you can see: `s`, two letters of the place, then the label that appears there."
-press = "Press `s`, type `fl`, then the label letter on the marked “flash”."
-at = "You can reach this flash word in three keys."
+press = "Press `s` and type `fl`: a letter appears on every “fl”. Press the letter on the marked “flash”."
+at = "A fly flew past, but you can reach this flash word in three keys."
 mark = "flash"
 cursor = "flash word"
 
@@ -268,7 +268,7 @@ done = ["workspace.file.find"]
 [[step]]
 chapter = "Files"
 text = "Dust remembers the files you opened."
-press = "Press `<leader>` `f` `r` to list recent files."
+press = "Press `<leader>` `f` `r` to list recent files, then `esc` `esc` to close it."
 done = ["navigation.recents"]
 
 [[step]]
@@ -309,7 +309,7 @@ done = ["buffer.previous", "buffer.next"]
 [[step]]
 chapter = "Tabs and windows"
 text = "The buffer list shows every open file."
-press = "Press `<leader>` then `,` to list open files."
+press = "Press `<leader>` `f` `b` to list open files, then `esc` `esc` to close it."
 done = ["buffer.picker.open"]
 
 [[step]]
@@ -387,7 +387,7 @@ done = ["navigation.jump.back"]
 [[step]]
 chapter = "Code"
 text = "Problems the server finds are listed together; `]` `d` goes to the next one and `<leader>` `c` `a` lists fixes."
-press = "Press `<leader>` `x` `x` to list every problem."
+press = "Press `<leader>` `x` `x` to list every problem, then `esc` `esc` to close it."
 done = ["diagnostic.open"]
 open = "{main}"
 at = "unused = 42"
@@ -425,7 +425,7 @@ mark = "there"
 [[step]]
 chapter = "Git"
 text = "Dust lists worktrees, and pull requests with gh or tea (`<leader>` `g` `p` `p`)."
-press = "Press `<leader>` `g` `w` to list worktrees."
+press = "Press `<leader>` `g` `w` to list worktrees, then `esc` `esc` to close it."
 done = ["workspace.git.worktrees.open", "workspace.git.pr.list"]
 
 [[step]]
@@ -449,7 +449,7 @@ done = ["agent.tab.new", "agent.session.next", "agent.session.previous"]
 [[step]]
 chapter = "Agents"
 text = "`ctrl-o` sets the mode and `ctrl-r` resumes an earlier conversation."
-press = "Press `ctrl-p` to pick the model."
+press = "Press `ctrl-p` to pick the model, then `esc` `esc` to close it."
 done = ["agent.model"]
 
 [[step]]
@@ -461,13 +461,13 @@ done = ["surface.focus.left", "agent.ask", "agent.add_file"]
 [[step]]
 chapter = "Projects"
 text = "`:sessionsave` and `:sessionload` keep layouts, and `:recovery` brings back unsaved work after a crash."
-press = "Press `<leader>` `f` `p` to list project folders."
+press = "Press `<leader>` `f` `p` to list project folders, then `esc` `esc` to close it."
 done = ["workspace.root.list"]
 
 [[step]]
 chapter = "Look and feel"
 text = "Themes change with a live preview."
-press = "Press `<leader>` `u` `C` (capital C) to pick a theme."
+press = "Press `<leader>` `u` `C` (capital C) to pick a theme, then `enter` keeps one or `esc` `esc` goes back."
 done = ["theme.select"]
 
 [[step]]
@@ -479,19 +479,19 @@ done = ["view.wrap.toggle", "view.line_numbers.toggle", "view.zen.toggle"]
 [[step]]
 chapter = "Help"
 text = "Help knows where you are and shows what you can do there."
-press = "Press `<leader>` then `?`."
+press = "Press `<leader>` then `?`, then `esc` `esc` to close it."
 done = ["overlay.help.contextual"]
 
 [[step]]
 chapter = "Help"
 text = "The command palette lists every command with its key: type to filter and `enter` runs one."
-press = "Press `F1` to open it."
+press = "Press `F1` to open it, then `esc` to close it."
 done = ["command_palette.open"]
 
 [[step]]
 chapter = "Plugins"
 text = "`:pluginvalidate` checks a plugin and `:plugindisable` turns one off."
-press = "Type `:plugins` and press `enter`."
+press = "Type `:plugins` and press `enter`, then `esc` `esc` to close the list."
 done = ["plugin.list"]
 
 [[step]]

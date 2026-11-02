@@ -97,6 +97,13 @@ pub fn parse_ex(
     if let Some(invocation) = parse_substitute(input) {
         return invocation;
     }
+    // `:12` goes to line 12 and `:$` to the last line, as `12G` and `G` do.
+    if input == "$" || input.bytes().all(|byte| byte.is_ascii_digit()) {
+        let mut invocation = command("view.cursor.move")?
+            .with_argument("motion", CommandValue::String("document_end".into()));
+        invocation.count = input.parse::<u64>().ok().map(|line| line.max(1)).and_then(std::num::NonZeroU64::new);
+        return Ok(invocation);
+    }
     // Visual mode opens the line with its range; other commands don't use it.
     let input = input.strip_prefix("'<,'>").map_or(input, str::trim_start);
     let (raw_name, arguments) = input
@@ -384,6 +391,16 @@ mod tests {
         .into_iter()
         .map(|(alias, command)| (alias.into(), command.into()))
         .collect()
+    }
+
+    #[test]
+    fn a_line_number_goes_to_that_line() {
+        let line = parse_ex(":5", &aliases()).expect("line");
+        assert_eq!(line.id.as_str(), "view.cursor.move");
+        assert_eq!(line.count.map(std::num::NonZeroU64::get), Some(5));
+        let last = parse_ex("$", &aliases()).expect("last line");
+        assert_eq!(last.arguments["motion"], CommandValue::String("document_end".into()));
+        assert_eq!(last.count, None);
     }
 
     #[test]

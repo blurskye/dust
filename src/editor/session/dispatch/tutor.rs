@@ -605,11 +605,16 @@ impl InteractiveApplication {
         let (split, explorer, terminal) = (step.split, step.explorer, step.terminal);
         // A step without a file of its own still needs a practice file in front, such as when
         // the tutor picks up in the middle of a chapter.
-        let in_practice = self
-            .state
-            .active_buffer_id()
-            .and_then(|id| self.state.buffers[id].path.as_deref())
-            .is_some_and(|path| path.starts_with(&root));
+        // A practice file in any window of the tab will do, so a step after the agent panel or
+        // the terminal took focus leaves the focus there.
+        let in_practice = self.state.active_tab_views().into_iter().any(|view| {
+            self.state
+                .views
+                .get(view)
+                .and_then(|view| self.state.buffers.get(view.buffer))
+                .and_then(|buffer| buffer.path.as_deref())
+                .is_some_and(|path| path.starts_with(&root))
+        });
         let file = step
             .scene_file()
             .or((!in_practice).then(|| step.file()))
@@ -911,6 +916,41 @@ mod tests {
                     assert!(!has(wanted), "{language:?}: {wanted:?} is already in {}", step.file());
                 }
             }
+        }
+    }
+
+    /// "Press `<leader>` `f` `b` ..." must be a leader sequence the default keymap binds to one
+    /// of the step's commands.
+    #[test]
+    fn every_leader_key_a_step_teaches_runs_its_command() {
+        let keymaps = crate::config::load_bundled_config().keymaps.entries;
+        for step in lessons(Language::Rust).expect("lessons parse") {
+            let mut parts = step.press.split('`');
+            let mut keys = Vec::new();
+            while let (Some(text), Some(key)) = (parts.next(), parts.next()) {
+                if key == "<leader>" {
+                    keys = vec!["<leader>".to_owned()];
+                } else if !keys.is_empty() && (text.trim().is_empty() || keys.len() == 1 && text.trim() == "then") {
+                    keys.push(key.to_owned());
+                } else if !keys.is_empty() {
+                    break;
+                }
+            }
+            if keys.is_empty() {
+                continue;
+            }
+            let sequence = keys.join(" ");
+            let command = keymaps
+                .iter()
+                .find(|entry| entry.keys.as_deref() == Some(sequence.as_str()))
+                .and_then(|entry| entry.command.clone())
+                .unwrap_or_else(|| panic!("no key {sequence} for step {:?}", step.press));
+            assert!(
+                step.done.iter().any(|pattern| pattern.split_whitespace().next() == Some(command.as_str())),
+                "{sequence} runs {command}, but step {:?} waits for {:?}",
+                step.press,
+                step.done
+            );
         }
     }
 

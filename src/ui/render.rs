@@ -1828,8 +1828,13 @@ fn wrap_card_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<Ve
 /// The tutor card at the bottom right, above the status line: the step's title in its border,
 /// the instruction and the tutor's commands. It moves to the top while the key hints fill the
 /// bottom.
-fn render_tutor_card(frame: &mut Frame, card: &TutorCard, config: &Config, width: u16, bottom: u16, hints_open: bool) {
-    let card_width = width.saturating_sub(2).min(64);
+/// `place` is whether the key hints are open and where an agent panel starts. The card goes to
+/// the top while the hints are open, and left of the panel, or above its input when there is
+/// no room beside it.
+fn render_tutor_card(frame: &mut Frame, card: &TutorCard, config: &Config, width: u16, bottom: u16, place: (bool, Option<u16>)) {
+    let (hints_open, panel) = place;
+    let beside = panel.map(|x| x.saturating_sub(2)).filter(|room| *room >= 30);
+    let card_width = width.saturating_sub(2).min(64).min(beside.unwrap_or(u16::MAX));
     if card_width < 24 || bottom < 8 {
         return;
     }
@@ -1857,8 +1862,8 @@ fn render_tutor_card(frame: &mut Frame, card: &TutorCard, config: &Config, width
     rows.push(vec![(card.footer.clone(), Style::Muted)]);
     // Long steps lose their last rows rather than cover the whole screen.
     let card_height = u16::try_from(rows.len()).unwrap_or(u16::MAX).saturating_add(2).min(bottom - 2);
-    let top = if hints_open { 1 } else { bottom - card_height };
-    let left = width - card_width - 1;
+    let top = if hints_open || panel.is_some() && beside.is_none() { 1 } else { bottom - card_height };
+    let left = if beside.is_some() { 1 } else { width - card_width - 1 };
     let right = left + card_width - 1;
     let last = top + card_height - 1;
     for y in top..=last {
@@ -2244,10 +2249,6 @@ pub fn render(
             workspace_height,
         );
     }
-    // The tutor card stays on top of popups so its instruction is readable while they are open.
-    if let Some(card) = &ui.tutor {
-        render_tutor_card(&mut frame, card, config, width, height - foot_rows, ui.key_hints.is_some());
-    }
     let modal_open = ui.picker.is_some() || ui.tool_menu.is_some() || ui.settings.is_some();
     // A modal's footer is at the bottom right too, and its keys matter more.
     if config.ui.lsp_progress.enabled && !ui.lsp_progress.is_empty() && !modal_open {
@@ -2263,6 +2264,17 @@ pub fn render(
                 height: workspace_height,
             }),
         );
+    }
+    // The tutor card stays on top of popups and server progress so its instruction is readable
+    // while they are open, and keeps clear of an agent panel's input.
+    if let Some(card) = &ui.tutor {
+        let panel = ui
+            .agent_panel
+            .as_ref()
+            .and_then(|panel| view_pane_viewport(state, ui, panel.view))
+            .map(|viewport| viewport.x);
+        let place = (ui.key_hints.is_some(), panel);
+        render_tutor_card(&mut frame, card, config, width, height - foot_rows, place);
     }
     // Pickers use the whole screen, so a notice below one clears the terminal dock too.
     let notice_height = if modal_open { height } else { workspace_height };

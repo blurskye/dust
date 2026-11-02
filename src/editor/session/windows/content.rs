@@ -55,6 +55,14 @@ impl WindowSession {
         line.order_revision = line.order_revision.saturating_add(1);
         line.signature = None;
     }
+    /// Put these buffers first on the buffer line, in this order, as a restored session had them.
+    pub(in crate::editor::session) fn restore_content_order(&mut self, buffers: Vec<BufferId>) {
+        let line = &mut self.content_line;
+        line.order.retain(|buffer| !buffers.contains(buffer));
+        line.order.splice(0..0, buffers);
+        line.order_revision = line.order_revision.saturating_add(1);
+        line.signature = None;
+    }
     pub(in crate::editor::session) fn move_content(
         &mut self,
         buffer: BufferId,
