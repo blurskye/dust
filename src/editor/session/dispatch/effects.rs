@@ -9022,6 +9022,7 @@ impl InteractiveApplication {
                 self.run_palette_command(&command);
             }
             Some(PickerPayload::Recovery(journal)) => self.recover_journal(&journal),
+            Some(PickerPayload::Tutor(start)) => self.start_tutor(start),
             Some(PickerPayload::Notice { title, text: message }) => {
                 self.present_documentation_popup(
                     DocumentationPopupKind::Notice,

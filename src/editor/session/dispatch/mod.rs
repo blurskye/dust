@@ -479,4 +479,4 @@ mod tests;
 mod render;
 mod shutdown;
 mod startup;
-mod tutor;
+pub(super) mod tutor;

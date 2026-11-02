@@ -1450,7 +1450,10 @@ pub struct UiState {
 pub struct TutorCard {
     pub title: String,
     pub text: String,
-    /// The step was just done; the bar says so before the next one comes.
+    /// The one thing to do now, after the moving pointer.
+    pub press: String,
+    pub pointer: String,
+    /// The step was just done; the card says so before the next one comes.
     pub praised: bool,
     pub footer: String,
     /// The text the step is about, highlighted in its file.
@@ -1831,14 +1834,25 @@ fn render_tutor_card(frame: &mut Frame, card: &TutorCard, config: &Config, width
         return;
     }
     let ambiguous = config.editor.ambiguous_width;
-    let mut rows: Vec<Vec<(String, Style)>> = wrap_card_text(&card.text, usize::from(card_width - 4), ambiguous)
-        .into_iter()
-        .map(|line| {
-            line.into_iter()
-                .map(|(piece, key)| (piece, if key { Style::KeyHintKey } else { Style::Default }))
-                .collect()
-        })
-        .collect();
+    let styled = |text: &str, room: u16, plain: Style, key: Style| -> Vec<Vec<(String, Style)>> {
+        wrap_card_text(text, usize::from(room), ambiguous)
+            .into_iter()
+            .map(|line| line.into_iter().map(|(piece, is_key)| (piece, if is_key { key } else { plain })).collect())
+            .collect()
+    };
+    let mut rows = styled(&card.text, card_width - 4, Style::Default, Style::KeyHintKey);
+    rows.push(Vec::new());
+    // The instruction sits after a moving pointer; once it is done it turns into a check mark.
+    let (lead, plain, key) = if card.praised {
+        ("✓   ".to_owned(), Style::GitSignAdded, Style::GitSignAdded)
+    } else {
+        (format!("{} ", card.pointer), Style::Accent, Style::KeyHintKey)
+    };
+    for (index, mut line) in styled(&card.press, card_width - 8, plain, key).into_iter().enumerate() {
+        let lead = if index == 0 { lead.clone() } else { "    ".to_owned() };
+        line.insert(0, (lead, if card.praised { Style::GitSignAdded } else { Style::Accent }));
+        rows.push(line);
+    }
     rows.push(Vec::new());
     rows.push(vec![(card.footer.clone(), Style::Muted)]);
     // Long steps lose their last rows rather than cover the whole screen.
@@ -1864,7 +1878,7 @@ fn render_tutor_card(frame: &mut Frame, card: &TutorCard, config: &Config, width
     frame.grid.set_cell(right, last, "╯", Style::Accent);
     let x = frame.grid.put_text_clipped(left + 2, top, &format!(" {} ", card.title), Style::Accent, right);
     if card.praised {
-        frame.grid.put_text_clipped(x, top, " ✓ Nice ", Style::GitSignAdded, right);
+        frame.grid.put_text_clipped(x, top, " ✓ Nice! ", Style::GitSignAdded, right);
     }
     for (row, y) in rows.iter().zip(top + 1..last) {
         let mut x = left + 2;

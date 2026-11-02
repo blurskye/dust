@@ -1,0 +1,49 @@
+Moving around
+
+    h  left      j  down      k  up      l  right
+
+    The X marks the spot.
+
+    You can reach this flash word in three keys.
+
+    First part, second part.
+
+    call(first, (second))
+
+Changing text
+
+    Thhe cow jumpped over thee moon.
+
+    Dust is a editor
+
+    Dust runs in a
+
+    Open a line below this one.
+
+    This line has has some some repeated repeated words.
+
+    DELETE THIS WHOLE LINE
+
+    This is a red apple.
+
+    Dusk is fast.
+
+    one line,
+    joined.
+
+    copy me
+
+Visual mode
+
+    alpha
+    beta
+    gamma
+
+    milk
+    eggs
+    bread
+    butter
+
+Search
+
+    The cat sat. The cat ran. Every cat naps.

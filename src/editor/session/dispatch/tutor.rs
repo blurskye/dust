@@ -1,49 +1,139 @@
-//! The guided tutor. `:Tutor` puts the user's layout aside, moves the editor into a throwaway
-//! practice project and walks through the lessons in `assets/defaults/tutor.toml` on a card above
-//! the status line. Each step sets its scene (file, cursor, windows) and moves on once it is
-//! done: the command it teaches ran, or the step's file reads as asked. While the user is
-//! outside the practice project the tutor waits and its card is gone. `:TutorQuit` or the last
-//! step moves the editor back and restores the layout; the practice project is deleted.
+//! The guided tutor. `:Tutor` asks whether to pick up where the user stopped or start over in
+//! Rust, TypeScript or Python, puts the user's layout aside, moves the editor into a throwaway
+//! practice project in that language and walks through the lessons in
+//! `assets/defaults/tutor.toml` on a card above the status line. Each step sets its scene (file,
+//! cursor, windows), says exactly which keys to press and moves on once it is done: the command
+//! it teaches ran, or the step's file reads as asked. While the user is outside the practice
+//! project the tutor waits and its card is gone. `:TutorQuit` or the last step moves the editor
+//! back and restores the layout; the practice project is deleted.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
-use super::{InteractiveApplication, PersistedSession, RestoreContext};
+use super::{
+    InteractiveApplication, PersistedSession, PickerAction, PickerItem, PickerItemId, PickerPayload,
+    RestoreContext,
+};
 use crate::editor::text::{ByteOffset, ByteRange};
 use crate::editor::{BufferId, CommandInvocation, CommandValue, EditorMode, InvocationSource};
 use crate::ui::UiSyntaxSpan;
 
 const LESSONS: &str = include_str!("../../../../assets/defaults/tutor.toml");
-/// One short lesson per chapter, named after the chapter.
-const LESSON_FILES: [(&str, &str); 19] = [
-    ("00-welcome.md", include_str!("../../../../assets/defaults/tutor/00-welcome.md")),
-    ("01-moving-around.md", include_str!("../../../../assets/defaults/tutor/01-moving-around.md")),
-    ("02-changing-text.md", include_str!("../../../../assets/defaults/tutor/02-changing-text.md")),
-    ("03-visual-mode.md", include_str!("../../../../assets/defaults/tutor/03-visual-mode.md")),
-    ("04-search.md", include_str!("../../../../assets/defaults/tutor/04-search.md")),
-    ("05-files.md", include_str!("../../../../assets/defaults/tutor/05-files.md")),
-    ("06-tabs-and-windows.md", include_str!("../../../../assets/defaults/tutor/06-tabs-and-windows.md")),
-    ("07-terminal.md", include_str!("../../../../assets/defaults/tutor/07-terminal.md")),
-    ("08-code.md", include_str!("../../../../assets/defaults/tutor/08-code.md")),
-    ("09-tools.md", include_str!("../../../../assets/defaults/tutor/09-tools.md")),
-    ("10-debugging.md", include_str!("../../../../assets/defaults/tutor/10-debugging.md")),
-    ("11-git.md", include_str!("../../../../assets/defaults/tutor/11-git.md")),
-    ("12-agents.md", include_str!("../../../../assets/defaults/tutor/12-agents.md")),
-    ("13-projects.md", include_str!("../../../../assets/defaults/tutor/13-projects.md")),
-    ("14-look-and-feel.md", include_str!("../../../../assets/defaults/tutor/14-look-and-feel.md")),
-    ("15-help.md", include_str!("../../../../assets/defaults/tutor/15-help.md")),
-    ("16-plugins.md", include_str!("../../../../assets/defaults/tutor/16-plugins.md")),
-    ("17-saving.md", include_str!("../../../../assets/defaults/tutor/17-saving.md")),
-    ("18-done.md", include_str!("../../../../assets/defaults/tutor/18-done.md")),
-];
-const MAIN: &str = include_str!("../../../../assets/defaults/tutor/src/main.rs");
-const GREET: &str = include_str!("../../../../assets/defaults/tutor/src/greet.rs");
-const MANIFEST: &str = "[package]\nname = \"practice\"\nversion = \"0.1.0\"\nedition = \"2021\"\n";
+/// The editing practice lines, the same in every language, inside a comment of the practice file.
+const PRACTICE_LINES: &str = include_str!("../../../../assets/defaults/tutor/practice.txt");
 const FOOTER: &str = ":TutorNext skip · :TutorBack back · :TutorQuit quit";
 /// How long the card says a step is done before the next one comes.
-const PRAISE: Duration = Duration::from_millis(700);
+const PRAISE: Duration = Duration::from_millis(1200);
+/// The pointer before the step's instruction, one frame every `POINTER_FRAME`.
+const POINTER: [&str; 6] = [">  ", ">> ", ">>>", " >>", "  >", "   "];
+const POINTER_FRAME: Duration = Duration::from_millis(160);
+
+/// The language of the practice project.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::editor::session) enum Language {
+    Rust,
+    TypeScript,
+    Python,
+}
+
+impl Language {
+    const ALL: [Self; 3] = [Self::Rust, Self::TypeScript, Self::Python];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Rust => "Rust",
+            Self::TypeScript => "TypeScript",
+            Self::Python => "Python",
+        }
+    }
+
+    /// How the language is written in the saved progress.
+    fn id(self) -> &'static str {
+        match self {
+            Self::Rust => "rust",
+            Self::TypeScript => "typescript",
+            Self::Python => "python",
+        }
+    }
+
+    fn server(self) -> &'static str {
+        match self {
+            Self::Rust => "rust-analyzer",
+            Self::TypeScript => "typescript-language-server",
+            Self::Python => "pyright",
+        }
+    }
+
+    /// The practice file, then the main and greet files of the code lessons.
+    fn practice_names(self) -> [&'static str; 3] {
+        match self {
+            Self::Rust => ["practice.rs", "src/main.rs", "src/greet.rs"],
+            Self::TypeScript => ["practice.ts", "src/main.ts", "src/greet.ts"],
+            Self::Python => ["practice.py", "src/main.py", "src/greet.py"],
+        }
+    }
+
+    /// The practice project's files as they are committed; the practice file still holds the
+    /// `PRACTICE_LINES` placeholder.
+    fn files(self) -> &'static [(&'static str, &'static str)] {
+        macro_rules! practice_file {
+            ($name:literal, $path:literal) => {
+                ($name, include_str!(concat!("../../../../assets/defaults/tutor/", $path)))
+            };
+        }
+        match self {
+            Self::Rust => &[
+                practice_file!("practice.rs", "rust/practice.rs"),
+                practice_file!("src/main.rs", "rust/src/main.rs"),
+                practice_file!("src/greet.rs", "rust/src/greet.rs"),
+                practice_file!("Cargo.toml", "rust/Cargo.toml"),
+                practice_file!(".gitignore", "rust/gitignore"),
+            ],
+            Self::TypeScript => &[
+                practice_file!("practice.ts", "typescript/practice.ts"),
+                practice_file!("src/main.ts", "typescript/src/main.ts"),
+                practice_file!("src/greet.ts", "typescript/src/greet.ts"),
+                practice_file!("package.json", "typescript/package.json"),
+                practice_file!("tsconfig.json", "typescript/tsconfig.json"),
+                practice_file!(".gitignore", "typescript/gitignore"),
+            ],
+            Self::Python => &[
+                practice_file!("practice.py", "python/practice.py"),
+                practice_file!("src/main.py", "python/src/main.py"),
+                practice_file!("src/greet.py", "python/src/greet.py"),
+                practice_file!("pyproject.toml", "python/pyproject.toml"),
+                practice_file!(".gitignore", "python/gitignore"),
+            ],
+        }
+    }
+
+    /// The practice project's files with the practice lines in place.
+    fn practice_files(self) -> impl Iterator<Item = (&'static str, String)> {
+        self.files().iter().map(|(name, text)| {
+            (*name, text.replacen("PRACTICE_LINES\n", PRACTICE_LINES, 1))
+        })
+    }
+
+    /// The greet file as the git lessons find it: changed since the commit.
+    fn changed_greet(self) -> (&'static str, String) {
+        let name = self.practice_names()[2];
+        let (_, text) = self
+            .files()
+            .iter()
+            .find(|(file, _)| *file == name)
+            .expect("every language has a greet file");
+        (name, text.replacen("Hello, ", "Hello there, ", 1))
+    }
+}
+
+/// Where `:Tutor` starts, as picked in its first list.
+#[derive(Clone, Copy, Debug)]
+pub(in crate::editor::session) struct TutorStart {
+    language: Language,
+    step: usize,
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -56,6 +146,8 @@ struct Lessons {
 pub(super) struct Step {
     chapter: String,
     text: String,
+    /// The one thing to do now.
+    press: String,
     #[serde(default)]
     pub(super) done: Vec<String>,
     line: Option<String>,
@@ -64,6 +156,7 @@ pub(super) struct Step {
     twice: Option<String>,
     /// A line that must be indented further than the practice blocks are.
     indented: Option<String>,
+    commented: Option<String>,
     cursor: Option<String>,
     open: Option<String>,
     pub(super) at: Option<String>,
@@ -71,9 +164,12 @@ pub(super) struct Step {
     split: Option<bool>,
     explorer: Option<bool>,
     terminal: Option<bool>,
-    /// The chapter's lesson file.
+    /// The language's practice file.
     #[serde(skip)]
-    lesson: &'static str,
+    practice: &'static str,
+    /// How far in the `indented` line starts in the practice file as it is made.
+    #[serde(skip)]
+    indent: usize,
 }
 
 impl Step {
@@ -82,12 +178,13 @@ impl Step {
             || self.gone.is_some()
             || self.twice.is_some()
             || self.indented.is_some()
+            || self.commented.is_some()
             || self.cursor.is_some()
     }
 
     /// The practice file the step's text checks and cursor are about.
     fn file(&self) -> &str {
-        self.open.as_deref().unwrap_or(self.lesson)
+        self.open.as_deref().unwrap_or(self.practice)
     }
 
     /// The file the step brings to the front when it starts.
@@ -96,52 +193,43 @@ impl Step {
     }
 }
 
-/// The lesson file of a chapter: "Tabs and windows" is NN-tabs-and-windows.md.
-fn lesson_file(chapter: &str) -> Option<&'static str> {
-    let name = format!("{}.md", chapter.to_lowercase().replace(' ', "-"));
-    LESSON_FILES
-        .iter()
-        .map(|(file, _)| *file)
-        .find(|file| file.split_once('-').is_some_and(|(_, rest)| rest == name))
-}
-
-/// The steps, each knowing its chapter's lesson; a chapter's first step opens it.
-pub(super) fn lessons() -> Result<Vec<Step>, String> {
+/// The steps for a practice project in `language`.
+pub(super) fn lessons(language: Language) -> Result<Vec<Step>, String> {
     let mut steps = toml::from_str::<Lessons>(LESSONS)
         .map(|lessons| lessons.step)
         .map_err(|error| format!("the tutor lessons are broken: {error}"))?;
-    let mut chapter = String::new();
+    let [practice, main, greet] = language.practice_names();
+    let fill = |text: &str| {
+        text.replace("{language}", language.name())
+            .replace("{server}", language.server())
+            .replace("{practice}", practice)
+            .replace("{main}", main)
+            .replace("{greet}", greet)
+    };
+    let files = language.practice_files().collect::<Vec<_>>();
     for step in &mut steps {
-        step.lesson = lesson_file(&step.chapter)
-            .ok_or_else(|| format!("the tutor chapter {} has no lesson file", step.chapter))?;
-        if step.chapter != chapter && step.open.is_none() {
-            step.open = Some(step.lesson.to_owned());
+        step.text = fill(&step.text);
+        step.press = fill(&step.press);
+        step.open = step.open.as_deref().map(fill);
+        step.practice = practice;
+        if let (Some(wanted), Some((_, text))) =
+            (&step.indented, files.iter().find(|(name, _)| *name == step.file()))
+        {
+            step.indent = text
+                .lines()
+                .find(|line| line.contains(wanted.as_str()))
+                .map(|line| line.len() - line.trim_start().len())
+                .ok_or_else(|| format!("{} has no line {wanted:?}", step.file()))?;
         }
-        chapter.clone_from(&step.chapter);
     }
     Ok(steps)
 }
 
-/// greet.rs as the git lessons find it: changed since the commit.
-fn changed_greet() -> String {
-    GREET.replacen("Hello, {name}!", "Hello there, {name}!", 1)
-}
-
-/// The practice project's files as they are committed.
-fn practice_files() -> impl Iterator<Item = (&'static str, &'static str)> {
-    LESSON_FILES.into_iter().chain([
-        ("Cargo.toml", MANIFEST),
-        (".gitignore", "target/\n"),
-        ("src/main.rs", MAIN),
-        ("src/greet.rs", GREET),
-    ])
-}
-
-/// Write the practice project to a new temporary folder and commit it, then change greet.rs so
-/// the git lessons have something to show.
-fn create_practice_project() -> Result<tempfile::TempDir, Box<dyn std::error::Error>> {
+/// Write the practice project to a new temporary folder and commit it, then change the greet
+/// file so the git lessons have something to show.
+fn create_practice_project(language: Language) -> Result<tempfile::TempDir, Box<dyn std::error::Error>> {
     let folder = tempfile::Builder::new().prefix("dust-tutor-").tempdir()?;
-    for (name, text) in practice_files() {
+    for (name, text) in language.practice_files() {
         let path = folder.path().join(name);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -155,7 +243,8 @@ fn create_practice_project() -> Result<tempfile::TempDir, Box<dyn std::error::Er
     let tree = repository.find_tree(index.write_tree()?)?;
     let signature = git2::Signature::now("Dust tutor", "tutor@dust.invalid")?;
     repository.commit(Some("HEAD"), &signature, &signature, "Practice project", &tree, &[])?;
-    std::fs::write(folder.path().join("src/greet.rs"), changed_greet())?;
+    let (greet, changed) = language.changed_greet();
+    std::fs::write(folder.path().join(greet), changed)?;
     Ok(folder)
 }
 
@@ -177,6 +266,9 @@ struct Practice {
     layout: Option<PersistedSession>,
     dashboard: bool,
     stage: Stage,
+    language: Language,
+    /// The step to show once the editor is in the practice project.
+    start: usize,
 }
 
 pub(super) struct Tutor {
@@ -187,6 +279,8 @@ pub(super) struct Tutor {
     observed: bool,
     /// When the current step was done; the next one comes after `PRAISE`.
     done_at: Option<Instant>,
+    /// When the current step came, for the pointer's frames.
+    shown_at: Instant,
     /// The step's scene still has to place the cursor: it does once its file is in front in
     /// Normal mode.
     jump: bool,
@@ -204,6 +298,7 @@ impl Tutor {
             current: None,
             observed: false,
             done_at: None,
+            shown_at: Instant::now(),
             jump: false,
             target: None,
             checked: None,
@@ -216,12 +311,22 @@ impl Tutor {
         self.current.and_then(|index| self.steps.get(index))
     }
 
-    fn saved_step(&self) -> usize {
-        std::fs::read_to_string(&self.progress)
-            .ok()
-            .and_then(|text| text.trim().parse::<usize>().ok())
-            .filter(|step| *step < self.steps.len())
-            .unwrap_or(0)
+    /// The step and language the user stopped at, saved as "12 python".
+    fn saved_start(&self) -> Option<TutorStart> {
+        let text = std::fs::read_to_string(&self.progress).ok()?;
+        let mut parts = text.split_whitespace();
+        let step = parts.next()?.parse::<usize>().ok()?;
+        let language = parts
+            .next()
+            .and_then(|id| Language::ALL.into_iter().find(|language| language.id() == id))
+            .unwrap_or(Language::Rust);
+        Some(TutorStart { language, step })
+    }
+
+    fn save_progress(&self, step: usize) {
+        if let Some(practice) = &self.practice {
+            let _ = std::fs::write(&self.progress, format!("{step} {}", practice.language.id()));
+        }
     }
 
     /// The user's own layout while the tutor has the editor in its practice project.
@@ -246,15 +351,9 @@ fn invocation_matches(pattern: &str, invocation: &CommandInvocation) -> bool {
 }
 
 impl InteractiveApplication {
-    /// `:Tutor`: move into a fresh practice project and show the step the user stopped at, or
-    /// go back into the practice project if the tutor already runs.
+    /// `:Tutor`: go back into the practice project if the tutor already runs; otherwise ask
+    /// whether to pick up at the saved step or start over, and in which language.
     pub(in crate::editor::session) fn open_tutor(&mut self) {
-        if self.tutor.steps.is_empty() {
-            match lessons() {
-                Ok(steps) => self.tutor.steps = steps,
-                Err(error) => return self.show_error(error),
-            }
-        }
         if let Some(practice) = &self.tutor.practice {
             match practice.stage {
                 Stage::Running if self.state.workspace_root != practice.root => {
@@ -262,7 +361,7 @@ impl InteractiveApplication {
                     self.switch_workspace_root(root);
                 }
                 Stage::Running => {
-                    let index = self.tutor.current.unwrap_or_else(|| self.tutor.saved_step());
+                    let index = self.tutor.current.unwrap_or(0);
                     let back = practice.root.join(self.tutor.steps[index].file());
                     self.tutor_go(index, false);
                     // Coming back from a file of the user's own shows the step's file again.
@@ -274,11 +373,72 @@ impl InteractiveApplication {
             }
             return;
         }
+        let steps = match lessons(Language::Rust) {
+            Ok(steps) => steps,
+            Err(error) => return self.show_error(error),
+        };
+        let row = |id: String, label: String, detail: String, start: TutorStart| {
+            (
+                PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
+                    id: PickerItemId(id),
+                    label,
+                    detail,
+                    source: String::new(),
+                    action: PickerAction::None,
+                },
+                PickerPayload::Tutor(start),
+            )
+        };
+        let saved = self.tutor.saved_start().filter(|start| start.step < steps.len());
+        let mut items = Vec::new();
+        if let Some(start) = saved {
+            items.push(row(
+                "tutor:continue".into(),
+                "Continue where you left off".into(),
+                format!(
+                    "step {} of {} · {} · {}",
+                    start.step + 1,
+                    steps.len(),
+                    steps[start.step].chapter,
+                    start.language.name()
+                ),
+                start,
+            ));
+        }
+        for language in Language::ALL {
+            let label = if saved.is_some() {
+                format!("Start over in {}", language.name())
+            } else {
+                format!("Learn in {}", language.name())
+            };
+            items.push(row(
+                format!("tutor:{}", language.id()),
+                label,
+                format!("practice in a small {} project", language.name()),
+                TutorStart { language, step: 0 },
+            ));
+        }
+        self.install_picker("Tutor".to_owned(), items);
+        self.search.set_picker_footer("Enter start · Esc not now".to_owned());
+        self.sync_picker_ui();
+    }
+
+    /// Move into a fresh practice project in the picked language and show the picked step.
+    pub(in crate::editor::session) fn start_tutor(&mut self, start: TutorStart) {
+        if self.tutor.practice.is_some() {
+            return self.open_tutor();
+        }
+        match lessons(start.language) {
+            Ok(steps) => self.tutor.steps = steps,
+            Err(error) => return self.show_error(error),
+        }
         let layout = match self.try_capture_session() {
             Ok(layout) => layout,
             Err(error) => return self.show_error(format!("could not keep your layout: {error}")),
         };
-        let folder = match create_practice_project() {
+        let folder = match create_practice_project(start.language) {
             Ok(folder) => folder,
             Err(error) => {
                 return self.show_error(format!("could not make the practice project: {error}"));
@@ -302,6 +462,8 @@ impl InteractiveApplication {
             layout,
             dashboard: self.ui.dashboard,
             stage: Stage::Entering,
+            language: start.language,
+            start: start.step.min(self.tutor.steps.len().saturating_sub(1)),
         });
     }
 
@@ -350,7 +512,7 @@ impl InteractiveApplication {
         match practice.stage {
             Stage::Entering if self.state.workspace_root == practice.root => {
                 practice.stage = Stage::Running;
-                let index = self.tutor.saved_step();
+                let index = practice.start;
                 self.tutor_go(index, false);
             }
             // The move failed and said why.
@@ -413,6 +575,7 @@ impl InteractiveApplication {
     fn tutor_go(&mut self, index: usize, praised: bool) {
         self.tutor.observed = false;
         self.tutor.done_at = None;
+        self.tutor.shown_at = Instant::now();
         self.tutor.target = None;
         if index >= self.tutor.steps.len() {
             let _ = std::fs::remove_file(&self.tutor.progress);
@@ -421,7 +584,7 @@ impl InteractiveApplication {
             return;
         }
         self.tutor.current = Some(index);
-        let _ = std::fs::write(&self.tutor.progress, index.to_string());
+        self.tutor.save_progress(index);
         self.tutor_scene(index);
         // The scene's own commands don't count as the user doing the step.
         self.tutor.observed = false;
@@ -440,7 +603,17 @@ impl InteractiveApplication {
         };
         let step = &self.tutor.steps[index];
         let (split, explorer, terminal) = (step.split, step.explorer, step.terminal);
-        let file = step.scene_file().map(|file| root.join(file));
+        // A step without a file of its own still needs a practice file in front, such as when
+        // the tutor picks up in the middle of a chapter.
+        let in_practice = self
+            .state
+            .active_buffer_id()
+            .and_then(|id| self.state.buffers[id].path.as_deref())
+            .is_some_and(|path| path.starts_with(&root));
+        let file = step
+            .scene_file()
+            .or((!in_practice).then(|| step.file()))
+            .map(|file| root.join(file));
         self.tutor.jump = step.at.is_some() || step.mark.is_some();
         if self.ui.dashboard {
             self.set_dashboard_visibility(false);
@@ -554,11 +727,17 @@ impl InteractiveApplication {
     }
 
     fn sync_tutor_card(&mut self) {
+        let leader = self.configuration.settings().input.keymaps.leader.clone();
+        let leader = leader.trim_matches(|c| c == '<' || c == '>');
+        let frame = self.tutor.shown_at.elapsed().as_millis() / POINTER_FRAME.as_millis();
+        let pointer = POINTER[usize::try_from(frame).unwrap_or(0) % POINTER.len()];
         let card = self.tutor.current.filter(|_| self.tutor_inside()).map(|index| {
             let step = &self.tutor.steps[index];
             crate::ui::TutorCard {
                 title: format!("Tutor {}/{} · {}", index + 1, self.tutor.steps.len(), step.chapter),
-                text: step.text.clone(),
+                text: step.text.replace("<leader>", leader),
+                press: step.press.replace("<leader>", leader),
+                pointer: pointer.into(),
                 praised: self.tutor.done_at.is_some(),
                 footer: FOOTER.into(),
                 target: self.tutor.target.clone(),
@@ -601,6 +780,7 @@ impl InteractiveApplication {
             && step.gone.is_none()
             && step.twice.is_none()
             && step.indented.is_none()
+            && step.commented.is_none()
         {
             return true;
         }
@@ -611,19 +791,24 @@ impl InteractiveApplication {
         let lines: Vec<String> = (0..text.len_lines())
             .filter_map(|line| text.line(line).ok())
             .collect();
-        let has = |wanted: &str| lines.iter().any(|line| line.trim() == wanted);
-        let twice = |wanted: &str| lines.iter().filter(|line| line.trim() == wanted).count() >= 2;
-        // Practice lines sit four columns in; more than that is indented.
+        let has = |wanted: &str| lines.iter().any(|line| line.contains(wanted));
+        let twice = |wanted: &str| lines.iter().filter(|line| line.contains(wanted)).count() >= 2;
         let indented = |wanted: &str| {
             lines.iter().any(|line| {
-                line.trim() == wanted
-                    && line.len() - line.trim_start().len() > 4
+                line.contains(wanted) && line.len() - line.trim_start().len() > step.indent
+            })
+        };
+        let commented = |wanted: &str| {
+            lines.iter().any(|line| {
+                let line = line.trim_start();
+                line.contains(wanted) && (line.starts_with("//") || line.starts_with('#'))
             })
         };
         step.line.as_deref().is_none_or(has)
             && step.gone.as_deref().is_none_or(|gone| !has(gone))
             && step.twice.as_deref().is_none_or(twice)
             && step.indented.as_deref().is_none_or(indented)
+            && step.commented.as_deref().is_none_or(commented)
     }
 
     /// Put the cursor on the step's `at` line and mark its `mark` text, once the step's file is
@@ -650,7 +835,9 @@ impl InteractiveApplication {
         let found = at.and_then(|at| {
             (0..text.len_lines()).find_map(|line| {
                 let content = text.line(line).ok()?;
-                (content.trim() == at).then(|| (line, content.len() - content.trim_start().len()))
+                content
+                    .contains(at.as_str())
+                    .then(|| (line, content.len() - content.trim_start().len()))
             })
         });
         let from = found
@@ -689,50 +876,59 @@ mod tests {
 
     #[test]
     fn every_lesson_checks_a_real_command_and_practice_line() {
-        let steps = lessons().expect("lessons parse");
-        assert!(steps.len() > 40);
         let mut registry = crate::editor::CommandRegistry::default();
         crate::editor::register_builtin_commands(&mut registry).expect("builtin commands");
         super::super::register_app_commands(&mut registry).expect("app commands");
-        let greet = changed_greet();
-        let file_text = |name: &str| {
-            if name == "src/greet.rs" {
-                return greet.as_str();
-            }
-            practice_files()
-                .find(|(file, _)| *file == name)
-                .map(|(_, text)| text)
-                .unwrap_or_else(|| panic!("the practice project has no {name}"))
-        };
-        for step in &steps {
-            for pattern in &step.done {
-                let id = pattern.split_whitespace().next().unwrap_or_default();
-                assert!(
-                    registry.specs().any(|spec| spec.id.as_str() == id),
-                    "tutor step checks the unknown command {id}"
-                );
-            }
-            let text = file_text(step.file());
-            let lines: Vec<&str> = text.lines().map(str::trim).collect();
-            for line in step.at.iter().chain(&step.gone) {
-                assert!(lines.contains(&line.as_str()), "{} has no line {line:?}", step.file());
-            }
-            if let Some(mark) = &step.mark {
-                assert!(text.contains(mark.as_str()), "{} has no {mark:?}", step.file());
+        for language in Language::ALL {
+            let steps = lessons(language).expect("lessons parse");
+            assert!(steps.len() > 40);
+            let mut files = language.practice_files().collect::<Vec<_>>();
+            let (greet, changed) = language.changed_greet();
+            files.retain(|(name, _)| *name != greet);
+            files.push((greet, changed));
+            for step in &steps {
+                assert!(!step.press.is_empty() && !step.press.contains('{'), "{}", step.press);
+                for pattern in &step.done {
+                    let id = pattern.split_whitespace().next().unwrap_or_default();
+                    assert!(
+                        registry.specs().any(|spec| spec.id.as_str() == id),
+                        "tutor step checks the unknown command {id}"
+                    );
+                }
+                let text = files
+                    .iter()
+                    .find(|(name, _)| *name == step.file())
+                    .map(|(_, text)| text.as_str())
+                    .unwrap_or_else(|| panic!("the {language:?} practice project has no {}", step.file()));
+                let has = |wanted: &str| text.lines().any(|line| line.contains(wanted));
+                for wanted in step.at.iter().chain(&step.gone).chain(&step.commented) {
+                    assert!(has(wanted), "{} has no line {wanted:?}", step.file());
+                }
+                if let Some(mark) = &step.mark {
+                    assert!(text.contains(mark.as_str()), "{} has no {mark:?}", step.file());
+                }
+                if let Some(wanted) = &step.line {
+                    assert!(!has(wanted), "{language:?}: {wanted:?} is already in {}", step.file());
+                }
             }
         }
     }
 
     #[test]
     fn the_practice_project_is_a_repository_with_one_changed_file() {
-        let folder = create_practice_project().expect("practice project");
-        let repository = git2::Repository::open(folder.path()).expect("repository");
-        let statuses = repository.statuses(None).expect("status");
-        let changed = statuses
-            .iter()
-            .filter_map(|entry| entry.path().map(str::to_owned))
-            .collect::<Vec<_>>();
-        assert_eq!(changed, ["src/greet.rs"]);
+        for language in Language::ALL {
+            let folder = create_practice_project(language).expect("practice project");
+            let repository = git2::Repository::open(folder.path()).expect("repository");
+            let statuses = repository.statuses(None).expect("status");
+            let changed = statuses
+                .iter()
+                .filter_map(|entry| entry.path().map(str::to_owned))
+                .collect::<Vec<_>>();
+            assert_eq!(changed, [language.practice_names()[2]]);
+            let practice = std::fs::read_to_string(folder.path().join(language.practice_names()[0]))
+                .expect("practice file");
+            assert!(practice.contains("    The X marks the spot.\n") && !practice.contains("PRACTICE_LINES"));
+        }
     }
 
     #[test]

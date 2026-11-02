@@ -639,19 +639,24 @@ fn tutor_moves_on_when_each_step_is_done() {
     }
     let mut app = app();
     let home = app.state.workspace_root.canonicalize().unwrap();
+    // The first start asks for a language; Rust comes first.
     app.process_effect(AppEffect::Tutor);
+    assert!(app.ui.tutor.is_none());
+    press(&mut app, "enter");
     wait_root(&mut app);
     assert!(title(&app).starts_with("Tutor 1/"), "{}", title(&app));
+    assert!(app.ui.tutor.as_ref().unwrap().press.contains("`j`"));
     // The tutor moved the editor into its own practice repository.
     let practice = app.state.workspace_root.clone();
     assert_ne!(practice, home);
     assert!(practice.join(".git").is_dir() && practice.join("src/greet.rs").is_file());
+    assert!(practice.join("practice.rs").is_file());
     press(&mut app, "j");
     next_step(&mut app);
     assert!(title(&app).starts_with("Tutor 2/"), "{}", title(&app));
     assert!(cursor_line(&app).starts_with("h  left"), "{}", cursor_line(&app));
     assert!(app.ui.tutor.as_ref().unwrap().target.is_some(), "the X is marked");
-    for _ in 0..4 {
+    for _ in 0..2 {
         press(&mut app, "j");
     }
     assert_eq!(cursor_line(&app), "The X marks the spot.");
@@ -664,7 +669,6 @@ fn tutor_moves_on_when_each_step_is_done() {
     for _ in 0..10 {
         app.process_effect(AppEffect::TutorNext);
     }
-    // Step 12 starts a chapter, so it opens that chapter's lesson.
     app.tutor_tick();
     wait_vfs(&mut app);
     app.tutor_tick();
@@ -706,8 +710,11 @@ fn tutor_moves_on_when_each_step_is_done() {
     assert!(app.state.buffers.values().all(|buffer| {
         buffer.path.as_deref().is_none_or(|path| !path.starts_with(&practice))
     }));
-    // The next start is a fresh practice project, at the step the user stopped at.
+    // The next start asks first; continuing is a fresh practice project at the step the user
+    // stopped at.
     app.process_effect(AppEffect::Tutor);
+    assert!(app.ui.tutor.is_none());
+    press(&mut app, "enter");
     wait_root(&mut app);
     assert!(title(&app).starts_with("Tutor 13/"), "{}", title(&app));
     assert_ne!(app.state.workspace_root, practice);

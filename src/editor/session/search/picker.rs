@@ -29,6 +29,8 @@ pub(in crate::editor::session) enum PickerPayload {
     LspCommand(crate::language::lsp::LspCommand),
     /// A row of one of the agent pickers.
     Agent(crate::editor::session::dispatch::agent::AgentChoice),
+    /// Where the tutor starts: the saved step, or the first one in a language.
+    Tutor(crate::editor::session::dispatch::tutor::TutorStart),
     /// A pull request number from `gh pr list`.
     PullRequest(u64),
     GitWorktree {
