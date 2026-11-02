@@ -1,12 +1,15 @@
 # Dust tutorial
 
-The card at the bottom right is your teacher. It gives you one thing to
-try at a time, puts the cursor on the text to practise on, and moves on
-by itself once you've done it. `:TutorNext` skips a step, `:TutorBack`
-goes back, `:TutorQuit` stops, and `:Tutor` picks up where you left.
-This file is a copy made for you: edit it, break it. It also works as a
-reference: read it with `j` and `k`, or jump between chapters with `/##
-` and `n`.
+The bar at the bottom is your teacher. It gives you one thing to try at
+a time, opens the file and puts the cursor on the text to practise on,
+and moves on by itself once you've done it. `:TutorNext` skips a step,
+`:TutorBack` goes back, `:TutorQuit` stops and puts your own files back,
+and `:Tutor` picks up where you left.
+
+This is a throwaway practice project: this file, a small Rust program
+in `src/` and a git repository with one changed file. Edit it, break it;
+it is deleted when the tutor ends. The file also works as a reference:
+read it with `j` and `k`, or jump between chapters with `/##` and `n`.
 
 `<leader>` is the space bar. When you press it and wait, a hint box
 lists what can follow, so you never need to remember a whole key
@@ -449,5 +452,5 @@ run sandboxed.
     :health      what works and what is missing
     :messages    earlier notifications
 
-That's the whole tour. Close this tab with `ctrl-q`, and come back with
-`:Tutor` any time.
+That's the whole tour. `:TutorQuit` takes you back to your own files,
+and `:Tutor` brings you here again any time.

@@ -1,26 +1,40 @@
-# The interactive tutor's lessons. `:Tutor` shows them one step at a time on a card and
-# moves on once the step is done.
+# The interactive tutor's lessons. `:Tutor` opens a practice project (assets/defaults/tutor/,
+# made into a repository with one changed file) and shows one step at a time in a bar above
+# the status line, moving on once the step is done.
+#
+# A step can set the scene when it starts:
+#   open     - show this file of the practice project (practice.md when only `at` or `mark`
+#              is given)
+#   at       - put the cursor on the line that reads this text
+#   mark     - highlight this text, the first one from the `at` line on
+#   split    - true: at least two windows; false: one window, not zoomed
+#   explorer - show (true) or hide (false) the file explorer
+#   terminal - show (true) or hide (false) the terminal panel
 #
 # A step is done when:
-#   line   - a line of the practice file (tutor.md) reads this text, in Normal mode
-#   gone   - no line of the practice file reads this text, in Normal mode
-#   twice  - at least two lines of the practice file read this text, in Normal mode
+#   line   - a line of the step's file reads this text, in Normal mode
+#   gone   - no line of the step's file reads this text, in Normal mode
+#   twice  - at least two lines of the step's file read this text, in Normal mode
 #   indented - a line reads this text and is indented past the practice blocks
 #   cursor - the text under the cursor starts with this
 #   done   - otherwise, when one of these commands runs ("id key=value ...")
 # A command counts once it ran without an error. A step with none of these waits for
 # :TutorNext.
-# `at` puts the cursor on the practice line that reads this text when the step starts.
 
 [[step]]
 chapter = "Welcome"
-text = "Hi! I'm the tutor. Each step tells you what to try and moves on once you've done it. Stuck? `:TutorNext` skips a step, `:TutorBack` goes back, `:TutorQuit` stops and `:Tutor` picks up where you left. Start by pressing `j` to move down a line."
+text = "Hi! I'm the tutor. This is a throwaway practice project; your own files come back when the tutor ends. Each step tells you what to try and moves on once you've done it. Stuck? `:TutorNext` skips a step, `:TutorBack` goes back, `:TutorQuit` stops. Start by pressing `j` to move down a line."
 done = ["input.motion motion=down"]
+open = "practice.md"
+split = false
+explorer = false
+terminal = false
 
 [[step]]
 chapter = "Moving around"
-text = "`h` `j` `k` `l` move left, down, up and right. Move the cursor onto the X in “The X marks the spot.”"
+text = "`h` `j` `k` `l` move left, down, up and right. Move the cursor onto the marked X in “The X marks the spot.”"
 at = "h  left      j  down      k  up      l  right"
+mark = "X marks"
 cursor = "X marks"
 
 [[step]]
@@ -55,20 +69,23 @@ done = ["view.scroll kind=half_down"]
 
 [[step]]
 chapter = "Moving around"
-text = "Flash jumps anywhere on screen: press `s`, type two letters of where you want to go, then the label that appears there. Try reaching the word “flash”."
+text = "Flash jumps anywhere on screen: press `s`, type two letters of where you want to go, then the label that appears there. Reach the marked word “flash”."
 at = "You can reach this flash word in three keys."
+mark = "flash"
 cursor = "flash word"
 
 [[step]]
 chapter = "Moving around"
 text = "`f` and a letter jumps to that letter on the line, `t` just before it, `;` repeats. Press `f,` to jump to the comma."
 at = "First part, second part."
+mark = ","
 cursor = ", second"
 
 [[step]]
 chapter = "Moving around"
 text = "`%` jumps between matching brackets. Put the cursor on the first `(` and press `%`."
 at = "call(first, (second))"
+mark = "("
 cursor = ")\n"
 
 [[step]]
@@ -119,20 +136,23 @@ done = ["history.redo"]
 
 [[step]]
 chapter = "Changing text"
-text = "`c` changes: `ciw` replaces the word you are in. Change “red” to “green”."
+text = "`c` changes: `ciw` replaces the word you are in. Change the marked “red” to “green”."
 at = "This is a red apple."
+mark = "red"
 line = "This is a green apple."
 
 [[step]]
 chapter = "Changing text"
 text = "Text objects work inside pairs too: `ci\"` changes what is in the quotes. Make the greeting “hi”."
 at = "let greeting = \"hello there\";"
+mark = "hello there"
 line = "let greeting = \"hi\";"
 
 [[step]]
 chapter = "Changing text"
 text = "`r` replaces one character. Turn “Dusk” into “Dust”."
 at = "Dusk is fast."
+mark = "Dusk"
 line = "Dust is fast."
 
 [[step]]
@@ -155,8 +175,9 @@ line = "<!-- comment me -->"
 
 [[step]]
 chapter = "Changing text"
-text = "Surrounds: `gsaiw)` puts parentheses around the word under the cursor, `gsd)` takes them off, `gsr)\"` swaps them for quotes. Put “value” in parentheses."
+text = "Surrounds: `gsaiw)` puts parentheses around the word under the cursor, `gsd)` takes them off, `gsr)\"` swaps them for quotes. Put the marked “value” in parentheses."
 at = "total = value * 2"
+mark = "value"
 line = "total = (value) * 2"
 
 [[step]]
@@ -175,6 +196,7 @@ line = "- fourth"
 chapter = "Search"
 text = "`/` searches forward, `?` backward. Type `/cat` and press `enter`."
 at = "The cat sat. The cat ran. Every cat naps."
+mark = "cat"
 cursor = "cat sat"
 
 [[step]]
@@ -189,7 +211,7 @@ done = ["search.word"]
 
 [[step]]
 chapter = "Search"
-text = "`space` is the leader key: press it and wait, and a box lists what can follow. `<leader>/` searches every file of the project. Try it, then `esc` `esc` closes the list."
+text = "`space` is the leader key: press it and wait, and a box lists what can follow. `<leader>/` searches every file of the project. Search for “hello”, then `esc` `esc` closes the list."
 done = ["workspace.search.prompt"]
 
 [[step]]
@@ -199,7 +221,7 @@ done = ["workspace.replace.prompt"]
 
 [[step]]
 chapter = "Files"
-text = "`<leader><space>` finds a file by name. Try it, then `esc` `esc`."
+text = "`<leader><space>` finds a file by name; this project has practice.md, src/main.rs and src/greet.rs. Try it, then `enter` opens one or `esc` `esc` closes the list."
 done = ["workspace.file.find"]
 
 [[step]]
@@ -211,21 +233,27 @@ done = ["navigation.recents"]
 chapter = "Files"
 text = "`<leader>e` shows or hides the file explorer: `j` `k` move, `l` opens, `h` closes a folder, `a` adds a file, `r` renames, `d` deletes. Show it."
 done = ["explorer.panel.toggle", "explorer.open"]
+explorer = false
 
 [[step]]
 chapter = "Files"
-text = "In the explorer press `/` to search the whole tree, type a few letters, then `enter` keeps the matches or `esc` clears them."
+text = "In the explorer press `/` to search the whole tree, type “greet”, then `enter` keeps the matches or `esc` clears them."
 done = ["explorer.search.done", "explorer.search.cancel"]
+explorer = true
 
 [[step]]
 chapter = "Files"
 text = "`ctrl-l` goes back to the editor, `ctrl-h` to the explorer. `<leader>e` hides it. Go back to the editor."
 done = ["surface.focus.right", "explorer.panel.toggle", "explorer.close"]
+explorer = true
 
 [[step]]
 chapter = "Tabs and windows"
 text = "Every open file is a tab at the top. `ctrl-t` opens a new tab with the file finder. Try it, then pick a file or `esc`."
 done = ["buffer.new_tab"]
+open = "practice.md"
+split = false
+explorer = false
 
 [[step]]
 chapter = "Tabs and windows"
@@ -241,40 +269,61 @@ done = ["buffer.picker.open"]
 chapter = "Tabs and windows"
 text = "`<leader>|` splits the window side by side, `<leader>-` top and bottom. Split it."
 done = ["pane.split.horizontal", "pane.split.vertical"]
+open = "practice.md"
+split = false
 
 [[step]]
 chapter = "Tabs and windows"
 text = "`ctrl-h` `ctrl-j` `ctrl-k` `ctrl-l` move between windows. Move to the other one."
 done = ["surface.focus.left", "surface.focus.right", "surface.focus.up", "surface.focus.down"]
+split = true
 
 [[step]]
 chapter = "Tabs and windows"
 text = "`<leader>wm` zooms a window to the full screen and back. Try it."
 done = ["pane.zoom"]
+split = true
 
 [[step]]
 chapter = "Tabs and windows"
 text = "`<leader>wd` closes the window; its file stays open as a tab. Close the split."
 done = ["pane.close"]
+split = true
 
 [[step]]
 chapter = "Terminal"
-text = "`ctrl-/` opens the terminal at the bottom. Open it."
+text = "Dust runs nothing from a project, not even a terminal in it, until you trust the project; it asks once for each one. Type `:trust` and answer yes to trust this practice project (`:untrust` takes it back)."
+done = ["workspace.trust"]
+
+[[step]]
+chapter = "Terminal"
+text = "`ctrl-/` opens the terminal at the bottom, in this project's folder. Open it."
 done = ["terminal.toggle"]
+terminal = false
 
 [[step]]
 chapter = "Terminal"
 text = "In the terminal, `esc esc` switches to Normal mode to scroll and copy with `v` and `y`; `i` types again. Try `esc esc`, then `ctrl-/` hides the terminal."
 done = ["terminal.mode.normal"]
+terminal = true
 
 [[step]]
 chapter = "Code"
-text = "In a source file the language server starts on its own: `K` shows documentation, `gd` goes to the definition, `gr` lists references and `ctrl-o` comes back. This file has no server, so try them in your code later. `:TutorNext` goes on."
+text = "This is a Rust project, so rust-analyzer starts on its own when it is installed (`<leader>cm` installs it). Move onto the marked `hello`: `K` shows its documentation, `gd` goes to its definition in greet.rs and `ctrl-o` comes back."
+done = ["lsp.hover", "lsp.definition"]
+open = "src/main.rs"
+at = "let message = greet::hello(name);"
+mark = "hello"
+split = false
+terminal = false
 
 [[step]]
 chapter = "Code"
-text = "`<leader>ca` lists code actions, `<leader>cf` formats, `]d` goes to the next problem and `<leader>xx` lists them all. Open the problem list with `<leader>xx`."
+text = "The marked variable is never used, so the server reports a problem: `]d` goes to the next problem, `<leader>ca` lists fixes and `<leader>xx` lists every problem. Open the list with `<leader>xx`."
 done = ["diagnostic.open"]
+open = "src/main.rs"
+at = "let unused = 42;"
+mark = "unused"
 
 [[step]]
 chapter = "Tools"
@@ -283,17 +332,23 @@ done = ["tools.menu.open"]
 
 [[step]]
 chapter = "Debugging"
-text = "`<leader>db` toggles a breakpoint on the line, `<leader>ds` starts debugging, `<leader>dc` continues, `<leader>dO` steps over. Toggle a breakpoint."
+text = "`<leader>db` toggles a breakpoint on the line, `<leader>ds` starts debugging, `<leader>dc` continues, `<leader>dO` steps over. Toggle a breakpoint on this line."
 done = ["dap.breakpoint.toggle", "dap.session.start"]
+open = "src/main.rs"
+at = "println!(\"{message}\");"
 
 [[step]]
 chapter = "Git"
-text = "`<leader>gg` opens lazygit on top of everything; `q` closes it. `<leader>gf` shows this file's history."
+text = "This project is a git repository. `<leader>gg` opens lazygit on top of everything; `q` closes it. `<leader>gf` shows this file's history."
 done = ["terminal.open profile=lazygit", "terminal.open profile=lazygit_file"]
 
 [[step]]
 chapter = "Git"
-text = "In a git project, changed lines are marked beside the numbers: `]h` and `[h` jump between changes, `<leader>ghp` previews one and `<leader>ghs` stages it. This file isn't in git; `:TutorNext` goes on."
+text = "greet.rs has a change that isn't committed, marked beside the line numbers. `]h` and `[h` jump between changes, `<leader>ghp` previews one and `<leader>ghs` stages it. Preview the change."
+done = ["workspace.git.hunk.preview", "workspace.git.hunk.stage", "workspace.git.hunk.next", "workspace.git.hunk.previous"]
+open = "src/greet.rs"
+at = "format!(\"Hello there, {name}!\")"
+mark = "there"
 
 [[step]]
 chapter = "Git"
@@ -359,7 +414,8 @@ done = ["plugin.list"]
 chapter = "Saving"
 text = "`:w` saves, `:q` closes the window, `:wq` both. Save this practice file with `:w`."
 done = ["file.save"]
+open = "practice.md"
 
 [[step]]
 chapter = "Done"
-text = "That's the tour. Your settings go in ~/.config/dust/config.toml and your keys in keymaps.toml, only what you change. `:TutorNext` ends the tutor; `:Tutor` starts it again any time."
+text = "That's the tour. Your settings go in ~/.config/dust/config.toml and your keys in keymaps.toml, only what you change. `:TutorNext` ends the tutor and puts your own files back; `:Tutor` starts it again any time."

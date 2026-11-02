@@ -139,6 +139,11 @@ impl PersistenceSession {
         self.load_source = restore_allowed.then(|| RestoreSource::capture(&context));
         Ok(())
     }
+    /// Let the next `begin_restore` replace what is open, for a session kept in memory, as
+    /// `load_session` does for the one read from disk.
+    pub(in crate::editor::session) fn allow_restore(&mut self, context: RestoreContext<'_>) {
+        self.load_source = Some(RestoreSource::capture(&context));
+    }
     pub(in crate::editor::session) fn begin_restore(
         &mut self,
         session: PersistedSession,

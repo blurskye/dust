@@ -1367,7 +1367,7 @@ impl InteractiveApplication {
         self.try_capture_session().ok().flatten()
     }
 
-    fn try_capture_session(&self) -> Result<Option<PersistedSession>, String> {
+    pub(super) fn try_capture_session(&self) -> Result<Option<PersistedSession>, String> {
         self.persistence.capture_session(
             &self.state,
             &self.workspace,
@@ -1399,7 +1399,12 @@ impl InteractiveApplication {
                 return;
             }
         }
-        let session = match self.try_capture_session() {
+        // During the tutor the layout to keep is the user's own, not the practice project's.
+        let captured = match self.tutor.saved_layout() {
+            Some(layout) => Ok(layout.clone()),
+            None => self.try_capture_session(),
+        };
+        let session = match captured {
             Ok(session) => session,
             Err(error) => {
                 self.ui.config_diagnostic = Some(error);
@@ -7831,7 +7836,7 @@ impl InteractiveApplication {
             .iter()
             .map(|root| root.identity.canonical_path.clone())
             .collect();
-        // An open file was let in already, like the tutor's practice file outside the project.
+        // An open file was let in already, even when it is outside the project.
         if self.state.buffers.values().any(|buffer| buffer.path.as_ref() == Some(&location.path)) {
             roots.extend(location.path.parent().map(Path::to_path_buf));
         }
@@ -9525,8 +9530,6 @@ impl InteractiveApplication {
         );
         self.sync_picker_ui();
     }
-    /// Open the tutorial, a fresh copy of `assets/defaults/tutor.md` in the state directory, so
-    /// the user practises on it and can save without touching the original, as in vimtutor.
     /// Contextual help: what is available on the focused surface, read from the command
     /// registry through the dispatcher's own context check, so help can never advertise a
     /// command the dispatcher would refuse and can never drift from a renamed command.
