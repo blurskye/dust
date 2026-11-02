@@ -10,7 +10,7 @@ licensed unless noted:
 - tree-sitter-go 0.25.0
 - tree-sitter-json 0.24.8
 - tree-sitter-toml-ng 0.7.0
-- tree-sitter-md-025 0.5.6
+- tree-sitter-md-025 0.5.6 (block and inline grammars)
 - tree-sitter-bash 0.25.1
 - tree-sitter-c 0.24.2
 - tree-sitter-cpp 0.23.4

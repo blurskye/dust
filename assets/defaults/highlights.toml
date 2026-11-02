@@ -6,6 +6,18 @@
 
 # Groups that have no default but that captures and tokens produce, so themes can colour them.
 names = [
+  # Markdown groups Neovim themes colour per language, tried before the general group.
+  "@markup.heading.1.markdown",
+  "@markup.heading.2.markdown",
+  "@markup.heading.3.markdown",
+  "@markup.heading.4.markdown",
+  "@markup.heading.5.markdown",
+  "@markup.heading.6.markdown",
+  "@markup.list.markdown",
+  "@punctuation.special.markdown",
+  "@markup.raw.markdown_inline",
+  "@markup.link.markdown_inline",
+  "@markup.link.label.markdown_inline",
   "@comment.block",
   "@comment.block.documentation",
   "@comment.discard",

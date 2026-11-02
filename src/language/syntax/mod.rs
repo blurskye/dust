@@ -237,6 +237,18 @@ pub fn validate_builtin_queries() -> Result<(), String> {
             }
         }
     }
+    let inline = Query::new(
+        &tree_sitter_md_025::INLINE_LANGUAGE.into(),
+        MARKDOWN_INLINE_HIGHLIGHTS,
+    )
+    .map_err(|error| format!("markdown_inline highlights: {error}"))?;
+    if let Some(capture) = inline
+        .capture_names()
+        .iter()
+        .find(|capture| !uncoloured_capture(capture) && Highlight::for_capture(capture).is_none())
+    {
+        return Err(format!("markdown_inline highlights: unsupported capture {capture}"));
+    }
     Ok(())
 }
 pub fn builtin_languages() -> impl Iterator<Item = SyntaxLanguageInfo> {
@@ -277,6 +289,9 @@ pub const fn language_info(language: SyntaxLanguage) -> SyntaxLanguageInfo {
         capabilities,
     }
 }
+const MARKDOWN_INLINE_HIGHLIGHTS: &str =
+    include_str!("../../../assets/syntax/markdown_inline/highlights.scm");
+
 struct Descriptor {
     language: Language,
     highlights: &'static str,
@@ -696,12 +711,27 @@ impl SyntaxService {
         }
     }
 }
-fn highlight_spans(query: &Query, tree: &tree_sitter::Tree, source: &str, maximum: usize) -> Vec<SyntaxSpan> {
+/// Spans for a query's captures. A group for this language, such as `@markup.heading.1.markdown`,
+/// comes before the general one, as in Neovim.
+fn highlight_spans(
+    query: &Query,
+    tree: &tree_sitter::Tree,
+    source: &str,
+    maximum: usize,
+    language: &str,
+) -> Vec<SyntaxSpan> {
     let mut cursor = QueryCursor::new();
     let groups: Vec<Option<Highlight>> = query
         .capture_names()
         .iter()
-        .map(|name| (!uncoloured_capture(name)).then(|| Highlight::for_capture(name)).flatten())
+        .map(|name| {
+            (!uncoloured_capture(name))
+                .then(|| {
+                    Highlight::named(&format!("@{name}.{language}"))
+                        .or_else(|| Highlight::for_capture(name))
+                })
+                .flatten()
+        })
         .collect();
     let mut matches = cursor.matches(query, tree.root_node(), source.as_bytes());
     let mut spans = Vec::new();
@@ -723,6 +753,110 @@ fn highlight_spans(query: &Query, tree: &tree_sitter::Tree, source: &str, maximu
         }
     }
     spans
+}
+
+/// Markdown's inline text, such as `code`, *emphasis* and links, has its own grammar. Each
+/// paragraph, heading and table cell is parsed with it, as Neovim injects `markdown_inline`.
+fn markdown_inline_spans(tree: &tree_sitter::Tree, source: &str, maximum: usize) -> Vec<SyntaxSpan> {
+    thread_local! {
+        static QUERY: Option<Query> = Query::new(
+            &tree_sitter_md_025::INLINE_LANGUAGE.into(),
+            MARKDOWN_INLINE_HIGHLIGHTS,
+        )
+        .ok();
+    }
+    let mut parser = Parser::new();
+    if parser.set_language(&tree_sitter_md_025::INLINE_LANGUAGE.into()).is_err() {
+        return Vec::new();
+    }
+    let mut inline = Vec::new();
+    let mut nodes = vec![tree.root_node()];
+    let mut walk = tree.walk();
+    while let Some(node) = nodes.pop() {
+        if matches!(node.kind(), "inline" | "pipe_table_cell") {
+            inline.push(node);
+        } else {
+            nodes.extend(node.named_children(&mut walk));
+        }
+    }
+    QUERY.with(|query| {
+        let Some(query) = query else {
+            return Vec::new();
+        };
+        let mut spans = Vec::new();
+        for node in inline {
+            // Leave out what the block grammar owns inside the text, such as a quote's `>`.
+            let mut ranges = Vec::new();
+            let mut start = (node.start_byte(), node.start_position());
+            for child in node.named_children(&mut walk) {
+                if child.start_byte() > start.0 {
+                    ranges.push(tree_sitter::Range {
+                        start_byte: start.0,
+                        end_byte: child.start_byte(),
+                        start_point: start.1,
+                        end_point: child.start_position(),
+                    });
+                }
+                start = (child.end_byte(), child.end_position());
+            }
+            if node.end_byte() > start.0 {
+                ranges.push(tree_sitter::Range {
+                    start_byte: start.0,
+                    end_byte: node.end_byte(),
+                    start_point: start.1,
+                    end_point: node.end_position(),
+                });
+            }
+            if ranges.is_empty() || parser.set_included_ranges(&ranges).is_err() {
+                continue;
+            }
+            let Some(tree) = parser.parse(source, None) else {
+                continue;
+            };
+            let room = maximum.saturating_sub(spans.len());
+            if room == 0 {
+                break;
+            }
+            spans.extend(highlight_spans(query, &tree, source, room, "markdown_inline"));
+        }
+        spans
+    })
+}
+
+/// Nested captures, such as an escape inside a string or code inside a heading, become
+/// side-by-side spans where the inner one wins, as Neovim draws them.
+fn flatten_spans(mut spans: Vec<SyntaxSpan>) -> Vec<SyntaxSpan> {
+    // Outer spans first; a stable sort keeps a later capture of the same text on top.
+    spans.sort_by_key(|span| (span.start, std::cmp::Reverse(span.end)));
+    let mut flat: Vec<SyntaxSpan> = Vec::with_capacity(spans.len());
+    let mut emit = |role, start: usize, end: usize| {
+        if start >= end {
+            return;
+        }
+        match flat.last_mut() {
+            Some(last) if last.role == role && last.end == start => last.end = end,
+            _ => flat.push(SyntaxSpan { start, end, role }),
+        }
+    };
+    let mut open: Vec<SyntaxSpan> = Vec::new();
+    let mut at = 0;
+    for span in spans {
+        while let Some(top) = open.last().copied().filter(|top| top.end <= span.start) {
+            emit(top.role, at.max(top.start), top.end);
+            at = at.max(top.end);
+            open.pop();
+        }
+        if let Some(top) = open.last() {
+            emit(top.role, at.max(top.start), span.start);
+        }
+        at = at.max(span.start);
+        open.push(span);
+    }
+    while let Some(top) = open.pop() {
+        emit(top.role, at.max(top.start), top.end);
+        at = at.max(top.end);
+    }
+    flat
 }
 
 /// Highlight a short snippet right away, such as a code block in a chat reply. The
@@ -750,7 +884,11 @@ pub fn highlight(language: SyntaxLanguage, source: &str) -> Vec<SyntaxSpan> {
                 }
             }
         };
-        highlight_spans(query, &tree, source, usize::MAX)
+        let mut spans = highlight_spans(query, &tree, source, usize::MAX, language.id());
+        if language == SyntaxLanguage::Markdown {
+            spans.extend(markdown_inline_spans(&tree, source, usize::MAX));
+        }
+        flatten_spans(spans)
     })
 }
 
@@ -892,7 +1030,14 @@ fn parse(request: Request) -> SyntaxEvent {
                 entry.insert(Query::new(&descriptor.language, descriptor.highlights)?)
             }
         };
-        Ok(highlight_spans(query, &tree, &request.source, request.policy.maximum_spans))
+        let maximum = request.policy.maximum_spans;
+        let mut spans =
+            highlight_spans(query, &tree, &request.source, maximum, request.language.id());
+        if request.language == SyntaxLanguage::Markdown {
+            let room = maximum.saturating_sub(spans.len());
+            spans.extend(markdown_inline_spans(&tree, &request.source, room));
+        }
+        Ok(flatten_spans(spans))
     });
     let spans = match spans {
         Ok(spans) => spans,
@@ -1136,6 +1281,45 @@ mod tests {
                 |span| source.is_char_boundary(span.start) && source.is_char_boundary(span.end)
             ));
         }
+    }
+    #[test]
+    fn markdown_colours_headings_by_level_and_inline_code_emphasis_and_links() {
+        let source = "# Title `code`\n\n## Sub\n\n> quote **bold** and *it* [link](https://x.y)\n";
+        let spans = highlight(SyntaxLanguage::Markdown, source);
+        let group = |word: &str| {
+            let at = source.find(word).expect(word);
+            spans
+                .iter()
+                .find(|span| span.start <= at && at < span.end)
+                .map(|span| span.role.name())
+        };
+        assert_eq!(group("Title"), Some("@markup.heading.1.markdown"));
+        assert_eq!(group("code"), Some("@markup.raw.markdown_inline"));
+        assert_eq!(group("Sub"), Some("@markup.heading.2.markdown"));
+        assert_eq!(group("quote"), Some("@markup.quote"));
+        assert_eq!(group("bold"), Some("@markup.strong"));
+        assert_eq!(group("it* "), Some("@markup.italic"));
+        assert_eq!(group("link"), Some("@markup.link.label.markdown_inline"));
+        assert_eq!(group("https"), Some("@markup.link.url"));
+        assert!(spans.windows(2).all(|pair| pair[0].end <= pair[1].start));
+    }
+    #[test]
+    fn nested_spans_flatten_with_the_inner_one_on_top() {
+        let span = |start, end, role| SyntaxSpan { start, end, role };
+        let flat = flatten_spans(vec![
+            span(0, 10, Highlight::STRING),
+            span(3, 5, Highlight::KEYWORD),
+            span(12, 14, Highlight::COMMENT),
+        ]);
+        assert_eq!(
+            flat,
+            vec![
+                span(0, 3, Highlight::STRING),
+                span(3, 5, Highlight::KEYWORD),
+                span(5, 10, Highlight::STRING),
+                span(12, 14, Highlight::COMMENT),
+            ]
+        );
     }
     #[test]
     fn every_bundled_query_compiles_and_colours_its_language() {

@@ -1,34 +1,64 @@
-;From nvim-treesitter/nvim-treesitter
-(atx_heading
-  (inline) @text.title)
+; From nvim-treesitter/nvim-treesitter. Inline text is coloured by markdown_inline.
+(setext_heading
+  (paragraph) @markup.heading.1
+  (setext_h1_underline) @markup.heading.1)
 
 (setext_heading
-  (paragraph) @text.title)
+  (paragraph) @markup.heading.2
+  (setext_h2_underline) @markup.heading.2)
+
+(atx_heading
+  (atx_h1_marker)) @markup.heading.1
+
+(atx_heading
+  (atx_h2_marker)) @markup.heading.2
+
+(atx_heading
+  (atx_h3_marker)) @markup.heading.3
+
+(atx_heading
+  (atx_h4_marker)) @markup.heading.4
+
+(atx_heading
+  (atx_h5_marker)) @markup.heading.5
+
+(atx_heading
+  (atx_h6_marker)) @markup.heading.6
+
+(info_string) @label
+
+(pipe_table_header
+  (pipe_table_cell) @markup.heading)
+
+(pipe_table_header
+  "|" @punctuation.special)
+
+(pipe_table_row
+  "|" @punctuation.special)
+
+(pipe_table_delimiter_row
+  "|" @punctuation.special)
+
+(pipe_table_delimiter_cell) @punctuation.special
 
 [
-  (atx_h1_marker)
-  (atx_h2_marker)
-  (atx_h3_marker)
-  (atx_h4_marker)
-  (atx_h5_marker)
-  (atx_h6_marker)
-  (setext_h1_underline)
-  (setext_h2_underline)
-] @punctuation.special
+  (indented_code_block)
+  (fenced_code_block)
+] @markup.raw.block
+
+(fenced_code_block
+  (fenced_code_block_delimiter) @markup.raw.block)
+
+(fenced_code_block
+  (info_string
+    (language) @label))
+
+(link_destination) @markup.link.url
 
 [
   (link_title)
-  (indented_code_block)
-  (fenced_code_block)
-] @text.literal
-
-(fenced_code_block_delimiter) @punctuation.delimiter
-
-(code_fence_content) @none
-
-(link_destination) @text.uri
-
-(link_label) @text.reference
+  (link_label)
+] @markup.link.label
 
 [
   (list_marker_plus)
@@ -36,8 +66,20 @@
   (list_marker_star)
   (list_marker_dot)
   (list_marker_parenthesis)
-  (thematic_break)
-] @punctuation.special
+] @markup.list
+
+(thematic_break) @punctuation.special
+
+(task_list_marker_unchecked) @markup.list.unchecked
+
+(task_list_marker_checked) @markup.list.checked
+
+(block_quote) @markup.quote
+
+[
+  (plus_metadata)
+  (minus_metadata)
+] @keyword.directive
 
 [
   (block_continuation)
