@@ -2561,6 +2561,14 @@ impl InteractiveApplication {
             self.append_lsp_log(format!("{server}: {method} failed: {message}"));
             return;
         }
+        // A server still indexing answers "content modified"; the protocol says to ask again,
+        // so the request waits for the load to finish, as an empty answer does.
+        if message.contains("-32801") && self.lsp_asked.is_some() && self.lsp_server_loading(&server)
+        {
+            self.show_lsp_loading();
+            self.lsp_waiting = self.lsp_asked.clone();
+            return;
+        }
         let server = self.lsp_server_label(&server);
         self.show_error(self.message(
             "lsp_request_failed",

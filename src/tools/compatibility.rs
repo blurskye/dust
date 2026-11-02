@@ -166,14 +166,25 @@ pub(super) fn patch_nix_compatible_executable(
         runtime.library_path.clone(),
         path.display().to_string(),
     ];
-    run_managed(
-        &runtime.patchelf,
-        &arguments,
-        cwd,
-        &BTreeMap::new(),
-        cancellations,
-        None,
-    )
+    // A tool installed in place, like a uv tool, can be run by a probe for a moment while it
+    // is patched; the kernel then refuses to open it for writing ("Text file busy").
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        match run_managed(
+            &runtime.patchelf,
+            &arguments,
+            cwd,
+            &BTreeMap::new(),
+            cancellations,
+            None,
+        ) {
+            Err(error) if attempt < 5 && error.contains("Text file busy") => {
+                std::thread::sleep(std::time::Duration::from_millis(200 * attempt));
+            }
+            result => break result,
+        }
+    }
     .map_err(|error| {
         format!(
             "cannot apply Dust Nix compatibility to {}: {error}",

@@ -1528,10 +1528,22 @@ fn confirmation_lines(text: &str, width: u16, config: &Config) -> (Vec<Confirmat
             oversized = true;
         }
         if !units.is_empty() && used.saturating_add(unit_width) > width {
+            // Break after the last word that fits; a path or command with no space breaks anywhere.
+            let carry = match units.iter().rposition(|(unit, _)| unit == " ") {
+                Some(space) => {
+                    let carry = units.split_off(space + 1);
+                    units.pop();
+                    carry
+                }
+                None => Vec::new(),
+            };
             lines.push(ConfirmationLine {
-                units: std::mem::take(&mut units),
+                units: std::mem::replace(&mut units, carry),
             });
-            used = 0;
+            used = units.iter().map(|(_, width)| *width).sum();
+            if grapheme == " " && units.is_empty() {
+                continue;
+            }
         }
         units.push((projected, unit_width));
         used = used.saturating_add(unit_width);

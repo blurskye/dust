@@ -31,7 +31,7 @@ pub(super) fn render_documentation_popup(
         return;
     }
     let page_rows = crate::ui::geometry::documentation_page_rows(config, editor_width, height);
-    let scrollable = line_count > page_rows;
+    let mut scrollable = line_count > page_rows;
     let widest = (0..line_count)
         .filter_map(|index| popup.line_at(index))
         .map(UnicodeWidthStr::width)
@@ -48,12 +48,12 @@ pub(super) fn render_documentation_popup(
     } else {
         editor_width
     };
-    let box_width = u16::try_from(widest)
+    let mut box_width = u16::try_from(widest)
         .unwrap_or(policy.max_width)
         .min(policy.max_width)
         .min(width_limit);
-    let visible_rows = line_count.saturating_sub(popup.scroll).min(page_rows);
-    let box_height = u16::try_from(visible_rows.saturating_add(2))
+    let mut visible_rows = line_count.saturating_sub(popup.scroll).min(page_rows);
+    let mut box_height = u16::try_from(visible_rows.saturating_add(2))
         .unwrap_or(policy.max_height)
         .min(policy.max_height)
         .min(available_height);
@@ -90,12 +90,14 @@ pub(super) fn render_documentation_popup(
             .saturating_sub(box_width)
             .max(editor_left)
     };
-    let (left, top) = completion_menu
+    let (left, top) = match completion_menu
         .filter(|_| popup.kind == DocumentationPopupKind::Completion)
-        .and_then(|menu| {
+    {
+        None => (left, top),
+        Some(menu) => {
             let beside_right = menu.x.saturating_add(menu.width);
             let below_menu = menu.y.saturating_add(menu.height);
-            [
+            let spot = [
                 (beside_right, menu.y),
                 (menu.x.saturating_sub(box_width), menu.y),
                 (left, top),
@@ -111,9 +113,31 @@ pub(super) fn render_documentation_popup(
                     && y.saturating_add(box_height) <= available_height
                     && !boxes_overlap((*x, *y), (box_width, box_height), menu)
                     && !(*y <= cursor_y && y.saturating_add(box_height) > cursor_y)
-            })
-        })
-        .unwrap_or((left, top));
+            });
+            match spot {
+                Some(spot) => spot,
+                None => {
+                    // Too big for anywhere clear of the menu: a narrower box on the wider side,
+                    // no taller than the menu so it stays off the cursor's line, or none at all
+                    // rather than one over the items.
+                    let right_room = editor_right.saturating_sub(beside_right);
+                    let left_room = menu.x.saturating_sub(editor_left);
+                    if right_room.max(left_room) < 20 {
+                        return;
+                    }
+                    box_width = box_width.min(right_room.max(left_room));
+                    box_height = box_height.min(menu.height.max(3));
+                    visible_rows = visible_rows.min(usize::from(box_height - 2));
+                    scrollable = line_count > visible_rows;
+                    if right_room >= left_room {
+                        (beside_right, menu.y)
+                    } else {
+                        (menu.x - box_width, menu.y)
+                    }
+                }
+            }
+        }
+    };
     let right = left.saturating_add(box_width);
     let bottom = top.saturating_add(box_height).saturating_sub(1);
     for y in top..=bottom {

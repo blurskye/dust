@@ -1646,13 +1646,20 @@ pub(super) fn render_prompt(
             right.saturating_sub(1),
         );
         if !confirmation.hint.is_empty() && geometry.width > 8 {
-            frame.grid.put_text_clipped(
-                geometry.left.saturating_add(2),
-                bottom_y,
-                &format!(" {} ", confirmation.hint),
-                Style::Muted,
-                right.saturating_sub(2),
-            );
+            // The legend starts two cells in, stops two short of the right edge and has a space
+            // on each side.
+            let room = right.saturating_sub(geometry.left).saturating_sub(6);
+            let hint =
+                fitted_footer(&confirmation.hint, usize::from(room), config.editor.ambiguous_width);
+            if !hint.is_empty() {
+                frame.grid.put_text_clipped(
+                    geometry.left.saturating_add(2),
+                    bottom_y,
+                    &format!(" {hint} "),
+                    Style::Muted,
+                    right.saturating_sub(2),
+                );
+            }
         }
         frame.cursor = None;
         return;

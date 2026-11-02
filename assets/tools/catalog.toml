@@ -533,7 +533,6 @@ executable = "ruff"
 version = "0.17.3"
 launch_args = ["server"]
 project_root_markers = ["pyproject.toml", "ruff.toml", ".ruff.toml", ".git"]
-project_root_strategy = "python"
 
 [tool.install]
 method = "uv_tool"
