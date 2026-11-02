@@ -97,7 +97,7 @@ struct PickerInteraction {
     footer: Option<String>,
     /// Which comparison the change surface's diff pane is showing. Only meaningful for that
     /// surface; it is where `Tab` switches between the unstaged and staged layers.
-    changes_layer: crate::workspace::git::GitDiffLayer,
+    changes_other_layer: bool,
     origin: PickerOrigin,
     source: (WorkspaceVersion, u64),
     epoch: PickerEpoch,
@@ -255,7 +255,7 @@ impl SearchSession {
             payloads,
             surface: content.surface,
             footer: surface_footer(content.surface),
-            changes_layer: crate::workspace::git::GitDiffLayer::Unstaged,
+            changes_other_layer: false,
             origin: content.origin,
             source: (scope, configuration),
             epoch: epoch.clone(),
@@ -391,12 +391,19 @@ impl SearchSession {
 
     /// Which comparison the change surface's diff pane shows.
     pub(in crate::editor::session) fn changes_layer(&self) -> crate::workspace::git::GitDiffLayer {
-        self.picker
-            .interaction
-            .as_ref()
-            .map_or(crate::workspace::git::GitDiffLayer::Unstaged, |picker| {
-                picker.changes_layer
-            })
+        // A row shows its own comparison, and Tab shows the other one.
+        let staged = self.picker.interaction.as_ref().is_some_and(|picker| {
+            let staged_row = picker
+                .state
+                .selected_item()
+                .is_some_and(|item| item.id.0.starts_with("git:Staged:"));
+            staged_row != picker.changes_other_layer
+        });
+        if staged {
+            crate::workspace::git::GitDiffLayer::Staged
+        } else {
+            crate::workspace::git::GitDiffLayer::Unstaged
+        }
     }
 
     /// Switch the change surface's diff pane to the other comparison and report which one it
@@ -408,15 +415,8 @@ impl SearchSession {
         if picker.surface != PickerSurfaceKind::Changes {
             return None;
         }
-        picker.changes_layer = match picker.changes_layer {
-            crate::workspace::git::GitDiffLayer::Unstaged => {
-                crate::workspace::git::GitDiffLayer::Staged
-            }
-            crate::workspace::git::GitDiffLayer::Staged => {
-                crate::workspace::git::GitDiffLayer::Unstaged
-            }
-        };
-        Some(picker.changes_layer)
+        picker.changes_other_layer = !picker.changes_other_layer;
+        Some(self.changes_layer())
     }
 
     pub(in crate::editor::session) fn picker_move(&mut self, direction: i8, wrap: bool) {

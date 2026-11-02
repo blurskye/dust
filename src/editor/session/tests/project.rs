@@ -2238,6 +2238,61 @@ fn a_failed_test_is_listed_in_problems_and_jumps_to_its_line() {
 
 #[cfg(unix)]
 #[test]
+fn a_task_inherits_the_shell_environment_and_its_own_settings_win() {
+    let root = tempdir().unwrap();
+    let state_dir = tempdir().unwrap();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.tasks.insert(
+        "env".into(),
+        crate::config::TaskConfig {
+            kind: crate::config::TaskKind::Task,
+            executable: "/bin/sh".into(),
+            arguments: vec![
+                "-c".into(),
+                "printf '%s|%s' \"$PATH\" \"$HOME\" > env.tmp; mv env.tmp env.txt".into(),
+            ],
+            cwd: None,
+            environment: BTreeMap::from([("HOME".to_owned(), "/task-home".to_owned())]),
+            dependencies: vec![],
+            timeout_ms: Some(2000),
+            stdin: false,
+            matcher: None,
+        },
+    );
+    let mut app = InteractiveApplication::new(
+        StartupTarget::Dashboard {
+            root: root.path().into(),
+        },
+        loaded,
+        false,
+        state_dir.path().into(),
+        false,
+        false,
+        std::sync::Arc::new(crate::clock::SystemClock),
+    )
+    .unwrap();
+    app.window_session.observe_size((80, 24));
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone());
+    }
+    app.reconcile_workspace_trust();
+    app.process_effect(AppEffect::TaskRun("env".into()));
+    let output = root.path().join("env.txt");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !output.exists() && Instant::now() < deadline {
+        app.process_execution_preflight();
+        app.process_job_events();
+        thread::sleep(Duration::from_millis(2));
+    }
+    let path = std::env::var("PATH").unwrap();
+    assert_eq!(fs::read_to_string(output).unwrap(), format!("{path}|/task-home"));
+}
+
+#[cfg(unix)]
+#[test]
 fn linter_job_and_vfs_publish_only_original_source_then_recover() {
     let root = tempdir().unwrap();
     let state_dir = tempdir().unwrap();
@@ -4523,6 +4578,18 @@ fn the_changes_diff_pane_follows_focus_and_tab_switches_the_comparison() {
         "the pane no longer shows the worktree-only line: {staged}"
     );
     assert_ne!(unstaged, staged, "the two comparisons render differently");
+
+    // With Tab undone, moving onto the staged row shows what was staged, without a Tab.
+    for id in ["workspace.git.diff.layer.switch", "picker.next"] {
+        let command = crate::editor::CommandInvocation::new(id, InvocationSource::Test)
+            .expect("static command");
+        app.invoke(command);
+    }
+    let staged_row = frame(&mut app);
+    assert!(
+        staged_row.contains("HEAD -> index"),
+        "a staged row previews its staged change: {staged_row}"
+    );
 }
 
 /// W-26: a refresh does not move the selection or reorder the list under the cursor.

@@ -443,7 +443,12 @@ impl TaskSession {
             program: result.executable,
             arguments: step.task.arguments,
             cwd: result.cwd,
-            environment: step.task.environment,
+            // A task runs with what the user's shell gave Dust, as a terminal does, and its own
+            // settings win.
+            environment: std::env::vars_os()
+                .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+                .chain(step.task.environment)
+                .collect(),
             root_revision: result.root_revision,
             stdin,
             policy: JobPolicy {

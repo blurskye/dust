@@ -533,15 +533,41 @@ pub fn permission_detail(params: &Value) -> String {
     {
         detail.push_str(&format!("\n$ {command}"));
     }
+    let mut shows_change = call["rawInput"]["command"].is_string();
     for change in call["content"].as_array().into_iter().flatten() {
         if change["type"] == "diff" {
+            shows_change = true;
             detail.push_str(&changed_lines(
                 change["oldText"].as_str().unwrap_or_default(),
                 change["newText"].as_str().unwrap_or_default(),
             ));
         }
     }
+    if !shows_change {
+        detail.push_str(&tool_arguments(&call["rawInput"]));
+    }
     detail
+}
+
+/// What any other tool was asked to do, one short line per argument.
+fn tool_arguments(input: &Value) -> String {
+    const SHOWN: usize = 6;
+    const LINE: usize = 200;
+    let Some(arguments) = input.as_object() else {
+        return String::new();
+    };
+    let mut text = String::new();
+    for (name, value) in arguments.iter().take(SHOWN) {
+        let value = value.as_str().map_or_else(|| value.to_string(), str::to_owned);
+        let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
+        let clipped: String = value.chars().take(LINE).collect();
+        let more = if clipped.len() < value.len() { "…" } else { "" };
+        text.push_str(&format!("\n{name}: {clipped}{more}"));
+    }
+    if arguments.len() > SHOWN {
+        text.push_str(&format!("\n… {} more", arguments.len() - SHOWN));
+    }
+    text
 }
 
 /// The lines an edit changes, between what it leaves alone at either end.
@@ -653,6 +679,14 @@ mod tests {
             "rawInput": {"file_path": "/w/a.rs"},
         }});
         assert_eq!(permission_changes(&located), [PathBuf::from("/w/a.rs")]);
+        let agent = json!({"toolCall": {
+            "title": "mcp__dust__agent",
+            "rawInput": {"agent": "reviewer", "count": 2, "task": "reply\n  ok"},
+        }});
+        assert_eq!(
+            permission_detail(&agent),
+            "mcp__dust__agent\nagent: reviewer\ncount: 2\ntask: reply ok"
+        );
     }
 
     #[test]

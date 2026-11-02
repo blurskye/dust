@@ -6962,7 +6962,7 @@ impl InteractiveApplication {
         let title = format!("Git worktrees · {}", list.worktrees.len());
         self.install_picker(title, items);
         self.search
-            .set_picker_footer("Enter Switch · a new name creates it · ctrl-x Remove · Esc Esc Close".to_owned());
+            .set_picker_footer("Enter Switch or Create · ctrl-x Remove · Esc Esc Close".to_owned());
         self.sync_picker_ui();
     }
     pub(in crate::editor::session) fn unstage_selected_git_hunk(&mut self) {
@@ -7449,8 +7449,10 @@ impl InteractiveApplication {
         };
         self.install_surface_picker(PickerSurfaceKind::Changes, title, items);
         self.search.set_picker_footer(
-            "s Stage · u Unstage · Tab Diff · Enter Open · Esc Esc Close".to_owned(),
+            "s Stage · u Unstage · Tab Diff · Enter Open · i Find · Esc Close".to_owned(),
         );
+        // The list is for acting on files, so its keys work from the start; i searches it.
+        self.input.set_picker_normal(true);
         self.search.restore_picker_view(previous, false);
         self.sync_picker_ui();
     }
