@@ -101,6 +101,12 @@ impl InteractiveApplication {
                     ui.scroll = scroll;
                 }
             }
+            let preview_rows = usize::from(geometry.preview_rows);
+            if let Some(scroll) = self.search.picker_preview_scroll(preview_rows) {
+                if let Some(ui) = &mut self.ui.picker {
+                    ui.preview_side_scroll = (scroll, scroll);
+                }
+            }
         }
         self.ui.surface_content = self.window_session.content().clone();
     }

@@ -28,6 +28,8 @@ pub enum TerminalNavigationKey {
     Right,
     Home,
     End,
+    PageUp,
+    PageDown,
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -43,6 +45,8 @@ pub enum KeyCode {
     Down,
     Home,
     End,
+    PageUp,
+    PageDown,
     Delete,
     /// A function key, `f1` to `f12`.
     F(u8),
@@ -142,6 +146,8 @@ impl KeyEvent {
             KeyCode::Right => Some(TerminalNavigationKey::Right),
             KeyCode::Home => Some(TerminalNavigationKey::Home),
             KeyCode::End => Some(TerminalNavigationKey::End),
+            KeyCode::PageUp => Some(TerminalNavigationKey::PageUp),
+            KeyCode::PageDown => Some(TerminalNavigationKey::PageDown),
             _ => None,
         }
     }
@@ -181,6 +187,8 @@ impl fmt::Display for KeyEvent {
             KeyCode::Down => "down".into(),
             KeyCode::Home => "home".into(),
             KeyCode::End => "end".into(),
+            KeyCode::PageUp => "pageup".into(),
+            KeyCode::PageDown => "pagedown".into(),
             KeyCode::Delete => "delete".into(),
             KeyCode::F(number) => format!("f{number}"),
             KeyCode::FocusGained => "focus-gained".into(),
@@ -284,6 +292,8 @@ impl FromStr for KeyEvent {
             "down" => KeyCode::Down,
             "home" => KeyCode::Home,
             "end" => KeyCode::End,
+            "pageup" => KeyCode::PageUp,
+            "pagedown" => KeyCode::PageDown,
             "delete" => KeyCode::Delete,
             "focus-gained" => KeyCode::FocusGained,
             "focus-lost" => KeyCode::FocusLost,

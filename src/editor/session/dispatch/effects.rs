@@ -3152,6 +3152,10 @@ impl InteractiveApplication {
             AppEffect::PickerInsert(text) => self.picker_insert(&text),
             AppEffect::PickerBackspace => self.picker_backspace(),
             AppEffect::PickerMove(direction) => self.picker_move(direction),
+            AppEffect::PickerPreviewPage(direction) => {
+                self.search.picker_preview_page(direction);
+                self.sync_picker_ui();
+            }
             AppEffect::PickerResults => {
                 if self.search.set_picker_surface(PickerSurfaceKind::Problems) {
                     self.sync_picker_ui();
@@ -7500,7 +7504,7 @@ impl InteractiveApplication {
         };
         self.install_surface_picker(PickerSurfaceKind::Changes, title, items);
         self.search.set_picker_footer(
-            "s Stage · u Unstage · Tab Diff · Enter Open · i Find · Esc Close".to_owned(),
+            "s Stage · u Unstage · Tab Diff · ctrl-d Scroll · Esc Close".to_owned(),
         );
         // The list is for acting on files, so its keys work from the start; i searches it.
         self.input.set_picker_normal(true);

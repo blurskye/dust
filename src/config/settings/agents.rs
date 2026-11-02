@@ -19,6 +19,9 @@ pub struct AgentProfileConfig {
     /// Claude Code may use.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<serde_json::Value>,
+    /// Shown at the top of a new session, for setup the agent needs outside Dust.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

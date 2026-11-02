@@ -719,6 +719,8 @@ pub fn normalize_event(event: Event) -> Option<UiEvent> {
                 CtKeyCode::Down => KeyCode::Down,
                 CtKeyCode::Home => KeyCode::Home,
                 CtKeyCode::End => KeyCode::End,
+                CtKeyCode::PageUp => KeyCode::PageUp,
+                CtKeyCode::PageDown => KeyCode::PageDown,
                 CtKeyCode::Delete => KeyCode::Delete,
                 CtKeyCode::F(number) => KeyCode::F(number),
                 _ => return None,

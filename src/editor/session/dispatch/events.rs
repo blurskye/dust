@@ -784,6 +784,12 @@ impl InteractiveApplication {
                 crate::editor::input::TerminalNavigationKey::Right => crate::ui::PtyInputKey::Right,
                 crate::editor::input::TerminalNavigationKey::Home => crate::ui::PtyInputKey::Home,
                 crate::editor::input::TerminalNavigationKey::End => crate::ui::PtyInputKey::End,
+                crate::editor::input::TerminalNavigationKey::PageUp => {
+                    crate::ui::PtyInputKey::PageUp
+                }
+                crate::editor::input::TerminalNavigationKey::PageDown => {
+                    crate::ui::PtyInputKey::PageDown
+                }
             });
             if let Some(encoded) = encoded {
                 if let Some(id) = self.keyboard_terminal() {

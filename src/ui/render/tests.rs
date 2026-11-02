@@ -3758,6 +3758,42 @@ fn a_row_with_cells_draws_each_column_at_its_own_width_and_style() {
 /// classification glyph. Intra-line emphasis, side-by-side mode and syntax highlighting are
 /// the diff renderer's own work and are not claimed by this test.
 #[test]
+fn a_short_diff_box_opens_on_the_change_and_keeps_the_comparison_on_top() {
+    use crate::ui::{DiffHunk, DiffLine, DiffLineKind, DiffPreview};
+
+    let line = |kind, text: &str| DiffLine {
+        kind,
+        old_number: Some(1),
+        new_number: Some(1),
+        text: text.to_string(),
+        spans: Vec::new(),
+    };
+    let diff = DiffPreview {
+        provenance: "HEAD -> index".into(),
+        truncated: false,
+        total_lines: 0,
+        layout: crate::ui::DiffLayout::Unified,
+        hunks: vec![DiffHunk {
+            header: "@@ -42,4 +42,4 @@".into(),
+            collapsed_before: 41,
+            lines: vec![
+                line(DiffLineKind::Context, "one"),
+                line(DiffLineKind::Context, "two"),
+                line(DiffLineKind::Context, "three"),
+                line(DiffLineKind::Removed, "old"),
+                line(DiffLineKind::Added, "new"),
+            ],
+        }],
+    };
+    // The change sits five rows below the pinned one, so a five-row box moves to it.
+    assert_eq!(diff.opening_scroll(5), 4);
+    // A box that holds it opens at the top, on the hunk's own header.
+    assert_eq!(diff.opening_scroll(7), 0);
+    assert_eq!(diff.last_scroll(5), 3);
+    assert_eq!(diff.last_scroll(50), 0);
+}
+
+#[test]
 fn a_structured_diff_preview_draws_provenance_hunks_and_classified_lines() {
     use crate::ui::{DiffHunk, DiffLine, DiffLineKind, DiffPreview, PickerPreviewBody, Style};
 

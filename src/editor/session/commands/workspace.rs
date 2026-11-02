@@ -198,6 +198,16 @@ pub(super) fn register_commands(
             AppEffect::PickerMove(-1),
         ),
         (
+            "picker.preview.down",
+            "Scroll the picker's diff down",
+            AppEffect::PickerPreviewPage(1),
+        ),
+        (
+            "picker.preview.up",
+            "Scroll the picker's diff up",
+            AppEffect::PickerPreviewPage(-1),
+        ),
+        (
             "picker.results",
             "Send these results to the shared Results surface",
             AppEffect::PickerResults,

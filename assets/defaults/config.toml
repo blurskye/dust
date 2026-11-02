@@ -510,6 +510,8 @@ program = "pi-acp"
 arguments = []
 environment = {}
 options = {}
+# pi reads MCP servers only from its own config, so Dust cannot hand it the `agent` tool.
+note = "To give pi Dust's subagents, run this once: pi mcp add dust --exposure direct -- dust --agent-tools"
 
 [agents.profiles.opencode]
 program = "opencode"
@@ -1584,6 +1586,8 @@ workspace = "Project"
 "picker.backspace" = "Delete picker query character"
 "picker.next" = "Select next picker item"
 "picker.previous" = "Select previous picker item"
+"picker.preview.down" = "Scroll the picker's diff down"
+"picker.preview.up" = "Scroll the picker's diff up"
 "picker.results" = "Send these results to the shared Results surface"
 "picker.accept" = "Accept picker item"
 "picker.cancel" = "Close picker"

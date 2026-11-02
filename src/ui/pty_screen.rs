@@ -89,6 +89,8 @@ pub enum PtyInputKey {
     Right,
     Home,
     End,
+    PageUp,
+    PageDown,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PtyMouseEvent {
@@ -783,6 +785,8 @@ pub fn encode_key(key: PtyInputKey, application: bool) -> &'static [u8] {
         (PtyInputKey::Left, false) => b"\x1b[D",
         (PtyInputKey::Home, false) => b"\x1b[H",
         (PtyInputKey::End, false) => b"\x1b[F",
+        (PtyInputKey::PageUp, _) => b"\x1b[5~",
+        (PtyInputKey::PageDown, _) => b"\x1b[6~",
     }
 }
 pub fn encode_paste(text: &str, bracketed: bool, ceiling: usize) -> Option<Vec<u8>> {

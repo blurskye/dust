@@ -28,6 +28,18 @@ impl SearchSession {
         &mut self,
         preview: PickerPreview,
     ) -> Option<RequestId> {
+        let same_diff = self.preview.as_ref().is_some_and(|shown| {
+            shown.title == preview.title
+                && match (&shown.body, &preview.body) {
+                    (PickerPreviewBody::Diff(shown), PickerPreviewBody::Diff(next)) => {
+                        shown.provenance == next.provenance
+                    }
+                    _ => false,
+                }
+        });
+        if !same_diff {
+            self.picker_preview_replaced();
+        }
         let retired = self.clear_preview();
         self.preview = Some(preview);
         retired

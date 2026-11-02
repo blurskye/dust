@@ -4597,6 +4597,99 @@ fn the_changes_diff_pane_follows_focus_and_tab_switches_the_comparison() {
     );
 }
 
+/// A long file's only change sits far below the top of a small diff pane: the pane opens on it,
+/// and the page keys move through the rest.
+#[test]
+fn a_small_changes_pane_opens_on_the_change_and_ctrl_d_scrolls_it() {
+    let mut app = app();
+    let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
+    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let lines = |changed: &str| {
+        (1..=90)
+            .map(|n| match n {
+                45 => changed.to_owned(),
+                60 => format!("later {changed}"),
+                n => format!("line {n}"),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    fs::write(app.state.workspace_root.join("notes.txt"), lines("before")).unwrap();
+    {
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("notes.txt")).unwrap();
+        index.write().unwrap();
+    }
+    let tree = repo.find_tree(repo.index().unwrap().write_tree().unwrap()).unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "base", &tree, &[]).unwrap();
+    fs::write(app.state.workspace_root.join("notes.txt"), lines("after")).unwrap();
+
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone())
+    }
+    app.reconcile_workspace_trust();
+    app.start_git_status_refresh();
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now()
+    }
+    app.open_git_status_picker();
+    let frame = |app: &mut InteractiveApplication| {
+        app.handle_event(crate::ui::UiEvent::Resize(80, 24));
+        app.reconcile_editor_windows();
+        let frame = crate::ui::render(
+            &app.state,
+            &app.ui,
+            app.configuration.settings(),
+            app.configuration.dashboard(),
+            app.window_session.width(),
+            app.window_session.height(),
+        );
+        (0..frame.grid.height())
+            .map(|y| frame.grid.row_text(y))
+            .collect::<Vec<String>>()
+            .join("\n")
+    };
+
+    let opened = frame(&mut app);
+    assert!(opened.contains("index -> disk"), "the comparison stays on top: {opened}");
+    assert!(opened.contains("- before"), "the pane opens on the change: {opened}");
+    assert!(opened.contains("+ after"), "the pane opens on the change: {opened}");
+
+    assert_eq!(frame(&mut app), opened, "a redraw keeps the pane's place");
+
+    let mut scrolled = opened.clone();
+    for _ in 0..8 {
+        app.handle_configured_key("ctrl-d".parse::<KeyEvent>().expect("ctrl-d"));
+        scrolled = frame(&mut app);
+        if scrolled.contains("+ later after") {
+            break;
+        }
+    }
+    assert!(scrolled.contains("+ later after"), "ctrl-d reaches the next change: {scrolled}");
+    assert!(scrolled.contains("index -> disk"), "the comparison stays on top: {scrolled}");
+
+    for _ in 0..12 {
+        app.handle_configured_key("pageup".parse::<KeyEvent>().expect("pageup"));
+    }
+    let top = frame(&mut app);
+    assert!(top.contains("unchanged lines"), "pageup reaches the top of the diff: {top}");
+}
+
+/// The page keys have names a keymap can use, and a focused terminal receives them.
+#[test]
+fn page_keys_parse_and_count_as_terminal_navigation() {
+    assert_eq!("pagedown".parse::<KeyEvent>().unwrap().code, crate::editor::input::KeyCode::PageDown);
+    assert_eq!("pageup".parse::<KeyEvent>().unwrap().code, crate::editor::input::KeyCode::PageUp);
+    assert_eq!(
+        "pagedown".parse::<KeyEvent>().unwrap().terminal_navigation(),
+        Some(crate::editor::input::TerminalNavigationKey::PageDown)
+    );
+}
+
 /// W-26: a refresh does not move the selection or reorder the list under the cursor.
 #[test]
 fn a_change_refresh_keeps_the_selection_on_the_same_row() {

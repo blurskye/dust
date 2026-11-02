@@ -1,7 +1,7 @@
 //! Content rectangles shared by surface painting and interaction.
 use crate::{
     config::{AmbiguousWidth, Config},
-    ui::{PickerUiState, window::WindowRect},
+    ui::{PickerSurfaceKind, PickerUiState, window::WindowRect},
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -19,6 +19,8 @@ pub struct PickerContentGeometry {
     pub list: WindowRect,
     pub divider: Option<u16>,
     pub stacked_divider: Option<u16>,
+    /// The rows the preview has inside the border, zero when none is showing.
+    pub preview_rows: u16,
 }
 
 /// Theme selection leaves most of the editor visible for live color preview.
@@ -117,7 +119,12 @@ pub fn picker_content_geometry(
             .min(left.saturating_add(width - 2))
     });
     let stacked_divider = (preview.is_some() && !side_by_side).then(|| {
-        top.saturating_add(height.saturating_mul(2) / 3).clamp(
+        // A short list of changes leaves its spare rows to the diff.
+        let list_rows = (picker.surface == PickerSurfaceKind::Changes)
+            .then(|| u16::try_from(picker.rows.len()).unwrap_or(u16::MAX).saturating_add(3))
+            .unwrap_or(u16::MAX);
+        let list_share = (height.saturating_mul(2) / 3).min(list_rows);
+        top.saturating_add(list_share).clamp(
             top.saturating_add(6),
             top.saturating_add(height.saturating_sub(4)),
         )
@@ -126,6 +133,13 @@ pub fn picker_content_geometry(
     let list_bottom = stacked_divider.unwrap_or(top.saturating_add(height - 1));
     let x = left.saturating_add(2);
     let y = top.saturating_add(3);
+    let preview_rows = if preview.is_some() {
+        height
+            .saturating_sub(stacked_divider.map_or(0, |divider| divider.saturating_sub(top)))
+            .saturating_sub(2)
+    } else {
+        0
+    };
     Some(PickerContentGeometry {
         outer: rect,
         list: WindowRect {
@@ -136,6 +150,7 @@ pub fn picker_content_geometry(
         },
         divider,
         stacked_divider,
+        preview_rows,
     })
 }
 

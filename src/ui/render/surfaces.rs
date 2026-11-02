@@ -201,12 +201,15 @@ fn render_diff_preview(
     let bottom = rect.y.saturating_add(rect.height);
     match diff.layout {
         DiffLayout::Unified => {
+            let rows = diff.rows();
+            let pinned = diff.pinned_rows();
+            let scrolled = rows.iter().skip(pinned.saturating_add(side_scroll.0));
             let mut y = top;
-            for row in diff.rows() {
+            for row in rows.iter().take(pinned).chain(scrolled) {
                 if y >= bottom {
                     break;
                 }
-                paint_diff_row(frame, config, left, y, right, &row);
+                paint_diff_row(frame, config, left, y, right, row);
                 y = y.saturating_add(1);
             }
         }

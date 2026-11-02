@@ -6521,3 +6521,95 @@ context = "editor"
 mode = "multi"
 keys = "escape"
 command = "mode.normal"
+
+[[keymap]]
+id = "builtin.picker.surface.picker-preview-down.ctrl-d"
+context = "picker"
+keys = "ctrl-d"
+command = "picker.preview.down"
+
+[[keymap]]
+id = "builtin.picker.surface.picker-preview-down.pagedown"
+context = "picker"
+keys = "pagedown"
+command = "picker.preview.down"
+
+[[keymap]]
+id = "builtin.picker.surface.picker-preview-up.ctrl-u"
+context = "picker"
+keys = "ctrl-u"
+command = "picker.preview.up"
+
+[[keymap]]
+id = "builtin.picker.surface.picker-preview-up.pageup"
+context = "picker"
+keys = "pageup"
+command = "picker.preview.up"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-preview-down.ctrl-d"
+context = "picker_normal"
+keys = "ctrl-d"
+command = "picker.preview.down"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-preview-down.pagedown"
+context = "picker_normal"
+keys = "pagedown"
+command = "picker.preview.down"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-preview-up.ctrl-u"
+context = "picker_normal"
+keys = "ctrl-u"
+command = "picker.preview.up"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-preview-up.pageup"
+context = "picker_normal"
+keys = "pageup"
+command = "picker.preview.up"
+
+[[keymap]]
+id = "builtin.editor.normal.view-scroll.pagedown"
+context = "editor"
+mode = "normal"
+keys = "pagedown"
+command = "view.scroll"
+arguments = { kind = "page_down" }
+
+[[keymap]]
+id = "builtin.editor.normal.view-scroll.pageup"
+context = "editor"
+mode = "normal"
+keys = "pageup"
+command = "view.scroll"
+arguments = { kind = "page_up" }
+
+[[keymap]]
+id = "builtin.editor.insert.view-scroll.pagedown"
+context = "editor"
+mode = "insert"
+keys = "pagedown"
+command = "view.scroll"
+arguments = { kind = "page_down" }
+
+[[keymap]]
+id = "builtin.editor.insert.view-scroll.pageup"
+context = "editor"
+mode = "insert"
+keys = "pageup"
+command = "view.scroll"
+arguments = { kind = "page_up" }
+
+[[keymap]]
+id = "builtin.explorer.explorer-page-down.pagedown"
+context = "explorer"
+keys = "pagedown"
+command = "explorer.page_down"
+
+[[keymap]]
+id = "builtin.explorer.explorer-page-up.pageup"
+context = "explorer"
+keys = "pageup"
+command = "explorer.page_up"

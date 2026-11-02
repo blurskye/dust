@@ -98,6 +98,10 @@ struct PickerInteraction {
     /// Which comparison the change surface's diff pane is showing. Only meaningful for that
     /// surface; it is where `Tab` switches between the unstaged and staged layers.
     changes_other_layer: bool,
+    /// Where the diff pane starts. `None` until the next layout places it on the first change.
+    preview_scroll: Option<usize>,
+    /// The diff pane's height in the last layout, which is what a page key moves by.
+    preview_rows: usize,
     origin: PickerOrigin,
     source: (WorkspaceVersion, u64),
     epoch: PickerEpoch,
@@ -256,6 +260,8 @@ impl SearchSession {
             surface: content.surface,
             footer: surface_footer(content.surface),
             changes_other_layer: false,
+            preview_scroll: None,
+            preview_rows: 0,
             origin: content.origin,
             source: (scope, configuration),
             epoch: epoch.clone(),
@@ -429,6 +435,49 @@ impl SearchSession {
         picker.ensure_selected_visible(rows);
         Some(picker.scroll())
     }
+    /// Where the diff pane starts in a box of `rows` rows. It opens on the first change and
+    /// keeps its place after that.
+    pub(in crate::editor::session) fn picker_preview_scroll(
+        &mut self,
+        rows: usize,
+    ) -> Option<usize> {
+        let picker = self.picker.interaction.as_mut()?;
+        let crate::ui::PickerPreviewBody::Diff(diff) = &self.preview.as_ref()?.body else {
+            return None;
+        };
+        let scroll = picker
+            .preview_scroll
+            .unwrap_or_else(|| diff.opening_scroll(rows))
+            .min(diff.last_scroll(rows));
+        picker.preview_scroll = Some(scroll);
+        picker.preview_rows = rows;
+        Some(scroll)
+    }
+    /// Move the diff pane by half its height. Nothing happens where no diff is showing.
+    pub(in crate::editor::session) fn picker_preview_page(&mut self, direction: i8) {
+        let Some(picker) = self.picker.interaction.as_mut() else {
+            return;
+        };
+        let Some(crate::ui::PickerPreviewBody::Diff(diff)) =
+            self.preview.as_ref().map(|preview| &preview.body)
+        else {
+            return;
+        };
+        let step = (picker.preview_rows / 2).max(1);
+        let current = picker.preview_scroll.unwrap_or(0);
+        let scroll = if direction < 0 {
+            current.saturating_sub(step)
+        } else {
+            current.saturating_add(step)
+        };
+        picker.preview_scroll = Some(scroll.min(diff.last_scroll(picker.preview_rows)));
+    }
+    /// A different diff is about to show, so the next layout places it afresh.
+    pub(super) fn picker_preview_replaced(&mut self) {
+        if let Some(picker) = &mut self.picker.interaction {
+            picker.preview_scroll = None;
+        }
+    }
     pub(in crate::editor::session) fn picker_follows_tail(&self) -> bool {
         self.picker().is_none_or(PickerState::selected_is_last)
     }
@@ -463,13 +512,13 @@ impl SearchSession {
     pub(in crate::editor::session) fn picker_projection(&self) -> Option<PickerUiState> {
         let picker = self.picker.interaction.as_ref()?;
         let presentation = picker.state.presentation();
+        let preview_scroll = picker.preview_scroll.unwrap_or(0);
         Some(PickerUiState {
             input_hint: String::new(),
             surface: picker.surface,
             footer: picker.footer.clone(),
-            // No key in the document chooses the side-by-side layout yet, so both sides sit
-            // at the top; the renderer honours whatever a surface passes here.
-            preview_side_scroll: (0, 0),
+            // Both sides move together; nothing scrolls one side of a diff alone yet.
+            preview_side_scroll: (preview_scroll, preview_scroll),
             title: presentation.title,
             query: presentation.query,
             rows: presentation

@@ -739,6 +739,40 @@ impl DiffPreview {
         (format!("{prefix}{}", cell.text), spans)
     }
 
+    /// The rows that stay on top of the box while the rest scroll: the comparison's name.
+    #[must_use]
+    pub fn pinned_rows(&self) -> usize {
+        usize::from(!self.provenance.is_empty())
+    }
+
+    /// The furthest a box of `height` rows can scroll.
+    #[must_use]
+    pub fn last_scroll(&self, height: usize) -> usize {
+        let pinned = self.pinned_rows();
+        self.rows()
+            .len()
+            .saturating_sub(pinned)
+            .saturating_sub(height.saturating_sub(pinned))
+    }
+
+    /// Where a box of `height` rows opens: at the top when the first change fits, otherwise
+    /// on that change with one row above it.
+    #[must_use]
+    pub fn opening_scroll(&self, height: usize) -> usize {
+        let pinned = self.pinned_rows();
+        let first_change = self
+            .rows()
+            .iter()
+            .skip(pinned)
+            .position(|row| matches!(row.kind, DiffRowKind::Added | DiffRowKind::Removed))
+            .unwrap_or(0);
+        if first_change < height.saturating_sub(pinned) {
+            0
+        } else {
+            first_change.saturating_sub(1)
+        }
+    }
+
     /// Every row this diff draws in the unified layout, in order.
     ///
     /// Measurement and painting both read this, so a preview's width cannot be computed from
@@ -909,7 +943,7 @@ pub struct PickerUiState {
     /// rather than the widget's mode. When present it is shown instead of `input_hint`, so a
     /// surface can name what its keys do here.
     pub footer: Option<String>,
-    /// How far each side of a side-by-side diff preview is scrolled, in rows.
+    /// How far a diff preview is scrolled, in rows. The unified layout reads the first offset.
     ///
     /// The two sides scroll INDEPENDENTLY: each offset moves its own side's sequence of
     /// cells, so one side can be moved without disturbing the other. Equal offsets keep the

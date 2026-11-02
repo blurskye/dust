@@ -383,6 +383,8 @@ pub enum AppEffect {
     PickerInsert(String),
     PickerBackspace,
     PickerMove(i8),
+    /// Page the open picker's diff pane.
+    PickerPreviewPage(i8),
     /// Re-present the open picker's rows on the shared Results surface.
     PickerResults,
     PickerAccept,

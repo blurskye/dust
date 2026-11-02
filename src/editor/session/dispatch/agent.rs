@@ -943,9 +943,13 @@ impl InteractiveApplication {
     fn start_agent_session(&mut self, name: &str) -> Result<(), String> {
         let root = self.state.workspace_root.clone();
         let spawned = self.spawn_agent(name, &root, Some(self.agent.started + 1))?;
+        let note = self.configuration.settings().agents.profiles.get(name).and_then(|profile| {
+            profile.note.clone().map(Entry::Notice)
+        });
         let index = self.add_agent_tab(name.to_owned(), root, Vec::new(), None, None);
         self.agent.active = index;
         self.agent.sessions[index].attach(spawned);
+        self.agent.sessions[index].entries.extend(note);
         Ok(())
     }
 
