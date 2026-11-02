@@ -233,6 +233,10 @@ pub fn parse_ex(
                     .map_err(|_| ExParseError::UnexpectedArguments(arguments.into()))?;
                 command(command_id)?.with_argument("direction", CommandValue::Integer(direction))
             }
+            "package.registry.search" if !arguments.is_empty() && !arguments.contains('=') => {
+                command(command_id)?
+                    .with_argument("query", CommandValue::String(arguments.to_owned()))
+            }
             "theme.select" if !arguments.is_empty() => command(command_id)?
                 .with_argument("name", CommandValue::String(arguments.to_owned())),
             // As in Vim, `:e` with no file reloads the current one.
@@ -393,6 +397,10 @@ mod tests {
             watch.arguments.get("expression"),
             Some(&CommandValue::String("total * 10".into()))
         );
+        let search = parse_ex("package.registry.search theme", &aliases).expect("search");
+        assert_eq!(search.arguments["query"], CommandValue::String("theme".into()));
+        let named = parse_ex("package.registry.search query=theme", &aliases).expect("named");
+        assert_eq!(named.arguments["query"], CommandValue::String("theme".into()));
         let edit = parse_ex("edit src/main.rs", &aliases).expect("edit");
         assert_eq!(edit.id.as_str(), "file.open");
         assert_eq!(

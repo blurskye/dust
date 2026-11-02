@@ -122,6 +122,9 @@ pub struct PersistedSession {
     /// This backward-compatible schema-2 extension is absent from older files.
     #[serde(default)]
     pub content_descriptors: Vec<PersistedContentDescriptor>,
+    /// Absent from files written before pins were saved.
+    #[serde(default)]
+    pub pinned: Vec<PathBuf>,
 }
 impl PersistedSession {
     #[must_use]
@@ -826,6 +829,7 @@ mod tests {
                     },
                 }],
                 content_descriptors: Vec::new(),
+                pinned: Vec::new(),
             }),
             jumps: vec![PersistedLocation {
                 path: PathBuf::from("/workspace/main.rs"),

@@ -144,7 +144,7 @@ fn every_managed_catalog_lsp_language_has_a_reachable_document_mapping() {
         .into_iter()
         .filter(|tool| tool.kind == ToolKind::Lsp && tool.install.is_some())
         .collect::<Vec<_>>();
-    assert_eq!(servers.len(), 23);
+    assert_eq!(servers.len(), 24);
     for server in servers {
         assert!(!server.project_root_markers.is_empty(), "{}", server.id);
         for language in &server.languages {

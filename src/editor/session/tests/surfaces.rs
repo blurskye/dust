@@ -4683,6 +4683,7 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
         active_tab: 0,
         window_rules: Vec::new(),
         content_descriptors: Vec::new(),
+        pinned: vec![path.clone()],
     };
     macro_rules! context {
         () => {
@@ -4722,6 +4723,8 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
     assert_ne!(buffer, newer);
     assert!(identity.same_editor(&app.state.window_version()));
     assert_eq!(app.state.buffers[buffer].text.to_string(), "héllo\n");
+    assert!(app.window_session.pins().contains(&buffer));
+    assert_eq!(app.capture_session().unwrap().pinned, [path.clone()]);
     let restored = &app.state.views[app.state.active_view.unwrap()];
     assert_eq!(restored.cursor.get(), 1);
     assert_eq!(restored.selection.unwrap().anchor.get(), 3);

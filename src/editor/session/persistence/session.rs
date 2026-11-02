@@ -94,6 +94,7 @@ pub(in crate::editor::session) struct RestorePrepared {
     pub paths: Vec<PathBuf>,
     pub window_rules: Vec<PersistedWindowRule>,
     pub content_descriptors: Vec<PersistedContentDescriptor>,
+    pub pinned: Vec<PathBuf>,
 }
 
 pub(in crate::editor::session) struct RestoreReady {
@@ -116,6 +117,7 @@ impl RestoreReady {
             paths: self.loaded.into_values().map(|(path, _)| path).collect(),
             window_rules: self.session.window_rules,
             content_descriptors: self.session.content_descriptors,
+            pinned: self.session.pinned,
         })
     }
 }
@@ -494,6 +496,11 @@ impl PersistenceSession {
                 active_tab,
                 window_rules: rules,
                 content_descriptors: descriptors,
+                pinned: windows
+                    .pins()
+                    .iter()
+                    .filter_map(|buffer| state.buffers.get(*buffer)?.path.clone())
+                    .collect(),
             }),
         )
     }

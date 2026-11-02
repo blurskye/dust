@@ -1604,6 +1604,7 @@ impl InteractiveApplication {
                      paths,
                      window_rules,
                      content_descriptors,
+                     pinned,
                  }| {
                     let terminals = self.terminal_session.descriptions();
                     let descriptions = NativeDescriptions {
@@ -1633,11 +1634,11 @@ impl InteractiveApplication {
                     let state = self
                         .window_session
                         .accept_editor_transition(transition, &current, &catalog)?;
-                    Ok((state, paths))
+                    Ok((state, paths, pinned))
                 },
             );
         match result {
-            Ok((state, paths)) => {
+            Ok((state, paths, pinned)) => {
                 *self.state = state;
                 let retired_confirmation = self.extension.reset_runtime();
                 if retired_confirmation
@@ -1656,6 +1657,16 @@ impl InteractiveApplication {
                 }
                 self.ensure_cursor_visible();
                 self.reconcile_editor_windows();
+                let pinned = self
+                    .state
+                    .buffers
+                    .iter()
+                    .filter(|(_, buffer)| {
+                        buffer.path.as_ref().is_some_and(|path| pinned.contains(path))
+                    })
+                    .map(|(id, _)| id)
+                    .collect();
+                self.window_session.restore_pins(pinned);
             }
             Err(error) => self.show_error(error),
         }
@@ -4877,10 +4888,10 @@ impl InteractiveApplication {
         .join("/");
         let mut hints = Vec::new();
         if !selections.is_empty() {
-            hints.push(format!("{selections} answer"));
+            hints.push(format!("{selections} answer now"));
         }
         if let Some(key) = binding("command_line.submit") {
-            hints.push(format!("{key} confirm"));
+            hints.push(format!("{key} selected"));
         }
         if let Some(key) = binding("command_line.cancel") {
             hints.push(format!("{key} cancel"));

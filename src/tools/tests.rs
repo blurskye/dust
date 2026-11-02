@@ -64,7 +64,7 @@ fn bundled_catalog_is_typed_and_has_real_language_and_debug_tools() {
             .iter()
             .filter(|tool| tool.kind == ToolKind::Lsp && tool.install.is_some())
             .count(),
-        23
+        24
     );
     assert!(
         catalog

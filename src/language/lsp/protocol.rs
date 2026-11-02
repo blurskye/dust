@@ -23,6 +23,8 @@ use super::{
     session::PendingRequest,
 };
 
+/// `tags` is in `resolveSupport` because rust-analyzer only advertises resolve, and with it
+/// auto-imports, when the client defers a field it recognises. Dust doesn't read tags.
 pub(super) fn initialize_message(root: &Path, initialization_options: Option<&Value>) -> Value {
     let mut message = json!({
         "jsonrpc":"2.0", "id":1, "method":"initialize",
@@ -37,7 +39,7 @@ pub(super) fn initialize_message(root: &Path, initialization_options: Option<&Va
                 "window":{"workDoneProgress":true},
                 "textDocument":{
                     "synchronization":{"didSave":true,"dynamicRegistration":true},
-                    "completion":{"dynamicRegistration":true,"completionItem":{"snippetSupport":true,"documentationFormat":["markdown","plaintext"]}},
+                    "completion":{"dynamicRegistration":true,"completionItem":{"snippetSupport":true,"documentationFormat":["markdown","plaintext"],"resolveSupport":{"properties":["additionalTextEdits","tags"]}}},
                     "hover":{"dynamicRegistration":true,"contentFormat":["markdown","plaintext"]},
                     "signatureHelp":{"dynamicRegistration":true},
                     "definition":{"dynamicRegistration":true,"linkSupport":true},

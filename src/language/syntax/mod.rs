@@ -247,7 +247,7 @@ pub const fn language_info(language: SyntaxLanguage) -> SyntaxLanguageInfo {
             folds: SyntaxSupport::Full,
             indents: SyntaxSupport::Unsupported,
         },
-        SyntaxLanguage::Toml => SyntaxCapabilities {
+        SyntaxLanguage::Toml | SyntaxLanguage::Html => SyntaxCapabilities {
             highlights: SyntaxSupport::Full,
             folds: SyntaxSupport::Full,
             indents: SyntaxSupport::Unsupported,
@@ -368,7 +368,7 @@ fn descriptor(language: SyntaxLanguage) -> Descriptor {
         SyntaxLanguage::Html => Descriptor {
             language: tree_sitter_html::LANGUAGE.into(),
             highlights: include_str!("../../../assets/syntax/html/highlights.scm"),
-            folds: None,
+            folds: Some(include_str!("../../../assets/syntax/html/folds.scm")),
             indents: None,
         },
         SyntaxLanguage::Python => Descriptor {
@@ -1093,6 +1093,30 @@ mod tests {
         assert!(rows("one\ntwo\n").is_empty());
         assert_eq!(rows("class A:\n  def b():\n    c\n"), [(0, 2), (1, 2)]);
         assert_eq!(indentation_folds("a\n b\nc\n d\n", 1).len(), 1);
+    }
+    #[test]
+    fn an_html_element_folds_even_when_its_children_share_its_indentation() {
+        let source = "<!doctype html>\n<html>\n<head>\n<title>x</title>\n</head>\n</html>\n";
+        let request = Request {
+            document: SyntaxDocumentId(1),
+            generation: 2,
+            revision: 3,
+            language: SyntaxLanguage::Html,
+            source: source.into(),
+            policy: SyntaxPolicy::default(),
+        };
+        let SyntaxEvent::Parsed(result) = parse(request) else {
+            panic!("parse html")
+        };
+        let folds = result.folds;
+        assert!(
+            folds.iter().any(|fold| (fold.start_row, fold.end_row) == (1, 5)),
+            "{folds:?}"
+        );
+        assert!(
+            folds.iter().any(|fold| (fold.start_row, fold.end_row) == (2, 4)),
+            "{folds:?}"
+        );
     }
     #[test]
     fn a_toml_table_fold_stops_before_the_next_table() {

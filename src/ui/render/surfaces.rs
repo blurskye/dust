@@ -1173,14 +1173,28 @@ pub(super) fn render_tool_menu(
     // A short window keeps what the user can act on, the note and the keys, and gives the list
     // the rest.
     let short = remaining < 12;
-    let detail_rows = if short { 5u16 } else { 9 }.min(remaining.saturating_sub(1));
+    let usual_detail_rows = if short { 5u16 } else { 9 };
+    // A failure explains itself in the details, so it takes rows from the list until it fits.
+    let failure_rows = menu
+        .rows
+        .get(menu.selected)
+        .filter(|row| tool_state_glyph(row).1 == Style::Error)
+        .map_or(0, |row| {
+            let note = super::wrap_card_text(&row.note, usize::from(content_width), ambiguous).len();
+            usual_detail_rows - 2 + u16::try_from(note).unwrap_or(u16::MAX)
+        })
+        .min(remaining.saturating_sub(2));
+    let detail_rows = usual_detail_rows
+        .max(failure_rows)
+        .min(remaining.saturating_sub(1));
     let list_bottom = top + height - 1 - detail_rows;
     let visible_rows = usize::from(list_bottom.saturating_sub(y));
+    let scroll = menu.scroll.max((menu.selected + 1).saturating_sub(visible_rows));
     for (index, row) in menu
         .rows
         .iter()
         .enumerate()
-        .skip(menu.scroll)
+        .skip(scroll)
         .take(visible_rows)
     {
         let selected = index == menu.selected;

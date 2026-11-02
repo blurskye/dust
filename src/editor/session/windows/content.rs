@@ -48,6 +48,12 @@ impl WindowSession {
         line.order_revision = line.order_revision.saturating_add(1);
         line.signature = None;
     }
+    pub(in crate::editor::session) fn restore_pins(&mut self, buffers: BTreeSet<BufferId>) {
+        let line = &mut self.content_line;
+        line.pins = buffers;
+        line.order_revision = line.order_revision.saturating_add(1);
+        line.signature = None;
+    }
     pub(in crate::editor::session) fn move_content(
         &mut self,
         buffer: BufferId,
@@ -80,7 +86,6 @@ impl WindowSession {
     pub(in crate::editor::session) fn content_builds(&self) -> usize {
         self.content_line.builds
     }
-    #[cfg(test)]
     pub(in crate::editor::session) fn pins(&self) -> &BTreeSet<BufferId> {
         &self.content_line.pins
     }

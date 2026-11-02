@@ -525,6 +525,21 @@ method = "npm_package"
 packages = ["prettier@3.6.2"]
 
 [[tool]]
+id = "ruff"
+name = "ruff"
+kind = "lsp"
+languages = ["python"]
+executable = "ruff"
+version = "0.17.3"
+launch_args = ["server"]
+project_root_markers = ["pyproject.toml", "ruff.toml", ".ruff.toml", ".git"]
+project_root_strategy = "python"
+
+[tool.install]
+method = "uv_tool"
+packages = ["ruff==0.17.3"]
+
+[[tool]]
 id = "black"
 name = "black"
 kind = "formatter"
