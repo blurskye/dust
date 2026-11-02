@@ -235,8 +235,6 @@ pub enum AppEffect {
     },
     ShowKeymapConflicts,
     RecoveryInspect,
-    RecoveryRecoverLatest,
-    RecoveryDiscardLatest,
     SessionSave,
     SessionLoad,
     HistoryClear,
@@ -389,6 +387,8 @@ pub enum AppEffect {
     PickerPreviewPage(i8),
     /// Re-present the open picker's rows on the shared Results surface.
     PickerResults,
+    /// Remove the selected row's thing: a recovery journal or a worktree.
+    PickerRemove,
     PickerAccept,
     PickerCancel,
     PickerNormal,

@@ -4551,16 +4551,16 @@ command = "workspace.git.conflicts.open"
 desc = "Conflicts"
 
 [[keymap]]
-id = "builtin.picker.worktree-remove.ctrl-x"
+id = "builtin.picker.remove.ctrl-x"
 context = "picker"
 keys = "ctrl-x"
-command = "workspace.git.worktree.remove"
+command = "picker.remove"
 
 [[keymap]]
-id = "builtin.picker-normal.worktree-remove.d"
+id = "builtin.picker-normal.remove.d"
 context = "picker_normal"
 keys = "d"
-command = "workspace.git.worktree.remove"
+command = "picker.remove"
 
 [[keymap]]
 id = "builtin.global.git-worktrees"

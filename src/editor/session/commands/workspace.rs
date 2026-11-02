@@ -213,6 +213,11 @@ pub(super) fn register_commands(
             AppEffect::PickerResults,
         ),
         (
+            "picker.remove",
+            "Remove the selected row",
+            AppEffect::PickerRemove,
+        ),
+        (
             "picker.accept",
             "Accept picker item",
             AppEffect::PickerAccept,

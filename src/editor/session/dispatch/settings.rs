@@ -152,7 +152,7 @@ impl InteractiveApplication {
                 if let Some(row) = page.selected_row() {
                     if row.modified {
                         let key = row.key.clone();
-                        self.save_setting(&key, None, false);
+                        let _ = self.save_setting(&key, None, false);
                     } else {
                         page.status = Some(("Already the default".into(), false));
                     }
@@ -256,19 +256,20 @@ impl InteractiveApplication {
             (Some(SettingsEdit::Choice { selected }), SettingsValue::Choice { choices, .. }) => {
                 if let Some(choice) = choices.get(selected) {
                     let value = typed_like(&row.key, choice);
-                    self.save_setting(&row.key, Some(value), row.restart);
+                    let _ = self.save_setting(&row.key, Some(value), row.restart);
                 }
             }
             (Some(SettingsEdit::Text { text, cursor, .. }), value) => {
-                match parsed_text(&row.key, value, &text) {
-                    Ok(value) => self.save_setting(&row.key, value, row.restart),
-                    Err(error) => {
-                        page.edit = Some(SettingsEdit::Text { text, cursor, error: Some(error) });
-                    }
+                // A rejected value stays in the field with the reason, ready to correct.
+                let saved = parsed_text(&row.key, value, &text)
+                    .and_then(|value| self.save_setting(&row.key, value, row.restart));
+                if let (Err(error), Some(page)) = (saved, self.ui.settings.as_mut()) {
+                    page.status = None;
+                    page.edit = Some(SettingsEdit::Text { text, cursor, error: Some(error) });
                 }
             }
             (_, SettingsValue::Bool(on)) => {
-                self.save_setting(&row.key, Some(toml::Value::Boolean(!on)), row.restart);
+                let _ = self.save_setting(&row.key, Some(toml::Value::Boolean(!on)), row.restart);
             }
             (_, SettingsValue::Choice { current, choices }) => {
                 let selected = choices.iter().position(|choice| choice == current).unwrap_or(0);
@@ -288,21 +289,27 @@ impl InteractiveApplication {
     }
 
     /// Write one setting to config.toml and reload; the reload refreshes the page.
-    fn save_setting(&mut self, key: &str, value: Option<toml::Value>, restart: bool) {
+    fn save_setting(
+        &mut self,
+        key: &str,
+        value: Option<toml::Value>,
+        restart: bool,
+    ) -> Result<(), String> {
         let result = match self.configuration.user_settings_path() {
             None => Err("Dust started without a user configuration, so nothing can be saved".into()),
             Some(path) => write_user_setting(&path, key, value).and_then(|()| {
                 self.configuration.request_reload().map_err(|error| error.to_string())
             }),
         };
-        let status = match result {
+        let status = match &result {
             Ok(()) if restart => ("Saved. Restart Dust to apply it".into(), false),
             Ok(()) => ("Saved".into(), false),
-            Err(error) => (error, true),
+            Err(error) => (error.clone(), true),
         };
         if let Some(page) = self.ui.settings.as_mut() {
             page.status = Some(status);
         }
+        result
     }
 
     pub(super) fn settings_mouse(
@@ -427,9 +434,11 @@ fn parsed_text(key: &str, value: &SettingsValue, text: &str) -> Result<Option<to
             Some(toml::Value::Float(_)) => toml::Value::Float(
                 text.parse().map_err(|_| "Enter a number".to_owned())?,
             ),
-            _ => toml::Value::Integer(
-                text.parse().map_err(|_| "Enter a whole number".to_owned())?,
-            ),
+            _ => match text.parse::<i64>() {
+                Ok(number) if number < 0 => return Err("Enter 0 or more".into()),
+                Ok(number) => toml::Value::Integer(number),
+                Err(_) => return Err("Enter a whole number".into()),
+            },
         },
         SettingsValue::List(_) => toml::Value::Array(
             text.split(',')

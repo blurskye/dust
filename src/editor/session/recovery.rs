@@ -8,7 +8,7 @@ use crate::{
 use std::ops::ControlFlow::{self, Break, Continue};
 use std::{
     collections::HashMap,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
@@ -23,6 +23,8 @@ enum Pending {
     Delete {
         path: PathBuf,
         buffer: Option<(BufferId, BufferRevision)>,
+        /// Say so once the journal is gone.
+        announce: bool,
     },
     CrashDelete {
         path: PathBuf,
@@ -55,6 +57,9 @@ pub(super) struct RecoverySession {
     discovery_queued: bool,
     cleanup_queued: bool,
     pending: HashMap<RequestId, Pending>,
+    /// Original files being read so a journal can be recovered into them: the journal's path
+    /// and the text it holds, by read.
+    reads: HashMap<RequestId, (PathBuf, String)>,
 }
 impl RecoverySession {
     pub(super) fn new(directory: PathBuf) -> Self {
@@ -69,7 +74,14 @@ impl RecoverySession {
             discovery_queued: false,
             cleanup_queued: false,
             pending: HashMap::new(),
+            reads: HashMap::new(),
         }
+    }
+    pub(super) fn register_read(&mut self, id: RequestId, journal: PathBuf, content: String) {
+        self.reads.insert(id, (journal, content));
+    }
+    pub(super) fn take_read(&mut self, id: RequestId) -> Option<(PathBuf, String)> {
+        self.reads.remove(&id)
     }
     pub(super) fn records(&self) -> &[(PathBuf, RecoveryRecord)] {
         &self.records
@@ -162,6 +174,7 @@ impl RecoverySession {
                                 Pending::Delete {
                                     path,
                                     buffer: Some((buffer, revision)),
+                                    announce: false,
                                 },
                             );
                         }
@@ -209,26 +222,31 @@ impl RecoverySession {
         self.pending.insert(id, Pending::CrashDelete { path });
         Ok(())
     }
-    pub(super) fn discard_latest(&mut self, mut io: RecoveryIo<'_>) -> Result<bool, String> {
-        let Some((path, _)) = self.records.last() else {
-            return Ok(false);
-        };
+    /// Delete one discovered journal; the record goes once the delete completes, and
+    /// `announce` says so then.
+    pub(super) fn discard(
+        &mut self,
+        path: &Path,
+        announce: bool,
+        mut io: RecoveryIo<'_>,
+    ) -> Result<(), String> {
         if self
             .pending
             .values()
             .any(|p| matches!(p, Pending::Delete { path: p, .. } if p == path))
         {
-            return Ok(true);
+            return Ok(());
         }
         let id = io.delete(path).map_err(|e| e.to_string())?;
         self.pending.insert(
             id,
             Pending::Delete {
-                path: path.clone(),
+                path: path.to_owned(),
                 buffer: None,
+                announce,
             },
         );
-        Ok(true)
+        Ok(())
     }
     pub(super) fn stopped(&mut self) {
         self.pending.clear();
@@ -317,7 +335,14 @@ impl RecoverySession {
                 Ok(()) => RecoveryUpdate::CrashCleared,
                 Err(error) => RecoveryUpdate::Error(error.to_string()),
             },
-            (Pending::Delete { path, buffer }, VfsResult::Deleted { result, .. }) => match result {
+            (
+                Pending::Delete {
+                    path,
+                    buffer,
+                    announce,
+                },
+                VfsResult::Deleted { result, .. },
+            ) => match result {
                 Err(error) => RecoveryUpdate::Error(error.to_string()),
                 Ok(()) => {
                     self.records.retain(|(p, _)| *p != path);
@@ -329,8 +354,10 @@ impl RecoverySession {
                             self.pruned.remove(&buffer);
                         }
                         RecoveryUpdate::Quiet
-                    } else {
+                    } else if announce {
                         RecoveryUpdate::Discarded
+                    } else {
+                        RecoveryUpdate::Quiet
                     }
                 }
             },
@@ -346,6 +373,9 @@ impl RecoverySession {
     }
     pub(super) fn directory(&self) -> &std::path::Path {
         &self.directory
+    }
+    pub(super) fn fixture_records(&mut self, records: Vec<(PathBuf, RecoveryRecord)>) {
+        self.records = records;
     }
     pub(super) fn scheduled(&self) -> &HashMap<BufferId, (BufferRevision, Instant)> {
         &self.scheduled

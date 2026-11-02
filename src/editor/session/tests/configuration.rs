@@ -1319,15 +1319,18 @@ fn the_settings_page_searches_edits_and_closes_layer_by_layer() {
         &app.ui.settings.as_ref().unwrap().edit,
         Some(SettingsEdit::Text { error: Some(error), .. }) if error == "Enter a whole number"
     ));
-    // The test runs on the bundled defaults alone, so a valid value is refused, not written.
+    // The test runs on the bundled defaults alone, so a valid value is refused, not written,
+    // and the draft stays to fix or cancel.
     app.process_effect(AppEffect::Settings(SettingsAction::Clear));
     app.process_effect(AppEffect::Settings(SettingsAction::Insert("2".into())));
     app.process_effect(AppEffect::Settings(SettingsAction::Activate));
-    let page = app.ui.settings.as_ref().unwrap();
-    assert!(page.edit.is_none());
-    assert!(page.status.as_ref().is_some_and(|(_, error)| *error));
+    assert!(matches!(
+        &app.ui.settings.as_ref().unwrap().edit,
+        Some(SettingsEdit::Text { text, error: Some(error), .. })
+            if text == "2" && error.contains("user configuration")
+    ));
 
-    for context in ["settings", "settings"] {
+    for context in ["settings_edit", "settings", "settings"] {
         assert_eq!(app.active_input_context(), context);
         app.process_effect(AppEffect::Settings(SettingsAction::Cancel));
     }

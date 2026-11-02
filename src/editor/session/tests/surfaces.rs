@@ -1453,6 +1453,72 @@ fn recovery_debounce_coalesces_revisions_and_clean_state_deletes_last_journal() 
 }
 
 #[test]
+fn recovery_dialog_discards_one_journal_and_recovers_another() {
+    let mut app = app();
+    app.recovery.skip_maintenance();
+    let directory = app.recovery.directory().to_owned();
+    std::fs::create_dir_all(&directory).unwrap();
+    let kept = directory.join("buffer-kept.toml");
+    let dropped = directory.join("buffer-dropped.toml");
+    std::fs::write(&kept, "").unwrap();
+    std::fs::write(&dropped, "").unwrap();
+    let notes = app.state.workspace_root.join("notes.md");
+    std::fs::write(&notes, "saved\n").unwrap();
+    app.recovery.fixture_records(vec![
+        (
+            kept.clone(),
+            crate::files::RecoveryRecord {
+                version: crate::files::RECOVERY_VERSION,
+                original_path: Some(notes.display().to_string()),
+                revision: 3,
+                content: "draft\nsecond\n".into(),
+            },
+        ),
+        (
+            dropped.clone(),
+            crate::files::RecoveryRecord {
+                version: crate::files::RECOVERY_VERSION,
+                original_path: None,
+                revision: 1,
+                content: "scratch".into(),
+            },
+        ),
+    ]);
+
+    app.invoke_mapped_command("recovery.inspect");
+    let picker = app.ui.picker.as_ref().expect("recovery dialog");
+    assert_eq!(picker.title, "Recover Unsaved Work");
+    assert_eq!(picker.rows.len(), 2);
+    assert_eq!(picker.rows[0].detail, "1 line");
+    assert!(picker.rows[1].label.contains("notes.md"));
+
+    app.invoke_mapped_command("picker.remove");
+    wait_vfs(&mut app);
+    assert!(!dropped.exists());
+    let picker = app.ui.picker.as_ref().expect("the dialog stays open");
+    assert_eq!(picker.rows.len(), 1);
+    assert!(
+        picker
+            .preview
+            .as_ref()
+            .and_then(crate::ui::PickerPreview::as_text)
+            .is_some_and(|text| text.lines == ["draft", "second"])
+    );
+
+    app.accept_picker();
+    wait_vfs(&mut app);
+    assert!(!kept.exists());
+    assert!(app.recovery.records().is_empty());
+    // The work comes back as an unsaved change to its own file; undo goes back to the disk.
+    let buffer = app.state.active_buffer_id().expect("recovered buffer");
+    assert_eq!(app.state.buffers[buffer].path.as_deref(), Some(notes.as_path()));
+    assert!(app.state.buffers[buffer].dirty);
+    assert_eq!(app.state.buffers[buffer].text.to_bytes(), b"draft\nsecond\n");
+    app.invoke_mapped_command("history.undo");
+    assert_eq!(app.state.buffers[buffer].text.to_bytes(), b"saved\n");
+}
+
+#[test]
 fn recovery_delete_completion_cannot_forget_a_newer_queued_write() {
     let mut app = app();
     app.recovery.skip_maintenance();

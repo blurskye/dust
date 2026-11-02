@@ -23,6 +23,8 @@ pub(in crate::editor::session) enum PickerPayload {
     Section,
     /// A workspace from the project list.
     Project(std::path::PathBuf),
+    /// A recovery journal, by the journal's own path.
+    Recovery(std::path::PathBuf),
     /// A code lens the server runs when chosen.
     LspCommand(crate::language::lsp::LspCommand),
     /// A row of one of the agent pickers.

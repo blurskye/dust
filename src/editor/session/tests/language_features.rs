@@ -148,6 +148,34 @@ fn inlay_hint_results_are_revision_owned_and_projected_at_exact_unicode_offsets(
 }
 
 #[test]
+fn content_modified_before_any_loading_is_asked_again_a_few_times() {
+    let mut app = app();
+    let failure = |app: &mut InteractiveApplication| {
+        app.handle_lsp_request_failure(
+            "rust-analyzer".into(),
+            7,
+            "textDocument/definition".into(),
+            r#"{"code":-32801,"message":"content modified"}"#.into(),
+        );
+    };
+    for _ in 0..10 {
+        app.lsp_asked = Some(crate::language::lsp::LspFeature::Definition);
+        failure(&mut app);
+        assert!(!app.ui.notification_error);
+        assert!(app.lsp_waiting.is_some());
+        assert!(app.lsp_retry_at.is_some());
+        // Sending it again needs a server, so the test only lets the retry come due.
+        app.lsp_waiting = None;
+        app.lsp_retry_at = Some(Instant::now());
+        app.process_lsp_retry();
+        assert!(app.lsp_retry_at.is_none());
+    }
+    app.lsp_asked = Some(crate::language::lsp::LspFeature::Definition);
+    failure(&mut app);
+    assert!(app.ui.notification_error, "the eleventh answer is shown");
+}
+
+#[test]
 fn background_inlay_failures_never_replace_the_user_notification() {
     let mut app = app();
     let path = app.state.workspace_root.join("inlay-failure.rs");

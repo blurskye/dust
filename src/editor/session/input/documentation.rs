@@ -155,14 +155,28 @@ fn markdown_rows(source: &str, width: usize) -> Vec<(String, DocumentationLineRo
         {
             rows.push(("─".repeat(width.clamp(1, 40)), Text));
         } else if let Some(item) = ["- ", "* ", "+ "].iter().find_map(|mark| trimmed.strip_prefix(mark)) {
-            rows.push((format!("{indent}• {}", plain_markdown(item)), Text));
+            let item = match item.get(..4) {
+                Some("[ ] ") => format!("☐ {}", &item[4..]),
+                Some("[x] " | "[X] ") => format!("☑ {}", &item[4..]),
+                _ => format!("• {item}"),
+            };
+            rows.push((format!("{indent}{}", plain_markdown(&item)), Text));
         } else if let Some(quote) = trimmed.strip_prefix('>') {
             rows.push((format!("{indent}│ {}", plain_markdown(quote.trim_start())), Text));
+        } else if !trimmed.is_empty()
+            && lines.next_if(|next| setext_underline(next.trim())).is_some()
+        {
+            rows.push((plain_markdown(trimmed), Heading));
         } else {
             rows.push((plain_markdown(line), Text));
         }
     }
     rows
+}
+
+/// The `===` or `---` line under a heading written the other way.
+fn setext_underline(line: &str) -> bool {
+    !line.is_empty() && (line.chars().all(|c| c == '=') || line.chars().all(|c| c == '-'))
 }
 
 /// The text of an ATX heading, `## Like this ##`.
@@ -232,6 +246,7 @@ fn table_cells(row: &str) -> Vec<String> {
 fn plain_markdown(line: &str) -> String {
     let text = link_labels(&without_data_images(line))
         .replace("**", "")
+        .replace("~~", "")
         .replace('`', "");
     let text = without_emphasis(&text);
     [
@@ -365,7 +380,7 @@ mod tests {
     fn markdown_blocks_read_as_a_rendered_page() {
         let rows = markdown_rows(
             "# Title\n*em* and `code`\n- item\n> quote\n---\n```rust\nlet a = *b*;\n```\n\
-             | Name | Age |\n|---|:-:|\n| Ada | 36 |\n",
+             | Name | Age |\n|---|:-:|\n| Ada | 36 |\nOther\n=====\n- [x] ~~done~~\n",
             4,
         );
         let text = |text: &str, role| (text.to_owned(), role);
@@ -381,6 +396,8 @@ mod tests {
                 text("Name │ Age", Role::Table),
                 text("─────┼────", Role::Table),
                 text("Ada  │ 36", Role::Table),
+                text("Other", Role::Heading),
+                text("☑ done", Role::Text),
                 text("", Role::Text),
             ]
         );

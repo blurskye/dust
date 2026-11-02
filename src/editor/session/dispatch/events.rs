@@ -851,6 +851,8 @@ impl InteractiveApplication {
         self.ui.lsp_loading = None;
         self.lsp_asked = None;
         self.lsp_waiting = None;
+        self.lsp_retry_at = None;
+        self.lsp_retries = 0;
         self.diagnostics.dismiss_expansion();
         self.ui.expanded_diagnostic = None;
         let context = context.to_owned();
@@ -1387,11 +1389,18 @@ impl InteractiveApplication {
 
 use std::ops::ControlFlow::{Break, Continue};
 
+/// How often, and how far apart, a request answered "content modified" before its server
+/// reported loading is sent again: rust-analyzer does this for a file opened a moment ago.
+const LSP_CONTENT_MODIFIED_RETRIES: u8 = 10;
+const LSP_CONTENT_MODIFIED_DELAY: Duration = Duration::from_millis(500);
+
 enum NavigationRead {
     Matcher(MatcherSource),
     Persisted(PersistedLocation),
     Lsp(crate::language::lsp::LspRange, PositionEncoding),
     WorkspaceSearch(std::ops::Range<usize>),
+    /// A recovery journal's path and text, to put into the file once it is open.
+    Recovered(std::path::PathBuf, String),
 }
 
 impl InteractiveApplication {
@@ -1459,6 +1468,7 @@ impl InteractiveApplication {
                         self.search.retire_document_request(id);
                         self.language.retire_document_request(id);
                         self.persistence.retire_document_request(id);
+                        self.recovery.take_read(id);
                     }
                     self.recovery.stopped();
                     self.search.clear_preview();
@@ -1541,7 +1551,10 @@ impl InteractiveApplication {
                             false,
                         ),
                         RecoveryUpdate::Discarded => {
-                            self.notify_message(self.message("recovery_discarded", &[]), false)
+                            if self.recovery_picker_open() {
+                                self.open_recovery_picker();
+                            }
+                            self.notify_message(self.message("recovery_discarded", &[]), false);
                         }
                         RecoveryUpdate::CrashCleared => {
                             self.notify_message(self.message("crash_cleared", &[]), false)
@@ -1595,7 +1608,22 @@ impl InteractiveApplication {
                             self.search
                                 .take_workspace_navigation(id)
                                 .map(NavigationRead::WorkspaceSearch)
+                        })
+                        .or_else(|| {
+                            self.recovery
+                                .take_read(id)
+                                .map(|(journal, content)| NavigationRead::Recovered(journal, content))
                         });
+                    // A file deleted since the crash comes back as a new file at its path.
+                    if let Some(NavigationRead::Recovered(journal, content)) = &pending
+                        && result.is_err()
+                    {
+                        let (buffer, _) =
+                            self.state.open_text(TextBuffer::from_text(content), Some(path));
+                        self.state.buffers[buffer].dirty = true;
+                        self.finish_recovery(journal, "recovery_restored");
+                        continue;
+                    }
                     match result.map_err(InteractiveError::from).and_then(|bytes| {
                         TextBuffer::from_bytes(&bytes).map_err(InteractiveError::from)
                     }) {
@@ -1709,6 +1737,14 @@ impl InteractiveApplication {
                                 }
                                 self.set_dashboard_visibility(false);
                                 self.ensure_cursor_visible();
+                            }
+                            Some(NavigationRead::Recovered(journal, content)) => {
+                                let (buffer, _) = self.state.open_text(text, Some(path.clone()));
+                                self.state.buffers[buffer].read_only =
+                                    self.workspace.require_path(&path).is_err();
+                                self.record_recent_file(path);
+                                self.replace_with_recovered(buffer, content);
+                                self.finish_recovery(&journal, "recovery_restored");
                             }
                             _ => self.show_error(self.message("unexpected_read", &[])),
                         },
@@ -2277,7 +2313,6 @@ impl InteractiveApplication {
             }
             if self.language.projection().is_some() {
                 self.schedule_lsp_inlay_refresh(true);
-        self.explorer.reset_watch_observation();
             }
         }
     }
@@ -2380,7 +2415,6 @@ impl InteractiveApplication {
             }
             // Hints asked for while the server was indexing or checking come back empty.
             self.schedule_lsp_inlay_refresh(true);
-        self.explorer.reset_watch_observation();
         }
         self.ui.set(frame, |ui| &mut ui.lsp_progress_frame);
     }
@@ -2392,6 +2426,16 @@ impl InteractiveApplication {
         self.project_lsp_progress();
     }
     /// Whether the server is still working through its project.
+    /// Sends the waiting request again once a "content modified" retry is due.
+    pub(super) fn process_lsp_retry(&mut self) {
+        if self.lsp_retry_at.is_none_or(|due| Instant::now() < due) {
+            return;
+        }
+        self.lsp_retry_at = None;
+        if let Some(feature) = self.lsp_waiting.take() {
+            self.request_lsp(feature);
+        }
+    }
     fn lsp_server_loading(&self, server: &str) -> bool {
         self.ui
             .lsp_progress
@@ -2474,11 +2518,19 @@ impl InteractiveApplication {
         }
         // A server still indexing answers "content modified"; the protocol says to ask again,
         // so the request waits for the load to finish, as an empty answer does.
-        if message.contains("-32801") && self.lsp_asked.is_some() && self.lsp_server_loading(&server)
-        {
-            self.show_lsp_loading();
-            self.lsp_waiting = self.lsp_asked.clone();
-            return;
+        // Right after opening a file the server can answer that way before it reports loading;
+        // then the request is sent again shortly, a bounded number of times.
+        if message.contains("-32801") && self.lsp_asked.is_some() {
+            let loading = self.lsp_server_loading(&server);
+            if loading || self.lsp_retries < LSP_CONTENT_MODIFIED_RETRIES {
+                if !loading {
+                    self.lsp_retries += 1;
+                    self.lsp_retry_at = Some(Instant::now() + LSP_CONTENT_MODIFIED_DELAY);
+                }
+                self.show_lsp_loading();
+                self.lsp_waiting = self.lsp_asked.clone();
+                return;
+            }
         }
         let server = self.lsp_server_label(&server);
         self.show_error(self.message(
@@ -2530,7 +2582,6 @@ impl InteractiveApplication {
                 } => {
                     if self.language.running(&server, capabilities) {
                         self.schedule_lsp_inlay_refresh(true);
-        self.explorer.reset_watch_observation();
                     }
                     self.request_lsp_colors();
                 }
@@ -2538,7 +2589,6 @@ impl InteractiveApplication {
                 LspEvent::InlayHintsRefresh { server } => {
                     if self.language.active().map(String::as_str) == Some(&server) {
                         self.schedule_lsp_inlay_refresh(true);
-        self.explorer.reset_watch_observation();
                     }
                 }
                 LspEvent::Diagnostics {
@@ -2874,7 +2924,6 @@ impl InteractiveApplication {
         }
         if matches!(feature, LspFeature::InlayHints { .. }) {
             self.schedule_lsp_inlay_refresh(true);
-        self.explorer.reset_watch_observation();
             self.process_lsp_inlay_refresh();
             return;
         }

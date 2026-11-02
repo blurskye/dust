@@ -6,6 +6,9 @@ use crate::editor::session::search::{
     SEARCH_QUEUE_CAPACITY,
 };
 use crate::ui::render::{COMPLETION_MAX_ROWS, SCRATCH_LABEL};
+
+/// Lines of a recovery journal its preview shows.
+const RECOVERY_PREVIEW_LINES: usize = 500;
 use crate::ui::render::editor::STATUS_DIRTY_MARKER;
 use crate::ui::render::surfaces::{PICKER_MAXIMUM_PREVIEW_BYTES, TOOL_CATEGORY_ORDER, TOOL_MANAGER_MINIMUM_HEIGHT};
 use super::super::configuration::{configured_grapheme_width, configured_text_width};
@@ -1719,7 +1722,16 @@ impl InteractiveApplication {
         }
     }
     fn finish_theme_choice(&mut self, name: &str) {
-        let saving = self.configuration.settings().persistence.enabled;
+        // The choice goes into config.toml like any other setting; once the reload lands, the
+        // configured theme replaces the applied one. Without a config file it lives in the
+        // editor state instead.
+        let saved = self.configuration.user_settings_path().is_some_and(|path| {
+            crate::config::write_user_setting(&path, "ui.theme", Some(toml::Value::String(name.into())))
+                .and_then(|()| self.configuration.request_reload().map_err(|error| error.to_string()))
+                .map_err(|error| self.show_error(error))
+                .is_ok()
+        });
+        let saving = saved || self.configuration.settings().persistence.enabled;
         if saving {
             self.persistence.request_save();
         }
@@ -1879,32 +1891,7 @@ impl InteractiveApplication {
                     self.show_error(conflicts.join("; "));
                 }
             }
-            AppEffect::RecoveryInspect => {
-                self.notify_message(
-                    self.message(
-                        "recovery_summary",
-                        &[("count", self.recovery.records().len().to_string())],
-                    ),
-                    false,
-                );
-            }
-            AppEffect::RecoveryRecoverLatest => {
-                if let Some((_, record)) = self.recovery.records().last() {
-                    self.state
-                        .open_text(TextBuffer::from_text(&record.content), None);
-                    self.set_dashboard_visibility(false);
-                    self.notify_message(self.message("recovery_opened", &[]), false);
-                } else {
-                    self.show_error(self.message("recovery_none", &[]));
-                }
-            }
-            AppEffect::RecoveryDiscardLatest => {
-                match self.recovery.discard_latest(self.documents.recovery_io()) {
-                    Ok(true) => {}
-                    Ok(false) => self.show_error(self.message("recovery_none", &[])),
-                    Err(error) => self.show_error(error),
-                }
-            }
+            AppEffect::RecoveryInspect => self.open_recovery_picker(),
             AppEffect::SessionSave => {
                 if self.configuration.settings().persistence.enabled {
                     self.write_persistence();
@@ -3173,6 +3160,17 @@ impl InteractiveApplication {
                     self.sync_picker_ui();
                 }
             }
+            AppEffect::PickerRemove => match self.search.selected_picker_payload().cloned() {
+                Some(PickerPayload::Recovery(journal)) => {
+                    if let Err(error) =
+                        self.recovery.discard(&journal, true, self.documents.recovery_io())
+                    {
+                        self.show_error(error);
+                    }
+                }
+                Some(PickerPayload::GitWorktree { .. }) => self.request_git_worktree_remove(),
+                _ => {}
+            },
             AppEffect::PickerAccept => self.accept_picker(),
             AppEffect::PickerCancel => self.close_picker(),
             AppEffect::PickerNormal if self.palette_is_open() => self.close_picker(),
@@ -8634,6 +8632,37 @@ impl InteractiveApplication {
             payload
         };
         match payload {
+            PickerPayload::Recovery(journal) => {
+                let preview = self
+                    .recovery
+                    .records()
+                    .iter()
+                    .find(|(path, _)| *path == journal)
+                    .map(|(_, record)| crate::ui::PickerPreview {
+                        title: label,
+                        body: crate::ui::PickerPreviewBody::Text(crate::ui::PickerTextPreview {
+                            lines: record
+                                .content
+                                .lines()
+                                .take(RECOVERY_PREVIEW_LINES)
+                                .map(str::to_owned)
+                                .collect(),
+                            first_line: 0,
+                            highlight_line: None,
+                            language: record.original_path.as_deref().and_then(|path| {
+                                crate::language::syntax::language_for_path(Path::new(path))
+                            }),
+                        }),
+                    });
+                match preview {
+                    Some(preview) => {
+                        if let Some(id) = self.search.set_preview(preview) {
+                            self.documents.cancel_request(id);
+                        }
+                    }
+                    None => self.clear_picker_preview(),
+                }
+            }
             PickerPayload::WorkspaceSearch(key) => {
                 if let Some(id) = self.search.preview_match(
                     &key,
@@ -8976,6 +9005,7 @@ impl InteractiveApplication {
             Some(PickerPayload::Command(command)) if !command.is_empty() => {
                 self.run_palette_command(&command);
             }
+            Some(PickerPayload::Recovery(journal)) => self.recover_journal(&journal),
             Some(PickerPayload::Notice(message)) => {
                 self.present_documentation_popup(
                     DocumentationPopupKind::Notice,
@@ -9892,13 +9922,17 @@ impl InteractiveApplication {
                 }
                 self.documents.retire_workspace(&self.workspace.version());
                 self.clear_git_status();
-                let path = self
+                let root = self
                     .workspace
                     .roots()
                     .iter()
                     .find(|root| root.id == id)
-                    .map(|root| root.identity.canonical_path.display().to_string())
-                    .unwrap_or_default();
+                    .map(|root| root.identity.canonical_path.clone());
+                // The statusline and relative labels name the active root.
+                if let Some(root) = &root {
+                    self.state.set_workspace_root(root.clone());
+                }
+                let path = root.map(|root| root.display().to_string()).unwrap_or_default();
                 self.notify_message(
                     self.message("workspace_root_activated", &[("path", path)]),
                     false,
@@ -12529,7 +12563,7 @@ impl InteractiveApplication {
                         id: PickerItemId(format!("lsp-session:{key}")),
                         label: session.server_id.clone(),
                         detail: format!(
-                            "root #{}{} · {} · restarts {}",
+                            "root #{}{} · {}{}",
                             session.root.0,
                             if active == Some(key) {
                                 " · active"
@@ -12545,9 +12579,20 @@ impl InteractiveApplication {
                             } else {
                                 "stopped"
                             },
-                            session.restart_count
+                            match session.restart_count {
+                                0 => String::new(),
+                                1 => " · restarted once".into(),
+                                count => format!(" · restarted {count} times"),
+                            }
                         ),
-                        source: key.clone(),
+                        // The folder it serves; the session key is internal.
+                        source: self
+                            .workspace
+                            .roots()
+                            .iter()
+                            .find(|root| root.id == session.root)
+                            .and_then(|root| root.identity.canonical_path.file_name())
+                            .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
                         action: PickerAction::None,
                     },
                     PickerPayload::LspSession(key.clone()),
@@ -13161,6 +13206,124 @@ impl InteractiveApplication {
         let name = self.notice_file_label(&path);
         self.notify_message(self.message("new_file", &[("path", name)]), false);
     }
+    /// The dashboard's Recover Unsaved Work: every journal with the file it was written for.
+    /// Enter opens one, ctrl-x (`d` in Normal mode) discards it, Escape leaves them for later.
+    pub(super) fn open_recovery_picker(&mut self) {
+        let items = self
+            .recovery
+            .records()
+            .iter()
+            .rev()
+            .map(|(journal, record)| {
+                let label = record.original_path.as_deref().map_or_else(
+                    || SCRATCH_LABEL.to_owned(),
+                    |path| self.workspace_relative_label(Path::new(path)),
+                );
+                let lines = record.content.lines().count();
+                (
+                    PickerItem {
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
+                        id: PickerItemId(format!("recovery:{}", journal.display())),
+                        label,
+                        detail: if lines == 1 {
+                            "1 line".to_owned()
+                        } else {
+                            format!("{lines} lines")
+                        },
+                        source: String::new(),
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::Recovery(journal.clone()),
+                )
+            })
+            .collect::<Vec<_>>();
+        if items.is_empty() {
+            if self.recovery_picker_open() {
+                self.close_picker();
+            }
+            self.notify_message(self.message("recovery_none", &[]), false);
+            return;
+        }
+        self.install_picker("Recover Unsaved Work".to_owned(), items);
+        self.search
+            .set_picker_footer("Enter Recover · ctrl-x Discard · Esc Later".to_owned());
+        self.sync_picker_ui();
+    }
+
+    pub(super) fn recovery_picker_open(&self) -> bool {
+        matches!(
+            self.search.selected_picker_payload(),
+            Some(PickerPayload::Recovery(_))
+        )
+    }
+
+    /// Open a journal's text as a new unsaved buffer, which keeps its own journal from then
+    /// on, and delete the old journal.
+    /// Recover a journal into its file, as an unsaved change on top of what is on disk, so undo
+    /// goes back to the saved version. Work that never had a file, or whose file is already
+    /// open, comes back in a new buffer.
+    fn recover_journal(&mut self, journal: &Path) {
+        let Some(record) = self
+            .recovery
+            .records()
+            .iter()
+            .find(|(path, _)| path == journal)
+            .map(|(_, record)| record.clone())
+        else {
+            self.show_error(self.message("recovery_none", &[]));
+            return;
+        };
+        let original = record.original_path.map(PathBuf::from).filter(|path| {
+            !self.state.buffers.values().any(|buffer| buffer.path.as_ref() == Some(path))
+        });
+        if let Some(original) = original {
+            let roots = self
+                .workspace
+                .roots()
+                .iter()
+                .map(|root| root.identity.canonical_path.clone())
+                .collect();
+            match self.documents.read_scoped(original, roots) {
+                Ok(id) => {
+                    self.recovery.register_read(id, journal.to_path_buf(), record.content);
+                }
+                Err(error) => self.show_error(error),
+            }
+            return;
+        }
+        let (buffer, _) = self.state.open_text(TextBuffer::from_text(&record.content), None);
+        self.state.buffers[buffer].dirty = true;
+        self.finish_recovery(journal, "recovery_opened");
+    }
+    pub(super) fn replace_with_recovered(&mut self, buffer: crate::editor::BufferId, content: String) {
+        let text = &self.state.buffers[buffer].text;
+        let revision = text.revision();
+        let edits = crate::editor::text::TextEditSet::new(
+            revision,
+            vec![crate::editor::text::TextEdit::new(
+                crate::editor::text::ByteRange::new(ByteOffset(0), ByteOffset(text.len_bytes()))
+                    .expect("whole buffer"),
+                content,
+            )],
+        );
+        let transaction = EditorTransaction::new(self.transaction_id())
+            .with_precondition(Precondition::BufferRevision { buffer, revision })
+            .with_precondition(Precondition::BufferWritable(buffer))
+            .with_operation(EditorOperation::ApplyEdits { buffer, edits });
+        if let Err(error) = self.state.apply_transaction(&transaction) {
+            self.show_error(error.to_string());
+        }
+    }
+    pub(super) fn finish_recovery(&mut self, journal: &Path, message: &str) {
+        self.set_dashboard_visibility(false);
+        self.ensure_cursor_visible();
+        self.notify_message(self.message(message, &[]), false);
+        if let Err(error) = self.recovery.discard(journal, false, self.documents.recovery_io()) {
+            self.show_error(error);
+        }
+    }
+
     pub(in crate::editor::session) fn start_open(&mut self, path: PathBuf) {
         self.record_jump();
         match self.documents.request_open(

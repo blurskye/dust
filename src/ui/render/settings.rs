@@ -505,17 +505,41 @@ pub(super) fn render_settings(
 
     // Keys, and how the last change went.
     let footer_y = layout.top + layout.height - 2;
-    let help = match (&page.edit, page.searching) {
-        (Some(SettingsEdit::Text { .. }), _) => "Enter save · Esc cancel",
-        (Some(SettingsEdit::Choice { .. }), _) => "↑↓ choose · Enter select · Esc cancel",
-        (None, true) => "Type to filter · ↑↓ move · Enter done · Esc clear",
-        (None, false) => {
-            "↑↓ move · Tab section · Space toggle · Enter change · r reset · / search · m modified · o config.toml · Esc close"
+    // Each hint with its rank; a narrow page drops the highest ranks first, keeping hints whole.
+    let hints: &[(&str, u8)] = match (&page.edit, page.searching) {
+        (Some(SettingsEdit::Text { .. }), _) => &[("Enter save", 0), ("Esc cancel", 0)],
+        (Some(SettingsEdit::Choice { .. }), _) => {
+            &[("↑↓ choose", 1), ("Enter select", 0), ("Esc cancel", 0)]
         }
+        (None, true) => &[("Type to filter", 1), ("↑↓ move", 2), ("Enter done", 0), ("Esc clear", 0)],
+        (None, false) => &[
+            ("↑↓ move", 4),
+            ("Tab section", 3),
+            ("Space toggle", 2),
+            ("Enter change", 0),
+            ("r reset", 2),
+            ("/ search", 1),
+            ("m modified", 1),
+            ("o config.toml", 1),
+            ("Esc close", 0),
+        ],
     };
     let status_width = page.status.as_ref().map_or(0, |(text, _)| width_of(text, ambiguous) + 4);
     let help_right = right.saturating_sub(2 + status_width);
-    let help = ellipsized(help, usize::from(help_right.saturating_sub(layout.left + 2)), ambiguous);
+    let room = help_right.saturating_sub(layout.left + 2);
+    let mut help = String::new();
+    for limit in (0..=4).rev() {
+        help = hints
+            .iter()
+            .filter(|(_, rank)| *rank <= limit)
+            .map(|(hint, _)| *hint)
+            .collect::<Vec<_>>()
+            .join(" · ");
+        if width_of(&help, ambiguous) <= room {
+            break;
+        }
+    }
+    let help = ellipsized(&help, usize::from(room), ambiguous);
     frame.grid.put_text(layout.left + 2, footer_y, &help, Style::Muted);
     if let Some((text, failed)) = &page.status {
         let style = if *failed { Style::Error } else { Style::Accent };

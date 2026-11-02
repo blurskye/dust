@@ -148,6 +148,8 @@ impl InteractiveApplication {
             format_on_save: None,
             lsp_asked: None,
             lsp_waiting: None,
+            lsp_retry_at: None,
+            lsp_retries: 0,
             disk_stamps: std::collections::HashMap::new(),
             next_disk_check: None,
             git_stamp: None,

@@ -175,6 +175,10 @@ struct InteractiveApplication {
     /// Asked for before its server could answer, and sent again once it has started and
     /// finished loading.
     lsp_waiting: Option<crate::language::lsp::LspFeature>,
+    /// When the waiting request is sent again after a "content modified" answer that came
+    /// before the server reported any loading, and how many times it has been.
+    lsp_retry_at: Option<std::time::Instant>,
+    lsp_retries: u8,
     /// Last seen modification time and length of each open file.
     disk_stamps: std::collections::HashMap<crate::editor::BufferId, (Option<std::time::SystemTime>, u64)>,
     pub(super) next_disk_check: Option<std::time::Instant>,
@@ -346,6 +350,7 @@ pub fn run_interactive(
         application.process_nix_lsp_workspace();
         application.process_dap_project_root();
         application.process_lsp_events();
+        application.process_lsp_retry();
         application.process_format_on_save_deadline();
         application.process_disk_changes();
         application.restart_lsp_if_due();

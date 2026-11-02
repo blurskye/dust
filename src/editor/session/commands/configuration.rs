@@ -135,32 +135,14 @@ pub(super) fn register_commands(
         ArgumentSchema::default(),
         |_| AppEffect::ShowKeymapConflicts,
     )?;
-    for (id, title, effect) in [
-        (
-            "recovery.inspect",
-            "Inspect recovery journals",
-            AppEffect::RecoveryInspect,
-        ),
-        (
-            "recovery.recover_latest",
-            "Recover latest journal as scratch buffer",
-            AppEffect::RecoveryRecoverLatest,
-        ),
-        (
-            "recovery.discard_latest",
-            "Discard latest recovery journal",
-            AppEffect::RecoveryDiscardLatest,
-        ),
-    ] {
-        register(
-            registry,
-            id,
-            title,
-            ContextRequirement::Application,
-            ArgumentSchema::default(),
-            move |_| effect.clone(),
-        )?;
-    }
+    register(
+        registry,
+        "recovery.inspect",
+        "Recover unsaved work",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_| AppEffect::RecoveryInspect,
+    )?;
     register(
         registry,
         "navigation.mark.set",

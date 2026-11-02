@@ -112,7 +112,14 @@ pub fn write_user_setting(path: &Path, key: &str, value: Option<toml::Value>) ->
         Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
     };
     let edited = edited_source(&source, key, value)?;
-    super::load::settings_from_source(&edited)?;
+    // A value of the wrong type fails in the deserializer, whose message names Rust types.
+    super::load::settings_from_source(&edited).map_err(|error| {
+        if error.lines().next().is_some_and(|line| line.contains("expected")) {
+            format!("{key} can't be set to that value")
+        } else {
+            error
+        }
+    })?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
@@ -131,7 +138,10 @@ pub(super) fn edited_source(
         .map_err(|error| format!("config.toml has a mistake to fix first: {error}"))?;
     let segments = super::config_key_segments(key).ok_or_else(|| format!("bad key {key}"))?;
     let Some(value) = value else {
-        remove_setting(document.as_table_mut(), &segments);
+        if let Some(comments) = remove_setting(document.as_table_mut(), &segments) {
+            let trailing = document.trailing().as_str().unwrap_or("").to_owned();
+            document.set_trailing(format!("{trailing}{comments}"));
+        }
         return Ok(document.to_string());
     };
     let value = value
@@ -164,33 +174,79 @@ pub(super) fn edited_source(
     Ok(document.to_string())
 }
 
-/// Remove the key, and the tables it leaves empty.
-fn remove_setting(table: &mut dyn toml_edit::TableLike, segments: &[String]) {
-    let Some((first, rest)) = segments.split_first() else {
-        return;
-    };
+/// Remove the key, and the tables it leaves empty. The key's comments stay: they move to the
+/// next key, or under the table's header when the key was its last. Returns the comments that
+/// found no place at this level.
+fn remove_setting(table: &mut dyn toml_edit::TableLike, segments: &[String]) -> Option<String> {
+    let (first, rest) = segments.split_first()?;
     if rest.is_empty() {
-        table.remove(first);
-        return;
+        let comments = setting_comments(table, first);
+        let next = table
+            .iter()
+            .map(|(key, _)| key.to_owned())
+            .skip_while(|key| key != first)
+            .nth(1);
+        table.remove(first)?;
+        let comments = comments?;
+        return match next.as_deref().and_then(|next| table.key_mut(next)) {
+            Some(mut key) => {
+                let prefix = key.leaf_decor().prefix().and_then(toml_edit::RawString::as_str);
+                let prefix = format!("{comments}{}", prefix.unwrap_or(""));
+                key.leaf_decor_mut().set_prefix(prefix);
+                None
+            }
+            None => Some(comments),
+        };
     }
-    // A table header with a comment above it stays, so the comment is not lost.
-    let empty = match table.get_mut(first) {
-        Some(toml_edit::Item::Table(inner)) => {
-            remove_setting(inner, rest);
-            let commented = inner
-                .decor()
-                .prefix()
-                .and_then(toml_edit::RawString::as_str)
-                .is_some_and(|prefix| prefix.contains('#'));
-            inner.is_empty() && !commented
+    let (empty, orphan) = match table.get_mut(first) {
+        Some(toml_edit::Item::Table(inner)) if !inner.is_implicit() && !inner.is_dotted() => {
+            if let Some(comments) = remove_setting(inner, rest) {
+                let suffix = inner.decor().suffix().and_then(toml_edit::RawString::as_str);
+                let suffix = format!("{}\n{}", suffix.unwrap_or(""), comments.trim_end());
+                inner.decor_mut().set_suffix(suffix);
+            }
+            // A table header with a comment on or above it stays, so the comment is not lost.
+            let commented = [inner.decor().prefix(), inner.decor().suffix()]
+                .into_iter()
+                .flatten()
+                .filter_map(toml_edit::RawString::as_str)
+                .any(|text| text.contains('#'));
+            (inner.is_empty() && !commented, None)
         }
-        Some(item) => item.as_table_like_mut().is_some_and(|inner| {
-            remove_setting(inner, rest);
-            inner.is_empty()
-        }),
-        None => false,
+        Some(item) => match item.as_table_like_mut() {
+            Some(inner) => {
+                let orphan = remove_setting(inner, rest);
+                (inner.is_empty() && orphan.is_none(), orphan)
+            }
+            None => (false, None),
+        },
+        None => (false, None),
     };
     if empty {
         table.remove(first);
     }
+    orphan
+}
+
+/// The comment lines above a key and the comment after its value, each ending in a newline.
+fn setting_comments(table: &dyn toml_edit::TableLike, key: &str) -> Option<String> {
+    let above = table
+        .key(key)
+        .and_then(|key| key.leaf_decor().prefix())
+        .and_then(toml_edit::RawString::as_str)
+        .unwrap_or("");
+    let after = table
+        .get(key)
+        .and_then(toml_edit::Item::as_value)
+        .and_then(|value| value.decor().suffix())
+        .and_then(toml_edit::RawString::as_str)
+        .unwrap_or("");
+    let lines = above
+        .lines()
+        .chain(after.lines())
+        .map(str::trim)
+        .filter(|line| line.starts_with('#'))
+        .map(|line| format!("{line}\n"))
+        .collect::<String>();
+    (!lines.is_empty()).then_some(lines)
 }

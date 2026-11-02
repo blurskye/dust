@@ -1021,7 +1021,7 @@ fn settings_catalog_lists_every_bundled_setting_once() {
 }
 
 #[test]
-fn a_setting_is_changed_in_place_and_reset_removes_it_with_empty_tables() {
+fn a_setting_is_changed_in_place_and_reset_removes_it_but_keeps_its_comments() {
     let edited = |source: &str, key: &str, value: Option<toml::Value>| {
         super::catalog::edited_source(source, key, value).unwrap()
     };
@@ -1033,8 +1033,14 @@ fn a_setting_is_changed_in_place_and_reset_removes_it_with_empty_tables() {
     assert!(added.contains("enabled = false"), "{added}");
     let reset = edited(&added, "editor.git_signs.enabled", None);
     assert_eq!(reset, wrapped);
+    // Reset keeps the setting's comments: under the table header when it was the last key,
+    // above the next key otherwise.
     let emptied = edited(&reset, "editor.wrap", None);
-    assert!(emptied.contains("# my settings") && !emptied.contains("wrap"), "{emptied}");
+    assert_eq!(emptied, "# my settings\n[editor]\n# wrap long lines\n# for now\n");
+    let next = edited("[editor]\n# width comment\ntab_width = 4\nwrap = true\n", "editor.tab_width", None);
+    assert_eq!(next, "[editor]\n# width comment\nwrap = true\n");
+    let plain = edited("[editor]\ntab_width = 4\n", "editor.tab_width", None);
+    assert_eq!(plain, "");
     let file = tempdir().unwrap();
     let path = file.path().join("dust").join("config.toml");
     super::write_user_setting(&path, "editor.tab_width", Some(toml::Value::Integer(2))).unwrap();
