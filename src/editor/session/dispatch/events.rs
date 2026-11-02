@@ -2436,6 +2436,8 @@ impl InteractiveApplication {
             if let Some(feature) = self.lsp_waiting.take() {
                 self.request_lsp(feature);
             }
+            // Hints asked for while the server was indexing or checking come back empty.
+            self.schedule_lsp_inlay_refresh(true);
         }
         self.ui.set(frame, |ui| &mut ui.lsp_progress_frame);
     }
@@ -3428,12 +3430,16 @@ impl InteractiveApplication {
                 let provisional = items
                     .iter()
                     .any(|item| item.label.to_ascii_lowercase().contains("{unknown}"));
-                if items.is_empty() || provisional {
-                    self.schedule_lsp_inlay_warmup_retry();
+                // A server still loading answers with nothing; keep the hints on screen
+                // until the retry brings real ones.
+                let retrying = if items.is_empty() || provisional {
+                    self.schedule_lsp_inlay_warmup_retry()
                 } else {
                     self.language.inlays_received();
-                }
-                if let Some(path) = path_from_file_uri(uri) {
+                    false
+                };
+                let keep_shown = retrying && !self.ui.lsp_inlay_hints.is_empty();
+                if let Some(path) = path_from_file_uri(uri).filter(|_| !keep_shown) {
                     if let Some((buffer_id, buffer)) = self
                         .state
                         .buffers

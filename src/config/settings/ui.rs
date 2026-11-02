@@ -666,7 +666,7 @@ pub struct TerminalPanelConfig {
 impl Default for TerminalPanelConfig {
     fn default() -> Self {
         Self {
-            height: 12,
+            height: 16,
             minimum_height: 4,
             maximum_height: 40,
             minimum_workspace_height: 3,

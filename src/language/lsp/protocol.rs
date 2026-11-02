@@ -35,7 +35,7 @@ pub(super) fn initialize_message(root: &Path, initialization_options: Option<&Va
             "workspaceFolders":[{"uri":file_uri(root),"name":root.file_name().and_then(|v|v.to_str()).unwrap_or("workspace")}],
             "capabilities":{
                 "general":{"positionEncodings":["utf-8","utf-16","utf-32"]},
-                "workspace":{"workspaceFolders":true,"configuration":true,"applyEdit":true,"executeCommand":{"dynamicRegistration":false},"symbol":{"dynamicRegistration":true}},
+                "workspace":{"workspaceFolders":true,"configuration":true,"inlayHint":{"refreshSupport":true},"applyEdit":true,"executeCommand":{"dynamicRegistration":false},"symbol":{"dynamicRegistration":true}},
                 "window":{"workDoneProgress":true},
                 "textDocument":{
                     "synchronization":{"didSave":true,"dynamicRegistration":true},

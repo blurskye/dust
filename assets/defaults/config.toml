@@ -232,7 +232,7 @@ preferred_below = true
 border = "rounded"
 
 [ui.terminal_panel]
-height = 12
+height = 16
 minimum_height = 4
 maximum_height = 40
 minimum_workspace_height = 3

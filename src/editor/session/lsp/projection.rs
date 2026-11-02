@@ -524,9 +524,7 @@ impl LspSession {
         config: &LspConfig,
         now: Instant,
     ) -> bool {
-        if !config.inlay_hints
-            || config.inlay_hint_level != InlayHintLevel::Max
-            || self.projection.inlay_retries >= INLAY_RETRY_LIMIT
+        if !config.inlay_hints || self.projection.inlay_retries >= INLAY_RETRY_LIMIT
         {
             return false;
         }

@@ -2858,6 +2858,30 @@ context = "editor"
 mode = "normal"
 keys = "L"
 command = "buffer.next"
+[[keymap]]
+id = "builtin.editor.normal.buffer-next.ctrl-pagedown"
+context = "editor"
+mode = "normal"
+keys = "ctrl-pagedown"
+command = "buffer.next"
+[[keymap]]
+id = "builtin.editor.normal.buffer-previous.ctrl-pageup"
+context = "editor"
+mode = "normal"
+keys = "ctrl-pageup"
+command = "buffer.previous"
+[[keymap]]
+id = "builtin.editor.insert.buffer-next.ctrl-pagedown"
+context = "editor"
+mode = "insert"
+keys = "ctrl-pagedown"
+command = "buffer.next"
+[[keymap]]
+id = "builtin.editor.insert.buffer-previous.ctrl-pageup"
+context = "editor"
+mode = "insert"
+keys = "ctrl-pageup"
+command = "buffer.previous"
 
 # The bottom terminal toggle is available from every editor mode and the two
 # persistent navigation surfaces. Both conventional terminal shortcuts are
@@ -3094,6 +3118,18 @@ context = "terminal"
 keys = "ctrl-shift-l"
 command = "terminal.cycle"
 arguments = { direction = 1 }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-cycle-previous.ctrl-pageup"
+context = "terminal"
+keys = "ctrl-pageup"
+command = "terminal.cycle"
+arguments = { direction = -1 }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-cycle-next.ctrl-pagedown"
+context = "terminal"
+keys = "ctrl-pagedown"
+command = "terminal.cycle"
+arguments = { direction = 1 }
 
 # Terminal normal mode is host-owned over bounded scrollback. The PTY keeps
 # running, but navigation and yanks never become process input.
@@ -3278,6 +3314,18 @@ arguments = { direction = -1 }
 id = "builtin.terminal-normal.surface.terminal-cycle-next.ctrl-shift-l"
 context = "terminal_normal"
 keys = "ctrl-shift-l"
+command = "terminal.cycle"
+arguments = { direction = 1 }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-cycle-previous.ctrl-pageup"
+context = "terminal_normal"
+keys = "ctrl-pageup"
+command = "terminal.cycle"
+arguments = { direction = -1 }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-cycle-next.ctrl-pagedown"
+context = "terminal_normal"
+keys = "ctrl-pagedown"
 command = "terminal.cycle"
 arguments = { direction = 1 }
 

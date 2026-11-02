@@ -141,15 +141,10 @@ fn inlay_hint_results_are_revision_owned_and_projected_at_exact_unicode_offsets(
     assert_eq!(app.language.inlay_retries(), 0);
     assert!(!app.language.inlay_pending());
 
+    // A server answers with nothing while it loads, at either hint level.
     {
         let mut fixture = app.configuration.fixture_snapshot();
         fixture.settings.lsp.inlay_hint_level = crate::config::InlayHintLevel::Standard;
-        app.configuration.install_fixture(fixture);
-    }
-    assert!(!app.schedule_lsp_inlay_warmup_retry());
-    {
-        let mut fixture = app.configuration.fixture_snapshot();
-        fixture.settings.lsp.inlay_hint_level = crate::config::InlayHintLevel::Max;
         app.configuration.install_fixture(fixture);
     }
     for retry in 1..=5 {
