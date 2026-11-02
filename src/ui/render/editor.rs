@@ -297,6 +297,12 @@ pub(super) fn render_editor_view(
         .collect::<Vec<_>>();
     highlight_spans.sort_unstable_by_key(|span| (span.range.start, span.range.end));
     let mut highlight_cursor = 0usize;
+    // The tutor marks what its step is about, until the text changes.
+    let tutor_target = ui
+        .tutor
+        .as_ref()
+        .and_then(|bar| bar.target.as_ref())
+        .filter(|target| target.buffer == view.buffer && target.revision == buffer.text.revision());
     let mut inlay_hints = ui
         .lsp_inlay_hints
         .iter()
@@ -520,6 +526,7 @@ pub(super) fn render_editor_view(
                 Style::Selection
             } else if search_ranges.iter().any(|range| range.contains(global))
                 || flash.is_some_and(|flash| flash.matches.iter().any(|range| range.contains(global)))
+                || tutor_target.is_some_and(|target| target.range.contains(global))
             {
                 Style::Search
             } else if let Some(style) = diagnostic_lines.get(&line_index).and_then(|diagnostics| {

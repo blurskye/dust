@@ -606,27 +606,58 @@ fn tutor_moves_on_when_each_step_is_done() {
         app.tutor_tick();
     }
     fn title(app: &InteractiveApplication) -> String {
-        app.ui.tutor.as_ref().map(|card| card.title.clone()).unwrap_or_default()
+        app.ui.tutor.as_ref().map(|bar| bar.title.clone()).unwrap_or_default()
     }
     fn cursor_line(app: &InteractiveApplication) -> String {
         let view = &app.state.views[app.state.active_view.unwrap()];
         let text = &app.state.buffers[view.buffer].text;
         text.line(text.byte_to_line(view.cursor).unwrap()).unwrap().trim().to_owned()
     }
+    fn wait_root(app: &mut InteractiveApplication) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while app.workspace.root_operation_pending() {
+            app.process_trust_events();
+            assert!(Instant::now() < deadline, "root switch timed out");
+            thread::yield_now();
+        }
+        app.tutor_tick();
+        wait_vfs(app);
+        app.tutor_tick();
+    }
+    /// A done step says so for a moment before the next one comes.
+    fn next_step(app: &mut InteractiveApplication) {
+        assert!(app.ui.tutor.as_ref().is_some_and(|bar| bar.praised), "{}", title(app));
+        let before = title(app);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while title(app) == before {
+            assert!(Instant::now() < deadline, "{before} never moved on");
+            thread::sleep(Duration::from_millis(10));
+            app.tutor_tick();
+        }
+        wait_vfs(app);
+        app.tutor_tick();
+    }
     let mut app = app();
+    let home = app.state.workspace_root.canonicalize().unwrap();
     app.process_effect(AppEffect::Tutor);
-    wait_vfs(&mut app);
-    app.tutor_tick();
+    wait_root(&mut app);
     assert!(title(&app).starts_with("Tutor 1/"), "{}", title(&app));
+    // The tutor moved the editor into its own practice repository.
+    let practice = app.state.workspace_root.clone();
+    assert_ne!(practice, home);
+    assert!(practice.join(".git").is_dir() && practice.join("src/greet.rs").is_file());
     press(&mut app, "j");
+    next_step(&mut app);
     assert!(title(&app).starts_with("Tutor 2/"), "{}", title(&app));
     assert!(cursor_line(&app).starts_with("h  left"), "{}", cursor_line(&app));
+    assert!(app.ui.tutor.as_ref().unwrap().target.is_some(), "the X is marked");
     for _ in 0..4 {
         press(&mut app, "j");
     }
     assert_eq!(cursor_line(&app), "The X marks the spot.");
     // `j` kept the column of `h` through the blank line, so `w` lands on the X.
     press(&mut app, "w");
+    next_step(&mut app);
     assert!(title(&app).starts_with("Tutor 3/"), "{}", title(&app));
     // A step that checks text waits for the practice line to read right.
     app.process_effect(AppEffect::TutorBack);
@@ -642,6 +673,7 @@ fn tutor_moves_on_when_each_step_is_done() {
     let view = &app.state.views[app.state.active_view.unwrap()];
     assert!(app.state.buffers[view.buffer].text.to_string().contains("    The cow jumped over the moon.\n"));
     // The next step put the cursor on its own practice line.
+    next_step(&mut app);
     assert!(title(&app).starts_with("Tutor 13/"), "{}", title(&app));
     assert_eq!(cursor_line(&app), "Dust is a editor");
     // Going back to a step already done in the text stays there.
@@ -649,12 +681,33 @@ fn tutor_moves_on_when_each_step_is_done() {
     app.tutor_tick();
     assert!(title(&app).starts_with("Tutor 12/"), "{}", title(&app));
     app.process_effect(AppEffect::TutorNext);
-    app.process_effect(AppEffect::TutorQuit);
+    app.tutor_tick();
+    // A file of the user's own pauses the tutor and hides its bar; :Tutor goes back.
+    let own = home.join("notes.txt");
+    fs::write(&own, "mine\n").unwrap();
+    app.start_open(own);
+    wait_vfs(&mut app);
+    app.tutor_tick();
     assert!(app.ui.tutor.is_none());
     app.process_effect(AppEffect::Tutor);
     wait_vfs(&mut app);
     app.tutor_tick();
     assert!(title(&app).starts_with("Tutor 13/"), "{}", title(&app));
+    assert_eq!(cursor_line(&app), "Dust is a editor");
+    // Quitting moves back home and deletes the practice project.
+    app.process_effect(AppEffect::TutorQuit);
+    wait_root(&mut app);
+    assert!(app.ui.tutor.is_none());
+    assert_eq!(app.state.workspace_root, home);
+    assert!(!practice.exists());
+    assert!(app.state.buffers.values().all(|buffer| {
+        buffer.path.as_deref().is_none_or(|path| !path.starts_with(&practice))
+    }));
+    // The next start is a fresh practice project, at the step the user stopped at.
+    app.process_effect(AppEffect::Tutor);
+    wait_root(&mut app);
+    assert!(title(&app).starts_with("Tutor 13/"), "{}", title(&app));
+    assert_ne!(app.state.workspace_root, practice);
 }
 
 #[test]
