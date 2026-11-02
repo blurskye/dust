@@ -188,7 +188,7 @@ fn attach_test_compositor(
         height,
     };
     let top = super::workspace_top_rows(state, ui, config);
-    let screen_bottom = super::screen_foot_rows(state, ui, config, height);
+    let screen_bottom = super::screen_foot_rows(state, ui, config, width, height);
     ui.window_graph_revision = Some(1);
     ui.compositor_layout = Some(super::CompositorLayoutState {
         source_revision: state.window_revision().expect("test revision"),

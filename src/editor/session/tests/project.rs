@@ -1066,9 +1066,17 @@ fn async_root_add_activation_and_dirty_removal_preflight_are_real() {
         crate::workspace::WorkspaceTrust::Untrusted
     );
     let second = app.workspace.active_root().expect("added root active");
-    app.activate_workspace_root(first);
-    app.activate_workspace_root(second);
+    assert_eq!(app.state.workspace_root, second_path);
+    let first_path = app.workspace.roots()[0].identity.canonical_path.clone();
+    // Picking an existing root from :roots activates it instead of replacing the active one.
+    app.switch_workspace_root(first_path.clone());
+    assert_eq!(app.workspace.active_root(), Some(first));
+    assert_eq!(app.workspace.roots().len(), 2);
+    assert_eq!(app.state.workspace_root, first_path);
+    assert!(!app.ui.notification_error);
+    app.switch_workspace_root(second_path.clone());
     assert_eq!(app.workspace.active_root(), Some(second));
+    assert_eq!(app.state.workspace_root, second_path);
 
     let dirty_path = second_path.join("dirty.txt");
     let (buffer, _) = app.state.open_text(

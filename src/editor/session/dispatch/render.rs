@@ -1565,6 +1565,7 @@ impl InteractiveApplication {
                         &self.state,
                         &self.ui,
                         self.configuration.settings(),
+                        self.window_session.width(),
                         self.window_session.height(),
                     );
                     let preliminary = snapshot.project_with_tiled_insets(

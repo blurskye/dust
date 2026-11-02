@@ -1457,15 +1457,15 @@ pub struct TutorBar {
     pub target: Option<UiSyntaxSpan>,
 }
 
-/// Rows the tutor bar takes: its title row and up to three rows of text.
-const TUTOR_BAR_ROWS: u16 = 4;
-
-fn tutor_bar_rows(ui: &UiState, height: u16) -> u16 {
-    if ui.tutor.is_some() && height >= 12 {
-        TUTOR_BAR_ROWS
-    } else {
-        0
-    }
+/// Rows the tutor bar takes: its title row and the step's wrapped text, at most a third of the
+/// screen so the practice file stays in view.
+fn tutor_bar_rows(ui: &UiState, config: &Config, width: u16, height: u16) -> u16 {
+    let Some(bar) = ui.tutor.as_ref().filter(|_| height >= 12) else {
+        return 0;
+    };
+    let lines = wrap_card_text(&bar.text, usize::from(width.saturating_sub(4)), config.editor.ambiguous_width);
+    let text = u16::try_from(lines.len()).unwrap_or(u16::MAX).max(1);
+    text.min(height / 3).saturating_add(1)
 }
 
 #[derive(Clone, Debug)]
@@ -1653,11 +1653,11 @@ pub fn prompt_surface_dimensions(
 /// Rows at the foot of the screen, under every dock: the status line, and above it the bar of a
 /// paused operation. The dashboard has neither.
 #[must_use]
-pub fn screen_foot_rows(state: &EditorState, ui: &UiState, config: &Config, height: u16) -> u16 {
+pub fn screen_foot_rows(state: &EditorState, ui: &UiState, config: &Config, width: u16, height: u16) -> u16 {
     if !config.ui.status_line.enabled || ui.dashboard || state.active_view.is_none() || height < 2 {
         return 0;
     }
-    1 + u16::from(ui.operation_bar.is_some() && height > 2) + tutor_bar_rows(ui, height)
+    1 + u16::from(ui.operation_bar.is_some() && height > 2) + tutor_bar_rows(ui, config, width, height)
 }
 
 #[must_use]
@@ -1835,8 +1835,8 @@ fn wrap_card_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<Ve
 
 /// The tutor bar in the rows that end just above `bottom`: a rule with the step's title and the
 /// tutor's commands, then the instruction.
-fn render_tutor_bar(frame: &mut Frame, bar: &TutorBar, config: &Config, width: u16, bottom: u16) {
-    let top = bottom.saturating_sub(TUTOR_BAR_ROWS);
+fn render_tutor_bar(frame: &mut Frame, bar: &TutorBar, config: &Config, width: u16, bottom: u16, rows: u16) {
+    let top = bottom.saturating_sub(rows);
     for y in top..bottom {
         frame.grid.fill_row(y, Style::Default);
     }
@@ -2038,7 +2038,7 @@ pub fn render(
             .iter()
             .any(|window| window.layer == crate::ui::window::CompositorLayer::Fullscreen)
     });
-    let foot_rows = screen_foot_rows(state, ui, config, height);
+    let foot_rows = screen_foot_rows(state, ui, config, width, height);
     if !fullscreen && foot_rows > 0 {
         if let Some(view) = state.active_view {
             editor::render_status_line(&mut frame.grid, state, view, ui, config, width, height - 1);
@@ -2048,8 +2048,9 @@ pub fn render(
             editor::render_operation_bar(&mut frame.grid, ui, width, bottom - 1);
             bottom -= 1;
         }
-        if let Some(bar) = ui.tutor.as_ref().filter(|_| tutor_bar_rows(ui, height) > 0) {
-            render_tutor_bar(&mut frame, bar, config, width, bottom);
+        let rows = tutor_bar_rows(ui, config, width, height);
+        if let Some(bar) = ui.tutor.as_ref().filter(|_| rows > 0) {
+            render_tutor_bar(&mut frame, bar, config, width, bottom, rows);
         }
     }
     if let Some(compositor) = compositor {

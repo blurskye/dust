@@ -8228,6 +8228,12 @@ impl InteractiveApplication {
                     .collect::<Vec<_>>();
                 projects.sort();
                 projects.dedup();
+                let open_roots = self
+                    .workspace
+                    .roots()
+                    .iter()
+                    .map(|root| root.identity.canonical_path.clone())
+                    .collect::<Vec<_>>();
                 let home = std::env::var_os("HOME").map(PathBuf::from);
                 let items = projects
                     .into_iter()
@@ -8242,12 +8248,18 @@ impl InteractiveApplication {
                         };
                         (
                             PickerItem {
-                                badge: if path == current { "current".into() } else { String::new() },
+                                badge: String::new(),
                                 kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("project:{}", path.display())),
                                 label: name,
                                 detail: shown,
-                                source: String::new(),
+                                source: if path == current {
+                                    "open here".into()
+                                } else if open_roots.contains(&path) {
+                                    "workspace root".into()
+                                } else {
+                                    String::new()
+                                },
                                 action: PickerAction::None,
                             },
                             PickerPayload::Project(path),
@@ -9660,7 +9672,20 @@ impl InteractiveApplication {
         };
         let target = path.canonicalize().unwrap_or_else(|_| path.clone());
         if target == current_path {
+            self.close_picker();
             self.notify_message(format!("already in {}", target.display()), false);
+            return;
+        }
+        // A folder that is already a workspace root is made active, not opened in place of this one.
+        if let Some(existing) = self
+            .workspace
+            .roots()
+            .iter()
+            .find(|root| root.identity.canonical_path == target)
+            .map(|root| root.id)
+        {
+            self.close_picker();
+            self.activate_workspace_root(existing);
             return;
         }
         let unsaved = self
@@ -13938,6 +13963,9 @@ impl InteractiveApplication {
                 WorkspaceUpdate::Message(key) => self.notify_message(self.message(key, &[]), false),
                 WorkspaceUpdate::RootAdded(path) => {
                     self.invalidate_root_scoped_operations();
+                    // A new root becomes the active one; the statusline and relative paths follow.
+                    self.clear_git_status();
+                    self.state.set_workspace_root(path.clone());
                     self.notify_message(
                         self.message(
                             "workspace_root_added",
