@@ -33,7 +33,7 @@ pub use settings::{
     ProblemMatcherConfig, ProcessConfig, PromptTextConfig, RecoveryConfig, RegisterConfig,
     ClipboardSync, RegisterStorage, RuntimeConfig, SearchConfig, StartupConfig, StatusLineConfig, SyntaxConfig,
     TabLineConfig, TaskConfig, TaskKind, TerminalPanelConfig, TerminalProfileConfig,
-    TerminalsConfig, ThemeAttribute, ThemeColor, ThemeConfig, ThemeStyle, ThemeStyles,
+    TerminalsConfig, HighlightDefinition, ThemeAttribute, ThemeColor, ThemeConfig, ThemeStyle, ThemeStyles,
     AgentProfileConfig, AgentsConfig,
     ToolManagerConfig, UiConfig, WindowPlacementConfig, WindowRuleConfig, WindowsConfig,
     WorkspaceConfig, WorkspaceSearchConfig,

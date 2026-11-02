@@ -459,83 +459,35 @@ foreground_16 = "white"
 background_16 = "black"
 attributes = []
 
-[styles.syntax_comment]
-foreground = "#8b949e"
-background = "#0d1117"
-foreground_256 = "indexed:246"
-background_256 = "indexed:233"
-foreground_16 = "dark_grey"
-background_16 = "black"
-attributes = ["italic"]
-
-[styles.syntax_string]
-foreground = "#a5d6ff"
-background = "#0d1117"
-foreground_256 = "indexed:153"
-background_256 = "indexed:233"
-foreground_16 = "cyan"
-background_16 = "black"
-attributes = []
-
-[styles.syntax_number]
-foreground = "#79c0ff"
-background = "#0d1117"
-foreground_256 = "indexed:117"
-background_256 = "indexed:233"
-foreground_16 = "cyan"
-background_16 = "black"
-attributes = []
-
-[styles.syntax_keyword]
-foreground = "#ff7b72"
-background = "#0d1117"
-foreground_256 = "indexed:210"
-background_256 = "indexed:233"
-foreground_16 = "red"
-background_16 = "black"
-attributes = ["bold"]
-
-[styles.syntax_type]
-foreground = "#ffa657"
-background = "#0d1117"
-foreground_256 = "indexed:215"
-background_256 = "indexed:233"
-foreground_16 = "yellow"
-background_16 = "black"
-attributes = []
-
-[styles.syntax_variable]
-foreground = "#c9d1d9"
-background = "#0d1117"
-foreground_256 = "indexed:252"
-background_256 = "indexed:233"
-foreground_16 = "white"
-background_16 = "black"
-attributes = []
-
-[styles.syntax_function]
-foreground = "#d2a8ff"
-background = "#0d1117"
-foreground_256 = "indexed:183"
-background_256 = "indexed:233"
-foreground_16 = "blue"
-background_16 = "black"
-attributes = []
-
-[styles.syntax_property]
-foreground = "#79c0ff"
-background = "#0d1117"
-foreground_256 = "indexed:111"
-background_256 = "indexed:233"
-foreground_16 = "cyan"
-background_16 = "black"
-attributes = []
-
-[styles.syntax_attribute]
-foreground = "#7ee787"
-background = "#0d1117"
-foreground_256 = "indexed:114"
-background_256 = "indexed:233"
-foreground_16 = "magenta"
-background_16 = "black"
-attributes = []
+[highlights]
+# Dust's own colours, in Neovim's highlight groups.
+"Comment" = { fg = "#8b949e", italic = true }
+"Constant" = { fg = "#79c0ff" }
+"String" = { fg = "#a5d6ff" }
+"Character" = { link = "String" }
+"Identifier" = { fg = "#c9d1d9" }
+"Function" = { fg = "#d2a8ff" }
+"Statement" = { fg = "#ff7b72", bold = true }
+"Operator" = { fg = "#ff7b72" }
+"PreProc" = { fg = "#ff7b72", bold = true }
+"Type" = { fg = "#ffa657" }
+"Special" = { fg = "#79c0ff" }
+"Delimiter" = { fg = "#8b949e" }
+"Title" = { fg = "#58a6ff", bold = true }
+"Underlined" = { fg = "#ffa657", underline = true }
+"Todo" = { fg = "#0d1117", bg = "#d29922", bold = true }
+"Added" = { fg = "#3fb950" }
+"Changed" = { fg = "#d29922" }
+"Removed" = { fg = "#f85149" }
+"DiagnosticError" = { fg = "#f85149" }
+"DiagnosticWarn" = { fg = "#d29922" }
+"DiagnosticInfo" = { fg = "#58a6ff" }
+"DiagnosticHint" = { fg = "#8b949e" }
+"@variable" = { fg = "#c9d1d9" }
+"@property" = { fg = "#79c0ff" }
+"@variable.member" = { link = "@property" }
+"@attribute" = { fg = "#7ee787" }
+"@constructor" = { link = "Type" }
+"@module" = { link = "Type" }
+"@markup.raw" = { link = "String" }
+"@markup.quote" = { fg = "#8b949e", italic = true }

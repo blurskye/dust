@@ -1,5 +1,5 @@
 mod theme;
-pub use theme::{ThemeAttribute, ThemeColor, ThemeConfig, ThemeStyle, ThemeStyles};
+pub use theme::{HighlightDefinition, ThemeAttribute, ThemeColor, ThemeConfig, ThemeStyle, ThemeStyles};
 mod editor;
 pub use editor::{
     AmbiguousWidth, BomPolicy, ColorMode, CursorShape, EditorConfig, EditorViewportConfig,

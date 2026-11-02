@@ -792,7 +792,7 @@ pub(super) fn render_picker(
                                     x,
                                     y,
                                     &line[range.clone()],
-                                    super::visual_rows::syntax_role_style(*role),
+                                    Style::Syntax(*role),
                                     preview_right,
                                 );
                                 at = range.end;
@@ -846,7 +846,7 @@ pub(super) fn render_picker(
 fn preview_line_spans(
     language: crate::language::syntax::SyntaxLanguage,
     lines: &[String],
-) -> Vec<Vec<(std::ops::Range<usize>, crate::language::syntax::SyntaxRole)>> {
+) -> Vec<Vec<(std::ops::Range<usize>, crate::language::syntax::Highlight)>> {
     let source = lines.join("\n");
     if source.len() > 512 * 1024 {
         return Vec::new();

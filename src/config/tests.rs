@@ -1157,3 +1157,43 @@ label = "Files"
     );
     assert_eq!(loaded.groups.len(), loaded.user_group_spans.len());
 }
+
+#[test]
+fn highlight_groups_resolve_like_neovim() {
+    use crate::language::syntax::Highlight;
+    let group = |name| Highlight::named(name).expect(name);
+    let colour = |theme: &super::ThemeConfig, name| theme.highlight(group(name)).map(|style| style.foreground);
+
+    // Every bundled link lands on a group with a definition, so ports keep their colours.
+    for (name, _) in super::themes::BUNDLED {
+        let theme = super::themes::bundled_named(name).unwrap().theme;
+        for (group, definition) in &theme.highlights {
+            if let Some(link) = &definition.link {
+                assert!(
+                    link.starts_with('@')
+                        || theme.highlights.contains_key(link)
+                        || Highlight::named(link).is_some_and(|linked| theme.highlight(linked).is_some()),
+                    "{name}: {group} links to undefined {link}"
+                );
+            }
+        }
+    }
+    let tokyo = super::themes::bundled_named("tokyo-night").unwrap().theme;
+    // `@function.method.call` links to `@function.method`, which links to `Function`.
+    assert_eq!(colour(&tokyo, "@function.method.call"), Some(super::ThemeColor::Rgb(0x7a, 0xa2, 0xf7)));
+    let keyword = tokyo.highlight(Highlight::KEYWORD).unwrap();
+    assert!(keyword.attributes.contains(&super::ThemeAttribute::Italic));
+    assert_eq!(keyword.foreground_256, Some(super::ThemeColor::Indexed(140)));
+
+    let mut dust = super::themes::bundled_named("dust").unwrap().theme;
+    dust.highlights.insert("@function".into(), super::HighlightDefinition { link: Some("@function.method".into()), ..Default::default() });
+    dust.highlights.insert("@function.method".into(), super::HighlightDefinition { link: Some("@function".into()), ..Default::default() });
+    // Nothing defines `@markup.heading.1`, so it takes `@markup.heading`, which Neovim links to `Title`.
+    assert_eq!(colour(&dust, "@markup.heading.1"), Some(super::ThemeColor::Rgb(0x58, 0xa6, 0xff)));
+    // A theme that leaves a token type out keeps tree-sitter's colour.
+    assert_eq!(dust.highlight(group("@lsp.type.derive")), None);
+    // Links that loop colour nothing.
+    assert_eq!(dust.highlight(Highlight::FUNCTION), None);
+    // Groups without a background draw on the editor's.
+    assert_eq!(dust.highlight(Highlight::STRING).unwrap().background, dust.styles.default.background);
+}

@@ -6,7 +6,7 @@ use std::ops::Range;
 
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::language::syntax::{self, SyntaxRole};
+use crate::language::syntax::{self, Highlight};
 
 /// Code blocks larger than this are shown without highlighting.
 const HIGHLIGHT_BYTE_CEILING: usize = 64 * 1024;
@@ -15,11 +15,11 @@ const HIGHLIGHT_BYTE_CEILING: usize = 64 * 1024;
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Styled {
     pub text: String,
-    pub spans: Vec<(Range<usize>, SyntaxRole)>,
+    pub spans: Vec<(Range<usize>, Highlight)>,
 }
 
 impl Styled {
-    pub fn push(&mut self, text: &str, role: Option<SyntaxRole>) {
+    pub fn push(&mut self, text: &str, role: Option<Highlight>) {
         let start = self.text.len();
         self.text.push_str(text);
         let Some(role) = role.filter(|_| !text.is_empty()) else {
@@ -33,13 +33,13 @@ impl Styled {
 
     /// A line of `width` rule characters.
     pub fn rule(&mut self, width: usize) {
-        self.push(&"─".repeat(width), Some(SyntaxRole::Comment));
+        self.push(&"─".repeat(width), Some(Highlight::COMMENT));
         self.push("\n", None);
     }
 
     /// Plain `text` wrapped at words to `width` cells. Its first line starts with `first`
     /// and every other line with `rest`.
-    pub fn wrapped(&mut self, text: &str, role: Option<SyntaxRole>, first: Prefix, rest: Prefix, width: usize) {
+    pub fn wrapped(&mut self, text: &str, role: Option<Highlight>, first: Prefix, rest: Prefix, width: usize) {
         for (index, line) in text.lines().enumerate() {
             let segments = [(line.to_owned(), role)];
             wrap(self, &segments, width, if index == 0 { first } else { rest }, rest);
@@ -47,15 +47,15 @@ impl Styled {
     }
 
     /// Styled runs wrapped at words to `width` cells.
-    pub fn runs(&mut self, runs: &[(String, Option<SyntaxRole>)], width: usize) {
+    pub fn runs(&mut self, runs: &[(String, Option<Highlight>)], width: usize) {
         wrap(self, runs, width, ("", None), ("", None));
     }
 }
 
 /// What starts a line: indentation, a bullet or a quote bar, and its style.
-pub type Prefix<'a> = (&'a str, Option<SyntaxRole>);
+pub type Prefix<'a> = (&'a str, Option<Highlight>);
 
-type Segment = (String, Option<SyntaxRole>);
+type Segment = (String, Option<Highlight>);
 
 /// Append `source` rendered for a column `width` cells wide.
 pub fn render(out: &mut Styled, source: &str, width: usize) {
@@ -86,20 +86,20 @@ pub fn render(out: &mut Styled, source: &str, width: usize) {
             }
             table(out, &rows, width);
         } else if let Some(title) = heading(trimmed) {
-            wrap(out, &inline(title, Some(SyntaxRole::Heading)), width, ("", None), ("", None));
+            wrap(out, &inline(title, Some(Highlight::HEADING)), width, ("", None), ("", None));
         } else if is_rule(trimmed) {
             out.rule(width);
         } else if trimmed.starts_with('>') {
             let text = trimmed.trim_start_matches(['>', ' ']);
-            let bar = ("▎ ", Some(SyntaxRole::Quote));
-            wrap(out, &inline(text, Some(SyntaxRole::Quote)), width, bar, bar);
+            let bar = ("▎ ", Some(Highlight::QUOTE));
+            wrap(out, &inline(text, Some(Highlight::QUOTE)), width, bar, bar);
         } else if let Some((marker, text)) = list_item(trimmed, indent) {
             let continuation = " ".repeat(UnicodeWidthStr::width(marker.as_str()));
             wrap(
                 out,
                 &inline(text, None),
                 width,
-                (marker.as_str(), Some(SyntaxRole::Keyword)),
+                (marker.as_str(), Some(Highlight::KEYWORD)),
                 (continuation.as_str(), None),
             );
         } else if trimmed.is_empty() {
@@ -177,7 +177,7 @@ fn code_block(out: &mut Styled, info: &str, body: &[&str], width: usize) {
     let name = info.split_whitespace().next().unwrap_or("");
     let label = if name.is_empty() { String::new() } else { format!(" {name} ") };
     let rest = width.saturating_sub(2 + UnicodeWidthStr::width(label.as_str()));
-    out.push(&format!("──{label}{}", "─".repeat(rest)), Some(SyntaxRole::Comment));
+    out.push(&format!("──{label}{}", "─".repeat(rest)), Some(Highlight::COMMENT));
     out.push("\n", None);
     let mut code = body.join("\n");
     code.push('\n');
@@ -206,7 +206,7 @@ fn table(out: &mut Styled, rows: &[&str], width: usize) {
         .map(|(index, row)| {
             let row = row.trim().trim_start_matches('|');
             let row = row.strip_suffix('|').unwrap_or(row);
-            let role = (index == 0).then_some(SyntaxRole::Strong);
+            let role = (index == 0).then_some(Highlight::STRONG);
             row.split('|').map(|cell| inline(cell.trim(), role)).collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
@@ -217,7 +217,7 @@ fn table(out: &mut Styled, rows: &[&str], width: usize) {
             widths[column] = widths[column].max(segments_width(cell));
         }
     }
-    let separator = (" │ ", Some(SyntaxRole::Comment));
+    let separator = (" │ ", Some(Highlight::COMMENT));
     if widths.iter().sum::<usize>() + 3 * columns.saturating_sub(1) > width {
         // Too wide to line up: one wrapped line per row.
         for row in cells {
@@ -248,7 +248,7 @@ fn table(out: &mut Styled, rows: &[&str], width: usize) {
         out.push("\n", None);
         if index == 0 {
             let line = widths.iter().map(|width| "─".repeat(*width)).collect::<Vec<_>>().join("─┼─");
-            out.push(&line, Some(SyntaxRole::Comment));
+            out.push(&line, Some(Highlight::COMMENT));
             out.push("\n", None);
         }
     }
@@ -260,7 +260,7 @@ fn segments_width(segments: &[Segment]) -> usize {
 
 /// Inline Markdown as styled runs: code spans, bold, italic, links and escapes. Text
 /// outside any of them gets `base`.
-fn inline(text: &str, base: Option<SyntaxRole>) -> Vec<Segment> {
+fn inline(text: &str, base: Option<Highlight>) -> Vec<Segment> {
     let mut segments = Vec::new();
     let mut plain = String::new();
     let flush = |segments: &mut Vec<Segment>, plain: &mut String| {
@@ -290,7 +290,7 @@ fn inline(text: &str, base: Option<SyntaxRole>) -> Vec<Segment> {
                         .and_then(|code| code.strip_suffix(' '))
                         .filter(|inner| !inner.trim().is_empty())
                         .unwrap_or(code);
-                    segments.push((code.to_owned(), Some(SyntaxRole::Code)));
+                    segments.push((code.to_owned(), Some(Highlight::RAW)));
                     at += ticks + end + ticks;
                 } else {
                     plain.push_str(&rest[..ticks]);
@@ -309,8 +309,8 @@ fn inline(text: &str, base: Option<SyntaxRole>) -> Vec<Segment> {
                     flush(&mut segments, &mut plain);
                     let role = match (character, length) {
                         ('~', _) => base,
-                        (_, 2) => Some(SyntaxRole::Strong),
-                        _ => Some(SyntaxRole::Emphasis),
+                        (_, 2) => Some(Highlight::STRONG),
+                        _ => Some(Highlight::ITALIC),
                     };
                     segments.extend(inline(&text[at + length..close], role));
                     at = close + length;
@@ -326,7 +326,7 @@ fn inline(text: &str, base: Option<SyntaxRole>) -> Vec<Segment> {
                     && let Some((label, length)) = link(&rest[label_start - 1..])
                 {
                     flush(&mut segments, &mut plain);
-                    segments.extend(inline(label, Some(SyntaxRole::Link)));
+                    segments.extend(inline(label, Some(Highlight::LINK)));
                     at += label_start - 1 + length;
                     continue;
                 }
@@ -337,7 +337,7 @@ fn inline(text: &str, base: Option<SyntaxRole>) -> Vec<Segment> {
                     && !rest[1..end].contains(' ')
                 {
                     flush(&mut segments, &mut plain);
-                    segments.push((rest[1..end].to_owned(), Some(SyntaxRole::Link)));
+                    segments.push((rest[1..end].to_owned(), Some(Highlight::LINK)));
                     at += end + 1;
                     continue;
                 }
@@ -348,7 +348,7 @@ fn inline(text: &str, base: Option<SyntaxRole>) -> Vec<Segment> {
                 let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
                 let url = rest[..end].trim_end_matches(['.', ',', ')', ';', ':', '!', '?']);
                 flush(&mut segments, &mut plain);
-                segments.push((url.to_owned(), Some(SyntaxRole::Link)));
+                segments.push((url.to_owned(), Some(Highlight::LINK)));
                 at += url.len();
                 continue;
             }
@@ -411,7 +411,7 @@ fn link(text: &str) -> Option<(&str, usize)> {
 /// Lay `segments` out in lines of at most `width` cells, the first starting with `first`
 /// and the rest with `rest`. Words longer than a line are broken between characters.
 fn wrap(out: &mut Styled, segments: &[Segment], width: usize, first: Prefix, rest: Prefix) {
-    let mut words: Vec<Vec<(&str, Option<SyntaxRole>)>> = vec![Vec::new()];
+    let mut words: Vec<Vec<(&str, Option<Highlight>)>> = vec![Vec::new()];
     for (text, role) in segments {
         for (index, part) in text.split(' ').enumerate() {
             if index > 0 {
@@ -480,7 +480,7 @@ mod tests {
         out
     }
 
-    fn styled<'a>(out: &'a Styled, role: SyntaxRole) -> Vec<&'a str> {
+    fn styled<'a>(out: &'a Styled, role: Highlight) -> Vec<&'a str> {
         out.spans
             .iter()
             .filter(|(_, candidate)| *candidate == role)
@@ -498,11 +498,11 @@ mod tests {
             out.text,
             "Title\n\nSome bold, italic and code, see docs.\n\n▎ quoted\n\n• one\n  ◦ two\n1. first\n✓ done\n\n────────────────────────────────────────\n"
         );
-        assert_eq!(styled(&out, SyntaxRole::Heading), ["Title"]);
-        assert_eq!(styled(&out, SyntaxRole::Strong), ["bold"]);
-        assert_eq!(styled(&out, SyntaxRole::Emphasis), ["italic"]);
-        assert_eq!(styled(&out, SyntaxRole::Code), ["code"]);
-        assert_eq!(styled(&out, SyntaxRole::Link), ["docs"]);
+        assert_eq!(styled(&out, Highlight::HEADING), ["Title"]);
+        assert_eq!(styled(&out, Highlight::STRONG), ["bold"]);
+        assert_eq!(styled(&out, Highlight::ITALIC), ["italic"]);
+        assert_eq!(styled(&out, Highlight::RAW), ["code"]);
+        assert_eq!(styled(&out, Highlight::LINK), ["docs"]);
     }
 
     #[test]
@@ -519,7 +519,7 @@ mod tests {
             out.text,
             "── rust ────────────\nfn main() {}\n────────────────────\nafter\n"
         );
-        assert!(styled(&out, SyntaxRole::Keyword).contains(&"fn"));
+        assert!(styled(&out, Highlight::KEYWORD).contains(&"fn"));
     }
 
     #[test]

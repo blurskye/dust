@@ -12,7 +12,9 @@ use std::{
 use thiserror::Error;
 use tree_sitter::{Language, Parser, Query, QueryCursor, StreamingIterator};
 
+mod highlight;
 mod objects;
+pub use highlight::Highlight;
 pub use objects::{SyntaxObject, SyntaxObjectKind};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -221,7 +223,7 @@ pub fn validate_builtin_queries() -> Result<(), String> {
         let highlights = Query::new(&descriptor.language, descriptor.highlights)
             .map_err(|error| format!("{} highlights: {error}", info.id))?;
         for capture in highlights.capture_names() {
-            if role(capture).is_none() && !uncoloured_capture(capture) {
+            if !uncoloured_capture(capture) && Highlight::for_capture(capture).is_none() {
                 return Err(format!(
                     "{} highlights: unsupported capture {capture}",
                     info.id
@@ -530,31 +532,10 @@ fn descriptor(language: SyntaxLanguage) -> Descriptor {
     }
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SyntaxRole {
-    Comment,
-    String,
-    Number,
-    Keyword,
-    Type,
-    Variable,
-    Function,
-    /// Fields and properties.
-    Property,
-    /// Attributes, decorators and annotations.
-    Attribute,
-    /// Markup: headings, bold and italic text, code, links and quotes.
-    Heading,
-    Strong,
-    Emphasis,
-    Code,
-    Link,
-    Quote,
-}
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SyntaxSpan {
     pub start: usize,
     pub end: usize,
-    pub role: SyntaxRole,
+    pub role: Highlight,
 }
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct SyntaxFold {
@@ -717,7 +698,11 @@ impl SyntaxService {
 }
 fn highlight_spans(query: &Query, tree: &tree_sitter::Tree, source: &str, maximum: usize) -> Vec<SyntaxSpan> {
     let mut cursor = QueryCursor::new();
-    let names = query.capture_names();
+    let groups: Vec<Option<Highlight>> = query
+        .capture_names()
+        .iter()
+        .map(|name| (!uncoloured_capture(name)).then(|| Highlight::for_capture(name)).flatten())
+        .collect();
     let mut matches = cursor.matches(query, tree.root_node(), source.as_bytes());
     let mut spans = Vec::new();
     while let Some(item) = matches.next() {
@@ -725,7 +710,7 @@ fn highlight_spans(query: &Query, tree: &tree_sitter::Tree, source: &str, maximu
             if spans.len() >= maximum {
                 break;
             }
-            if let Some(role) = role(names[capture.index as usize]) {
+            if let Some(role) = groups[capture.index as usize] {
                 let range = capture.node.byte_range();
                 if source.is_char_boundary(range.start) && source.is_char_boundary(range.end) {
                     spans.push(SyntaxSpan {
@@ -878,38 +863,6 @@ fn uncoloured_capture(name: &str) -> bool {
             name.split('.').next(),
             Some("none" | "spell" | "nospell" | "error" | "conceal" | "local")
         )
-}
-fn role(name: &str) -> Option<SyntaxRole> {
-    match name {
-        "text.title" => return Some(SyntaxRole::Heading),
-        "text.literal" => return Some(SyntaxRole::Code),
-        "text.uri" | "text.reference" => return Some(SyntaxRole::Link),
-        _ => {}
-    }
-    let root = name.split('.').next().unwrap_or(name);
-    match root {
-        "none" => None,
-        "comment" => Some(SyntaxRole::Comment),
-        "string" | "character" | "text" | "escape" => Some(SyntaxRole::String),
-        "number" | "float" => Some(SyntaxRole::Number),
-        "keyword" | "operator" | "punctuation" | "tag" | "label" | "boolean" | "conditional"
-        | "repeat" | "exception" | "include" | "import" | "preproc" | "storageclass"
-        | "delimiter" | "charset" | "keyframes" | "media" | "supports" => Some(SyntaxRole::Keyword),
-        "type" | "constructor" | "module" | "namespace" => Some(SyntaxRole::Type),
-        "function" | "method" => Some(SyntaxRole::Function),
-        "property" | "field" => Some(SyntaxRole::Property),
-        "attribute" => Some(SyntaxRole::Attribute),
-        "variable" | "constant" | "embedded" | "parameter" => Some(SyntaxRole::Variable),
-        "markup" => Some(match name {
-            "markup.heading" => SyntaxRole::Heading,
-            "markup.strong" | "markup.bold" => SyntaxRole::Strong,
-            "markup.italic" | "markup.emphasis" => SyntaxRole::Emphasis,
-            "markup.link" | "markup.link.url" => SyntaxRole::Link,
-            "markup.quote" => SyntaxRole::Quote,
-            _ => SyntaxRole::String,
-        }),
-        _ => None,
-    }
 }
 fn parse(request: Request) -> SyntaxEvent {
     if request.source.len() > request.policy.maximum_source_bytes {
@@ -1222,12 +1175,12 @@ mod tests {
         let spans = highlight(SyntaxLanguage::Toml, source);
         let role_at = |word: &str| {
             let at = source.find(word).expect(word);
-            spans.iter().find(|span| span.start <= at && at < span.end).map(|span| span.role)
+            spans.iter().find(|span| span.start <= at && at < span.end).map(|span| span.role.name())
         };
-        assert_eq!(role_at("package"), Some(SyntaxRole::Keyword));
-        assert_eq!(role_at("name"), Some(SyntaxRole::Type));
-        assert_eq!(role_at("\"dust\""), Some(SyntaxRole::String));
-        assert_eq!(role_at("2"), Some(SyntaxRole::Number));
+        assert_eq!(role_at("package"), Some("@keyword"));
+        assert_eq!(role_at("name"), Some("@type"));
+        assert_eq!(role_at("\"dust\""), Some("@string"));
+        assert_eq!(role_at("2"), Some("@number"));
     }
     #[test]
     fn scripts_without_an_extension_are_known_by_their_first_line() {

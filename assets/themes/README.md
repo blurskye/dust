@@ -21,11 +21,24 @@ work with `--clean`, without downloads or plugins.
 | Rosé Pine Moon | `rose-pine-moon` |
 | Rosé Pine Dawn (light) | `rose-pine-dawn` |
 
-These are Dust semantic-role adaptations of the upstream palettes, not imports
-of executable editor themes or promises of identical highlighting. Each TOML
-file supplies all existing semantic styles and explicit truecolor, xterm-256
-and ANSI-16 fallbacks. ANSI fallbacks prioritize foreground/background contrast;
-terminal palette customization can still affect the result.
+Each file has two parts. `[styles]` colours Dust's own surfaces (panels, status
+line, explorer) with explicit truecolor, xterm-256 and ANSI-16 fallbacks.
+`[highlights]` colours code with Neovim's highlight groups, in the shape
+`nvim_set_hl` takes: `"@function" = { fg = "#7aa2f7" }`, `"@lsp.type.property" =
+{ link = "@property" }`, with `bold`, `italic`, `underline`, `strikethrough` and
+`reverse`. Groups resolve as in Neovim: the theme's definition, then Neovim's
+default (`assets/defaults/highlights.toml`), then the parent group, so
+`@function.method.call` falls back to `@function.method` and `@function`.
+Language-server tokens colour only when their `@lsp.type.*` group has a colour.
+The 256 and 16-colour fallbacks for `[highlights]` are the nearest palette colour.
+
+To port a Neovim colorscheme, dump its groups and paste them under `[highlights]`:
+
+    nvim --clean --headless --cmd 'set rtp^=<plugin dir>' \
+      -l scripts/nvim-highlights.lua <colorscheme> [dark|light]
+
+The bundled `[highlights]` tables were dumped this way from the plugins below;
+Dust runs no Lua.
 
 ## Palette sources and licenses
 
@@ -48,17 +61,16 @@ terminal palette customization can still affect the result.
   [palette.json at 92af52b465ab6e47437aca223c9b8d3009a2023b](https://github.com/rose-pine/rose-pine-palette/blob/92af52b465ab6e47437aca223c9b8d3009a2023b/palette.json).
   [License](../../LICENSES/MIT-rose-pine.txt).
 
-Role mapping uses each palette's base/text for editor content, secondary
-surfaces for panels/selection, and its red/yellow/green/blue colors for semantic
-error/warning/success/information. Catppuccin uses mauve keywords, green strings,
-peach numbers and yellow types; Gruvbox and Nord use their corresponding accents.
-Tokyo Night uses its corresponding accents. Rosé Pine uses foam for information,
-strings and additions, love for errors, gold for warnings/types, iris for keywords,
-and rose for numbers. These are role adaptations, not exact upstream syntax mappings.
-No upstream runtime or additional dependency is included.
+Highlights come from these Neovim plugins, under their own licenses:
+[tokyonight.nvim at cdc07ac](https://github.com/folke/tokyonight.nvim/tree/cdc07ac78467a233fd62c493de29a17e0cf2b2b6) (Apache-2.0),
+[catppuccin/nvim at edefef7](https://github.com/catppuccin/nvim/tree/edefef779ab08ce1a4a404713e3012b0d202bd35) (MIT, [license](../../LICENSES/MIT-catppuccin.txt)),
+[rose-pine/neovim at ff48305](https://github.com/rose-pine/neovim/tree/ff483051a47e27d84bdef47703538df1ed9f4a47) (MIT, [license](../../LICENSES/MIT-rose-pine-nvim.txt)),
+[gruvbox.nvim at 154eb5f](https://github.com/ellisonleao/gruvbox.nvim/tree/154eb5ff5b96d0641307113fa385eaf0d36d9796) (MIT, [license](../../LICENSES/MIT-gruvbox.txt)) and
+[gbprod/nord.nvim at 87394d4](https://github.com/gbprod/nord.nvim/tree/87394d4fc35c901bbe38326a78d31ab1ead826b6) (WTFPL, [license](../../LICENSES/WTFPL-nord-nvim.txt)).
+The Dust theme's `[highlights]` are its own.
 
 Dust plugins do **not yet** have a theme-contribution API. To add a custom theme
 today, place a Dust-format TOML file beside user configuration in `themes/`.
-Existing Neovim theme plugins cannot run directly. Palette fetching for these
+Neovim theme plugins don't run directly; dump their groups as above. Palette fetching for these
 bundled ports happened during development; opening the chooser makes no network
 request and does not install code.

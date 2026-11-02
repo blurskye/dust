@@ -20,7 +20,7 @@ use super::{
     visual_rows::{
         VisualRowAnchor, VisualRowModel, active_indent_guide, editor_line_number_digits,
         editor_state_content_width, editor_state_gutter_width, git_sign_column,
-        is_indent_guide_column, leading_indentation_width, one_cell_symbol, syntax_role_style,
+        is_indent_guide_column, leading_indentation_width, one_cell_symbol,
     },
 };
 
@@ -562,7 +562,7 @@ pub(super) fn render_editor_view(
                     .copied()
                     .filter(|span| span.range.contains(global))
             } {
-                syntax_role_style(span.role)
+                Style::Syntax(span.role)
             } else if let Some(span) = {
                 while syntax_spans
                     .get(syntax_cursor)
@@ -575,7 +575,7 @@ pub(super) fn render_editor_view(
                     .copied()
                     .filter(|span| span.range.contains(global))
             } {
-                syntax_role_style(span.role)
+                Style::Syntax(span.role)
             } else {
                 Style::Default
             };

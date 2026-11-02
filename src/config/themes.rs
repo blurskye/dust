@@ -11,7 +11,7 @@ use std::{
     sync::mpsc::SyncSender,
 };
 
-const BUNDLED: &[(&str, &str)] = &[
+pub(super) const BUNDLED: &[(&str, &str)] = &[
     ("dust", super::load::BUNDLED_THEME),
     (
         "catppuccin-latte",

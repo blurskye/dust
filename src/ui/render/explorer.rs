@@ -4,6 +4,7 @@ use crate::{
 };
 
 use super::{ExplorerSegmentRole, ExplorerUiState, Frame, editor::cursor_style};
+use crate::language::syntax::Highlight;
 
 /// Width of the persistent explorer dock, leaving a usable editor pane.
 #[must_use]
@@ -338,10 +339,10 @@ pub(super) fn explorer_segment_style(role: ExplorerSegmentRole) -> Style {
         ExplorerSegmentRole::Tree => Style::ExplorerTree,
         ExplorerSegmentRole::Icon | ExplorerSegmentRole::IconGrey => Style::ExplorerIcon,
         ExplorerSegmentRole::IconAzure => Style::Accent,
-        ExplorerSegmentRole::IconBlue => Style::SyntaxNumber,
-        ExplorerSegmentRole::IconCyan => Style::SyntaxString,
+        ExplorerSegmentRole::IconBlue => Style::Syntax(Highlight::FUNCTION),
+        ExplorerSegmentRole::IconCyan => Style::Syntax(Highlight::PROPERTY),
         ExplorerSegmentRole::IconGreen => Style::GitSignAdded,
-        ExplorerSegmentRole::IconOrange => Style::SyntaxType,
+        ExplorerSegmentRole::IconOrange => Style::Syntax(Highlight::NUMBER),
         ExplorerSegmentRole::IconPurple => Style::ExplorerSymlink,
         ExplorerSegmentRole::IconRed => Style::GitSignDeleted,
         ExplorerSegmentRole::IconYellow => Style::GitSignChanged,

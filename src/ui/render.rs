@@ -241,7 +241,7 @@ pub struct UiSyntaxSpan {
     pub buffer: crate::editor::BufferId,
     pub revision: crate::editor::text::BufferRevision,
     pub range: ByteRange,
-    pub role: crate::language::syntax::SyntaxRole,
+    pub role: crate::language::syntax::Highlight,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiInlayHint {

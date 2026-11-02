@@ -28,7 +28,7 @@ use crate::{
         Axis, BufferId, EditorMode, LayoutAction, session::search::PickerPayload,
         text::TextBuffer,
     },
-    language::syntax::SyntaxRole,
+    language::syntax::Highlight,
     tools::{ToolKind, ToolStatus},
     remote::{AgentRequest, Reply},
     ui::{
@@ -1598,7 +1598,7 @@ impl InteractiveApplication {
                         "No agent session yet. Type below to ask {name}, ctrl-n picks another \
                          agent, ctrl-r resumes a saved conversation and / lists the commands."
                     ),
-                    Some(SyntaxRole::Comment),
+                    Some(Highlight::COMMENT),
                     ("", None),
                     ("", None),
                     width,
@@ -2247,7 +2247,7 @@ fn transcript(
     width: usize,
 ) {
     let plain = ("", None);
-    let quote = Some(SyntaxRole::Quote);
+    let quote = Some(Highlight::QUOTE);
     for (index, entry) in entries.iter().enumerate() {
         // A blank line between tool lines and the prose around them.
         let previous = index.checked_sub(1).map(|previous| &entries[previous]);
@@ -2292,16 +2292,16 @@ fn transcript(
             Entry::Tool { title, .. } if title.trim().is_empty() => {}
             Entry::Tool { title, status, .. } => {
                 let role = match status.as_str() {
-                    "completed" => SyntaxRole::String,
-                    "failed" => SyntaxRole::Number,
-                    "in_progress" => SyntaxRole::Type,
-                    _ => SyntaxRole::Comment,
+                    "completed" => Highlight::STRING,
+                    "failed" => Highlight::NUMBER,
+                    "in_progress" => Highlight::TYPE,
+                    _ => Highlight::COMMENT,
                 };
                 out.wrapped(title, None, ("● ", Some(role)), ("  ", None), width);
             }
             Entry::Plan(steps) => {
                 out.push("\n", None);
-                out.push("Plan", Some(SyntaxRole::Strong));
+                out.push("Plan", Some(Highlight::STRONG));
                 out.push("\n", None);
                 for (status, step) in steps {
                     let mark = match status.as_str() {
@@ -2309,7 +2309,7 @@ fn transcript(
                         "in_progress" => "… ",
                         _ => "○ ",
                     };
-                    out.wrapped(step, None, (mark, Some(SyntaxRole::Keyword)), ("  ", None), width);
+                    out.wrapped(step, None, (mark, Some(Highlight::KEYWORD)), ("  ", None), width);
                 }
                 out.push("\n", None);
             }

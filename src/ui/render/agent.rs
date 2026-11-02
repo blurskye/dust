@@ -16,7 +16,7 @@ use crate::{
     ui::{CellGrid, Style, geometry::text_width, markdown::Styled},
 };
 
-use super::{ContentTabEntry, Frame, overlays::render_content_tab_line, visual_rows::syntax_role_style};
+use super::{ContentTabEntry, Frame, overlays::render_content_tab_line};
 
 /// The input box grows with what is typed up to this many rows, then scrolls.
 const INPUT_ROW_CEILING: usize = 8;
@@ -133,7 +133,7 @@ pub(super) fn render_agent_panel(
     if panel.menu.is_empty() {
         for (offset, row) in panel.family.iter().take(usize::from(list)).enumerate() {
             let y = list_top + u16::try_from(offset).unwrap_or(0);
-            let (mark, style) = if row.shown { ("● ", Style::MarkupStrong) } else { ("○ ", Style::Muted) };
+            let (mark, style) = if row.shown { ("● ", Style::Syntax(crate::language::syntax::Highlight::STRONG)) } else { ("○ ", Style::Muted) };
             let x = grid.put_text(1, y, mark, style);
             let x = grid.put_text_clipped(x, y, &row.name, style, width - 1);
             let x = grid.put_text_clipped(x.saturating_add(2), y, &row.task, Style::Muted, width - 1);
@@ -224,7 +224,7 @@ fn draw_line(grid: &mut CellGrid, y: u16, transcript: &Styled, bands: &[Range<us
         }
         let style = match spans.get(span) {
             _ if banded => Style::Selection,
-            Some((range, role)) if range.start <= at => syntax_role_style(*role),
+            Some((range, role)) if range.start <= at => Style::Syntax(*role),
             _ => Style::Default,
         };
         x = grid.put_text_clipped(x, y, grapheme, style, right);

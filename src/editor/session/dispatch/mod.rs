@@ -38,7 +38,7 @@ mod remote;
 
 #[cfg(test)]
 use super::persistence::capture_persisted_layout;
-use super::syntax::{IndentError, SyntaxDocument, SyntaxSession, semantic_role};
+use super::syntax::{IndentError, SyntaxDocument, SyntaxSession};
 use super::windows::rect_contains_point;
 use crate::editor::session::tasks::{AdapterContext, RunningTask};
 #[cfg(test)]

@@ -70,22 +70,8 @@ pub enum Style {
     TerminalStatus,
     TerminalStatusAccent,
     Terminal(PtyStyle),
-    SyntaxComment,
-    SyntaxString,
-    SyntaxNumber,
-    SyntaxKeyword,
-    SyntaxType,
-    SyntaxVariable,
-    SyntaxFunction,
-    SyntaxProperty,
-    SyntaxAttribute,
-    /// Markup styles reuse a theme color and add an attribute, so themes need no entries.
-    MarkupHeading,
-    MarkupStrong,
-    MarkupEmphasis,
-    MarkupCode,
-    MarkupLink,
-    MarkupQuote,
+    /// A Neovim highlight group, coloured by the theme's `[highlights]`.
+    Syntax(crate::language::syntax::Highlight),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

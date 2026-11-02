@@ -31,6 +31,7 @@ use nix::{
 };
 
 use crate::config::{ColorMode, ThemeAttribute, ThemeColor, ThemeConfig, ThemeStyle};
+use crate::language::syntax::Highlight;
 use crate::editor::input::{KeyCode, KeyEvent, Modifiers};
 use thiserror::Error;
 
@@ -409,15 +410,6 @@ fn queue_style(
         }
         return Ok(());
     }
-    let (style, added) = match style {
-        Style::MarkupHeading => (Style::Accent, Some(Attribute::Bold)),
-        Style::MarkupStrong => (Style::Default, Some(Attribute::Bold)),
-        Style::MarkupEmphasis => (Style::Default, Some(Attribute::Italic)),
-        Style::MarkupCode => (Style::SyntaxString, None),
-        Style::MarkupLink => (Style::SyntaxType, Some(Attribute::Underlined)),
-        Style::MarkupQuote => (Style::Muted, Some(Attribute::Italic)),
-        other => (other, None),
-    };
     let derived;
     let configured = match style {
         Style::Default => &theme.styles.default,
@@ -487,33 +479,7 @@ fn queue_style(
         Style::TerminalStatus => &theme.styles.terminal_status,
         Style::TerminalStatusAccent => &theme.styles.terminal_status_accent,
         Style::Terminal(_) => unreachable!("terminal cells are handled above"),
-        Style::SyntaxComment => &theme.styles.syntax_comment,
-        Style::SyntaxString => &theme.styles.syntax_string,
-        Style::SyntaxNumber => &theme.styles.syntax_number,
-        Style::SyntaxKeyword => &theme.styles.syntax_keyword,
-        Style::SyntaxType => &theme.styles.syntax_type,
-        Style::SyntaxVariable => &theme.styles.syntax_variable,
-        Style::SyntaxFunction => theme
-            .styles
-            .syntax_function
-            .as_ref()
-            .unwrap_or(&theme.styles.syntax_variable),
-        Style::SyntaxProperty => theme
-            .styles
-            .syntax_property
-            .as_ref()
-            .unwrap_or(&theme.styles.syntax_variable),
-        Style::SyntaxAttribute => theme
-            .styles
-            .syntax_attribute
-            .as_ref()
-            .unwrap_or(&theme.styles.syntax_variable),
-        Style::MarkupHeading
-        | Style::MarkupStrong
-        | Style::MarkupEmphasis
-        | Style::MarkupCode
-        | Style::MarkupLink
-        | Style::MarkupQuote => unreachable!("markup styles are mapped above"),
+        Style::Syntax(group) => theme.highlight(group).unwrap_or(&theme.styles.default),
     };
     queue!(
         writer,
@@ -534,9 +500,6 @@ fn queue_style(
     for attribute in &configured.attributes {
         queue!(writer, SetAttribute(terminal_attribute(*attribute)))?;
     }
-    if let Some(attribute) = added {
-        queue!(writer, SetAttribute(attribute))?;
-    }
     Ok(())
 }
 
@@ -548,6 +511,7 @@ fn status_bar_style(style: Style, theme: &ThemeConfig) -> ThemeStyle {
     let fill = |style: &ThemeStyle| (style.background, style.background_256, style.background_16);
     let styles = &theme.styles;
     let accent = &styles.status_accent;
+    let group = |group| theme.highlight(group).unwrap_or(&styles.accent);
     let paint = |foreground: Colour, background: Colour, attributes: Vec<_>| ThemeStyle {
         foreground: foreground.0,
         foreground_256: foreground.1,
@@ -560,12 +524,12 @@ fn status_bar_style(style: Style, theme: &ThemeConfig) -> ThemeStyle {
     let block = |colour: &ThemeStyle| paint(text(accent), text(colour), accent.attributes.clone());
     let edge = |colour: Colour| paint(colour, fill(&styles.selection), Vec::new());
     match style {
-        Style::StatusInsert => block(&styles.syntax_string),
-        Style::StatusVisual => block(&styles.syntax_keyword),
+        Style::StatusInsert => block(group(Highlight::STRING)),
+        Style::StatusVisual => block(group(Highlight::KEYWORD)),
         Style::StatusReplace => block(&styles.error),
         Style::StatusCommand => block(&styles.warning),
-        Style::StatusEdgeInsert => edge(text(&styles.syntax_string)),
-        Style::StatusEdgeVisual => edge(text(&styles.syntax_keyword)),
+        Style::StatusEdgeInsert => edge(text(group(Highlight::STRING))),
+        Style::StatusEdgeVisual => edge(text(group(Highlight::KEYWORD))),
         Style::StatusEdgeReplace => edge(text(&styles.error)),
         Style::StatusEdgeCommand => edge(text(&styles.warning)),
         Style::StatusEdgeSection => {
@@ -680,6 +644,7 @@ fn terminal_attribute(attribute: ThemeAttribute) -> Attribute {
         ThemeAttribute::Italic => Attribute::Italic,
         ThemeAttribute::Underlined => Attribute::Underlined,
         ThemeAttribute::Reverse => Attribute::Reverse,
+        ThemeAttribute::Strikethrough => Attribute::CrossedOut,
     }
 }
 

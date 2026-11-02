@@ -1,4 +1,8 @@
+use std::{collections::BTreeMap, sync::OnceLock};
+
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+
+use crate::language::syntax::Highlight;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ThemeColor {
@@ -115,6 +119,7 @@ pub enum ThemeAttribute {
     Italic,
     Underlined,
     Reverse,
+    Strikethrough,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -188,29 +193,127 @@ pub struct ThemeStyles {
     pub terminal_status: ThemeStyle,
     pub terminal_status_accent: ThemeStyle,
     pub terminal_text: ThemeStyle,
-    pub syntax_comment: ThemeStyle,
-    pub syntax_string: ThemeStyle,
-    pub syntax_number: ThemeStyle,
-    pub syntax_keyword: ThemeStyle,
-    pub syntax_type: ThemeStyle,
-    pub syntax_variable: ThemeStyle,
-    /// Left out, these draw like variables.
-    #[serde(default)]
-    pub syntax_function: Option<ThemeStyle>,
-    #[serde(default)]
-    pub syntax_property: Option<ThemeStyle>,
-    #[serde(default)]
-    pub syntax_attribute: Option<ThemeStyle>,
 }
+
+/// A Neovim highlight group's definition, in the shape `nvim_set_hl` takes and
+/// `nvim_get_hl` returns, so a colorscheme's groups can be copied across as they are.
+/// Keys Dust doesn't use, such as `sp` or `blend`, are ignored.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct HighlightDefinition {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fg: Option<ThemeColor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bg: Option<ThemeColor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ctermfg: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ctermbg: Option<u8>,
+    #[serde(default)]
+    pub bold: bool,
+    #[serde(default)]
+    pub italic: bool,
+    #[serde(default)]
+    pub underline: bool,
+    #[serde(default)]
+    pub undercurl: bool,
+    #[serde(default)]
+    pub strikethrough: bool,
+    #[serde(default)]
+    pub reverse: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
+}
+
+/// Every group's style, worked out on first use.
+#[derive(Clone, Debug, Default)]
+struct ResolvedHighlights(OnceLock<Vec<Option<ThemeStyle>>>);
+impl PartialEq for ResolvedHighlights {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+impl Eq for ResolvedHighlights {}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThemeConfig {
     pub name: String,
     pub styles: ThemeStyles,
+    /// Neovim highlight groups, such as `"@function" = { fg = "#7aa2f7" }` or
+    /// `"@lsp.type.property" = { link = "@property" }`.
+    #[serde(default)]
+    pub highlights: BTreeMap<String, HighlightDefinition>,
+    #[serde(skip)]
+    resolved: ResolvedHighlights,
 }
 
 impl ThemeConfig {
+    /// A group's style, following links and parent groups as Neovim does: the theme's own
+    /// definition first, then Neovim's default for that group, then the parent group's.
+    /// `None` when nothing colours it.
+    #[must_use]
+    pub fn highlight(&self, group: Highlight) -> Option<&ThemeStyle> {
+        self.resolved
+            .0
+            .get_or_init(|| Highlight::all().map(|group| self.resolve(group.name())).collect())
+            .get(group.index())?
+            .as_ref()
+    }
+
+    fn resolve<'a>(&'a self, mut name: &'a str) -> Option<ThemeStyle> {
+        // Links can loop in a hand-written theme.
+        for _ in 0..32 {
+            match self.highlights.get(name).or_else(|| Highlight::default_definition(name)) {
+                Some(HighlightDefinition { link: Some(link), .. }) => name = link,
+                Some(definition) => return Some(self.highlight_style(definition)),
+                None if name.starts_with('@') => name = name.rsplit_once('.')?.0,
+                None => return None,
+            }
+        }
+        None
+    }
+
+    fn highlight_style(&self, definition: &HighlightDefinition) -> ThemeStyle {
+        let base = &self.styles.default;
+        let channel = |colour: Option<ThemeColor>, cterm: Option<u8>, fallback| match colour {
+            Some(colour) => (
+                colour,
+                cterm.map(ThemeColor::Indexed).or_else(|| nearest_256(colour)),
+                nearest_16(colour),
+            ),
+            None => fallback,
+        };
+        let foreground = channel(
+            definition.fg,
+            definition.ctermfg,
+            (base.foreground, base.foreground_256, base.foreground_16),
+        );
+        let background = channel(
+            definition.bg,
+            definition.ctermbg,
+            (base.background, base.background_256, base.background_16),
+        );
+        let attributes = [
+            (definition.bold, ThemeAttribute::Bold),
+            (definition.italic, ThemeAttribute::Italic),
+            (definition.underline || definition.undercurl, ThemeAttribute::Underlined),
+            (definition.strikethrough, ThemeAttribute::Strikethrough),
+            (definition.reverse, ThemeAttribute::Reverse),
+        ]
+        .into_iter()
+        .filter_map(|(on, attribute)| on.then_some(attribute))
+        .collect();
+        ThemeStyle {
+            foreground: foreground.0,
+            foreground_256: foreground.1,
+            foreground_16: foreground.2,
+            background: background.0,
+            background_256: background.1,
+            background_16: background.2,
+            attributes,
+        }
+    }
+
     pub(in crate::config) fn validate(&self) -> Result<(), String> {
         let styles = [
             ("default", &self.styles.default),
@@ -276,23 +379,7 @@ impl ThemeConfig {
                 &self.styles.terminal_status_accent,
             ),
             ("terminal_text", &self.styles.terminal_text),
-            ("syntax_comment", &self.styles.syntax_comment),
-            ("syntax_string", &self.styles.syntax_string),
-            ("syntax_number", &self.styles.syntax_number),
-            ("syntax_keyword", &self.styles.syntax_keyword),
-            ("syntax_type", &self.styles.syntax_type),
-            ("syntax_variable", &self.styles.syntax_variable),
-        ]
-        .into_iter()
-        .chain(
-            [
-                ("syntax_function", &self.styles.syntax_function),
-                ("syntax_property", &self.styles.syntax_property),
-                ("syntax_attribute", &self.styles.syntax_attribute),
-            ]
-            .into_iter()
-            .filter_map(|(name, style)| Some((name, style.as_ref()?))),
-        );
+        ];
         for (name, style) in styles {
             if style.foreground == style.background && style.foreground != ThemeColor::Reset {
                 return Err(format!(
@@ -342,3 +429,71 @@ impl ThemeConfig {
         Ok(())
     }
 }
+
+const XTERM_LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+
+/// The nearest xterm-256 colour, for terminals without truecolor.
+fn nearest_256(colour: ThemeColor) -> Option<ThemeColor> {
+    let ThemeColor::Rgb(red, green, blue) = colour else {
+        return matches!(colour, ThemeColor::Indexed(_)).then_some(colour);
+    };
+    let cube = (0..216u8).map(|index| {
+        let level = |step: u8| XTERM_LEVELS[usize::from(step)];
+        (16 + index, (level(index / 36), level(index / 6 % 6), level(index % 6)))
+    });
+    let greys = (0..24u8).map(|step| (232 + step, (8 + step * 10, 8 + step * 10, 8 + step * 10)));
+    cube.chain(greys)
+        .min_by_key(|(_, rgb)| distance((red, green, blue), *rgb))
+        .map(|(index, _)| ThemeColor::Indexed(index))
+}
+
+/// The nearest of the sixteen ANSI colours, for the most limited terminals.
+fn nearest_16(colour: ThemeColor) -> Option<ThemeColor> {
+    let (red, green, blue) = match colour {
+        ThemeColor::Rgb(red, green, blue) => (red, green, blue),
+        ThemeColor::Indexed(index) => return nearest_16(indexed_rgb(index)),
+        _ => return None,
+    };
+    [
+        (ThemeColor::Black, (0, 0, 0)),
+        (ThemeColor::DarkRed, (205, 0, 0)),
+        (ThemeColor::DarkGreen, (0, 205, 0)),
+        (ThemeColor::DarkYellow, (205, 205, 0)),
+        (ThemeColor::DarkBlue, (0, 0, 238)),
+        (ThemeColor::DarkMagenta, (205, 0, 205)),
+        (ThemeColor::DarkCyan, (0, 205, 205)),
+        (ThemeColor::Grey, (229, 229, 229)),
+        (ThemeColor::DarkGrey, (127, 127, 127)),
+        (ThemeColor::Red, (255, 0, 0)),
+        (ThemeColor::Green, (0, 255, 0)),
+        (ThemeColor::Yellow, (255, 255, 0)),
+        (ThemeColor::Blue, (92, 92, 255)),
+        (ThemeColor::Magenta, (255, 0, 255)),
+        (ThemeColor::Cyan, (0, 255, 255)),
+        (ThemeColor::White, (255, 255, 255)),
+    ]
+    .into_iter()
+    .min_by_key(|(_, rgb)| distance((red, green, blue), *rgb))
+    .map(|(named, _)| named)
+}
+
+fn indexed_rgb(index: u8) -> ThemeColor {
+    match index {
+        16..=231 => {
+            let index = index - 16;
+            let level = |step: u8| XTERM_LEVELS[usize::from(step)];
+            ThemeColor::Rgb(level(index / 36), level(index / 6 % 6), level(index % 6))
+        }
+        232..=255 => {
+            let grey = 8 + (index - 232) * 10;
+            ThemeColor::Rgb(grey, grey, grey)
+        }
+        _ => ThemeColor::Rgb(128, 128, 128),
+    }
+}
+
+fn distance(left: (u8, u8, u8), right: (u8, u8, u8)) -> u32 {
+    let channel = |a: u8, b: u8| u32::from(a.abs_diff(b)).pow(2);
+    channel(left.0, right.0) + channel(left.1, right.1) + channel(left.2, right.2)
+}
+

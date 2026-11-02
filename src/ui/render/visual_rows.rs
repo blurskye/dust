@@ -8,30 +8,10 @@ use crate::{
         EditorState,
         text::{ByteOffset, ByteRange, DisplayWidthPolicy, display_column_at},
     },
-    ui::{Style, geometry::text_width},
+    ui::geometry::text_width,
 };
 
 use super::{UiState, editor::display_column};
-
-pub(super) fn syntax_role_style(role: crate::language::syntax::SyntaxRole) -> Style {
-    match role {
-        crate::language::syntax::SyntaxRole::Comment => Style::SyntaxComment,
-        crate::language::syntax::SyntaxRole::String => Style::SyntaxString,
-        crate::language::syntax::SyntaxRole::Number => Style::SyntaxNumber,
-        crate::language::syntax::SyntaxRole::Keyword => Style::SyntaxKeyword,
-        crate::language::syntax::SyntaxRole::Type => Style::SyntaxType,
-        crate::language::syntax::SyntaxRole::Variable => Style::SyntaxVariable,
-        crate::language::syntax::SyntaxRole::Function => Style::SyntaxFunction,
-        crate::language::syntax::SyntaxRole::Property => Style::SyntaxProperty,
-        crate::language::syntax::SyntaxRole::Attribute => Style::SyntaxAttribute,
-        crate::language::syntax::SyntaxRole::Heading => Style::MarkupHeading,
-        crate::language::syntax::SyntaxRole::Strong => Style::MarkupStrong,
-        crate::language::syntax::SyntaxRole::Emphasis => Style::MarkupEmphasis,
-        crate::language::syntax::SyntaxRole::Code => Style::MarkupCode,
-        crate::language::syntax::SyntaxRole::Link => Style::MarkupLink,
-        crate::language::syntax::SyntaxRole::Quote => Style::MarkupQuote,
-    }
-}
 
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 pub struct VisualRowAnchor {

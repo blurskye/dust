@@ -1508,7 +1508,7 @@ fn non_wrapped_horizontal_projection_snaps_graphemes_and_preserves_source_tabs()
                 crate::editor::text::ByteOffset("a\t界e\u{301}".len()),
             )
             .expect("combining syntax range"),
-            role: crate::language::syntax::SyntaxRole::String,
+            role: crate::language::syntax::Highlight::STRING,
         }],
         lsp_inlay_hints: vec![super::UiInlayHint {
             buffer,
@@ -1535,7 +1535,7 @@ fn non_wrapped_horizontal_projection_snaps_graphemes_and_preserves_source_tabs()
     );
     assert_eq!(
         frame.grid.get(5, 0).expect("syntax after clipping").style,
-        crate::ui::Style::SyntaxString
+        crate::ui::Style::Syntax(crate::language::syntax::Highlight::STRING)
     );
     assert_eq!(
         frame.grid.get(8 - 1, 0).expect("projected inlay").symbol,
@@ -4149,7 +4149,7 @@ fn indent_guides_inside_a_multiline_string_keep_the_guide_colour() {
             crate::editor::text::ByteOffset(end),
         )
         .expect("string range"),
-        role: crate::language::syntax::SyntaxRole::String,
+        role: crate::language::syntax::Highlight::STRING,
     }];
     let frame = super::render_editor_view(&state, view, &ui, &config, 30, 5);
     let guide = frame.grid.get(4, 2).expect("guide inside the string");

@@ -12,7 +12,7 @@ use super::{
     SyntaxSupport, TerminalInput, TerminalPanelMode, TextBuffer, TextEdit, TextEditSet, UiEvent,
     UiFold, UiInlayHint, UiSyntaxSpan, UndoPolicy, VfsResult, WindowRect, command,
     discover_executable, explorer_watch_policy, language_for_document, mode_name, path_from_file_uri,
-    rect_contains_point, semantic_role, terminal_tab_at_column,
+    rect_contains_point, terminal_tab_at_column,
 };
 
 impl InteractiveApplication {
@@ -3363,6 +3363,16 @@ impl InteractiveApplication {
                             .capabilities()
                             .map(|value| value.semantic_token_types.as_slice())
                             .unwrap_or(&[]);
+                        // As in Neovim, a token colours only when the theme gives its
+                        // `@lsp.type.*` group a colour; otherwise tree-sitter's stays.
+                        let theme = self.configuration.theme();
+                        let groups: Vec<_> = legend
+                            .iter()
+                            .map(|name| {
+                                crate::language::syntax::Highlight::for_semantic_token(name)
+                                    .filter(|group| theme.highlight(*group).is_some())
+                            })
+                            .collect();
                         let mut line = 0usize;
                         let mut character = 0usize;
                         let mut spans = Vec::new();
@@ -3373,8 +3383,7 @@ impl InteractiveApplication {
                             } else {
                                 token[1] as usize
                             };
-                            let Some(role) =
-                                legend.get(token[3] as usize).and_then(|name| semantic_role(name))
+                            let Some(role) = groups.get(token[3] as usize).copied().flatten()
                             else {
                                 continue;
                             };
@@ -3515,7 +3524,7 @@ impl InteractiveApplication {
                                         buffer: buffer_id,
                                         revision: buffer.text.revision(),
                                         range,
-                                        role: crate::language::syntax::SyntaxRole::Variable,
+                                        role: crate::language::syntax::Highlight::VARIABLE,
                                     })
                                     .collect()
                             }
