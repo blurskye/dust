@@ -17,6 +17,7 @@ use workspace::{
 };
 mod agent;
 mod editor;
+mod settings;
 mod surfaces;
 mod visual_rows;
 #[cfg(test)]
@@ -31,6 +32,10 @@ use surfaces::{
 use visual_rows::{VisualRowSlice, editor_line_number_digits, git_sign_column};
 
 pub use agent::{AgentListRow, AgentPanelUi, transcript_lines};
+pub use settings::{
+    SettingsEdit, SettingsHit, SettingsLine, SettingsPageState, SettingsRow, SettingsValue,
+    settings_hit, settings_layout, settings_line_height,
+};
 pub use editor::{snap_display_column, snap_display_column_forward};
 pub use explorer::explorer_panel_width;
 pub use overlays::content_tab_at_column;
@@ -1377,6 +1382,8 @@ pub struct UiState {
     pub config_diagnostic: Option<String>,
     pub dashboard_actions: Vec<DashboardAction>,
     pub tool_menu: Option<ToolMenuState>,
+    /// The Settings page, while it is open.
+    pub settings: Option<SettingsPageState>,
     pub language_completion: Option<LanguageCompletionState>,
     /// Shown at the cursor while a language server is too busy loading to answer.
     pub lsp_loading: Option<String>,
@@ -2169,6 +2176,9 @@ pub fn render(
     if let Some(tool_menu) = &ui.tool_menu {
         render_tool_menu(&mut frame, tool_menu, config, width, workspace_height);
     }
+    if let Some(page) = &ui.settings {
+        settings::render_settings(&mut frame, page, config, width, workspace_height);
+    }
     if let Some(picker) = &ui.picker {
         if let Some(rect) = compositor.and_then(|compositor| {
             let window = compositor.surfaces.picker?;
@@ -2223,7 +2233,7 @@ pub fn render(
     if let Some(card) = &ui.tutor {
         render_tutor_card(&mut frame, card, config, width, height, ui.key_hints.is_some());
     }
-    let modal_open = ui.picker.is_some() || ui.tool_menu.is_some();
+    let modal_open = ui.picker.is_some() || ui.tool_menu.is_some() || ui.settings.is_some();
     // A modal's footer is at the bottom right too, and its keys matter more.
     if config.ui.lsp_progress.enabled && !ui.lsp_progress.is_empty() && !modal_open {
         render_lsp_progress(

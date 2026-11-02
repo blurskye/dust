@@ -18,6 +18,7 @@ use std::{
 use serde_json::{Value, json};
 
 use super::InteractiveApplication;
+use crate::ui::window::ContentLifecycle;
 use crate::{
     agent::{
         self, AgentMessage, AgentProcess, AuthMethod, PermissionOption, PromptPart, Rejoin,
@@ -350,6 +351,11 @@ impl InteractiveApplication {
 
     /// `<leader>aa`: in Visual mode the selection goes along with the question.
     pub(super) fn begin_agent_question(&mut self) {
+        if self.configuration.settings().agents.connection == crate::config::AgentConnection::Terminal
+        {
+            self.ask_terminal_agent();
+            return;
+        }
         if let Some(view) = self.state.active_view
             && let Some(selection) = self.state.views[view].selection
         {
@@ -368,6 +374,94 @@ impl InteractiveApplication {
         }
         self.show_agent_panel();
         self.refresh_agent_transcript();
+    }
+
+    /// The default agent's own program in a terminal, for `agents.connection = "terminal"`:
+    /// shows the one that is running, with the selection pasted into its prompt, or starts it.
+    fn ask_terminal_agent(&mut self) {
+        let name = self.configuration.settings().agents.default.clone();
+        let Some(profile) = self.configuration.settings().agents.profiles.get(&name) else {
+            self.show_error(format!("agents.default names no agent profile: {name}"));
+            return;
+        };
+        if profile.cli.is_empty() {
+            self.show_error(format!("agent {name} has no cli command to run in a terminal"));
+            return;
+        }
+        // Through the shell, as the lazygit profile does, so the program is found on PATH and a
+        // missing one says so in the terminal.
+        let arguments = ["-c".to_owned(), "exec \"$0\" \"$@\"".to_owned()]
+            .into_iter()
+            .chain(profile.cli.iter().cloned())
+            .collect();
+        let running = self
+            .terminal_session
+            .descriptions()
+            .into_iter()
+            .find(|(_, profile, lifecycle)| {
+                *profile == name
+                    && matches!(
+                        lifecycle,
+                        ContentLifecycle::Preflight
+                            | ContentLifecycle::Starting
+                            | ContentLifecycle::Running
+                    )
+            })
+            .map(|(id, ..)| super::PtyId(id));
+        let selection = self.state.active_view.and_then(|view| {
+            let selection = self.state.views[view].selection?;
+            let buffer = &self.state.buffers[self.state.views[view].buffer];
+            let text = selected_text(&buffer.text, selection, self.state.views[view].cursor);
+            Some(match &buffer.path {
+                Some(path) => format!("{}:\n```\n{text}\n```\n", self.workspace_relative_label(path)),
+                None => format!("```\n{text}\n```\n"),
+            })
+        });
+        if let Some(id) = running {
+            self.reveal_terminal(id);
+            if let Some(text) = selection {
+                if let Some(view) = self.state.active_view {
+                    self.state.views[view].selection = None;
+                }
+                self.set_mode(EditorMode::Normal);
+                if let Err(error) =
+                    self.terminal_session
+                        .send(id, super::TerminalInput::Paste(&text), &self.workspace)
+                {
+                    self.show_error(error);
+                }
+            }
+            return;
+        }
+        let program = crate::config::TerminalProfileConfig {
+            program: "/bin/sh".into(),
+            arguments,
+            cwd: None,
+            environment: BTreeMap::new(),
+            columns: 80,
+            rows: 24,
+            float: true,
+            close_on_exit: true,
+        };
+        match self.terminal_session.open_program(
+            &name,
+            program,
+            &self.workspace,
+            self.window_session
+                .navigation_stamp(self.state.window_version(), self.state.active_view),
+            self.input.capture_epoch(),
+        ) {
+            Ok(intent) => {
+                self.run_trusted(super::TrustedAction::OpenTerminal(intent));
+                if selection.is_some() {
+                    self.notify_message(
+                        format!("Starting {name}; press <leader>aa again to send the selection"),
+                        false,
+                    );
+                }
+            }
+            Err(error) => self.show_error(error),
+        }
     }
 
     pub(super) fn attach_agent_file(&mut self) {

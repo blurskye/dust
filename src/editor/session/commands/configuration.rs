@@ -1,6 +1,7 @@
 use super::{
     AppEffect, ArgumentSchema, ArgumentType, CommandError, CommandRegistry, ContextRequirement,
-    PromptKind, PromptMove, optional_string_arg, register, register_grammar_commands, string_arg,
+    PromptKind, PromptMove, SettingsAction, integer_arg, optional_string_arg, register,
+    register_grammar_commands, string_arg,
 };
 
 pub(super) fn register_commands(
@@ -19,6 +20,60 @@ pub(super) fn register_commands(
             })
         },
     )?;
+    for (id, title, action) in [
+        ("settings.open", "Open Settings", SettingsAction::Open),
+        ("settings.page.close", "Close Settings", SettingsAction::Close),
+        ("settings.page.activate", "Change the selected setting", SettingsAction::Activate),
+        ("settings.page.toggle", "Toggle the selected setting", SettingsAction::Toggle),
+        ("settings.page.reset", "Reset the selected setting to its default", SettingsAction::Reset),
+        ("settings.page.search", "Search settings", SettingsAction::Search),
+        ("settings.page.modified", "Show only modified settings", SettingsAction::Modified),
+        ("settings.page.open_file", "Open config.toml", SettingsAction::OpenFile),
+        ("settings.page.cancel", "Cancel or close", SettingsAction::Cancel),
+        ("settings.page.backspace", "Delete a character", SettingsAction::Backspace),
+        ("settings.page.clear", "Clear the text", SettingsAction::Clear),
+        ("settings.page.left", "Cursor left", SettingsAction::Cursor(PromptMove::Left)),
+        ("settings.page.right", "Cursor right", SettingsAction::Cursor(PromptMove::Right)),
+        ("settings.page.home", "Cursor to start", SettingsAction::Cursor(PromptMove::Home)),
+        ("settings.page.end", "Cursor to end", SettingsAction::Cursor(PromptMove::End)),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::Application,
+            ArgumentSchema::default(),
+            move |_| AppEffect::Settings(action.clone()),
+        )?;
+    }
+    register(
+        registry,
+        "settings.page.move",
+        "Move through settings",
+        ContextRequirement::Application,
+        ArgumentSchema::default().field("by", ArgumentType::Integer, true),
+        |invocation| Ok(AppEffect::Settings(SettingsAction::Move(integer_arg(invocation, "by")?))),
+    )?;
+    register(
+        registry,
+        "settings.page.section",
+        "Jump to another settings section",
+        ContextRequirement::Application,
+        ArgumentSchema::default().field("by", ArgumentType::Integer, true),
+        |invocation| {
+            Ok(AppEffect::Settings(SettingsAction::Section(integer_arg(invocation, "by")?)))
+        },
+    )?;
+    register(
+        registry,
+        "settings.page.insert",
+        "Type into the settings page",
+        ContextRequirement::Application,
+        ArgumentSchema::default().field("text", ArgumentType::String, true),
+        |invocation| {
+            Ok(AppEffect::Settings(SettingsAction::Insert(string_arg(invocation, "text")?.into())))
+        },
+    )?;
     register(
         registry,
         "config.reload",
@@ -30,7 +85,7 @@ pub(super) fn register_commands(
     register(
         registry,
         "config.open",
-        "Open Settings (config.toml)",
+        "Open Settings File (config.toml)",
         ContextRequirement::Workspace,
         ArgumentSchema::default(),
         |_| AppEffect::OpenUserFile(crate::config::user_config_path()),

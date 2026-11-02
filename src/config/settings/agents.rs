@@ -22,6 +22,21 @@ pub struct AgentProfileConfig {
     /// Shown at the top of a new session, for setup the agent needs outside Dust.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// The agent's own command-line program and its arguments, run in a terminal tab when
+    /// `agents.connection` is `terminal`.
+    #[serde(default)]
+    pub cli: Vec<String>,
+}
+
+/// How `<leader>aa` talks to the default agent.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentConnection {
+    /// Through the Agent Client Protocol, in Dust's agent panel.
+    #[default]
+    Acp,
+    /// The agent's own program in a terminal tab.
+    Terminal,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -30,6 +45,8 @@ pub struct AgentsConfig {
     /// The agent `<leader>aa` starts when none was picked.
     #[serde(default)]
     pub default: String,
+    #[serde(default)]
+    pub connection: AgentConnection,
     /// How much of the editor width the agent panel takes when it opens, in percent.
     #[serde(default = "default_panel_width")]
     pub panel_width: u16,
@@ -45,6 +62,7 @@ impl Default for AgentsConfig {
     fn default() -> Self {
         Self {
             default: String::new(),
+            connection: AgentConnection::default(),
             panel_width: default_panel_width(),
             profiles: BTreeMap::new(),
         }

@@ -47,6 +47,7 @@ const BUILTIN_NAMESPACES: &[&str] = &[
     "package",
     "tools",
     "config",
+    "settings",
     "theme",
     "keymap",
     "health",

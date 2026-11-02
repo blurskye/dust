@@ -35,6 +35,7 @@ mod palette;
 mod substitute;
 mod pull_requests;
 mod remote;
+mod settings;
 
 #[cfg(test)]
 use super::persistence::capture_persisted_layout;

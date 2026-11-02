@@ -1,7 +1,12 @@
 #![forbid(unsafe_code)]
 
+mod catalog;
 mod load;
 mod themes;
+pub use catalog::{
+    SettingInfo, SettingsCatalog, SettingsSection, default_setting, settings_catalog,
+    write_user_setting,
+};
 #[cfg(test)]
 pub(crate) use load::setting_spans;
 pub use load::{
@@ -34,7 +39,7 @@ pub use settings::{
     ClipboardSync, RegisterStorage, RuntimeConfig, SearchConfig, StartupConfig, StatusLineConfig, SyntaxConfig,
     TabLineConfig, TaskConfig, TaskKind, TerminalPanelConfig, TerminalProfileConfig,
     TerminalsConfig, HighlightDefinition, ThemeAttribute, ThemeColor, ThemeConfig, ThemeStyle, ThemeStyles,
-    AgentProfileConfig, AgentsConfig,
+    AgentConnection, AgentProfileConfig, AgentsConfig,
     ToolManagerConfig, UiConfig, WindowPlacementConfig, WindowRuleConfig, WindowsConfig,
     WorkspaceConfig, WorkspaceSearchConfig,
 };

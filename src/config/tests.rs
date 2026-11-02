@@ -1212,3 +1212,79 @@ fn a_saved_bundled_theme_restores_from_this_build() {
     assert!(catalog.diagnostics.is_empty(), "{:?}", catalog.diagnostics);
     assert_eq!(catalog.choices[0].theme, super::themes::bundled_named("tokyo-night").unwrap().theme);
 }
+
+#[test]
+fn settings_catalog_lists_every_bundled_setting_once() {
+    let catalog = super::settings_catalog();
+    let bundled = setting_keys(&toml::from_str::<toml::Value>(BUNDLED_CONFIG).unwrap());
+    let in_collection = |key: &str| {
+        catalog
+            .collections
+            .iter()
+            .any(|prefix| key == prefix || key.starts_with(&format!("{prefix}.")))
+    };
+    let listed: Vec<&str> = catalog
+        .sections
+        .iter()
+        .flat_map(|section| &section.settings)
+        .map(|setting| setting.key.as_str())
+        .collect();
+    let missing: Vec<&String> = bundled
+        .iter()
+        .filter(|key| !listed.contains(&key.as_str()) && !in_collection(key))
+        .collect();
+    assert!(missing.is_empty(), "settings missing from settings.toml: {missing:?}");
+    let stale: Vec<&&str> = listed.iter().filter(|key| !bundled.contains(**key)).collect();
+    assert!(stale.is_empty(), "settings.toml lists unknown settings: {stale:?}");
+    let unique: BTreeSet<&&str> = listed.iter().collect();
+    assert_eq!(unique.len(), listed.len(), "settings.toml lists a setting twice");
+    for section in &catalog.sections {
+        for key in &section.common {
+            assert!(catalog.setting(key).is_some(), "{} lists unknown {key}", section.title);
+        }
+    }
+    for setting in catalog.sections.iter().flat_map(|section| &section.settings) {
+        assert!(!setting.about.is_empty(), "{} needs a description", setting.key);
+        if let Some(table) = &setting.choices_from {
+            assert!(super::default_setting(table).is_some_and(|value| value.is_table()), "{table}");
+        }
+        for choice in &setting.choices {
+            let source = super::catalog::edited_source(
+                "",
+                &setting.key,
+                Some(toml::Value::String(choice.clone())),
+            )
+            .unwrap();
+            assert!(
+                super::load::settings_from_source(&source).is_ok(),
+                "{} = {choice} is offered but rejected",
+                setting.key
+            );
+        }
+    }
+}
+
+#[test]
+fn a_setting_is_changed_in_place_and_reset_removes_it_with_empty_tables() {
+    let edited = |source: &str, key: &str, value: Option<toml::Value>| {
+        super::catalog::edited_source(source, key, value).unwrap()
+    };
+    let source = "# my settings\n[editor]\n# wrap long lines\nwrap = false # for now\n";
+    let wrapped = edited(source, "editor.wrap", Some(toml::Value::Boolean(true)));
+    assert_eq!(wrapped, "# my settings\n[editor]\n# wrap long lines\nwrap = true # for now\n");
+    let added = edited(&wrapped, "editor.git_signs.enabled", Some(toml::Value::Boolean(false)));
+    assert!(added.starts_with(&wrapped), "{added}");
+    assert!(added.contains("enabled = false"), "{added}");
+    let reset = edited(&added, "editor.git_signs.enabled", None);
+    assert_eq!(reset, wrapped);
+    let emptied = edited(&reset, "editor.wrap", None);
+    assert!(emptied.contains("# my settings") && !emptied.contains("wrap"), "{emptied}");
+    let file = tempdir().unwrap();
+    let path = file.path().join("dust").join("config.toml");
+    super::write_user_setting(&path, "editor.tab_width", Some(toml::Value::Integer(2))).unwrap();
+    assert_eq!(fs::read_to_string(&path).unwrap(), "[editor]\ntab_width = 2\n");
+    let rejected =
+        super::write_user_setting(&path, "editor.tab_width", Some(toml::Value::String("x".into())));
+    assert!(rejected.is_err());
+    assert_eq!(fs::read_to_string(&path).unwrap(), "[editor]\ntab_width = 2\n");
+}

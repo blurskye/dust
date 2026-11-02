@@ -240,6 +240,7 @@ impl InteractiveApplication {
             || self.input.prompt().is_some()
             || self.ui.picker.is_some()
             || self.ui.tool_menu.is_some()
+            || self.ui.settings.is_some()
             || self.ui.dashboard
             || self.state.active_view.is_none()
         {
@@ -284,7 +285,10 @@ impl InteractiveApplication {
         column: u16,
         row: u16,
     ) -> bool {
-        if self.input.prompt().is_some() || self.ui.picker.is_some() || self.ui.tool_menu.is_some()
+        if self.input.prompt().is_some()
+            || self.ui.picker.is_some()
+            || self.ui.tool_menu.is_some()
+            || self.ui.settings.is_some()
         {
             return false;
         }
@@ -474,6 +478,13 @@ impl InteractiveApplication {
             }
             UiEvent::Mouse { key, column, row } => {
                 self.input.observe_mouse(column, row);
+                if self.ui.settings.is_some()
+                    && self.ui.picker.is_none()
+                    && self.input.prompt().is_none()
+                {
+                    self.settings_mouse(&key, column, row);
+                    return;
+                }
                 if self.input.documentation().is_some() {
                     match key.terminal_mouse() {
                         Some(crate::editor::input::TerminalMouseInput::ScrollUp) => {
@@ -691,6 +702,7 @@ impl InteractiveApplication {
             || self.workspace_edits.proposal().is_some()
             || self.ui.picker.is_some()
             || self.ui.tool_menu.is_some()
+            || self.ui.settings.is_some()
         {
             return None;
         }
@@ -730,6 +742,15 @@ impl InteractiveApplication {
         }
         if let Some(menu) = &self.ui.tool_menu {
             return if menu.searching { "tool_manager_search" } else { "tool_manager" }.into();
+        }
+        if let Some(page) = &self.ui.settings {
+            return match &page.edit {
+                Some(crate::ui::SettingsEdit::Text { .. }) => "settings_edit",
+                Some(crate::ui::SettingsEdit::Choice { .. }) => "settings_choice",
+                None if page.searching => "settings_search",
+                None => "settings",
+            }
+            .into();
         }
         if self.keyboard_terminal().is_some() && self.terminal_window_rect().is_some() {
             return self
@@ -1252,7 +1273,9 @@ impl InteractiveApplication {
                 } else {
                     "reload_rejected"
                 };
-                self.show_error(self.message(message, &[("diagnostic", diagnostic)]));
+                let message = self.message(message, &[("diagnostic", diagnostic)]);
+                self.settings_status(message.clone(), true);
+                self.show_error(message);
             }
         }
     }
@@ -1413,6 +1436,15 @@ impl InteractiveApplication {
             self.rebuild_tool_menu(&category, None);
         }
         self.ui.config_diagnostic = None;
+        // The Settings page shows the new values itself; a toast for each change is noise.
+        if self.ui.settings.is_some() {
+            self.refresh_settings();
+            if restart_required {
+                self.settings_status(self.message("reloaded_restart", &[]), false);
+            }
+            self.ensure_cursor_visible();
+            return Ok(());
+        }
         self.notify_message(
             if restart_required {
                 self.message("reloaded_restart", &[])

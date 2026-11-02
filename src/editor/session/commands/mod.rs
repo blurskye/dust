@@ -397,6 +397,7 @@ pub enum AppEffect {
     WorkspaceEditAccept,
     WorkspaceEditReject,
     WorkspaceResourceApply,
+    Settings(SettingsAction),
     OpenToolMenu(String),
     CloseToolMenu,
     MoveToolMenu(i8),
@@ -500,6 +501,34 @@ pub enum PickerKind {
 }
 
 pub use crate::editor::session::windows::LayoutAction;
+
+/// What a key on the Settings page does.
+#[derive(Clone, Debug)]
+pub enum SettingsAction {
+    Open,
+    Close,
+    /// Move the selection by this many settings.
+    Move(i64),
+    /// Jump to the next or previous section.
+    Section(i64),
+    /// Enter: change the setting, or confirm the edit or choice.
+    Activate,
+    /// Space: flip an on/off setting; otherwise as Enter.
+    Toggle,
+    /// Remove the user's value so the default applies.
+    Reset,
+    Search,
+    /// Show only the settings the user changed, or everything again.
+    Modified,
+    /// Open config.toml itself.
+    OpenFile,
+    /// Escape: leave the edit, choice or search, or close the page.
+    Cancel,
+    Insert(String),
+    Backspace,
+    Cursor(PromptMove),
+    Clear,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub enum PromptMove {

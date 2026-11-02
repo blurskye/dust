@@ -30,7 +30,7 @@ pub use tools::{PackageRegistryConfig, PackagesConfig, PluginEntryConfig, Plugin
 mod debugger;
 pub use debugger::{DebugAdapterConfig, DebugConfig, DebugRequestKind, DebugSessionConfig};
 mod agents;
-pub use agents::{AgentProfileConfig, AgentsConfig};
+pub use agents::{AgentConnection, AgentProfileConfig, AgentsConfig};
 mod terminal;
 pub use terminal::{TerminalProfileConfig, TerminalsConfig};
 mod windows;

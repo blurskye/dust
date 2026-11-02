@@ -13,7 +13,8 @@ use crossterm::{
     event::{
         self, DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
         EnableFocusChange, EnableMouseCapture, Event, KeyCode as CtKeyCode, KeyEventKind,
-        KeyModifiers, MouseButton, MouseEventKind,
+        KeyModifiers, KeyboardEnhancementFlags, MouseButton, MouseEventKind,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute, queue,
     style::{
@@ -115,6 +116,12 @@ impl TerminalSession {
             if options.mouse {
                 execute!(stdout, EnableMouseCapture)?;
             }
+            // Terminals with the kitty keyboard protocol then send keys like ctrl-, that have no
+            // legacy code; the others ignore the request.
+            execute!(
+                stdout,
+                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+            )?;
             execute!(stdout, Hide, Clear(ClearType::All))
         })();
         if let Err(error) = enter_result {
@@ -319,7 +326,7 @@ fn queue_frame(
 
 impl Drop for TerminalSession {
     fn drop(&mut self) {
-        let _ = execute!(self.stdout, EndSynchronizedUpdate);
+        let _ = execute!(self.stdout, EndSynchronizedUpdate, PopKeyboardEnhancementFlags);
         if self.options.mouse {
             let _ = execute!(self.stdout, DisableMouseCapture);
         }
@@ -345,6 +352,7 @@ fn restore_terminal(writer: &mut impl Write) -> io::Result<()> {
         SetAttribute(Attribute::Reset),
         SetCursorStyle::DefaultUserShape,
         Show,
+        PopKeyboardEnhancementFlags,
         DisableBracketedPaste,
         DisableFocusChange,
         LeaveAlternateScreen

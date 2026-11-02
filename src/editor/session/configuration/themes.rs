@@ -21,6 +21,14 @@ pub(super) struct Themes {
     /// The theme `:colorscheme name` asked for, applied once the list has loaded.
     wanted: Option<String>,
 }
+impl Themes {
+    /// Forget the picker and restore state for a new configuration, keeping the applied theme
+    /// when `keep_applied` says the configured theme has not changed.
+    pub(super) fn reset(&mut self, keep_applied: bool) {
+        let applied = self.applied.take().filter(|_| keep_applied);
+        *self = Self { applied, ..Self::default() };
+    }
+}
 struct ThemeRestore {
     source: Arc<()>,
     receiver: Receiver<ThemeCatalog>,

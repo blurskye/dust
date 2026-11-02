@@ -538,7 +538,7 @@ fn symbolic_leaders_expand_before_dispatch_and_preserve_literal_space_actions() 
     assert!(diagnostic.is_none(), "{diagnostic:?}");
 
     let leader_binding = keymaps
-        .inspect("editor.normal", "buffer.picker.open")
+        .inspect_id("builtin.global.settings.editor-normal")
         .expect("bundled leader binding");
     assert_eq!(leader_binding.source_keys, "<leader> ,");
     assert_eq!(leader_binding.keys, "\\ ,");
@@ -1343,4 +1343,47 @@ fn colorscheme_with_a_name_applies_that_theme_and_refuses_an_unknown_one() {
     set("nope", &mut app);
     assert!(app.ui.notification_error);
     assert_eq!(app.configuration.theme().name, "rose-pine");
+}
+
+#[test]
+fn the_settings_page_searches_edits_and_closes_layer_by_layer() {
+    use crate::editor::session::dispatch::commands::SettingsAction;
+    use crate::ui::{SettingsEdit, SettingsValue};
+    let mut app = app();
+    app.process_effect(AppEffect::Settings(SettingsAction::Open));
+    assert_eq!(app.active_input_context(), "settings");
+    let page = app.ui.settings.as_ref().expect("settings page");
+    assert_eq!(page.selected_row().unwrap().key, "editor.wrap");
+
+    app.process_effect(AppEffect::Settings(SettingsAction::Search));
+    assert_eq!(app.active_input_context(), "settings_search");
+    app.process_effect(AppEffect::Settings(SettingsAction::Insert("tab width".into())));
+    let page = app.ui.settings.as_ref().unwrap();
+    assert_eq!(page.selected_row().unwrap().key, "editor.tab_width");
+    assert_eq!(page.selected_row().unwrap().value, SettingsValue::Number("4".into()));
+
+    // Enter leaves the search box; Enter again edits the number.
+    app.process_effect(AppEffect::Settings(SettingsAction::Activate));
+    app.process_effect(AppEffect::Settings(SettingsAction::Activate));
+    assert_eq!(app.active_input_context(), "settings_edit");
+    app.process_effect(AppEffect::Settings(SettingsAction::Clear));
+    app.process_effect(AppEffect::Settings(SettingsAction::Insert("x".into())));
+    app.process_effect(AppEffect::Settings(SettingsAction::Activate));
+    assert!(matches!(
+        &app.ui.settings.as_ref().unwrap().edit,
+        Some(SettingsEdit::Text { error: Some(error), .. }) if error == "Enter a whole number"
+    ));
+    // The test runs on the bundled defaults alone, so a valid value is refused, not written.
+    app.process_effect(AppEffect::Settings(SettingsAction::Clear));
+    app.process_effect(AppEffect::Settings(SettingsAction::Insert("2".into())));
+    app.process_effect(AppEffect::Settings(SettingsAction::Activate));
+    let page = app.ui.settings.as_ref().unwrap();
+    assert!(page.edit.is_none());
+    assert!(page.status.as_ref().is_some_and(|(_, error)| *error));
+
+    for context in ["settings", "settings"] {
+        assert_eq!(app.active_input_context(), context);
+        app.process_effect(AppEffect::Settings(SettingsAction::Cancel));
+    }
+    assert!(app.ui.settings.is_none());
 }

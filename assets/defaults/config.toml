@@ -515,12 +515,16 @@ close_on_exit = true
 # mode or thinking level at start, e.g. `options = { model = "…", thought_level = "high" }`.
 [agents]
 default = "claude"
+# "acp" talks to the agent in Dust's agent panel; "terminal" runs its own program (`cli`) in a
+# terminal tab, where it handles its own login, permissions and history.
+connection = "acp"
 # Share of the editor width the agent panel opens at; drag its border or use ctrl-left and
 # ctrl-right in it to change it.
 panel_width = 35
 
 [agents.profiles.claude]
 program = "claude-agent-acp"
+cli = ["claude"]
 arguments = []
 environment = {}
 options = {}
@@ -529,12 +533,14 @@ meta = { claudeCode = { options = { disallowedTools = ["Task"] } } }
 
 [agents.profiles.codex]
 program = "codex-acp"
+cli = ["codex"]
 arguments = []
 environment = {}
 options = {}
 
 [agents.profiles.pi]
 program = "pi-acp"
+cli = ["pi"]
 arguments = []
 environment = {}
 options = {}
@@ -543,6 +549,7 @@ note = "To give pi Dust's subagents, run this once: pi mcp add dust --exposure d
 
 [agents.profiles.opencode]
 program = "opencode"
+cli = ["opencode"]
 arguments = ["acp"]
 # Subagents come from Dust's `agent` tool, so OpenCode's own task tool is off.
 environment = { OPENCODE_CONFIG_CONTENT = '{"tools":{"task":false}}' }
@@ -550,6 +557,7 @@ options = {}
 
 [agents.profiles.gemini]
 program = "gemini"
+cli = ["gemini"]
 arguments = ["--experimental-acp"]
 environment = {}
 options = {}
@@ -732,6 +740,8 @@ terminal = "terminal.send"
 agent = "agent.input.insert"
 explorer_search = "explorer.search.insert"
 tool_manager_search = "tools.search.insert"
+settings_search = "settings.page.insert"
+settings_edit = "settings.page.insert"
 
 [input.paste_commands]
 "editor.insert" = "edit.insert_text"
@@ -746,6 +756,8 @@ terminal = "terminal.send"
 agent = "agent.input.insert"
 explorer_search = "explorer.search.insert"
 tool_manager_search = "tools.search.insert"
+settings_search = "settings.page.insert"
+settings_edit = "settings.page.insert"
 
 [input.character_fallback_commands]
 register = "input.register.select"
@@ -828,7 +840,7 @@ colorscheme = "theme.select"
 colo = "theme.select"
 mason = "tools.menu.open"
 Mason = "tools.menu.open"
-settings = "config.open"
+settings = "settings.open"
 keymaps = "keymap.open"
 trust = "workspace.trust"
 untrust = "workspace.untrust"
@@ -1139,7 +1151,7 @@ hidden = [
   "edit.", "view.cursor.", "view.selection.", "view.scroll", "explorer.search.",
   "agent.input.", "agent.escape", "tools.category.", "tools.menu.next", "tools.menu.previous",
   "tools.menu.close", "terminal.mode.", "terminal.send", "macro.", "workspace.edit.",
-  "search.word", "search.repeat",
+  "search.word", "search.repeat", "settings.page.",
 ]
 
 # Commands that need typed text: choosing one opens the command line with this filled in.
@@ -1177,6 +1189,7 @@ application = "Dust"
 buffer = "Buffer"
 command_palette = "Commands"
 config = "Settings"
+settings = "Settings"
 crash = "Dust"
 dap = "Debug"
 diagnostic = "Diagnostics"
@@ -1241,7 +1254,25 @@ workspace = "Project"
 "surface.confirmation.select_no" = "Answer no"
 "surface.confirmation.toggle" = "Toggle confirmation choice"
 "config.explain" = "Explain a resolved configuration value"
-"config.open" = "Open Settings (config.toml)"
+"config.open" = "Open Settings File (config.toml)"
+"settings.open" = "Open Settings (UI)"
+"settings.page.close" = "Close Settings"
+"settings.page.move" = "Move through settings"
+"settings.page.section" = "Jump to another settings section"
+"settings.page.activate" = "Change the selected setting"
+"settings.page.toggle" = "Toggle the selected setting"
+"settings.page.reset" = "Reset the selected setting"
+"settings.page.search" = "Search settings"
+"settings.page.modified" = "Show modified settings"
+"settings.page.open_file" = "Open config.toml"
+"settings.page.cancel" = "Cancel or close"
+"settings.page.insert" = "Type into the settings page"
+"settings.page.backspace" = "Delete a character"
+"settings.page.clear" = "Clear the text"
+"settings.page.left" = "Cursor left"
+"settings.page.right" = "Cursor right"
+"settings.page.home" = "Cursor to start"
+"settings.page.end" = "Cursor to end"
 "config.reload" = "Reload Settings"
 "edit.backspace" = "Delete previous character"
 "edit.delete_backward" = "Delete previous character in Normal mode"

@@ -67,6 +67,8 @@ fn configured_context(
 /// Accepted policy and reload admission. No caller receives a mutable policy view.
 pub(super) struct ConfigurationSession {
     accepted: ResolvedConfiguration,
+    /// Settings come from the user's config.toml rather than only the bundled defaults.
+    user_configuration: bool,
     themes: themes::Themes,
     stamp: Arc<()>,
     worker: ConfigurationWorker,
@@ -152,6 +154,7 @@ impl ConfigurationSession {
         );
         Self {
             accepted,
+            user_configuration,
             themes: themes::Themes::default(),
             stamp: Arc::new(()),
             worker,
@@ -164,6 +167,15 @@ impl ConfigurationSession {
     }
     pub(super) fn settings(&self) -> &crate::config::Config {
         &self.accepted.settings
+    }
+    /// The config.toml the Settings page writes, or `None` when Dust runs on the bundled
+    /// defaults only.
+    pub(super) fn user_settings_path(&self) -> Option<PathBuf> {
+        self.user_configuration.then(crate::config::user_config_path)
+    }
+    /// Keys the user's config.toml sets.
+    pub(super) fn user_setting_keys(&self) -> &BTreeSet<String> {
+        &self.accepted.user_setting_keys
     }
     pub(super) fn dashboard(&self) -> &crate::config::DashboardConfig {
         &self.accepted.dashboard
@@ -302,10 +314,12 @@ impl ConfigurationSession {
     ) -> Result<(), String> {
         self.check_stamp(&candidate.stamp)?;
         Self::check_catalog(&candidate.catalog, catalog)?;
+        // A theme picked in the theme picker stays while config.toml keeps the same theme.
+        let keep_theme = candidate.resolved.settings.ui.theme == self.accepted.settings.ui.theme;
         self.accepted = candidate.resolved;
         self.hidden_line_numbers = None;
         self.zen = None;
-        self.themes = themes::Themes::default();
+        self.themes.reset(keep_theme);
         self.stamp = Arc::new(());
         self.binding_revision = self.binding_revision.saturating_add(1);
         Ok(())

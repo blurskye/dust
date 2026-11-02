@@ -4165,11 +4165,18 @@ command = "workspace.search.prompt"
 desc = "Grep"
 
 [[keymap]]
-id = "builtin.global.buffers"
+id = "builtin.global.settings"
 context = "global"
 keys = "<leader> ,"
-command = "buffer.picker.open"
-desc = "Buffers"
+command = "settings.open"
+desc = "Settings"
+
+[[keymap]]
+id = "builtin.global.settings.ctrl-comma"
+context = "global"
+keys = "ctrl-,"
+command = "settings.open"
+desc = "Settings"
 
 [[keymap]]
 id = "builtin.global.commands"
@@ -6681,3 +6688,364 @@ id = "builtin.explorer.explorer-page-up.pageup"
 context = "explorer"
 keys = "pageup"
 command = "explorer.page_up"
+
+[[keymap]]
+id = "builtin.editor.insert.settings.ctrl-comma"
+context = "editor"
+mode = "insert"
+keys = "ctrl-,"
+command = "settings.open"
+
+[[keymap]]
+id = "builtin.terminal.settings.ctrl-comma"
+context = "terminal"
+keys = "ctrl-,"
+command = "settings.open"
+
+[[keymap]]
+id = "builtin.agent.settings.ctrl-comma"
+context = "agent"
+keys = "ctrl-,"
+command = "settings.open"
+
+[[keymap]]
+id = "builtin.settings.move.j"
+context = "settings"
+keys = "j"
+command = "settings.page.move"
+arguments = { by = 1 }
+
+[[keymap]]
+id = "builtin.settings.move.down"
+context = "settings"
+keys = "down"
+command = "settings.page.move"
+arguments = { by = 1 }
+
+[[keymap]]
+id = "builtin.settings.move.k"
+context = "settings"
+keys = "k"
+command = "settings.page.move"
+arguments = { by = -1 }
+
+[[keymap]]
+id = "builtin.settings.move.up"
+context = "settings"
+keys = "up"
+command = "settings.page.move"
+arguments = { by = -1 }
+
+[[keymap]]
+id = "builtin.settings.move.ctrl-d"
+context = "settings"
+keys = "ctrl-d"
+command = "settings.page.move"
+arguments = { by = 5 }
+
+[[keymap]]
+id = "builtin.settings.move.pagedown"
+context = "settings"
+keys = "pagedown"
+command = "settings.page.move"
+arguments = { by = 5 }
+
+[[keymap]]
+id = "builtin.settings.move.ctrl-u"
+context = "settings"
+keys = "ctrl-u"
+command = "settings.page.move"
+arguments = { by = -5 }
+
+[[keymap]]
+id = "builtin.settings.move.pageup"
+context = "settings"
+keys = "pageup"
+command = "settings.page.move"
+arguments = { by = -5 }
+
+[[keymap]]
+id = "builtin.settings.move.g-g"
+context = "settings"
+keys = "g g"
+command = "settings.page.move"
+arguments = { by = -100000 }
+
+[[keymap]]
+id = "builtin.settings.move.home"
+context = "settings"
+keys = "home"
+command = "settings.page.move"
+arguments = { by = -100000 }
+
+[[keymap]]
+id = "builtin.settings.move.shift-g"
+context = "settings"
+keys = "G"
+command = "settings.page.move"
+arguments = { by = 100000 }
+
+[[keymap]]
+id = "builtin.settings.move.end"
+context = "settings"
+keys = "end"
+command = "settings.page.move"
+arguments = { by = 100000 }
+
+[[keymap]]
+id = "builtin.settings.section.tab"
+context = "settings"
+keys = "tab"
+command = "settings.page.section"
+arguments = { by = 1 }
+
+[[keymap]]
+id = "builtin.settings.section.shift-tab"
+context = "settings"
+keys = "shift-tab"
+command = "settings.page.section"
+arguments = { by = -1 }
+
+[[keymap]]
+id = "builtin.settings.section.bracket-right"
+context = "settings"
+keys = "]"
+command = "settings.page.section"
+arguments = { by = 1 }
+
+[[keymap]]
+id = "builtin.settings.section.bracket-left"
+context = "settings"
+keys = "["
+command = "settings.page.section"
+arguments = { by = -1 }
+
+[[keymap]]
+id = "builtin.settings.activate.enter"
+context = "settings"
+keys = "enter"
+command = "settings.page.activate"
+
+[[keymap]]
+id = "builtin.settings.toggle.space"
+context = "settings"
+keys = "space"
+command = "settings.page.toggle"
+
+[[keymap]]
+id = "builtin.settings.reset.r"
+context = "settings"
+keys = "r"
+command = "settings.page.reset"
+
+[[keymap]]
+id = "builtin.settings.search.slash"
+context = "settings"
+keys = "/"
+command = "settings.page.search"
+
+[[keymap]]
+id = "builtin.settings.search.ctrl-f"
+context = "settings"
+keys = "ctrl-f"
+command = "settings.page.search"
+
+[[keymap]]
+id = "builtin.settings.modified.m"
+context = "settings"
+keys = "m"
+command = "settings.page.modified"
+
+[[keymap]]
+id = "builtin.settings.open-file.o"
+context = "settings"
+keys = "o"
+command = "settings.page.open_file"
+
+[[keymap]]
+id = "builtin.settings.cancel.escape"
+context = "settings"
+keys = "escape"
+command = "settings.page.cancel"
+
+[[keymap]]
+id = "builtin.settings.close.q"
+context = "settings"
+keys = "q"
+command = "settings.page.close"
+
+[[keymap]]
+id = "builtin.settings.close.ctrl-comma"
+context = "settings"
+keys = "ctrl-,"
+command = "settings.page.close"
+
+[[keymap]]
+id = "builtin.settings-search.cancel.escape"
+context = "settings_search"
+keys = "escape"
+command = "settings.page.cancel"
+
+[[keymap]]
+id = "builtin.settings-search.activate.enter"
+context = "settings_search"
+keys = "enter"
+command = "settings.page.activate"
+
+[[keymap]]
+id = "builtin.settings-search.backspace.backspace"
+context = "settings_search"
+keys = "backspace"
+command = "settings.page.backspace"
+
+[[keymap]]
+id = "builtin.settings-search.clear.ctrl-u"
+context = "settings_search"
+keys = "ctrl-u"
+command = "settings.page.clear"
+
+[[keymap]]
+id = "builtin.settings-search.move.down"
+context = "settings_search"
+keys = "down"
+command = "settings.page.move"
+arguments = { by = 1 }
+
+[[keymap]]
+id = "builtin.settings-search.move.up"
+context = "settings_search"
+keys = "up"
+command = "settings.page.move"
+arguments = { by = -1 }
+
+[[keymap]]
+id = "builtin.settings-search.move.ctrl-n"
+context = "settings_search"
+keys = "ctrl-n"
+command = "settings.page.move"
+arguments = { by = 1 }
+
+[[keymap]]
+id = "builtin.settings-search.move.ctrl-p"
+context = "settings_search"
+keys = "ctrl-p"
+command = "settings.page.move"
+arguments = { by = -1 }
+
+[[keymap]]
+id = "builtin.settings-search.close.ctrl-comma"
+context = "settings_search"
+keys = "ctrl-,"
+command = "settings.page.close"
+
+[[keymap]]
+id = "builtin.settings-edit.cancel.escape"
+context = "settings_edit"
+keys = "escape"
+command = "settings.page.cancel"
+
+[[keymap]]
+id = "builtin.settings-edit.activate.enter"
+context = "settings_edit"
+keys = "enter"
+command = "settings.page.activate"
+
+[[keymap]]
+id = "builtin.settings-edit.backspace.backspace"
+context = "settings_edit"
+keys = "backspace"
+command = "settings.page.backspace"
+
+[[keymap]]
+id = "builtin.settings-edit.clear.ctrl-u"
+context = "settings_edit"
+keys = "ctrl-u"
+command = "settings.page.clear"
+
+[[keymap]]
+id = "builtin.settings-edit.left.left"
+context = "settings_edit"
+keys = "left"
+command = "settings.page.left"
+
+[[keymap]]
+id = "builtin.settings-edit.right.right"
+context = "settings_edit"
+keys = "right"
+command = "settings.page.right"
+
+[[keymap]]
+id = "builtin.settings-edit.home.home"
+context = "settings_edit"
+keys = "home"
+command = "settings.page.home"
+
+[[keymap]]
+id = "builtin.settings-edit.end.end"
+context = "settings_edit"
+keys = "end"
+command = "settings.page.end"
+
+[[keymap]]
+id = "builtin.settings-edit.home.ctrl-a"
+context = "settings_edit"
+keys = "ctrl-a"
+command = "settings.page.home"
+
+[[keymap]]
+id = "builtin.settings-edit.end.ctrl-e"
+context = "settings_edit"
+keys = "ctrl-e"
+command = "settings.page.end"
+
+[[keymap]]
+id = "builtin.settings-choice.move.j"
+context = "settings_choice"
+keys = "j"
+command = "settings.page.move"
+arguments = { by = 1 }
+
+[[keymap]]
+id = "builtin.settings-choice.move.down"
+context = "settings_choice"
+keys = "down"
+command = "settings.page.move"
+arguments = { by = 1 }
+
+[[keymap]]
+id = "builtin.settings-choice.move.k"
+context = "settings_choice"
+keys = "k"
+command = "settings.page.move"
+arguments = { by = -1 }
+
+[[keymap]]
+id = "builtin.settings-choice.move.up"
+context = "settings_choice"
+keys = "up"
+command = "settings.page.move"
+arguments = { by = -1 }
+
+[[keymap]]
+id = "builtin.settings-choice.activate.enter"
+context = "settings_choice"
+keys = "enter"
+command = "settings.page.activate"
+
+[[keymap]]
+id = "builtin.settings-choice.activate.space"
+context = "settings_choice"
+keys = "space"
+command = "settings.page.activate"
+
+[[keymap]]
+id = "builtin.settings-choice.cancel.escape"
+context = "settings_choice"
+keys = "escape"
+command = "settings.page.cancel"
+
+[[keymap]]
+id = "builtin.settings-choice.cancel.q"
+context = "settings_choice"
+keys = "q"
+command = "settings.page.cancel"

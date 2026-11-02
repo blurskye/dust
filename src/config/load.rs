@@ -120,12 +120,14 @@ fn bundled_settings() -> Config {
 }
 
 fn bundled_settings_value() -> toml::Value {
+    bundled_value().clone()
+}
+
+fn bundled_value() -> &'static toml::Value {
     static VALUE: OnceLock<toml::Value> = OnceLock::new();
-    VALUE
-        .get_or_init(|| {
-            toml::from_str::<toml::Value>(BUNDLED_CONFIG).expect("bundled config must remain valid")
-        })
-        .clone()
+    VALUE.get_or_init(|| {
+        toml::from_str::<toml::Value>(BUNDLED_CONFIG).expect("bundled config must remain valid")
+    })
 }
 
 fn parse_bundled_config() -> LoadedConfig {
@@ -594,89 +596,14 @@ pub fn load_config(path: &Path) -> LoadedConfig {
 }
 
 pub(super) fn parse_config_source(path: &Path, source: &str) -> LoadedConfig {
-    let migrated = match migrate_config_source(source) {
-        Ok((source, _)) => source,
-        Err(error) => {
-            return fallback_config(Some(format!(
-                "invalid {}: {error}; using bundled defaults",
-                path.display()
-            )));
-        }
-    };
-    let source = migrated.as_str();
-    let defaults = bundled_settings();
-    let mut merged = bundled_settings_value();
-    let user = match toml::from_str::<toml::Value>(source) {
-        Ok(user) => user,
-        Err(error) => {
-            return LoadedConfig {
-                user_configuration: false,
-                user_setting_keys: BTreeSet::new(),
-                user_setting_spans: BTreeMap::new(),
-                config: defaults,
-                path: PathBuf::from("<bundled:config>"),
-                diagnostic: Some(format!(
-                    "invalid {}: {error}; using bundled defaults",
-                    path.display()
-                )),
-                keymaps: LoadedKeymaps::default(),
-                dashboard: DashboardConfig::default(),
-                dashboard_path: PathBuf::from("<bundled:dashboard>"),
-                dashboard_spans: BTreeMap::new(),
-                theme: bundled_theme(),
-                theme_path: PathBuf::from("<bundled:theme:dust>"),
-                theme_spans: BTreeMap::new(),
-            };
-        }
-    };
-    let user_setting_keys = setting_keys(&user);
-    merge_toml(&mut merged, user);
-    match merged.try_into::<Config>() {
-        Ok(config) => match config.validate() {
-            Ok(()) => LoadedConfig {
-                user_configuration: false,
-                user_setting_keys,
-                user_setting_spans: setting_spans(source),
-                config,
-                path: path.to_path_buf(),
-                diagnostic: unknown_key_warning(source),
-                keymaps: LoadedKeymaps::default(),
-                dashboard: DashboardConfig::default(),
-                dashboard_path: PathBuf::from("<bundled:dashboard>"),
-                dashboard_spans: BTreeMap::new(),
-                theme: bundled_theme(),
-                theme_path: PathBuf::from("<bundled:theme:dust>"),
-                theme_spans: BTreeMap::new(),
-            },
-            Err(error) => LoadedConfig {
-                user_configuration: false,
-                user_setting_keys: BTreeSet::new(),
-                user_setting_spans: BTreeMap::new(),
-                config: defaults,
-                path: PathBuf::from("<bundled:config>"),
-                diagnostic: Some(format!(
-                    "invalid {}: {error}; using defaults",
-                    path.display()
-                )),
-                keymaps: LoadedKeymaps::default(),
-                dashboard: DashboardConfig::default(),
-                dashboard_path: PathBuf::from("<bundled:dashboard>"),
-                dashboard_spans: BTreeMap::new(),
-                theme: bundled_theme(),
-                theme_path: PathBuf::from("<bundled:theme:dust>"),
-                theme_spans: BTreeMap::new(),
-            },
-        },
-        Err(error) => LoadedConfig {
+    match settings_from_source(source) {
+        Ok((config, user_setting_keys, source)) => LoadedConfig {
             user_configuration: false,
-            user_setting_keys: BTreeSet::new(),
-            user_setting_spans: BTreeMap::new(),
-            config: defaults,
-            path: PathBuf::from("<bundled:config>"),
-            diagnostic: Some(format!(
-                "invalid {}: {error}; using bundled defaults",
-                path.display()
-            )),
+            user_setting_keys,
+            user_setting_spans: setting_spans(&source),
+            config,
+            path: path.to_path_buf(),
+            diagnostic: unknown_key_warning(&source),
             keymaps: LoadedKeymaps::default(),
             dashboard: DashboardConfig::default(),
             dashboard_path: PathBuf::from("<bundled:dashboard>"),
@@ -685,7 +612,37 @@ pub(super) fn parse_config_source(path: &Path, source: &str) -> LoadedConfig {
             theme_path: PathBuf::from("<bundled:theme:dust>"),
             theme_spans: BTreeMap::new(),
         },
+        Err(error) => fallback_config(Some(format!(
+            "invalid {}: {error}; using bundled defaults",
+            path.display()
+        ))),
     }
+}
+
+/// The settings a user config.toml gives over the bundled defaults, with the keys it sets and
+/// its source after migration; an error when it does not parse or holds an invalid value.
+pub(super) fn settings_from_source(
+    source: &str,
+) -> Result<(Config, BTreeSet<String>, String), String> {
+    let (source, _) = migrate_config_source(source)?;
+    let user = toml::from_str::<toml::Value>(&source).map_err(|error| error.to_string())?;
+    let user_setting_keys = setting_keys(&user);
+    let mut merged = bundled_settings_value();
+    merge_toml(&mut merged, user);
+    let config = merged
+        .try_into::<Config>()
+        .map_err(|error| error.to_string())?;
+    config.validate()?;
+    Ok((config, user_setting_keys, source))
+}
+
+/// A setting's bundled default value, by its dotted key.
+pub(super) fn bundled_setting(key: &str) -> Option<toml::Value> {
+    let mut value = bundled_value();
+    for segment in super::config_key_segments(key)? {
+        value = value.get(&segment)?;
+    }
+    Some(value.clone())
 }
 
 pub(crate) fn setting_spans(source: &str) -> BTreeMap<String, std::ops::Range<usize>> {

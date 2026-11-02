@@ -1725,14 +1725,17 @@ impl InteractiveApplication {
         if saving {
             self.persistence.request_save();
         }
-        self.notify_message(
-            format!(
-                "Theme {}{}",
-                crate::config::theme_display_name(name),
-                if saving { "" } else { " (not saved)" }
-            ),
-            false,
+        let message = format!(
+            "Theme {}{}",
+            crate::config::theme_display_name(name),
+            if saving { "" } else { " (not saved)" }
         );
+        if self.ui.settings.is_some() {
+            self.refresh_settings();
+            self.settings_status(message, false);
+        } else {
+            self.notify_message(message, false);
+        }
     }
     fn present_theme_picker(&mut self, rows: crate::editor::session::configuration::ThemeRows) {
         let items = rows
@@ -2561,6 +2564,7 @@ impl InteractiveApplication {
                 let interaction_available = self.input.prompt().is_none()
                     && self.ui.picker.is_none()
                     && self.ui.tool_menu.is_none()
+                    && self.ui.settings.is_none()
                     && self.input.documentation().is_none()
                     && !self.input.mapping_pending()
                     && !self.input.grammar_pending();
@@ -2714,6 +2718,7 @@ impl InteractiveApplication {
         effect: AppEffect,
     ) -> Result<(), AppEffect> {
         match effect {
+            AppEffect::Settings(action) => self.settings_action(action),
             AppEffect::OpenToolMenu(category) => self.open_tool_menu(category),
             // Esc on a filtered list clears the search before it closes the manager.
             AppEffect::CloseToolMenu
@@ -3913,7 +3918,7 @@ impl InteractiveApplication {
 
 impl InteractiveApplication {
     /// Shows a terminal and gives it the keys, bringing its window back if it was hidden.
-    fn reveal_terminal(&mut self, id: PtyId) {
+    pub(super) fn reveal_terminal(&mut self, id: PtyId) {
         self.terminal_session.display(id);
         if self.terminal_window_rect().is_none() {
             if let Err(error) = self.show_native_window(NativeSurfaceTarget::Terminal(id.0)) {
@@ -6308,6 +6313,7 @@ impl InteractiveApplication {
                             && self.input.capture_context().is_none()
                             && self.ui.picker.is_none()
                             && self.ui.tool_menu.is_none()
+                            && self.ui.settings.is_none()
                         {
                             self.terminal_session.select(id);
                             if open.float {
@@ -13875,7 +13881,8 @@ impl InteractiveApplication {
             typing
                 || self.input.prompt().is_some()
                 || self.ui.picker.is_some()
-                || self.ui.tool_menu.is_some(),
+                || self.ui.tool_menu.is_some()
+                || self.ui.settings.is_some(),
         ) {
             self.request_workspace_trust();
         }
