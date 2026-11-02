@@ -33,6 +33,7 @@ impl InteractiveApplication {
         register_builtin_commands(&mut commands)?;
         register_app_commands(&mut commands)?;
         let use_user_configuration = loaded_config.user_configuration;
+        let config_warning = loaded_config.warning.clone();
         let (configuration, config_diagnostic) =
             match resolve_configuration(&commands, loaded_config, true) {
                 Ok(resolved) => resolved,
@@ -179,6 +180,9 @@ impl InteractiveApplication {
         };
         application.project_configuration();
         application.project_window_activation();
+        if let Some(warning) = config_warning.filter(|_| application.ui.config_diagnostic.is_none()) {
+            application.notify_warning(warning);
+        }
         Ok(application)
     }
 }

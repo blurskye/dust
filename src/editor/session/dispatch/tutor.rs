@@ -1,8 +1,8 @@
 //! The guided tutor. `:Tutor` puts the user's layout aside, moves the editor into a throwaway
-//! practice project and walks through the lessons in `assets/defaults/tutor.toml` in a bar above
+//! practice project and walks through the lessons in `assets/defaults/tutor.toml` on a card above
 //! the status line. Each step sets its scene (file, cursor, windows) and moves on once it is
 //! done: the command it teaches ran, or the step's file reads as asked. While the user is
-//! outside the practice project the tutor waits and its bar is gone. `:TutorQuit` or the last
+//! outside the practice project the tutor waits and its card is gone. `:TutorQuit` or the last
 //! step moves the editor back and restores the layout; the practice project is deleted.
 
 use std::path::{Path, PathBuf};
@@ -16,12 +16,33 @@ use crate::editor::{BufferId, CommandInvocation, CommandValue, EditorMode, Invoc
 use crate::ui::UiSyntaxSpan;
 
 const LESSONS: &str = include_str!("../../../../assets/defaults/tutor.toml");
-const PRACTICE: &str = include_str!("../../../../assets/defaults/tutor/practice.md");
+/// One short lesson per chapter, named after the chapter.
+const LESSON_FILES: [(&str, &str); 19] = [
+    ("00-welcome.md", include_str!("../../../../assets/defaults/tutor/00-welcome.md")),
+    ("01-moving-around.md", include_str!("../../../../assets/defaults/tutor/01-moving-around.md")),
+    ("02-changing-text.md", include_str!("../../../../assets/defaults/tutor/02-changing-text.md")),
+    ("03-visual-mode.md", include_str!("../../../../assets/defaults/tutor/03-visual-mode.md")),
+    ("04-search.md", include_str!("../../../../assets/defaults/tutor/04-search.md")),
+    ("05-files.md", include_str!("../../../../assets/defaults/tutor/05-files.md")),
+    ("06-tabs-and-windows.md", include_str!("../../../../assets/defaults/tutor/06-tabs-and-windows.md")),
+    ("07-terminal.md", include_str!("../../../../assets/defaults/tutor/07-terminal.md")),
+    ("08-code.md", include_str!("../../../../assets/defaults/tutor/08-code.md")),
+    ("09-tools.md", include_str!("../../../../assets/defaults/tutor/09-tools.md")),
+    ("10-debugging.md", include_str!("../../../../assets/defaults/tutor/10-debugging.md")),
+    ("11-git.md", include_str!("../../../../assets/defaults/tutor/11-git.md")),
+    ("12-agents.md", include_str!("../../../../assets/defaults/tutor/12-agents.md")),
+    ("13-projects.md", include_str!("../../../../assets/defaults/tutor/13-projects.md")),
+    ("14-look-and-feel.md", include_str!("../../../../assets/defaults/tutor/14-look-and-feel.md")),
+    ("15-help.md", include_str!("../../../../assets/defaults/tutor/15-help.md")),
+    ("16-plugins.md", include_str!("../../../../assets/defaults/tutor/16-plugins.md")),
+    ("17-saving.md", include_str!("../../../../assets/defaults/tutor/17-saving.md")),
+    ("18-done.md", include_str!("../../../../assets/defaults/tutor/18-done.md")),
+];
 const MAIN: &str = include_str!("../../../../assets/defaults/tutor/src/main.rs");
 const GREET: &str = include_str!("../../../../assets/defaults/tutor/src/greet.rs");
 const MANIFEST: &str = "[package]\nname = \"practice\"\nversion = \"0.1.0\"\nedition = \"2021\"\n";
 const FOOTER: &str = ":TutorNext skip · :TutorBack back · :TutorQuit quit";
-/// How long the bar says a step is done before the next one comes.
+/// How long the card says a step is done before the next one comes.
 const PRAISE: Duration = Duration::from_millis(700);
 
 #[derive(Debug, Deserialize)]
@@ -50,6 +71,9 @@ pub(super) struct Step {
     split: Option<bool>,
     explorer: Option<bool>,
     terminal: Option<bool>,
+    /// The chapter's lesson file.
+    #[serde(skip)]
+    lesson: &'static str,
 }
 
 impl Step {
@@ -63,7 +87,7 @@ impl Step {
 
     /// The practice file the step's text checks and cursor are about.
     fn file(&self) -> &str {
-        self.open.as_deref().unwrap_or("practice.md")
+        self.open.as_deref().unwrap_or(self.lesson)
     }
 
     /// The file the step brings to the front when it starts.
@@ -72,10 +96,30 @@ impl Step {
     }
 }
 
+/// The lesson file of a chapter: "Tabs and windows" is NN-tabs-and-windows.md.
+fn lesson_file(chapter: &str) -> Option<&'static str> {
+    let name = format!("{}.md", chapter.to_lowercase().replace(' ', "-"));
+    LESSON_FILES
+        .iter()
+        .map(|(file, _)| *file)
+        .find(|file| file.split_once('-').is_some_and(|(_, rest)| rest == name))
+}
+
+/// The steps, each knowing its chapter's lesson; a chapter's first step opens it.
 pub(super) fn lessons() -> Result<Vec<Step>, String> {
-    toml::from_str::<Lessons>(LESSONS)
+    let mut steps = toml::from_str::<Lessons>(LESSONS)
         .map(|lessons| lessons.step)
-        .map_err(|error| format!("the tutor lessons are broken: {error}"))
+        .map_err(|error| format!("the tutor lessons are broken: {error}"))?;
+    let mut chapter = String::new();
+    for step in &mut steps {
+        step.lesson = lesson_file(&step.chapter)
+            .ok_or_else(|| format!("the tutor chapter {} has no lesson file", step.chapter))?;
+        if step.chapter != chapter && step.open.is_none() {
+            step.open = Some(step.lesson.to_owned());
+        }
+        chapter.clone_from(&step.chapter);
+    }
+    Ok(steps)
 }
 
 /// greet.rs as the git lessons find it: changed since the commit.
@@ -84,14 +128,13 @@ fn changed_greet() -> String {
 }
 
 /// The practice project's files as they are committed.
-fn practice_files() -> [(&'static str, &'static str); 5] {
-    [
-        ("practice.md", PRACTICE),
+fn practice_files() -> impl Iterator<Item = (&'static str, &'static str)> {
+    LESSON_FILES.into_iter().chain([
         ("Cargo.toml", MANIFEST),
         (".gitignore", "target/\n"),
         ("src/main.rs", MAIN),
         ("src/greet.rs", GREET),
-    ]
+    ])
 }
 
 /// Write the practice project to a new temporary folder and commit it, then change greet.rs so
@@ -138,7 +181,7 @@ struct Practice {
 
 pub(super) struct Tutor {
     steps: Vec<Step>,
-    /// The step in the bar, while the tutor runs.
+    /// The step on the card, while the tutor runs.
     current: Option<usize>,
     /// The step's command ran since the last check.
     observed: bool,
@@ -296,7 +339,7 @@ impl InteractiveApplication {
     }
 
     /// Called once per main loop pass: follow the moves in and out of the practice project,
-    /// finish the step when it is done and keep the bar in sync with what is on screen.
+    /// finish the step when it is done and keep the card in sync with what is on screen.
     pub(super) fn tutor_tick(&mut self) {
         let Some(practice) = &mut self.tutor.practice else {
             return;
@@ -350,7 +393,7 @@ impl InteractiveApplication {
         if done {
             self.tutor.done_at = Some(Instant::now());
         }
-        self.sync_tutor_bar();
+        self.sync_tutor_card();
     }
 
     /// The editor shows the practice project: its folder is the workspace and the file in
@@ -387,7 +430,7 @@ impl InteractiveApplication {
         // practice text doesn't skip itself.
         self.tutor.checked = (!praised).then_some(self.state.revision);
         self.tutor_show_line();
-        self.sync_tutor_bar();
+        self.sync_tutor_card();
     }
 
     /// Set up the windows and file the step starts from.
@@ -510,10 +553,10 @@ impl InteractiveApplication {
         }
     }
 
-    fn sync_tutor_bar(&mut self) {
-        let bar = self.tutor.current.filter(|_| self.tutor_inside()).map(|index| {
+    fn sync_tutor_card(&mut self) {
+        let card = self.tutor.current.filter(|_| self.tutor_inside()).map(|index| {
             let step = &self.tutor.steps[index];
-            crate::ui::TutorBar {
+            crate::ui::TutorCard {
                 title: format!("Tutor {}/{} · {}", index + 1, self.tutor.steps.len(), step.chapter),
                 text: step.text.clone(),
                 praised: self.tutor.done_at.is_some(),
@@ -521,7 +564,7 @@ impl InteractiveApplication {
                 target: self.tutor.target.clone(),
             }
         });
-        self.ui.set(bar, |ui| &mut ui.tutor);
+        self.ui.set(card, |ui| &mut ui.tutor);
     }
 
     fn tutor_buffer(&self, file: &str) -> Option<BufferId> {
@@ -657,7 +700,6 @@ mod tests {
                 return greet.as_str();
             }
             practice_files()
-                .into_iter()
                 .find(|(file, _)| *file == name)
                 .map(|(_, text)| text)
                 .unwrap_or_else(|| panic!("the practice project has no {name}"))

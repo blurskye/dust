@@ -1441,13 +1441,13 @@ pub struct UiState {
     /// The agent panel, drawn in place of the pane that shows its view.
     pub agent_panel: Option<AgentPanelUi>,
     /// The tutor's current step, while the user is in its practice project.
-    pub tutor: Option<TutorBar>,
+    pub tutor: Option<TutorCard>,
 }
 
-/// One tutor step in a bar across the screen above the status line. Text in `backticks` is
+/// One tutor step on a card at the bottom right, above the status line. Text in `backticks` is
 /// drawn as keys.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TutorBar {
+pub struct TutorCard {
     pub title: String,
     pub text: String,
     /// The step was just done; the bar says so before the next one comes.
@@ -1455,17 +1455,6 @@ pub struct TutorBar {
     pub footer: String,
     /// The text the step is about, highlighted in its file.
     pub target: Option<UiSyntaxSpan>,
-}
-
-/// Rows the tutor bar takes: its title row and the step's wrapped text, at most a third of the
-/// screen so the practice file stays in view.
-fn tutor_bar_rows(ui: &UiState, config: &Config, width: u16, height: u16) -> u16 {
-    let Some(bar) = ui.tutor.as_ref().filter(|_| height >= 12) else {
-        return 0;
-    };
-    let lines = wrap_card_text(&bar.text, usize::from(width.saturating_sub(4)), config.editor.ambiguous_width);
-    let text = u16::try_from(lines.len()).unwrap_or(u16::MAX).max(1);
-    text.min(height / 3).saturating_add(1)
 }
 
 #[derive(Clone, Debug)]
@@ -1653,11 +1642,11 @@ pub fn prompt_surface_dimensions(
 /// Rows at the foot of the screen, under every dock: the status line, and above it the bar of a
 /// paused operation. The dashboard has neither.
 #[must_use]
-pub fn screen_foot_rows(state: &EditorState, ui: &UiState, config: &Config, width: u16, height: u16) -> u16 {
+pub fn screen_foot_rows(state: &EditorState, ui: &UiState, config: &Config, height: u16) -> u16 {
     if !config.ui.status_line.enabled || ui.dashboard || state.active_view.is_none() || height < 2 {
         return 0;
     }
-    1 + u16::from(ui.operation_bar.is_some() && height > 2) + tutor_bar_rows(ui, config, width, height)
+    1 + u16::from(ui.operation_bar.is_some() && height > 2)
 }
 
 #[must_use]
@@ -1833,31 +1822,54 @@ fn wrap_card_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<Ve
     lines
 }
 
-/// The tutor bar in the rows that end just above `bottom`: a rule with the step's title and the
-/// tutor's commands, then the instruction.
-fn render_tutor_bar(frame: &mut Frame, bar: &TutorBar, config: &Config, width: u16, bottom: u16, rows: u16) {
-    let top = bottom.saturating_sub(rows);
-    for y in top..bottom {
-        frame.grid.fill_row(y, Style::Default);
+/// The tutor card at the bottom right, above the status line: the step's title in its border,
+/// the instruction and the tutor's commands. It moves to the top while the key hints fill the
+/// bottom.
+fn render_tutor_card(frame: &mut Frame, card: &TutorCard, config: &Config, width: u16, bottom: u16, hints_open: bool) {
+    let card_width = width.saturating_sub(2).min(64);
+    if card_width < 24 || bottom < 8 {
+        return;
     }
-    for x in 0..width {
+    let ambiguous = config.editor.ambiguous_width;
+    let mut rows: Vec<Vec<(String, Style)>> = wrap_card_text(&card.text, usize::from(card_width - 4), ambiguous)
+        .into_iter()
+        .map(|line| {
+            line.into_iter()
+                .map(|(piece, key)| (piece, if key { Style::KeyHintKey } else { Style::Default }))
+                .collect()
+        })
+        .collect();
+    rows.push(Vec::new());
+    rows.push(vec![(card.footer.clone(), Style::Muted)]);
+    // Long steps lose their last rows rather than cover the whole screen.
+    let card_height = u16::try_from(rows.len()).unwrap_or(u16::MAX).saturating_add(2).min(bottom - 2);
+    let top = if hints_open { 1 } else { bottom - card_height };
+    let left = width - card_width - 1;
+    let right = left + card_width - 1;
+    let last = top + card_height - 1;
+    for y in top..=last {
+        for x in left..=right {
+            frame.grid.set_cell(x, y, " ", Style::Default);
+        }
+        frame.grid.set_cell(left, y, "│", Style::Accent);
+        frame.grid.set_cell(right, y, "│", Style::Accent);
+    }
+    for x in left + 1..right {
         frame.grid.set_cell(x, top, "─", Style::Accent);
+        frame.grid.set_cell(x, last, "─", Style::Accent);
     }
-    let mut x = frame.grid.put_text_clipped(1, top, &format!(" {} ", bar.title), Style::Accent, width);
-    if bar.praised {
-        x = frame.grid.put_text_clipped(x, top, " ✓ Nice ", Style::GitSignAdded, width);
+    frame.grid.set_cell(left, top, "╭", Style::Accent);
+    frame.grid.set_cell(right, top, "╮", Style::Accent);
+    frame.grid.set_cell(left, last, "╰", Style::Accent);
+    frame.grid.set_cell(right, last, "╯", Style::Accent);
+    let x = frame.grid.put_text_clipped(left + 2, top, &format!(" {} ", card.title), Style::Accent, right);
+    if card.praised {
+        frame.grid.put_text_clipped(x, top, " ✓ Nice ", Style::GitSignAdded, right);
     }
-    let footer = format!(" {} ", bar.footer);
-    let footer_width = u16::try_from(text_width(&footer, config.editor.ambiguous_width)).unwrap_or(u16::MAX);
-    if x.saturating_add(footer_width).saturating_add(2) <= width {
-        frame.grid.put_text_clipped(width - footer_width - 1, top, &footer, Style::Muted, width);
-    }
-    let lines = wrap_card_text(&bar.text, usize::from(width.saturating_sub(4)), config.editor.ambiguous_width);
-    for (line, y) in lines.iter().zip(top + 1..bottom) {
-        let mut x = 2;
-        for (piece, key) in line {
-            let style = if *key { Style::KeyHintKey } else { Style::Default };
-            x = frame.grid.put_text_clipped(x, y, piece, style, width.saturating_sub(1));
+    for (row, y) in rows.iter().zip(top + 1..last) {
+        let mut x = left + 2;
+        for (piece, style) in row {
+            x = frame.grid.put_text_clipped(x, y, piece, *style, right - 1);
         }
     }
 }
@@ -2038,19 +2050,13 @@ pub fn render(
             .iter()
             .any(|window| window.layer == crate::ui::window::CompositorLayer::Fullscreen)
     });
-    let foot_rows = screen_foot_rows(state, ui, config, width, height);
+    let foot_rows = screen_foot_rows(state, ui, config, height);
     if !fullscreen && foot_rows > 0 {
         if let Some(view) = state.active_view {
             editor::render_status_line(&mut frame.grid, state, view, ui, config, width, height - 1);
         }
-        let mut bottom = height - 1;
         if ui.operation_bar.is_some() && height > 2 {
-            editor::render_operation_bar(&mut frame.grid, ui, width, bottom - 1);
-            bottom -= 1;
-        }
-        let rows = tutor_bar_rows(ui, config, width, height);
-        if let Some(bar) = ui.tutor.as_ref().filter(|_| rows > 0) {
-            render_tutor_bar(&mut frame, bar, config, width, bottom, rows);
+            editor::render_operation_bar(&mut frame.grid, ui, width, height - 2);
         }
     }
     if let Some(compositor) = compositor {
@@ -2223,6 +2229,10 @@ pub fn render(
             content_width,
             workspace_height,
         );
+    }
+    // The tutor card stays on top of popups so its instruction is readable while they are open.
+    if let Some(card) = &ui.tutor {
+        render_tutor_card(&mut frame, card, config, width, height - foot_rows, ui.key_hints.is_some());
     }
     let modal_open = ui.picker.is_some() || ui.tool_menu.is_some() || ui.settings.is_some();
     // A modal's footer is at the bottom right too, and its keys matter more.

@@ -42,7 +42,7 @@ pub use render::{
     prompt_geometry_for_state, prompt_surface_dimensions, render, snap_display_column,
     snap_display_column_forward, terminal_panel_geometry, terminal_tab_at_column};
 pub use render::{
-    AgentListRow, AgentPanelUi, DebugPane, DebugPanesUiState, DebugSign, DebugSignKind, TutorBar,
+    AgentListRow, AgentPanelUi, DebugPane, DebugPanesUiState, DebugSign, DebugSignKind, TutorCard,
     SettingsEdit, SettingsHit, SettingsLine, SettingsPageState, SettingsRow, SettingsValue,
     settings_hit, settings_layout, settings_line_height,
     debug_pane_insets, debug_pane_tab_at, transcript_lines,

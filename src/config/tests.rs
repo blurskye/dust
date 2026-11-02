@@ -178,19 +178,20 @@ fn viewport_horizontal_margin_is_nested_bounded_and_has_no_flat_alias() {
             .is_some_and(|message| { message.contains("editor.viewport.horizontal_margin") })
     );
 
-    fs::write(&path, "[editor]\nhorizontal_margin = 9\n").expect("write removed flat field");
+    // A removed setting is left out with a warning; the rest of the file still applies.
+    fs::write(&path, "[editor]\nhorizontal_margin = 9\ntab_width = 3\n").expect("write removed flat field");
     let loaded = load_config(&path);
-    assert_eq!(loaded.config, load_bundled_config().config);
+    assert_eq!(loaded.config.editor.tab_width, 3);
     assert!(
         loaded
-            .diagnostic
+            .warning
             .as_deref()
-            .is_some_and(|message| { message.contains("unknown field `horizontal_margin`") })
+            .is_some_and(|message| message.ends_with("config.toml: editor.horizontal_margin"))
     );
 }
 
 #[test]
-fn unpublished_explorer_schema_rejects_removed_overlay_fields() {
+fn unpublished_explorer_schema_leaves_out_removed_overlay_fields() {
     let root = tempdir().expect("tempdir");
     let removed = [
         ("width_percent", "22"),
@@ -208,10 +209,10 @@ fn unpublished_explorer_schema_rejects_removed_overlay_fields() {
         assert_eq!(loaded.config, load_bundled_config().config);
         assert!(
             loaded
-                .diagnostic
+                .warning
                 .as_deref()
                 .is_some_and(|message| message.contains(field)),
-            "missing rejection for {field}"
+            "missing warning for {field}"
         );
     }
 }
@@ -279,15 +280,16 @@ fn malformed_or_invalid_config_is_nonfatal() {
     assert_eq!(loaded.config, load_bundled_config().config);
     assert!(loaded.diagnostic.is_some());
 
-    fs::write(&path, "[ui]\nmade_up = true\n").expect("unknown nested key");
+    fs::write(&path, "made_up = 1\n[ui]\nmade_up = true\n[editor.debug_signs]\nexecution = \"x\"\n")
+        .expect("unknown keys");
     let loaded = load_config(&path);
     assert_eq!(loaded.config, load_bundled_config().config);
-    assert!(
-        loaded
-            .diagnostic
-            .as_deref()
-            .is_some_and(|message| message.contains("unknown field `made_up`"))
-    );
+    assert_eq!(loaded.path, path, "the file is used, not the bundled defaults");
+    assert_eq!(loaded.diagnostic, None);
+    let diagnostic = loaded.warning.unwrap_or_default();
+    for key in ["made_up", "ui.made_up", "editor.debug_signs"] {
+        assert!(diagnostic.split(": ").last().unwrap().split(", ").any(|found| found == key), "{diagnostic}");
+    }
 }
 
 #[test]
@@ -696,7 +698,7 @@ fn buffer_line_policy_is_typed_and_strict() {
         fs::write(&path, format!("[ui.buffer_line]\n{invalid}\n")).expect("invalid buffer line");
         let loaded = load_config(&path);
         assert_eq!(loaded.config, load_bundled_config().config);
-        assert!(loaded.diagnostic.is_some());
+        assert!(loaded.diagnostic.is_some() || loaded.warning.is_some(), "{invalid}");
     }
 }
 
@@ -753,7 +755,7 @@ fn terminal_panel_height_is_bounded() {
             .expect("invalid terminal panel");
         let loaded = load_config(&path);
         assert_eq!(loaded.config, load_bundled_config().config, "{invalid}");
-        assert!(loaded.diagnostic.is_some(), "{invalid}");
+        assert!(loaded.diagnostic.is_some() || loaded.warning.is_some(), "{invalid}");
     }
 }
 
@@ -770,7 +772,7 @@ fn key_hint_policy_is_typed_bounded_and_transactional() {
     for invalid in ["delay_ms=60001", "max_rows=4"] {
         fs::write(&path, format!("[ui.key_hints]\n{invalid}\n")).expect("invalid key hints");
         let loaded = load_config(&path);
-        assert!(loaded.diagnostic.is_some(), "{invalid}");
+        assert!(loaded.diagnostic.is_some() || loaded.warning.is_some(), "{invalid}");
         assert_eq!(
             loaded.config.ui.key_hints,
             load_bundled_config().config.ui.key_hints

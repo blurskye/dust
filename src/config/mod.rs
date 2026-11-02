@@ -251,6 +251,8 @@ pub struct LoadedConfig {
     pub config: Config,
     pub path: PathBuf,
     pub diagnostic: Option<String>,
+    /// A problem that doesn't stop the file from applying, such as a setting Dust doesn't have.
+    pub warning: Option<String>,
     pub keymaps: LoadedKeymaps,
     pub dashboard: DashboardConfig,
     pub dashboard_path: PathBuf,

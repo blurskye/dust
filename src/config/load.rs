@@ -156,6 +156,7 @@ fn parse_bundled_config() -> LoadedConfig {
         config,
         path: PathBuf::from("<bundled:config>"),
         diagnostic: None,
+        warning: None,
         keymaps,
         dashboard,
         dashboard_path: PathBuf::from("<bundled:dashboard>"),
@@ -564,6 +565,7 @@ pub(super) fn fallback_config(diagnostic: Option<String>) -> LoadedConfig {
         config: bundled_settings(),
         path: PathBuf::from("<bundled:config>"),
         diagnostic,
+        warning: None,
         keymaps: LoadedKeymaps::default(),
         dashboard: DashboardConfig::default(),
         dashboard_path: PathBuf::from("<bundled:dashboard>"),
@@ -592,13 +594,20 @@ pub fn load_config(path: &Path) -> LoadedConfig {
 
 pub(super) fn parse_config_source(path: &Path, source: &str) -> LoadedConfig {
     match settings_from_source(source) {
-        Ok((config, user_setting_keys, source)) => LoadedConfig {
+        Ok((config, user_setting_keys, source, ignored)) => LoadedConfig {
             user_configuration: false,
             user_setting_keys,
             user_setting_spans: setting_spans(&source),
             config,
             path: path.to_path_buf(),
-            diagnostic: unknown_key_warning(&source),
+            diagnostic: None,
+            warning: (!ignored.is_empty()).then(|| {
+                let file = path.file_name().map_or_else(
+                    || path.display().to_string(),
+                    |name| name.to_string_lossy().into_owned(),
+                );
+                format!("left out settings Dust doesn't have from {file}: {}", ignored.join(", "))
+            }),
             keymaps: LoadedKeymaps::default(),
             dashboard: DashboardConfig::default(),
             dashboard_path: PathBuf::from("<bundled:dashboard>"),
@@ -614,21 +623,54 @@ pub(super) fn parse_config_source(path: &Path, source: &str) -> LoadedConfig {
     }
 }
 
-/// The settings a user config.toml gives over the bundled defaults, with the keys it sets and
-/// its source after migration; an error when it does not parse or holds an invalid value.
+/// The settings a user config.toml gives over the bundled defaults, with the keys it sets, its
+/// source after migration and the keys it has that Dust doesn't, which are left out so an old
+/// or misspelt setting doesn't cost the rest of the file; an error when it does not parse or
+/// holds an invalid value.
 pub(super) fn settings_from_source(
     source: &str,
-) -> Result<(Config, BTreeSet<String>, String), String> {
+) -> Result<(Config, BTreeSet<String>, String, Vec<String>), String> {
     let (source, _) = migrate_config_source(source)?;
-    let user = toml::from_str::<toml::Value>(&source).map_err(|error| error.to_string())?;
-    let user_setting_keys = setting_keys(&user);
-    let mut merged = bundled_settings_value();
-    merge_toml(&mut merged, user);
-    let config = merged
-        .try_into::<Config>()
-        .map_err(|error| error.to_string())?;
+    let mut user = toml::from_str::<toml::Value>(&source).map_err(|error| error.to_string())?;
+    let mut ignored = Vec::new();
+    let config = loop {
+        let mut merged = bundled_settings_value();
+        merge_toml(&mut merged, user.clone());
+        let message = match merged.try_into::<Config>() {
+            Ok(config) => break config,
+            Err(error) => error.to_string(),
+        };
+        match unknown_field(&message) {
+            Some(key) if ignored.len() < 64 && remove_key(&mut user, &key) => ignored.push(key.join(".")),
+            _ => return Err(message),
+        }
+    };
     config.validate()?;
-    Ok((config, user_setting_keys, source))
+    Ok((config, setting_keys(&user), source, ignored))
+}
+
+/// The dotted key of the field serde refused in "unknown field `name`, expected ...\nin `a.b`".
+fn unknown_field(message: &str) -> Option<Vec<String>> {
+    let (_, rest) = message.split_once("unknown field `")?;
+    let (name, _) = rest.split_once('`')?;
+    let mut key: Vec<String> = message
+        .lines()
+        .find_map(|line| line.strip_prefix("in "))
+        .map(|table| table.trim().trim_matches('`').split('.').map(str::to_owned).collect())
+        .unwrap_or_default();
+    key.push(name.to_owned());
+    Some(key)
+}
+
+fn remove_key(value: &mut toml::Value, key: &[String]) -> bool {
+    let Some((last, parents)) = key.split_last() else {
+        return false;
+    };
+    let mut table = value.as_table_mut();
+    for parent in parents {
+        table = table.and_then(|table| table.get_mut(parent)).and_then(toml::Value::as_table_mut);
+    }
+    table.is_some_and(|table| table.remove(last).is_some())
 }
 
 /// A setting's bundled default value, by its dotted key.
@@ -1115,41 +1157,6 @@ pub enum ConfigurationWorkerError {
     Busy,
     #[error("configuration worker stopped")]
     Stopped,
-}
-
-pub(super) fn unknown_key_warning(source: &str) -> Option<String> {
-    let value = toml::from_str::<toml::Value>(source).ok()?;
-    let table = value.as_table()?;
-    let unknown: Vec<_> = table
-        .keys()
-        .filter(|key| {
-            !matches!(
-                key.as_str(),
-                "schema_version"
-                    | "editor"
-                    | "ui"
-                    | "startup"
-                    | "input"
-                    | "search"
-                    | "recovery"
-                    | "lsp"
-                    | "persistence"
-                    | "plugins"
-                    | "debug"
-                    | "tasks"
-                    | "syntax"
-                    | "terminals"
-                    | "agents"
-                    | "windows"
-                    | "workspace"
-                    | "messages"
-                    | "command_labels"
-                    | "command_palette"
-            )
-        })
-        .cloned()
-        .collect();
-    (!unknown.is_empty()).then(|| format!("unknown configuration sections: {}", unknown.join(", ")))
 }
 
 /// Surfaces that receive `context = "global"` bindings: every place where keys are

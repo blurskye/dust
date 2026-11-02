@@ -2235,13 +2235,17 @@ impl InteractiveApplication {
                     kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("dap-console:{index}")),
                                 label: entry.text.clone(),
-                                // The ORIGIN and the source are both shown, so a REPL result is
+                                // The origin and the source are both shown, so a REPL result is
                                 // never read as program output.
-                                detail: format!("{} · {}", entry.origin.label(), entry.source),
+                                detail: entry.source.clone(),
                                 source: entry.origin.label().to_owned(),
                                 action: PickerAction::None,
                             },
-                            PickerPayload::Command(String::new()),
+                            // Enter shows the whole line, such as a long compiler error.
+                            PickerPayload::Notice {
+                                title: self.message("dap_console_title", &[]),
+                                text: entry.text.clone(),
+                            },
                         )
                     })
                     .collect();
@@ -9018,10 +9022,10 @@ impl InteractiveApplication {
                 self.run_palette_command(&command);
             }
             Some(PickerPayload::Recovery(journal)) => self.recover_journal(&journal),
-            Some(PickerPayload::Notice(message)) => {
+            Some(PickerPayload::Notice { title, text: message }) => {
                 self.present_documentation_popup(
                     DocumentationPopupKind::Notice,
-                    "Notification".into(),
+                    title,
                     "application".into(),
                     None,
                     vec![LspMarkupContent {
@@ -12952,7 +12956,10 @@ impl InteractiveApplication {
                                 source: "application".into(),
                                 action: PickerAction::None,
                             },
-                            PickerPayload::Notice(message.clone()),
+                            PickerPayload::Notice {
+                                title: "Notification".into(),
+                                text: message.clone(),
+                            },
                         )
                     })
                     .collect();

@@ -664,6 +664,9 @@ fn tutor_moves_on_when_each_step_is_done() {
     for _ in 0..10 {
         app.process_effect(AppEffect::TutorNext);
     }
+    // Step 12 starts a chapter, so it opens that chapter's lesson.
+    app.tutor_tick();
+    wait_vfs(&mut app);
     app.tutor_tick();
     assert!(title(&app).starts_with("Tutor 12/"), "{}", title(&app));
     assert_eq!(cursor_line(&app), "Thhe cow jumpped over thee moon.");

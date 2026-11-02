@@ -1,10 +1,11 @@
 # The interactive tutor's lessons. `:Tutor` opens a practice project (assets/defaults/tutor/,
-# made into a repository with one changed file) and shows one step at a time in a bar above
-# the status line, moving on once the step is done.
+# made into a repository with one changed file) and shows one step at a time on a card above
+# the status line, moving on once the step is done. Each chapter has a short lesson file,
+# NN-chapter-name.md, that its first step opens.
 #
 # A step can set the scene when it starts:
-#   open     - show this file of the practice project (practice.md when only `at` or `mark`
-#              is given)
+#   open     - show this file of the practice project (the chapter's lesson when only `at`
+#              or `mark` is given)
 #   at       - put the cursor on the line that reads this text
 #   mark     - highlight this text, the first one from the `at` line on
 #   split    - true: at least two windows; false: one window, not zoomed
@@ -23,9 +24,8 @@
 
 [[step]]
 chapter = "Welcome"
-text = "Hi! I'm the tutor. This is a throwaway practice project; your own files come back when the tutor ends. Each step tells you what to try and moves on once you've done it. Stuck? `:TutorNext` skips a step, `:TutorBack` goes back, `:TutorQuit` stops. Start by pressing `j` to move down a line."
+text = "Hi! I'm the tutor. Each step tells you what to try and moves on once you've done it; the lesson file lists the keys. Start by pressing `j` to move down a line."
 done = ["input.motion motion=down"]
-open = "practice.md"
 split = false
 explorer = false
 terminal = false
@@ -221,7 +221,7 @@ done = ["workspace.replace.prompt"]
 
 [[step]]
 chapter = "Files"
-text = "`<leader><space>` finds a file by name; this project has practice.md, src/main.rs and src/greet.rs. Try it, then `enter` opens one or `esc` `esc` closes the list."
+text = "`<leader><space>` finds a file by name; this project has the lessons, src/main.rs and src/greet.rs. Try it, then `enter` opens one or `esc` `esc` closes the list."
 done = ["workspace.file.find"]
 
 [[step]]
@@ -251,7 +251,6 @@ explorer = true
 chapter = "Tabs and windows"
 text = "Every open file is a tab at the top. `ctrl-t` opens a new tab with the file finder. Try it, then pick a file or `esc`."
 done = ["buffer.new_tab"]
-open = "practice.md"
 split = false
 explorer = false
 
@@ -269,7 +268,7 @@ done = ["buffer.picker.open"]
 chapter = "Tabs and windows"
 text = "`<leader>|` splits the window side by side, `<leader>-` top and bottom. Split it."
 done = ["pane.split.horizontal", "pane.split.vertical"]
-open = "practice.md"
+open = "06-tabs-and-windows.md"
 split = false
 
 [[step]]
@@ -412,9 +411,8 @@ done = ["plugin.list"]
 
 [[step]]
 chapter = "Saving"
-text = "`:w` saves, `:q` closes the window, `:wq` both. Save this practice file with `:w`."
+text = "`:w` saves, `:q` closes the window, `:wq` both. Save this lesson with `:w`."
 done = ["file.save"]
-open = "practice.md"
 
 [[step]]
 chapter = "Done"

@@ -1286,6 +1286,7 @@ impl InteractiveApplication {
         loaded: LoadedConfig,
         automatic: bool,
     ) -> Result<(), String> {
+        let warning = loaded.warning.clone();
         let candidate =
             self.configuration
                 .prepare(loaded, &self.commands, self.extension.contributions())?;
@@ -1368,6 +1369,14 @@ impl InteractiveApplication {
             self.rebuild_tool_menu(&category, None);
         }
         self.ui.config_diagnostic = None;
+        if let Some(warning) = warning {
+            self.notify_warning(warning);
+            if self.ui.settings.is_some() {
+                self.refresh_settings();
+            }
+            self.ensure_cursor_visible();
+            return Ok(());
+        }
         // The Settings page shows the new values itself; a toast for each change is noise.
         if self.ui.settings.is_some() {
             self.refresh_settings();
