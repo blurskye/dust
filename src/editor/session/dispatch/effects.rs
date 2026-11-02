@@ -3095,7 +3095,10 @@ impl InteractiveApplication {
                 self.sync_explorer_ui();
             }
             AppEffect::ExplorerToggle => self.explorer_toggle(),
-            AppEffect::ExplorerRefresh => self.refresh_explorer(),
+            AppEffect::ExplorerRefresh => {
+                self.refresh_explorer();
+                self.start_git_status_refresh_with_feedback(false);
+            }
             AppEffect::ExplorerFollow => self.follow_active_file_in_explorer(),
             AppEffect::ExplorerToggleHidden => {
                 self.explorer.toggle_hidden();
@@ -13267,6 +13270,19 @@ impl InteractiveApplication {
         }
     }
 
+    /// A commit or stage made outside Dust, such as in its terminal, moves the index or HEAD.
+    fn follow_outside_git_changes(&mut self) {
+        let Some(status) = self.git.status() else {
+            return;
+        };
+        let stamp = ["index", "HEAD"].map(|name| {
+            std::fs::metadata(status.git_dir.join(name)).and_then(|file| file.modified()).ok()
+        });
+        if self.git_stamp.replace(stamp).is_some_and(|previous| previous != stamp) {
+            self.start_git_status_refresh_with_feedback(false);
+        }
+    }
+
     /// Once a second, notice open files that changed outside Dust: lazygit, a hunk reset, a
     /// formatter. A clean buffer takes the new text; a changed one keeps its text and says so.
     pub(super) fn process_disk_changes(&mut self) {
@@ -13275,6 +13291,7 @@ impl InteractiveApplication {
             return;
         }
         self.next_disk_check = Some(now + std::time::Duration::from_secs(1));
+        self.follow_outside_git_changes();
         let open: Vec<_> = self
             .state
             .buffers

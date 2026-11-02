@@ -168,6 +168,8 @@ pub struct GitStatusSnapshot {
     pub generation: GitStatusGeneration,
     pub root_revision: u64,
     pub repository: PathBuf,
+    /// The folder holding this checkout's index and HEAD.
+    pub git_dir: PathBuf,
     pub scope_root: PathBuf,
     pub repository_id: GitRepositoryId,
     pub entries: Vec<GitStatusEntry>,
@@ -488,6 +490,7 @@ pub(super) fn read_status(
         generation,
         root_revision: p.root_revision,
         repository: workdir,
+        git_dir: repo.path().to_path_buf(),
         scope_root: root,
         repository_id,
         entries,

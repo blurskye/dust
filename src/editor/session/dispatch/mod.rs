@@ -166,6 +166,8 @@ struct InteractiveApplication {
     /// Last seen modification time and length of each open file.
     disk_stamps: std::collections::HashMap<crate::editor::BufferId, (Option<std::time::SystemTime>, u64)>,
     pub(super) next_disk_check: Option<std::time::Instant>,
+    /// When the repository's index and HEAD last changed, as of the last disk check.
+    pub(super) git_stamp: Option<[Option<std::time::SystemTime>; 2]>,
     /// What project replace is looking for, while it asks what to replace it with.
     replace_query: Option<String>,
     session_load_requested: bool,

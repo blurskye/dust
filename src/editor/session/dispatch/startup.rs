@@ -162,6 +162,7 @@ impl InteractiveApplication {
             format_on_save: None,
             disk_stamps: std::collections::HashMap::new(),
             next_disk_check: None,
+            git_stamp: None,
             replace_query: None,
             session_load_requested: false,
             window_session: WindowSession::new(dashboard_visible, terminal_panel_height),

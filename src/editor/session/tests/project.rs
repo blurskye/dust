@@ -4679,6 +4679,26 @@ fn a_small_changes_pane_opens_on_the_change_and_ctrl_d_scrolls_it() {
     assert!(top.contains("unchanged lines"), "pageup reaches the top of the diff: {top}");
 }
 
+/// A commit made outside Dust shows after the explorer's refresh key.
+#[test]
+fn refreshing_the_explorer_also_refreshes_git_status() {
+    let mut app = app();
+    git2::Repository::init(&app.state.workspace_root).unwrap();
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone())
+    }
+    app.reconcile_workspace_trust();
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now()
+    }
+    app.process_effect(AppEffect::ExplorerRefresh);
+    assert!(app.git.status_pending(), "the refresh asks Git again");
+}
+
 /// `:e` on a path with nothing there starts that file, and the first save creates it.
 #[test]
 fn editing_a_missing_path_starts_a_new_file_that_saving_creates() {
