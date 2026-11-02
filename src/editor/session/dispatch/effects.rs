@@ -2443,7 +2443,7 @@ impl InteractiveApplication {
         match effect {
             AppEffect::PluginValidate => self.load_configured_plugins(),
             AppEffect::PluginList => {
-                let items = self
+                let items: Vec<_> = self
                     .extension
                     .statuses()
                     .iter()
@@ -2464,7 +2464,13 @@ impl InteractiveApplication {
                         )
                     })
                     .collect();
+                let empty = items.is_empty();
                 self.install_picker(self.message("plugin_picker_title", &[]), items);
+                if empty {
+                    self.search
+                        .set_picker_footer(self.message("plugin_picker_empty", &[]));
+                    self.sync_picker_ui();
+                }
             }
             AppEffect::PluginDisable(id) => {
                 if !self.extension.statuses().contains_key(&id) {
@@ -11679,7 +11685,7 @@ impl InteractiveApplication {
                     self.notify_message(self.message(key, &arguments), false)
                 }
                 ExtensionUpdate::Lock(lock) => {
-                    let items = lock
+                    let items: Vec<_> = lock
                         .packages
                         .into_iter()
                         .enumerate()
@@ -11698,7 +11704,13 @@ impl InteractiveApplication {
                             )
                         })
                         .collect();
+                    let empty = items.is_empty();
                     self.install_picker(self.message("package_picker_title", &[]), items);
+                    if empty {
+                        self.search
+                            .set_picker_footer(self.message("package_picker_empty", &[]));
+                        self.sync_picker_ui();
+                    }
                 }
                 ExtensionUpdate::Failed { operation, error } => {
                     self.notices.record(

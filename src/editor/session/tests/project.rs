@@ -5084,3 +5084,13 @@ fn command_line_completes_commands_without_an_alias_and_fills_in_their_arguments
     assert!(rows.iter().any(|row| row == "workspace.git.hunk.stage"), "{rows:?}");
     assert!(!rows.iter().any(|row| row.starts_with("input.")), "{rows:?}");
 }
+
+#[test]
+fn an_empty_plugin_list_says_how_to_get_one() {
+    let mut app = app();
+    app.process_effect(AppEffect::PluginList);
+    assert_eq!(
+        app.ui.picker.as_ref().expect("picker").footer.as_deref(),
+        Some("No plugins yet · :pkgsearch <name> finds one · Esc Esc Close")
+    );
+}
