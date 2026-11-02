@@ -600,17 +600,19 @@ pub(super) fn render_picker(
         let y = first_row + u16::try_from(display_row).unwrap_or(0);
         let selected = picker.selected == Some(index);
         let marker = if selected { ">" } else { " " };
-        let source = if row.source.is_empty() {
-            String::new()
-        } else {
-            row.source.clone()
-        };
         // Every picker uses the same trailing provenance column. Reserve at
         // most a third of the row so long sources cannot crowd out the label.
         let source_right = list_right.saturating_sub(1);
+        let source_room = source_right.saturating_sub(content_left) / 3;
+        let source = if looks_like_path(&row.source) {
+            // A path keeps its end, which tells two rows apart.
+            truncate_content_title(&row.source, usize::from(source_room), config.editor.ambiguous_width)
+        } else {
+            row.source.clone()
+        };
         let source_width = u16::try_from(text_width(&source, config.editor.ambiguous_width))
             .unwrap_or(u16::MAX)
-            .min(source_right.saturating_sub(content_left) / 3);
+            .min(source_room);
         let source_x = source_right.saturating_sub(source_width);
         let label_right = if source_width == 0 {
             list_right

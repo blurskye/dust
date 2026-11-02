@@ -237,6 +237,18 @@ fn explorer_glyph_policy_rejects_oversized_segments() {
 }
 
 #[test]
+fn a_bad_task_is_named_with_what_to_fix() {
+    let root = tempdir().expect("tempdir");
+    let path = root.path().join("config.toml");
+    fs::write(&path, "[tasks.demo]\nexecutable = \"python3\"\n").expect("write");
+    let diagnostic = load_config(&path).diagnostic.expect("relative executable is refused");
+    assert!(
+        diagnostic.contains("tasks.demo executable must be an absolute path"),
+        "{diagnostic}"
+    );
+}
+
+#[test]
 fn parser_spans_cover_inline_tables_and_quoted_dotted_keys() {
     let root = tempdir().expect("tempdir");
     let path = root.path().join("config.toml");

@@ -1834,7 +1834,7 @@ impl InteractiveApplication {
             .iter()
             .filter(|(name, _)| PANEL_COMMANDS.iter().all(|(own, _)| own != name))
             .cloned();
-        own.chain(theirs).filter(|(name, _)| name.starts_with(word)).collect()
+        slash_matches(word, own.chain(theirs))
     }
 
     /// Run one of the panel's own slash commands; false for any other name.
@@ -2431,9 +2431,30 @@ fn shown_root(root: &Path, width: usize) -> String {
     }
 }
 
+/// The commands starting with `word`, in order, but the one named exactly `word` first: `/mode`
+/// typed in full is mode, not model.
+fn slash_matches(word: &str, commands: impl Iterator<Item = (String, String)>) -> Vec<(String, String)> {
+    let mut matches: Vec<_> = commands.filter(|(name, _)| name.starts_with(word)).collect();
+    matches.sort_by_key(|(name, _)| name != word);
+    matches
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_slash_command_typed_in_full_comes_first() {
+        let names = |word: &str| {
+            let commands = PANEL_COMMANDS
+                .iter()
+                .map(|(name, description)| ((*name).to_owned(), (*description).to_owned()));
+            slash_matches(word, commands).into_iter().map(|(name, _)| name).collect::<Vec<_>>()
+        };
+        assert_eq!(names("mode").first().map(String::as_str), Some("mode"));
+        assert!(names("mode").contains(&"model".to_owned()));
+        assert_eq!(names("mod").first().map(String::as_str), Some("model"));
+    }
 
     #[test]
     fn the_users_message_is_a_band_and_the_answer_follows() {

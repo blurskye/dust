@@ -180,10 +180,11 @@ pub(super) fn render_agent_panel(
             x = x.saturating_add(2);
         }
     }
-    let settings_width = u16::try_from(text_width(&panel.settings, config.editor.ambiguous_width)).unwrap_or(width);
+    let settings = fitted_settings(&panel.settings, usize::from(width).saturating_sub(2), config.editor.ambiguous_width);
+    let settings_width = u16::try_from(text_width(&settings, config.editor.ambiguous_width)).unwrap_or(width);
     let settings_x = width.saturating_sub(settings_width + 1);
     grid.put_text_clipped(1, footer, &panel.status, Style::Muted, settings_x.saturating_sub(1));
-    grid.put_text_clipped(settings_x, footer, &panel.settings, Style::Muted, width - 1);
+    grid.put_text_clipped(settings_x, footer, &settings, Style::Muted, width - 1);
 
     let area = usize::from(list_top - chips - 1);
     let lines = transcript_lines(&panel.transcript.text, &panel.bands);
@@ -207,6 +208,21 @@ pub(super) fn render_agent_panel(
         (1 + column, input_top + row, shape)
     });
     Frame { grid, cursor }
+}
+
+/// "model · mode · thinking" in `room` columns: a long model name is shortened first, so the
+/// mode and thinking level stay readable in a narrow panel.
+fn fitted_settings(settings: &str, room: usize, ambiguous: AmbiguousWidth) -> String {
+    if text_width(settings, ambiguous) <= room {
+        return settings.to_owned();
+    }
+    match settings.split_once(" · ") {
+        Some((model, rest)) if text_width(rest, ambiguous) + 3 + 6 <= room => {
+            let model = super::surfaces::ellipsized(model, room - text_width(rest, ambiguous) - 3, ambiguous);
+            format!("{model} · {rest}")
+        }
+        _ => super::surfaces::ellipsized(settings, room, ambiguous),
+    }
 }
 
 fn draw_line(grid: &mut CellGrid, y: u16, transcript: &Styled, bands: &[Range<usize>], line: Range<usize>) {
@@ -275,6 +291,15 @@ mod tests {
         assert_eq!(wrap_input("abcd", 4, 4), (vec!["abcd".into()], (0, 4)));
         assert_eq!(wrap_input("ab\ncd", 2, 4), (vec!["ab".into(), "cd".into()], (0, 2)));
         assert_eq!(wrap_input("ab\ncd", 3, 4), (vec!["ab".into(), "cd".into()], (1, 0)));
+    }
+
+    #[test]
+    fn a_narrow_footer_shortens_the_model_before_the_mode() {
+        let settings = "Claude Opus 5.5 with a long name · Bypass permissions · high";
+        let fitted = fitted_settings(settings, 44, AmbiguousWidth::Narrow);
+        assert!(fitted.ends_with("· Bypass permissions · high"), "{fitted}");
+        assert!(text_width(&fitted, AmbiguousWidth::Narrow) <= 44);
+        assert_eq!(fitted_settings(settings, 80, AmbiguousWidth::Narrow), settings);
     }
 
     #[test]

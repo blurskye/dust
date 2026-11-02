@@ -12580,48 +12580,53 @@ impl InteractiveApplication {
 
     pub(in crate::editor::session) fn show_lsp_sessions(&mut self) {
         let active = self.language.active().map(String::as_str);
+        let home = std::env::var_os("HOME").map(PathBuf::from);
         let items = self
             .language
             .sessions()
             .iter()
             .map(|(key, session)| {
+                let root = self
+                    .workspace
+                    .roots()
+                    .iter()
+                    .find(|root| root.id == session.root)
+                    .map(|root| root.identity.canonical_path.clone())
+                    .unwrap_or_default();
+                let folder = root
+                    .file_name()
+                    .map_or_else(|| root.display().to_string(), |name| name.to_string_lossy().into_owned());
+                // The folder and state come first so a narrow picker keeps them; the path last.
+                let state = if session.circuit_open {
+                    "crashed"
+                } else if session.restart_due.is_some() {
+                    "restarting"
+                } else if session.desired_running {
+                    "running"
+                } else {
+                    "stopped"
+                };
+                let mut detail = format!("{folder} · {state}");
+                if active == Some(key) {
+                    detail.push_str(" · active");
+                }
+                match session.restart_count {
+                    0 => {}
+                    1 => detail.push_str(" · 1 restart"),
+                    count => detail.push_str(&format!(" · {count} restarts")),
+                }
+                let source = match home.as_deref().and_then(|home| root.strip_prefix(home).ok()) {
+                    Some(rest) => format!("~/{}", rest.display()),
+                    None => root.display().to_string(),
+                };
                 (
                     PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(format!("lsp-session:{key}")),
                         label: session.server_id.clone(),
-                        detail: format!(
-                            "root #{}{} · {}{}",
-                            session.root.0,
-                            if active == Some(key) {
-                                " · active"
-                            } else {
-                                ""
-                            },
-                            if session.circuit_open {
-                                "circuit-open"
-                            } else if session.restart_due.is_some() {
-                                "backoff"
-                            } else if session.desired_running {
-                                "running"
-                            } else {
-                                "stopped"
-                            },
-                            match session.restart_count {
-                                1 => " · 1 restart".into(),
-                                count => format!(" · {count} restarts"),
-                            }
-                        ),
-                        // The folder it serves, as a path; the session key is internal.
-                        source: self
-                            .workspace
-                            .roots()
-                            .iter()
-                            .find(|root| root.id == session.root)
-                            .map_or_else(String::new, |root| {
-                                root.identity.canonical_path.display().to_string()
-                            }),
+                        detail,
+                        source,
                         action: PickerAction::None,
                     },
                     PickerPayload::LspSession(key.clone()),

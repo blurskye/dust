@@ -250,7 +250,7 @@ impl ConfigurationSession {
         commands: &CommandRegistry<AppEffect>,
         catalog: &PluginContributionCatalog,
     ) -> Result<ConfigurationCandidate, String> {
-        loaded.config.validate().map_err(str::to_owned)?;
+        loaded.config.validate()?;
         let mut resolved = match resolve_configuration(commands, loaded, true)? {
             (resolved, None) => resolved,
             (_, Some(error)) => return Err(error),

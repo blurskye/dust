@@ -418,10 +418,13 @@ pub(super) fn render_key_hints(
                 column_right,
             );
         }
+        // A label too long for its column ends in an ellipsis instead of stopping mid-word.
+        let room = usize::from(column_right.saturating_sub(cursor.saturating_add(1)));
+        let label = super::surfaces::ellipsized(&row.label, room, crate::config::AmbiguousWidth::Narrow);
         frame.grid.put_text_clipped(
             cursor.saturating_add(1),
             y,
-            &row.label,
+            &label,
             if row.group {
                 Style::KeyHintGroup
             } else {

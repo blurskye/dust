@@ -36,8 +36,38 @@ fn task_graph_has_cycle(tasks: &BTreeMap<String, TaskConfig>) -> bool {
         .any(|name| visit(name, tasks, &mut visiting, &mut visited))
 }
 
+/// What is wrong with one configured task, as the end of "tasks.NAME ...".
+fn task_problem(task: &TaskConfig, tasks: &BTreeMap<String, TaskConfig>) -> Option<String> {
+    if !task.executable.is_absolute() {
+        return Some(format!(
+            "executable must be an absolute path, such as /usr/bin/{}",
+            task.executable.display()
+        ));
+    }
+    if task.arguments.len() > 4096 || task.environment.len() > 4096 {
+        return Some("has more than 4096 arguments or environment variables".into());
+    }
+    if let Some(missing) = task.dependencies.iter().find(|dependency| !tasks.contains_key(*dependency)) {
+        return Some(format!("depends on {missing}, which is not a task"));
+    }
+    if task
+        .matcher
+        .as_ref()
+        .is_some_and(|matcher| regex::Regex::new(&matcher.pattern).is_err())
+    {
+        return Some("matcher.pattern is not a valid regular expression".into());
+    }
+    if matches!(task.kind, TaskKind::Formatter) && !task.stdin {
+        return Some("is a formatter, so it needs stdin = true".into());
+    }
+    if task.timeout_ms.is_some_and(|timeout| timeout == 0 || timeout > 86_400_000) {
+        return Some("timeout_ms must be between 1 and 86400000".into());
+    }
+    None
+}
+
 impl Config {
-    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+    pub(crate) fn validate(&self) -> Result<(), String> {
         const SUPPORTED_WINDOW_CONTENT: &[&str] = &[
             "builtin.explorer",
             "builtin.terminal",
@@ -50,7 +80,7 @@ impl Config {
             "builtin.theme",
         ];
         if self.windows.rules.len() > 32 {
-            return Err("windows.rule exceeds the 32-rule ceiling");
+            return Err("windows.rule exceeds the 32-rule ceiling".into());
         }
         let mut window_targets = BTreeSet::new();
         let mut fullscreen_rules = 0_usize;
@@ -68,10 +98,10 @@ impl Config {
                         })
                 });
             if !SUPPORTED_WINDOW_CONTENT.contains(&rule.content_type.as_str()) && !plugin_content {
-                return Err("windows.rule contains an unsupported content_type");
+                return Err("windows.rule contains an unsupported content_type".into());
             }
             if !window_targets.insert(rule.content_type.as_str()) {
-                return Err("windows.rule contains a duplicate content_type");
+                return Err("windows.rule contains a duplicate content_type".into());
             }
             match &rule.placement {
                 WindowPlacementConfig::Automatic | WindowPlacementConfig::Hidden => {}
@@ -79,25 +109,25 @@ impl Config {
                     if !matches!(edge.as_str(), "left" | "right" | "top" | "bottom")
                         || !(1..=240).contains(size)
                     {
-                        return Err("windows.rule contains an invalid dock placement");
+                        return Err("windows.rule contains an invalid dock placement".into());
                     }
                 }
                 WindowPlacementConfig::Floating { width, height, .. } => {
                     if *width == 0 || *height == 0 {
-                        return Err("windows.rule contains an invalid floating placement");
+                        return Err("windows.rule contains an invalid floating placement".into());
                     }
                 }
                 WindowPlacementConfig::Fullscreen => fullscreen_rules += 1,
             }
         }
         if fullscreen_rules > 1 {
-            return Err("windows.rule contains conflicting fullscreen defaults");
+            return Err("windows.rule contains conflicting fullscreen defaults".into());
         }
         if !(1..=32).contains(&self.editor.tab_width) {
-            return Err("editor.tab_width must be between 1 and 32");
+            return Err("editor.tab_width must be between 1 and 32".into());
         }
         if !(1..=32).contains(&self.editor.indent_width) {
-            return Err("editor.indent_width must be between 1 and 32");
+            return Err("editor.indent_width must be between 1 and 32".into());
         }
         for (name, sequence) in [
             ("input.keymaps.leader", &self.input.keymaps.leader),
@@ -108,43 +138,23 @@ impl Config {
         ] {
             let tokens = sequence.split_whitespace().collect::<Vec<_>>();
             if tokens.is_empty() {
-                return Err(match name {
-                    "input.keymaps.leader" => "input.keymaps.leader must not be empty",
-                    _ => "input.keymaps.local_leader must not be empty",
-                });
+                return Err(format!("{name} must not be empty"));
             }
             if sequence.len() > 64 || tokens.len() > 4 {
-                return Err(match name {
-                    "input.keymaps.leader" => {
-                        "input.keymaps.leader must contain at most 4 keys and 64 bytes"
-                    }
-                    _ => "input.keymaps.local_leader must contain at most 4 keys and 64 bytes",
-                });
+                return Err(format!("{name} must contain at most 4 keys and 64 bytes"));
             }
             if tokens
                 .iter()
                 .any(|token| matches!(*token, "<leader>" | "<localleader>"))
             {
-                return Err(match name {
-                    "input.keymaps.leader" => {
-                        "input.keymaps.leader must be a literal sequence without leader tokens"
-                    }
-                    _ => {
-                        "input.keymaps.local_leader must be a literal sequence without leader tokens"
-                    }
-                });
+                return Err(format!("{name} must be a literal sequence without leader tokens"));
             }
             if sequence.chars().any(char::is_control) {
-                return Err(match name {
-                    "input.keymaps.leader" => {
-                        "input.keymaps.leader must not contain control characters"
-                    }
-                    _ => "input.keymaps.local_leader must not contain control characters",
-                });
+                return Err(format!("{name} must not contain control characters"));
             }
         }
         if !(10..=10_000).contains(&self.input.mapping_timeout_ms) {
-            return Err("input.mapping_timeout_ms must be between 10 and 10000");
+            return Err("input.mapping_timeout_ms must be between 10 and 10000".into());
         }
         let explorer_glyph_width = |glyph: &str| match self.editor.ambiguous_width {
             AmbiguousWidth::Narrow => UnicodeWidthStr::width(glyph),
@@ -176,16 +186,16 @@ impl Config {
             invalid_bounded
         });
         if !(12..=240).contains(&self.ui.explorer.width) || invalid_explorer_glyph {
-            return Err("ui.explorer width or glyph policy is invalid");
+            return Err("ui.explorer width or glyph policy is invalid".into());
         }
         if !(3..=200).contains(&self.ui.terminal_panel.height) {
-            return Err("ui.terminal_panel.height must be between 3 and 200");
+            return Err("ui.terminal_panel.height must be between 3 and 200".into());
         }
         if self.ui.key_hints.delay_ms > 60_000 {
-            return Err("ui.key_hints.delay_ms exceeds 60 seconds");
+            return Err("ui.key_hints.delay_ms exceeds 60 seconds".into());
         }
         if self.schema_version > super::CONFIG_SCHEMA_VERSION {
-            return Err("configuration schema is newer than this Dust build");
+            return Err("configuration schema is newer than this Dust build".into());
         }
         if self.debug.adapters.iter().any(|(id, adapter)| {
                 id.is_empty()
@@ -212,7 +222,7 @@ impl Config {
                     || session.path_maps.len() > 1024
             })
         {
-            return Err("debug policy is invalid");
+            return Err("debug policy is invalid".into());
         }
         if self.terminals.default_profile.is_empty()
             || !self
@@ -227,7 +237,7 @@ impl Config {
                     || !(1..=1000).contains(&profile.rows)
             })
         {
-            return Err("terminal policy is invalid");
+            return Err("terminal policy is invalid".into());
         }
         if (!self.agents.default.is_empty() && !self.agents.profiles.contains_key(&self.agents.default))
             || !(10..=90).contains(&self.agents.panel_width)
@@ -237,7 +247,7 @@ impl Config {
                     || profile.arguments.len() > 4096
             })
         {
-            return Err("agent policy is invalid");
+            return Err("agent policy is invalid".into());
         }
         if self
             .plugins
@@ -262,29 +272,18 @@ impl Config {
                         .any(|part| matches!(part, std::path::Component::ParentDir))
             })
         {
-            return Err("plugin policy is invalid");
+            return Err("plugin policy is invalid".into());
         }
-        if self.tasks.iter().any(|(name, task)| {
-                name.is_empty()
-                    || !task.executable.is_absolute()
-                    || task.arguments.len() > 4096
-                    || task.environment.len() > 4096
-                    || task
-                        .dependencies
-                        .iter()
-                        .any(|dependency| !self.tasks.contains_key(dependency))
-                    || task
-                        .matcher
-                        .as_ref()
-                        .is_some_and(|matcher| regex::Regex::new(&matcher.pattern).is_err())
-                    || matches!(task.kind, TaskKind::Formatter) && !task.stdin
-                    || task.timeout_ms.is_some_and(|timeout| {
-                        timeout == 0 || timeout > 86_400_000
-                    })
-            })
-            || task_graph_has_cycle(&self.tasks)
-        {
-            return Err("task policy is invalid");
+        for (name, task) in &self.tasks {
+            if let Some(problem) = task_problem(task, &self.tasks) {
+                return Err(format!("tasks.{name} {problem}"));
+            }
+        }
+        if self.tasks.keys().any(String::is_empty) {
+            return Err("a task needs a name".into());
+        }
+        if task_graph_has_cycle(&self.tasks) {
+            return Err("tasks depend on each other in a loop".into());
         }
         if self
             .workspace
@@ -293,7 +292,7 @@ impl Config {
             .iter()
             .any(|pattern| globset::Glob::new(pattern).is_err())
         {
-            return Err("workspace.search.exclude_globs contains an invalid glob");
+            return Err("workspace.search.exclude_globs contains an invalid glob".into());
         }
         if self.ui.buffer_line.extension_icons.len() > 64
             || self
@@ -311,14 +310,14 @@ impl Config {
                         || glyph.chars().any(char::is_control)
                 })
         {
-            return Err("ui.buffer_line.extension_icons is invalid");
+            return Err("ui.buffer_line.extension_icons is invalid".into());
         }
         if self.ui.theme.is_empty()
             || !self.ui.theme.bytes().all(|byte| {
                 byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
             })
         {
-            return Err("ui.theme must be a safe lowercase theme identifier");
+            return Err("ui.theme must be a safe lowercase theme identifier".into());
         }
         // A comment string is a line prefix like `//`, or a template like `<!-- %s -->`.
         if self.editor.comments.values().any(|token| {
@@ -331,14 +330,15 @@ impl Config {
                 || (parts.len() == 1 && token.chars().any(char::is_whitespace))
         }) {
             return Err(
-                "editor.comments values must be a prefix without spaces or one `before %s after` template",
+                "editor.comments values must be a prefix without spaces or one `before %s after` template"
+                    .into(),
             );
         }
         if self.editor.viewport.horizontal_margin > 100 {
-            return Err("editor.viewport.horizontal_margin must not exceed 100");
+            return Err("editor.viewport.horizontal_margin must not exceed 100".into());
         }
         if self.editor.viewport.vertical_margin > 100 {
-            return Err("editor.viewport.vertical_margin must not exceed 100");
+            return Err("editor.viewport.vertical_margin must not exceed 100".into());
         }
         const REQUIRED_MESSAGES: &[&str] = &[
             "unsaved_quit",
@@ -520,14 +520,14 @@ impl Config {
             .iter()
             .any(|key| !self.messages.contains_key(*key))
         {
-            return Err("messages table is missing a required current-surface message");
+            return Err("messages table is missing a required current-surface message".into());
         }
         if self
             .messages
             .values()
             .any(|message| message.contains('\u{1b}') || message.len() > 4_096)
         {
-            return Err("messages contain unsafe or oversized text");
+            return Err("messages contain unsafe or oversized text".into());
         }
         if [
             "normal",
@@ -544,7 +544,7 @@ impl Config {
         .iter()
         .any(|mode| !self.ui.status_line.mode_labels.contains_key(*mode))
         {
-            return Err("ui.status_line.mode_labels is incomplete");
+            return Err("ui.status_line.mode_labels is incomplete".into());
         }
         if self.ui.status_line.components.iter().any(|component| {
             !matches!(
@@ -562,7 +562,7 @@ impl Config {
                     | "breadcrumbs"
             )
         }) {
-            return Err("ui.status_line.components contains an unknown component");
+            return Err("ui.status_line.components contains an unknown component".into());
         }
         Ok(())
     }
