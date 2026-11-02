@@ -525,7 +525,15 @@ impl InteractiveApplication {
                         .flatten()
                     });
                 let over_explorer = explorer_window.is_some();
-                if let Some(window) = explorer_window {
+                // Only a press moves focus. Terminals also report releases and plain pointer
+                // motion, and those must not take the keyboard away from the user.
+                let pressed = matches!(
+                    key.code,
+                    crate::editor::input::KeyCode::MouseLeftDown
+                        | crate::editor::input::KeyCode::MouseRightDown
+                        | crate::editor::input::KeyCode::MouseMiddleDown
+                );
+                if let Some(window) = explorer_window.filter(|_| pressed) {
                     // The click picks this row once focus has moved.
                     self.explorer
                         .set_clicked(self.explorer_row_at(window, column, row));
@@ -594,6 +602,7 @@ impl InteractiveApplication {
                         if let Some(window) = self
                             .compositor_projection()
                             .and_then(|projection| projection.hit_test(column, row))
+                            .filter(|_| pressed)
                         {
                             if self
                                 .window_session
@@ -627,7 +636,9 @@ impl InteractiveApplication {
                 {
                     "dashboard_mouse"
                 } else {
-                    self.set_explorer_focus(false);
+                    if pressed {
+                        self.set_explorer_focus(false);
+                    }
                     "editor_mouse"
                 };
                 if context == "terminal_mouse" && self.window_session.terminal_focused() {

@@ -126,6 +126,21 @@ pub(super) fn valid_project_root_marker(marker: &str) -> bool {
         && !marker.contains('\0')
 }
 
+/// A document's real path. One not saved yet resolves through the nearest folder that exists.
+fn canonical_document(document: &Path) -> Result<PathBuf, VfsError> {
+    let existing = document
+        .ancestors()
+        .find(|path| path.exists())
+        .unwrap_or(document);
+    let rest = document.strip_prefix(existing).unwrap_or(Path::new(""));
+    let canonical = canonical_path(existing)?;
+    Ok(if rest.as_os_str().is_empty() {
+        canonical
+    } else {
+        canonical.join(rest)
+    })
+}
+
 pub(super) fn resolve_project_root(
     generation: u64,
     root_revision: u64,
@@ -134,7 +149,7 @@ pub(super) fn resolve_project_root(
     markers: &[String],
     strategy: ProjectRootStrategy,
 ) -> Result<ProjectRootResolution, VfsError> {
-    let document = canonical_path(document)?;
+    let document = canonical_document(document)?;
     let workspace_root = canonical_path(workspace_root)?;
     if !document.starts_with(&workspace_root) {
         return Err(VfsError::OutsideScope(document));

@@ -26,6 +26,23 @@ impl StartupTarget {
         }
     }
 
+    /// The files named at startup that do not exist yet.
+    #[must_use]
+    pub fn new_files(&self) -> Vec<PathBuf> {
+        match self {
+            Self::Dashboard { .. } => Vec::new(),
+            Self::File {
+                path,
+                additional_files,
+                ..
+            } => std::iter::once(path)
+                .chain(additional_files)
+                .filter(|path| !path.exists())
+                .cloned()
+                .collect(),
+        }
+    }
+
     #[must_use]
     pub fn describe(&self) -> String {
         match self {
@@ -55,22 +72,22 @@ pub fn resolve_startup(
         });
     }
 
-    let first = canonical_existing(&paths[0])?;
+    let first = canonical_or_new(&paths[0], current_directory)?;
     if first.is_dir() {
         if paths.len() != 1 {
             return Err(StartupError::DirectoryWithAdditionalPaths);
         }
         return Ok(StartupTarget::Dashboard { root: first });
     }
-    if !first.is_file() {
+    if first.exists() && !first.is_file() {
         return Err(StartupError::UnsupportedPath(first));
     }
 
     let additional_files = paths[1..]
         .iter()
         .map(|path| {
-            let path = canonical_existing(path)?;
-            if path.is_file() {
+            let path = canonical_or_new(path, current_directory)?;
+            if !path.exists() || path.is_file() {
                 Ok(path)
             } else {
                 Err(StartupError::UnsupportedPath(path))
@@ -95,6 +112,24 @@ fn validate_current_directory(path: &Path) -> Result<(), StartupError> {
         ));
     }
     Ok(())
+}
+
+/// Where a new file at `path` lives: its folder resolved when that exists, as an open resolves
+/// an existing file.
+pub(crate) fn new_file_path(path: &Path) -> PathBuf {
+    match (path.parent().map(Path::canonicalize), path.file_name()) {
+        (Some(Ok(parent)), Some(name)) => parent.join(name),
+        _ => path.to_path_buf(),
+    }
+}
+
+/// An existing path resolved, or a new file in a folder that exists, which the first save creates.
+fn canonical_or_new(path: &Path, current_directory: &Path) -> Result<PathBuf, StartupError> {
+    let absolute = current_directory.join(path);
+    if !absolute.exists() && absolute.parent().is_some_and(Path::is_dir) {
+        return Ok(new_file_path(&absolute));
+    }
+    canonical_existing(path)
 }
 
 fn canonical_existing(path: &Path) -> Result<PathBuf, StartupError> {
@@ -158,6 +193,18 @@ mod tests {
     }
 
     #[test]
+    fn a_new_file_in_an_existing_folder_is_a_file_target() {
+        let root = tempdir().expect("tempdir");
+        let target =
+            resolve_startup(&[std::path::PathBuf::from("new.txt")], root.path()).expect("startup");
+        assert_eq!(target.new_files(), vec![root.path().canonicalize().unwrap().join("new.txt")]);
+        assert!(
+            resolve_startup(&[std::path::PathBuf::from("missing/new.txt")], root.path()).is_err(),
+            "a folder that does not exist is still an error"
+        );
+    }
+
+    #[test]
     fn file_uses_current_directory_as_workspace() {
         let root = tempdir().expect("tempdir");
         let file = root.path().join("main.rs");
@@ -174,8 +221,8 @@ mod tests {
     }
 
     #[test]
-    fn missing_path_fails_before_application_start() {
+    fn a_path_in_a_missing_folder_fails_before_application_start() {
         let root = tempdir().expect("tempdir");
-        assert!(resolve_startup(&[root.path().join("missing")], root.path()).is_err());
+        assert!(resolve_startup(&[root.path().join("missing/file")], root.path()).is_err());
     }
 }

@@ -226,6 +226,7 @@ pub fn run_interactive(
     loaded_config: LoadedConfig,
     safe_mode: bool,
 ) -> Result<(), InteractiveError> {
+    let new_files = startup.new_files();
     let mut application = InteractiveApplication::new(
         startup,
         loaded_config,
@@ -250,6 +251,9 @@ pub fn run_interactive(
     }
     application.rebuild_matcher_cache();
     application.start_remote_server();
+    for path in new_files {
+        application.edit_path(path);
+    }
     if !application.workspace.safe_mode() {
         application.load_configured_plugins();
         application.extension.start_packages();

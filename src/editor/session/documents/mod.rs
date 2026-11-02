@@ -104,6 +104,8 @@ impl DocumentSession {
                 ..
             } => std::iter::once((path.clone(), true))
                 .chain(additional_files.iter().cloned().map(|path| (path, false)))
+                // A file that does not exist yet has nothing to read.
+                .filter(|(path, _)| path.exists())
                 .collect(),
         };
         Self {

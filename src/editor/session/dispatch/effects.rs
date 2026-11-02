@@ -12645,7 +12645,7 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::SaveAll { quit_after } => self.save_all(quit_after),
-            AppEffect::OpenPath(path) => self.start_open(path),
+            AppEffect::OpenPath(path) => self.edit_path(path),
             AppEffect::ForceOpenPath(path) => {
                 let wanted = self.state.workspace_root.join(&path).canonicalize().ok();
                 let current = self
@@ -12656,7 +12656,7 @@ impl InteractiveApplication {
                 if wanted.is_some() && wanted == current {
                     self.start_reload(true);
                 } else {
-                    self.start_open(path);
+                    self.edit_path(path);
                 }
             }
             // Settings files are optional, so the first open creates an empty one to edit.
@@ -13164,6 +13164,29 @@ impl InteractiveApplication {
             }
             crate::editor::session::documents::DocumentFailure::Error(e) => self.show_error(e),
         }
+    }
+    /// Open a path the user named. With nothing there it starts a new file, as in Vim, which
+    /// the first save creates.
+    pub(in crate::editor::session) fn edit_path(&mut self, path: PathBuf) {
+        let absolute = self.state.workspace_root.join(&path);
+        let missing = matches!(
+            std::fs::symlink_metadata(&absolute),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound
+        );
+        if !missing {
+            self.start_open(path);
+            return;
+        }
+        let path = crate::editor::new_file_path(&absolute);
+        self.record_jump();
+        let mut candidate = self.state.draft();
+        candidate.open_document(TextBuffer::from_text(""), path.clone());
+        if let Err(error) = self.commit_editor_draft(candidate, None, true) {
+            self.show_error(error);
+            return;
+        }
+        let name = self.notice_file_label(&path);
+        self.notify_message(self.message("new_file", &[("path", name)]), false);
     }
     pub(in crate::editor::session) fn start_open(&mut self, path: PathBuf) {
         self.record_jump();

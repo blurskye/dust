@@ -1608,8 +1608,13 @@ pub(super) fn checked_atomic_write(
             }
         },
         WriteExpectation::Exact(expected) => {
-            let actual = read_file(path)?;
-            if actual != *expected {
+            // A new file's buffer starts empty, with nothing on disk to compare it with yet.
+            let new_file = expected.is_empty()
+                && matches!(
+                    fs::symlink_metadata(path),
+                    Err(error) if error.kind() == io::ErrorKind::NotFound
+                );
+            if !new_file && read_file(path)? != *expected {
                 return Err(VfsError::ExternalModification(path.to_path_buf()));
             }
         }

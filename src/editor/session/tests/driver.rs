@@ -525,6 +525,16 @@ impl TestSession {
             row,
         });
     }
+    pub(super) fn mouse(&mut self, code: crate::editor::input::KeyCode, column: u16, row: u16) {
+        self.application.handle_event(UiEvent::Mouse {
+            key: crate::editor::input::KeyEvent::mouse(code, Default::default()),
+            column,
+            row,
+        });
+    }
+    pub(super) fn explorer_focused(&self) -> bool {
+        self.application.window_session.focused_explorer().is_some()
+    }
     /// Waits for the open a click started, and names the file it brought up.
     pub(super) fn wait_for_opened_file(&mut self) -> Option<String> {
         super::wait_vfs(&mut self.application);

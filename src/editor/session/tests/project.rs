@@ -4679,6 +4679,29 @@ fn a_small_changes_pane_opens_on_the_change_and_ctrl_d_scrolls_it() {
     assert!(top.contains("unchanged lines"), "pageup reaches the top of the diff: {top}");
 }
 
+/// `:e` on a path with nothing there starts that file, and the first save creates it.
+#[test]
+fn editing_a_missing_path_starts_a_new_file_that_saving_creates() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("new-file.txt");
+    app.edit_path(PathBuf::from("new-file.txt"));
+    let buffer = app.state.active_buffer_id().expect("the new file is on screen");
+    assert_eq!(
+        app.state.buffers[buffer].path.as_deref().and_then(std::path::Path::file_name),
+        path.file_name()
+    );
+    assert!(!path.exists(), "nothing is written before the save");
+    app.handle_configured_key(KeyEvent::character('i'));
+    app.handle_configured_key(KeyEvent::character('o'));
+    app.handle_configured_key("escape".parse::<KeyEvent>().expect("escape"));
+    let save = crate::editor::CommandInvocation::new("file.save", InvocationSource::Test)
+        .expect("static command");
+    app.invoke(save);
+    super::wait_vfs(&mut app);
+    let saved = fs::read_to_string(&path).expect("the save created the file");
+    assert!(saved.contains('o'), "{saved:?}");
+}
+
 /// The page keys have names a keymap can use, and a focused terminal receives them.
 #[test]
 fn page_keys_parse_and_count_as_terminal_navigation() {

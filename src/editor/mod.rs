@@ -13,6 +13,7 @@ pub use command::{
     CommandInvocation, CommandOutcome, CommandRegistry, CommandSource, CommandSpec, CommandTarget,
     CommandValue, ContextRequirement, InvocationSource, register_builtin_commands,
 };
+pub(crate) use launch::new_file_path;
 pub use launch::{StartupError, StartupTarget, resolve_startup};
 pub use session::{
     AppEffect, ConfigurationSources, InteractiveError, KeymapInspection, LayoutAction, PickerKind,

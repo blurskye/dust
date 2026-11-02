@@ -115,6 +115,33 @@ fn project_root_resolution_requires_valid_tool_evidence_and_prefers_the_nested_p
 }
 
 #[test]
+fn a_file_not_saved_yet_still_finds_its_project_root() {
+    let workspace = tempdir().unwrap();
+    let workspace = fs::canonicalize(workspace.path()).unwrap();
+    fs::write(workspace.join("Cargo.toml"), "[package]\nname = \"a\"\n").unwrap();
+    let mut service = ProjectRootService::default();
+    service
+        .resolve(
+            workspace.join("src/new.rs"),
+            workspace.clone(),
+            1,
+            vec!["Cargo.toml".into()],
+            ProjectRootStrategy::Cargo,
+        )
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let resolution = loop {
+        if let Some(result) = service.try_result() {
+            break result.unwrap();
+        }
+        assert!(Instant::now() < deadline, "project-root worker timed out");
+        std::thread::yield_now();
+    };
+    assert_eq!(resolution.document, workspace.join("src/new.rs"));
+    assert_eq!(resolution.project_root, Some(workspace.clone()));
+}
+
+#[test]
 fn explorer_watch_fingerprints_are_deterministic_metadata_only_and_bounded() {
     let root = tempdir().unwrap();
     let canonical = fs::canonicalize(root.path()).unwrap();

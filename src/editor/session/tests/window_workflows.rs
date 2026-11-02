@@ -352,6 +352,37 @@ fn clicking_a_file_in_the_explorer_opens_it() {
 }
 
 #[test]
+fn a_full_click_shows_the_file_in_place_of_the_open_one_and_leaves_focus_on_it() {
+    let mut session = TestSession::new(crate::config::load_bundled_config());
+    session.new_buffer();
+    session.explorer_fixture();
+    let body = session.explorer_body(1);
+    session.click(body.x, body.y.saturating_add(2));
+    let first = session.wait_for_opened_file().expect("first file");
+    let body = session.explorer_body(1);
+    session.click(body.x, body.y.saturating_add(3));
+    session.mouse(crate::editor::input::KeyCode::MouseLeftUp, body.x, body.y.saturating_add(3));
+    let second = session.wait_for_opened_file().expect("second file");
+    assert_ne!(first, second, "the clicked file replaces the one on screen");
+    assert!(!session.explorer_focused(), "the release leaves focus on the file");
+}
+
+#[test]
+fn moving_the_pointer_does_not_move_focus() {
+    let mut session = TestSession::new(crate::config::load_bundled_config());
+    session.new_buffer();
+    session.explorer_fixture();
+    assert!(session.explorer_focused(), "the fixture starts in the explorer");
+    session.mouse(crate::editor::input::KeyCode::MouseMove, 60, 5);
+    assert!(session.explorer_focused(), "hovering the editor keeps the explorer");
+    session.click(60, 5);
+    assert!(!session.explorer_focused(), "a click moves focus");
+    let body = session.explorer_body(1);
+    session.mouse(crate::editor::input::KeyCode::MouseMove, body.x, body.y);
+    assert!(!session.explorer_focused(), "hovering the tree keeps the editor");
+}
+
+#[test]
 fn stale_contribution_policy_is_rejected_before_window_graph_publication() {
     let mut session = TestSession::new(crate::config::load_bundled_config());
     session.new_buffer();
