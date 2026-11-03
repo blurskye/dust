@@ -528,6 +528,7 @@ pub(super) fn render_lsp_loading(frame: &mut Frame, text: &str, config: &Config)
 pub(super) fn render_dashboard(
     root: &Path,
     configured_actions: &[DashboardAction],
+    selected: usize,
     configured: &DashboardConfig,
     editor_config: &Config,
     width: u16,
@@ -602,12 +603,18 @@ pub(super) fn render_dashboard(
     let row_width = configured.content_width.min(width.saturating_sub(4));
     let left = width.saturating_sub(row_width) / 2;
     let right = left.saturating_add(row_width);
-    for action in configured_actions {
+    let selected = selected.min(configured_actions.len().saturating_sub(1));
+    let mut cursor = None;
+    for (index, action) in configured_actions.iter().enumerate() {
         if !action.icon.is_empty() {
             grid.put_text_clipped(left, y, &action.icon, Style::Accent, right);
         }
         let label_x = if action.icon.is_empty() { left } else { left.saturating_add(3) };
         grid.put_text_clipped(label_x, y, &action.label, Style::Default, right);
+        // Like LazyVim, the cursor rests on the label of the item Enter runs.
+        if index == selected && label_x < right && y < height {
+            cursor = Some((label_x, y, cursor_style(editor_config.ui.cursor.normal)));
+        }
         if let Some(key) = &action.key {
             let key_x = right.saturating_sub(measure(key));
             grid.put_text_clipped(key_x, y, key, Style::Accent, right);
@@ -624,7 +631,7 @@ pub(super) fn render_dashboard(
             ambiguous,
         );
     }
-    Frame { grid, cursor: None }
+    Frame { grid, cursor }
 }
 
 pub(super) fn center_text(

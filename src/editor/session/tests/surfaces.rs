@@ -3753,6 +3753,52 @@ fn a_terminal_agent_opens_on_the_right_where_the_agent_panel_goes() {
 
 #[cfg(unix)]
 #[test]
+fn the_dashboard_cursor_runs_items_and_ctrl_h_l_reach_an_agent_beside_it() {
+    use super::driver::TestSession;
+    let mut loaded = crate::config::load_bundled_config();
+    let agents = &mut loaded.config.agents;
+    agents.connection = crate::config::AgentConnection::Terminal;
+    let mut profile = agents.profiles[&agents.default].clone();
+    profile.cli = vec!["sh".into(), "-c".into(), "echo READY; cat".into()];
+    agents.profiles.insert("echoer".into(), profile);
+    agents.default = "echoer".into();
+    let mut driver = TestSession::new(loaded);
+    driver.trust_owned_terminal_fixture();
+    driver
+        .application_mut()
+        .process_effect(crate::editor::AppEffect::AgentAsk);
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while !driver.terminal_lines().iter().any(|line| line.contains("READY")) {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert!(driver.application_mut().window_session.terminal_focused());
+    driver.key("ctrl-h");
+    assert!(!driver.application_mut().window_session.terminal_focused());
+    assert_eq!(driver.application_mut().active_input_context(), "dashboard");
+    driver.key("ctrl-l");
+    assert!(driver.application_mut().window_session.terminal_focused());
+    driver.key("ctrl-h");
+
+    // The cursor stops at the ends and sits on the label of the item Enter runs.
+    for key in ["k", "j", "j", "k", "down"] {
+        driver.key(key);
+    }
+    assert_eq!(driver.application_mut().ui.dashboard_selected, 2);
+    driver.key("up");
+    let frame = driver.frame();
+    let (x, y, _) = frame.cursor.expect("dashboard cursor");
+    let label = (x..x + 8)
+        .filter_map(|column| frame.grid.get(column, y).map(|cell| cell.symbol.to_string()))
+        .collect::<String>();
+    assert_eq!(label, "New File");
+    driver.key("enter");
+    assert!(driver.application_mut().state.active_view.is_some());
+}
+
+#[cfg(unix)]
+#[test]
 fn resizing_a_terminal_that_is_stopping_is_not_an_error() {
     use super::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();

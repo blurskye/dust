@@ -160,6 +160,21 @@ pub(super) fn register_commands(
             "Select retained UI node at mouse position",
             AppEffect::RetainedUiMouseSelect,
         ),
+        (
+            "dashboard.select.next",
+            "Move to the next dashboard item",
+            AppEffect::DashboardSelect(1),
+        ),
+        (
+            "dashboard.select.previous",
+            "Move to the previous dashboard item",
+            AppEffect::DashboardSelect(-1),
+        ),
+        (
+            "dashboard.open",
+            "Run the dashboard item under the cursor",
+            AppEffect::DashboardOpen,
+        ),
     ] {
         register(
             registry,

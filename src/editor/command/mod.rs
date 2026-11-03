@@ -30,6 +30,7 @@ const BUILTIN_NAMESPACES: &[&str] = &[
     "multi",
     "pane",
     "surface",
+    "dashboard",
     "tab",
     "overlay",
     "panel",

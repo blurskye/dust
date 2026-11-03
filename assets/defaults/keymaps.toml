@@ -1737,6 +1737,54 @@ context = "dashboard"
 keys = "s"
 command = "session.load"
 
+# The cursor moves between items as in LazyVim; Enter runs the one under it.
+[[keymap]]
+id = "builtin.dashboard.surface.select-next.j"
+context = "dashboard"
+keys = "j"
+command = "dashboard.select.next"
+[[keymap]]
+id = "builtin.dashboard.surface.select-next.down"
+context = "dashboard"
+keys = "down"
+command = "dashboard.select.next"
+[[keymap]]
+id = "builtin.dashboard.surface.select-previous.k"
+context = "dashboard"
+keys = "k"
+command = "dashboard.select.previous"
+[[keymap]]
+id = "builtin.dashboard.surface.select-previous.up"
+context = "dashboard"
+keys = "up"
+command = "dashboard.select.previous"
+[[keymap]]
+id = "builtin.dashboard.surface.open.enter"
+context = "dashboard"
+keys = "enter"
+command = "dashboard.open"
+# Ctrl-h/j/k/l move to a terminal or panel beside the dashboard, as in the editor.
+[[keymap]]
+id = "builtin.dashboard.surface.surface-focus-left.ctrl-h"
+context = "dashboard"
+keys = "ctrl-h"
+command = "surface.focus.left"
+[[keymap]]
+id = "builtin.dashboard.surface.surface-focus-down.ctrl-j"
+context = "dashboard"
+keys = "ctrl-j"
+command = "surface.focus.down"
+[[keymap]]
+id = "builtin.dashboard.surface.surface-focus-up.ctrl-k"
+context = "dashboard"
+keys = "ctrl-k"
+command = "surface.focus.up"
+[[keymap]]
+id = "builtin.dashboard.surface.surface-focus-right.ctrl-l"
+context = "dashboard"
+keys = "ctrl-l"
+command = "surface.focus.right"
+
 # Command/search prompt controls.
 [[keymap]]
 id = "builtin.command-prompt.surface.help-form.ctrl-g"

@@ -222,6 +222,23 @@ impl ConfigurationSession {
     pub(super) fn dashboard_actions(&self) -> Vec<DashboardAction> {
         dashboard_actions(&self.accepted)
     }
+    /// The command of the `index`th shown dashboard item, as its key would run it.
+    pub(super) fn dashboard_invocation(&self, index: usize) -> Option<CommandInvocation> {
+        let action = self
+            .accepted
+            .dashboard
+            .action
+            .iter()
+            .filter(|action| action.visible)
+            .nth(index)?;
+        let mut invocation = CommandInvocation::new(&action.command, InvocationSource::Keymap).ok()?;
+        for (name, value) in &action.arguments {
+            invocation
+                .arguments
+                .insert(name.clone(), configuration_value(value).ok()?);
+        }
+        Some(invocation)
+    }
     pub(super) fn request_reload(&self) -> Result<(), ConfigurationWorkerError> {
         self.worker.request_reload()
     }

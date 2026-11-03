@@ -1397,6 +1397,8 @@ pub struct UiState {
     pub flash: Option<FlashOverlay>,
     pub config_diagnostic: Option<String>,
     pub dashboard_actions: Vec<DashboardAction>,
+    /// The dashboard item under the cursor.
+    pub dashboard_selected: usize,
     pub tool_menu: Option<ToolMenuState>,
     /// The Settings page, while it is open.
     pub settings: Option<SettingsPageState>,
@@ -2041,6 +2043,7 @@ pub fn render(
         render_dashboard(
             &state.workspace_root,
             &ui.dashboard_actions,
+            ui.dashboard_selected,
             dashboard,
             config,
             content_width,

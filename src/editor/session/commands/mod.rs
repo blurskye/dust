@@ -173,6 +173,9 @@ pub enum AppEffect {
     ExtendMouseSelection,
     Layout(LayoutAction),
     SurfaceFocus(FocusDirection),
+    /// Moves the dashboard cursor by this many items.
+    DashboardSelect(i8),
+    DashboardOpen,
     WindowList,
     WindowClone {
         target: String,
