@@ -164,16 +164,31 @@ fn parse_line(line: &str) -> Option<AgentMessage> {
         (None, Some(id)) => {
             let id = id.as_u64()?;
             let result = match value.get_mut("error") {
-                Some(error) => Err(error
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("the agent reported an error")
-                    .to_owned()),
+                Some(error) => Err(error_text(error)),
                 None => Ok(value.get_mut("result").map(Value::take).unwrap_or(Value::Null)),
             };
             Some(AgentMessage::Response { id, result })
         }
         (None, None) => None,
+    }
+}
+
+/// A JSON-RPC error's message, with the detail agents put in `data` (Gemini's "Internal
+/// error" says what is wrong only there).
+fn error_text(error: &Value) -> String {
+    let message = error
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("the agent reported an error");
+    let data = error.get("data");
+    let detail = data
+        .and_then(Value::as_str)
+        .or_else(|| data?.get("details").and_then(Value::as_str))
+        .or_else(|| data?.get("message").and_then(Value::as_str))
+        .filter(|detail| !detail.is_empty() && *detail != message);
+    match detail {
+        Some(detail) => format!("{message}: {detail}"),
+        None => message.to_owned(),
     }
 }
 
@@ -647,6 +662,11 @@ mod tests {
         assert!(matches!(
             parse_line(r#"{"jsonrpc":"2.0","id":4,"error":{"code":1,"message":"no"}}"#),
             Some(AgentMessage::Response { id: 4, result: Err(message) }) if message == "no"
+        ));
+        assert!(matches!(
+            parse_line(r#"{"jsonrpc":"2.0","id":5,"error":{"code":-32603,"message":"Internal error","data":{"details":"set GOOGLE_CLOUD_PROJECT"}}}"#),
+            Some(AgentMessage::Response { id: 5, result: Err(message) })
+                if message == "Internal error: set GOOGLE_CLOUD_PROJECT"
         ));
         assert!(matches!(
             parse_line(r#"{"jsonrpc":"2.0","id":"p1","method":"session/request_permission","params":{}}"#),
