@@ -683,19 +683,31 @@ fn tutor_moves_on_when_each_step_is_done() {
     next_step(&mut app);
     assert!(title(&app).starts_with("Tutor 13/"), "{}", title(&app));
     assert_eq!(cursor_line(&app), "Dust is a editor");
+    // The card says which line, and the gutter marks it.
+    let card = app.ui.tutor.as_ref().unwrap();
+    let line = card.line.expect("the step's line").1;
+    assert_eq!(card.place, format!("practice.rs, line {}", line + 1));
+    assert!(!card.away);
     // Going back to a step already done in the text stays there.
     app.process_effect(AppEffect::TutorBack);
     app.tutor_tick();
     assert!(title(&app).starts_with("Tutor 12/"), "{}", title(&app));
     app.process_effect(AppEffect::TutorNext);
     app.tutor_tick();
-    // A file of the user's own pauses the tutor and hides its bar; :Tutor goes back.
+    // A file of the user's own pauses the tutor, whose card says how to get back; :Tutor goes
+    // back too.
     let own = home.join("notes.txt");
     fs::write(&own, "mine\n").unwrap();
     app.start_open(own);
     wait_vfs(&mut app);
     app.tutor_tick();
-    assert!(app.ui.tutor.is_none());
+    let card = app.ui.tutor.as_ref().expect("the card stays");
+    assert!(card.away && card.place.contains("`:e practice.rs`"), "{}", card.place);
+    // Back in the practice file, the cursor is on the step's line again.
+    app.start_open(practice.join("practice.rs"));
+    wait_vfs(&mut app);
+    app.tutor_tick();
+    assert_eq!(cursor_line(&app), "Dust is a editor");
     app.process_effect(AppEffect::Tutor);
     wait_vfs(&mut app);
     app.tutor_tick();

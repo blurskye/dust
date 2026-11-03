@@ -537,7 +537,9 @@ impl InteractiveApplication {
         };
         if !self.tutor_inside() {
             self.tutor.observed = false;
-            self.ui.set(None, |ui| &mut ui.tutor);
+            // A file opened from outside the practice project keeps the card, which says how
+            // to get back.
+            self.sync_tutor_card();
             return;
         }
         if let Some(done_at) = self.tutor.done_at {
@@ -563,13 +565,21 @@ impl InteractiveApplication {
         self.sync_tutor_card();
     }
 
+    /// The practice project's folder is the workspace.
+    fn tutor_in_project(&self) -> bool {
+        self.tutor
+            .practice
+            .as_ref()
+            .is_some_and(|practice| self.state.workspace_root == practice.root)
+    }
+
     /// The editor shows the practice project: its folder is the workspace and the file in
     /// front, if it is a file, is one of its files.
     fn tutor_inside(&self) -> bool {
         let Some(practice) = &self.tutor.practice else {
             return false;
         };
-        self.state.workspace_root == practice.root
+        self.tutor_in_project()
             && self
                 .state
                 .active_buffer_id()
@@ -741,7 +751,17 @@ impl InteractiveApplication {
         let leader = leader.trim_matches(|c| c == '<' || c == '>');
         let frame = self.tutor.shown_at.elapsed().as_millis() / POINTER_FRAME.as_millis();
         let pointer = POINTER[usize::try_from(frame).unwrap_or(0) % POINTER.len()];
-        let card = self.tutor.current.filter(|_| self.tutor_inside()).map(|index| {
+        let place = self
+            .tutor
+            .current
+            .filter(|_| self.tutor_in_project())
+            .map(|index| (index, self.tutor_place(index)));
+        // Coming back to the step's file puts the cursor on its line again.
+        if let Some((index, (_, true, _))) = &place {
+            let step = &self.tutor.steps[*index];
+            self.tutor.jump = step.at.is_some() || step.mark.is_some();
+        }
+        let card = place.map(|(index, (place, away, line))| {
             let step = &self.tutor.steps[index];
             crate::ui::TutorCard {
                 title: format!("Tutor {}/{} · {}", index + 1, self.tutor.steps.len(), step.chapter),
@@ -751,9 +771,40 @@ impl InteractiveApplication {
                 praised: self.tutor.done_at.is_some(),
                 footer: FOOTER.into(),
                 target: self.tutor.target.clone(),
+                place,
+                away,
+                line,
             }
         });
         self.ui.set(card, |ui| &mut ui.tutor);
+    }
+
+    /// Where step `index` happens for the card: its file and line, or, when another file is in
+    /// front, how to get back to it.
+    fn tutor_place(&self, index: usize) -> (String, bool, Option<(BufferId, usize)>) {
+        let step = &self.tutor.steps[index];
+        if !(step.checks_text() || step.at.is_some() || step.mark.is_some()) {
+            return (String::new(), false, None);
+        }
+        let file = step.file();
+        let buffer = self.tutor_buffer(file);
+        let front = self.state.active_buffer_id();
+        let front_is_file = front.is_some_and(|id| self.state.buffers[id].path.is_some());
+        if front_is_file && front != buffer && self.tutor.done_at.is_none() {
+            return (format!("This step is in {file}: type `:e {file}` and `enter` to go back."), true, None);
+        }
+        let line = buffer.and_then(|buffer| {
+            let text = &self.state.buffers[buffer].text;
+            let wanted = step.at.as_deref().or(step.mark.as_deref())?;
+            let line = (0..text.len_lines())
+                .find(|line| text.line(*line).is_ok_and(|content| content.contains(wanted)))?;
+            Some((buffer, line))
+        });
+        let place = match line {
+            Some((_, line)) => format!("{file}, line {}", line + 1),
+            None => file.to_owned(),
+        };
+        (place, false, line)
     }
 
     fn tutor_buffer(&self, file: &str) -> Option<BufferId> {

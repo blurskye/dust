@@ -1461,6 +1461,12 @@ pub struct TutorCard {
     pub footer: String,
     /// The text the step is about, highlighted in its file.
     pub target: Option<UiSyntaxSpan>,
+    /// Where the step happens, such as "greet.rs, line 12", or how to get back there.
+    pub place: String,
+    /// The step's file isn't the one in front.
+    pub away: bool,
+    /// The line the step is about, marked in the gutter.
+    pub line: Option<(crate::editor::BufferId, usize)>,
 }
 
 #[derive(Clone, Debug)]
@@ -1850,6 +1856,13 @@ fn render_tutor_card(frame: &mut Frame, card: &TutorCard, config: &Config, width
     };
     let mut rows = styled(&card.text, card_width - 4, Style::Default, Style::KeyHintKey);
     rows.push(Vec::new());
+    if !card.place.is_empty() {
+        let (style, lead) = if card.away { (Style::Warning, "! ") } else { (Style::Accent, "▶ ") };
+        for (index, mut line) in styled(&card.place, card_width - 6, style, Style::KeyHintKey).into_iter().enumerate() {
+            line.insert(0, ((if index == 0 { lead } else { "  " }).to_owned(), style));
+            rows.push(line);
+        }
+    }
     // The instruction sits after a moving pointer; once it is done it turns into a check mark.
     let (lead, plain, key) = if card.praised {
         ("✓   ".to_owned(), Style::GitSignAdded, Style::GitSignAdded)

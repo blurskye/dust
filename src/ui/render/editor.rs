@@ -303,6 +303,12 @@ pub(super) fn render_editor_view(
         .as_ref()
         .and_then(|bar| bar.target.as_ref())
         .filter(|target| target.buffer == view.buffer && target.revision == buffer.text.revision());
+    let tutor_line = ui
+        .tutor
+        .as_ref()
+        .and_then(|card| card.line)
+        .filter(|(target, _)| *target == view.buffer)
+        .map(|(_, line)| line);
     let mut inlay_hints = ui
         .lsp_inlay_hints
         .iter()
@@ -362,12 +368,18 @@ pub(super) fn render_editor_view(
             } else {
                 number
             };
-            let label = format!("{number:>digits$}{}", LINE_NUMBER_SEPARATOR);
+            // The tutor's line has an arrow in place of its number.
+            let tutor_line = tutor_line == Some(line_index);
+            let label = if tutor_line {
+                format!("{:>digits$}{}", "▶", LINE_NUMBER_SEPARATOR)
+            } else {
+                format!("{number:>digits$}{}", LINE_NUMBER_SEPARATOR)
+            };
             grid.put_text_clipped(
                 0,
                 screen_row,
                 &label,
-                if line_index == current_line {
+                if line_index == current_line || tutor_line {
                     Style::Accent
                 } else {
                     Style::Muted
