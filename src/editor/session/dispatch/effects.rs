@@ -5530,7 +5530,11 @@ impl InteractiveApplication {
                 self.notices.mark_current_passing();
             }
             Ok(None) => {}
-            Err(error) => self.show_error(error),
+            // A launch retired by revoked trust says how to get trust back, as tasks do.
+            Err(error) => match self.workspace.execution_allowed() {
+                Err(failure) => self.show_workspace_failure(failure),
+                Ok(()) => self.show_error(error),
+            },
         }
     }
     pub(super) fn process_dap_project_root(&mut self) {
@@ -10634,6 +10638,15 @@ impl InteractiveApplication {
                 } else {
                     managed.is_some()
                 };
+                // A Dust-installed copy older than the one this release ships can be updated.
+                let installed_version = (installed && source != LspRuntimeSource::Path)
+                    .then(|| crate::tools::managed_tool_installed_version(definition))
+                    .flatten();
+                let update = definition.version.clone().filter(|current| {
+                    installed_version.as_ref().is_some_and(|installed| {
+                        installed != current && definition.release.as_ref() != Some(installed)
+                    })
+                });
                 let error = self
                     .language
                     .errors()
@@ -10695,8 +10708,23 @@ impl InteractiveApplication {
                         LspRuntimeSource::Path => {
                             "Found on PATH. Dust uses it as is and never removes it.".into()
                         }
-                        LspRuntimeSource::Managed => "Installed by Dust.".into(),
-                        LspRuntimeSource::Nix => "Installed by Dust through Nix.".into(),
+                        LspRuntimeSource::Managed | LspRuntimeSource::Nix => {
+                            let how = if source == LspRuntimeSource::Nix {
+                                "Installed by Dust through Nix"
+                            } else {
+                                "Installed by Dust"
+                            };
+                            match (&update, &installed_version) {
+                                (Some(current), Some(installed)) => format!(
+                                    "{how}: {installed}. This Dust release ships {current}; \
+                                     press i to update."
+                                ),
+                                _ => format!(
+                                    "{how}. This is the version this Dust release ships; \
+                                     a newer Dust brings newer tools."
+                                ),
+                            }
+                        }
                     }
                 } else if can_install {
                     format!("Not installed. Press i to install {version}.")
@@ -10731,6 +10759,7 @@ impl InteractiveApplication {
                             })),
                     can_install,
                     can_uninstall,
+                    update,
                 }
             })
             .collect::<Vec<_>>();
@@ -11188,6 +11217,12 @@ impl InteractiveApplication {
                 )
             });
         let source = focused.as_ref().map(|(source, _)| *source);
+        let menu = self.ui.tool_menu.as_ref();
+        let update = menu
+            .filter(|menu| menu.runtime_picker.is_none())
+            .and_then(|menu| menu.rows.iter().find(|row| row.id == id))
+            .and_then(|row| row.update.clone());
+        let focused = focused.map(|(source, version)| (source, update.or(version)));
         if let Some((source, Some(version))) = focused {
             if matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix) {
                 if let Err(error) = self.tooling.select_version(&id, version) {

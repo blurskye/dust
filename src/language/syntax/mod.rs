@@ -823,6 +823,47 @@ fn markdown_inline_spans(tree: &tree_sitter::Tree, source: &str, maximum: usize)
     })
 }
 
+/// A fenced code block that names its language is coloured as that language, as Neovim
+/// injects it.
+fn markdown_fence_spans(tree: &tree_sitter::Tree, source: &str, maximum: usize) -> Vec<SyntaxSpan> {
+    let mut spans = Vec::new();
+    let mut nodes = vec![tree.root_node()];
+    let mut walk = tree.walk();
+    while let Some(node) = nodes.pop() {
+        if node.kind() != "fenced_code_block" {
+            nodes.extend(node.named_children(&mut walk));
+            continue;
+        }
+        let children = node.named_children(&mut walk).collect::<Vec<_>>();
+        let language = children
+            .iter()
+            .find(|child| child.kind() == "info_string")
+            .and_then(|info| info.named_child(0))
+            .and_then(|name| source.get(name.byte_range()))
+            .and_then(language_for_fence)
+            .filter(|language| *language != SyntaxLanguage::Markdown);
+        let content = children.iter().find(|child| child.kind() == "code_fence_content");
+        let (Some(language), Some(content)) = (language, content) else {
+            continue;
+        };
+        let Some(code) = source.get(content.byte_range()) else {
+            continue;
+        };
+        let offset = content.start_byte();
+        for span in highlight(language, code) {
+            if spans.len() >= maximum {
+                return spans;
+            }
+            spans.push(SyntaxSpan {
+                start: span.start + offset,
+                end: span.end + offset,
+                role: span.role,
+            });
+        }
+    }
+    spans
+}
+
 /// Nested captures, such as an escape inside a string or code inside a heading, become
 /// side-by-side spans where the inner one wins, as Neovim draws them.
 fn flatten_spans(mut spans: Vec<SyntaxSpan>) -> Vec<SyntaxSpan> {
@@ -874,7 +915,7 @@ pub fn highlight(language: SyntaxLanguage, source: &str) -> Vec<SyntaxSpan> {
     let Some(tree) = parser.parse(source, None) else {
         return Vec::new();
     };
-    QUERIES.with_borrow_mut(|queries| {
+    let mut spans = QUERIES.with_borrow_mut(|queries| {
         let query = match queries.entry(language) {
             std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
             std::collections::hash_map::Entry::Vacant(entry) => {
@@ -884,12 +925,14 @@ pub fn highlight(language: SyntaxLanguage, source: &str) -> Vec<SyntaxSpan> {
                 }
             }
         };
-        let mut spans = highlight_spans(query, &tree, source, usize::MAX, language.id());
-        if language == SyntaxLanguage::Markdown {
-            spans.extend(markdown_inline_spans(&tree, source, usize::MAX));
-        }
-        flatten_spans(spans)
-    })
+        highlight_spans(query, &tree, source, usize::MAX, language.id())
+    });
+    // Fences highlight their own language through this function, so outside the borrow.
+    if language == SyntaxLanguage::Markdown {
+        spans.extend(markdown_inline_spans(&tree, source, usize::MAX));
+        spans.extend(markdown_fence_spans(&tree, source, usize::MAX));
+    }
+    flatten_spans(spans)
 }
 
 /// The language a code fence names, such as `rust` or `ts`.
@@ -1036,6 +1079,8 @@ fn parse(request: Request) -> SyntaxEvent {
         if request.language == SyntaxLanguage::Markdown {
             let room = maximum.saturating_sub(spans.len());
             spans.extend(markdown_inline_spans(&tree, &request.source, room));
+            let room = maximum.saturating_sub(spans.len());
+            spans.extend(markdown_fence_spans(&tree, &request.source, room));
         }
         Ok(flatten_spans(spans))
     });
@@ -1301,6 +1346,21 @@ mod tests {
         assert_eq!(group("it* "), Some("@markup.italic"));
         assert_eq!(group("link"), Some("@markup.link.label.markdown_inline"));
         assert_eq!(group("https"), Some("@markup.link.url"));
+        assert!(spans.windows(2).all(|pair| pair[0].end <= pair[1].start));
+    }
+    #[test]
+    fn a_fenced_block_is_coloured_as_the_language_it_names() {
+        let source = "# Example\n\n```python\ndef area(r: float):\n    return \"x\"\n```\n";
+        let spans = highlight(SyntaxLanguage::Markdown, source);
+        let role = |word: &str| {
+            let at = source.find(word).expect(word);
+            spans
+                .iter()
+                .find(|span| span.start <= at && at < span.end)
+                .map_or("", |span| span.role.name())
+        };
+        assert!(role("def").starts_with("@keyword"), "{}", role("def"));
+        assert!(role("\"x\"").starts_with("@string"), "{}", role("\"x\""));
         assert!(spans.windows(2).all(|pair| pair[0].end <= pair[1].start));
     }
     #[test]

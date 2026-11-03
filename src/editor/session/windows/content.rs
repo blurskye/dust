@@ -190,6 +190,11 @@ impl WindowSession {
                     let (icon, diagnostic, closeable) = buffer.map_or_else(
                         || {
                             let icon = match content.adapter {
+                                _ if config.ui.explorer.icon_mode
+                                    != crate::config::ExplorerIconMode::NerdFont =>
+                                {
+                                    config.ui.explorer.active_glyphs().file.clone()
+                                }
                                 crate::ui::window::ContentAdapterKind::TerminalSession
                                 | crate::ui::window::ContentAdapterKind::ExternalTui => {
                                     TERMINAL_ICON.to_owned()
@@ -203,7 +208,12 @@ impl WindowSession {
                         },
                         |buffer| {
                             let state = &state.buffers()[buffer];
-                            let icon = if state.is_virtual_read_only() {
+                            // Without a Nerd Font, a tab uses the explorer's plain file glyph.
+                            let icon = if config.ui.explorer.icon_mode
+                                != crate::config::ExplorerIconMode::NerdFont
+                            {
+                                config.ui.explorer.active_glyphs().file.clone()
+                            } else if state.is_virtual_read_only() {
                                 VIRTUAL_ICON.to_owned()
                             } else if let Some(extension) = state
                                 .path

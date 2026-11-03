@@ -225,6 +225,8 @@ pub struct ToolMenuRow {
     pub can_start: bool,
     pub can_install: bool,
     pub can_uninstall: bool,
+    /// The version this Dust release ships, when the Dust-installed copy is a different one.
+    pub update: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

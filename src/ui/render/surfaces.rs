@@ -1394,6 +1394,9 @@ fn tool_row_keys(row: &crate::ui::ToolMenuRow) -> Vec<&'static str> {
                 keys.push("R restart");
             }
         }
+        if row.update.is_some() {
+            keys.push("i update");
+        }
         if row.can_uninstall {
             keys.push("u uninstall");
         }

@@ -662,6 +662,10 @@ fn explorer_lazily_loads_and_opens_scoped_file() {
     wait_vfs(&mut app);
     let buffer = app.state.active_buffer_id().expect("opened");
     assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
+    // Without Nerd Font icons the file's tab uses the same plain glyph as the explorer.
+    app.reconcile_editor_windows();
+    assert!(!app.ui.content_tabs.is_empty());
+    assert!(app.ui.content_tabs.iter().all(|tab| tab.icon == "·"));
     assert_eq!(app.active_input_context(), "editor.normal");
     let tab = app.state.active_tab;
     let view = app.state.active_view;
