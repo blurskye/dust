@@ -1964,6 +1964,14 @@ pub fn render(
             .filter(|window| window.layer != crate::ui::window::CompositorLayer::Floating)
             .map(|window| window.rect)
     });
+    let terminal_rect = compositor.and_then(|compositor| {
+        let (_, window) = compositor.surfaces.terminal?;
+        compositor
+            .projection
+            .window(window)
+            .filter(|window| window.layer != crate::ui::window::CompositorLayer::Floating)
+            .map(|window| window.rect)
+    });
     let dashboard_rect = compositor.and_then(|compositor| {
         let window = compositor.surfaces.dashboard?;
         compositor
@@ -2000,8 +2008,9 @@ pub fn render(
             })
         });
     let content_bounds = if ui.dashboard || state.active_view.is_none() {
-        // The dashboard centres itself in what a docked explorer leaves free.
-        dashboard_rect.or(workspace).map(|bounds| match explorer_rect {
+        // The dashboard centres itself in what a docked explorer, or a terminal docked at the
+        // side such as an agent's, leaves free.
+        let beside = |bounds: WindowRect, dock: Option<WindowRect>| match dock {
             Some(dock) if dock.x <= bounds.x && dock.x + dock.width > bounds.x => {
                 let cut = (dock.x + dock.width - bounds.x).min(bounds.width);
                 WindowRect {
@@ -2015,7 +2024,12 @@ pub fn render(
                 ..bounds
             },
             _ => bounds,
-        })
+        };
+        let side_terminal =
+            terminal_rect.filter(|dock| dock.y <= workspace.map_or(0, |bounds| bounds.y));
+        dashboard_rect
+            .or(workspace)
+            .map(|bounds| beside(beside(bounds, explorer_rect), side_terminal))
     } else {
         workspace
     };
