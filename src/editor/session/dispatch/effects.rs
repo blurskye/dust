@@ -9735,6 +9735,18 @@ impl InteractiveApplication {
             ));
             return;
         }
+        // Terminals belong to the folder they were opened in, so switching ends them, as
+        // opening another folder does in VS Code; it takes asking twice when any are open.
+        let terminals = self.terminal_session.running_count();
+        if terminals > 0 && self.switch_ends_terminals.as_ref() != Some(&target) {
+            self.switch_ends_terminals = Some(target);
+            self.show_error(format!(
+                "switching ends {terminals} open terminal(s) and what runs in them; switch again \
+                 to go ahead"
+            ));
+            return;
+        }
+        self.switch_ends_terminals = None;
         self.close_picker();
         match self.workspace.add_root_request(target, Some(id)) {
             Ok(()) => self.notify_message("switching…".to_owned(), false),

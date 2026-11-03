@@ -528,6 +528,14 @@ impl DebugSession {
                     arguments
                         .entry("buildFlags")
                         .or_insert_with(|| serde_json::json!("-buildvcs=false"));
+                    // Delve builds `__debug_bin*` in the project and only deletes it when it
+                    // exits cleanly; the temporary directory keeps a stopped session's out of it.
+                    let stamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |elapsed| elapsed.as_nanos());
+                    arguments.entry("output").or_insert_with(|| {
+                        serde_json::json!(std::env::temp_dir().join(format!("dust-debug-{stamp}")))
+                    });
                 }
                 if let Some(program) = launch.program {
                     // Go builds packages, so a file beside the active one still has to compile.

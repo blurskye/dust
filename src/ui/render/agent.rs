@@ -180,10 +180,15 @@ pub(super) fn render_agent_panel(
             x = x.saturating_add(2);
         }
     }
-    let settings = fitted_settings(&panel.settings, usize::from(width).saturating_sub(2), config.editor.ambiguous_width);
-    let settings_width = u16::try_from(text_width(&settings, config.editor.ambiguous_width)).unwrap_or(width);
+    // The folder the session works in keeps at least its last name; the model text shortens first.
+    let ambiguous = config.editor.ambiguous_width;
+    let folder = panel.status.rsplit('/').next().unwrap_or_default();
+    let status_need = text_width(&panel.status, ambiguous).min(text_width(folder, ambiguous) + 2) + 2;
+    let settings = fitted_settings(&panel.settings, usize::from(width).saturating_sub(2 + status_need), ambiguous);
+    let settings_width = u16::try_from(text_width(&settings, ambiguous)).unwrap_or(width);
     let settings_x = width.saturating_sub(settings_width + 1);
-    grid.put_text_clipped(1, footer, &panel.status, Style::Muted, settings_x.saturating_sub(1));
+    let status = left_ellipsized(&panel.status, usize::from(settings_x.saturating_sub(2)), ambiguous);
+    grid.put_text_clipped(1, footer, &status, Style::Muted, settings_x.saturating_sub(1));
     grid.put_text_clipped(settings_x, footer, &settings, Style::Muted, width - 1);
 
     let area = usize::from(list_top - chips - 1);
@@ -212,6 +217,23 @@ pub(super) fn render_agent_panel(
 
 /// "model · mode · thinking" in `room` columns: a long model name is shortened first, so the
 /// mode and thinking level stay readable in a narrow panel.
+/// `text` shortened from the left with `…`, so its end stays.
+fn left_ellipsized(text: &str, room: usize, ambiguous: AmbiguousWidth) -> String {
+    if text_width(text, ambiguous) <= room {
+        return text.to_owned();
+    }
+    let mut tail = String::new();
+    for character in text.chars().rev() {
+        let mut candidate = character.to_string();
+        candidate.push_str(&tail);
+        if text_width(&candidate, ambiguous) + 1 > room {
+            break;
+        }
+        tail = candidate;
+    }
+    format!("…{tail}")
+}
+
 fn fitted_settings(settings: &str, room: usize, ambiguous: AmbiguousWidth) -> String {
     if text_width(settings, ambiguous) <= room {
         return settings.to_owned();
@@ -300,6 +322,13 @@ mod tests {
         assert!(fitted.ends_with("· Bypass permissions · high"), "{fitted}");
         assert!(text_width(&fitted, AmbiguousWidth::Narrow) <= 44);
         assert_eq!(fitted_settings(settings, 80, AmbiguousWidth::Narrow), settings);
+    }
+
+    #[test]
+    fn a_long_folder_keeps_its_last_name() {
+        let shown = left_ellipsized("~/dev/qa/fixtures/agents", 10, AmbiguousWidth::Narrow);
+        assert_eq!(shown, "…es/agents");
+        assert_eq!(left_ellipsized("~/agents", 10, AmbiguousWidth::Narrow), "~/agents");
     }
 
     #[test]

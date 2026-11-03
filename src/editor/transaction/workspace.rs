@@ -216,7 +216,10 @@ impl EditorState {
 
 /// Only what differs between the texts, so cursors and marks elsewhere stay where they are.
 /// Replaces the whole text when a line diff can't describe the change, as with binary content.
-fn changed_spans(before: &str, after: &str) -> Vec<(std::ops::Range<usize>, String)> {
+pub(crate) fn changed_spans(before: &str, after: &str) -> Vec<(std::ops::Range<usize>, String)> {
+    if before == after {
+        return Vec::new();
+    }
     let spans = line_diff_spans(before, after).filter(|spans| {
         let mut rebuilt = String::with_capacity(after.len());
         let mut position = 0;
@@ -426,6 +429,11 @@ mod tests {
             vec![(3..3, "\nc\n".to_owned())]
         );
         assert_eq!(changed_spans("é\n", "è\n"), vec![(0..2, "è".to_owned())]);
+    }
+
+    #[test]
+    fn identical_text_needs_no_edit() {
+        assert!(changed_spans("a\nb\n", "a\nb\n").is_empty());
     }
 
     #[test]

@@ -1774,7 +1774,8 @@ pub(super) fn render_prompt(
                 .put_text_clipped(label_x, y, &item.label, style, right);
             let room = usize::from(right.saturating_sub(detail_x));
             let detail = ellipsized(&item.detail, room, config.editor.ambiguous_width);
-            frame.grid.put_text_clipped(detail_x, y, &detail, Style::Muted, right);
+            let detail_style = if style == Style::Selection { style } else { Style::Muted };
+            frame.grid.put_text_clipped(detail_x, y, &detail, detail_style, right);
         }
     }
     let prefix = prompt.input.get(..prompt.cursor).unwrap_or(&prompt.input);

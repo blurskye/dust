@@ -217,6 +217,9 @@ struct InteractiveApplication {
     tab_drag: Option<u16>,
     /// Where `dust --remote` from Dust's own terminals reaches this session.
     remote: Option<crate::remote::RemoteServer>,
+    /// A folder the user was warned that switching to ends the open terminals; asking again
+    /// switches.
+    switch_ends_terminals: Option<PathBuf>,
     /// The parse results and views `ui.syntax_spans` and `ui.syntax_folds` were built from.
     syntax_spans_source: (
         Vec<(crate::editor::BufferId, u64, u64)>,

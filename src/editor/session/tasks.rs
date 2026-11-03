@@ -864,6 +864,15 @@ impl TaskSession {
             .map_err(|_| "formatter output is not UTF-8")?
             .to_owned();
         let text = &editor.buffers[source.buffer()].text;
+        // Only what the formatter changed is replaced, so the cursor stays on the code it was on.
+        let edits = crate::editor::transaction::changed_spans(&text.to_string(), &replacement)
+            .into_iter()
+            .map(|(range, inserted)| {
+                ByteRange::new(ByteOffset(range.start), ByteOffset(range.end))
+                    .map(|range| TextEdit::new(range, inserted))
+                    .map_err(|e| e.to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Some(
             EditorTransaction::new(id)
                 .with_precondition(Precondition::BufferRevision {
@@ -873,14 +882,7 @@ impl TaskSession {
                 .with_precondition(Precondition::BufferWritable(source.buffer()))
                 .with_operation(EditorOperation::ApplyEdits {
                     buffer: source.buffer(),
-                    edits: TextEditSet::new(
-                        text.revision(),
-                        vec![TextEdit::new(
-                            ByteRange::new(ByteOffset(0), ByteOffset(text.len_bytes()))
-                                .map_err(|e| e.to_string())?,
-                            replacement,
-                        )],
-                    ),
+                    edits: TextEditSet::new(text.revision(), edits),
                 }),
         ))
     }

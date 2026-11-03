@@ -720,7 +720,14 @@ fn completion_attaches_below_globally_centered_prompt() {
     let frame = render(&state, &ui, &config, &dashboard, 100, 20);
     let geometry = prompt_geometry(100, 20, false);
     assert_eq!(geometry.left, 20);
-    assert!(frame.grid.row_text(geometry.top + 3).contains("Open file"));
+    let row = frame.grid.row_text(geometry.top + 3);
+    assert!(row.contains("Open file"));
+    // The selected row's description sits on the selection, not a dark gap.
+    let x = u16::try_from(row[..row.find("Open file").unwrap()].chars().count()).unwrap();
+    assert_eq!(
+        frame.grid.get(x, geometry.top + 3).expect("detail cell").style,
+        crate::ui::Style::Selection
+    );
 }
 
 #[test]

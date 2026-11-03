@@ -1036,27 +1036,32 @@ impl InteractiveApplication {
     /// on the last line lands on the line above instead.
     /// Where views stand on lines a formatter is replacing. The edit alone would send each to
     /// the end of what it replaced, so `restore_view_positions` puts them back.
+    /// Each cursor as the count of non-blank characters before it, for views whose cursor line
+    /// `replaced` says a reformat rewrites. Formatting mostly moves whitespace, so the cursor
+    /// then stays on the same character, where a line and column would land on other code.
     pub(super) fn view_positions(
         &self,
         replaced: impl Fn(usize) -> bool,
-    ) -> Vec<(crate::editor::ViewId, crate::editor::text::BufferRevision, usize, usize)> {
+    ) -> Vec<(crate::editor::ViewId, crate::editor::text::BufferRevision, usize)> {
         self.state
             .views
             .iter()
             .filter_map(|(id, view)| {
                 let text = &self.state.buffers.get(view.buffer)?.text;
-                let (line, column) = PositionCodec::new(text)
-                    .byte_to_lsp(view.cursor, PositionEncoding::Utf32)
-                    .ok()?;
-                replaced(line).then(|| (id, text.revision(), line, column))
+                if !replaced(text.byte_to_line(view.cursor).ok()?) {
+                    return None;
+                }
+                let before = text.slice(ByteRange::new(ByteOffset(0), view.cursor).ok()?).ok()?;
+                let non_blank = before.chars().filter(|c| !c.is_whitespace()).count();
+                Some((id, text.revision(), non_blank))
             })
             .collect()
     }
     pub(super) fn restore_view_positions(
         &mut self,
-        positions: Vec<(crate::editor::ViewId, crate::editor::text::BufferRevision, usize, usize)>,
+        positions: Vec<(crate::editor::ViewId, crate::editor::text::BufferRevision, usize)>,
     ) {
-        for (id, revision, line, column) in positions {
+        for (id, revision, non_blank) in positions {
             let Some(view) = self.state.views.get(id) else {
                 continue;
             };
@@ -1064,12 +1069,8 @@ impl InteractiveApplication {
             if text.revision() == revision {
                 continue;
             }
-            let line = line.min(text.visible_lines().saturating_sub(1));
-            if let Ok(cursor) =
-                PositionCodec::new(text).lsp_to_byte(line, column, PositionEncoding::Utf32)
-            {
-                self.state.views[id].cursor = cursor;
-            }
+            let text = text.to_string();
+            self.state.views[id].cursor = ByteOffset(nth_non_blank(&text, non_blank));
         }
         self.ensure_cursor_visible();
     }
@@ -2281,6 +2282,14 @@ impl InteractiveApplication {
             .syntax_spans
             .sort_unstable_by_key(|span| (span.range.start, span.range.end));
     }
+}
+
+/// Where the `count`th non-blank character (from zero) of `text` starts, or its end.
+fn nth_non_blank(text: &str, count: usize) -> usize {
+    text.char_indices()
+        .filter(|(_, character)| !character.is_whitespace())
+        .nth(count)
+        .map_or(text.len(), |(at, _)| at)
 }
 
 fn move_spans_onto_current_text(
@@ -3979,5 +3988,19 @@ impl InteractiveApplication {
             .map_err(|e| e.to_string())?;
         self.commit_editor_draft(draft, None, false)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod formatter_cursor_tests {
+    #[test]
+    fn a_formatted_file_keeps_the_cursor_on_its_word() {
+        let before = "<html><head></head>\n<body><p>Hello World</p></body></html>\n";
+        let after = "<html>\n  <head></head>\n  <body>\n    <p>Hello World</p>\n  </body>\n</html>\n";
+        let cursor = before.find("World").unwrap();
+        let non_blank = before[..cursor].chars().filter(|c| !c.is_whitespace()).count();
+        let moved = super::nth_non_blank(after, non_blank);
+        assert_eq!(&after[moved..moved + 5], "World");
+        assert_eq!(super::nth_non_blank("a b", 9), 3);
     }
 }

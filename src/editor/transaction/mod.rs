@@ -7,6 +7,7 @@ pub(crate) use restore::build_restored_layout;
 mod workspace;
 pub(crate) use workspace::{
     EditorPublication, WorkspaceCommitCheck, WorkspaceEditSources, WorkspaceSnapshot,
+    changed_spans,
 };
 mod undo;
 pub(crate) use paths::BufferPathChange;

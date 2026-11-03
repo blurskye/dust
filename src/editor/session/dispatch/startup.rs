@@ -145,6 +145,7 @@ impl InteractiveApplication {
             border_drag: None,
             tab_drag: None,
             remote: None,
+            switch_ends_terminals: None,
             syntax_spans_source: (Vec::new(), Vec::new()),
             format_on_save: None,
             lsp_asked: None,

@@ -5289,3 +5289,44 @@ fn an_empty_plugin_list_says_how_to_get_one() {
         Some("No plugins yet · :pkgsearch <name> finds one · Esc Esc Close")
     );
 }
+
+#[test]
+fn switching_folders_with_open_terminals_warns_before_ending_them() {
+    let main = tempdir().unwrap();
+    let state_dir = tempdir().unwrap();
+    let main = main.path().canonicalize().unwrap();
+    let nested = main.join(".worktree/feature");
+    fs::create_dir_all(&nested).unwrap();
+    let mut app = InteractiveApplication::new(
+        StartupTarget::Dashboard {
+            root: nested.clone(),
+        },
+        crate::config::load_bundled_config(),
+        false,
+        state_dir.path().into(),
+        false,
+        false,
+        std::sync::Arc::new(crate::clock::SystemClock),
+    )
+    .unwrap();
+    app.terminal_session.fixture(
+        crate::process::PtyId(1),
+        crate::editor::session::terminal::TerminalFixture {
+            profile: "shell".into(),
+            screen: crate::ui::PtyScreen::new(80, 8, 100),
+            running: true,
+            exit_code: None,
+            truncated: false,
+        },
+        app.workspace.version(),
+    );
+    app.switch_workspace_root(main.clone());
+    assert!(
+        app.ui.notification.as_deref().is_some_and(|text| text.contains("switch again")),
+        "{:?}",
+        app.ui.notification
+    );
+    assert_eq!(app.terminal_session.running_count(), 1, "nothing ended yet");
+    app.switch_workspace_root(main.clone());
+    assert_eq!(app.ui.notification.as_deref(), Some("switching…"));
+}
