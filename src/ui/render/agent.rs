@@ -132,7 +132,22 @@ pub(super) fn render_agent_panel(
     }
     let list_top = top - list;
     if panel.menu.is_empty() {
-        for (offset, row) in panel.family.iter().take(usize::from(list)).enumerate() {
+        // When the family is longer than the room, the last row counts the rest, and the
+        // conversation on screen stays listed.
+        let room = usize::from(list);
+        let hidden = panel.family.len().saturating_sub(room);
+        let take = if hidden > 0 { room.saturating_sub(1) } else { room };
+        let mut rows = panel.family.iter().take(take).collect::<Vec<_>>();
+        if hidden > 0 {
+            if let Some(shown) = panel.family.iter().skip(take).find(|row| row.shown) {
+                rows.pop();
+                rows.push(shown);
+            }
+            let y = list_top + u16::try_from(take).unwrap_or(0);
+            let more = panel.family.len() - rows.len();
+            grid.put_text_clipped(3, y, &format!("+{more} more"), Style::Muted, width - 1);
+        }
+        for (offset, row) in rows.into_iter().enumerate() {
             let y = list_top + u16::try_from(offset).unwrap_or(0);
             let (mark, style) = if row.shown { ("● ", Style::Syntax(crate::language::syntax::Highlight::STRONG)) } else { ("○ ", Style::Muted) };
             let x = grid.put_text(1, y, mark, style);
@@ -329,6 +344,42 @@ mod tests {
         let shown = left_ellipsized("~/dev/qa/fixtures/agents", 10, AmbiguousWidth::Narrow);
         assert_eq!(shown, "…es/agents");
         assert_eq!(left_ellipsized("~/agents", 10, AmbiguousWidth::Narrow), "~/agents");
+    }
+
+    #[test]
+    fn a_long_subagent_list_counts_the_rest_and_keeps_the_shown_one() {
+        let row = |index: usize| AgentListRow {
+            shown: index == 10,
+            name: "claude".into(),
+            task: format!("task {index}"),
+            status: "✓".into(),
+        };
+        let panel = AgentPanelUi {
+            view: ViewId::default(),
+            tabs: Vec::new(),
+            transcript: Styled::default(),
+            bands: Vec::new(),
+            scroll: 0,
+            context: Vec::new(),
+            family: (0..12).map(row).collect(),
+            menu: Vec::new(),
+            selected: 0,
+            busy: String::new(),
+            normal: false,
+            input: String::new(),
+            cursor: 0,
+            placeholder: String::new(),
+            status: String::new(),
+            settings: String::new(),
+        };
+        let frame = render_agent_panel(&panel, true, &Config::default(), 60, 40, false);
+        let lines = (0..40)
+            .map(|y| (0..60).filter_map(|x| frame.grid.get(x, y).map(|cell| cell.symbol.to_string())).collect::<String>())
+            .collect::<Vec<_>>();
+        let listed = lines.iter().filter(|line| line.contains("task ")).count();
+        assert_eq!(listed, LIST_ROW_CEILING - 1, "{lines:#?}");
+        assert!(lines.iter().any(|line| line.contains("● claude  task 10")), "{lines:#?}");
+        assert!(lines.iter().any(|line| line.contains("+5 more")), "{lines:#?}");
     }
 
     #[test]
