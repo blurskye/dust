@@ -2,7 +2,7 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
-    sync::{atomic::Ordering, mpsc::Receiver},
+    sync::mpsc::Receiver,
 };
 
 use thiserror::Error;
@@ -15,7 +15,7 @@ use super::{
         replace_managed_directory,
     },
     install_prepare::{ensure_private_directory, validate_tool_id},
-    package_lock::NEXT_PACKAGE_TEMP,
+    package_lock::next_temp_suffix,
     runtimes::{
         install_javascript_package, install_rustup_component, install_uv_tool, managed_runtime,
         probe_downloaded_tool, run_managed,
@@ -58,7 +58,7 @@ pub(super) fn install_tool(
     let staging = root.join(format!(
         ".tool-{}-{}",
         definition.id,
-        NEXT_PACKAGE_TEMP.fetch_add(1, Ordering::Relaxed)
+        next_temp_suffix()
     ));
     fs::create_dir(&staging).map_err(|error| format!("cannot stage tool installation: {error}"))?;
     let result = (|| {

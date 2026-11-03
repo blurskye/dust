@@ -77,7 +77,17 @@ pub(super) fn read_bounded_regular(path: &Path, maximum: u64) -> Result<Vec<u8>,
     }
     fs::read(path).map_err(PackageError::Io)
 }
-pub(super) static NEXT_PACKAGE_TEMP: AtomicU64 = AtomicU64::new(1);
+static NEXT_PACKAGE_TEMP: AtomicU64 = AtomicU64::new(1);
+
+/// A unique suffix for temporary names in the tool store. The process id keeps a name left
+/// behind by an interrupted install from colliding with a later run's.
+pub(super) fn next_temp_suffix() -> String {
+    format!(
+        "{}-{}",
+        std::process::id(),
+        NEXT_PACKAGE_TEMP.fetch_add(1, Ordering::Relaxed)
+    )
+}
 pub(super) fn valid_digest(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
@@ -196,7 +206,7 @@ pub fn write_lock_atomic(
     let temp = path.with_extension(format!(
         "tmp.{}.{}",
         std::process::id(),
-        NEXT_PACKAGE_TEMP.fetch_add(1, Ordering::Relaxed)
+        next_temp_suffix()
     ));
     let mut options = fs::OpenOptions::new();
     options.create_new(true).write(true);
@@ -231,7 +241,7 @@ pub(super) fn write_protected_atomic(
     let temp = path.with_extension(format!(
         "tmp.{}.{}",
         std::process::id(),
-        NEXT_PACKAGE_TEMP.fetch_add(1, Ordering::Relaxed)
+        next_temp_suffix()
     ));
     let mut options = fs::OpenOptions::new();
     options.create_new(true).write(true);
@@ -316,7 +326,7 @@ pub fn commit_store_bytes(
     let temp = store.join(format!(
         ".stage-{}-{}",
         std::process::id(),
-        NEXT_PACKAGE_TEMP.fetch_add(1, Ordering::Relaxed)
+        next_temp_suffix()
     ));
     let mut options = fs::OpenOptions::new();
     options.create_new(true).write(true);

@@ -2,7 +2,6 @@ use std::{
     fs,
     io::Write,
     path::{Component, Path, PathBuf},
-    sync::atomic::Ordering,
     time::Duration,
 };
 
@@ -11,7 +10,7 @@ use reqwest::Url;
 use super::{
     BUNDLED_NIX_LSP_FLAKE, BUNDLED_NIX_LSP_LOCK,
     catalog::{ToolArchiveFormat, nix_lsp_workspace_root},
-    package_lock::NEXT_PACKAGE_TEMP,
+    package_lock::next_temp_suffix,
 };
 
 pub(super) const MAXIMUM_TOOL_DOWNLOAD_BYTES: usize = 512 * 1024 * 1024;
@@ -106,7 +105,7 @@ pub(super) fn write_private_workspace_file(
     }
     let staging = root.join(format!(
         ".{name}-{}",
-        NEXT_PACKAGE_TEMP.fetch_add(1, Ordering::Relaxed)
+        next_temp_suffix()
     ));
     let mut file = fs::OpenOptions::new()
         .write(true)

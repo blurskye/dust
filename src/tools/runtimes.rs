@@ -3,7 +3,7 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::{atomic::Ordering, mpsc::Receiver},
+    sync::mpsc::Receiver,
     thread,
     time::{Duration, Instant},
 };
@@ -28,7 +28,7 @@ use super::{
         TOOL_INSTALL_TIMEOUT, ensure_private_directory, prepare_nix_lsp_workspace_at,
         validate_tool_id,
     },
-    package_lock::NEXT_PACKAGE_TEMP,
+    package_lock::next_temp_suffix,
 };
 
 pub(super) fn fhs_glibc_loader_available() -> bool {
@@ -67,7 +67,7 @@ pub(super) fn managed_runtime(
         .map_err(|error| format!("cannot create runtime directory: {error}"))?;
     let staging = root.join(format!(
         ".runtime-{name}-{}",
-        NEXT_PACKAGE_TEMP.fetch_add(1, Ordering::Relaxed)
+        next_temp_suffix()
     ));
     fs::create_dir(&staging).map_err(|error| format!("cannot stage runtime: {error}"))?;
     let result = (|| {
@@ -522,7 +522,7 @@ pub(super) fn install_rustup_component(
     let staging = root.join(format!(
         ".tool-{}-{}",
         definition.id,
-        NEXT_PACKAGE_TEMP.fetch_add(1, Ordering::Relaxed)
+        next_temp_suffix()
     ));
     fs::create_dir(&staging).map_err(|error| format!("cannot stage rust component: {error}"))?;
     let result = (|| {
@@ -582,7 +582,7 @@ pub(super) fn uninstall_managed_tool(
     let removed = root.join(format!(
         ".removed-{}-{}",
         definition.id,
-        NEXT_PACKAGE_TEMP.fetch_add(1, Ordering::Relaxed)
+        next_temp_suffix()
     ));
     fs::rename(&destination, &removed)
         .map_err(|error| format!("cannot deactivate managed tool: {error}"))?;
