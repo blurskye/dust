@@ -136,10 +136,17 @@ impl PtyScreen {
             match parser {
                 Parser::Ground => match character {
                     '\u{1b}' => self.parser = Parser::Escape,
-                    '\r' => self.cursor_column = 0,
+                    '\r' => {
+                        self.cursor_column = 0;
+                        self.pending_wrap = false;
+                    }
                     '\n' => self.newline(),
-                    '\u{8}' => self.cursor_column = self.cursor_column.saturating_sub(1),
+                    '\u{8}' => {
+                        self.cursor_column = self.cursor_column.saturating_sub(1);
+                        self.pending_wrap = false;
+                    }
                     '\t' => {
+                        self.pending_wrap = false;
                         let next = (self.cursor_column / 8 + 1) * 8;
                         self.cursor_column = next.min(self.columns.saturating_sub(1));
                     }
@@ -147,6 +154,10 @@ impl PtyScreen {
                     _ => {}
                 },
                 Parser::Escape => match character {
+                    '7' | '8' | 'D' | 'E' | 'M' => {
+                        self.pending_wrap = false;
+                        self.escape(character);
+                    }
                     '[' => {
                         self.parser = Parser::Csi {
                             parameters: String::new(),
@@ -156,19 +167,6 @@ impl PtyScreen {
                     ']' => self.parser = Parser::Osc,
                     'P' | '_' | '^' => self.parser = Parser::StringControl,
                     '(' | ')' | '*' | '+' => self.parser = Parser::EscapeIntermediate,
-                    '7' => self.saved_cursor = Some((self.cursor_row, self.cursor_column)),
-                    'D' => self.index(),
-                    'E' => {
-                        self.cursor_column = 0;
-                        self.index();
-                    }
-                    'M' => self.reverse_index(),
-                    '8' => {
-                        if let Some((row, column)) = self.saved_cursor {
-                            self.cursor_row = row.min(self.rows - 1);
-                            self.cursor_column = column.min(self.columns - 1);
-                        }
-                    }
                     _ => self.unsupported_sequences = self.unsupported_sequences.saturating_add(1),
                 },
                 Parser::EscapeIntermediate => {}
@@ -425,6 +423,23 @@ impl PtyScreen {
             self.pending_wrap = self.autowrap;
         }
     }
+    fn escape(&mut self, character: char) {
+        match character {
+            '7' => self.saved_cursor = Some((self.cursor_row, self.cursor_column)),
+            'D' => self.index(),
+            'E' => {
+                self.cursor_column = 0;
+                self.index();
+            }
+            'M' => self.reverse_index(),
+            _ => {
+                if let Some((row, column)) = self.saved_cursor {
+                    self.cursor_row = row.min(self.rows - 1);
+                    self.cursor_column = column.min(self.columns - 1);
+                }
+            }
+        }
+    }
     fn newline(&mut self) {
         self.cursor_column = 0;
         self.pending_wrap = false;
@@ -479,6 +494,11 @@ impl PtyScreen {
             .map(|value| value.parse::<usize>().unwrap_or(0))
             .collect::<Vec<_>>();
         let first = parameters.first().copied().unwrap_or(0);
+        // As in xterm, moving the cursor or editing the line cancels a wrap held at the right
+        // margin; otherwise the next character would land a row below where the program put it.
+        if !matches!(final_byte, 'm' | 'h' | 'l' | 'r' | 'S' | 'T') {
+            self.pending_wrap = false;
+        }
         match final_byte {
             'h' | 'l' if source.starts_with('?') => {
                 let enabled = final_byte == 'h';
@@ -565,7 +585,20 @@ impl PtyScreen {
             'B' => self.cursor_row = (self.cursor_row + first.max(1)).min(self.rows - 1),
             'C' => self.cursor_column = (self.cursor_column + first.max(1)).min(self.columns - 1),
             'D' => self.cursor_column = self.cursor_column.saturating_sub(first.max(1)),
-            'G' => self.cursor_column = first.max(1).saturating_sub(1).min(self.columns - 1),
+            'E' => {
+                self.cursor_row = (self.cursor_row + first.max(1)).min(self.rows - 1);
+                self.cursor_column = 0;
+            }
+            'F' => {
+                self.cursor_row = self.cursor_row.saturating_sub(first.max(1));
+                self.cursor_column = 0;
+            }
+            'G' | '`' => {
+                self.cursor_column = first.max(1).saturating_sub(1).min(self.columns - 1)
+            }
+            'a' => self.cursor_column = (self.cursor_column + first.max(1)).min(self.columns - 1),
+            'd' => self.cursor_row = first.max(1).saturating_sub(1).min(self.rows - 1),
+            'e' => self.cursor_row = (self.cursor_row + first.max(1)).min(self.rows - 1),
             'H' | 'f' => {
                 let base = if self.origin_mode { self.scroll_top } else { 0 };
                 let maximum = if self.origin_mode {
@@ -691,6 +724,7 @@ impl PtyScreen {
                     row.fill(PtyCell::default())
                 }
             }
+            3 => self.scrollback.clear(),
             _ => self.unsupported_sequences = self.unsupported_sequences.saturating_add(1),
         }
     }
@@ -1008,6 +1042,22 @@ mod tests {
             screen.cells()[0][1].style.background,
             Some(PtyColor::Rgb(0, 255, 0))
         );
+    }
+
+    #[test]
+    fn moving_the_cursor_after_a_full_width_line_cancels_its_wrap() {
+        // pi and other differential renderers end a frame on a full-width border, then move up
+        // and rewrite from there; the rewrite must land where they moved, not a row lower.
+        let mut screen = PtyScreen::new(4, 3, 8);
+        screen.feed("top\r\n────\x1b[1A\rX");
+        assert_eq!(screen.lines()[0], "Xop");
+        assert_eq!(screen.cursor(), (1, 0));
+        let mut screen = PtyScreen::new(4, 3, 8);
+        screen.feed("────\rY\x1b[2;3HZ\x1b[1dW");
+        assert_eq!(screen.lines()[..2], ["Y──W".to_owned(), "  Z".to_owned()]);
+        let mut screen = PtyScreen::new(4, 2, 8);
+        screen.feed("a\r\nb\r\nc\x1b[3J");
+        assert_eq!(screen.scrollback_len(), 0);
     }
 
     #[test]
