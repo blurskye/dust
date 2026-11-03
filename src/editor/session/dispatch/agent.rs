@@ -1494,10 +1494,13 @@ impl InteractiveApplication {
         let text = match open {
             Some(buffer) => buffer.text.to_string(),
             None => {
-                let size = std::fs::metadata(&path)
-                    .map_err(|error| format!("{}: {error}", path.display()))?
-                    .len();
-                if size > READ_BYTE_CEILING {
+                let metadata = std::fs::metadata(&path)
+                    .map_err(|error| format!("{}: {error}", path.display()))?;
+                // A pipe or device would block the editor while it is read.
+                if !metadata.is_file() {
+                    return Err(format!("{} is not a regular file", path.display()));
+                }
+                if metadata.len() > READ_BYTE_CEILING {
                     return Err(format!("{} is too large to read", path.display()));
                 }
                 std::fs::read_to_string(&path)
@@ -1514,15 +1517,25 @@ impl InteractiveApplication {
     /// Writes stay inside the session's worktree and never overwrite unsaved edits; an open,
     /// clean buffer is reloaded so it shows the agent's change.
     fn agent_write_file(&mut self, root: &Path, params: &Value) -> Result<(), String> {
-        let path = PathBuf::from(params["path"].as_str().ok_or("path is missing")?);
+        let requested = PathBuf::from(params["path"].as_str().ok_or("path is missing")?);
         let content = params["content"].as_str().ok_or("content is missing")?;
-        if !path.is_absolute()
-            || !path.starts_with(root)
-            || path
+        let outside = || format!("{} is outside {}", requested.display(), root.display());
+        if !requested.is_absolute()
+            || requested
                 .components()
                 .any(|part| matches!(part, std::path::Component::ParentDir))
         {
-            return Err(format!("{} is outside {}", path.display(), root.display()));
+            return Err(outside());
+        }
+        // Symlinks are followed before the check, so a link inside the worktree cannot
+        // write outside it or around an open buffer's unsaved edits.
+        let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let path = resolve_existing_prefix(&requested);
+        if !path.starts_with(&root) {
+            return Err(outside());
+        }
+        if path.is_dir() || path.exists() && !path.is_file() {
+            return Err(format!("{} is not a regular file", requested.display()));
         }
         let open = self
             .state
@@ -1536,7 +1549,8 @@ impl InteractiveApplication {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
-        std::fs::write(&path, content).map_err(|error| format!("{}: {error}", path.display()))?;
+        crate::files::atomic_write(&path, content.as_bytes())
+            .map_err(|error| format!("{}: {error}", requested.display()))?;
         if let Some((id, _)) = open {
             let view = Self::document_view(id, &self.state.buffers[id]);
             if let Err(error) = self.documents.request_reload(
@@ -2523,6 +2537,25 @@ fn slash_matches(word: &str, commands: impl Iterator<Item = (String, String)>) -
     matches
 }
 
+/// `path` with its longest existing prefix resolved through symlinks; the rest, which does
+/// not exist yet, is kept as written.
+fn resolve_existing_prefix(path: &Path) -> PathBuf {
+    let mut existing = path;
+    let mut rest = Vec::new();
+    loop {
+        if let Ok(resolved) = existing.canonicalize() {
+            return rest.iter().rev().fold(resolved, |path, part| path.join(part));
+        }
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_owned());
+                existing = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2682,5 +2715,16 @@ mod tests {
         session.earlier = Some("old".into());
         session.open_session();
         assert!(session.recap && session.earlier.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_new_file_under_a_symlinked_directory_resolves_to_where_it_will_be_written() {
+        let root = tempfile::tempdir().expect("root");
+        let outside = tempfile::tempdir().expect("outside");
+        std::os::unix::fs::symlink(outside.path(), root.path().join("link")).expect("link");
+        let resolved = super::resolve_existing_prefix(&root.path().join("link/new/file.txt"));
+        assert_eq!(resolved, outside.path().canonicalize().unwrap().join("new/file.txt"));
+        assert!(!resolved.starts_with(root.path().canonicalize().unwrap()));
     }
 }
