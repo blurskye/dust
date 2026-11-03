@@ -2218,6 +2218,10 @@ impl InteractiveApplication {
                     Some((revision, result.objects.clone()));
             }
         }
+        // Until a new parse or token reply arrives, the old colours follow the edit instead of
+        // dropping out, so typed text doesn't flash plain and back.
+        move_spans_onto_current_text(&mut self.ui.syntax_spans, &self.state);
+        move_spans_onto_current_text(&mut self.ui.lsp_semantic_spans, &self.state);
         // Folds and spans are rebuilt only when a parse result or the views changed, not on
         // every tick.
         let source = (
@@ -2274,6 +2278,35 @@ impl InteractiveApplication {
             .syntax_spans
             .sort_unstable_by_key(|span| (span.range.start, span.range.end));
     }
+}
+
+fn move_spans_onto_current_text(
+    spans: &mut Vec<UiSyntaxSpan>,
+    state: &crate::editor::EditorState,
+) {
+    let current = |span: &UiSyntaxSpan| {
+        state
+            .buffers
+            .get(span.buffer)
+            .map(|buffer| buffer.text.revision())
+    };
+    if spans.iter().all(|span| current(span).is_none_or(|at| at == span.revision)) {
+        return;
+    }
+    spans.retain_mut(|span| {
+        let Some(buffer) = state.buffers.get(span.buffer) else {
+            return true;
+        };
+        if span.revision == buffer.text.revision() {
+            return true;
+        }
+        let Some(range) = buffer.text.map_range_since(span.revision, span.range) else {
+            return false;
+        };
+        span.range = range;
+        span.revision = buffer.text.revision();
+        true
+    });
 }
 
 impl InteractiveApplication {

@@ -132,7 +132,9 @@ impl TextBuffer {
             self.rope.insert(start, &edit.replacement);
         }
         if !edits.is_empty() {
+            let before = self.revision();
             self.bump_revision()?;
+            self.remember_edit(before, delta.clone());
         }
         Ok(delta)
     }

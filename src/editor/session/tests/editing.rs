@@ -947,3 +947,26 @@ fn clean_buffers_follow_the_disk_and_changed_ones_keep_their_text() {
     wait_vfs(&mut app);
     assert_eq!(app.state.buffers[buffer].text.to_string(), "from outside\n", "unsaved work stays");
 }
+
+#[test]
+fn colours_follow_typed_text_until_the_next_parse_or_token_reply() {
+    let mut app = app();
+    app.state
+        .open_text(crate::editor::text::TextBuffer::from_text("let word = 1;"), None);
+    app.set_dashboard_visibility(false);
+    let buffer = app.state.active_buffer_id().expect("buffer");
+    let word = ByteRange::new(ByteOffset(4), ByteOffset(8)).unwrap();
+    app.ui.lsp_semantic_spans = vec![crate::ui::UiSyntaxSpan {
+        buffer,
+        revision: app.state.buffers[buffer].text.revision(),
+        range: word,
+        role: crate::language::syntax::Highlight::VARIABLE,
+    }];
+    for key in ['i', 'X'] {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    app.process_syntax();
+    let span = app.ui.lsp_semantic_spans.first().expect("the colour stays");
+    assert_eq!(span.revision, app.state.buffers[buffer].text.revision());
+    assert_eq!(span.range, ByteRange::new(ByteOffset(5), ByteOffset(9)).unwrap());
+}

@@ -3,9 +3,12 @@ use std::fmt;
 use ropey::Rope;
 
 use crate::editor::text::{
-    BufferRevision, ByteOffset, ByteRange, DecodedText, EncodingError, FileFormat, PositionError,
-    decode_utf8, encode_utf8,
+    Affinity, BufferRevision, ByteOffset, ByteRange, DecodedText, EditDelta, EncodingError,
+    FileFormat, PositionError, decode_utf8, encode_utf8,
 };
+
+/// How many recent edits a buffer remembers for moving highlights forward.
+const RECENT_EDITS: usize = 64;
 
 /// Rope-backed normalized UTF-8 text and its file-format metadata.
 #[derive(Clone, Debug)]
@@ -14,6 +17,9 @@ pub struct TextBuffer {
     revision: BufferRevision,
     format: FileFormat,
     source: TextVersion,
+    /// The latest edits, each with the revision it was applied to, so highlights computed for
+    /// an older revision can be moved onto the current text until a new parse arrives.
+    recent_edits: Vec<(BufferRevision, EditDelta)>,
 }
 
 /// Exact immutable text snapshot identity, including reloads at equal revisions.
@@ -82,6 +88,7 @@ impl TextBuffer {
             revision: BufferRevision::initial(),
             format,
             source: TextVersion::new(),
+            recent_edits: Vec::new(),
         }
     }
 
@@ -97,6 +104,7 @@ impl TextBuffer {
             revision: BufferRevision::initial(),
             format,
             source: TextVersion::new(),
+            recent_edits: Vec::new(),
         })
     }
 
@@ -256,7 +264,42 @@ impl TextBuffer {
     pub fn restore_text(&mut self, text: &str) -> Result<(), PositionError> {
         self.bump_revision()?;
         self.rope = Rope::from_str(text);
+        self.recent_edits.clear();
         Ok(())
+    }
+
+    pub(in crate::editor::text) fn remember_edit(
+        &mut self,
+        before: BufferRevision,
+        delta: EditDelta,
+    ) {
+        if self.recent_edits.len() == RECENT_EDITS {
+            self.recent_edits.remove(0);
+        }
+        self.recent_edits.push((before, delta));
+    }
+
+    /// Moves a range computed at `revision` onto the current text, or `None` when the edits
+    /// since then are no longer remembered or the range was deleted.
+    #[must_use]
+    pub fn map_range_since(
+        &self,
+        revision: BufferRevision,
+        range: ByteRange,
+    ) -> Option<ByteRange> {
+        if revision == self.revision {
+            return Some(range);
+        }
+        let first = self
+            .recent_edits
+            .iter()
+            .position(|(before, _)| *before == revision)?;
+        let (mut start, mut end) = (range.start, range.end);
+        for (_, delta) in &self.recent_edits[first..] {
+            start = delta.map_offset(start, Affinity::After);
+            end = delta.map_offset(end, Affinity::After);
+        }
+        ByteRange::new(start, end).ok().filter(|range| !range.is_empty())
     }
 }
 
@@ -321,5 +364,31 @@ mod source_tests {
         assert!(a.restore_text("must not publish").is_err());
         assert_eq!(a.to_string(), bytes);
         assert_eq!(a.source_version(), source);
+    }
+
+    #[test]
+    fn a_highlight_follows_the_edits_made_after_it() {
+        use crate::editor::text::{TextEdit, TextEditSet};
+        let mut text = TextBuffer::from_text("// note\nfn main() {}\n");
+        let parsed = text.revision();
+        let main = ByteRange::new(ByteOffset(11), ByteOffset(15)).unwrap();
+        let comment = ByteRange::new(ByteOffset(0), ByteOffset(7)).unwrap();
+        for (at, insert) in [(7, "s"), (0, "x")] {
+            let edit = TextEdit::new(ByteRange::empty(ByteOffset(at)), insert);
+            text.apply_edits(&TextEditSet::new(text.revision(), vec![edit]))
+                .unwrap();
+        }
+        assert_eq!(&text.to_string()[13..17], "main");
+        assert_eq!(
+            text.map_range_since(parsed, main),
+            Some(ByteRange::new(ByteOffset(13), ByteOffset(17)).unwrap())
+        );
+        // Typing at the end of the comment keeps the new letter in its colour.
+        assert_eq!(
+            text.map_range_since(parsed, comment),
+            Some(ByteRange::new(ByteOffset(1), ByteOffset(9)).unwrap())
+        );
+        text.restore_text("other").unwrap();
+        assert_eq!(text.map_range_since(parsed, main), None);
     }
 }
