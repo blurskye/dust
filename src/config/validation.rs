@@ -540,6 +540,7 @@ impl Config {
             "operator_pending",
             "command_line",
             "prompt",
+            "terminal",
         ]
         .iter()
         .any(|mode| !self.ui.status_line.mode_labels.contains_key(*mode))

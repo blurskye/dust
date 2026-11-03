@@ -2964,7 +2964,8 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
     assert!(viewport.height <= 13);
 
     let frame = render(&state, &ui, &config, &loaded.dashboard, 80, 20);
-    assert!(frame.grid.row_text(19).contains("NORMAL"));
+    // Typing in the terminal is its own mode, not the editor's Normal mode.
+    assert!(frame.grid.row_text(19).contains("TERMINAL"));
     assert_eq!(
         frame.grid.get(0, geometry.top).expect("full divider").style,
         crate::ui::Style::TerminalBorder
@@ -3018,11 +3019,11 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
     let tab_row = frame.grid.row_text(geometry.top);
     assert!(tab_row.contains("shell"));
     assert!(!tab_row.contains("TERMINAL"));
-    assert!(!frame.grid.row_text(19).contains("TERMINAL"));
 
     let mut editor_ui = ui;
     editor_ui.terminal_panel.as_mut().expect("terminal").focused = false;
     let editor_frame = render(&state, &editor_ui, &config, &loaded.dashboard, 80, 20);
+    assert!(editor_frame.grid.row_text(19).contains("NORMAL"));
     assert!(
         editor_frame
             .cursor

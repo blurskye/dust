@@ -2188,9 +2188,14 @@ impl InteractiveApplication {
                     .iter()
                     .cloned()
                     .map(|expression| {
+                        // The value from the last stop shows beside it, as in the Watches pane.
+                        let value = self
+                            .debugger_session
+                            .watch_value(&expression)
+                            .map_or_else(String::new, |value| format!("= {value}"));
                         (
                             expression.clone(),
-                            String::new(),
+                            value,
                             DapControl::Evaluate {
                                 expression,
                                 frame_id: self.debugger_session.current_frame(),

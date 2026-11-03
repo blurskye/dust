@@ -94,6 +94,7 @@ multi = "MULTI"
 operator_pending = "OPERATOR"
 command_line = "COMMAND"
 prompt = "PROMPT"
+terminal = "TERMINAL"
 
 [ui.buffer_line]
 enabled = true

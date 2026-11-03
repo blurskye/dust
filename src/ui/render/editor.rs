@@ -17,7 +17,7 @@ use crate::{
 };
 
 use super::{
-    DebugSignKind, Frame, UiDiagnostic, UiGitSignKind, UiState,
+    DebugSignKind, Frame, TerminalPanelMode, UiDiagnostic, UiGitSignKind, UiState,
     visual_rows::{
         VisualRowAnchor, VisualRowModel, active_indent_guide, editor_line_number_digits,
         editor_state_content_width, editor_state_gutter_width, git_sign_column,
@@ -871,10 +871,17 @@ pub(super) fn render_status_line(
     // The agent panel's input has its own Insert and Normal modes.
     let panel = ui.agent_panel.as_ref().filter(|panel| panel.view == view_id);
     let agent = panel.is_some();
-    let mode_key = match panel {
-        Some(panel) if panel.normal => "normal",
-        Some(_) => "insert",
-        None => mode_name(view.mode),
+    // So does a focused terminal, whose typing mode is its own.
+    let terminal = ui.terminal_panel.as_ref().filter(|terminal| terminal.focused);
+    let mode_key = match (terminal, panel) {
+        (Some(terminal), _) => match terminal.mode {
+            TerminalPanelMode::Input => "terminal",
+            TerminalPanelMode::Normal => "normal",
+            TerminalPanelMode::Visual => "visual_char",
+        },
+        (None, Some(panel)) if panel.normal => "normal",
+        (None, Some(_)) => "insert",
+        (None, None) => mode_name(view.mode),
     };
     let mode_label = status
         .mode_labels
@@ -1101,7 +1108,7 @@ pub(super) fn render_status_line(
 /// A mode's block on the status line and the edge that joins it to the next section.
 fn status_mode_styles(mode: &str) -> (Style, Style) {
     match mode {
-        "insert" => (Style::StatusInsert, Style::StatusEdgeInsert),
+        "insert" | "terminal" => (Style::StatusInsert, Style::StatusEdgeInsert),
         "visual_char" | "visual_line" | "visual_block" | "multi" => {
             (Style::StatusVisual, Style::StatusEdgeVisual)
         }
