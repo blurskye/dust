@@ -666,10 +666,12 @@ pub(super) fn render_picker(
             // style, so a status column, a lane and a badge are coloured independently.
             // The marker keeps focus legible; a cell that carries a meaningful style keeps
             // it on the selected row, and only the default style is promoted to the
-            // selection style so no lane or status colour is lost under the cursor.
+            // selection style so no lane or status colour is lost under the cursor. Muted
+            // text is promoted too, so the selection band runs unbroken under a description.
+            let marker_style = if selected { Style::Selection } else { Style::Default };
             frame
                 .grid
-                .put_text_clipped(content_left, y, marker, Style::Selection, list_right);
+                .put_text_clipped(content_left, y, marker, marker_style, list_right);
             let mut cell_x = content_left.saturating_add(2);
             for (position, cell) in row.cells.iter().enumerate() {
                 if cell_x >= list_right {
@@ -688,7 +690,7 @@ pub(super) fn render_picker(
                     cell.width
                 };
                 let cell_right = cell_x.saturating_add(width).min(list_right);
-                let style = if selected && cell.style == Style::Default {
+                let style = if selected && matches!(cell.style, Style::Default | Style::Muted) {
                     Style::Selection
                 } else {
                     cell.style

@@ -537,6 +537,10 @@ impl SearchSession {
                             && row.id.0.starts_with("git:")
                         {
                             changes_row_cells(&row)
+                        } else if picker.surface == PickerSurfaceKind::Choice
+                            && !row.badge.is_empty()
+                        {
+                            choice_row_cells(&row)
                         } else {
                             Vec::new()
                         };
@@ -578,6 +582,21 @@ fn surface_footer(surface: PickerSurfaceKind) -> Option<String> {
 /// The status code is its own glyph column rather than a colour, so the meaning survives a
 /// terminal without colour. The path column is flexible, so a narrow picker clips the path
 /// instead of the provenance.
+/// A choice with an icon: the badge is the icon, coloured as the explorer colours the file
+/// named by the row's source, such as `practice.rs`.
+fn choice_row_cells(source: &crate::workspace::PickerRowPresentation) -> Vec<PickerCell> {
+    let icon = crate::files::file_icon(&source.source).map_or(Style::ExplorerIcon, |icon| {
+        crate::ui::explorer_segment_style(super::super::explorer::explorer_icon_role(icon.color))
+    });
+    let label = format!("{}  ", source.label);
+    let width = u16::try_from(label.chars().count()).unwrap_or(u16::MAX);
+    vec![
+        PickerCell::new(format!("{} ", source.badge), icon, 2),
+        PickerCell::new(label, Style::Default, width),
+        PickerCell::flex(source.detail.clone(), Style::Muted),
+    ]
+}
+
 fn changes_row_cells(source: &crate::workspace::PickerRowPresentation) -> Vec<PickerCell> {
     let code = source.source.clone();
     let status_style = match code.chars().next() {

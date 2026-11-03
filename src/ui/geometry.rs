@@ -45,6 +45,25 @@ pub(crate) fn picker_window_geometry(
         rect.y = bounds
             .y
             .saturating_add((bounds.height.saturating_sub(rect.height) / 4).min(4));
+    } else if picker.surface == crate::ui::PickerSurfaceKind::Choice {
+        let widest = picker
+            .rows
+            .iter()
+            .map(|row| row.label.chars().count() + row.detail.chars().count() + 2)
+            .max()
+            .unwrap_or(0);
+        let wanted = u16::try_from(widest + 8).unwrap_or(u16::MAX).max(48);
+        rect.width = rect.width.min(wanted);
+        // Border, query, divider, the rows and the footer.
+        rect.height = rect
+            .height
+            .min(u16::try_from(picker.rows.len().clamp(2, 12)).unwrap_or(12) + 5);
+        rect.x = bounds
+            .x
+            .saturating_add(bounds.width.saturating_sub(rect.width) / 2);
+        rect.y = bounds
+            .y
+            .saturating_add(bounds.height.saturating_sub(rect.height) / 3);
     }
     Some(rect)
 }

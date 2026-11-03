@@ -794,7 +794,7 @@ impl NativeSurfaceBridge {
         }
         let picker = if let Some((rect, kind)) = active_picker {
             let content_type = match kind {
-                PickerSurfaceKind::Generic => "builtin.picker",
+                PickerSurfaceKind::Generic | PickerSurfaceKind::Choice => "builtin.picker",
                 PickerSurfaceKind::Problems => "builtin.problems",
                 PickerSurfaceKind::Output => "builtin.output",
                 PickerSurfaceKind::Logs => "builtin.logs",

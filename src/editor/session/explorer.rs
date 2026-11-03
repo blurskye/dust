@@ -862,7 +862,7 @@ impl ExplorerSession {
         self.follow.is_some()
     }
 }
-fn explorer_icon_role(color: crate::files::ExplorerIconColor) -> ExplorerSegmentRole {
+pub(in crate::editor::session) fn explorer_icon_role(color: crate::files::ExplorerIconColor) -> ExplorerSegmentRole {
     match color {
         crate::files::ExplorerIconColor::Azure => ExplorerSegmentRole::IconAzure,
         crate::files::ExplorerIconColor::Blue => ExplorerSegmentRole::IconBlue,

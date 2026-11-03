@@ -377,15 +377,20 @@ impl InteractiveApplication {
             Ok(steps) => steps,
             Err(error) => return self.show_error(error),
         };
+        // Each choice leads with its language's file icon when the font has them.
+        let icons = self.configuration.settings().ui.explorer.icon_mode
+            == crate::config::ExplorerIconMode::NerdFont;
         let row = |id: String, label: String, detail: String, start: TutorStart| {
+            let file = start.language.practice_names()[0].to_owned();
+            let icon = crate::files::file_icon(&file).filter(|_| icons);
             (
                 PickerItem {
-                    badge: String::new(),
+                    badge: icon.map_or_else(String::new, |icon| icon.glyph.to_owned()),
                     kind: crate::workspace::PickerItemKind::Entry,
                     id: PickerItemId(id),
                     label,
                     detail,
-                    source: String::new(),
+                    source: if icon.is_some() { file } else { String::new() },
                     action: PickerAction::None,
                 },
                 PickerPayload::Tutor(start),
@@ -420,7 +425,7 @@ impl InteractiveApplication {
                 TutorStart { language, step: 0 },
             ));
         }
-        self.install_picker("Tutor".to_owned(), items);
+        self.install_surface_picker(crate::ui::PickerSurfaceKind::Choice, "Tutor".to_owned(), items);
         self.search.set_picker_footer("Enter start · Esc not now".to_owned());
         self.sync_picker_ui();
     }

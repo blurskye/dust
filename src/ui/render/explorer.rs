@@ -309,7 +309,7 @@ fn render_explorer_search_box(
     );
 }
 
-pub(super) fn explorer_segment_style(role: ExplorerSegmentRole) -> Style {
+pub(crate) fn explorer_segment_style(role: ExplorerSegmentRole) -> Style {
     match role {
         ExplorerSegmentRole::Tree => Style::ExplorerTree,
         ExplorerSegmentRole::Icon | ExplorerSegmentRole::IconGrey => Style::ExplorerIcon,

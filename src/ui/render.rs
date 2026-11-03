@@ -5,6 +5,7 @@ pub(crate) mod explorer;
 use debug::{debug_layout_in, render_debug_panes};
 pub use debug::{DebugPane, DebugPanesUiState, debug_pane_insets, debug_pane_tab_at};
 use explorer::{place_workspace_frame, render_explorer_window};
+pub(crate) use explorer::explorer_segment_style;
 pub(crate) mod overlays;
 use super::geometry::text_width;
 use overlays::{
@@ -521,6 +522,8 @@ pub enum PickerSurfaceKind {
     Logs,
     Debug,
     Theme,
+    /// A few choices, such as the tutor's start: a small box sized to its rows.
+    Choice,
     /// The change list: grouped sections whose entries draw status, path and provenance as
     /// their own columns.
     Changes,
