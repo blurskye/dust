@@ -632,13 +632,9 @@ impl TerminalSession {
         }
         self.epoch = Arc::new(());
     }
-    pub(in crate::editor::session) fn configure(&mut self, policy: &TerminalsConfig) -> bool {
-        if &self.policy != policy {
-            self.reset();
-            self.policy = policy.clone();
-            return true;
-        }
-        false
+    /// New terminals open from `policy`; the running ones keep going as they were started.
+    pub(in crate::editor::session) fn configure(&mut self, policy: &TerminalsConfig) {
+        self.policy = policy.clone();
     }
     pub(in crate::editor::session) fn begin_shutdown(&mut self) {
         self.preflights.clear();

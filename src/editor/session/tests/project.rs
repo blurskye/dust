@@ -5345,3 +5345,27 @@ fn switching_folders_with_open_terminals_warns_before_ending_them() {
     app.switch_workspace_root(main.clone());
     assert_eq!(app.ui.notification.as_deref(), Some("switching…"));
 }
+
+#[test]
+fn reloading_terminal_settings_keeps_running_terminals() {
+    let mut app = app();
+    app.terminal_session.fixture(
+        crate::process::PtyId(1),
+        crate::editor::session::terminal::TerminalFixture {
+            profile: "shell".into(),
+            screen: crate::ui::PtyScreen::new(80, 8, 100),
+            running: true,
+            exit_code: None,
+            truncated: false,
+        },
+        app.workspace.version(),
+    );
+    let mut candidate = crate::config::load_bundled_config();
+    let mut profile = candidate.config.terminals.profiles["shell"].clone();
+    profile.rows = 40;
+    candidate.config.terminals.profiles.insert("another".into(), profile);
+    app.apply_configuration_candidate(candidate, false)
+        .expect("accepted configuration");
+    assert_eq!(app.terminal_session.running_count(), 1);
+    assert!(app.configuration.settings().terminals.profiles.contains_key("another"));
+}

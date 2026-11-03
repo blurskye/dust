@@ -1437,12 +1437,8 @@ impl InteractiveApplication {
         self.retire_workspace_resources("configuration changed");
         self.retire_plugin_edit_sources();
         self.input.reconfigure();
-        if self
-            .terminal_session
-            .configure(&self.configuration.settings().terminals)
-        {
-            self.reject_terminal_responses("terminal configuration changed");
-        }
+        self.terminal_session
+            .configure(&self.configuration.settings().terminals);
         self.restore_input_focus();
         self.project_configuration();
         self.project_input_hints();
