@@ -467,6 +467,56 @@ fn key_hint_timeout_reload_and_pass_through_never_leave_stale_actions() {
 }
 
 #[test]
+fn an_unfinished_insert_mapping_types_its_keys() {
+    let mut app = app();
+    let clock = std::sync::Arc::new(crate::clock::ManualClock::new(
+        std::time::UNIX_EPOCH,
+        Instant::now(),
+    ));
+    app.clock = clock.clone();
+    let mut loaded = crate::config::load_bundled_config().keymaps;
+    loaded.entries.push(crate::config::KeymapEntry {
+        id: "user.test.jk".into(),
+        context: Some("editor".into()),
+        mode: "insert".into(),
+        keys: Some("j k".into()),
+        command: Some("input.cancel".into()),
+        arguments: BTreeMap::new(),
+        unmap: false,
+        disable: false,
+        pass_through: false,
+        desc: None,
+    });
+    let (keymaps, diagnostic) = compile_keymaps(
+        &app.commands,
+        &loaded,
+        &app.configuration.settings().input.keymaps,
+    );
+    assert!(diagnostic.is_none(), "{diagnostic:?}");
+    app.configuration.install_bindings(keymaps, false);
+    let (_, view) = app.state.open_text(TextBuffer::from_text(""), None);
+    app.set_dashboard_visibility(false);
+    let text = |app: &InteractiveApplication| app.state.buffers[app.state.views[view].buffer].text.to_string();
+
+    app.handle_configured_key(KeyEvent::character('i'));
+    app.handle_configured_key(KeyEvent::character('j'));
+    app.handle_configured_key(KeyEvent::character('a'));
+    assert_eq!(text(&app), "ja");
+
+    app.handle_configured_key(KeyEvent::character('j'));
+    clock.advance(Duration::from_millis(
+        app.configuration.settings().input.mapping_timeout_ms + 1,
+    ));
+    app.flush_keymap_timeout();
+    assert_eq!(text(&app), "jaj");
+
+    app.handle_configured_key(KeyEvent::character('j'));
+    app.handle_configured_key(KeyEvent::character('k'));
+    assert_eq!(text(&app), "jaj");
+    assert_eq!(app.state.views[view].mode, crate::editor::EditorMode::Normal);
+}
+
+#[test]
 fn delayed_open_preserves_newer_unsaved_canonical_buffer_and_closed_reload_cannot_reopen_it() {
     let mut app = app();
     let root = app.state.workspace_root.clone();

@@ -961,14 +961,13 @@ impl InteractiveApplication {
                 }
             }
             // A key that finishes no sequence ends it, as in Vim: `]q` must not go on to run `q`,
-            // and `<leader>gz` must not start an operator. While typing the key is still text.
-            MappingResolution::Replay(replay) => {
-                let typing = self.state.active_view.is_some_and(|view| {
-                    matches!(self.state.views[view].mode, EditorMode::Insert | EditorMode::Replace)
-                });
-                if context.starts_with("editor.") && !typing {
+            // and `<leader>gz` must not start an operator. While typing, all the keys are text,
+            // so `ja` with `jk` mapped types `ja`.
+            MappingResolution::Replay(prefix, replay) => {
+                if context.starts_with("editor.") && !self.typing() {
                     self.input.cancel_pending();
                 } else {
+                    self.type_unmapped(&context, &prefix);
                     for key in replay {
                         self.handle_configured_key(key);
                     }
@@ -981,29 +980,7 @@ impl InteractiveApplication {
                 return;
             }
             MappingResolution::Missing => {
-                let mut handled = false;
-                if let Some(character) = key.text_character() {
-                    if let Some(command_id) = self
-                        .configuration
-                        .settings()
-                        .input
-                        .character_fallback_commands
-                        .get(&context)
-                        .cloned()
-                        .or_else(|| {
-                            self.configuration
-                                .settings()
-                                .input
-                                .text_commands
-                                .get(&context)
-                                .cloned()
-                        })
-                    {
-                        self.invoke_text_command(&command_id, character.to_string());
-                        handled = true;
-                    }
-                }
-                if !handled {
+                if !self.type_unmapped(&context, std::slice::from_ref(&key)) {
                     if let Some(command_id) = self
                         .configuration
                         .settings()
@@ -1021,6 +998,34 @@ impl InteractiveApplication {
             }
         }
         self.ensure_cursor_visible();
+    }
+
+    fn typing(&self) -> bool {
+        self.state.active_view.is_some_and(|view| {
+            matches!(self.state.views[view].mode, EditorMode::Insert | EditorMode::Replace)
+        })
+    }
+
+    /// Types `keys` as text where `context` takes text, without looking them up again.
+    /// Returns false when the context takes no text or a key has none.
+    fn type_unmapped(&mut self, context: &str, keys: &[KeyEvent]) -> bool {
+        let input = &self.configuration.settings().input;
+        let Some(command_id) = input
+            .character_fallback_commands
+            .get(context)
+            .or_else(|| input.text_commands.get(context))
+            .cloned()
+        else {
+            return false;
+        };
+        let mut typed = true;
+        for key in keys {
+            match key.text_character() {
+                Some(character) => self.invoke_text_command(&command_id, character.to_string()),
+                None => typed = false,
+            }
+        }
+        typed
     }
 
     pub(super) fn handle_configured_paste(&mut self, text: String) {
@@ -1087,16 +1092,21 @@ impl InteractiveApplication {
     }
     pub(super) fn flush_keymap_timeout(&mut self) {
         let context = self.active_input_context();
-        let invocation = self.input.flush_timeout(
+        let resolution = self.input.flush_timeout(
             &context,
             self.configuration.binding_revision(),
             self.clock.monotonic(),
         );
         self.project_input_hints();
-        if let Some(invocation) = invocation {
-            self.invoke_mapped(invocation);
-            self.ensure_cursor_visible();
+        match resolution {
+            MappingResolution::Ready(invocation) => self.invoke_mapped(invocation),
+            // A lone `j` with `jk` mapped is typed once the wait is over, as in Vim.
+            MappingResolution::Replay(prefix, _) if !context.starts_with("editor.") || self.typing() => {
+                self.type_unmapped(&context, &prefix);
+            }
+            _ => return,
         }
+        self.ensure_cursor_visible();
     }
     pub(super) fn update_key_hint_ui(&mut self) {
         let context = self.active_input_context();

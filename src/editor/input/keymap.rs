@@ -94,7 +94,9 @@ pub enum MappingResolution {
     Ready(CommandInvocation),
     ReadyAndReplay(CommandInvocation, Vec<KeyEvent>),
     Ambiguous,
-    Replay(Vec<KeyEvent>),
+    /// No binding finished the sequence: the keys that started it, then the key that ended
+    /// it (none after a timeout).
+    Replay(Vec<KeyEvent>, Vec<KeyEvent>),
 }
 
 /// Compiled bindings contain no live key-sequence state.
@@ -145,7 +147,7 @@ impl KeymapSequence {
         } else if rejected.is_empty() {
             MappingResolution::Missing
         } else {
-            MappingResolution::Replay(last)
+            MappingResolution::Replay(rejected, last)
         }
     }
 
@@ -155,10 +157,12 @@ impl KeymapSequence {
     }
 
     pub fn flush_timeout(&mut self) -> MappingResolution {
-        self.pending.clear();
-        self.pending_exact
-            .take()
-            .map_or(MappingResolution::Missing, MappingResolution::Ready)
+        let pending = std::mem::take(&mut self.pending);
+        match self.pending_exact.take() {
+            Some(command) => MappingResolution::Ready(command),
+            None if pending.is_empty() => MappingResolution::Missing,
+            None => MappingResolution::Replay(pending, Vec::new()),
+        }
     }
 
     pub fn cancel(&mut self) {
@@ -260,7 +264,7 @@ mod tests {
         );
         assert_eq!(
             prefix.feed(KeyEvent::character('x')),
-            MappingResolution::Replay(vec![KeyEvent::character('x')])
+            MappingResolution::Replay(vec![KeyEvent::character('g')], vec![KeyEvent::character('x')])
         );
     }
 

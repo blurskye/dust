@@ -277,8 +277,11 @@ impl InputSession {
                     context: context.into(),
                     prefix: display_key_sequence(self.sequence.pending_sequence()),
                     started_at,
-                    deadline: matches!(result, MappingResolution::Ambiguous)
-                        .then_some(now + timeout),
+                    // While typing, a key that may start a mapping (`j` of `jk`) is typed
+                    // once the wait is over, as in Vim; elsewhere a bare prefix waits.
+                    deadline: (matches!(result, MappingResolution::Ambiguous)
+                        || matches!(context, "editor.insert" | "editor.replace" | "snippet"))
+                    .then_some(now + timeout),
                     binding_revision: revision,
                 });
             }
@@ -300,21 +303,20 @@ impl InputSession {
         context: &str,
         revision: u64,
         now: Instant,
-    ) -> Option<CommandInvocation> {
-        let pending = self.pending.as_ref()?;
+    ) -> MappingResolution {
+        let Some(pending) = self.pending.as_ref() else {
+            return MappingResolution::Missing;
+        };
         if pending.context != context || pending.binding_revision != revision {
             self.cancel_mapping();
-            return None;
+            return MappingResolution::Missing;
         }
         if pending.deadline.is_none_or(|deadline| now < deadline) {
-            return None;
+            return MappingResolution::Missing;
         }
         self.pending = None;
         self.hints = None;
-        match self.sequence.flush_timeout() {
-            MappingResolution::Ready(invocation) => Some(invocation),
-            _ => None,
-        }
+        self.sequence.flush_timeout()
     }
     pub(super) fn hide_hints(&mut self) {
         self.hints = None;
