@@ -285,6 +285,22 @@ pub(super) fn register_commands(
     )?;
     register(
         registry,
+        "edit.substitute_rest",
+        "Replace every remaining match",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_| Ok(AppEffect::SubstituteAll),
+    )?;
+    register(
+        registry,
+        "search.select_next",
+        "Select the next search match",
+        ContextRequirement::Buffer,
+        ArgumentSchema::default(),
+        |_| Ok(AppEffect::SearchSelectNext),
+    )?;
+    register(
+        registry,
         "search.repeat",
         "Repeat search",
         ContextRequirement::Buffer,

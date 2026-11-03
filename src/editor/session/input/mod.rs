@@ -205,7 +205,9 @@ impl InputSession {
                 | crate::ui::PromptKind::TerminalClose
                 | crate::ui::PromptKind::DirtyClose
                 | crate::ui::PromptKind::GitStageUnsaved => "confirmation_prompt",
-                crate::ui::PromptKind::GitDestructive | crate::ui::PromptKind::AgentPermission => {
+                crate::ui::PromptKind::GitDestructive
+                | crate::ui::PromptKind::AgentPermission
+                | crate::ui::PromptKind::SubstituteConfirm => {
                     "confirmation_prompt"
                 }
             });

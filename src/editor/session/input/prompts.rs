@@ -322,6 +322,7 @@ impl InputSession {
                 | PromptKind::BreakpointCondition
                 | PromptKind::ReplaceFind
                 | PromptKind::ReplaceWith
+                | PromptKind::SubstituteConfirm
         ) {
             return;
         }
@@ -522,6 +523,7 @@ impl InputSession {
                 | PromptKind::BreakpointCondition
                 | PromptKind::ReplaceFind
                 | PromptKind::ReplaceWith
+                | PromptKind::SubstituteConfirm
         ) {
             return;
         }

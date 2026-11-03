@@ -94,6 +94,7 @@ pub enum PromptKind {
     BreakpointCondition,
     ReplaceFind,
     ReplaceWith,
+    SubstituteConfirm,
 }
 
 impl PromptKind {
@@ -117,6 +118,7 @@ impl PromptKind {
             Self::BreakpointCondition => "Breakpoint condition",
             Self::ReplaceFind => "Replace in project: find",
             Self::ReplaceWith => "Replace with",
+            Self::SubstituteConfirm => "Replace",
         }
     }
 
@@ -135,7 +137,8 @@ impl PromptKind {
             | Self::DirtyClose
             | Self::GitStageUnsaved
             | Self::GitDestructive
-            | Self::AgentPermission => "",
+            | Self::AgentPermission
+            | Self::SubstituteConfirm => "",
             Self::ReviewComment => ">",
             Self::BreakpointCondition | Self::ReplaceFind | Self::ReplaceWith => ">",
         }
@@ -1601,7 +1604,13 @@ pub(crate) fn confirmation_layout(
         .unwrap_or(u16::MAX)
         .saturating_add(3);
     geometry.height = desired_height.min(terminal_height.max(1));
-    geometry.top = 2.min(terminal_height.saturating_sub(geometry.height));
+    // `:s///c` asks about text in the file, so its question sits above the status line,
+    // clear of the match; the session scrolls the match into the rows above it.
+    geometry.top = if prompt.kind == PromptKind::SubstituteConfirm {
+        terminal_height.saturating_sub(geometry.height.saturating_add(1))
+    } else {
+        2.min(terminal_height.saturating_sub(geometry.height))
+    };
     let buttons = format!(
         "[ {} ] [ {} ]",
         confirmation.positive_label, confirmation.negative_label

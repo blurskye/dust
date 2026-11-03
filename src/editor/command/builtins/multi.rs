@@ -2,13 +2,14 @@
 //! and below, then change them together. Insert mode types at every position in
 //! `View::block_insert`, the same as Visual block insert.
 use crate::editor::{
-    state::{EditorMode, View},
+    state::{EditingPolicy, EditorMode, View},
     text::{ByteOffset, ByteRange, TextBuffer, TextEdit, TextEditSet, next_grapheme_boundary},
     transaction::{EditorOperation, EditorTransaction, UndoPolicy},
     ViewId,
 };
 
 use super::super::CommandError;
+use super::motion::{cursor_display_column, first_nonblank, line_content_end, motion_target, on_last_character};
 use super::transaction::failed;
 
 fn is_word_character(character: char) -> bool {
@@ -133,7 +134,166 @@ pub(super) fn add_line(
     Ok(())
 }
 
-/// `c`, `i` and `a`: leave the marks for Insert mode, typing at each. `c` removes them first.
+/// The mark the cursor is on, else the first one after it.
+fn current(marks: &[ByteRange], cursor: ByteOffset) -> usize {
+    marks
+        .iter()
+        .position(|mark| mark.start == cursor || (mark.start < cursor && cursor < mark.end))
+        .or_else(|| marks.iter().position(|mark| mark.start > cursor))
+        .unwrap_or(0)
+}
+
+/// Every match of the word or selection, as Ctrl-Shift-L does in VS Code.
+pub(super) fn add_all(
+    transaction: &mut EditorTransaction,
+    view_id: ViewId,
+    view: &View,
+    text: &TextBuffer,
+) -> Result<(), CommandError> {
+    let source = text.to_string();
+    let first = match view.multi_marks.first() {
+        Some(first) if first.is_empty() => {
+            return Err(failed("selecting every match needs a word; these cursors were added by line"));
+        }
+        Some(first) => *first,
+        None => visual_range(view, text)
+            .or_else(|| word_at(&source, view.cursor.get()))
+            .ok_or_else(|| failed("no word under the cursor"))?,
+    };
+    let needle = &source[first.start.get()..first.end.get()];
+    let whole_word = needle.chars().all(is_word_character);
+    let marks: Vec<ByteRange> = source
+        .match_indices(needle)
+        .map(|(start, _)| start)
+        .filter(|start| !whole_word || is_whole_word(&source, *start, start + needle.len()))
+        .filter_map(|start| ByteRange::new(ByteOffset(start), ByteOffset(start + needle.len())).ok())
+        .collect();
+    let cursor = marks[current(&marks, view.cursor)].start;
+    set_marks(transaction, view_id, marks, cursor);
+    Ok(())
+}
+
+/// `n` and `N`: the cursor goes to the next or previous mark, round the ends.
+pub(super) fn cycle(transaction: &mut EditorTransaction, view_id: ViewId, view: &View, forward: bool) {
+    let marks = &view.multi_marks;
+    if marks.is_empty() {
+        return;
+    }
+    let index = current(marks, view.cursor);
+    let next = if forward { (index + 1) % marks.len() } else { (index + marks.len() - 1) % marks.len() };
+    transaction.undo_policy = UndoPolicy::Ignore;
+    transaction.operations.push(EditorOperation::SetCursor { view: view_id, position: marks[next].start });
+}
+
+/// `q`: drops the match the cursor is on and marks the next one instead.
+pub(super) fn skip(
+    transaction: &mut EditorTransaction,
+    view_id: ViewId,
+    view: &View,
+    text: &TextBuffer,
+) -> Result<(), CommandError> {
+    let source = text.to_string();
+    let mut marks = view.multi_marks.clone();
+    let index = current(&marks, view.cursor);
+    let skipped = marks
+        .get(index)
+        .copied()
+        .filter(|mark| !mark.is_empty())
+        .ok_or_else(|| failed("q skips a word match; these cursors were added by line"))?;
+    // With no match left to take instead, skipping just drops this one.
+    let Some(next) = next_occurrence(&source, skipped, skipped.end.get(), &marks) else {
+        remove(transaction, view_id, view);
+        return Ok(());
+    };
+    marks.remove(index);
+    marks.push(next);
+    marks.sort_by_key(|mark| mark.start);
+    set_marks(transaction, view_id, marks, next.start);
+    Ok(())
+}
+
+/// `Q`: removes the cursor the cursor is on; removing the last one goes back to Normal mode.
+pub(super) fn remove(transaction: &mut EditorTransaction, view_id: ViewId, view: &View) {
+    let mut marks = view.multi_marks.clone();
+    if marks.is_empty() {
+        return;
+    }
+    let index = current(&marks, view.cursor);
+    marks.remove(index);
+    match marks.get(index.saturating_sub(1)).map(|mark| mark.start) {
+        Some(cursor) => set_marks(transaction, view_id, marks, cursor),
+        None => {
+            transaction.undo_policy = UndoPolicy::Ignore;
+            transaction.operations.push(EditorOperation::SetMode { view: view_id, mode: EditorMode::Normal });
+        }
+    }
+}
+
+/// A motion moves every cursor; a word match becomes a cursor at its start first.
+pub(super) fn move_all(
+    transaction: &mut EditorTransaction,
+    view_id: ViewId,
+    view: &View,
+    text: &TextBuffer,
+    motion: &str,
+    count: usize,
+    policy: EditingPolicy,
+) -> Result<(), CommandError> {
+    let index = current(&view.multi_marks, view.cursor);
+    let mut cursor = None;
+    let mut marks = Vec::with_capacity(view.multi_marks.len());
+    for (at, mark) in view.multi_marks.iter().enumerate() {
+        let wanted_column = matches!(motion, "up" | "down")
+            .then(|| cursor_display_column(text, mark.start, policy))
+            .transpose()?;
+        let mut target = motion_target(text, mark.start, motion, count, None, policy, wanted_column)?;
+        if wanted_column.is_some() {
+            target = on_last_character(text, target)?;
+        }
+        if at == index {
+            cursor = Some(target);
+        }
+        marks.push(ByteRange::empty(target));
+    }
+    marks.sort_by_key(|mark| mark.start);
+    marks.dedup();
+    if let Some(cursor) = cursor {
+        set_marks(transaction, view_id, marks, cursor);
+    }
+    Ok(())
+}
+
+/// `x`: deletes the character at every cursor and keeps the cursors.
+pub(super) fn delete_char(
+    transaction: &mut EditorTransaction,
+    view_id: ViewId,
+    buffer: crate::editor::BufferId,
+    view: &View,
+    text: &TextBuffer,
+) -> Result<(), CommandError> {
+    let mut edits = Vec::new();
+    let mut points = Vec::new();
+    for mark in &view.multi_marks {
+        let next = next_grapheme_boundary(text, mark.start);
+        let range = ByteRange::new(mark.start, next).map_err(failed)?;
+        points.push(ByteRange::empty(mark.start));
+        if !range.is_empty() && text.slice(range).map_err(failed)? != "\n" {
+            edits.push(TextEdit::new(range, ""));
+        }
+    }
+    transaction.undo_policy = UndoPolicy::Record;
+    transaction.operations.push(EditorOperation::SetMultiMarks { view: view_id, marks: points });
+    if !edits.is_empty() {
+        transaction.operations.push(EditorOperation::ApplyEdits {
+            buffer,
+            edits: TextEditSet::new(text.revision(), edits),
+        });
+    }
+    Ok(())
+}
+
+/// `c`, `i` and `a` type at each mark, `I` and `A` at the start and end of each mark's line.
+/// `c` removes the marked text first.
 pub(super) fn begin_insert(
     transaction: &mut EditorTransaction,
     view_id: ViewId,
@@ -141,12 +301,19 @@ pub(super) fn begin_insert(
     view: &View,
     text: &TextBuffer,
     placement: &str,
+    marks: &[ByteRange],
 ) -> Result<(), CommandError> {
-    let positions: Vec<ByteOffset> = view
-        .multi_marks
-        .iter()
-        .map(|mark| if placement == "end" { mark.end } else { mark.start })
-        .collect();
+    let mut positions = Vec::with_capacity(marks.len());
+    for mark in marks {
+        positions.push(match placement {
+            "end" => mark.end,
+            "line_start" => first_nonblank(text, text.byte_to_line(mark.start).map_err(failed)?)?,
+            "line_end" => line_content_end(text, text.byte_to_line(mark.start).map_err(failed)?)?,
+            _ => mark.start,
+        });
+    }
+    positions.sort();
+    positions.dedup();
     let Some(first) = positions.first().copied() else {
         return Ok(());
     };

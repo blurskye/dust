@@ -118,6 +118,32 @@ fn view_substitution(
     substitution_edits(text, lines, pattern, replacement, flags)
 }
 
+/// The zero-based lines of `range` that match `pattern`, or with `invert` that don't.
+fn global_lines(
+    view: &crate::editor::state::View,
+    text: &TextBuffer,
+    range: &str,
+    pattern: &str,
+    invert: bool,
+) -> Result<Vec<usize>, String> {
+    let line_of = |offset| text.byte_to_line(offset).unwrap_or(0);
+    let selection = view
+        .selection
+        .map(|selection| (line_of(selection.anchor), line_of(selection.head)));
+    let last = text.visible_lines().saturating_sub(1);
+    let (start, end) = range_lines(range, line_of(view.cursor), selection, last)?;
+    let pattern = pattern.replace(r"\<", r"\b").replace(r"\>", r"\b");
+    let regex = regex::Regex::new(&pattern).map_err(|error| error.to_string())?;
+    let mut lines = Vec::new();
+    for number in start..=end {
+        let line = text.line(number).map_err(|error| error.to_string())?;
+        if regex.is_match(line.trim_end_matches(['\n', '\r'])) != invert {
+            lines.push(number);
+        }
+    }
+    Ok(lines)
+}
+
 impl InteractiveApplication {
     /// Shows what a `:s` being typed puts in place of each match, as with Vim's inccommand.
     pub(super) fn preview_substitute(&mut self) {
@@ -176,6 +202,18 @@ impl InteractiveApplication {
             self.show_error(format!("pattern not found: {pattern}"));
             return;
         }
+        if flags.contains('c') {
+            self.substitute_confirm = Some(SubstituteConfirm {
+                view: view_id,
+                buffer: buffer_id,
+                revision,
+                edits,
+                next: 0,
+                accepted: Vec::new(),
+            });
+            self.ask_next_substitution();
+            return;
+        }
         let count = edits.len();
         let transaction = EditorTransaction::new(self.transaction_id())
             .with_precondition(Precondition::BufferRevision {
@@ -196,6 +234,195 @@ impl InteractiveApplication {
         }
         self.notify_message(format!("{count} substitutions on {lines} lines"), false);
     }
+
+    /// `:g/pattern/d`, or with `invert` `:v/pattern/d`: deletes the lines of `range` (the whole
+    /// file without one) that match, or that don't.
+    pub(super) fn run_global_delete(&mut self, range: &str, pattern: &str, invert: bool) {
+        let Some(view_id) = self.state.active_view else {
+            return;
+        };
+        let view = &self.state.views[view_id];
+        let buffer_id = view.buffer;
+        let text = &self.state.buffers[buffer_id].text;
+        let revision = text.revision();
+        let result = global_lines(view, text, if range.is_empty() { "%" } else { range }, pattern, invert);
+        let lines = match result {
+            Ok(lines) => lines,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        if lines.is_empty() {
+            self.show_error(format!("pattern not found: {pattern}"));
+            return;
+        }
+        let mut edits: Vec<TextEdit> = Vec::new();
+        for line in &lines {
+            let start = text.line_to_byte(*line).map_or(0, ByteOffset::get);
+            let end = text
+                .line_to_byte(line + 1)
+                .map_or(text.len_bytes(), ByteOffset::get);
+            match edits.last_mut() {
+                Some(last) if last.range().end.get() == start => {
+                    let merged_start = last.range().start;
+                    *last = TextEdit::new(
+                        ByteRange::new(merged_start, ByteOffset(end)).expect("lines are in order"),
+                        "",
+                    );
+                }
+                _ => edits.push(TextEdit::new(
+                    ByteRange::new(ByteOffset(start), ByteOffset(end)).expect("a line"),
+                    "",
+                )),
+            }
+        }
+        let transaction = EditorTransaction::new(self.transaction_id())
+            .with_precondition(Precondition::BufferRevision {
+                buffer: buffer_id,
+                revision,
+            })
+            .with_precondition(Precondition::BufferWritable(buffer_id))
+            .with_operation(EditorOperation::ApplyEdits {
+                buffer: buffer_id,
+                edits: TextEditSet::new(revision, edits),
+            });
+        if let Err(error) = self.state.apply_transaction(&transaction) {
+            self.show_error(error);
+            return;
+        }
+        if self.state.views[view_id].mode != EditorMode::Normal {
+            self.set_mode(EditorMode::Normal);
+        }
+        self.notify_message(format!("{} lines deleted", lines.len()), false);
+    }
+
+    /// Selects the next match of a `:s///c` and asks whether to replace it.
+    fn ask_next_substitution(&mut self) {
+        let Some(confirm) = &self.substitute_confirm else {
+            return;
+        };
+        let Some(edit) = confirm.edits.get(confirm.next) else {
+            self.finish_substitution();
+            return;
+        };
+        let text = self.state.buffers.get(confirm.buffer).map(|buffer| &buffer.text);
+        if text.map(TextBuffer::revision) != Some(confirm.revision) {
+            self.substitute_confirm = None;
+            self.show_error("the file changed, so replacing stopped");
+            return;
+        }
+        let found = text.and_then(|text| text.slice(edit.range()).ok()).unwrap_or_default();
+        let message = format!(
+            "Replace `{found}` with `{}`? Match {} of {}; a replaces the rest, esc stops.",
+            edit.replacement(),
+            confirm.next + 1,
+            confirm.edits.len()
+        );
+        let (view, range) = (confirm.view, edit.range());
+        if !self.select_text(view, range.start.get(), range.end.get()) {
+            self.substitute_confirm = None;
+            return;
+        }
+        self.scroll_above_substitute_question(view, range.start);
+        self.open_confirmation_actions(
+            PromptKind::SubstituteConfirm,
+            "Replace".into(),
+            message,
+            crate::ui::ConfirmationChoice::Yes,
+            "Replace",
+            "Skip",
+        );
+    }
+
+    /// Keep the match in the top part of the pane, clear of the question at the bottom.
+    fn scroll_above_substitute_question(&mut self, view: crate::editor::ViewId, at: ByteOffset) {
+        const QUESTION_ROWS: usize = 6;
+        let Some(height) = crate::ui::view_pane_viewport(&self.state, &self.ui, view)
+            .map(|viewport| usize::from(viewport.height))
+        else {
+            return;
+        };
+        let Some((line, first_line)) = self.state.views.get(view).and_then(|target| {
+            let text = &self.state.buffers.get(target.buffer)?.text;
+            Some((text.byte_to_line(at).ok()?, target.scroll_line))
+        }) else {
+            return;
+        };
+        if line >= first_line && line < first_line + height.saturating_sub(QUESTION_ROWS).max(1) {
+            return;
+        }
+        let transaction = EditorTransaction::new(self.transaction_id())
+            .with_operation(EditorOperation::SetScroll {
+                view,
+                first_line: line.saturating_sub(height / 3),
+            })
+            .with_undo_policy(super::UndoPolicy::Ignore);
+        if let Err(error) = self.state.apply_transaction(&transaction) {
+            self.show_error(error);
+        }
+    }
+
+    /// Replace (or skip) the match being asked about, or with `all` every one left, then ask
+    /// about the next.
+    pub(super) fn answer_substitution(&mut self, replace: bool, all: bool) {
+        let Some(mut confirm) = self.substitute_confirm.take() else {
+            return;
+        };
+        let end = if all { confirm.edits.len() } else { confirm.next + 1 };
+        if replace {
+            let next = confirm.next;
+            confirm.accepted.extend(confirm.edits[next..end].iter().cloned());
+        }
+        confirm.next = end;
+        // Taken out, so closing this question doesn't count as stopping.
+        self.close_prompt();
+        self.substitute_confirm = Some(confirm);
+        self.ask_next_substitution();
+    }
+
+    /// Makes the replacements said yes to, as one change to undo.
+    pub(super) fn finish_substitution(&mut self) {
+        let Some(confirm) = self.substitute_confirm.take() else {
+            return;
+        };
+        if self.input.prompt().is_some_and(|prompt| prompt.kind == PromptKind::SubstituteConfirm) {
+            self.close_prompt();
+        }
+        if self.state.views.contains_key(confirm.view) {
+            self.set_specific_mode(confirm.view, EditorMode::Normal);
+        }
+        let count = confirm.accepted.len();
+        if count == 0 {
+            self.notify_message("nothing was replaced".into(), false);
+            return;
+        }
+        let transaction = EditorTransaction::new(self.transaction_id())
+            .with_precondition(Precondition::BufferRevision {
+                buffer: confirm.buffer,
+                revision: confirm.revision,
+            })
+            .with_precondition(Precondition::BufferWritable(confirm.buffer))
+            .with_operation(EditorOperation::ApplyEdits {
+                buffer: confirm.buffer,
+                edits: TextEditSet::new(confirm.revision, confirm.accepted),
+            });
+        if let Err(error) = self.state.apply_transaction(&transaction) {
+            self.show_error(error);
+            return;
+        }
+        self.notify_message(format!("{count} substitutions"), false);
+    }
+}
+
+/// A `:s///c` in progress: its matches, found before anything changed, and which to replace.
+pub(super) struct SubstituteConfirm {
+    view: crate::editor::ViewId,
+    buffer: crate::editor::BufferId,
+    revision: crate::editor::text::BufferRevision,
+    edits: Vec<TextEdit>,
+    next: usize,
+    accepted: Vec<TextEdit>,
 }
 
 #[cfg(test)]
@@ -236,6 +463,15 @@ mod tests {
             Some(("2,3".into(), "a".into(), "b".into(), "g".into()))
         );
         assert_eq!(typed("set wrap"), None);
+    }
+
+    #[test]
+    fn global_takes_the_lines_that_match_or_with_v_the_others() {
+        let text = TextBuffer::from_text("keep\n// note\nkeep too\n// more\n");
+        let view = crate::editor::state::View::new(crate::editor::BufferId::default());
+        assert_eq!(global_lines(&view, &text, "%", "^//", false), Ok(vec![1, 3]));
+        assert_eq!(global_lines(&view, &text, "%", "^//", true), Ok(vec![0, 2]));
+        assert_eq!(global_lines(&view, &text, "1,2", r"\<keep\>", false), Ok(vec![0]));
     }
 
     #[test]

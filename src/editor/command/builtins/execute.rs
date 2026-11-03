@@ -155,15 +155,42 @@ pub(super) fn execute_builtin<E>(
             &buffer.text,
             invocation.id.as_str() == "multi.add_below",
         )?,
-        "multi.insert" => multi::begin_insert(
+        "multi.insert" => {
+            // Visual block `I` and `A` type at every row of the block.
+            let block = if view.mode == EditorMode::VisualBlock {
+                visual_ranges(&buffer.text, view, state.policy)?.0
+            } else {
+                view.multi_marks.clone()
+            };
+            multi::begin_insert(
+                &mut transaction,
+                view_id,
+                buffer_id,
+                view,
+                &buffer.text,
+                string_argument(invocation, "placement")?,
+                &block,
+            )?;
+        }
+        "multi.delete" => multi::delete(&mut transaction, view_id, buffer_id, view, &buffer.text),
+        "multi.add_all" => multi::add_all(&mut transaction, view_id, view, &buffer.text)?,
+        "multi.next" | "multi.previous" => {
+            multi::cycle(&mut transaction, view_id, view, invocation.id.as_str() == "multi.next");
+        }
+        "multi.skip" => multi::skip(&mut transaction, view_id, view, &buffer.text)?,
+        "multi.remove" => multi::remove(&mut transaction, view_id, view),
+        "multi.move" => multi::move_all(
             &mut transaction,
             view_id,
-            buffer_id,
             view,
             &buffer.text,
-            string_argument(invocation, "placement")?,
+            string_argument(invocation, "motion")?,
+            count,
+            state.policy,
         )?,
-        "multi.delete" => multi::delete(&mut transaction, view_id, buffer_id, view, &buffer.text),
+        "multi.delete_char" => {
+            multi::delete_char(&mut transaction, view_id, buffer_id, view, &buffer.text)?;
+        }
         "mode.visual_char" | "mode.visual_line" | "mode.visual_block" => {
             transaction.undo_policy = UndoPolicy::Ignore;
             transaction.operations.push(EditorOperation::SetMode {

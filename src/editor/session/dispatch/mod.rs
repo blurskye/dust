@@ -186,6 +186,8 @@ struct InteractiveApplication {
     pub(super) git_stamp: Option<[Option<std::time::SystemTime>; 2]>,
     /// What project replace is looking for, while it asks what to replace it with.
     replace_query: Option<String>,
+    /// A `:s///c` asking about each match in turn.
+    substitute_confirm: Option<substitute::SubstituteConfirm>,
     session_load_requested: bool,
     notices: super::notifications::NoticeSession,
     clock: std::sync::Arc<dyn crate::clock::Clock>,

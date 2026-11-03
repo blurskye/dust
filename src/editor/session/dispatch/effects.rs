@@ -2887,6 +2887,11 @@ impl InteractiveApplication {
                 replacement,
                 flags,
             } => self.run_substitute(&range, &pattern, &replacement, &flags),
+            AppEffect::GlobalDelete {
+                range,
+                pattern,
+                invert,
+            } => self.run_global_delete(&range, &pattern, invert),
             AppEffect::LspCompletionLeave => {
                 self.cancel_lsp_completion();
                 self.invoke_mapped_command("input.cancel");
@@ -4953,6 +4958,10 @@ impl InteractiveApplication {
             self.workspace.cancel_confirmation();
         }
         self.cancel_explorer_confirmation();
+        let substituting = self
+            .input
+            .prompt()
+            .is_some_and(|prompt| prompt.kind == PromptKind::SubstituteConfirm);
         if let Some((view, mode)) = self.input.close_prompt(&self.state.window_version()) {
             if self.state.views.contains_key(view) {
                 self.set_specific_mode(view, mode);
@@ -4960,6 +4969,10 @@ impl InteractiveApplication {
         }
         self.restore_input_focus();
         self.project_input_prompt();
+        // Closing the question any other way than answering it stops, keeping what was replaced.
+        if substituting {
+            self.finish_substitution();
+        }
     }
     pub(super) fn present_next_plugin_confirmation(&mut self) {
         if self.input.prompt().is_some() {
@@ -5224,6 +5237,7 @@ impl InteractiveApplication {
                 | PromptKind::BreakpointCondition
                 | PromptKind::ReplaceFind
                 | PromptKind::ReplaceWith
+                | PromptKind::SubstituteConfirm
         ) {
             self.record_prompt_history(prompt.kind, &prompt.input);
         }
@@ -5315,6 +5329,12 @@ impl InteractiveApplication {
                     .map_or(crate::ui::ConfirmationChoice::No, |state| state.selected),
             ),
             PromptKind::ExplorerRename => self.submit_explorer_rename_prompt(&prompt.input),
+            PromptKind::SubstituteConfirm => self.answer_substitution(
+                prompt
+                    .confirmation
+                    .is_some_and(|state| state.selected == crate::ui::ConfirmationChoice::Yes),
+                false,
+            ),
             PromptKind::ReviewComment => {
                 self.close_prompt();
                 self.submit_review_comment(prompt.input);
@@ -5456,6 +5476,84 @@ impl InteractiveApplication {
         } else {
             self.ensure_cursor_visible();
         }
+    }
+
+    /// `gn`: selects the search match under the cursor, else the next one, as Vim does.
+    /// Returns false, having said why, when there is none.
+    pub(super) fn select_next_search_match(&mut self) -> bool {
+        let Some(query) = self.ui.search_query.clone() else {
+            self.show_error(self.message("no_previous_search", &[]));
+            return false;
+        };
+        let Some(view_id) = self.state.active_view else {
+            return false;
+        };
+        let view = &self.state.views[view_id];
+        let cursor = view.cursor.get();
+        let buffer = &self.state.buffers[view.buffer];
+        let source = buffer.text.to_string();
+        let matches = match crate::editor::input::search_matches(
+            &source,
+            &query,
+            self.configuration.settings().search.smart_case,
+            false,
+        ) {
+            Ok(matches) => matches,
+            Err(error) => {
+                self.show_error(error);
+                return false;
+            }
+        };
+        let wrap = self.configuration.settings().search.wrap;
+        let mut found = matches.iter().filter(|found| !found.is_empty());
+        let Some(found) = found
+            .clone()
+            .find(|found| found.end > cursor)
+            .or_else(|| wrap.then(|| found.next()).flatten())
+            .cloned()
+        else {
+            self.show_error(self.message("pattern_not_found", &[("query", query)]));
+            return false;
+        };
+        self.select_text(view_id, found.start, found.end)
+    }
+
+    /// Selects `start..end` in character Visual mode, with the cursor on its last character.
+    pub(super) fn select_text(&mut self, view_id: crate::editor::ViewId, start: usize, end: usize) -> bool {
+        let Some(text) = self
+            .state
+            .views
+            .get(view_id)
+            .and_then(|view| self.state.buffers.get(view.buffer))
+            .map(|buffer| &buffer.text)
+        else {
+            return false;
+        };
+        let head = crate::editor::text::previous_grapheme_boundary(text, ByteOffset(end));
+        let transaction = EditorTransaction::new(self.transaction_id())
+            .with_operation(EditorOperation::SetMode {
+                view: view_id,
+                mode: EditorMode::VisualChar,
+            })
+            .with_operation(EditorOperation::SetSelection {
+                view: view_id,
+                selection: Some(crate::editor::Selection {
+                    anchor: ByteOffset(start),
+                    head,
+                    kind: crate::editor::SelectionKind::Character,
+                }),
+            })
+            .with_operation(EditorOperation::SetCursor {
+                view: view_id,
+                position: head,
+            })
+            .with_undo_policy(UndoPolicy::Ignore);
+        if let Err(error) = self.state.apply_transaction(&transaction) {
+            self.show_error(error);
+            return false;
+        }
+        self.ensure_cursor_visible();
+        true
     }
 }
 
@@ -13047,6 +13145,14 @@ impl InteractiveApplication {
                 self.perform_search(forward);
             }
             AppEffect::SearchWord { forward } => self.search_word_under_cursor(forward),
+            AppEffect::SubstituteAll => {
+                if self.substitute_confirm.is_some() {
+                    self.answer_substitution(true, true);
+                }
+            }
+            AppEffect::SearchSelectNext => {
+                self.select_next_search_match();
+            }
             AppEffect::Scroll {
                 kind,
                 count,

@@ -1144,6 +1144,19 @@ impl InteractiveApplication {
                 invocation = invocation.with_argument("comment", CommandValue::String(token));
             }
         }
+        // `cgn`, `dgn`: the operator acts on the next search match, selected as `gn` does, and
+        // `.` repeats it on the match after that.
+        let search_match = (invocation.id.as_str() == "edit.operator"
+            && invocation.arguments.get("motion")
+                == Some(&CommandValue::String("search_match".into())))
+        .then(|| invocation.clone());
+        if search_match.is_some() {
+            if !self.select_next_search_match() {
+                self.set_mode(EditorMode::Normal);
+                return;
+            }
+            invocation = invocation.with_argument("motion", CommandValue::String("visual".into()));
+        }
         let visual_operator = invocation.id.as_str() == "edit.operator"
             && invocation
                 .arguments
@@ -1154,9 +1167,11 @@ impl InteractiveApplication {
                 .arguments
                 .get("operator")
                 .is_some_and(|operator| operator == &CommandValue::String("yank".into()));
-        let repeat_override = visual_operator
-            .then(|| self.normalized_visual_repeat(&invocation))
-            .flatten();
+        let repeat_override = search_match.or_else(|| {
+            visual_operator
+                .then(|| self.normalized_visual_repeat(&invocation))
+                .flatten()
+        });
         // Long moves are jumps that `ctrl-o` comes back from, as in Vim.
         if invocation.id.as_str() == "view.cursor.move"
             && invocation.arguments.get("motion").is_some_and(|motion| {

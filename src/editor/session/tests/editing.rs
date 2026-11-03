@@ -898,6 +898,147 @@ fn several_cursors_change_every_match_and_type_on_every_line() {
 }
 
 #[test]
+fn cgn_repeats_with_dot_substitute_confirms_each_match_and_global_deletes_lines() {
+    let mut app = app();
+    let (_, view) = app
+        .state
+        .open_text(TextBuffer::from_text("cat one\ncat two\n// cat three\ncat four\n"), None);
+    app.set_dashboard_visibility(false);
+    let press = |app: &mut InteractiveApplication, key: &str| {
+        let event = match key.chars().collect::<Vec<_>>()[..] {
+            [character] => KeyEvent::character(character),
+            _ => key.parse().expect("key"),
+        };
+        app.handle_configured_key(event);
+    };
+    let typed = |app: &mut InteractiveApplication, keys: &str| {
+        for character in keys.chars() {
+            app.handle_configured_key(KeyEvent::character(character));
+        }
+    };
+    let text = |app: &InteractiveApplication| app.state.buffers[app.state.views[view].buffer].text.to_string();
+
+    // `/cat` goes to the second cat; `cgn` changes it and `.` the one after.
+    typed(&mut app, "/cat");
+    press(&mut app, "enter");
+    typed(&mut app, "cgndog");
+    press(&mut app, "escape");
+    assert_eq!(text(&app), "cat one\ndog two\n// cat three\ncat four\n");
+    press(&mut app, ".");
+    assert_eq!(text(&app), "cat one\ndog two\n// dog three\ncat four\n");
+
+    // `:s///c` asks about each match: skip the first, replace the second.
+    typed(&mut app, ":%s/cat/cow/c");
+    press(&mut app, "enter");
+    assert_eq!(app.input.prompt().map(|prompt| prompt.kind), Some(crate::ui::PromptKind::SubstituteConfirm));
+    press(&mut app, "n");
+    press(&mut app, "y");
+    assert_eq!(text(&app), "cat one\ndog two\n// dog three\ncow four\n");
+    assert!(app.input.prompt().is_none());
+    assert_eq!(app.state.views[view].mode, crate::editor::EditorMode::Normal);
+    press(&mut app, "u");
+    assert_eq!(text(&app), "cat one\ndog two\n// dog three\ncat four\n");
+
+    // `a` replaces every match left.
+    typed(&mut app, ":%s/cat/cow/c");
+    press(&mut app, "enter");
+    press(&mut app, "a");
+    assert_eq!(text(&app), "cow one\ndog two\n// dog three\ncow four\n");
+
+    // `:g` deletes the lines that match, `:v` the ones that don't.
+    typed(&mut app, ":g#^//#d");
+    press(&mut app, "enter");
+    assert_eq!(text(&app), "cow one\ndog two\ncow four\n");
+    typed(&mut app, ":v/cow/d");
+    press(&mut app, "enter");
+    assert_eq!(text(&app), "cow one\ncow four\n");
+}
+
+#[test]
+fn multi_cursors_take_every_match_skip_remove_and_move_together() {
+    let mut app = app();
+    let (_, view) = app
+        .state
+        .open_text(TextBuffer::from_text("let cat = 1;\nlet cat = 2;\nlet cat = 3;\nlet dog = cat;\n"), None);
+    app.set_dashboard_visibility(false);
+    let press = |app: &mut InteractiveApplication, key: &str| {
+        let event = match key.chars().collect::<Vec<_>>()[..] {
+            [character] => KeyEvent::character(character),
+            _ => key.parse().expect("key"),
+        };
+        app.handle_configured_key(event);
+    };
+    let text = |app: &InteractiveApplication| app.state.buffers[app.state.views[view].buffer].text.to_string();
+    let marks = |app: &InteractiveApplication| app.state.views[view].multi_marks.len();
+
+    // Ctrl-Shift-L takes every match; Q drops the one the cursor is on.
+    app.state.views[view].cursor = ByteOffset(4);
+    press(&mut app, "ctrl-shift-l");
+    assert_eq!(marks(&app), 4);
+    press(&mut app, "N");
+    assert_eq!(app.state.views[view].cursor, ByteOffset("let cat = 1;\nlet cat = 2;\nlet cat = 3;\nlet dog = ".len()));
+    press(&mut app, "Q");
+    assert_eq!(marks(&app), 3);
+    press(&mut app, "c");
+    for key in ["c", "o", "w"] {
+        press(&mut app, key);
+    }
+    press(&mut app, "escape");
+    assert_eq!(text(&app), "let cow = 1;\nlet cow = 2;\nlet cow = 3;\nlet dog = cat;\n");
+
+    // q skips the second match for the one after it.
+    app.state.views[view].cursor = ByteOffset(4);
+    press(&mut app, "ctrl-n");
+    press(&mut app, "ctrl-n");
+    press(&mut app, "q");
+    let starts: Vec<usize> = app.state.views[view].multi_marks.iter().map(|mark| mark.start.get()).collect();
+    assert_eq!(starts, vec![4, "let cow = 1;\nlet cow = 2;\nlet ".len()]);
+    press(&mut app, "escape");
+    // With every match already taken, q just drops the one it is on.
+    app.state.views[view].cursor = ByteOffset(4);
+    press(&mut app, "ctrl-shift-l");
+    assert_eq!(marks(&app), 3);
+    press(&mut app, "q");
+    assert_eq!(marks(&app), 2);
+    press(&mut app, "escape");
+
+    // Motions move every cursor; x deletes at each, and A types at each line's end.
+    app.state.views[view].cursor = ByteOffset(0);
+    press(&mut app, "ctrl-alt-j");
+    press(&mut app, "ctrl-alt-j");
+    press(&mut app, "w");
+    press(&mut app, "x");
+    assert_eq!(text(&app), "let ow = 1;\nlet ow = 2;\nlet ow = 3;\nlet dog = cat;\n");
+    press(&mut app, "A");
+    press(&mut app, "!");
+    press(&mut app, "escape");
+    assert_eq!(text(&app), "let ow = 1;!\nlet ow = 2;!\nlet ow = 3;!\nlet dog = cat;\n");
+}
+
+#[test]
+fn visual_block_i_and_a_type_before_and_after_every_row() {
+    let mut app = app();
+    let (_, view) = app.state.open_text(TextBuffer::from_text("  x = 1\n  y = 2\n  z = 3\n"), None);
+    app.set_dashboard_visibility(false);
+    let keys = |app: &mut InteractiveApplication, keys: &str| {
+        for character in keys.chars() {
+            app.handle_configured_key(KeyEvent::character(character));
+        }
+    };
+    let text = |app: &InteractiveApplication| app.state.buffers[app.state.views[view].buffer].text.to_string();
+    app.state.views[view].cursor = ByteOffset(2);
+    app.handle_configured_key("ctrl-v".parse().expect("key"));
+    keys(&mut app, "2jIlet ");
+    app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Escape));
+    assert_eq!(text(&app), "  let x = 1\n  let y = 2\n  let z = 3\n");
+    app.state.views[view].cursor = ByteOffset("  let ".len());
+    app.handle_configured_key("ctrl-v".parse().expect("key"));
+    keys(&mut app, "jA:");
+    app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Escape));
+    assert_eq!(text(&app), "  let x: = 1\n  let y: = 2\n  let z = 3\n");
+}
+
+#[test]
 fn unknown_key_after_a_prefix_ends_the_sequence_without_editing() {
     let mut app = app();
     let path = app.state.workspace_root.join("prefix.txt");

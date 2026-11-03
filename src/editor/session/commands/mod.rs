@@ -159,6 +159,8 @@ pub enum AppEffect {
     SearchRepeat {
         reverse: bool,
     },
+    SearchSelectNext,
+    SubstituteAll,
     SearchWord {
         forward: bool,
     },
@@ -251,6 +253,11 @@ pub enum AppEffect {
         pattern: String,
         replacement: String,
         flags: String,
+    },
+    GlobalDelete {
+        range: String,
+        pattern: String,
+        invert: bool,
     },
     LspCompletionLeave,
     SyntaxIndentLine,

@@ -32,12 +32,25 @@ pub fn register_builtin_commands<E: 'static>(
         ContextRequirement::View,
         ArgumentSchema::default().field("placement", ArgumentType::String, true),
     )?;
+    register(
+        registry,
+        "multi.move",
+        "Move every cursor",
+        ContextRequirement::View,
+        ArgumentSchema::default().field("motion", ArgumentType::String, true),
+    )?;
     for (id, title) in [
         ("mode.normal", "Enter Normal mode"),
         ("multi.add_next", "Add a cursor at the next match"),
         ("multi.add_below", "Add a cursor below"),
         ("multi.add_above", "Add a cursor above"),
         ("multi.delete", "Delete at every cursor"),
+        ("multi.add_all", "Add a cursor at every match"),
+        ("multi.next", "Go to the next cursor"),
+        ("multi.previous", "Go to the previous cursor"),
+        ("multi.skip", "Skip this match and add the next"),
+        ("multi.remove", "Remove this cursor"),
+        ("multi.delete_char", "Delete the character at every cursor"),
         ("mode.replace", "Enter Replace mode"),
         ("mode.visual_char", "Enter character Visual mode"),
         ("mode.visual_line", "Enter line Visual mode"),

@@ -38,6 +38,42 @@ fn parse_substitute(input: &str) -> Option<Result<CommandInvocation, ExParseErro
     )
 }
 
+/// `:g/pattern/d` deletes every line that matches, `:v/pattern/d` every line that doesn't.
+/// Without a range they cover the whole file, as in Vim.
+fn parse_global(input: &str) -> Option<Result<CommandInvocation, ExParseError>> {
+    let name_at = input
+        .find(|character: char| !(character.is_ascii_digit() || "%.,$'<>".contains(character)))?;
+    let (range, rest) = input.split_at(name_at);
+    let (invert, rest) = [("vglobal", true), ("global!", true), ("global", false), ("g!", true), ("v", true), ("g", false)]
+        .into_iter()
+        .find_map(|(name, invert)| rest.strip_prefix(name).map(|rest| (invert, rest)))?;
+    let delimiter = rest
+        .chars()
+        .next()
+        .filter(|character| !character.is_alphanumeric() && !character.is_whitespace())?;
+    let mut parts = split_unescaped(&rest[delimiter.len_utf8()..], delimiter).into_iter();
+    let pattern = parts.next().unwrap_or_default();
+    let action = parts.next().unwrap_or_default();
+    if pattern.is_empty() {
+        return Some(Err(ExParseError::MissingArgument("pattern")));
+    }
+    if !matches!(action.trim(), "d" | "delete") {
+        return Some(Err(ExParseError::UnexpectedArguments(format!(
+            "{action}: only `d` works after :g and :v"
+        ))));
+    }
+    Some(
+        command("edit.global_delete")
+            .map(|invocation| {
+                invocation
+                    .with_argument("range", CommandValue::String(range.to_owned()))
+                    .with_argument("pattern", CommandValue::String(pattern))
+                    .with_argument("invert", CommandValue::Bool(invert))
+            })
+            .map_err(Into::into),
+    )
+}
+
 /// The pattern of a `:s` while it is being typed, so its matches can show before it runs.
 #[must_use]
 pub fn substitute_pattern(input: &str) -> Option<String> {
@@ -94,7 +130,7 @@ pub fn parse_ex(
     if input.is_empty() {
         return Err(ExParseError::Empty);
     }
-    if let Some(invocation) = parse_substitute(input) {
+    if let Some(invocation) = parse_substitute(input).or_else(|| parse_global(input)) {
         return invocation;
     }
     // `:12` goes to line 12 and `:$` to the last line, as `12G` and `G` do.

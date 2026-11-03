@@ -156,6 +156,7 @@ impl InteractiveApplication {
             next_disk_check: None,
             git_stamp: None,
             replace_query: None,
+            substitute_confirm: None,
             session_load_requested: false,
             window_session: WindowSession::new(dashboard_visible, terminal_panel_height),
             tooling,

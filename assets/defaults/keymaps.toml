@@ -1024,6 +1024,20 @@ context = "editor"
 mode = "visual_line"
 keys = ","
 command = "input.find.reverse"
+# `gn` is the next search match: `cgn` changes it and `.` changes the one after, as in Vim.
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.g-n"
+context = "editor"
+mode = "operator_pending"
+keys = "g n"
+command = "input.motion"
+arguments = { motion = "search_match", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.search-select-next.g-n"
+context = "editor"
+mode = "normal"
+keys = "g n"
+command = "search.select_next"
 [[keymap]]
 id = "builtin.editor.operator-pending.input-motion.i-w"
 context = "editor"
@@ -2051,6 +2065,17 @@ id = "builtin.confirmation-prompt.surface.confirmation-no.n"
 context = "confirmation_prompt"
 keys = "n"
 command = "surface.confirmation.select_no"
+# While `:s///c` asks about each match, `a` replaces the rest and `q` stops, as in Vim.
+[[keymap]]
+id = "builtin.confirmation-prompt.edit-substitute-rest.a"
+context = "confirmation_prompt"
+keys = "a"
+command = "edit.substitute_rest"
+[[keymap]]
+id = "builtin.confirmation-prompt.command-line-cancel.q"
+context = "confirmation_prompt"
+keys = "q"
+command = "command_line.cancel"
 [[keymap]]
 id = "builtin.confirmation-prompt.surface.confirmation-no.upper-n"
 context = "confirmation_prompt"
@@ -2591,6 +2616,138 @@ mode = "visual_block"
 keys = "right"
 command = "input.motion"
 arguments = { motion = "right", linewise = false }
+# I and A type before and after the block on every line, as in Vim.
+[[keymap]]
+id = "builtin.editor.visual-block.multi-insert.upper-i"
+context = "editor"
+mode = "visual_block"
+keys = "I"
+command = "multi.insert"
+arguments = { placement = "start" }
+[[keymap]]
+id = "builtin.editor.visual-block.multi-insert.upper-a"
+context = "editor"
+mode = "visual_block"
+keys = "A"
+command = "multi.insert"
+arguments = { placement = "end" }
+[[keymap]]
+id = "builtin.editor.visual-block.input-count.key-1"
+context = "editor"
+mode = "visual_block"
+keys = "1"
+command = "input.count"
+arguments = { digit = 1 }
+[[keymap]]
+id = "builtin.editor.visual-block.input-count.key-2"
+context = "editor"
+mode = "visual_block"
+keys = "2"
+command = "input.count"
+arguments = { digit = 2 }
+[[keymap]]
+id = "builtin.editor.visual-block.input-count.key-3"
+context = "editor"
+mode = "visual_block"
+keys = "3"
+command = "input.count"
+arguments = { digit = 3 }
+[[keymap]]
+id = "builtin.editor.visual-block.input-count.key-4"
+context = "editor"
+mode = "visual_block"
+keys = "4"
+command = "input.count"
+arguments = { digit = 4 }
+[[keymap]]
+id = "builtin.editor.visual-block.input-count.key-5"
+context = "editor"
+mode = "visual_block"
+keys = "5"
+command = "input.count"
+arguments = { digit = 5 }
+[[keymap]]
+id = "builtin.editor.visual-block.input-count.key-6"
+context = "editor"
+mode = "visual_block"
+keys = "6"
+command = "input.count"
+arguments = { digit = 6 }
+[[keymap]]
+id = "builtin.editor.visual-block.input-count.key-7"
+context = "editor"
+mode = "visual_block"
+keys = "7"
+command = "input.count"
+arguments = { digit = 7 }
+[[keymap]]
+id = "builtin.editor.visual-block.input-count.key-8"
+context = "editor"
+mode = "visual_block"
+keys = "8"
+command = "input.count"
+arguments = { digit = 8 }
+[[keymap]]
+id = "builtin.editor.visual-block.input-count.key-9"
+context = "editor"
+mode = "visual_block"
+keys = "9"
+command = "input.count"
+arguments = { digit = 9 }
+[[keymap]]
+id = "builtin.editor.visual-block.input-zero.key-0"
+context = "editor"
+mode = "visual_block"
+keys = "0"
+command = "input.zero"
+[[keymap]]
+id = "builtin.editor.visual-block.input-motion.w"
+context = "editor"
+mode = "visual_block"
+keys = "w"
+command = "input.motion"
+arguments = { motion = "word_forward", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.input-motion.b"
+context = "editor"
+mode = "visual_block"
+keys = "b"
+command = "input.motion"
+arguments = { motion = "word_backward", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.input-motion.e"
+context = "editor"
+mode = "visual_block"
+keys = "e"
+command = "input.motion"
+arguments = { motion = "word_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.input-motion.caret"
+context = "editor"
+mode = "visual_block"
+keys = "^"
+command = "input.motion"
+arguments = { motion = "first_nonblank", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.input-motion.upper-g"
+context = "editor"
+mode = "visual_block"
+keys = "G"
+command = "input.motion"
+arguments = { motion = "document_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.input-motion.g-g"
+context = "editor"
+mode = "visual_block"
+keys = "g g"
+command = "input.motion"
+arguments = { motion = "document_start", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.selection-swap.o"
+context = "editor"
+mode = "visual_block"
+keys = "o"
+command = "view.selection.swap"
 
 # Spatial focus uses the same Ctrl-h/j/k/l model across editor and explorer surfaces.
 [[keymap]]
@@ -6590,6 +6747,187 @@ context = "editor"
 mode = "multi"
 keys = "d"
 command = "multi.delete"
+# VS Code selects every match with Ctrl-Shift-L, which kitty keeps for itself by default, so
+# Alt-A does it too; vim-visual-multi moves between cursors with
+# n and N, skips a match with q and removes a cursor with Q. Motions move every cursor.
+[[keymap]]
+id = "builtin.editor.normal.multi-add-all.ctrl-shift-l"
+context = "editor"
+mode = "normal"
+keys = "ctrl-shift-l"
+command = "multi.add_all"
+[[keymap]]
+id = "builtin.editor.normal.multi-add-all.alt-a"
+context = "editor"
+mode = "normal"
+keys = "alt-a"
+command = "multi.add_all"
+[[keymap]]
+id = "builtin.editor.visual-char.multi-add-all.ctrl-shift-l"
+context = "editor"
+mode = "visual_char"
+keys = "ctrl-shift-l"
+command = "multi.add_all"
+[[keymap]]
+id = "builtin.editor.visual-char.multi-add-all.alt-a"
+context = "editor"
+mode = "visual_char"
+keys = "alt-a"
+command = "multi.add_all"
+[[keymap]]
+id = "builtin.editor.multi.multi-add-all.ctrl-shift-l"
+context = "editor"
+mode = "multi"
+keys = "ctrl-shift-l"
+command = "multi.add_all"
+[[keymap]]
+id = "builtin.editor.multi.multi-add-all.alt-a"
+context = "editor"
+mode = "multi"
+keys = "alt-a"
+command = "multi.add_all"
+[[keymap]]
+id = "builtin.editor.multi.multi-next.n"
+context = "editor"
+mode = "multi"
+keys = "n"
+command = "multi.next"
+[[keymap]]
+id = "builtin.editor.multi.multi-previous.upper-n"
+context = "editor"
+mode = "multi"
+keys = "N"
+command = "multi.previous"
+[[keymap]]
+id = "builtin.editor.multi.multi-skip.q"
+context = "editor"
+mode = "multi"
+keys = "q"
+command = "multi.skip"
+[[keymap]]
+id = "builtin.editor.multi.multi-remove.upper-q"
+context = "editor"
+mode = "multi"
+keys = "Q"
+command = "multi.remove"
+[[keymap]]
+id = "builtin.editor.multi.multi-delete-char.x"
+context = "editor"
+mode = "multi"
+keys = "x"
+command = "multi.delete_char"
+[[keymap]]
+id = "builtin.editor.multi.multi-insert.line-start"
+context = "editor"
+mode = "multi"
+keys = "I"
+command = "multi.insert"
+arguments = { placement = "line_start" }
+[[keymap]]
+id = "builtin.editor.multi.multi-insert.line-end"
+context = "editor"
+mode = "multi"
+keys = "A"
+command = "multi.insert"
+arguments = { placement = "line_end" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.h"
+context = "editor"
+mode = "multi"
+keys = "h"
+command = "multi.move"
+arguments = { motion = "left" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.j"
+context = "editor"
+mode = "multi"
+keys = "j"
+command = "multi.move"
+arguments = { motion = "down" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.k"
+context = "editor"
+mode = "multi"
+keys = "k"
+command = "multi.move"
+arguments = { motion = "up" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.l"
+context = "editor"
+mode = "multi"
+keys = "l"
+command = "multi.move"
+arguments = { motion = "right" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.left"
+context = "editor"
+mode = "multi"
+keys = "left"
+command = "multi.move"
+arguments = { motion = "left" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.down"
+context = "editor"
+mode = "multi"
+keys = "down"
+command = "multi.move"
+arguments = { motion = "down" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.up"
+context = "editor"
+mode = "multi"
+keys = "up"
+command = "multi.move"
+arguments = { motion = "up" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.right"
+context = "editor"
+mode = "multi"
+keys = "right"
+command = "multi.move"
+arguments = { motion = "right" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.w"
+context = "editor"
+mode = "multi"
+keys = "w"
+command = "multi.move"
+arguments = { motion = "word_forward" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.b"
+context = "editor"
+mode = "multi"
+keys = "b"
+command = "multi.move"
+arguments = { motion = "word_backward" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.e"
+context = "editor"
+mode = "multi"
+keys = "e"
+command = "multi.move"
+arguments = { motion = "word_end" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.zero"
+context = "editor"
+mode = "multi"
+keys = "0"
+command = "multi.move"
+arguments = { motion = "line_start" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.caret"
+context = "editor"
+mode = "multi"
+keys = "^"
+command = "multi.move"
+arguments = { motion = "first_nonblank" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.dollar"
+context = "editor"
+mode = "multi"
+keys = "$"
+command = "multi.move"
+arguments = { motion = "line_end" }
 [[keymap]]
 id = "builtin.editor.multi.mode-normal.escape"
 context = "editor"

@@ -845,6 +845,7 @@ hidden = [
     "lsp.rename.prompt",
   "input.", "command_line.", "picker.", "surface.", "mode.", "completion.",
   "edit.", "view.cursor.", "view.selection.", "view.scroll", "explorer.search.",
+  "multi.move", "multi.delete_char", "multi.next", "multi.previous", "multi.skip", "multi.remove",
   "agent.input.", "agent.escape", "tools.category.", "tools.menu.next", "tools.menu.previous",
   "tools.menu.close", "terminal.mode.", "terminal.send", "macro.", "workspace.edit.",
   "search.word", "search.repeat", "settings.page.",
@@ -1146,7 +1147,16 @@ workspace = "Project"
 "multi.add_above" = "Add a cursor above"
 "multi.insert" = "Type at every cursor"
 "multi.delete" = "Delete at every cursor"
+"multi.add_all" = "Add a cursor at every match"
+"multi.next" = "Go to the next cursor"
+"multi.previous" = "Go to the previous cursor"
+"multi.skip" = "Skip this match and add the next"
+"multi.remove" = "Remove this cursor"
+"multi.move" = "Move every cursor"
+"multi.delete_char" = "Delete the character at every cursor"
 "search.repeat" = "Repeat search"
+"search.select_next" = "Select the next search match"
+"edit.substitute_rest" = "Replace every remaining match"
 "search.word" = "Search word under cursor"
 "view.cursor.move" = "Move cursor"
 "view.scroll" = "Scroll view"
@@ -1254,6 +1264,7 @@ workspace = "Project"
 "syntax.fold.close_all" = "Close all folds"
 "lsp.rename.prompt" = "Rename Symbol"
 "edit.substitute_lines" = "Substitute in lines (:s/old/new/g)"
+"edit.global_delete" = "Delete matching lines (:g/pattern/d, :v/pattern/d)"
 "completion.leave" = "Close completion and leave Insert"
 "syntax.indent.line" = "Indent current line from built-in syntax structure"
 "task.run" = "Run configured task"

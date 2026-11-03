@@ -39,6 +39,23 @@ pub(super) fn register_commands(
     )?;
     register(
         registry,
+        "edit.global_delete",
+        "Delete matching lines",
+        ContextRequirement::Buffer,
+        ArgumentSchema::default()
+            .field("range", ArgumentType::String, true)
+            .field("pattern", ArgumentType::String, true)
+            .field("invert", ArgumentType::Bool, true),
+        |invocation| {
+            Ok(AppEffect::GlobalDelete {
+                range: string_arg(invocation, "range")?.to_owned(),
+                pattern: string_arg(invocation, "pattern")?.to_owned(),
+                invert: bool_arg(invocation, "invert")?,
+            })
+        },
+    )?;
+    register(
+        registry,
         "file.save",
         "Save file",
         ContextRequirement::Buffer,

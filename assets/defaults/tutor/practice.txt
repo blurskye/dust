@@ -47,3 +47,25 @@ Visual mode
 Search
 
     The cat sat. The cat ran. Every cat naps.
+
+Power edits
+
+    A fox ran. A fox hid. A fox slept.
+
+    colour, colour, colour
+
+    scratch: remove me
+    keep me
+    scratch: and me
+
+    let size = 1; total = size + size;
+
+    item one, item two, item three
+
+    north
+    south
+    east
+
+    x = 1
+    y = 2
+    z = 3

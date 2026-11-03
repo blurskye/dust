@@ -260,6 +260,60 @@ press = "Press `<leader>` `s` `r`, then `esc` `esc` to close it."
 done = ["workspace.replace.prompt"]
 
 [[step]]
+chapter = "Power edits"
+text = "`c` `g` `n` changes the next search match and `.` changes the one after. `n` skips a match you want to keep."
+press = "Type `/fox` and press `enter`, then `c` `g` `n`, type `wolf`, press `esc`, and press `.` twice."
+at = "A fox ran. A fox hid. A fox slept."
+mark = "fox"
+line = "A wolf ran. A wolf hid. A wolf slept."
+
+[[step]]
+chapter = "Power edits"
+text = "`:%s/old/new/g` replaces in the whole file and shows each replacement while you type. A `c` at the end asks at every match: `y` replaces, `n` skips, `a` replaces the rest."
+press = "Type `:%s/colour/color/gc`, press `enter`, then `y` `n` `y`."
+at = "colour, colour, colour"
+mark = "colour"
+line = "color, colour, color"
+
+[[step]]
+chapter = "Power edits"
+text = "`:g/pattern/d` deletes every line that matches, and `:v/pattern/d` every line that doesn't."
+press = "Type `:g/scratch:/d` and press `enter`."
+at = "scratch: remove me"
+mark = "scratch:"
+gone = "scratch:"
+
+[[step]]
+chapter = "Power edits"
+text = "Several cursors: `ctrl-n` marks the word, and each press marks its next match. `q` skips one, `Q` drops one, and `c` changes them all at once."
+press = "Press `w` to reach “size”, `ctrl-n` three times, then `c`, type `width` and press `esc`."
+at = "let size = 1; total = size + size;"
+mark = "size"
+line = "let width = 1; total = width + width;"
+
+[[step]]
+chapter = "Power edits"
+text = "`alt-a` (or `ctrl-shift-l`, as in VS Code) puts a cursor on every match at once. Motions such as `w` and `$` move all the cursors."
+press = "Press `alt-a` on “item”, then `c`, type `entry` and press `esc`."
+at = "item one, item two, item three"
+mark = "item"
+line = "entry one, entry two, entry three"
+
+[[step]]
+chapter = "Power edits"
+text = "`ctrl-alt-j` adds a cursor on the line below and `ctrl-alt-k` above. `I` and `A` type at the start and end of every cursor's line."
+press = "On “north” press `ctrl-alt-j` twice, then `A`, type `,` and press `esc`."
+at = "north"
+line = "east,"
+
+[[step]]
+chapter = "Power edits"
+text = "`ctrl-v` selects a block of columns, and `I` types before it on every line."
+press = "Press `ctrl-v`, `2` `j`, then `I`, type `let ` and press `esc`."
+at = "x = 1"
+line = "let z = 3"
+
+[[step]]
 chapter = "Files"
 text = "This project has {practice}, {main} and {greet}. In the file finder type part of a name and `enter` opens it."
 press = "Press `<leader>` then `space` to find a file, then `esc` `esc` to close it."
