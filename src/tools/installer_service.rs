@@ -3,7 +3,7 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, Sender, SyncSender, TryRecvError, TrySendError},
+        mpsc::{self, Receiver, Sender, TryRecvError},
     },
     thread::{self, JoinHandle},
 };
@@ -67,11 +67,11 @@ pub(super) enum InstallerRequest {
 }
 
 pub struct ToolInstaller {
-    sender: SyncSender<InstallerRequest>,
+    sender: Sender<InstallerRequest>,
     receiver: Receiver<ToolInstallResult>,
     progress_receiver: Receiver<ToolInstallProgress>,
     cancel: Sender<()>,
-    busy: Arc<AtomicBool>,
+    stopping: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -83,16 +83,20 @@ impl ToolInstaller {
 
     #[must_use]
     pub fn start_at(root: PathBuf) -> Self {
-        let (sender, requests) = mpsc::sync_channel(1);
+        // Requests queue up and run one at a time, so asking for several installs works.
+        let (sender, requests) = mpsc::channel();
         let (results, receiver) = mpsc::channel();
         let (progress, progress_receiver) = mpsc::sync_channel(32);
         let (cancel, cancellations) = mpsc::channel();
-        let busy = Arc::new(AtomicBool::new(false));
-        let worker_busy = Arc::clone(&busy);
+        let stopping = Arc::new(AtomicBool::new(false));
+        let worker_stopping = Arc::clone(&stopping);
         let thread = thread::Builder::new()
             .name("dust-tool-installer".into())
             .spawn(move || {
                 while let Ok(request) = requests.recv() {
+                    if worker_stopping.load(Ordering::Acquire) {
+                        break;
+                    }
                     let (definition, operation, executable, proxy, cwd, component) = match request {
                         InstallerRequest::Install { definition } => (
                             definition,
@@ -199,7 +203,6 @@ impl ToolInstaller {
                             uninstall_nix_lsp_tool(&definition, &root).map(|()| None)
                         }
                     };
-                    worker_busy.store(false, Ordering::Release);
                     if results
                         .send(ToolInstallResult {
                             id: result_id,
@@ -218,7 +221,7 @@ impl ToolInstaller {
             receiver,
             progress_receiver,
             cancel,
-            busy,
+            stopping,
             thread: Some(thread),
         }
     }
@@ -270,20 +273,9 @@ impl ToolInstaller {
     }
 
     fn submit(&self, request: InstallerRequest) -> Result<(), ToolInstallerError> {
-        if self
-            .busy
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            return Err(ToolInstallerError::Busy);
-        }
-        self.sender.try_send(request).map_err(|error| {
-            self.busy.store(false, Ordering::Release);
-            match error {
-                TrySendError::Full(_) => ToolInstallerError::Busy,
-                TrySendError::Disconnected(_) => ToolInstallerError::Stopped,
-            }
-        })
+        self.sender
+            .send(request)
+            .map_err(|_| ToolInstallerError::Stopped)
     }
 
     pub fn try_progress(&self) -> Result<Option<ToolInstallProgress>, ToolInstallerError> {
@@ -305,6 +297,7 @@ impl ToolInstaller {
 
 impl Drop for ToolInstaller {
     fn drop(&mut self) {
+        self.stopping.store(true, Ordering::Release);
         let _ = self.cancel.send(());
         let _ = self.sender.send(InstallerRequest::Shutdown);
         if let Some(thread) = self.thread.take() {

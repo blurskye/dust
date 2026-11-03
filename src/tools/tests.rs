@@ -773,6 +773,37 @@ fn installer_worker_routes_real_managed_uninstall_and_reports_its_operation() {
     assert!(!directory.path().join("rust-analyzer").exists());
 }
 
+#[test]
+fn installer_worker_queues_requests_made_while_one_is_running() {
+    let directory = tempfile::tempdir().expect("tool store");
+    let catalog = bundled_tool_catalog();
+    let installer = ToolInstaller::start_at(directory.path().to_path_buf());
+    let ids = ["rust-analyzer", "claude-agent-acp", "codex-acp"];
+    for id in ids {
+        let selected = directory.path().join(id).join("bin");
+        std::fs::create_dir_all(&selected).expect("selected tool");
+        let definition = catalog
+            .iter()
+            .find(|tool| tool.id == id)
+            .expect("catalog tool")
+            .clone();
+        installer.uninstall(definition).expect("queue uninstall");
+    }
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut finished = Vec::new();
+    while finished.len() < ids.len() {
+        if let Some(result) = installer.try_result().expect("installer result") {
+            assert!(result.result.is_ok(), "{result:?}");
+            finished.push(result.id);
+        }
+        assert!(std::time::Instant::now() < deadline, "queued work timed out");
+        std::thread::yield_now();
+    }
+    assert_eq!(finished, ids);
+    assert!(ids.iter().all(|id| !directory.path().join(id).exists()));
+}
+
 #[cfg(unix)]
 #[test]
 fn installer_worker_can_explicitly_add_rust_analyzer_to_the_active_rustup_toolchain() {

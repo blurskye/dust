@@ -156,8 +156,6 @@ pub(super) fn install_tool(
 
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
 pub enum ToolInstallerError {
-    #[error("another tool installation is already running")]
-    Busy,
     #[error("tool installer stopped")]
     Stopped,
     #[error("this tool has no portable bundled installer")]

@@ -158,10 +158,27 @@ impl ToolingSession {
         self.version_pending.remove(key);
     }
     pub(super) fn refresh(&mut self) {
-        self.entries = inspect_tools();
+        self.reinspect(None);
         self.path_lookups.get_mut().clear();
         self.replace_probe_worker();
         self.versions.clear();
+    }
+    /// Re-reads the catalog and host, keeping the rows of installs still running or
+    /// queued (other than `finished`).
+    fn reinspect(&mut self, finished: Option<&str>) {
+        let waiting: Vec<_> = self
+            .entries
+            .iter()
+            .filter(|e| Some(e.definition.id.as_str()) != finished)
+            .filter(|e| matches!(e.status, ToolStatus::Installing { .. }))
+            .map(|e| (e.definition.id.clone(), e.status.clone()))
+            .collect();
+        self.entries = inspect_tools();
+        for (id, status) in waiting {
+            if let Some(entry) = self.entries.iter_mut().find(|e| e.definition.id == id) {
+                entry.status = status;
+            }
+        }
     }
     fn replace_probe_worker(&mut self) {
         self.version_service = ToolVersionService::start();
@@ -296,9 +313,16 @@ impl ToolingSession {
             ToolInstall::Uninstall(d, _) => (d, true),
         };
         let id = definition.id.clone();
-        if !self.entries.iter().any(|e| e.definition.id == id) {
+        let Some(entry) = self.entries.iter().find(|e| e.definition.id == id) else {
             return Err("tool source retired".into());
+        };
+        if matches!(entry.status, ToolStatus::Installing { .. }) {
+            return Err(format!("{} is already being installed", entry.definition.name));
         }
+        let queued = self
+            .entries
+            .iter()
+            .any(|e| matches!(e.status, ToolStatus::Installing { .. }));
         match request {
             ToolInstall::Managed(d) => self.installer.install(d),
             ToolInstall::Nix(d, nix) => self.installer.install_nix(d, nix),
@@ -320,7 +344,9 @@ impl ToolingSession {
         .map_err(|error| error.to_string())?;
         if let Some(entry) = self.entries.iter_mut().find(|e| e.definition.id == id) {
             entry.status = ToolStatus::Installing {
-                phase: if removing {
+                phase: if queued {
+                    "queued"
+                } else if removing {
                     "uninstalling"
                 } else {
                     "preparing"
@@ -357,7 +383,7 @@ impl ToolingSession {
             .iter()
             .find(|e| e.definition.id == result.id)
             .map_or_else(|| result.id.clone(), |e| e.definition.name.clone());
-        self.entries = inspect_tools();
+        self.reinspect(Some(&result.id));
         self.path_lookups.get_mut().clear();
         if let Err(error) = &result.result {
             if let Some(entry) = self
