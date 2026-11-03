@@ -6170,6 +6170,31 @@ impl InteractiveApplication {
             .prefer_terminal_placement(id.0, WindowPlacement::Floating(rect));
     }
 
+    /// A terminal running an agent profile's own program, for `agents.connection = "terminal"`.
+    pub(super) fn agent_terminal(&self, id: PtyId) -> bool {
+        let agents = &self.configuration.settings().agents.profiles;
+        self.terminal_session
+            .descriptions()
+            .into_iter()
+            .any(|(terminal, profile, _)| terminal == id.0 && agents.contains_key(&profile))
+    }
+
+    /// An agent's terminal opens on the right at the agent panel's width, where the ACP panel goes.
+    fn dock_agent_terminal(&mut self, id: PtyId) {
+        self.terminal_session.display(id);
+        let width = u32::from(self.window_session.width());
+        let share = width * u32::from(self.configuration.settings().agents.panel_width) / 100;
+        // A conversation needs about 40 columns, however narrow the terminal is.
+        let size = share.max(40).min(width * 7 / 10).max(1);
+        self.window_session.prefer_terminal_placement(
+            id.0,
+            WindowPlacement::Docked {
+                edge: DockEdge::Right,
+                size: u16::try_from(size).unwrap_or(u16::MAX),
+            },
+        );
+    }
+
     pub(super) fn retire_terminal(&mut self, id: PtyId, request_close: bool) {
         let focused = self.window_session.focused_terminal() == Some(id.0);
         if request_close {
@@ -6385,6 +6410,8 @@ impl InteractiveApplication {
                             self.terminal_session.select(id);
                             if open.float {
                                 self.float_terminal(id);
+                            } else if self.agent_terminal(id) {
+                                self.dock_agent_terminal(id);
                             }
                             // A debugged program's terminal shows, and the user stays on the source.
                             if !for_debugger {

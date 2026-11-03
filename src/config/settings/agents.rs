@@ -22,8 +22,8 @@ pub struct AgentProfileConfig {
     /// Shown at the top of a new session, for setup the agent needs outside Dust.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
-    /// The agent's own command-line program and its arguments, run in a terminal tab when
-    /// `agents.connection` is `terminal`.
+    /// The agent's own command-line program and its arguments, run in a terminal on the
+    /// right when `agents.connection` is `terminal`.
     #[serde(default)]
     pub cli: Vec<String>,
 }

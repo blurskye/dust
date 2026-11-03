@@ -318,7 +318,8 @@ close_on_exit = true
 [agents]
 default = "claude"
 # "acp" talks to the agent in Dust's agent panel; "terminal" runs its own program (`cli`) in a
-# terminal tab, where it handles its own login, permissions and history.
+# terminal on the right, where the panel opens, and it handles its own login, permissions and
+# history there.
 connection = "acp"
 # Share of the editor width the agent panel opens at; drag its border or use ctrl-left and
 # ctrl-right in it to change it.

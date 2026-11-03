@@ -441,7 +441,7 @@ impl InteractiveApplication {
             environment: BTreeMap::new(),
             columns: 80,
             rows: 24,
-            float: true,
+            float: false,
             close_on_exit: true,
         };
         match self.terminal_session.open_program(
@@ -1548,6 +1548,17 @@ impl InteractiveApplication {
     }
 
     pub(super) fn toggle_agent_panel(&mut self) {
+        if self.configuration.settings().agents.connection == crate::config::AgentConnection::Terminal
+        {
+            // Like the panel, a shown agent hides whether or not it has the keys.
+            match self.displayed_terminal() {
+                Some(id) if self.agent_terminal(id) && self.terminal_window_rect().is_some() => {
+                    self.place_active_terminal(crate::ui::window::WindowPlacement::Hidden)
+                }
+                _ => self.ask_terminal_agent(),
+            }
+            return;
+        }
         if let Some(pane) = self.agent_pane() {
             let previous = self.active_tab_focus();
             if self.state.focus_pane_id(pane).is_ok() {

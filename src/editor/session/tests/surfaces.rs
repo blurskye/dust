@@ -3703,6 +3703,45 @@ fn live_pty_clone_refusal_preserves_process_screen_geometry_focus_and_sources() 
 
 #[cfg(unix)]
 #[test]
+fn a_terminal_agent_opens_on_the_right_where_the_agent_panel_goes() {
+    use super::driver::TestSession;
+    let mut loaded = crate::config::load_bundled_config();
+    let agents = &mut loaded.config.agents;
+    agents.connection = crate::config::AgentConnection::Terminal;
+    let mut profile = agents.profiles[&agents.default].clone();
+    profile.cli = vec!["sh".into(), "-c".into(), "echo READY; cat".into()];
+    agents.profiles.insert("echoer".into(), profile);
+    agents.default = "echoer".into();
+    let mut driver = TestSession::new(loaded);
+    driver.new_buffer();
+    driver.trust_owned_terminal_fixture();
+    let app = driver.application_mut();
+    app.process_effect(crate::editor::AppEffect::AgentAsk);
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while !driver.terminal_lines().iter().any(|line| line.contains("READY")) {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    let app = driver.application_mut();
+    let width = app.window_session.width();
+    let rect = app.terminal_window_rect().expect("agent terminal shown");
+    assert_eq!(rect.x + rect.width, width, "docked on the right: {rect:?}");
+    assert!(rect.x > 0 && rect.width >= 40.min(width), "{rect:?}");
+    assert!(rect.height > app.window_session.height() / 2, "full height: {rect:?}");
+    app.process_effect(crate::editor::AppEffect::AgentToggle);
+    assert!(app.terminal_window_rect().is_none());
+    app.process_effect(crate::editor::AppEffect::AgentToggle);
+    assert_eq!(app.terminal_window_rect(), Some(rect));
+    // From the code beside it, the toggle hides it too.
+    app.process_effect(crate::editor::AppEffect::TerminalUnfocus);
+    app.process_effect(crate::editor::AppEffect::AgentToggle);
+    assert!(app.terminal_window_rect().is_none());
+    assert_eq!(app.terminal_session.descriptions().len(), 1);
+}
+
+#[cfg(unix)]
+#[test]
 fn resizing_a_terminal_that_is_stopping_is_not_an_error() {
     use super::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
