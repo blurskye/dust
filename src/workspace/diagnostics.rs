@@ -134,6 +134,20 @@ impl DiagnosticStore {
         self.total = self.sets.values().map(Vec::len).sum();
     }
 
+    /// Moves one owner's diagnostics for a file, as an edit moved the text under them.
+    pub fn move_ranges(
+        &mut self,
+        owner: &DiagnosticOwner,
+        uri: &str,
+        mut move_range: impl FnMut(ByteRange) -> ByteRange,
+    ) {
+        if let Some(diagnostics) = self.sets.get_mut(&(owner.clone(), uri.to_owned())) {
+            for diagnostic in diagnostics {
+                diagnostic.range = move_range(diagnostic.range);
+            }
+        }
+    }
+
     pub fn clear_owner(&mut self, owner: &DiagnosticOwner) {
         self.sets.retain(|(candidate, _), _| candidate != owner);
         self.total = self.sets.values().map(Vec::len).sum();

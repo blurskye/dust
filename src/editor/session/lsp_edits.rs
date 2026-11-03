@@ -4,7 +4,7 @@ use crate::{
     editor::{
         BufferId, TransactionId,
         text::{
-            BufferRevision, ByteRange, PositionCodec, PositionEncoding, TextBuffer, TextEdit,
+            BufferRevision, ByteOffset, ByteRange, PositionCodec, PositionEncoding, TextBuffer, TextEdit,
             TextEditSet,
         },
         transaction::{EditorOperation, EditorTransaction, Precondition},
@@ -841,7 +841,16 @@ impl LspEditSources {
         let producer = context
             .diagnostic_producer(if pull { "lsp-pull:" } else { "lsp." })
             .map_err(|e| e.to_string())?;
-        let codec = PositionCodec::new(&buffer.text);
+        // A late report is read against the text it was made for, when that is still kept, and
+        // then moved over the edits since; otherwise against the current text.
+        let reported = behind
+            .then(|| version.and_then(|v| buffer.text.text_at(BufferRevision(v))))
+            .flatten();
+        let codec = PositionCodec::new(reported.as_ref().unwrap_or(&buffer.text));
+        let onto_current = |offset: ByteOffset| match &reported {
+            Some(old) => buffer.text.map_offset_since(old.revision(), offset).unwrap_or(offset),
+            None => offset,
+        };
         let version = if pull {
             Some(revision)
         } else if behind {
@@ -868,6 +877,7 @@ impl LspEditSources {
                         context.encoding(),
                     )
                     .map_err(|e| e.to_string())?;
+                let start = onto_current(start);
                 let end = codec
                     .lsp_to_byte(
                         diagnostic.range.end.line,
@@ -875,6 +885,7 @@ impl LspEditSources {
                         context.encoding(),
                     )
                     .map_err(|e| e.to_string())?;
+                let end = onto_current(end).max(start);
                 Ok(crate::workspace::Diagnostic {
                     uri: uri.into(),
                     version,
@@ -1072,6 +1083,29 @@ mod diagnostic_tests {
         )
         .unwrap();
         assert!(behind.items.is_empty(), "what no longer fits is left out");
+        // Read against the text it was made for, then moved over the edits since: after `é` is
+        // deleted, the old report's `a` is at the start, not two bytes in.
+        let typed = editor.buffers[buffer].text.revision();
+        let accent = ByteRange::new(ByteOffset(0), ByteOffset("é".len())).unwrap();
+        editor
+            .apply_transaction(&EditorTransaction::new(TransactionId(10)).with_operation(
+                EditorOperation::ApplyEdits {
+                    buffer,
+                    edits: TextEditSet::new(typed, vec![TextEdit::new(accent, "")]),
+                },
+            ))
+            .unwrap();
+        let late = LspEditSources::diagnostic_batch(
+            &event.context,
+            &service,
+            &editor,
+            (&uri, Some(revision.0), raw()),
+            false,
+            10,
+            "fixture",
+        )
+        .unwrap();
+        assert_eq!(late.items[0].range, ByteRange::new(ByteOffset(0), ByteOffset(1)).unwrap());
         editor.buffers[buffer].text = TextBuffer::from_text("éab");
         endpoint.observe_diagnostic_document(
             &uri,

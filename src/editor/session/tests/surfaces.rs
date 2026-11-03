@@ -4411,6 +4411,52 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
 }
 
 #[test]
+fn session_restore_keeps_tab_order_after_the_first_tab_was_closed() {
+    use crate::editor::session::persistence::RestoreContext;
+
+    let mut app = app();
+    let paths = ["one.txt", "two.txt", "three.txt"].map(|name| {
+        let path = app.state.workspace_root.join(name);
+        std::fs::write(&path, format!("{name}\n")).expect("fixture file");
+        path
+    });
+    app.set_dashboard_visibility(false);
+    app.start_open(paths[0].clone());
+    wait_vfs(&mut app);
+    app.process_effect(crate::editor::AppEffect::Layout(crate::editor::LayoutAction::NewTab));
+    app.start_open(paths[1].clone());
+    wait_vfs(&mut app);
+    let session = app.capture_session().expect("captured session");
+
+    // Closing the first tab frees the slot that a restore would otherwise fill last.
+    app.process_effect(crate::editor::AppEffect::Layout(crate::editor::LayoutAction::FocusTab(-1)));
+    app.process_effect(crate::editor::AppEffect::Layout(crate::editor::LayoutAction::CloseTab));
+    app.start_open(paths[2].clone());
+    wait_vfs(&mut app);
+    app.persistence.fixture_restore_source(RestoreContext {
+        editor: &app.state,
+        workspace: &app.workspace,
+        input: &app.input,
+        windows: &app.window_session,
+        configuration: app.configuration.binding_revision(),
+    });
+    app.restore_session(session);
+    wait_vfs(&mut app);
+
+    assert_eq!(app.ui.config_diagnostic, None);
+    let order = app
+        .state
+        .tabs
+        .values()
+        .map(|tab| {
+            let view = app.state.panes[tab.focused].view;
+            app.state.buffers[app.state.views[view].buffer].path.clone()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(order, vec![Some(paths[0].clone()), Some(paths[1].clone())]);
+}
+
+#[test]
 fn semantic_content_restore_uses_fresh_ids_and_preserves_unclamped_desired_placement() {
     use crate::editor::session::persistence::RestoreContext;
     use crate::persistence::PersistedWindowPlacement;

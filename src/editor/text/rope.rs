@@ -9,6 +9,11 @@ use crate::editor::text::{
 
 /// How many recent edits a buffer remembers for moving highlights forward.
 const RECENT_EDITS: usize = 64;
+/// How many texts before recent edits a buffer keeps, so a language server's late report can be
+/// read against the text it was made for. Ropes share their unchanged parts, but a file over
+/// the size limit keeps none, so one big replace can't hold several copies of a huge file.
+const RECENT_TEXTS: usize = 8;
+const RECENT_TEXT_BYTES: usize = 4 << 20;
 
 /// Rope-backed normalized UTF-8 text and its file-format metadata.
 #[derive(Clone, Debug)]
@@ -20,6 +25,7 @@ pub struct TextBuffer {
     /// The latest edits, each with the revision it was applied to, so highlights computed for
     /// an older revision can be moved onto the current text until a new parse arrives.
     recent_edits: Vec<(BufferRevision, EditDelta)>,
+    recent_texts: Vec<(BufferRevision, Rope)>,
 }
 
 /// Exact immutable text snapshot identity, including reloads at equal revisions.
@@ -89,6 +95,7 @@ impl TextBuffer {
             format,
             source: TextVersion::new(),
             recent_edits: Vec::new(),
+            recent_texts: Vec::new(),
         }
     }
 
@@ -105,6 +112,7 @@ impl TextBuffer {
             format,
             source: TextVersion::new(),
             recent_edits: Vec::new(),
+            recent_texts: Vec::new(),
         })
     }
 
@@ -265,6 +273,7 @@ impl TextBuffer {
         self.bump_revision()?;
         self.rope = Rope::from_str(text);
         self.recent_edits.clear();
+        self.recent_texts.clear();
         Ok(())
     }
 
@@ -272,11 +281,37 @@ impl TextBuffer {
         &mut self,
         before: BufferRevision,
         delta: EditDelta,
+        previous: Rope,
     ) {
         if self.recent_edits.len() == RECENT_EDITS {
             self.recent_edits.remove(0);
         }
         self.recent_edits.push((before, delta));
+        if previous.len_bytes() > RECENT_TEXT_BYTES {
+            self.recent_texts.clear();
+            return;
+        }
+        if self.recent_texts.len() == RECENT_TEXTS {
+            self.recent_texts.remove(0);
+        }
+        self.recent_texts.push((before, previous));
+    }
+
+    /// The text as it was at `revision`, while that is among the last few edits.
+    #[must_use]
+    pub fn text_at(&self, revision: BufferRevision) -> Option<Self> {
+        if revision == self.revision {
+            return Some(self.clone());
+        }
+        let (_, rope) = self.recent_texts.iter().find(|(before, _)| *before == revision)?;
+        Some(Self {
+            rope: rope.clone(),
+            revision,
+            format: self.format.clone(),
+            source: self.source.clone(),
+            recent_edits: Vec::new(),
+            recent_texts: Vec::new(),
+        })
     }
 
     /// Moves a range computed at `revision` onto the current text, or `None` when the edits
@@ -290,16 +325,27 @@ impl TextBuffer {
         if revision == self.revision {
             return Some(range);
         }
+        let start = self.map_offset_since(revision, range.start)?;
+        let end = self.map_offset_since(revision, range.end)?;
+        ByteRange::new(start, end).ok().filter(|range| !range.is_empty())
+    }
+
+    /// Moves an offset taken at `revision` onto the current text, or `None` when the edits
+    /// since then are no longer remembered.
+    #[must_use]
+    pub fn map_offset_since(&self, revision: BufferRevision, offset: ByteOffset) -> Option<ByteOffset> {
+        if revision == self.revision {
+            return Some(offset);
+        }
         let first = self
             .recent_edits
             .iter()
             .position(|(before, _)| *before == revision)?;
-        let (mut start, mut end) = (range.start, range.end);
-        for (_, delta) in &self.recent_edits[first..] {
-            start = delta.map_offset(start, Affinity::After);
-            end = delta.map_offset(end, Affinity::After);
-        }
-        ByteRange::new(start, end).ok().filter(|range| !range.is_empty())
+        Some(
+            self.recent_edits[first..]
+                .iter()
+                .fold(offset, |offset, (_, delta)| delta.map_offset(offset, Affinity::After)),
+        )
     }
 }
 

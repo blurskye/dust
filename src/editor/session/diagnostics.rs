@@ -2,7 +2,7 @@
 use crate::{
     editor::{
         BufferId, EditorState, EditorWindowVersion,
-        text::{ByteOffset, TextVersion},
+        text::{BufferRevision, ByteOffset, TextVersion},
     },
     ui::{
         ContentTabDiagnostic, ContentTabDiagnosticSeverity, ExpandedDiagnosticState, UiDiagnostic,
@@ -73,6 +73,8 @@ struct Batch {
     path: PathBuf,
     document: Option<DiagnosticDocument>,
     validity: DiagnosticValidity,
+    /// The text the ranges point into; edits since then move them.
+    revision: Option<BufferRevision>,
 }
 impl Batch {
     fn current(&self, editor: &EditorState) -> bool {
@@ -237,6 +239,9 @@ impl DiagnosticSession {
             )
             .map_err(|e| e.to_string())?;
         if unchanged {
+            if let Some(old) = self.batches.get_mut(&set) {
+                old.revision = revision;
+            }
             return Ok(false);
         }
         self.batches.insert(
@@ -246,6 +251,7 @@ impl DiagnosticSession {
                 path,
                 document: batch.document,
                 validity: batch.validity,
+                revision,
             },
         );
         Ok(true)
@@ -308,6 +314,7 @@ impl DiagnosticSession {
         self.dirty = true;
     }
     pub(super) fn retire_documents(&mut self, editor: &EditorState) {
+        self.follow_edits(editor);
         let retired = self
             .batches
             .iter()
@@ -408,6 +415,42 @@ impl DiagnosticSession {
             line: buffer.text.byte_to_line(row.range.start).ok()?,
             severities: severities.clone(),
         })
+    }
+    /// Until the server reports again, its diagnostics move with the edits, so one doesn't
+    /// jump to the next line when the text before it shrinks.
+    fn follow_edits(&mut self, editor: &EditorState) {
+        let mut moved = false;
+        for ((owner, uri), batch) in &mut self.batches {
+            let (Some(document), Some(revision)) = (&mut batch.document, batch.revision) else {
+                continue;
+            };
+            let Some(buffer) = editor.buffers.get(document.id) else {
+                continue;
+            };
+            let text = &buffer.text;
+            // Only edits of the same file in this editor, which are still remembered, move them;
+            // a reload or another file retires them as before.
+            if text.revision() == revision
+                || !document.editor.same_editor(&editor.window_version())
+                || buffer.path.as_ref() != Some(&document.path)
+                || !text.source_version().same_incarnation(&document.text)
+                || text.map_offset_since(revision, ByteOffset(0)).is_none()
+            {
+                continue;
+            }
+            let length = ByteOffset(text.len_bytes());
+            self.store.move_ranges(owner, uri, |range| {
+                let start = text.map_offset_since(revision, range.start).unwrap_or(range.start).min(length);
+                let end = text.map_offset_since(revision, range.end).unwrap_or(range.end).clamp(start, length);
+                crate::editor::text::ByteRange::new(start, end).unwrap_or(range)
+            });
+            batch.revision = Some(text.revision());
+            document.text = text.source_version();
+            moved = true;
+        }
+        if moved {
+            self.changed();
+        }
     }
     pub(super) fn projection(&mut self, editor: &EditorState) -> Option<Vec<UiDiagnostic>> {
         self.retire_documents(editor);
@@ -541,5 +584,48 @@ mod tests {
             owner.resolve(&key, &editor).is_none(),
             "an unbound disk report cannot adopt a newly opened buffer"
         );
+    }
+
+    #[test]
+    fn diagnostics_move_with_edits_until_the_server_reports_again() {
+        let root = tempfile::tempdir().unwrap();
+        let mut editor = EditorState::new(root.path().into());
+        let path = root.path().join("source");
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("abc\ndef\n"), Some(path.clone()));
+        let uri = crate::language::lsp::file_uri(&path);
+        let producer = DiagnosticProducer::new(DiagnosticOwner::new("server").unwrap());
+        let mut owner = DiagnosticSession::new(4, 2);
+        owner.activate(producer.clone());
+        // At the end of the first line, as rust-analyzer reports "expected COMMA".
+        let batch = DiagnosticBatch {
+            producer,
+            uri: uri.clone(),
+            document: DiagnosticDocument::capture(&editor, buffer),
+            validity: DiagnosticValidity::RequestedSnapshot,
+            items: vec![Diagnostic {
+                uri,
+                version: None,
+                range: ByteRange::new(ByteOffset(3), ByteOffset(4)).unwrap(),
+                severity: DiagnosticSeverity::Error,
+                source: "test".into(),
+                code: None,
+                message: "expected COMMA".into(),
+                related: Vec::new(),
+                tags: Vec::new(),
+                fixes: Vec::new(),
+                data: None,
+                timestamp: std::time::SystemTime::UNIX_EPOCH,
+            }],
+        };
+        owner.publish(batch, &editor).unwrap();
+        assert_eq!(owner.projection(&editor).expect("published").len(), 1);
+        let text = &mut editor.buffers[buffer].text;
+        let edits = crate::editor::text::TextEditSet::new(
+            text.revision(),
+            vec![crate::editor::text::TextEdit::new(ByteRange::new(ByteOffset(2), ByteOffset(3)).unwrap(), String::new())],
+        );
+        text.apply_edits(&edits).unwrap();
+        let shown = owner.projection(&editor).expect("moved diagnostics");
+        assert_eq!(shown[0].range, ByteRange::new(ByteOffset(2), ByteOffset(3)).unwrap());
     }
 }

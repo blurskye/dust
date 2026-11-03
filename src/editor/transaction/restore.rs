@@ -23,7 +23,7 @@ impl EditorDraft {
         self.state.tabs.clear();
         self.state.active_tab = None;
         self.state.active_view = None;
-        let mut tabs = Vec::new();
+        let mut built = Vec::new();
         for tab in &session.tabs {
             let (layout, panes) = build_layout(&mut self.state, &tab.layout, loaded)
                 .ok_or("session layout is incomplete")?;
@@ -38,11 +38,21 @@ impl EditorDraft {
                 })
                 .or_else(|| panes.first().map(|(_, pane)| *pane))
                 .ok_or("session tab is empty")?;
-            let id = self.state.tabs.insert(crate::editor::Tab {
+            built.push(crate::editor::Tab {
                 root: layout,
                 focused,
             });
-            tabs.push((id, focused));
+        }
+        // Cleared slots are reused last-freed first, so take the keys in iteration order
+        // before filling them; the tab bar and saved tab indices both follow that order.
+        for tab in &built {
+            self.state.tabs.insert(tab.clone());
+        }
+        let keys = self.state.tabs.keys().collect::<Vec<_>>();
+        let mut tabs = Vec::new();
+        for (id, tab) in keys.into_iter().zip(built) {
+            tabs.push((id, tab.focused));
+            self.state.tabs[id] = tab;
         }
         if tabs.is_empty() {
             return Err("session has no restorable tabs".into());

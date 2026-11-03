@@ -125,6 +125,7 @@ impl TextBuffer {
                 })
                 .collect(),
         );
+        let previous = self.rope.clone();
         for edit in edits.iter().rev() {
             let start = self.byte_to_char(edit.range.start)?;
             let end = self.byte_to_char(edit.range.end)?;
@@ -134,7 +135,7 @@ impl TextBuffer {
         if !edits.is_empty() {
             let before = self.revision();
             self.bump_revision()?;
-            self.remember_edit(before, delta.clone());
+            self.remember_edit(before, delta.clone(), previous);
         }
         Ok(delta)
     }
