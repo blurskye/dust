@@ -1,4 +1,17 @@
-use unicode_width::UnicodeWidthChar;
+//! A terminal tab's screen. alacritty_terminal reads the program's output as a real terminal
+//! would; this module hands its grid and scrollback to the panel in Dust's own cell types.
+use std::sync::{Arc, Mutex};
+
+use alacritty_terminal::{
+    event::{Event, EventListener},
+    grid::Dimensions,
+    index::{Column, Line},
+    term::{
+        Config, Term, TermMode,
+        cell::{Cell, Flags},
+    },
+    vte::ansi::{Color, NamedColor, Processor},
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PtyColor {
@@ -31,48 +44,6 @@ impl Default for PtyCell {
         }
     }
 }
-#[derive(Clone, Debug)]
-enum Parser {
-    Ground,
-    Escape,
-    EscapeIntermediate,
-    Csi {
-        parameters: String,
-        overflowed: bool,
-    },
-    Osc,
-    OscEscape,
-    StringControl,
-    StringControlEscape,
-}
-#[derive(Clone, Debug)]
-pub struct PtyScreen {
-    rows: usize,
-    columns: usize,
-    cursor_row: usize,
-    cursor_column: usize,
-    cells: Vec<Vec<PtyCell>>,
-    style: PtyStyle,
-    parser: Parser,
-    utf8_pending: Vec<u8>,
-    scrollback: Vec<Vec<PtyCell>>,
-    maximum_scrollback_lines: usize,
-    unsupported_sequences: u64,
-    alternate: bool,
-    primary_saved: Option<(Vec<Vec<PtyCell>>, usize, usize)>,
-    saved_cursor: Option<(usize, usize)>,
-    cursor_visible: bool,
-    application_cursor: bool,
-    bracketed_paste: bool,
-    focus_reporting: bool,
-    mouse_mode: PtyMouseMode,
-    sgr_mouse: bool,
-    scroll_top: usize,
-    scroll_bottom: usize,
-    origin_mode: bool,
-    autowrap: bool,
-    pending_wrap: bool,
-}
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum PtyMouseMode {
     #[default]
@@ -98,710 +69,223 @@ pub enum PtyMouseEvent {
     Release,
     Move(u8),
 }
-impl PtyScreen {
-    pub fn new(columns: u16, rows: u16, maximum_scrollback_lines: usize) -> Self {
-        let columns = usize::from(columns.max(1));
-        let rows = usize::from(rows.max(1));
-        Self {
-            rows,
-            columns,
-            cursor_row: 0,
-            cursor_column: 0,
-            cells: vec![vec![PtyCell::default(); columns]; rows],
-            style: PtyStyle::default(),
-            parser: Parser::Ground,
-            utf8_pending: Vec::new(),
-            scrollback: Vec::new(),
-            maximum_scrollback_lines: maximum_scrollback_lines.max(1),
-            unsupported_sequences: 0,
-            alternate: false,
-            primary_saved: None,
-            saved_cursor: None,
-            cursor_visible: true,
-            application_cursor: false,
-            bracketed_paste: false,
-            focus_reporting: false,
-            mouse_mode: PtyMouseMode::Off,
-            sgr_mouse: false,
-            scroll_top: 0,
-            scroll_bottom: rows,
-            origin_mode: false,
-            autowrap: true,
-            pending_wrap: false,
+
+/// What the terminal answers the program, such as its cursor position when asked.
+#[derive(Clone, Default)]
+struct Replies(Arc<Mutex<Vec<u8>>>);
+impl EventListener for Replies {
+    fn send_event(&self, event: Event) {
+        if let Event::PtyWrite(text) = event
+            && let Ok(mut replies) = self.0.lock()
+        {
+            replies.extend_from_slice(text.as_bytes());
         }
     }
-    pub fn feed(&mut self, text: &str) {
-        for character in text.chars() {
-            let parser = std::mem::replace(&mut self.parser, Parser::Ground);
-            match parser {
-                Parser::Ground => match character {
-                    '\u{1b}' => self.parser = Parser::Escape,
-                    '\r' => {
-                        self.cursor_column = 0;
-                        self.pending_wrap = false;
-                    }
-                    '\n' => self.newline(),
-                    '\u{8}' => {
-                        self.cursor_column = self.cursor_column.saturating_sub(1);
-                        self.pending_wrap = false;
-                    }
-                    '\t' => {
-                        self.pending_wrap = false;
-                        let next = (self.cursor_column / 8 + 1) * 8;
-                        self.cursor_column = next.min(self.columns.saturating_sub(1));
-                    }
-                    character if !character.is_control() => self.put(character),
-                    _ => {}
-                },
-                Parser::Escape => match character {
-                    '7' | '8' | 'D' | 'E' | 'M' => {
-                        self.pending_wrap = false;
-                        self.escape(character);
-                    }
-                    '[' => {
-                        self.parser = Parser::Csi {
-                            parameters: String::new(),
-                            overflowed: false,
-                        }
-                    }
-                    ']' => self.parser = Parser::Osc,
-                    'P' | '_' | '^' => self.parser = Parser::StringControl,
-                    '(' | ')' | '*' | '+' => self.parser = Parser::EscapeIntermediate,
-                    _ => self.unsupported_sequences = self.unsupported_sequences.saturating_add(1),
-                },
-                Parser::EscapeIntermediate => {}
-                Parser::Csi {
-                    mut parameters,
-                    mut overflowed,
-                } => {
-                    if ('@'..='~').contains(&character) {
-                        if overflowed {
-                            self.unsupported_sequences =
-                                self.unsupported_sequences.saturating_add(1)
-                        } else {
-                            self.csi(&parameters, character)
-                        }
-                    } else if (' '..='?').contains(&character) {
-                        if parameters.len() < 128 {
-                            parameters.push(character)
-                        } else {
-                            overflowed = true
-                        }
-                        self.parser = Parser::Csi {
-                            parameters,
-                            overflowed,
-                        }
-                    } else {
-                        self.unsupported_sequences = self.unsupported_sequences.saturating_add(1)
-                    }
-                }
-                Parser::Osc => match character {
-                    '\u{7}' => {}
-                    '\u{1b}' => self.parser = Parser::OscEscape,
-                    _ => self.parser = Parser::Osc,
-                },
-                Parser::OscEscape => {
-                    if character != '\\' {
-                        self.parser = if character == '\u{1b}' {
-                            Parser::OscEscape
-                        } else {
-                            Parser::Osc
-                        }
-                    }
-                }
-                Parser::StringControl => {
-                    self.parser = if character == '\u{1b}' {
-                        Parser::StringControlEscape
-                    } else {
-                        Parser::StringControl
-                    }
-                }
-                Parser::StringControlEscape => {
-                    if character != '\\' {
-                        self.parser = if character == '\u{1b}' {
-                            Parser::StringControlEscape
-                        } else {
-                            Parser::StringControl
-                        }
-                    }
-                }
-            }
+}
+
+struct Size {
+    columns: usize,
+    rows: usize,
+}
+impl Dimensions for Size {
+    fn total_lines(&self) -> usize {
+        self.rows
+    }
+    fn screen_lines(&self) -> usize {
+        self.rows
+    }
+    fn columns(&self) -> usize {
+        self.columns
+    }
+}
+
+pub struct PtyScreen {
+    term: Term<Replies>,
+    parser: Processor,
+    replies: Replies,
+}
+impl PtyScreen {
+    pub fn new(columns: u16, rows: u16, maximum_scrollback_lines: usize) -> Self {
+        let replies = Replies::default();
+        let config = Config {
+            scrolling_history: maximum_scrollback_lines.max(1),
+            ..Config::default()
+        };
+        Self {
+            term: Term::new(config, &size(columns, rows), replies.clone()),
+            parser: Processor::new(),
+            replies,
         }
     }
     pub fn feed_bytes(&mut self, bytes: &[u8]) {
-        let mut input = std::mem::take(&mut self.utf8_pending);
-        input.extend_from_slice(bytes);
-        let mut remaining = input.as_slice();
-        while !remaining.is_empty() {
-            match std::str::from_utf8(remaining) {
-                Ok(text) => {
-                    self.feed(text);
-                    break;
-                }
-                Err(error) => {
-                    let valid = error.valid_up_to();
-                    if valid > 0 {
-                        self.feed(std::str::from_utf8(&remaining[..valid]).expect("valid prefix"));
-                    }
-                    if let Some(length) = error.error_len() {
-                        self.feed("\u{fffd}");
-                        remaining = &remaining[valid.saturating_add(length)..];
-                    } else {
-                        self.utf8_pending.extend_from_slice(&remaining[valid..]);
-                        break;
-                    }
-                }
-            }
+        self.parser.advance(&mut self.term, bytes);
+        // A program that began a synchronized update and never ended it still gets shown.
+        if self
+            .parser
+            .sync_timeout()
+            .sync_timeout()
+            .is_some_and(|deadline| deadline <= std::time::Instant::now())
+        {
+            self.parser.stop_sync(&mut self.term);
         }
     }
-    pub fn finish_bytes(&mut self) {
-        if !self.utf8_pending.is_empty() {
-            self.utf8_pending.clear();
-            self.feed("\u{fffd}");
-        }
+    /// Bytes the terminal owes the program, such as answers to cursor-position queries.
+    pub fn take_replies(&mut self) -> Vec<u8> {
+        self.replies
+            .0
+            .lock()
+            .map(|mut replies| std::mem::take(&mut *replies))
+            .unwrap_or_default()
     }
     pub fn resize(&mut self, columns: u16, rows: u16) {
-        let columns = usize::from(columns.max(1));
-        let rows = usize::from(rows.max(1));
-        if rows < self.rows {
-            // Blank rows under the cursor go first, as in other terminals: only real output
-            // scrolls into history.
-            let mut excess = self.rows - rows;
-            while excess > 0
-                && self.cells.len() > self.cursor_row + 1
-                && self.cells.last().is_some_and(|row| row.iter().all(|cell| *cell == PtyCell::default()))
-            {
-                self.cells.pop();
-                excess -= 1;
-            }
-            let drained = self.cells.drain(..excess).collect::<Vec<_>>();
-            for row in drained {
-                self.push_scrollback(row);
-            }
-            self.cursor_row = self.cursor_row.saturating_sub(excess);
-        } else {
-            self.cells
-                .extend((0..rows - self.rows).map(|_| vec![PtyCell::default(); self.columns]));
-        }
-        for row in &mut self.cells {
-            row.resize(columns, PtyCell::default());
-        }
-        if let Some((saved, saved_row, saved_column)) = &mut self.primary_saved {
-            saved.resize(rows, vec![PtyCell::default(); columns]);
-            for row in saved.iter_mut() {
-                row.resize(columns, PtyCell::default());
-            }
-            *saved_row = (*saved_row).min(rows - 1);
-            *saved_column = (*saved_column).min(columns - 1);
-        }
-        self.rows = rows;
-        self.columns = columns;
-        self.scroll_top = 0;
-        self.scroll_bottom = rows;
-        self.pending_wrap = false;
-        self.cursor_row = self.cursor_row.min(rows - 1);
-        self.cursor_column = self.cursor_column.min(columns - 1);
+        self.term.resize(size(columns, rows));
     }
     #[must_use]
-    pub const fn dimensions(&self) -> (usize, usize) {
-        (self.columns, self.rows)
+    pub fn dimensions(&self) -> (usize, usize) {
+        (self.term.columns(), self.term.screen_lines())
     }
+    /// The cursor as (column, row) on the screen.
     #[must_use]
-    pub const fn cursor(&self) -> (usize, usize) {
-        (self.cursor_column, self.cursor_row)
-    }
-    #[must_use]
-    pub fn cells(&self) -> &[Vec<PtyCell>] {
-        &self.cells
+    pub fn cursor(&self) -> (usize, usize) {
+        let point = self.term.grid().cursor.point;
+        (point.column.0, usize::try_from(point.line.0).unwrap_or(0))
     }
     #[must_use]
     pub fn scrollback_len(&self) -> usize {
-        self.scrollback.len()
-    }
-    pub fn lines(&self) -> Vec<String> {
-        self.scrollback
-            .iter()
-            .chain(&self.cells)
-            .map(|row| render_row(row))
-            .collect()
+        self.term.grid().history_size()
     }
     #[must_use]
     pub fn history_len(&self) -> usize {
-        self.scrollback.len().saturating_add(self.cells.len())
+        self.scrollback_len() + self.term.screen_lines()
     }
+    /// One row of scrollback and screen together, oldest first.
     #[must_use]
-    pub fn history_row(&self, row: usize) -> Option<&[PtyCell]> {
-        if row < self.scrollback.len() {
-            self.scrollback.get(row).map(Vec::as_slice)
-        } else {
-            self.cells
-                .get(row.saturating_sub(self.scrollback.len()))
-                .map(Vec::as_slice)
+    pub fn history_row(&self, row: usize) -> Option<Vec<PtyCell>> {
+        if row >= self.history_len() {
+            return None;
         }
+        let line = Line(i32::try_from(row).ok()? - i32::try_from(self.scrollback_len()).ok()?);
+        let grid = self.term.grid();
+        Some(
+            (0..grid.columns())
+                .map(|column| pty_cell(&grid[line][Column(column)]))
+                .collect(),
+        )
     }
     #[must_use]
     pub fn history_window(&self, start: usize, maximum_rows: usize) -> Vec<Vec<PtyCell>> {
         (start..self.history_len().min(start.saturating_add(maximum_rows)))
-            .filter_map(|row| self.history_row(row).map(<[PtyCell]>::to_vec))
+            .filter_map(|row| self.history_row(row))
+            .collect()
+    }
+    pub fn lines(&self) -> Vec<String> {
+        (0..self.history_len())
+            .filter_map(|row| self.history_row(row))
+            .map(|row| render_row(&row))
             .collect()
     }
     #[must_use]
-    pub const fn unsupported_sequences(&self) -> u64 {
-        self.unsupported_sequences
+    pub fn alternate_active(&self) -> bool {
+        self.term.mode().contains(TermMode::ALT_SCREEN)
     }
     #[must_use]
-    pub const fn alternate_active(&self) -> bool {
-        self.alternate
+    pub fn cursor_visible(&self) -> bool {
+        self.term.mode().contains(TermMode::SHOW_CURSOR)
     }
     #[must_use]
-    pub const fn cursor_visible(&self) -> bool {
-        self.cursor_visible
+    pub fn application_cursor(&self) -> bool {
+        self.term.mode().contains(TermMode::APP_CURSOR)
     }
     #[must_use]
-    pub const fn application_cursor(&self) -> bool {
-        self.application_cursor
+    pub fn bracketed_paste(&self) -> bool {
+        self.term.mode().contains(TermMode::BRACKETED_PASTE)
     }
     #[must_use]
-    pub const fn bracketed_paste(&self) -> bool {
-        self.bracketed_paste
+    pub fn focus_reporting(&self) -> bool {
+        self.term.mode().contains(TermMode::FOCUS_IN_OUT)
     }
     #[must_use]
-    pub const fn focus_reporting(&self) -> bool {
-        self.focus_reporting
-    }
-    #[must_use]
-    pub const fn mouse_mode(&self) -> PtyMouseMode {
-        self.mouse_mode
-    }
-    #[must_use]
-    pub const fn sgr_mouse(&self) -> bool {
-        self.sgr_mouse
-    }
-    fn put(&mut self, character: char) {
-        let width = character.width().unwrap_or(0);
-        if self.pending_wrap {
-            if self.autowrap {
-                self.cursor_column = 0;
-                self.index();
-            }
-            self.pending_wrap = false;
+    pub fn mouse_mode(&self) -> PtyMouseMode {
+        let mode = self.term.mode();
+        if mode.contains(TermMode::MOUSE_MOTION) {
+            PtyMouseMode::Any
+        } else if mode.contains(TermMode::MOUSE_DRAG) {
+            PtyMouseMode::Drag
+        } else if mode.contains(TermMode::MOUSE_REPORT_CLICK) {
+            PtyMouseMode::Click
+        } else {
+            PtyMouseMode::Off
         }
-        if width == 0 {
-            if self.cursor_column > 0 {
-                self.cells[self.cursor_row][self.cursor_column - 1]
-                    .text
-                    .push(character);
-            }
-            return;
-        }
-        if self.cursor_column >= self.columns {
-            self.cursor_column = self.columns - 1;
-        }
-        if width == 2 && self.cursor_column + 1 >= self.columns {
-            if self.autowrap {
-                self.cursor_column = 0;
-                self.index();
+    }
+    #[must_use]
+    pub fn sgr_mouse(&self) -> bool {
+        self.term.mode().contains(TermMode::SGR_MOUSE)
+    }
+}
+
+fn size(columns: u16, rows: u16) -> Size {
+    Size {
+        columns: usize::from(columns.max(2)),
+        rows: usize::from(rows.max(1)),
+    }
+}
+
+fn pty_cell(cell: &Cell) -> PtyCell {
+    let flags = cell.flags;
+    let style = PtyStyle {
+        foreground: pty_color(cell.fg),
+        background: pty_color(cell.bg),
+        bold: flags.contains(Flags::BOLD),
+        dim: flags.contains(Flags::DIM) || matches!(cell.fg, Color::Named(named) if is_dim(named)),
+        italic: flags.contains(Flags::ITALIC),
+        underline: flags.intersects(Flags::ALL_UNDERLINES),
+        reverse: flags.contains(Flags::INVERSE),
+        strikethrough: flags.contains(Flags::STRIKEOUT),
+    };
+    if flags.contains(Flags::WIDE_CHAR_SPACER) {
+        return PtyCell {
+            text: String::new(),
+            style,
+            continuation: true,
+        };
+    }
+    let mut text = if flags.intersects(Flags::HIDDEN | Flags::LEADING_WIDE_CHAR_SPACER)
+        || cell.c == '\0'
+    {
+        " ".to_owned()
+    } else {
+        cell.c.to_string()
+    };
+    text.extend(cell.zerowidth().into_iter().flatten());
+    PtyCell {
+        text,
+        style,
+        continuation: false,
+    }
+}
+
+fn is_dim(color: NamedColor) -> bool {
+    (NamedColor::DimBlack as usize..=NamedColor::DimForeground as usize).contains(&(color as usize))
+        && color != NamedColor::BrightForeground
+}
+
+/// The program's colours in the panel's terms; the default foreground and background are left
+/// to the theme.
+fn pty_color(color: Color) -> Option<PtyColor> {
+    match color {
+        Color::Spec(rgb) => Some(PtyColor::Rgb(rgb.r, rgb.g, rgb.b)),
+        Color::Indexed(index) => Some(PtyColor::Indexed(index)),
+        Color::Named(named) => {
+            let index = named as usize;
+            if index < 16 {
+                u8::try_from(index).ok().map(PtyColor::Indexed)
+            } else if is_dim(named) && named != NamedColor::DimForeground {
+                u8::try_from(index - NamedColor::DimBlack as usize)
+                    .ok()
+                    .map(PtyColor::Indexed)
             } else {
-                return;
+                None
             }
-        }
-        self.cells[self.cursor_row][self.cursor_column] = PtyCell {
-            text: character.to_string(),
-            style: self.style,
-            continuation: false,
-        };
-        if width == 2 && self.cursor_column + 1 < self.columns {
-            self.cells[self.cursor_row][self.cursor_column + 1] = PtyCell {
-                text: String::new(),
-                style: self.style,
-                continuation: true,
-            };
-        }
-        self.cursor_column += width;
-        if self.cursor_column >= self.columns {
-            self.cursor_column = self.columns - 1;
-            self.pending_wrap = self.autowrap;
-        }
-    }
-    fn escape(&mut self, character: char) {
-        match character {
-            '7' => self.saved_cursor = Some((self.cursor_row, self.cursor_column)),
-            'D' => self.index(),
-            'E' => {
-                self.cursor_column = 0;
-                self.index();
-            }
-            'M' => self.reverse_index(),
-            _ => {
-                if let Some((row, column)) = self.saved_cursor {
-                    self.cursor_row = row.min(self.rows - 1);
-                    self.cursor_column = column.min(self.columns - 1);
-                }
-            }
-        }
-    }
-    fn newline(&mut self) {
-        self.cursor_column = 0;
-        self.pending_wrap = false;
-        self.index();
-    }
-    fn index(&mut self) {
-        if self.cursor_row >= self.scroll_top && self.cursor_row + 1 >= self.scroll_bottom {
-            self.scroll_up_region(1)
-        } else {
-            self.cursor_row = (self.cursor_row + 1).min(self.rows - 1)
-        }
-    }
-    fn reverse_index(&mut self) {
-        if self.cursor_row == self.scroll_top {
-            self.cells
-                .insert(self.scroll_top, vec![PtyCell::default(); self.columns]);
-            self.cells.remove(self.scroll_bottom);
-        } else {
-            self.cursor_row = self.cursor_row.saturating_sub(1).max(self.scroll_top)
-        }
-    }
-    fn scroll_up_region(&mut self, count: usize) {
-        for _ in 0..count.min(self.scroll_bottom - self.scroll_top) {
-            let row = self.cells.remove(self.scroll_top);
-            if self.scroll_top == 0 && self.scroll_bottom == self.rows && !self.alternate {
-                self.push_scrollback(row);
-            }
-            self.cells.insert(
-                self.scroll_bottom - 1,
-                vec![PtyCell::default(); self.columns],
-            );
-        }
-    }
-    fn scroll_down_region(&mut self, count: usize) {
-        for _ in 0..count.min(self.scroll_bottom - self.scroll_top) {
-            self.cells.remove(self.scroll_bottom - 1);
-            self.cells
-                .insert(self.scroll_top, vec![PtyCell::default(); self.columns]);
-        }
-    }
-    fn push_scrollback(&mut self, line: Vec<PtyCell>) {
-        self.scrollback.push(line);
-        if self.scrollback.len() > self.maximum_scrollback_lines {
-            let excess = self.scrollback.len() - self.maximum_scrollback_lines;
-            self.scrollback.drain(..excess);
-        }
-    }
-    fn csi(&mut self, source: &str, final_byte: char) {
-        let parameters = source
-            .trim_start_matches('?')
-            .split(';')
-            .map(|value| value.parse::<usize>().unwrap_or(0))
-            .collect::<Vec<_>>();
-        let first = parameters.first().copied().unwrap_or(0);
-        // As in xterm, moving the cursor or editing the line cancels a wrap held at the right
-        // margin; otherwise the next character would land a row below where the program put it.
-        if !matches!(final_byte, 'm' | 'h' | 'l' | 'r' | 'S' | 'T') {
-            self.pending_wrap = false;
-        }
-        match final_byte {
-            'h' | 'l' if source.starts_with('?') => {
-                let enabled = final_byte == 'h';
-                for mode in source
-                    .trim_start_matches('?')
-                    .split(';')
-                    .filter_map(|v| v.parse::<usize>().ok())
-                {
-                    match mode {
-                        1 => self.application_cursor = enabled,
-                        6 => {
-                            self.origin_mode = enabled;
-                            self.cursor_row = if enabled { self.scroll_top } else { 0 };
-                            self.cursor_column = 0;
-                            self.pending_wrap = false;
-                        }
-                        7 => {
-                            self.autowrap = enabled;
-                            self.pending_wrap = false;
-                        }
-                        25 => self.cursor_visible = enabled,
-                        47 | 1049 => self.set_alternate(enabled),
-                        1000 => {
-                            self.mouse_mode = if enabled {
-                                PtyMouseMode::Click
-                            } else {
-                                PtyMouseMode::Off
-                            }
-                        }
-                        1002 => {
-                            self.mouse_mode = if enabled {
-                                PtyMouseMode::Drag
-                            } else {
-                                PtyMouseMode::Off
-                            }
-                        }
-                        1003 => {
-                            self.mouse_mode = if enabled {
-                                PtyMouseMode::Any
-                            } else {
-                                PtyMouseMode::Off
-                            }
-                        }
-                        1004 => self.focus_reporting = enabled,
-                        1006 => self.sgr_mouse = enabled,
-                        2004 => self.bracketed_paste = enabled,
-                        _ => {
-                            self.unsupported_sequences =
-                                self.unsupported_sequences.saturating_add(1)
-                        }
-                    }
-                }
-            }
-            's' => self.saved_cursor = Some((self.cursor_row, self.cursor_column)),
-            'u' => {
-                if let Some((row, column)) = self.saved_cursor {
-                    self.cursor_row = row.min(self.rows - 1);
-                    self.cursor_column = column.min(self.columns - 1)
-                }
-            }
-            '@' => {
-                let count = first
-                    .max(1)
-                    .min(self.columns - self.cursor_column.min(self.columns));
-                let row = &mut self.cells[self.cursor_row];
-                for _ in 0..count {
-                    row.insert(self.cursor_column.min(self.columns), PtyCell::default());
-                    row.pop();
-                }
-            }
-            'P' => {
-                let count = first
-                    .max(1)
-                    .min(self.columns - self.cursor_column.min(self.columns));
-                let row = &mut self.cells[self.cursor_row];
-                for _ in 0..count {
-                    if self.cursor_column < row.len() {
-                        row.remove(self.cursor_column);
-                        row.push(PtyCell::default());
-                    }
-                }
-            }
-            'A' => self.cursor_row = self.cursor_row.saturating_sub(first.max(1)),
-            'B' => self.cursor_row = (self.cursor_row + first.max(1)).min(self.rows - 1),
-            'C' => self.cursor_column = (self.cursor_column + first.max(1)).min(self.columns - 1),
-            'D' => self.cursor_column = self.cursor_column.saturating_sub(first.max(1)),
-            'E' => {
-                self.cursor_row = (self.cursor_row + first.max(1)).min(self.rows - 1);
-                self.cursor_column = 0;
-            }
-            'F' => {
-                self.cursor_row = self.cursor_row.saturating_sub(first.max(1));
-                self.cursor_column = 0;
-            }
-            'G' | '`' => {
-                self.cursor_column = first.max(1).saturating_sub(1).min(self.columns - 1)
-            }
-            'a' => self.cursor_column = (self.cursor_column + first.max(1)).min(self.columns - 1),
-            'd' => self.cursor_row = first.max(1).saturating_sub(1).min(self.rows - 1),
-            'e' => self.cursor_row = (self.cursor_row + first.max(1)).min(self.rows - 1),
-            'H' | 'f' => {
-                let base = if self.origin_mode { self.scroll_top } else { 0 };
-                let maximum = if self.origin_mode {
-                    self.scroll_bottom - 1
-                } else {
-                    self.rows - 1
-                };
-                self.cursor_row = (base + first.max(1).saturating_sub(1)).min(maximum);
-                self.cursor_column = parameters
-                    .get(1)
-                    .copied()
-                    .unwrap_or(1)
-                    .max(1)
-                    .saturating_sub(1)
-                    .min(self.columns - 1)
-            }
-            'r' => {
-                let top = first.max(1).saturating_sub(1);
-                let bottom = parameters
-                    .get(1)
-                    .copied()
-                    .unwrap_or(self.rows)
-                    .min(self.rows);
-                if top < bottom {
-                    self.scroll_top = top;
-                    self.scroll_bottom = bottom;
-                    self.cursor_row = if self.origin_mode { top } else { 0 };
-                    self.cursor_column = 0;
-                    self.pending_wrap = false;
-                } else {
-                    self.unsupported_sequences = self.unsupported_sequences.saturating_add(1)
-                }
-            }
-            'L' => {
-                if self.cursor_row >= self.scroll_top && self.cursor_row < self.scroll_bottom {
-                    for _ in 0..first.max(1).min(self.scroll_bottom - self.cursor_row) {
-                        self.cells
-                            .insert(self.cursor_row, vec![PtyCell::default(); self.columns]);
-                        self.cells.remove(self.scroll_bottom);
-                    }
-                }
-            }
-            'M' => {
-                if self.cursor_row >= self.scroll_top && self.cursor_row < self.scroll_bottom {
-                    for _ in 0..first.max(1).min(self.scroll_bottom - self.cursor_row) {
-                        self.cells.remove(self.cursor_row);
-                        self.cells.insert(
-                            self.scroll_bottom - 1,
-                            vec![PtyCell::default(); self.columns],
-                        );
-                    }
-                }
-            }
-            'S' => self.scroll_up_region(first.max(1)),
-            'T' => self.scroll_down_region(first.max(1)),
-            'X' => {
-                let end = (self.cursor_column + first.max(1)).min(self.columns);
-                self.cells[self.cursor_row][self.cursor_column..end].fill(PtyCell::default());
-            }
-            'J' => self.erase_display(first),
-            'K' => self.erase_line(first),
-            'm' => self.sgr(&parameters),
-            _ => self.unsupported_sequences = self.unsupported_sequences.saturating_add(1),
-        }
-    }
-    fn set_alternate(&mut self, enabled: bool) {
-        if enabled && !self.alternate {
-            self.primary_saved = Some((
-                std::mem::replace(
-                    &mut self.cells,
-                    vec![vec![PtyCell::default(); self.columns]; self.rows],
-                ),
-                self.cursor_row,
-                self.cursor_column,
-            ));
-            self.cursor_row = 0;
-            self.cursor_column = 0;
-            self.alternate = true;
-        } else if !enabled && self.alternate {
-            if let Some((cells, row, column)) = self.primary_saved.take() {
-                self.cells = cells;
-                self.cursor_row = row.min(self.rows - 1);
-                self.cursor_column = column.min(self.columns - 1);
-            }
-            self.alternate = false;
-        }
-    }
-    fn erase_line(&mut self, mode: usize) {
-        match mode {
-            0 => {
-                for cell in &mut self.cells[self.cursor_row][self.cursor_column.min(self.columns)..]
-                {
-                    *cell = PtyCell::default()
-                }
-            }
-            1 => {
-                for cell in
-                    &mut self.cells[self.cursor_row][..=self.cursor_column.min(self.columns - 1)]
-                {
-                    *cell = PtyCell::default()
-                }
-            }
-            2 => self.cells[self.cursor_row].fill(PtyCell::default()),
-            _ => self.unsupported_sequences = self.unsupported_sequences.saturating_add(1),
-        }
-    }
-    fn erase_display(&mut self, mode: usize) {
-        match mode {
-            0 => {
-                self.erase_line(0);
-                for row in self.cells.iter_mut().skip(self.cursor_row + 1) {
-                    row.fill(PtyCell::default())
-                }
-            }
-            1 => {
-                self.erase_line(1);
-                for row in self.cells.iter_mut().take(self.cursor_row) {
-                    row.fill(PtyCell::default())
-                }
-            }
-            2 => {
-                for row in &mut self.cells {
-                    row.fill(PtyCell::default())
-                }
-            }
-            3 => self.scrollback.clear(),
-            _ => self.unsupported_sequences = self.unsupported_sequences.saturating_add(1),
-        }
-    }
-    fn sgr(&mut self, parameters: &[usize]) {
-        let values = if parameters.is_empty() {
-            vec![0]
-        } else {
-            parameters.to_vec()
-        };
-        let mut index = 0;
-        while index < values.len() {
-            let value = values[index];
-            match value {
-                0 => self.style = PtyStyle::default(),
-                1 => self.style.bold = true,
-                2 => self.style.dim = true,
-                3 => self.style.italic = true,
-                4 => self.style.underline = true,
-                7 => self.style.reverse = true,
-                9 => self.style.strikethrough = true,
-                22 => {
-                    self.style.bold = false;
-                    self.style.dim = false
-                }
-                23 => self.style.italic = false,
-                24 => self.style.underline = false,
-                27 => self.style.reverse = false,
-                29 => self.style.strikethrough = false,
-                30..=37 => self.style.foreground = Some(PtyColor::Indexed((value - 30) as u8)),
-                39 => self.style.foreground = None,
-                40..=47 => self.style.background = Some(PtyColor::Indexed((value - 40) as u8)),
-                49 => self.style.background = None,
-                90..=97 => self.style.foreground = Some(PtyColor::Indexed((value - 90 + 8) as u8)),
-                100..=107 => {
-                    self.style.background = Some(PtyColor::Indexed((value - 100 + 8) as u8))
-                }
-                38 | 48 => {
-                    let target_foreground = value == 38;
-                    let color = match values.get(index + 1).copied() {
-                        Some(5) => {
-                            index += 2;
-                            values
-                                .get(index)
-                                .and_then(|v| u8::try_from(*v).ok())
-                                .map(PtyColor::Indexed)
-                        }
-                        Some(2) => {
-                            index += 4;
-                            if index < values.len() {
-                                match (
-                                    u8::try_from(values[index - 2]),
-                                    u8::try_from(values[index - 1]),
-                                    u8::try_from(values[index]),
-                                ) {
-                                    (Ok(r), Ok(g), Ok(b)) => Some(PtyColor::Rgb(r, g, b)),
-                                    _ => None,
-                                }
-                            } else {
-                                index = values.len().saturating_sub(1);
-                                None
-                            }
-                        }
-                        _ => None,
-                    };
-                    if let Some(color) = color {
-                        if target_foreground {
-                            self.style.foreground = Some(color)
-                        } else {
-                            self.style.background = Some(color)
-                        }
-                    } else {
-                        self.unsupported_sequences = self.unsupported_sequences.saturating_add(1)
-                    }
-                }
-                _ => self.unsupported_sequences = self.unsupported_sequences.saturating_add(1),
-            }
-            index += 1;
         }
     }
 }
@@ -944,19 +428,23 @@ mod tests {
         encode_key, encode_paste, encode_sgr_mouse,
     };
 
+    fn row(screen: &PtyScreen, row: usize) -> Vec<super::PtyCell> {
+        screen.history_row(screen.scrollback_len() + row).unwrap()
+    }
+
     #[test]
     fn shrinking_keeps_blank_rows_out_of_history() {
         let mut screen = PtyScreen::new(20, 10, 64);
         screen.feed_bytes(b"prompt$ ");
         screen.resize(20, 4);
         assert_eq!(screen.scrollback_len(), 0, "nothing was on those rows");
-        assert_eq!(screen.lines()[0].trim_end(), "prompt$");
+        assert_eq!(screen.lines()[0], "prompt$");
         assert_eq!(screen.cursor().1, 0);
 
         screen.feed_bytes(b"\r\n1\r\n2\r\n3");
         screen.resize(20, 2);
         assert_eq!(screen.scrollback_len(), 2, "output above the cursor is kept");
-        assert_eq!(screen.lines()[0].trim_end(), "prompt$");
+        assert_eq!(screen.lines()[0], "prompt$");
         assert_eq!(screen.cursor().1, 1);
     }
 
@@ -968,21 +456,20 @@ mod tests {
 
         assert_eq!(screen.lines()[0], "green 界 ready");
         assert_eq!(
-            screen.cells()[0][0].style,
+            row(&screen, 0)[0].style,
             PtyStyle {
-                foreground: Some(super::PtyColor::Indexed(2)),
+                foreground: Some(PtyColor::Indexed(2)),
                 bold: true,
                 ..PtyStyle::default()
             }
         );
-        assert!(screen.cells()[0][7].continuation);
-        assert_eq!(screen.unsupported_sequences(), 0);
+        assert!(row(&screen, 0)[7].continuation);
     }
 
     #[test]
     fn alternate_modes_and_extended_sgr_are_streaming_and_restorative() {
         let mut screen = PtyScreen::new(24, 3, 8);
-        screen.feed("primary");
+        screen.feed_bytes(b"primary");
         let sequence =
             b"\x1b[?1049h\x1b[?1;25;1004;1002;1006;2004h\x1b[1;2;3;4;7;9;38;5;201;48;2;1;2;3malt";
         for byte in sequence {
@@ -997,7 +484,9 @@ mod tests {
                 && screen.sgr_mouse()
         );
         assert_eq!(screen.mouse_mode(), PtyMouseMode::Drag);
-        let style = screen.cells()[0][0].style;
+        // As in xterm, the alternate screen keeps the cursor where "primary" left it.
+        assert_eq!(screen.lines()[0], "       alt");
+        let style = row(&screen, 0)[7].style;
         assert_eq!(style.foreground, Some(PtyColor::Indexed(201)));
         assert_eq!(style.background, Some(PtyColor::Rgb(1, 2, 3)));
         assert!(
@@ -1008,40 +497,9 @@ mod tests {
                 && style.reverse
                 && style.strikethrough
         );
-        screen.feed("\x1b[?1049l");
+        screen.feed_bytes(b"\x1b[?1049l");
         assert!(!screen.alternate_active());
         assert_eq!(screen.lines()[0], "primary");
-        for _ in 0..256 {
-            assert_eq!(screen.lines()[0], "primary");
-        }
-    }
-
-    #[test]
-    fn malformed_extended_sgr_preserves_prior_color() {
-        for sequence in [
-            "\x1b[38;5;256m",
-            "\x1b[38;2;256;2;3m",
-            "\x1b[38;2;1;2m",
-            "\x1b[38;5m",
-        ] {
-            let mut screen = PtyScreen::new(4, 1, 1);
-            screen.feed("\x1b[31m");
-            let before = screen.style.foreground;
-            let unsupported = screen.unsupported_sequences();
-            screen.feed(sequence);
-            assert_eq!(screen.style.foreground, before);
-            assert_eq!(screen.unsupported_sequences(), unsupported + 1);
-        }
-        let mut screen = PtyScreen::new(4, 1, 1);
-        screen.feed("\x1b[38;5;255mX\x1b[48;2;0;255;0mY");
-        assert_eq!(
-            screen.cells()[0][0].style.foreground,
-            Some(PtyColor::Indexed(255))
-        );
-        assert_eq!(
-            screen.cells()[0][1].style.background,
-            Some(PtyColor::Rgb(0, 255, 0))
-        );
     }
 
     #[test]
@@ -1049,43 +507,32 @@ mod tests {
         // pi and other differential renderers end a frame on a full-width border, then move up
         // and rewrite from there; the rewrite must land where they moved, not a row lower.
         let mut screen = PtyScreen::new(4, 3, 8);
-        screen.feed("top\r\n────\x1b[1A\rX");
+        screen.feed_bytes("top\r\n────\x1b[1A\rX".as_bytes());
         assert_eq!(screen.lines()[0], "Xop");
         assert_eq!(screen.cursor(), (1, 0));
-        let mut screen = PtyScreen::new(4, 3, 8);
-        screen.feed("────\rY\x1b[2;3HZ\x1b[1dW");
-        assert_eq!(screen.lines()[..2], ["Y──W".to_owned(), "  Z".to_owned()]);
         let mut screen = PtyScreen::new(4, 2, 8);
-        screen.feed("a\r\nb\r\nc\x1b[3J");
+        screen.feed_bytes(b"a\r\nb\r\nc\x1b[3J");
         assert_eq!(screen.scrollback_len(), 0);
     }
 
     #[test]
-    fn scroll_regions_origin_wrap_and_line_operations_are_bounded() {
-        let mut screen = PtyScreen::new(6, 4, 8);
-        for byte in b"one\r\ntwo\r\nthree\r\nfour" {
-            screen.feed_bytes(&[*byte]);
-        }
-        let scrollback = screen.scrollback_len();
-        screen.feed("\x1b[2;4r\x1b[?6h\x1b[3;1Hbottom\x1bD");
-        assert_eq!(
-            screen.scrollback_len(),
-            scrollback,
-            "interior region never reaches scrollback"
-        );
-        screen.feed("\x1b[2;1H\x1bLx\x1b[1M\x1b[2S\x1b[1T\x1b[2X");
-        assert_eq!(screen.dimensions(), (6, 4));
-        screen.feed("\x1b[?6l\x1b[?7l\x1b[1;6HZQ");
-        assert_eq!(screen.cursor().0, 5, "disabled autowrap stays at margin");
-        let before = (screen.scroll_top, screen.scroll_bottom);
-        screen.feed("\x1b[4;2r");
-        assert_eq!((screen.scroll_top, screen.scroll_bottom), before);
-        assert!(screen.unsupported_sequences() > 0);
-        screen.feed("\x1b[?1049h");
-        screen.resize(8, 5);
-        screen.feed("alternate\x1b[?1049l");
-        assert_eq!(screen.dimensions(), (8, 5));
-        assert_eq!(screen.cells().len(), 5);
+    fn the_terminal_answers_cursor_and_device_queries() {
+        let mut screen = PtyScreen::new(10, 4, 8);
+        screen.feed_bytes(b"ab\r\ncd\x1b[6n\x1b[c");
+        let replies = String::from_utf8(screen.take_replies()).unwrap();
+        assert!(replies.starts_with("\x1b[2;3R"), "{replies:?}");
+        assert!(replies.contains("\x1b[?"), "device attributes: {replies:?}");
+        assert!(screen.take_replies().is_empty());
+    }
+
+    #[test]
+    fn narrowing_rewraps_long_lines_and_widening_joins_them() {
+        let mut screen = PtyScreen::new(10, 4, 8);
+        screen.feed_bytes(b"0123456789abc\r\n$ ");
+        screen.resize(5, 6);
+        assert_eq!(screen.lines()[..3], ["01234", "56789", "abc"]);
+        screen.resize(20, 4);
+        assert_eq!(screen.lines()[0], "0123456789abc");
     }
 
     #[test]
@@ -1140,11 +587,10 @@ mod tests {
     }
 
     #[test]
-    fn raw_pty_bytes_replace_invalid_or_incomplete_utf8_without_exposing_controls() {
+    fn raw_pty_bytes_replace_invalid_utf8_without_exposing_controls() {
         let mut screen = PtyScreen::new(20, 2, 4);
-        screen.feed_bytes(b"ok\xff\xe2\x82");
-        screen.finish_bytes();
-        assert_eq!(screen.lines()[0], "ok��");
+        screen.feed_bytes(b"ok\xff!\xe2\x82\x1b[m");
+        assert_eq!(screen.lines()[0], "ok\u{fffd}!\u{fffd}");
         assert!(!screen.lines()[0].contains('\u{1b}'));
     }
 }

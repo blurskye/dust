@@ -1128,7 +1128,6 @@ pub struct TerminalPanelState {
     pub running: bool,
     pub exit_code: Option<u32>,
     pub truncated: bool,
-    pub unsupported_sequences: u64,
     pub focused: bool,
     pub columns: u16,
     pub rows: u16,

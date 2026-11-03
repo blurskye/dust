@@ -7,6 +7,9 @@ rust-version = "1.85"
 default-run = "dust"
 
 [dependencies]
+# The terminal emulator behind Alacritty and Zed, so programs in Dust's terminals behave as in a
+# real one; Dust keeps its own PTY processes and only feeds it their output.
+alacritty_terminal = { version = "0.26.0", default-features = false }
 clap = { version = "4.5.28", features = ["derive"] }
 # Keep unread SIGWINCH readiness pending when input and resize arrive together.
 # Crossterm 0.29's default Mio backend can discard the second edge-triggered event.

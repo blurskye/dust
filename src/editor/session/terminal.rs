@@ -750,6 +750,14 @@ impl TerminalSession {
                     bytes, truncated, ..
                 } => {
                     tab.screen.feed_bytes(&bytes);
+                    // Answers to the program's questions, such as where the cursor is, go
+                    // straight back to it.
+                    let replies = tab.screen.take_replies();
+                    if !replies.is_empty()
+                        && let Ok(admission) = self.service.reserve_input(pty)
+                    {
+                        let _ = admission.submit(replies);
+                    }
                     tab.truncated |= truncated;
                     if tab.mode != TerminalPanelMode::Input {
                         if let Some(cursor) = tab.normal_cursor {
@@ -806,7 +814,6 @@ impl TerminalSession {
                     // exited is the program's business, not a terminal failure.
                     let keep_output = tab.profile == DEBUG_TERMINAL_PROFILE;
                     tab.pty = None;
-                    tab.screen.finish_bytes();
                     tab.io_complete = true;
                     updates.push(TerminalUpdate::IoComplete(id));
                     if let Err(message) = result {
@@ -831,7 +838,6 @@ impl TerminalSession {
                     }
                     let stopping = tab.stopping;
                     tab.pty = None;
-                    tab.screen.finish_bytes();
                     tab.running = false;
                     tab.failure = Some(message.clone());
                     tab.truncated = true;
@@ -847,7 +853,6 @@ impl TerminalSession {
                     }
                     let stopping = tab.stopping;
                     tab.pty = None;
-                    tab.screen.finish_bytes();
                     tab.running = false;
                     tab.unknown = Some(message.clone());
                     if stopping {

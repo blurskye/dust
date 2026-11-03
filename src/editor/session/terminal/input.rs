@@ -128,7 +128,7 @@ impl TerminalSession {
                 cursor.1 = terminal
                     .screen
                     .history_row(cursor.0)
-                    .map_or(0, terminal_row_end);
+                    .map_or(0, |row| terminal_row_end(&row));
             }
             "first" => cursor = (0, 0),
             "last" => {
@@ -136,7 +136,7 @@ impl TerminalSession {
                 cursor.1 = terminal
                     .screen
                     .history_row(cursor.0)
-                    .map_or(0, terminal_row_end);
+                    .map_or(0, |row| terminal_row_end(&row));
             }
             _ => {
                 return Err("unknown terminal normal-mode motion".into());
@@ -267,7 +267,6 @@ impl TerminalSession {
             running: terminal.running,
             exit_code: terminal.exit_code,
             truncated: terminal.truncated,
-            unsupported_sequences: terminal.screen.unsupported_sequences(),
             focused: focused == Some(id.0),
             columns: u16::try_from(columns).unwrap_or(u16::MAX),
             rows: u16::try_from(rows).unwrap_or(u16::MAX),
@@ -335,7 +334,7 @@ fn terminal_yank_text(
             start.1
         };
         let last_column = if linewise || row_index < end.0 {
-            terminal_row_end(row)
+            terminal_row_end(&row)
         } else {
             end.1.min(row.len().saturating_sub(1))
         };

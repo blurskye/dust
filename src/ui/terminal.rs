@@ -368,12 +368,7 @@ fn queue_style(
     if let Style::Terminal(pty) = style {
         let text = &theme.styles.terminal_text;
         let background = &theme.styles.terminal_background;
-        let (pty_foreground, pty_background) = if pty.reverse {
-            (pty.background, pty.foreground)
-        } else {
-            (pty.foreground, pty.background)
-        };
-        let foreground = pty_foreground.map_or_else(
+        let foreground = pty.foreground.map_or_else(
             || {
                 terminal_color(tier_color(
                     text.foreground,
@@ -384,7 +379,7 @@ fn queue_style(
             },
             |color| terminal_pty_color(color, tier),
         );
-        let background = pty_background.map_or_else(
+        let background = pty.background.map_or_else(
             || {
                 terminal_color(tier_color(
                     background.background,
@@ -395,6 +390,12 @@ fn queue_style(
             },
             |color| terminal_pty_color(color, tier),
         );
+        // Reverse swaps the colours as drawn, so text in the default colours inverts too.
+        let (foreground, background) = if pty.reverse {
+            (background, foreground)
+        } else {
+            (foreground, background)
+        };
         queue!(
             writer,
             SetAttribute(Attribute::Reset),
@@ -800,6 +801,7 @@ mod tests {
 
     use super::{
         ColorTier, KeyInputKind, UiEvent, configured_color_tier, normalize_event, queue_style,
+        terminal_color, tier_color,
     };
 
     #[test]
@@ -976,6 +978,41 @@ mod tests {
         assert!(pty.contains("38;5;1"));
         assert!(pty.contains("48;5;4"));
         assert!(pty.contains("\u{1b}[1m"));
+        // Reverse in the default colours draws the theme's background on its text colour.
+        let mut reversed = Vec::new();
+        queue_style(
+            &mut reversed,
+            crate::ui::Style::Terminal(crate::ui::PtyStyle {
+                reverse: true,
+                ..crate::ui::PtyStyle::default()
+            }),
+            &theme,
+            ColorTier::TrueColor,
+        )
+        .expect("queue reversed style");
+        let (text, background) = (&theme.styles.terminal_text, &theme.styles.terminal_background);
+        let mut swapped = Vec::new();
+        crossterm::queue!(
+            swapped,
+            crossterm::style::SetForegroundColor(terminal_color(tier_color(
+                background.background,
+                background.background_256,
+                background.background_16,
+                ColorTier::TrueColor,
+            ))),
+            crossterm::style::SetBackgroundColor(terminal_color(tier_color(
+                text.foreground,
+                text.foreground_256,
+                text.foreground_16,
+                ColorTier::TrueColor,
+            )))
+        )
+        .expect("expected colours");
+        assert!(
+            String::from_utf8(reversed)
+                .unwrap()
+                .contains(&String::from_utf8(swapped).unwrap())
+        );
         assert_eq!(
             configured_color_tier(crate::config::ColorMode::Ansi256),
             (ColorTier::Ansi256, "configured")

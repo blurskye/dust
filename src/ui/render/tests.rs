@@ -265,7 +265,6 @@ fn workspace_frame_respects_nonzero_compositor_origin_for_side_and_top_docks() {
         running: true,
         exit_code: None,
         truncated: false,
-        unsupported_sequences: 0,
         focused: false,
         columns: 5,
         rows: 8,
@@ -2958,7 +2957,7 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
     let mut config = loaded.config;
     config.ui.terminal_panel.height = 6;
     let mut screen = crate::ui::PtyScreen::new(80, 4, 100);
-    screen.feed("\u{1b}[31;1mRED\u{1b}[0m 界");
+    screen.feed_bytes("\u{1b}[31;1mRED\u{1b}[0m 界".as_bytes());
     let (cursor_column, cursor_row) = screen.cursor();
     let terminal = super::TerminalPanelState {
         id: 7,
@@ -2983,7 +2982,6 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
         running: true,
         exit_code: None,
         truncated: false,
-        unsupported_sequences: screen.unsupported_sequences(),
         focused: true,
         columns: 80,
         rows: 4,
@@ -3629,7 +3627,6 @@ fn the_debug_console_and_the_terminal_panel_are_planned_together_rather_than_col
         running: true,
         exit_code: None,
         truncated: false,
-        unsupported_sequences: 0,
         focused: false,
         columns: 40,
         rows: 8,

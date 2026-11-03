@@ -3155,9 +3155,9 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
     app.set_dashboard_visibility(false);
     app.window_session.observe_size((80, 24));
     let mut first_screen = PtyScreen::new(80, 8, 100);
-    first_screen.feed("first terminal");
+    first_screen.feed_bytes(b"first terminal");
     let mut second_screen = PtyScreen::new(80, 8, 100);
-    second_screen.feed("second terminal");
+    second_screen.feed_bytes(b"second terminal");
     app.terminal_session.fixture(
         PtyId(1),
         crate::editor::session::terminal::TerminalFixture {
