@@ -337,9 +337,11 @@ meta = { claudeCode = { options = { disallowedTools = ["Task", "Agent"] } } }
 
 [agents.profiles.codex]
 program = "codex-acp"
-cli = ["codex"]
+# Subagents come from Dust's `agent` tool, so Codex's own multi-agent tools are off: through
+# CODEX_CONFIG for the ACP adapter and with --disable for the CLI.
+cli = ["codex", "--disable", "multi_agent"]
 arguments = []
-environment = {}
+environment = { CODEX_CONFIG = '{"features":{"multi_agent":false}}' }
 options = {}
 
 [agents.profiles.pi]

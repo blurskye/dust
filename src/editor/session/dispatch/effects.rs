@@ -3926,8 +3926,9 @@ impl InteractiveApplication {
 impl InteractiveApplication {
     /// Shows a terminal and gives it the keys, bringing its window back if it was hidden.
     pub(super) fn reveal_terminal(&mut self, id: PtyId) {
+        self.terminal_session.select(id);
         self.terminal_session.display(id);
-        if self.terminal_window_rect().is_none() {
+        if self.terminal_rect(id).is_none() {
             if let Err(error) = self.show_native_window(NativeSurfaceTarget::Terminal(id.0)) {
                 self.show_error(error);
                 return;
@@ -3954,9 +3955,22 @@ impl InteractiveApplication {
                 self.request_terminal_open(&profile, None);
             }
             AppEffect::TerminalToggle => {
-                if self.window_session.terminal_focused() {
-                    self.place_active_terminal(WindowPlacement::Hidden);
-                } else if let Some(id) = self.terminal_session.selected() {
+                // This is the panel's terminal. A side terminal, such as a docked agent, keeps its
+                // window, so from one this opens the panel beside it.
+                let focused = self
+                    .window_session
+                    .focused_terminal()
+                    .map(PtyId)
+                    .filter(|id| self.terminal_session.contains(*id))
+                    .filter(|id| !self.terminal_session.side(*id));
+                if let Some(id) = focused {
+                    if let Err(error) = self.apply_native_window_placement(
+                        NativeSurfaceTarget::Terminal(id.0),
+                        WindowPlacement::Hidden,
+                    ) {
+                        self.show_error(error);
+                    }
+                } else if let Some(id) = self.terminal_session.panel() {
                     self.reveal_terminal(id);
                 } else {
                     let profile = self
@@ -6181,7 +6195,7 @@ impl InteractiveApplication {
 
     /// An agent's terminal opens on the right at the agent panel's width, where the ACP panel goes.
     fn dock_agent_terminal(&mut self, id: PtyId) {
-        self.terminal_session.display(id);
+        self.terminal_session.set_side(id);
         let width = u32::from(self.window_session.width());
         let share = width * u32::from(self.configuration.settings().agents.panel_width) / 100;
         // A conversation needs about 40 columns, however narrow the terminal is.
@@ -6287,14 +6301,48 @@ impl InteractiveApplication {
         self.sync_terminal_panel();
     }
     pub(super) fn sync_terminal_panel(&mut self) {
-        self.ui.terminal_panel = self.terminal_session.projection(
-            self.window_session.focused_terminal(),
-            self.window_session.terminal_height(),
-        );
+        let focused = self.window_session.focused_terminal();
+        let height = self.window_session.terminal_height();
+        self.ui.terminal_panel = self.displayed_terminal().and_then(|id| {
+            self.terminal_session
+                .projection(id, focused == Some(id.0), height)
+        });
         if self.ui.terminal_panel.is_none() {
             self.set_terminal_focus(false);
         }
         self.reconcile_editor_windows();
+        let active = self.ui.terminal_panel.as_ref().map(|terminal| terminal.id);
+        self.ui.other_terminals = self
+            .shown_terminal_windows()
+            .into_iter()
+            .filter(|(id, _)| Some(id.0) != active)
+            .filter_map(|(id, window)| {
+                Some((window, self.terminal_session.projection(id, false, height)?))
+            })
+            .collect();
+    }
+
+    /// Every terminal with a window on screen, the active one first.
+    pub(super) fn shown_terminal_windows(&self) -> Vec<(PtyId, crate::ui::window::WindowId)> {
+        let Some(projection) = self.compositor_projection() else {
+            return Vec::new();
+        };
+        self.displayed_terminal()
+            .into_iter()
+            .chain(self.terminal_session.displayed())
+            .chain(self.terminal_session.side_terminals())
+            .fold(Vec::new(), |mut ids, id| {
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
+                ids
+            })
+            .into_iter()
+            .filter_map(|id| {
+                let window = self.window_session.native_ids().terminal(id.0)?.window;
+                projection.window(window).map(|_| (id, window))
+            })
+            .collect()
     }
 }
 

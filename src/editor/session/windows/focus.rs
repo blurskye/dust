@@ -1,5 +1,5 @@
 use super::{NativeSurfaceTarget, WindowSession};
-use crate::ui::window::{SpatialDirection, WindowId};
+use crate::ui::window::{PANE_MINIMUM_WIDTH, SpatialDirection, WindowId};
 
 /// The underlying keyboard target. Picker/prompt/documentation capture does not
 /// erase this target; its identity is revalidated when the graph is reconciled.
@@ -162,6 +162,21 @@ impl WindowSession {
         );
         let target = NativeSurfaceTarget::Terminal(id);
         let placement = match self.native_placement(target)? {
+            // A terminal on the left or right, such as an agent, grows in columns.
+            crate::ui::window::WindowPlacement::Docked {
+                edge: edge @ (crate::ui::window::DockEdge::Left | crate::ui::window::DockEdge::Right),
+                size,
+            } => {
+                let step = i32::from(rows) * i32::from(crate::ui::render::TERMINAL_PANEL_RESIZE_STEP);
+                let widest = i32::from(self.width().saturating_sub(PANE_MINIMUM_WIDTH)).max(20);
+                let size = (i32::from(size) + step).clamp(20, widest);
+                let placement = crate::ui::window::WindowPlacement::Docked {
+                    edge,
+                    size: u16::try_from(size).unwrap_or(u16::MAX),
+                };
+                self.place_native(target, placement)?;
+                return Ok(());
+            }
             crate::ui::window::WindowPlacement::Docked { edge, .. } => {
                 Some(crate::ui::window::WindowPlacement::Docked { edge, size: height })
             }

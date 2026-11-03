@@ -3801,6 +3801,118 @@ fn the_dashboard_cursor_runs_items_and_ctrl_h_l_reach_an_agent_beside_it() {
 
 #[cfg(unix)]
 #[test]
+fn ctrl_slash_beside_a_terminal_agent_opens_a_shell_and_both_keep_their_windows_and_sizes() {
+    use super::driver::TestSession;
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.terminals.profiles.insert(
+        "shell".into(),
+        crate::config::TerminalProfileConfig {
+            program: "/bin/sh".into(),
+            arguments: vec!["-c".into(), "echo SHELL; cat".into()],
+            cwd: None,
+            environment: Default::default(),
+            columns: 80,
+            rows: 10,
+            float: false,
+            close_on_exit: false,
+        },
+    );
+    let agents = &mut loaded.config.agents;
+    agents.connection = crate::config::AgentConnection::Terminal;
+    let mut profile = agents.profiles[&agents.default].clone();
+    profile.cli = vec!["sh".into(), "-c".into(), "echo READY; cat".into()];
+    agents.profiles.insert("echoer".into(), profile);
+    agents.default = "echoer".into();
+    let mut driver = TestSession::new(loaded);
+    driver.new_buffer();
+    driver.trust_owned_terminal_fixture();
+    let deadline = Instant::now() + Duration::from_secs(6);
+    let wait = |driver: &mut TestSession, done: &dyn Fn(&mut TestSession) -> bool| {
+        while !done(driver) {
+            driver.pump_terminal();
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+    };
+    driver
+        .application_mut()
+        .process_effect(crate::editor::AppEffect::AgentAsk);
+    wait(&mut driver, &|driver| driver.terminal_lines().iter().any(|line| line.contains("READY")));
+    let agent = driver.application_mut().displayed_terminal().expect("agent");
+
+    // ctrl-/ from the agent opens a shell instead of hiding the agent.
+    driver.key("ctrl-/");
+    wait(&mut driver, &|driver| {
+        driver.application_mut().terminal_session.descriptions().len() == 2
+            && driver.terminal_lines().iter().any(|line| line.contains("SHELL"))
+    });
+    let app = driver.application_mut();
+    let shell = app.displayed_terminal().expect("shell");
+    assert_ne!(shell, agent);
+    assert_eq!(app.window_session.focused_terminal(), Some(shell.0));
+    let width = app.window_session.width();
+    let agent_rect = app.terminal_rect(agent).expect("the agent keeps its window");
+    let shell_rect = app.terminal_rect(shell).expect("the shell has a window");
+    assert_eq!(agent_rect.x + agent_rect.width, width, "{agent_rect:?}");
+    assert!(
+        shell_rect.x + shell_rect.width <= agent_rect.x
+            || shell_rect.y >= agent_rect.y + agent_rect.height,
+        "{shell_rect:?} overlaps {agent_rect:?}"
+    );
+    // Each program has its own window's size, the agent's less its border.
+    wait(&mut driver, &|driver| {
+        let app = driver.application_mut();
+        app.terminal_session.fixture_dimensions(agent).0 == usize::from(agent_rect.width - 1)
+            && app.terminal_session.fixture_dimensions(shell).0 == usize::from(shell_rect.width)
+    });
+    // Both draw, and the agent's tab row names only itself.
+    let frame = driver.frame();
+    let row = |rect: WindowRect, y: u16| {
+        (rect.x..rect.x + rect.width)
+            .filter_map(|x| frame.grid.get(x, y).map(|cell| cell.symbol.to_string()))
+            .collect::<String>()
+    };
+    let agent_text = (agent_rect.y..agent_rect.y + agent_rect.height)
+        .map(|y| row(agent_rect, y))
+        .collect::<Vec<_>>();
+    let shell_text = (shell_rect.y..shell_rect.y + shell_rect.height)
+        .map(|y| row(shell_rect, y))
+        .collect::<Vec<_>>();
+    assert!(agent_text.iter().any(|line| line.contains("READY")), "{agent_text:#?}");
+    assert!(shell_text.iter().any(|line| line.contains("SHELL")), "{shell_text:#?}");
+    assert!(!agent_text[0].contains("shell"), "{agent_text:#?}");
+    assert!(!shell_text[0].contains("echoer"), "{shell_text:#?}");
+
+    // ctrl-/ in the shell hides it and leaves the agent; again brings it back.
+    driver.key("ctrl-/");
+    let app = driver.application_mut();
+    assert!(app.terminal_rect(shell).is_none());
+    assert!(app.terminal_rect(agent).is_some());
+    driver.key("ctrl-/");
+    let app = driver.application_mut();
+    assert_eq!(app.terminal_rect(shell), Some(shell_rect));
+    assert_eq!(app.window_session.focused_terminal(), Some(shell.0));
+
+    // The agent widens and narrows in columns, and its program follows.
+    app.process_effect(crate::editor::AppEffect::TerminalFocus(agent.0));
+    assert_eq!(app.window_session.focused_terminal(), Some(agent.0));
+    assert!(app.terminal_rect(shell).is_some(), "the shell stays below");
+    app.resize_focused_window(crate::editor::FocusDirection::Left)
+        .expect("resize");
+    let wider = app.terminal_rect(agent).expect("agent");
+    assert_eq!(wider.width, agent_rect.width + crate::ui::render::TERMINAL_PANEL_RESIZE_STEP);
+    wait(&mut driver, &|driver| {
+        driver.application_mut().terminal_session.fixture_dimensions(agent).0
+            == usize::from(wider.width - 1)
+    });
+    // terminal.resize, given rows, moves a side terminal in columns too.
+    let app = driver.application_mut();
+    app.process_effect(crate::editor::AppEffect::TerminalResize(-1));
+    assert_eq!(app.terminal_rect(agent).map(|rect| rect.width), Some(agent_rect.width));
+}
+
+#[cfg(unix)]
+#[test]
 fn resizing_a_terminal_that_is_stopping_is_not_an_error() {
     use super::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();

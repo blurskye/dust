@@ -215,6 +215,8 @@ struct InteractiveApplication {
     palette_recent: Vec<String>,
     /// The split border being dragged with the mouse: the panes on its two sides.
     border_drag: Option<(crate::editor::PaneId, crate::editor::PaneId)>,
+    /// The docked terminal whose inner edge is being dragged with the mouse.
+    dock_drag: Option<PtyId>,
     /// The column a buffer tab was last dragged at with the mouse.
     tab_drag: Option<u16>,
     /// Where `dust --remote` from Dust's own terminals reaches this session.

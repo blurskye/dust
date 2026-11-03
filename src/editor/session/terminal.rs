@@ -125,12 +125,41 @@ impl TerminalSession {
     pub(in crate::editor::session) fn displayed(&self) -> Option<PtyId> {
         self.displayed.filter(|id| self.contains(*id))
     }
+    /// Shows the terminal in the panel. A side terminal has its own window, so the panel keeps
+    /// what it shows.
     pub(in crate::editor::session) fn display(&mut self, id: PtyId) -> bool {
         if !self.contains(id) {
             return false;
         }
-        self.displayed = Some(id);
+        if !self.side(id) {
+            self.displayed = Some(id);
+        }
         true
+    }
+    /// A side terminal, such as a terminal agent docked on the right, stays in its own window
+    /// beside the panel instead of being one of the panel's tabs.
+    pub(in crate::editor::session) fn set_side(&mut self, id: PtyId) {
+        if let Some(tab) = self.tabs.get_mut(&id) {
+            tab.side = true;
+        }
+        if self.displayed == Some(id) {
+            self.displayed = self.panel_fallback();
+        }
+    }
+    pub(in crate::editor::session) fn side(&self, id: PtyId) -> bool {
+        self.tabs.get(&id).is_some_and(|tab| tab.side)
+    }
+    pub(in crate::editor::session) fn side_terminals(&self) -> Vec<PtyId> {
+        let mut ids = self.tabs.iter().filter(|(_, tab)| tab.side).map(|(id, _)| *id).collect::<Vec<_>>();
+        ids.sort_by_key(|id| id.0);
+        ids
+    }
+    /// The terminal the panel shows or would show.
+    pub(in crate::editor::session) fn panel(&self) -> Option<PtyId> {
+        self.displayed().or_else(|| self.panel_fallback())
+    }
+    fn panel_fallback(&self) -> Option<PtyId> {
+        self.tabs.iter().filter(|(_, tab)| !tab.side).map(|(id, _)| *id).min_by_key(|id| id.0)
     }
     pub(in crate::editor::session) fn revision(&self) -> Option<u64> {
         self.revision
@@ -152,7 +181,7 @@ impl TerminalSession {
             return false;
         }
         self.selected = Some(id);
-        if self.displayed.is_none() {
+        if self.displayed.is_none() && !self.side(id) {
             self.displayed = Some(id);
         }
         true
@@ -264,7 +293,8 @@ impl TerminalSession {
         self.tabs.values().filter(|t| t.running).count()
     }
     pub(in crate::editor::session) fn cycle(&mut self, direction: i64) -> bool {
-        let ids = self.descriptions();
+        let mut ids = self.descriptions();
+        ids.retain(|(id, ..)| !self.side(PtyId(*id)));
         if ids.is_empty() {
             return false;
         }
@@ -413,6 +443,7 @@ impl TerminalSession {
                 profile: source.token.profile,
                 close_on_exit: config.close_on_exit,
                 float,
+                side: false,
                 pty: None,
                 scope: source.scope,
                 epoch: source.epoch,
@@ -584,7 +615,10 @@ impl TerminalSession {
             self.selected = self.tabs.keys().min_by_key(|id| id.0).copied();
         }
         if self.displayed == Some(id) {
-            self.displayed = self.selected.filter(|selected| self.contains(*selected));
+            self.displayed = self
+                .selected
+                .filter(|selected| self.contains(*selected) && !self.side(*selected))
+                .or_else(|| self.panel_fallback());
         }
         true
     }
@@ -923,6 +957,7 @@ struct TerminalRuntime {
     profile: String,
     close_on_exit: bool,
     float: bool,
+    side: bool,
     pty: Option<PtyId>,
     scope: WorkspaceVersion,
     epoch: Arc<()>,
@@ -983,6 +1018,7 @@ impl TerminalSession {
                 profile: fixture.profile,
                 close_on_exit: false,
                 float: false,
+                side: false,
                 pty: None,
                 scope,
                 epoch: self.epoch.clone(),

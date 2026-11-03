@@ -143,6 +143,7 @@ impl InteractiveApplication {
             tutor: super::tutor::Tutor::new(&state_directory),
             palette_recent: Vec::new(),
             border_drag: None,
+            dock_drag: None,
             tab_drag: None,
             remote: None,
             switch_ends_terminals: None,

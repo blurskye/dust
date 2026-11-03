@@ -420,6 +420,13 @@ impl InteractiveApplication {
             .filter(|id| self.terminal_session.contains(*id))
             .or(self.terminal_session.displayed())
     }
+    /// Where the terminal's window is, if it is on screen.
+    pub(super) fn terminal_rect(&self, id: PtyId) -> Option<WindowRect> {
+        let window = self.window_session.native_ids().terminal(id.0)?.window;
+        self.compositor_projection()?
+            .window(window)
+            .map(|window| window.rect)
+    }
     pub(super) fn terminal_window_rect(&self) -> Option<WindowRect> {
         let layout = self.window_session.layout()?;
         let (_, window) = layout.surfaces.terminal?;
@@ -434,29 +441,35 @@ impl InteractiveApplication {
             .map_or(self.window_session.height(), |bounds| bounds.height)
     }
 
+    #[cfg(test)]
     pub(super) fn terminal_body_dimensions(&self) -> Option<(u16, u16)> {
         self.compositor_projection()?;
         let rect = self.window_session.content().terminal?;
         Some((rect.width.max(1), rect.height.max(1)))
     }
 
+    /// Sizes each terminal on screen to its window.
     pub(super) fn resize_active_terminal_to_panel(&mut self) {
-        let Some(id) = self.displayed_terminal() else {
-            return;
-        };
         self.reconcile_editor_windows();
-        let Some((columns, rows)) = self.terminal_body_dimensions() else {
-            return;
-        };
-        let Some(source) = self.window_session.terminal_geometry_source(id.0) else {
-            self.show_error("terminal geometry source is missing, stale or foreign");
-            return;
-        };
-        if let Err(error) = self
-            .terminal_session
-            .resize(id, columns, rows, source, &self.workspace)
-        {
-            self.show_error(error);
+        for (id, window) in self.shown_terminal_windows() {
+            let Some(geometry) = self
+                .compositor_projection()
+                .and_then(|projection| projection.window(window))
+                .and_then(crate::ui::terminal_window_geometry)
+            else {
+                continue;
+            };
+            let Some(source) = self.window_session.terminal_geometry_source(id.0) else {
+                self.show_error("terminal geometry source is missing, stale or foreign");
+                return;
+            };
+            let (columns, rows) = (geometry.width.max(1), geometry.body_height.max(1));
+            if let Err(error) = self
+                .terminal_session
+                .resize(id, columns, rows, source, &self.workspace)
+            {
+                self.show_error(error);
+            }
         }
     }
 
@@ -714,7 +727,11 @@ impl InteractiveApplication {
                 command,
                 &(&*self.state).into(),
                 CommandPolicy {
-                    selected_terminal: self.terminal_session.selected().map(|id| id.0),
+                    // The terminal with the keys, as the one ctrl-h/l moved to need not be selected.
+                    selected_terminal: self
+                        .window_session
+                        .focused_terminal()
+                        .or(self.terminal_session.selected().map(|id| id.0)),
                     pane_step: PANE_RESIZE_STEP,
                     terminal_step: TERMINAL_PANEL_RESIZE_STEP,
                 },
@@ -1452,6 +1469,14 @@ impl InteractiveApplication {
                 .and_then(|_| self.window_session.focused_explorer()),
             explorer_size,
             active_terminal: self.displayed_terminal().map(|id| id.0),
+            shown_terminals: self
+                .terminal_session
+                .displayed()
+                .into_iter()
+                .chain(self.terminal_session.side_terminals())
+                .map(|id| id.0)
+                .collect::<Vec<_>>()
+                .into(),
             terminal_focused: self.displayed_terminal().is_some_and(|id| {
                 self.window_session.focused_terminal() == Some(id.0)
                     && self.window_session.native_ids().terminal_placement(id.0)

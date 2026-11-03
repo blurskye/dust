@@ -201,13 +201,10 @@ impl TerminalSession {
     }
     pub(in crate::editor::session) fn projection(
         &self,
-        focused: Option<u64>,
+        id: PtyId,
+        focused: bool,
         requested_height: u16,
     ) -> Option<TerminalPanelState> {
-        let id = focused
-            .map(PtyId)
-            .filter(|id| self.contains(*id))
-            .or(self.displayed())?;
         let terminal = self.tabs.get(&id)?;
         let (cursor_column, cursor_row) = terminal.screen.cursor();
         let (columns, rows) = terminal.screen.dimensions();
@@ -247,9 +244,11 @@ impl TerminalSession {
                 .min(history_rows.saturating_sub(visible_rows))
         };
         let cells = terminal.screen.history_window(cells_start, visible_rows);
+        // A side terminal's window shows only itself; the panel shows the other tabs.
         let mut tabs = self
             .tabs
             .iter()
+            .filter(|(tab_id, tab)| if terminal.side { **tab_id == id } else { !tab.side })
             .map(|(tab_id, tab)| TerminalTabState {
                 phase: tab.phase(),
                 id: tab_id.0,
@@ -267,7 +266,7 @@ impl TerminalSession {
             running: terminal.running,
             exit_code: terminal.exit_code,
             truncated: terminal.truncated,
-            focused: focused == Some(id.0),
+            focused,
             columns: u16::try_from(columns).unwrap_or(u16::MAX),
             rows: u16::try_from(rows).unwrap_or(u16::MAX),
             cells,

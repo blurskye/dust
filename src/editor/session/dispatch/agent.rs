@@ -1591,11 +1591,21 @@ impl InteractiveApplication {
         if self.configuration.settings().agents.connection == crate::config::AgentConnection::Terminal
         {
             // Like the panel, a shown agent hides whether or not it has the keys.
-            match self.displayed_terminal() {
-                Some(id) if self.agent_terminal(id) && self.terminal_window_rect().is_some() => {
-                    self.place_active_terminal(crate::ui::window::WindowPlacement::Hidden)
+            let shown = self
+                .terminal_session
+                .side_terminals()
+                .into_iter()
+                .find(|id| self.agent_terminal(*id) && self.terminal_rect(*id).is_some());
+            match shown {
+                Some(id) => {
+                    if let Err(error) = self.apply_native_window_placement(
+                        super::NativeSurfaceTarget::Terminal(id.0),
+                        crate::ui::window::WindowPlacement::Hidden,
+                    ) {
+                        self.show_error(error);
+                    }
                 }
-                _ => self.ask_terminal_agent(),
+                None => self.ask_terminal_agent(),
             }
             return;
         }

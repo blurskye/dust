@@ -1,7 +1,7 @@
 use crate::editor::session::diagnostics::MAXIMUM_DIAGNOSTICS_PER_URI;
 use crate::editor::session::lsp::{LSP_MAXIMUM_LOG_LINES, ProjectionChange};
 use crate::ui::render::{TERMINAL_PANEL_MAXIMUM_HEIGHT, TERMINAL_PANEL_MINIMUM_HEIGHT};
-use crate::ui::window::PANE_DEFAULT_RATIO;
+use crate::ui::window::{PANE_DEFAULT_RATIO, PANE_MINIMUM_HEIGHT, PANE_MINIMUM_WIDTH, WindowPlacement};
 use super::{
     AppEffect, BufferRevision, ByteOffset, ByteRange, CommandInvocation, CommandValue,
     DiagnosticOwner, DocumentEvent, DocumentationMarkupKind,
@@ -142,6 +142,93 @@ impl InteractiveApplication {
             return;
         }
         self.reconcile_editor_windows();
+    }
+
+    /// Dragging a docked terminal's inner edge resizes it: the border left of a right-hand
+    /// terminal, or the top row of the bottom panel.
+    fn handle_dock_drag(&mut self, key: &KeyEvent, column: u16, row: u16) -> bool {
+        use crate::editor::input::TerminalMouseInput;
+        use crate::ui::window::DockEdge;
+        let docked = |this: &Self, id: PtyId| {
+            let rect = this.terminal_rect(id)?;
+            match this.current_native_placement(NativeSurfaceTarget::Terminal(id.0)).ok()? {
+                WindowPlacement::Docked { edge, .. } => Some((edge, rect)),
+                _ => None,
+            }
+        };
+        match key.terminal_mouse() {
+            Some(TerminalMouseInput::LeftDown) => {
+                let edge_at = self.shown_terminal_windows().into_iter().find_map(|(id, _)| {
+                    let (edge, rect) = docked(self, id)?;
+                    let on_edge = match edge {
+                        DockEdge::Right => column == rect.x,
+                        DockEdge::Left => column + 1 == rect.x.saturating_add(rect.width),
+                        DockEdge::Bottom => row == rect.y,
+                        DockEdge::Top => row + 1 == rect.y.saturating_add(rect.height),
+                    } && rect_contains_point(rect, column, row);
+                    on_edge.then_some((id, edge))
+                });
+                self.dock_drag = edge_at.map(|(id, _)| id);
+                // The bottom panel's top row holds its tabs, so a click there still picks one.
+                edge_at.is_some_and(|(_, edge)| matches!(edge, DockEdge::Left | DockEdge::Right))
+            }
+            Some(TerminalMouseInput::LeftDrag) => {
+                let Some(id) = self.dock_drag else {
+                    return false;
+                };
+                let Some((edge, rect)) = docked(self, id) else {
+                    self.dock_drag = None;
+                    return false;
+                };
+                let (width, height) = (self.window_session.width(), self.window_session.height());
+                let size = match edge {
+                    DockEdge::Right => rect.x.saturating_add(rect.width).saturating_sub(column),
+                    DockEdge::Left => column.saturating_add(1).saturating_sub(rect.x),
+                    DockEdge::Bottom => rect.y.saturating_add(rect.height).saturating_sub(row),
+                    DockEdge::Top => row.saturating_add(1).saturating_sub(rect.y),
+                };
+                let size = match edge {
+                    DockEdge::Left | DockEdge::Right => {
+                        size.clamp(20, width.saturating_sub(PANE_MINIMUM_WIDTH).max(20))
+                    }
+                    DockEdge::Top | DockEdge::Bottom => size.clamp(
+                        crate::ui::render::TERMINAL_PANEL_MINIMUM_HEIGHT,
+                        height.saturating_sub(PANE_MINIMUM_HEIGHT).max(4),
+                    ),
+                };
+                if let Err(error) = self.apply_native_window_placement(
+                    NativeSurfaceTarget::Terminal(id.0),
+                    WindowPlacement::Docked { edge, size },
+                ) {
+                    self.show_error(error);
+                }
+                true
+            }
+            Some(TerminalMouseInput::LeftUp) => self.dock_drag.take().is_some(),
+            _ => false,
+        }
+    }
+
+    /// A click on a terminal shown beside the active one, such as a docked agent, gives it the
+    /// keys; other mouse input over it goes nowhere.
+    fn handle_other_terminal_mouse(&mut self, key: &KeyEvent, column: u16, row: u16) -> bool {
+        if self.ui.picker.is_some() || self.input.prompt().is_some() {
+            return false;
+        }
+        let active = self.displayed_terminal();
+        let Some(id) = self
+            .shown_terminal_windows()
+            .into_iter()
+            .map(|(id, _)| id)
+            .filter(|id| Some(*id) != active)
+            .find(|id| self.terminal_rect(*id).is_some_and(|rect| rect_contains_point(rect, column, row)))
+        else {
+            return false;
+        };
+        if key.terminal_mouse() == Some(crate::editor::input::TerminalMouseInput::LeftDown) {
+            self.process_effect(AppEffect::TerminalFocus(id.0));
+        }
+        true
     }
 
     /// Dragging the border between two editor windows resizes them, as in Neovim.
@@ -495,7 +582,9 @@ impl InteractiveApplication {
                 }
                 if self.handle_debug_tab_mouse(&key, column, row)
                     || self.handle_content_tab_mouse(&key, column, row)
+                    || self.handle_dock_drag(&key, column, row)
                     || self.handle_border_drag(&key, column, row)
+                    || self.handle_other_terminal_mouse(&key, column, row)
                 {
                     return;
                 }

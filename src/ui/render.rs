@@ -1424,6 +1424,8 @@ pub struct UiState {
     pub explorer_views: Vec<ExplorerWindowUiState>,
     pub explorer_focused: bool,
     pub terminal_panel: Option<TerminalPanelState>,
+    /// Terminals shown in their own windows beside the active one, such as a docked agent.
+    pub other_terminals: Vec<(WindowId, TerminalPanelState)>,
     /// Renderer-pure content-switcher projection supplied by the application-owned window graph.
     pub content_tabs: Vec<ContentTabEntry>,
     /// Active generic tiled topology and editor adapter bindings.
@@ -2108,6 +2110,18 @@ pub fn render(
         } else {
             workspace_frame
         };
+    for (window, terminal) in &ui.other_terminals {
+        let Some(projected) = compositor.and_then(|compositor| compositor.projection.window(*window))
+        else {
+            continue;
+        };
+        if projected.layer == crate::ui::window::CompositorLayer::Floating {
+            continue;
+        }
+        if let Some(geometry) = terminal_window_geometry(projected) {
+            frame = dock_terminal_panel(frame, terminal, geometry, config, width, height);
+        }
+    }
     let fullscreen = compositor.is_some_and(|compositor| {
         compositor
             .projection
@@ -2220,6 +2234,16 @@ pub fn render(
                     &ui.terminal_panel,
                     terminal_window_geometry(*projected),
                 ) {
+                    frame = dock_terminal_panel(frame, terminal, geometry, config, width, height);
+                }
+                continue;
+            }
+            if let Some((_, terminal)) = ui
+                .other_terminals
+                .iter()
+                .find(|(window, _)| *window == projected.window)
+            {
+                if let Some(geometry) = terminal_window_geometry(*projected) {
                     frame = dock_terminal_panel(frame, terminal, geometry, config, width, height);
                 }
                 continue;

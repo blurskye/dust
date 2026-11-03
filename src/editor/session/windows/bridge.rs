@@ -524,6 +524,9 @@ pub(in crate::editor::session) struct NativeSurfaceSignature {
     pub focused_explorer: Option<u64>,
     pub explorer_size: u16,
     pub active_terminal: Option<u64>,
+    /// Terminals that keep their windows while another is active: the panel's terminal and side
+    /// terminals such as a docked agent.
+    pub shown_terminals: Arc<[u64]>,
     pub terminal_focused: bool,
     pub terminal_size: u16,
     pub terminal_set_revision: Option<u64>,
@@ -853,7 +856,9 @@ impl NativeSurfaceBridge {
             self.terminal_restore_placements.remove(&id);
         }
         for (id, profile, lifecycle) in terminals {
-            let placement = if signature.active_terminal == Some(*id) {
+            let placement = if signature.active_terminal == Some(*id)
+                || signature.shown_terminals.contains(id)
+            {
                 self.terminal_placements
                     .get(id)
                     .copied()
