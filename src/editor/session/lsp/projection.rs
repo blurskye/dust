@@ -62,6 +62,16 @@ pub(super) struct Projection {
     progress_epoch: Option<Instant>,
     progress_frame: usize,
 }
+/// How the document the server's results belong to changed since the last frame.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::editor::session) enum ProjectionChange {
+    Same,
+    /// The same document in the same window, edited.
+    Typed,
+    /// Another document, window or server.
+    Moved,
+}
+
 impl LspSession {
     pub(in crate::editor::session) fn generation(&self) -> u64 {
         self.projection.generation
@@ -97,11 +107,11 @@ impl LspSession {
         &mut self,
         editor: &EditorState,
         document: Option<(BufferId, &LspDocument)>,
-    ) -> bool {
+    ) -> ProjectionChange {
         let current =
             document.and_then(|(buffer, doc)| self.projection_source(editor, buffer, doc));
         if self.projection.owner == current {
-            return false;
+            return ProjectionChange::Same;
         }
         // Typing moves the revision but keeps the menu: what was typed narrows it.
         let typing = match (&self.projection.owner, &current) {
@@ -122,7 +132,11 @@ impl LspSession {
         }
         self.clear_projection_rows();
         self.projection.owner = current;
-        true
+        if typing {
+            ProjectionChange::Typed
+        } else {
+            ProjectionChange::Moved
+        }
     }
     pub(in crate::editor::session) fn clear_projection(&mut self) {
         self.clear_completion();

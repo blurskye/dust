@@ -104,8 +104,11 @@ impl SyntaxSession {
         for buffer in removed {
             self.close(buffer);
         }
+        // An older parse stays until the next one lands, so editing doesn't blank the colours;
+        // anything that needs the exact text checks the revision itself.
         self.accepted.retain(|buffer, result| {
-            live.get(buffer) == Some(&(BufferRevision(result.revision), result.language))
+            live.get(buffer)
+                .is_some_and(|(_, language)| *language == result.language)
         });
         self.failures.retain(|buffer, failure| {
             live.get(buffer) == Some(&(failure.revision, failure.language))
@@ -319,6 +322,40 @@ mod tests {
         assert!(session.documents.is_empty());
         assert!(session.submitted.is_empty());
         assert_eq!(session.results().count(), 0);
+    }
+
+    #[test]
+    fn an_edit_keeps_the_last_parse_until_the_next_one_lands() {
+        let mut ids = SlotMap::<BufferId, ()>::with_key();
+        let buffer = ids.insert(());
+        let mut text = TextBuffer::from_text("// note\nfn main() {}\n");
+        let config = SyntaxConfig::default();
+        let mut session = SyntaxSession::new(2);
+        let mut now = Instant::now();
+        for _ in 0..400 {
+            let documents = [SyntaxDocument {
+                buffer,
+                text: &text,
+                language: Some(SyntaxLanguage::Rust),
+                enabled: true,
+            }];
+            session.tick(&documents, &config, now, "too large");
+            if session.result(buffer).is_some() {
+                break;
+            }
+            now += Duration::from_millis(SYNTAX_DEBOUNCE_MS);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let parsed = session.result(buffer).expect("first parse").revision;
+        text.restore_text("// notes\nfn main() {}\n").unwrap();
+        let documents = [SyntaxDocument {
+            buffer,
+            text: &text,
+            language: Some(SyntaxLanguage::Rust),
+            enabled: true,
+        }];
+        session.tick(&documents, &config, now, "too large");
+        assert_eq!(session.result(buffer).map(|result| result.revision), Some(parsed));
     }
 
     #[test]

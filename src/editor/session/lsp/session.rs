@@ -11,6 +11,7 @@ pub(in crate::editor::session) use launch::{
 };
 #[path = "projection.rs"]
 mod projection;
+pub(in crate::editor::session) use projection::ProjectionChange;
 // LSP runtime bookkeeping and accepted document lineage. No mutable editor authority.
 use super::{
     lsp_edits::{CodeActionChoice, CodeActionKey, EditDocument, OfferedAction, LspEditSources, SourcePlan},

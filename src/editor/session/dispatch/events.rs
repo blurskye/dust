@@ -1,5 +1,5 @@
 use crate::editor::session::diagnostics::MAXIMUM_DIAGNOSTICS_PER_URI;
-use crate::editor::session::lsp::LSP_MAXIMUM_LOG_LINES;
+use crate::editor::session::lsp::{LSP_MAXIMUM_LOG_LINES, ProjectionChange};
 use crate::ui::render::{TERMINAL_PANEL_MAXIMUM_HEIGHT, TERMINAL_PANEL_MINIMUM_HEIGHT};
 use crate::ui::window::PANE_DEFAULT_RATIO;
 use super::{
@@ -2218,10 +2218,6 @@ impl InteractiveApplication {
                     Some((revision, result.objects.clone()));
             }
         }
-        // Until a new parse or token reply arrives, the old colours follow the edit instead of
-        // dropping out, so typed text doesn't flash plain and back.
-        move_spans_onto_current_text(&mut self.ui.syntax_spans, &self.state);
-        move_spans_onto_current_text(&mut self.ui.lsp_semantic_spans, &self.state);
         // Folds and spans are rebuilt only when a parse result or the views changed, not on
         // every tick.
         let source = (
@@ -2235,10 +2231,17 @@ impl InteractiveApplication {
                 .map(|(view_id, view)| (view_id, view.buffer))
                 .collect::<Vec<_>>(),
         );
-        if source == self.syntax_spans_source {
-            return;
+        if source != self.syntax_spans_source {
+            self.syntax_spans_source = source;
+            self.rebuild_syntax_rows();
         }
-        self.syntax_spans_source = source;
+        // Until a new parse or token reply arrives, the old colours follow the edit instead of
+        // dropping out, so typed text doesn't flash plain and back.
+        move_spans_onto_current_text(&mut self.ui.syntax_spans, &self.state);
+        move_spans_onto_current_text(&mut self.ui.lsp_semantic_spans, &self.state);
+    }
+
+    fn rebuild_syntax_rows(&mut self) {
         let collapsed = self
             .ui
             .syntax_folds
@@ -2343,13 +2346,20 @@ impl InteractiveApplication {
     }
     pub(in crate::editor::session) fn refresh_lsp_projection_owner(&mut self) {
         let document = self.active_lsp_document_without_text();
-        if self.language.refresh_projection(
+        let change = self.language.refresh_projection(
             &self.state,
             document
                 .as_ref()
                 .map(|(buffer, document)| (*buffer, document)),
-        ) {
+        );
+        if change != ProjectionChange::Same {
+            // Typing keeps the server's colours, moved along with the edit, until it sends new
+            // ones; dropping them flashes the text back to tree-sitter's.
+            let semantic = std::mem::take(&mut self.ui.lsp_semantic_spans);
             self.clear_lsp_ui_rows();
+            if change == ProjectionChange::Typed {
+                self.ui.lsp_semantic_spans = semantic;
+            }
             if !self.language.completion_items().is_empty() {
                 self.project_lsp_completion();
             }
