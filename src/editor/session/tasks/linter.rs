@@ -152,7 +152,7 @@ impl TaskSession {
         if !self.current(&task, workspace, configuration) {
             return Err("linter run retired".into());
         }
-        let AdapterContext::Linter { matcher } = &task.adapter else {
+        let AdapterContext::Linter { matcher, .. } = &task.adapter else {
             return Ok(());
         };
         let source = task

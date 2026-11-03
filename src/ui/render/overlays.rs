@@ -147,15 +147,20 @@ pub(super) fn render_documentation_popup(
                 Some(spot) => spot,
                 None => {
                     // Too big for anywhere clear of the menu: a narrower box on the wider side,
-                    // no taller than the menu so it stays off the cursor's line, or none at all
-                    // rather than one over the items.
+                    // as tall as fits from the menu's top without reaching the cursor's line,
+                    // or none at all rather than one over the items.
                     let right_room = editor_right.saturating_sub(beside_right);
                     let left_room = menu.x.saturating_sub(editor_left);
                     if right_room.max(left_room) < 20 {
                         return;
                     }
                     box_width = box_width.min(right_room.max(left_room));
-                    box_height = box_height.min(menu.height.max(3));
+                    let room = if menu.y > cursor_y {
+                        available_height.saturating_sub(menu.y)
+                    } else {
+                        cursor_y.saturating_sub(menu.y)
+                    };
+                    box_height = box_height.min(room.max(menu.height).max(3));
                     visible_rows = visible_rows.min(usize::from(box_height - 2));
                     scrollable = line_count > visible_rows;
                     if right_room >= left_room {

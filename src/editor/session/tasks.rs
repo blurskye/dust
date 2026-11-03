@@ -37,8 +37,12 @@ pub(in crate::editor::session) enum AdapterContext {
     Formatter {
         source: FormatterSource,
     },
+    /// A task whose output a matcher turns into problems. `lint` is a linter's run, where
+    /// exit 1 means findings rather than failure; other tasks with a matcher, such as a build,
+    /// still fail on any nonzero exit.
     Linter {
         matcher: crate::config::ProblemMatcherConfig,
+        lint: bool,
     },
     Test {
         matcher: crate::config::ProblemMatcherConfig,
@@ -693,7 +697,7 @@ impl TaskSession {
                             && (code == Some(0)
                                 && matches!(task.adapter, AdapterContext::Formatter { .. })
                                 || matches!(code, Some(0 | 1))
-                                    && matches!(task.adapter, AdapterContext::Linter { .. }))
+                                    && matches!(task.adapter, AdapterContext::Linter { lint: true, .. }))
                         {
                             "process exited"
                         } else if code == Some(0) && !truncated {

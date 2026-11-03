@@ -77,6 +77,7 @@ fn completed(
 ) -> RunningTask {
     let adapter = AdapterContext::Linter {
         matcher: config.tasks[name].matcher.clone().unwrap(),
+        lint: true,
     };
     tasks
         .plan_checked(name, &adapter, config, workspace, 1)

@@ -2382,6 +2382,82 @@ fn linter_job_and_vfs_publish_only_original_source_then_recover() {
 }
 
 #[test]
+fn a_task_with_a_matcher_puts_what_it_matched_in_problems() {
+    let root = tempdir().unwrap();
+    let state_dir = tempdir().unwrap();
+    fs::write(root.path().join("notes.txt"), "one\ntwo\n").unwrap();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.tasks.insert(
+        "build".into(),
+        crate::config::TaskConfig {
+            kind: crate::config::TaskKind::Task,
+            executable: "/bin/sh".into(),
+            arguments: vec![
+                "-c".into(),
+                "printf 'notes.txt:2:1: error: broken\n'; exit 1".into(),
+            ],
+            cwd: None,
+            environment: BTreeMap::new(),
+            dependencies: vec![],
+            timeout_ms: Some(2000),
+            stdin: false,
+            matcher: Some(crate::config::ProblemMatcherConfig {
+                pattern: r"(?m)^(?P<path>[^:]+):(?P<line>\d+):(?P<column>\d+): (?P<severity>\w+): (?P<message>[^\n]+)$"
+                    .into(),
+                path_group: "path".into(),
+                line_group: "line".into(),
+                column_group: Some("column".into()),
+                severity_group: Some("severity".into()),
+                message_group: "message".into(),
+                name_group: None,
+                status_group: None,
+                duration_group: None,
+            }),
+        },
+    );
+    let mut app = InteractiveApplication::new(
+        StartupTarget::Dashboard {
+            root: root.path().into(),
+        },
+        loaded,
+        false,
+        state_dir.path().into(),
+        false,
+        false,
+        std::sync::Arc::new(crate::clock::SystemClock),
+    )
+    .unwrap();
+    app.window_session.observe_size((80, 24));
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone());
+    }
+    app.reconcile_workspace_trust();
+    app.process_effect(AppEffect::TaskRun("build".into()));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.diagnostics.choices().count() == 0 && Instant::now() < deadline {
+        app.process_execution_preflight();
+        app.process_job_events();
+        app.process_vfs_results();
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(
+        app.diagnostics.choices().count(),
+        1,
+        "{:?}",
+        app.notices.history().collect::<Vec<_>>()
+    );
+    // A build that exits 1 still failed, unlike a linter reporting findings.
+    assert!(app
+        .tasks
+        .task_items()
+        .iter()
+        .any(|item| item.label == "build" && item.detail == "failed"));
+}
+
+#[test]
 fn named_staging_commands_change_only_the_index() {
     fn index_bytes(root: &std::path::Path, name: &str) -> String {
         let repo = git2::Repository::open(root).unwrap();

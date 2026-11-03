@@ -180,9 +180,10 @@ pub(super) fn dock_terminal_panel(
             right,
         );
     }
-    // Input is the usual mode, so only the others are named, at the end of the tab row.
+    // The status line names the mode; only the other modes are repeated at the end of the tab
+    // row, unless the terminal covers the status line, as fullscreen does.
     let mode = match terminal.mode {
-        TerminalPanelMode::Input => None,
+        TerminalPanelMode::Input => (bottom >= height).then_some("TERMINAL"),
         TerminalPanelMode::Normal => Some(TERMINAL_NORMAL_LABEL),
         TerminalPanelMode::Visual => Some(TERMINAL_VISUAL_LABEL),
     };

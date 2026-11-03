@@ -5982,9 +5982,13 @@ impl InteractiveApplication {
                         if matches!(task.adapter(), AdapterContext::Formatter { .. }) {
                             self.finish_format_on_save();
                         }
-                        // Linters exit 1 when they have findings; that is not a failure.
-                        let linter_ran = matches!(task.adapter(), AdapterContext::Linter { .. })
-                            && matches!(code, Some(0 | 1));
+                        // Linters exit 1 when they have findings; that is not a failure. Other
+                        // tasks with a matcher publish what they matched however they exit.
+                        let (matched, lint) = match task.adapter() {
+                            AdapterContext::Linter { lint, .. } => (true, *lint),
+                            _ => (false, false),
+                        };
+                        let linter_ran = lint && matches!(code, Some(0 | 1));
                         if !linter_ran
                             && (!matches!(task.adapter(), AdapterContext::Formatter { .. })
                                 || code != Some(0))
@@ -6006,7 +6010,7 @@ impl InteractiveApplication {
                         if truncated && matches!(task.adapter(), AdapterContext::Linter { .. }) {
                             self.show_error("linter output truncated; diagnostics not published");
                         }
-                        if linter_ran && !truncated {
+                        if matched && (linter_ran || !lint) && !truncated {
                             if let Err(error) = self.tasks.begin_linter(
                                 *task,
                                 &self.state,
@@ -13957,7 +13961,19 @@ impl InteractiveApplication {
                 component,
                 update,
             ),
-            TrustedAction::RunTask(name) => self.start_task_plan(&name, AdapterContext::Plain),
+            // A task with a matcher reports what it matched in Problems, as a VS Code task does.
+            TrustedAction::RunTask(name) => {
+                let adapter = match self.configuration.settings().tasks.get(&name) {
+                    Some(task) => task.matcher.clone().map_or(AdapterContext::Plain, |matcher| {
+                        AdapterContext::Linter {
+                            matcher,
+                            lint: task.kind == crate::config::TaskKind::Linter,
+                        }
+                    }),
+                    None => AdapterContext::Plain,
+                };
+                self.start_task_plan(&name, adapter)
+            }
             TrustedAction::OpenTerminal(intent) => {
                 self.open_terminal_with_response(intent, None)
             }
@@ -13968,7 +13984,7 @@ impl InteractiveApplication {
                 self.start_task_plan(&name, AdapterContext::Test { matcher })
             }
             TrustedAction::RunLinter { name, matcher } => {
-                self.start_task_plan(&name, AdapterContext::Linter { matcher })
+                self.start_task_plan(&name, AdapterContext::Linter { matcher, lint: true })
             }
             TrustedAction::RunFormatter { name, source } => {
                 self.start_task_plan(&name, AdapterContext::Formatter { source })
