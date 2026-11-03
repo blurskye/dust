@@ -5209,3 +5209,45 @@ fn a_restored_session_keeps_the_buffer_line_in_window_order() {
         .collect::<Vec<_>>();
     assert_eq!(order, [zeta, alpha]);
 }
+
+#[test]
+fn hiding_the_terminal_goes_back_to_the_file_not_the_explorer() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("editor"), None);
+    app.set_dashboard_visibility(false);
+    app.handle_event(crate::ui::UiEvent::Resize(100, 30));
+    app.process_effect(AppEffect::ExplorerOpen);
+    app.set_explorer_focus(false);
+    app.reconcile_editor_windows();
+    app.terminal_session.fixture(
+        PtyId(1),
+        crate::editor::session::terminal::TerminalFixture {
+            profile: "shell".into(),
+            screen: PtyScreen::new(80, 8, 100),
+            running: true,
+            exit_code: None,
+            truncated: false,
+        },
+        app.workspace.version(),
+    );
+    app.terminal_session.select(PtyId(1));
+    app.set_terminal_focus(true);
+    app.sync_terminal_panel();
+    app.process_effect(AppEffect::TerminalToggle);
+    app.reconcile_editor_windows();
+    for _ in 0..2 {
+        assert_eq!(app.active_input_context(), "editor.normal");
+        app.process_effect(AppEffect::TerminalToggle);
+        assert!(app.window_session.terminal_focused(), "{:?}", app.ui.notification);
+        app.process_effect(AppEffect::TerminalToggle);
+        app.reconcile_editor_windows();
+        assert!(!app.window_session.terminal_focused());
+        assert!(!app.window_session.explorer_focused(), "the file had the keyboard before");
+    }
+    // From the explorer, it goes back to the explorer.
+    app.set_explorer_focus(true);
+    app.process_effect(AppEffect::TerminalToggle);
+    app.process_effect(AppEffect::TerminalToggle);
+    app.reconcile_editor_windows();
+    assert!(app.window_session.explorer_focused());
+}

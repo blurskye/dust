@@ -136,6 +136,8 @@ pub(super) struct WindowSession {
     epoch: u64,
     content_line: content::ContentLine,
     focus: FocusTarget,
+    /// Where the keyboard was before the terminal took it, so hiding the terminal goes back there.
+    before_terminal: FocusTarget,
     focus_stamp: Arc<()>,
     dashboard: bool,
     terminal_height: u16,

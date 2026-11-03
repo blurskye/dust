@@ -505,6 +505,8 @@ impl WindowSession {
         placement: WindowPlacement,
     ) -> Result<(), String> {
         self.require_projected_graph()?;
+        let hiding_focused_terminal = placement == WindowPlacement::Hidden
+            && matches!(target, NativeSurfaceTarget::Terminal(id) if self.focused_terminal() == Some(id));
         let mut candidate = self.candidate()?;
         let core = &mut candidate.core;
         if placement == WindowPlacement::Hidden {
@@ -528,6 +530,9 @@ impl WindowSession {
             .place(ids.window, placement)
             .map_err(|e| e.to_string())?;
         self.commit(candidate)?;
+        if hiding_focused_terminal {
+            self.return_from_terminal();
+        }
         if matches!(target, NativeSurfaceTarget::Terminal(_)) {
             match placement {
                 WindowPlacement::Docked { size, .. } => self.terminal_height = size,

@@ -75,11 +75,21 @@ impl WindowSession {
         }
     }
     fn request_focus(&mut self, focus: FocusTarget) {
+        self.remember_before_terminal(focus);
         if self.focus != focus {
             self.focus_stamp = std::sync::Arc::new(());
             self.focus = focus;
             self.invalidate_native();
         }
+    }
+    fn remember_before_terminal(&mut self, focus: FocusTarget) {
+        if matches!(focus, FocusTarget::Terminal(_)) && !self.terminal_focused() {
+            self.before_terminal = self.focus;
+        }
+    }
+    /// Give the keyboard back to where it was before the terminal had it.
+    pub(in crate::editor::session) fn return_from_terminal(&mut self) {
+        self.request_focus(self.before_terminal);
     }
     pub(super) fn accept_graph_focus(&mut self) {
         let Some(window) = self.core.graph.focused() else {
@@ -92,7 +102,10 @@ impl WindowSession {
             Some(NativeSurfaceTarget::ExplorerView(view)) => {
                 self.focus = FocusTarget::Explorer(view)
             }
-            Some(NativeSurfaceTarget::Terminal(id)) => self.focus = FocusTarget::Terminal(id),
+            Some(NativeSurfaceTarget::Terminal(id)) => {
+                self.remember_before_terminal(FocusTarget::Terminal(id));
+                self.focus = FocusTarget::Terminal(id);
+            }
             Some(NativeSurfaceTarget::Dashboard) => self.focus = FocusTarget::Editor,
             None => {
                 self.focus = if self
