@@ -546,7 +546,11 @@ impl InteractiveApplication {
         if self.agent.sessions.is_empty() {
             let name = self.configuration.settings().agents.default.clone();
             if let Err(error) = self.start_agent_session(&name) {
+                // The question stays in the input to send once the agent can start.
+                self.agent.input = question;
+                self.agent.cursor = self.agent.input.len();
                 self.show_error(error);
+                self.refresh_agent_transcript();
                 return;
             }
         } else if self.active_agent().is_some_and(|session| session.process.is_none())
@@ -1156,18 +1160,7 @@ impl InteractiveApplication {
             .get(name)
             .ok_or_else(|| format!("no agent named `{name}` in [agents.profiles]"))?;
         let Some(program) = self.agent_program(&profile.program) else {
-            let installable = self.tooling.entries().iter().any(|entry| {
-                entry.definition.kind == ToolKind::Agent
-                    && Path::new(&entry.definition.executable) == profile.program
-            });
-            return Err(if installable {
-                format!(
-                    "{} is not installed; install it in the tool manager (<leader>cm, Agent)",
-                    profile.program.display()
-                )
-            } else {
-                format!("{} is not installed", profile.program.display())
-            });
+            return Err(self.missing_agent_program(&profile.program));
         };
         let mut environment = profile.environment.clone();
         if let Some(server) = &self.remote {
@@ -1183,6 +1176,20 @@ impl InteractiveApplication {
                 .map_err(|error| format!("could not start agent {name}: {error}"))?;
         let id = process.request("initialize", agent::initialize_params())?;
         Ok((process, Phase::Initializing(id), profile.options.clone(), profile.meta.clone()))
+    }
+
+    fn missing_agent_program(&self, program: &Path) -> String {
+        let installable = self.tooling.entries().iter().any(|entry| {
+            entry.definition.kind == ToolKind::Agent && Path::new(&entry.definition.executable) == program
+        });
+        if installable {
+            format!(
+                "{} is not installed; install it in the tool manager (<leader>cm, Agent)",
+                program.display()
+            )
+        } else {
+            format!("{} is not installed", program.display())
+        }
     }
 
     /// The program to run: a path as given, a Dust-installed adapter, or one on `PATH`.
@@ -1749,7 +1756,8 @@ impl InteractiveApplication {
                 (shown_root(&session.root, width / 2), settings)
             }
             None => {
-                let name = &self.configuration.settings().agents.default;
+                let agents = &self.configuration.settings().agents;
+                let name = &agents.default;
                 text.wrapped(
                     &format!(
                         "No agent session yet. Type below to ask {name}, ctrl-n picks another \
@@ -1760,6 +1768,16 @@ impl InteractiveApplication {
                     ("", None),
                     width,
                 );
+                // Said here as well as in the notice, which fades, so a first ask is not lost.
+                if let Some(missing) = agents
+                    .profiles
+                    .get(name)
+                    .filter(|profile| self.agent_program(&profile.program).is_none())
+                    .map(|profile| self.missing_agent_program(&profile.program))
+                {
+                    text.push("\n\n", None);
+                    text.wrapped(&missing, Some(Highlight::QUOTE), ("", None), ("", None), width);
+                }
                 (String::new(), String::new())
             }
         };

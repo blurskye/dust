@@ -1271,6 +1271,32 @@ fn the_agent_panel_opens_over_the_dashboard() {
 }
 
 #[test]
+fn asking_an_agent_whose_adapter_is_missing_says_how_to_install_it() {
+    let mut app = app();
+    let mut fixture = app.configuration.fixture_snapshot();
+    let agents = &mut fixture.settings.agents;
+    agents.connection = crate::config::AgentConnection::Acp;
+    agents.profiles.get_mut(&agents.default).unwrap().program = "dust-test-missing-adapter".into();
+    app.configuration.install_fixture(fixture);
+    for key in [' ', 'a', 't'] {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    for key in "hi".chars() {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Enter));
+    // The panel says so for good, not just in the notice, and keeps the question.
+    let panel = app.ui.agent_panel.as_ref().expect("the panel is drawn");
+    assert!(panel.transcript.text.contains("dust-test-missing-adapter is not installed"));
+    assert_eq!(
+        (panel.input.as_str(), app.ui.notification.as_deref(), app.ui.notification_error),
+        ("hi", Some("dust-test-missing-adapter is not installed"), true)
+    );
+    app.handle_configured_key(KeyEvent::character('!'));
+    assert_eq!(app.ui.agent_panel.as_ref().map(|panel| panel.input.as_str()), Some("hi!"));
+}
+
+#[test]
 fn colorscheme_with_a_name_applies_that_theme_and_refuses_an_unknown_one() {
     let mut app = app();
     let set = |name: &str, app: &mut InteractiveApplication| {
