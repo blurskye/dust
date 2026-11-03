@@ -2850,6 +2850,62 @@ fn completion_documentation_never_covers_the_candidates_on_a_narrow_screen() {
 }
 
 #[test]
+fn completion_documentation_wraps_to_the_room_beside_a_wide_menu() {
+    let mut state = EditorState::new(PathBuf::from("/tmp"));
+    state.open_text(
+        crate::editor::text::TextBuffer::from_text("div {\n co\n}\n"),
+        Some(PathBuf::from("/tmp/completion.css")),
+    );
+    if let Some(view) = state.active_view {
+        state.views[view].cursor = crate::editor::text::ByteOffset(9);
+    }
+    let ui = UiState {
+        editor_window_layout: Some(editor_layout(&state)),
+        language_completion: Some(super::LanguageCompletionState {
+            typed: 0,
+            items: ["color", "content", "column-gap", "contain-intrinsic-size"]
+                .into_iter()
+                .map(|label| CompletionItem {
+                    icon: None,
+                    color: None,
+                    label: label.into(),
+                    detail: "vscode-css-language-server".into(),
+                })
+                .collect(),
+            selected: 0,
+            scroll: 0,
+        }),
+        documentation_popup: Some(DocumentationPopupState {
+            kind: DocumentationPopupKind::Completion,
+            title: "Completion · color".into(),
+            provider: "test".into(),
+            source_range: None,
+            sections: vec![DocumentationSection {
+                heading: None,
+                markup: DocumentationMarkupKind::Markdown,
+                spans: Vec::new(),
+                lines: vec![
+                    "Sets the color of an element's text".into(),
+                    String::new(),
+                    "Widely available across major browsers (Baseline since 2015)".into(),
+                ],
+            }],
+            scroll: 0,
+        }),
+        ..UiState::default()
+    };
+    let loaded = crate::config::load_bundled_config();
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 24);
+    let text = (0..24)
+        .map(|y| frame.grid.row_text(y))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for word in ["element's", "text", "2015)"] {
+        assert!(text.contains(word), "{word} lost:\n{text}");
+    }
+}
+
+#[test]
 fn language_completion_keeps_the_selected_item_inside_its_bounded_viewport() {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
     state.open_text(

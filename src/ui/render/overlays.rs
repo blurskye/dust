@@ -172,6 +172,36 @@ pub(super) fn render_documentation_popup(
             }
         }
     };
+    // Lines wider than the box wrap at spaces instead of losing their ends, and the box grows
+    // down for them while that stays clear of the menu and the cursor's line.
+    let inner = usize::from(
+        box_width
+            .saturating_sub(2)
+            .saturating_sub(DOCUMENTATION_PADDING.saturating_mul(2)),
+    )
+    .max(1);
+    let rows = (popup.scroll..line_count)
+        .filter_map(|index| popup.at(index).map(|(line, spans)| (index, line, spans)))
+        .flat_map(|(index, line, spans)| {
+            wrap_ranges(line, inner)
+                .into_iter()
+                .map(move |range| (index, line, spans, range))
+        })
+        .collect::<Vec<_>>();
+    let wanted = u16::try_from(rows.len().min(page_rows).saturating_add(2))
+        .unwrap_or(u16::MAX)
+        .min(DOCUMENTATION_MAX_HEIGHT)
+        .min(available_height.saturating_sub(top));
+    if wanted > box_height
+        && completion_menu
+            .filter(|_| popup.kind == DocumentationPopupKind::Completion)
+            .is_none_or(|menu| !boxes_overlap((left, top), (box_width, wanted), menu))
+        && !(top <= cursor_y && top.saturating_add(wanted) > cursor_y)
+    {
+        box_height = wanted;
+    }
+    visible_rows = usize::from(box_height.saturating_sub(2)).min(rows.len());
+    scrollable = scrollable || rows.len() > visible_rows;
     let right = left.saturating_add(box_width);
     let bottom = top.saturating_add(box_height).saturating_sub(1);
     for y in top..=bottom {
@@ -225,10 +255,8 @@ pub(super) fn render_documentation_popup(
     let text_left = left
         .saturating_add(1)
         .saturating_add(DOCUMENTATION_PADDING);
-    for (row, (index, (line, spans))) in (popup.scroll..popup.scroll.saturating_add(visible_rows))
-        .filter_map(|index| popup.at(index).map(|line| (index, line)))
-        .enumerate()
-    {
+    for (row, (index, line, spans, wrapped)) in rows.iter().take(visible_rows).enumerate() {
+        let index = *index;
         // A hunk preview reads as a diff.
         let style = match line.chars().next() {
             Some('+') if popup.provider == "Git" => Style::GitSignAdded,
@@ -242,25 +270,33 @@ pub(super) fn render_documentation_popup(
         let limit = right.saturating_sub(1).saturating_sub(DOCUMENTATION_PADDING);
         // Rendered Markdown: the runs between styled ones keep the line's style.
         let mut x = text_left;
-        let mut at = 0;
-        for (range, role) in spans {
-            let (Some(before), Some(styled)) = (line.get(at..range.start), line.get(range.clone()))
-            else {
+        let mut at = wrapped.start;
+        for (range, role) in spans.iter() {
+            let (start, end) = (range.start.max(at), range.end.min(wrapped.end));
+            let (Some(before), Some(styled)) = (line.get(at..start), line.get(start..end)) else {
                 continue;
             };
+            if start >= end {
+                continue;
+            }
             x = frame.grid.put_text_clipped(x, y, before, style, limit);
             x = frame
                 .grid
                 .put_text_clipped(x, y, styled, Style::DocumentationSyntax(*role), limit);
-            at = range.end;
+            at = end;
         }
-        frame.grid.put_text_clipped(x, y, line.get(at..).unwrap_or(""), style, limit);
+        frame
+            .grid
+            .put_text_clipped(x, y, line.get(at..wrapped.end).unwrap_or(""), style, limit);
     }
     if scrollable {
+        let last = rows
+            .get(visible_rows.saturating_sub(1))
+            .map_or(popup.scroll, |(index, ..)| *index);
         let footer = format!(
             " j/k or wheel · {}-{}/{} ",
             popup.scroll.saturating_add(1),
-            popup.scroll.saturating_add(visible_rows).min(line_count),
+            last.saturating_add(1).min(line_count),
             line_count
         );
         frame.grid.put_text_clipped(
@@ -285,6 +321,37 @@ pub(super) fn color_swatch_style((red, green, blue): (u8, u8, u8)) -> Style {
         background: Some(crate::ui::PtyColor::Rgb(red, green, blue)),
         ..Default::default()
     })
+}
+
+/// The byte ranges of `line` that fit `width` cells each, broken after a space when there is
+/// one, else mid-word.
+fn wrap_ranges(line: &str, width: usize) -> Vec<std::ops::Range<usize>> {
+    let mut rows = Vec::new();
+    let mut start = 0;
+    while UnicodeWidthStr::width(&line[start..]) > width {
+        let (mut used, mut end, mut space) = (0, start, None);
+        for (offset, grapheme) in line[start..].grapheme_indices(true) {
+            let cells = UnicodeWidthStr::width(grapheme);
+            if used + cells > width && end > start {
+                break;
+            }
+            used += cells;
+            end = start + offset + grapheme.len();
+            if grapheme == " " {
+                space = Some(end);
+            }
+        }
+        let cut = space.unwrap_or(end);
+        rows.push(start..cut);
+        start = cut;
+        while line[start..].starts_with(' ') {
+            start += 1;
+        }
+    }
+    if start < line.len() || rows.is_empty() {
+        rows.push(start..line.len());
+    }
+    rows
 }
 
 fn boxes_overlap(at: (u16, u16), size: (u16, u16), other: WindowRect) -> bool {
