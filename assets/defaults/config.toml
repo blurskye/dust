@@ -331,9 +331,9 @@ cli = ["claude"]
 arguments = []
 environment = {}
 options = {}
-# Subagents come from Dust's `agent` tool, so Claude Code's own subagent tool is off; it is
-# called Task in older versions and Agent in newer ones.
-meta = { claudeCode = { options = { disallowedTools = ["Task", "Agent"] } } }
+# Subagents come from Dust's `agent` tool, so Claude Code's own subagent tools are off: Task
+# in older versions, Agent and Workflow in newer ones.
+meta = { claudeCode = { options = { disallowedTools = ["Task", "Agent", "Workflow"] } } }
 
 [agents.profiles.codex]
 program = "codex-acp"
