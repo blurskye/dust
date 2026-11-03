@@ -5285,6 +5285,17 @@ fn command_line_completes_commands_without_an_alias_and_fills_in_their_arguments
 }
 
 #[test]
+fn completing_a_path_after_w_keeps_the_save_command() {
+    let mut app = app();
+    fs::write(app.state.workspace_root.join("q!"), b"").expect("file");
+    app.open_prompt(crate::ui::PromptKind::Command, "w q".into());
+    wait_vfs(&mut app);
+    app.input.prompt_complete(1);
+    assert!(app.input.accept_completion(app.configuration.settings()));
+    assert_eq!(app.input.prompt().expect("prompt").input, "w q!");
+}
+
+#[test]
 fn an_empty_plugin_list_says_how_to_get_one() {
     let mut app = app();
     app.process_effect(AppEffect::PluginList);

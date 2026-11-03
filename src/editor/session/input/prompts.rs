@@ -391,7 +391,7 @@ impl InputSession {
                 .input
                 .command_aliases
                 .get(command)
-                .is_some_and(|id| matches!(id.as_str(), "file.open" | "workspace.root.add"))
+                .is_some_and(|id| takes_path(id))
             {
                 prompt.input = format!("{command} {label}");
             } else {
@@ -403,12 +403,7 @@ impl InputSession {
                 .input
                 .command_aliases
                 .get(prompt.input.as_str())
-                .is_some_and(|id| {
-                    matches!(
-                        id.as_str(),
-                        "file.open" | "file.save" | "workspace.root.add"
-                    )
-                })
+                .is_some_and(|id| takes_path(id))
             {
                 prompt.input.push(' ');
             } else {
@@ -447,12 +442,7 @@ impl InputSession {
         let mut request = None;
         let mut candidates = BTreeMap::<String, String>::new();
         if let Some((command, fragment)) = input.split_once(char::is_whitespace) {
-            if policy.input.command_aliases.get(command).is_some_and(|id| {
-                matches!(
-                    id.as_str(),
-                    "file.open" | "file.save" | "workspace.root.add"
-                )
-            }) {
+            if policy.input.command_aliases.get(command).is_some_and(|id| takes_path(id)) {
                 let fragment = fragment.trim();
                 let query = fragment.to_lowercase();
                 for path in buffers {
@@ -600,4 +590,9 @@ fn command_completions<'a>(
         .collect::<Vec<_>>();
     rows.sort();
     rows.into_iter().map(|(rank, label)| (rank.3, label)).collect()
+}
+
+/// Commands whose argument is a path, which the command line completes from files.
+fn takes_path(command: &str) -> bool {
+    matches!(command, "file.open" | "file.save" | "workspace.root.add")
 }

@@ -151,23 +151,28 @@ pub(super) fn add_all(
     text: &TextBuffer,
 ) -> Result<(), CommandError> {
     let source = text.to_string();
+    // A visual selection matches as typed; a word under the cursor matches whole words only.
+    let selected = visual_range(view, text);
     let first = match view.multi_marks.first() {
         Some(first) if first.is_empty() => {
             return Err(failed("selecting every match needs a word; these cursors were added by line"));
         }
         Some(first) => *first,
-        None => visual_range(view, text)
+        None => selected
             .or_else(|| word_at(&source, view.cursor.get()))
             .ok_or_else(|| failed("no word under the cursor"))?,
     };
     let needle = &source[first.start.get()..first.end.get()];
-    let whole_word = needle.chars().all(is_word_character);
+    let whole_word = selected.is_none() && needle.chars().all(is_word_character);
     let marks: Vec<ByteRange> = source
         .match_indices(needle)
         .map(|(start, _)| start)
         .filter(|start| !whole_word || is_whole_word(&source, *start, start + needle.len()))
         .filter_map(|start| ByteRange::new(ByteOffset(start), ByteOffset(start + needle.len())).ok())
         .collect();
+    if marks.is_empty() {
+        return Err(failed("no matches"));
+    }
     let cursor = marks[current(&marks, view.cursor)].start;
     set_marks(transaction, view_id, marks, cursor);
     Ok(())

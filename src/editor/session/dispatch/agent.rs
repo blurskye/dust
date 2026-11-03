@@ -2158,7 +2158,11 @@ impl InteractiveApplication {
             }
             "word_back" => {
                 let text = input[..cursor].trim_end();
-                (text.rfind(char::is_whitespace).map_or(0, |space| space + 1), false)
+                let start = text
+                    .char_indices()
+                    .rfind(|(_, character)| character.is_whitespace())
+                    .map_or(0, |(space, character)| space + character.len_utf8());
+                (start, false)
             }
             "word_end" => {
                 let skip = cursor + after;

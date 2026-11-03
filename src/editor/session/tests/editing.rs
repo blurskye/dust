@@ -1016,6 +1016,19 @@ fn multi_cursors_take_every_match_skip_remove_and_move_together() {
 }
 
 #[test]
+fn selecting_every_match_of_a_selected_part_of_a_word_matches_it_as_typed() {
+    let mut app = app();
+    let (_, view) = app.state.open_text(TextBuffer::from_text("foobar\nxfoo\n"), None);
+    app.set_dashboard_visibility(false);
+    for key in ["v", "l", "l"] {
+        app.handle_configured_key(KeyEvent::character(key.chars().next().unwrap()));
+    }
+    app.handle_configured_key("ctrl-shift-l".parse().expect("key"));
+    let starts: Vec<usize> = app.state.views[view].multi_marks.iter().map(|mark| mark.start.get()).collect();
+    assert_eq!(starts, vec![0, "foobar\nx".len()]);
+}
+
+#[test]
 fn visual_block_i_and_a_type_before_and_after_every_row() {
     let mut app = app();
     let (_, view) = app.state.open_text(TextBuffer::from_text("  x = 1\n  y = 2\n  z = 3\n"), None);
