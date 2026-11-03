@@ -40,6 +40,8 @@ pub struct AgentRequest {
     pub prompt: String,
     /// A profile in `[agents.profiles]`; the parent's own when absent.
     pub agent: Option<String>,
+    /// A model the subagent's agent offers; its default when absent.
+    pub model: Option<String>,
     pub reply: Reply,
 }
 
@@ -148,6 +150,7 @@ fn parse_agent(body: &str, reply: Reply) -> Option<RemoteRequest> {
         description: request["description"].as_str().unwrap_or_default().to_owned(),
         prompt: request["prompt"].as_str()?.to_owned(),
         agent: request["agent"].as_str().filter(|name| !name.is_empty()).map(str::to_owned),
+        model: request["model"].as_str().filter(|name| !name.is_empty()).map(str::to_owned),
         reply,
     }))
 }

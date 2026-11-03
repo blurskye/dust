@@ -3710,7 +3710,9 @@ fn a_terminal_agent_opens_on_the_right_where_the_agent_panel_goes() {
     let agents = &mut loaded.config.agents;
     agents.connection = crate::config::AgentConnection::Terminal;
     let mut profile = agents.profiles[&agents.default].clone();
-    profile.cli = vec!["sh".into(), "-c".into(), "echo READY; cat".into()];
+    // The profile's environment reaches the program, as PI_HARDWARE_CURSOR reaches pi.
+    profile.cli = vec!["sh".into(), "-c".into(), "echo READY$SHOWN; cat".into()];
+    profile.environment.insert("SHOWN".into(), "-shown".into());
     agents.profiles.insert("echoer".into(), profile);
     agents.default = "echoer".into();
     let mut driver = TestSession::new(loaded);
@@ -3719,7 +3721,7 @@ fn a_terminal_agent_opens_on_the_right_where_the_agent_panel_goes() {
     let app = driver.application_mut();
     app.process_effect(crate::editor::AppEffect::AgentAsk);
     let deadline = Instant::now() + Duration::from_secs(4);
-    while !driver.terminal_lines().iter().any(|line| line.contains("READY")) {
+    while !driver.terminal_lines().iter().any(|line| line.contains("READY-shown")) {
         driver.pump_terminal();
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(2));

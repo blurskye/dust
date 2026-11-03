@@ -9,6 +9,7 @@ pub struct AgentProfileConfig {
     pub program: PathBuf,
     #[serde(default)]
     pub arguments: Vec<String>,
+    /// Set for both `program` and `cli`.
     #[serde(default)]
     pub environment: BTreeMap<String, String>,
     /// Session options to choose once the agent starts, by option id or category, such as

@@ -154,6 +154,10 @@ struct AgentSession {
 /// A started agent process, its phase, and the profile's option values and `_meta`.
 type Spawned = (AgentProcess, Phase, BTreeMap<String, String>, Option<Value>);
 
+/// The preferred option a subagent's requested model waits under until the session says which
+/// models it offers.
+const SUBAGENT_MODEL: &str = "subagent model";
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Phase {
     Initializing(u64),
@@ -330,6 +334,29 @@ impl AgentSession {
     }
 
     /// Profile preferences such as `model = "…"`, applied once the session exists.
+    /// A subagent asked for a model runs on that model or not at all, so the agent that asked
+    /// never gets an answer from a model it did not pick. The model may be given by its id or,
+    /// ignoring case, its name.
+    fn choose_subagent_model(&mut self) -> Result<(), String> {
+        let Some(wanted) = self.preferred.remove(SUBAGENT_MODEL) else {
+            return Ok(());
+        };
+        let Some(option) = self.option("model") else {
+            return Err(format!("{} does not let Dust choose its model", self.name));
+        };
+        let Some(value) = option
+            .values
+            .iter()
+            .find(|candidate| candidate.value == wanted)
+            .or_else(|| option.values.iter().find(|candidate| candidate.name.eq_ignore_ascii_case(&wanted)))
+        else {
+            let offered = option.values.iter().map(|candidate| candidate.value.as_str()).collect::<Vec<_>>();
+            return Err(format!("{} has no model `{wanted}`; it offers: {}", self.name, offered.join(", ")));
+        };
+        self.preferred.insert("model".into(), value.value.clone());
+        Ok(())
+    }
+
     fn apply_preferred(&mut self) {
         for (key, value) in std::mem::take(&mut self.preferred) {
             if self.option(&key).is_some_and(|option| option.current != value)
@@ -395,6 +422,7 @@ impl InteractiveApplication {
             .into_iter()
             .chain(profile.cli.iter().cloned())
             .collect();
+        let environment = profile.environment.clone();
         let running = self
             .terminal_session
             .descriptions()
@@ -438,7 +466,7 @@ impl InteractiveApplication {
             program: "/bin/sh".into(),
             arguments,
             cwd: None,
-            environment: BTreeMap::new(),
+            environment,
             columns: 80,
             rows: 24,
             float: false,
@@ -963,7 +991,7 @@ impl InteractiveApplication {
         };
         let name = request.agent.clone().unwrap_or_else(|| parent.name.clone());
         let root = parent.root.clone();
-        let spawned = match self.spawn_agent(&name, &root, None) {
+        let mut spawned = match self.spawn_agent(&name, &root, None) {
             Ok(spawned) => spawned,
             Err(error) => {
                 request.reply.send(Err(error));
@@ -979,6 +1007,9 @@ impl InteractiveApplication {
         };
         // Subagents do not start subagents of their own.
         session.tools = json!([]);
+        if let Some(model) = request.model {
+            spawned.2.insert(SUBAGENT_MODEL.into(), model);
+        }
         session.attach(spawned);
         session.entries.push(Entry::User {
             text: request.prompt.clone(),
@@ -1370,6 +1401,15 @@ impl InteractiveApplication {
                 session.id = result["sessionId"].as_str().map(str::to_owned);
                 session.options = agent::session_options(&result);
                 session.phase = Phase::Ready;
+                if let Err(error) = session.choose_subagent_model() {
+                    session.entries.push(Entry::Notice(error.clone()));
+                    if let Some(reply) = session.reply.take() {
+                        reply.send(Err(error));
+                    }
+                    session.process = None;
+                    session.phase = Phase::Stopped;
+                    return false;
+                }
                 session.apply_preferred();
                 session.send_next_prompt();
             }
@@ -2491,6 +2531,63 @@ mod tests {
         assert_eq!(out.text, "\nwhy\n+ main.rs\n\n\n● Read main.rs\n\nBecause.\n");
         let banded = bands.iter().map(|band| &out.text[band.clone()]).collect::<Vec<_>>();
         assert_eq!(banded, ["\nwhy\n+ main.rs\n\n"]);
+    }
+
+    #[test]
+    fn a_subagent_runs_on_the_model_asked_for_or_says_which_ones_there_are() {
+        let session = |wanted: Option<&str>, options: Value| AgentSession {
+            number: 2,
+            name: "pi".into(),
+            root: PathBuf::from("/r"),
+            process: None,
+            phase: Phase::Ready,
+            id: Some("s".into()),
+            queued: VecDeque::new(),
+            last_log: String::new(),
+            entries: Vec::new(),
+            options: agent::session_options(&options),
+            auth_methods: Vec::new(),
+            requests: Vec::new(),
+            preferred: wanted
+                .map(|model| (SUBAGENT_MODEL.to_owned(), model.to_owned()))
+                .into_iter()
+                .collect(),
+            history: "2".into(),
+            rejoin: Rejoin::default(),
+            earlier: None,
+            recap: false,
+            parent: Some(1),
+            task: String::new(),
+            reply: None,
+            commands: Vec::new(),
+            tools: json!([]),
+            meta: None,
+        };
+        let models = json!({"configOptions": [{
+            "id": "model", "name": "Model", "category": "model", "type": "select",
+            "currentValue": "openai/gpt-6.1",
+            "options": [
+                {"value": "openai/gpt-6.1", "name": "GPT 6.1"},
+                {"value": "anthropic/claude-opus", "name": "Claude Opus"},
+            ],
+        }]});
+        let mut by_name = session(Some("claude opus"), models.clone());
+        assert_eq!(by_name.choose_subagent_model(), Ok(()));
+        assert_eq!(by_name.preferred.get("model").map(String::as_str), Some("anthropic/claude-opus"));
+        let mut by_id = session(Some("anthropic/claude-opus"), models.clone());
+        assert_eq!(by_id.choose_subagent_model(), Ok(()));
+        assert_eq!(by_id.preferred.get("model").map(String::as_str), Some("anthropic/claude-opus"));
+        assert_eq!(
+            session(Some("gpt-5"), models.clone()).choose_subagent_model(),
+            Err("pi has no model `gpt-5`; it offers: openai/gpt-6.1, anthropic/claude-opus".into())
+        );
+        assert_eq!(
+            session(Some("gpt-5"), json!({})).choose_subagent_model(),
+            Err("pi does not let Dust choose its model".into())
+        );
+        let mut default = session(None, models);
+        assert_eq!(default.choose_subagent_model(), Ok(()));
+        assert!(default.preferred.is_empty());
     }
 
     #[test]

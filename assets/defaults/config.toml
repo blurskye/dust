@@ -331,8 +331,9 @@ cli = ["claude"]
 arguments = []
 environment = {}
 options = {}
-# Subagents come from Dust's `agent` tool, so Claude Code's own Task tool is off.
-meta = { claudeCode = { options = { disallowedTools = ["Task"] } } }
+# Subagents come from Dust's `agent` tool, so Claude Code's own subagent tool is off; it is
+# called Task in older versions and Agent in newer ones.
+meta = { claudeCode = { options = { disallowedTools = ["Task", "Agent"] } } }
 
 [agents.profiles.codex]
 program = "codex-acp"
@@ -345,7 +346,9 @@ options = {}
 program = "pi-acp"
 cli = ["pi"]
 arguments = []
-environment = {}
+# pi draws its own cursor unless told to show the terminal's, which kitty's cursor trail and
+# screen readers follow.
+environment = { PI_HARDWARE_CURSOR = "1" }
 options = {}
 # pi reads MCP servers only from its own config, so Dust cannot hand it the `agent` tool.
 note = "To give pi Dust's subagents, run this once: pi mcp add dust --exposure direct -- dust --agent-tools"

@@ -125,6 +125,10 @@ fn tool(profiles: &str) -> Value {
                 "agent": {
                     "type": "string",
                     "description": format!("Which agent runs it; the same agent as you when left out.{agents}")
+                },
+                "model": {
+                    "type": "string",
+                    "description": "The model the subagent uses, by the name or id its agent gives it; the agent's default when left out. If the agent does not offer it, the call fails with the models it does offer."
                 }
             },
             "required": ["description", "prompt"]
@@ -142,6 +146,7 @@ fn call(socket: &Path, tab: u64, params: &Value) -> Value {
             "description": arguments["description"],
             "prompt": arguments["prompt"],
             "agent": arguments["agent"],
+            "model": arguments["model"],
         });
         match remote::ask_agent(socket, &request) {
             Ok(reply) => match reply["text"].as_str() {
