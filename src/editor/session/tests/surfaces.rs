@@ -3417,7 +3417,8 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
         edge: "right".into(),
         size: 10,
     });
-    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (10, 18));
+    // The column left of a right dock is its border.
+    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (9, 18));
     app.process_effect(crate::editor::AppEffect::TerminalDock {
         edge: "left".into(),
         size: 8,
@@ -3729,6 +3730,16 @@ fn a_terminal_agent_opens_on_the_right_where_the_agent_panel_goes() {
     assert_eq!(rect.x + rect.width, width, "docked on the right: {rect:?}");
     assert!(rect.x > 0 && rect.width >= 40.min(width), "{rect:?}");
     assert!(rect.height > app.window_session.height() / 2, "full height: {rect:?}");
+    // A border separates it from the code; the program gets the columns right of it.
+    assert_eq!(
+        driver.terminal_dimensions().map(|(columns, _)| columns),
+        Some(rect.width - 1)
+    );
+    let frame = driver.frame();
+    for y in rect.y + 1..rect.y + rect.height {
+        assert_eq!(frame.grid.get(rect.x, y).map(|cell| cell.symbol.as_str()), Some("│"));
+    }
+    let app = driver.application_mut();
     app.process_effect(crate::editor::AppEffect::AgentToggle);
     assert!(app.terminal_window_rect().is_none());
     app.process_effect(crate::editor::AppEffect::AgentToggle);

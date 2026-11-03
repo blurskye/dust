@@ -282,6 +282,7 @@ fn workspace_frame_respects_nonzero_compositor_origin_for_side_and_top_docks() {
         super::TerminalPanelGeometry {
             x: 0,
             width: 5,
+            left_border: false,
             top: 0,
             height: 10,
             body_top: 1,

@@ -4,7 +4,11 @@ use unicode_width::UnicodeWidthStr;
 use crate::{
     config::{AmbiguousWidth, Config},
     editor::EditorState,
-    ui::{CellGrid, Style, geometry::text_width, window::WindowRect},
+    ui::{
+        CellGrid, Style,
+        geometry::text_width,
+        window::{CompositorLayer, ProjectedCompositorWindow},
+    },
 };
 
 use super::{
@@ -38,10 +42,18 @@ pub(super) fn active_compositor<'a>(
     })
 }
 
-pub(crate) fn terminal_geometry_from_rect(rect: WindowRect) -> Option<TerminalPanelGeometry> {
-    (rect.width > 0 && rect.height >= 3).then_some(TerminalPanelGeometry {
-        x: rect.x,
-        width: rect.width,
+/// Where a terminal window draws. A docked terminal with something on its left, such as an
+/// agent on the right, keeps its first column for a border.
+pub(crate) fn terminal_window_geometry(
+    window: ProjectedCompositorWindow,
+) -> Option<TerminalPanelGeometry> {
+    let rect = window.rect;
+    let left_border = window.layer == CompositorLayer::Docked && rect.x > 0;
+    let border_width = u16::from(left_border);
+    (rect.width > border_width && rect.height >= 3).then_some(TerminalPanelGeometry {
+        x: rect.x.saturating_add(border_width),
+        width: rect.width.saturating_sub(border_width),
+        left_border,
         top: rect.y,
         height: rect.height,
         body_top: rect.y.saturating_add(1),
@@ -155,6 +167,13 @@ pub(super) fn dock_terminal_panel(
             &TERMINAL_PANEL_DIVIDER,
             Style::TerminalBorder,
         );
+    }
+    if geometry.left_border {
+        let x = geometry.x.saturating_sub(1);
+        for y in geometry.top..bottom {
+            let symbol = if y == geometry.top { "┌" } else { "│" };
+            grid.set_cell(x, y, symbol, Style::TerminalBorder);
+        }
     }
     let mut title_x = geometry.x.saturating_add(1);
     for (index, tab) in terminal.tabs.iter().enumerate() {

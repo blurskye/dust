@@ -41,7 +41,7 @@ pub use editor::{snap_display_column, snap_display_column_forward};
 pub use explorer::explorer_panel_width;
 pub use overlays::content_tab_at_column;
 pub use surfaces::picker_geometry;
-pub(crate) use terminal::terminal_geometry_from_rect;
+pub(crate) use terminal::terminal_window_geometry;
 pub use terminal::terminal_tab_at_column;
 pub use visual_rows::{
     VisualRowAnchor, VisualRowModel, editor_content_width, editor_gutter_width,
@@ -1144,6 +1144,8 @@ pub struct TerminalPanelState {
 pub struct TerminalPanelGeometry {
     pub x: u16,
     pub width: u16,
+    /// Drawn in the column left of `x`.
+    pub left_border: bool,
     pub top: u16,
     pub height: u16,
     pub body_top: u16,
@@ -1698,6 +1700,7 @@ pub fn terminal_panel_geometry(
     Some(TerminalPanelGeometry {
         x: 0,
         width: u16::MAX,
+        left_border: false,
         top,
         height,
         body_top: top.saturating_add(1),
@@ -1951,7 +1954,7 @@ pub fn render(
         let (_, window) = compositor.surfaces.terminal?;
         let projected = compositor.projection.window(window)?;
         (projected.layer != crate::ui::window::CompositorLayer::Floating)
-            .then(|| terminal_geometry_from_rect(projected.rect))?
+            .then(|| terminal_window_geometry(projected))?
     });
     let workspace = compositor.map(|compositor| compositor.projection.workspace_bounds);
     let workspace_height = workspace.map_or(height, |bounds| bounds.height);
@@ -2212,7 +2215,7 @@ pub fn render(
             {
                 if let (Some(terminal), Some(geometry)) = (
                     &ui.terminal_panel,
-                    terminal_geometry_from_rect(projected.rect),
+                    terminal_window_geometry(*projected),
                 ) {
                     frame = dock_terminal_panel(frame, terminal, geometry, config, width, height);
                 }

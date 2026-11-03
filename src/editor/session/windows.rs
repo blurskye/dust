@@ -249,15 +249,13 @@ impl WindowSession {
             terminal: layout
                 .surfaces
                 .terminal
-                .and_then(|(_, window)| rect(window))
-                .map(|rect| WindowRect {
-                    x: rect.x,
-                    y: rect
-                        .y
-                        .saturating_add(1)
-                        .min(rect.y.saturating_add(rect.height)),
-                    width: rect.width,
-                    height: rect.height.saturating_sub(1),
+                .and_then(|(_, window)| layout.projection.window(window))
+                .and_then(crate::ui::terminal_window_geometry)
+                .map(|geometry| WindowRect {
+                    x: geometry.x,
+                    y: geometry.body_top,
+                    width: geometry.width,
+                    height: geometry.body_height,
                 }),
             documentation_rows: documentation_page_rows(
                 config,

@@ -650,17 +650,13 @@ impl InteractiveApplication {
                 if context == "terminal_mouse" && self.window_session.terminal_focused() {
                     if let Some(id) = self.keyboard_terminal() {
                         if self.terminal_session.mode(id) == Some(TerminalPanelMode::Input) {
-                            if let Some(rect) = self
+                            if let Some(window) = self
                                 .window_session
                                 .native_ids()
                                 .terminal(id.0)
-                                .and_then(|ids| {
-                                    self.compositor_projection()?
-                                        .window(ids.window)
-                                        .map(|w| w.rect)
-                                })
+                                .and_then(|ids| self.compositor_projection()?.window(ids.window))
                             {
-                                if let Some(geometry) = crate::ui::terminal_geometry_from_rect(rect)
+                                if let Some(geometry) = crate::ui::terminal_window_geometry(window)
                                 {
                                     if let Some(event) = key.terminal_mouse() {
                                         let rect = WindowRect {
