@@ -199,7 +199,8 @@ impl DapService {
         scope: Option<ExecutionScope>,
         resident: Arc<()>,
     ) -> Result<(), DapError> {
-        if !launch.executable.is_absolute()
+        if launch.adapter.contains('\0')
+            || !launch.executable.is_absolute()
             || !launch.root.is_absolute()
             || !matches!(launch.request.as_str(), "launch" | "attach")
             || launch.arguments.len() > 4096

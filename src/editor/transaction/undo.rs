@@ -169,9 +169,13 @@ impl UndoTree {
         self.current < self.nodes.len()
             && self.nodes[0].parent.is_none()
             && self.nodes.iter().enumerate().all(|(index, node)| {
-                node.children
-                    .iter()
-                    .all(|&child| child > index && child < self.nodes.len())
+                let mut children = std::collections::BTreeSet::new();
+                node.children.iter().all(|&child| {
+                    child > index
+                        && child < self.nodes.len()
+                        && self.nodes[child].parent == Some(index)
+                        && children.insert(child)
+                })
                     && node.parent.is_none_or(|parent| {
                         parent < index && self.nodes[parent].children.contains(&index)
                     })
@@ -387,6 +391,27 @@ mod tests {
         assert_eq!(tree.redo_branch_count(), 2);
         apply(&mut text, &tree.redo().unwrap());
         assert_eq!(text, "abX");
+    }
+
+    #[test]
+    fn saved_undo_trees_reject_inconsistent_and_duplicate_child_links() {
+        let mut tree = UndoTree::default();
+        tree.record(insert(0, "a"), false);
+        tree.record(insert(1, "b"), false);
+        assert!(tree.is_well_formed());
+
+        let mut inconsistent = tree.clone();
+        std::sync::Arc::make_mut(&mut inconsistent.nodes[0]).children.push(2);
+        let restored: UndoTree = serde_json::from_str(
+            &serde_json::to_string(&inconsistent).unwrap(),
+        ).unwrap();
+        assert!(!restored.is_well_formed());
+
+        std::sync::Arc::make_mut(&mut tree.nodes[0]).children.push(1);
+        let restored: UndoTree = serde_json::from_str(
+            &serde_json::to_string(&tree).unwrap(),
+        ).unwrap();
+        assert!(!restored.is_well_formed());
     }
 
     #[test]

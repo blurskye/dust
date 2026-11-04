@@ -168,7 +168,7 @@ impl CellGrid {
         }
         let safe = self.sanitize_grapheme(symbol);
         let display_width = self.display_width(&safe).clamp(1, 2);
-        if x.saturating_add(u16::try_from(display_width).unwrap_or(1)) > self.width {
+        if display_width > usize::from(self.width - x) {
             return;
         }
         let index = self.index(x, y);
@@ -221,7 +221,7 @@ impl CellGrid {
                 self.sanitize_grapheme(grapheme)
             };
             let width = u16::try_from(self.display_width(&safe).clamp(1, 2)).unwrap_or(1);
-            if x.saturating_add(width) > right_exclusive {
+            if x >= right_exclusive || width > right_exclusive - x {
                 break;
             }
             self.set_cell(x, y, &safe, style);
@@ -294,6 +294,20 @@ mod tests {
         assert!(grid.get(2, 0).unwrap().continuation);
         assert!(!grid.get(3, 0).unwrap().continuation);
         assert_eq!(grid.get(3, 0).unwrap().symbol, " ");
+    }
+
+    #[test]
+    fn wide_writes_at_the_maximum_grid_edge_are_rejected() {
+        let mut grid = CellGrid::new(u16::MAX, 1);
+        let last = u16::MAX - 1;
+        grid.set_cell(last, 0, "界", Style::Accent);
+        assert_eq!(grid.get(last, 0), Some(&super::Cell::default()));
+        assert_eq!(grid.put_text(last, 0, "界", Style::Accent), last);
+        assert_eq!(grid.get(last, 0), Some(&super::Cell::default()));
+        grid.set_cell(last - 1, 0, "界", Style::Accent);
+        assert!(grid.get(last, 0).unwrap().continuation);
+        grid.set_cell(last, 0, "x", Style::Default);
+        assert_eq!(grid.get(last, 0).unwrap().symbol, "x");
     }
 
     #[test]

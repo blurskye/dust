@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     fs,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
     sync::{Arc, Condvar, Mutex, OnceLock},
     thread,
@@ -15,6 +15,7 @@ use std::{
 
 /// Larger files are not read back.
 const FILE_BYTE_CEILING: u64 = 32 * 1024 * 1024;
+const HEADER_BYTE_CEILING: u64 = 64 * 1024;
 
 /// One part of a conversation as the panel shows it.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -137,6 +138,21 @@ pub fn flush(deadline: Instant) -> bool {
     WRITER.get().is_none_or(|writer| writer.flush(deadline))
 }
 
+fn open_history(path: &Path) -> Option<fs::File> {
+    if !fs::symlink_metadata(path).ok()?.is_file() {
+        return None;
+    }
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(nix::libc::O_NONBLOCK | nix::libc::O_NOFOLLOW);
+    }
+    let file = options.open(path).ok()?;
+    file.metadata().ok()?.is_file().then_some(file)
+}
+
 /// Every saved conversation, newest first.
 #[must_use]
 pub fn list(directory: &Path) -> Vec<Conversation> {
@@ -152,9 +168,12 @@ pub fn list(directory: &Path) -> Vec<Conversation> {
         })
         .filter_map(|entry| {
             let mut line = String::new();
-            BufReader::new(fs::File::open(entry.path()).ok()?)
+            BufReader::new(open_history(&entry.path())?.take(HEADER_BYTE_CEILING + 1))
                 .read_line(&mut line)
                 .ok()?;
+            if line.len() as u64 > HEADER_BYTE_CEILING {
+                return None;
+            }
             serde_json::from_str::<Conversation>(&line).ok()
         })
         .collect::<Vec<_>>();
@@ -164,11 +183,15 @@ pub fn list(directory: &Path) -> Vec<Conversation> {
 
 #[must_use]
 pub fn load(directory: &Path, id: &str) -> Option<(Conversation, Vec<Entry>)> {
-    let path = file(directory, id);
-    if fs::metadata(&path).ok()?.len() > FILE_BYTE_CEILING {
+    let source = open_history(&file(directory, id))?;
+    if source.metadata().ok()?.len() > FILE_BYTE_CEILING {
         return None;
     }
-    let text = fs::read_to_string(path).ok()?;
+    let mut text = String::new();
+    source.take(FILE_BYTE_CEILING + 1).read_to_string(&mut text).ok()?;
+    if text.len() as u64 > FILE_BYTE_CEILING {
+        return None;
+    }
     let (head, body) = text.split_once('\n')?;
     Some((
         serde_json::from_str(head).ok()?,
@@ -245,6 +268,39 @@ mod tests {
             Some((conversation, entries))
         );
         assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn history_reads_reject_oversized_headers_and_transcripts() {
+        let directory = tempfile::tempdir().unwrap();
+        let conversation = Conversation {
+            id: "large".into(),
+            agent: "fixture".into(),
+            root: directory.path().into(),
+            session: None,
+            title: "x".repeat(HEADER_BYTE_CEILING as usize),
+            updated: 1,
+        };
+        let path = file(directory.path(), &conversation.id);
+        fs::write(&path, format!("{}\n[]\n", serde_json::to_string(&conversation).unwrap())).unwrap();
+        assert!(list(directory.path()).is_empty());
+        fs::OpenOptions::new().write(true).open(&path).unwrap()
+            .set_len(FILE_BYTE_CEILING + 1).unwrap();
+        assert!(load(directory.path(), &conversation.id).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn history_reads_reject_special_files_and_symlinks() {
+        use std::os::unix::fs::symlink;
+        let directory = tempfile::tempdir().unwrap();
+        symlink("/dev/zero", file(directory.path(), "device")).unwrap();
+        nix::unistd::mkfifo(&file(directory.path(), "pipe"), nix::sys::stat::Mode::S_IRUSR).unwrap();
+        fs::create_dir(file(directory.path(), "directory")).unwrap();
+        assert!(list(directory.path()).is_empty());
+        for id in ["device", "pipe", "directory"] {
+            assert!(load(directory.path(), id).is_none());
+        }
     }
 
     #[test]

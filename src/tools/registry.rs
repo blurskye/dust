@@ -279,6 +279,7 @@ impl RegistryClient {
         let key = format!("{:x}", Sha256::digest(url.as_str().as_bytes()));
         let path = self.cache.join(format!("{key}.body"));
         if self.policy.offline {
+            let _lock = self.lock_cache()?;
             return read_cache(&path, maximum);
         }
         let response = self
@@ -288,9 +289,28 @@ impl RegistryClient {
             .send()
             .map_err(http_error)?;
         let bytes = read_response(response, accept, maximum)?;
+        let _lock = self.lock_cache()?;
         write_cache(&path, &bytes)?;
         self.prune_cache()?;
         Ok(bytes)
+    }
+    // Keep the body/checksum pair and pruning under one cross-process lock.
+    fn lock_cache(&self) -> Result<nix::fcntl::Flock<fs::File>, RegistryError> {
+        use std::os::unix::fs::OpenOptionsExt;
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .mode(0o600)
+            .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
+            .open(self.cache.join("cache.lock"))
+            .map_err(io_error)?;
+        if !file.metadata().map_err(io_error)?.is_file() {
+            return Err(RegistryError::Cache);
+        }
+        nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive)
+            .map_err(|(_, error)| io_error(error.into()))
     }
     fn prune_cache(&self) -> Result<(), RegistryError> {
         let mut entries = fs::read_dir(&self.cache)
@@ -523,6 +543,48 @@ fn read_cache(path: &Path, maximum: usize) -> Result<Vec<u8>, RegistryError> {
     }
     Ok(bytes)
 }
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    #[test]
+    fn independent_cache_clients_serialize_publication_reads_and_pruning() {
+        let directory = tempfile::tempdir().unwrap();
+        let policy = RegistryPolicy { offline: true, ..RegistryPolicy::default() };
+        let client = RegistryClient::new(policy.clone(), directory.path().into()).unwrap();
+        let url = client.official_url("packages/search?q=test").unwrap();
+        let key = format!("{:x}", Sha256::digest(url.as_str().as_bytes()));
+        let path = directory.path().join(format!("{key}.body"));
+        {
+            let _lock = client.lock_cache().unwrap();
+            let file = fs::File::open(directory.path().join("cache.lock")).unwrap();
+            assert!(matches!(
+                nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock),
+                Err((_, nix::errno::Errno::EWOULDBLOCK))
+            ));
+            write_cache(&path, b"initial").unwrap();
+        }
+        thread::scope(|scope| {
+            for value in [b"first".as_slice(), b"second".as_slice()] {
+                let client = RegistryClient::new(policy.clone(), directory.path().into()).unwrap();
+                let path = path.clone();
+                scope.spawn(move || {
+                    for _ in 0..32 {
+                        let _lock = client.lock_cache().unwrap();
+                        write_cache(&path, value).unwrap();
+                        client.prune_cache().unwrap();
+                    }
+                });
+            }
+            for _ in 0..64 {
+                let bytes = client.fetch(url.clone(), "application/json", 1024).unwrap();
+                assert!([b"initial".as_slice(), b"first", b"second"].contains(&bytes.as_slice()));
+            }
+        });
+        assert!(read_cache(&path, 1024).is_ok());
+    }
+}
+
 fn validate_cache_destination(path: &Path) -> Result<(), RegistryError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_file() && !metadata.file_type().is_symlink() => {

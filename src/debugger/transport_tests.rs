@@ -66,6 +66,20 @@ fn wait(mut predicate: impl FnMut() -> bool) {
     }
 }
 #[test]
+fn adapter_identifiers_with_nul_are_rejected_before_spawning() {
+    let root = tempfile::tempdir().unwrap();
+    let mut configuration = launch(root.path(), &root.path().join("unused.py"));
+    configuration.adapter = "bad\0adapter".into();
+    let mut service = DapService::new();
+    assert!(matches!(
+        service.start_absolute(configuration),
+        Err(DapError::InvalidConfiguration)
+    ));
+    assert!(!service.is_running());
+    assert_eq!(service.pending(), 0);
+}
+
+#[test]
 fn breakpoints_reach_the_adapter_before_the_program_runs() {
     let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
     let body = r#"
