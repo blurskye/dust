@@ -9651,7 +9651,7 @@ impl InteractiveApplication {
                 if let Some(value) = debug_selection.as_ref().ok().and_then(|s| s.value()) {
                     let value = value.to_owned();
                     self.debugger_session
-                        .record_console_evaluation(value.clone());
+                        .record_inspected_value(value.clone());
                     self.notify_message(value, false);
                 }
                 match debug_selection

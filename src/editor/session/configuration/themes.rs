@@ -44,7 +44,6 @@ impl Drop for ThemeRestore {
 }
 struct ThemeInteraction {
     epoch: Arc<()>,
-    source: Arc<()>,
     revision: u64,
     choices: Vec<Arc<ThemeChoice>>,
     selected: Option<usize>,
@@ -204,7 +203,6 @@ impl ConfigurationSession {
         });
         let interaction = ThemeInteraction {
             epoch: Arc::new(()),
-            source: self.stamp.clone(),
             revision: self.binding_revision,
             choices: vec![current],
             selected: None,
@@ -218,7 +216,6 @@ impl ConfigurationSession {
     fn theme_key_current(&self, key: &ThemeKey) -> bool {
         self.themes.interaction.as_ref().is_some_and(|i| {
             Arc::ptr_eq(&i.epoch, &key.epoch)
-                && Arc::ptr_eq(&i.source, &self.stamp)
                 && i.revision == self.binding_revision
                 && key.index < i.choices.len()
         })
@@ -290,7 +287,7 @@ impl ConfigurationSession {
         self.themes
             .interaction
             .as_ref()
-            .filter(|i| Arc::ptr_eq(&i.source, &self.stamp) && i.revision == self.binding_revision)
+            .filter(|i| i.revision == self.binding_revision)
             .and_then(|i| i.selected.and_then(|index| i.choices.get(index)))
             .map(Arc::as_ref)
             .or(self.themes.applied.as_deref())
@@ -307,8 +304,7 @@ impl ConfigurationSession {
             )?
         };
         let preview = self.themes.interaction.as_ref().is_some_and(|interaction| {
-            Arc::ptr_eq(&interaction.source, &self.stamp)
-                && interaction.revision == self.binding_revision
+            interaction.revision == self.binding_revision
                 && interaction.selected.is_some()
         });
         let source = format!(

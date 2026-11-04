@@ -128,6 +128,9 @@ pub(super) struct DebugSession {
     /// What is TRUE about each requested breakpoint, keyed by path and line. A request the
     /// adapter has not answered stays unverified; only a real acknowledgement verifies one.
     breakpoint_states: BTreeMap<(PathBuf, u64), crate::debugger::DapBreakpointState>,
+    latest_breakpoints: BTreeMap<PathBuf, u64>,
+    /// The visible console row that an unterminated output chunk continues.
+    output_line: Option<usize>,
     /// Breakpoints the USER disabled. This is session state rather than a flag a caller passes,
     /// so it survives an adapter answer.
     disabled_breakpoints: std::collections::BTreeSet<(PathBuf, u64)>,
@@ -146,8 +149,6 @@ pub(super) struct DebugSession {
     /// again. Data captured at one stop is stamped with it, so a value read at an earlier stop
     /// can never be presented as current at a later one.
     stop_epoch: u64,
-    /// Values read from the adapter at a particular stop, stamped with the epoch they belong to.
-    stopped_values: BTreeMap<i64, (u64, String)>,
     /// The stop at which each stopped-data request was ISSUED. An answer whose request is known to
     /// belong to a DIFFERENT stop belongs to that stop, and is refused rather than presented as
     /// current. A request with no record is presented as before: the session cannot prove it
@@ -156,7 +157,6 @@ pub(super) struct DebugSession {
     requests: HashMap<u64, (u64, Option<u64>)>,
     watch_refresh: VecDeque<String>,
     issued_scopes: VecDeque<(i64, u64)>,
-    issued_variables: BTreeMap<i64, u64>,
     /// Pages of variables asked for and not yet answered, oldest first: the protocol's variables
     /// answer carries no request id, so a page is matched to its answer in the order it was sent.
     pending_variable_pages: VecDeque<(i64, u64, u64)>,
@@ -204,14 +204,14 @@ impl DebugSession {
             console: VecDeque::new(),
             breakpoints: BTreeMap::new(),
             breakpoint_states: BTreeMap::new(),
+            latest_breakpoints: BTreeMap::new(),
+            output_line: None,
             end_state: None,
             stop_epoch: 0,
-            stopped_values: BTreeMap::new(),
             issued_stack: VecDeque::new(),
             requests: HashMap::new(),
             watch_refresh: VecDeque::new(),
             issued_scopes: VecDeque::new(),
-            issued_variables: BTreeMap::new(),
             pending_variable_pages: VecDeque::new(),
             threads: Vec::new(),
             stopped_thread: None,
@@ -256,6 +256,8 @@ impl DebugSession {
     }
     pub(in crate::editor::session) fn stop(&mut self) -> Result<(), DapError> {
         let pending_launch = self.launch.take().is_some();
+        self.latest_breakpoints.clear();
+        self.output_line = None;
         self.clear_paused_state();
         self.stop_reason = None;
         self.choices = None;
@@ -388,7 +390,7 @@ impl DebugSession {
             let (reference, start, count) = (*reference, *start, *count);
             let open = self.expansion.contains(&reference);
             let continuation = start > 0 && self.expansion.last() == Some(&reference);
-            if (open && !continuation) || self.expansion.len() >= MAX_EXPANSION_DEPTH {
+            if !continuation && (open || self.expansion.len() >= MAX_EXPANSION_DEPTH) {
                 self.note_refused_expansion(reference);
                 return Ok(());
             }
@@ -398,7 +400,6 @@ impl DebugSession {
             }
             self.pending_variable_pages
                 .push_back((reference, start, count));
-            self.note_issued(false, None, Some(reference), epoch);
             return Ok(());
         }
         let evaluation = match &control {
@@ -414,19 +415,19 @@ impl DebugSession {
             DapControl::Scopes { frame_id } => Some(*frame_id),
             _ => None,
         };
-        let reference = match &control {
-            DapControl::Variables { reference, .. } => Some(*reference),
-            _ => None,
-        };
         self.send_control(control)?;
         self.evaluations.extend(evaluation);
         // Recorded only once the request is actually away, so a refused send leaves nothing that a
         // later answer could be matched against.
-        self.note_issued(stack, scopes, reference, epoch);
+        self.note_issued(stack, scopes, epoch);
         Ok(())
     }
     fn send_control(&mut self, control: DapControl) -> Result<(), DapError> {
         let repl = matches!(&control, DapControl::Evaluate { context, .. } if context != "watch");
+        let breakpoint_path = match &control {
+            DapControl::SetBreakpoints { path, .. } => Some(path.clone()),
+            _ => None,
+        };
         let result = self
             .service
             .context()
@@ -434,6 +435,9 @@ impl DebugSession {
             .and_then(|context| self.service.control_tracked(&context, control));
         match result {
             Ok(id) => {
+                if let Some(path) = breakpoint_path {
+                    self.latest_breakpoints.insert(path, id);
+                }
                 let submission = repl
                     .then(|| self.pending_submissions.back().map(|p| p.0))
                     .flatten();
@@ -490,7 +494,6 @@ impl DebugSession {
                 count,
             } => {
                 self.pending_variable_pages.clear();
-                self.issued_variables.clear();
                 if !failed {
                     self.pending_variable_pages
                         .push_back((*reference, *start, *count));
@@ -504,7 +507,6 @@ impl DebugSession {
         &mut self,
         stack: bool,
         scopes: Option<i64>,
-        reference: Option<i64>,
         epoch: u64,
     ) {
         if stack {
@@ -512,9 +514,6 @@ impl DebugSession {
         }
         if let Some(frame) = scopes {
             self.issued_scopes.push_back((frame, epoch));
-        }
-        if let Some(reference) = reference {
-            self.issued_variables.insert(reference, epoch);
         }
     }
     /// Whether an answer issued at `epoch` may be presented now: only if it belongs to THIS stop.
@@ -559,10 +558,22 @@ impl DebugSession {
         match &event {
             DapEvent::Response {
                 request: Some(DapControl::SetBreakpoints { path, breakpoints }),
+                request_id,
                 response,
                 ..
-            } => {
+            } if self.latest_breakpoints.get(path).copied().unwrap_or(0) == *request_id => {
                 self.apply_breakpoints(path, breakpoints, response);
+            }
+            DapEvent::RequestFailed {
+                request: Some(DapControl::SetBreakpoints { path, breakpoints }),
+                request_id,
+                ..
+            } if self.latest_breakpoints.get(path).copied().unwrap_or(0) == *request_id => {
+                self.apply_breakpoints(
+                    path,
+                    breakpoints,
+                    &DapResponse::Breakpoints(vec![(false, None, None); breakpoints.len()]),
+                );
             }
             DapEvent::Response {
                 response: DapResponse::Disconnected { terminate_debuggee },
@@ -665,16 +676,7 @@ impl DebugSession {
                 self.stop_follow = StopFollow::Idle;
             }
             DapEvent::Output { adapter, output } => {
-                for line in output.lines().filter(|line| !line.trim().is_empty()) {
-                    self.push_console(crate::debugger::DapConsoleEntry::new(
-                        crate::debugger::DapConsoleOrigin::ProgramOutput,
-                        adapter.clone(),
-                        line.to_owned(),
-                    ));
-                }
-                while self.console.len() > 10_000 {
-                    self.console.pop_front();
-                }
+                self.record_program_output(adapter, output);
             }
             DapEvent::Stopped {
                 reason, thread_id, ..
@@ -712,13 +714,34 @@ impl DebugSession {
         self.pending_submissions
             .push_back((submission, stop, frame, actor));
     }
-    /// Test-facing: drive the same PROGRAM OUTPUT path an adapter Output event uses, so a test
-    /// measures the real entry shape rather than a parallel construction.
-    #[cfg(test)]
-    pub(in crate::editor::session) fn record_program_output_for_test(&mut self, text: String) {
+    fn record_program_output(&mut self, adapter: &str, output: &str) {
+        for chunk in output.split_inclusive('\n') {
+            let line = if let Some(index) = self.output_line {
+                index
+            } else {
+                self.push_console(crate::debugger::DapConsoleEntry::new(
+                    crate::debugger::DapConsoleOrigin::ProgramOutput,
+                    adapter,
+                    String::new(),
+                ));
+                self.console.len() - 1
+            };
+            let entry = &mut self.console[line];
+            entry.text.push_str(chunk.strip_suffix('\n').unwrap_or(chunk));
+            if chunk.ends_with('\n') {
+                if entry.text.ends_with('\r') {
+                    entry.text.pop();
+                }
+                self.output_line = None;
+            } else {
+                self.output_line = Some(line);
+            }
+        }
+    }
+    pub(in crate::editor::session) fn record_inspected_value(&mut self, text: String) {
         self.push_console(crate::debugger::DapConsoleEntry::new(
-            crate::debugger::DapConsoleOrigin::ProgramOutput,
-            "adapter",
+            crate::debugger::DapConsoleOrigin::Evaluation,
+            "inspector",
             text,
         ));
     }
@@ -764,6 +787,7 @@ impl DebugSession {
         self.console.push_back(entry);
         while self.console.len() > 10_000 {
             self.console.pop_front();
+            self.output_line = self.output_line.and_then(|index| index.checked_sub(1));
         }
     }
     pub(in crate::editor::session) fn console(
@@ -783,18 +807,16 @@ impl DebugSession {
         {
             self.watches.push(expression.clone());
             // Paused, the value can be shown now rather than at the next stop.
-            if self.execution.is_some() {
-                let frame_id = self.console_frame;
-                let _ = self.control(DapControl::Evaluate {
-                    expression,
-                    frame_id,
-                    context: "watch".into(),
-                });
+            if self.console_frame.is_some() {
+                self.watch_refresh.push_back(expression);
+                self.refresh_watches();
             }
         }
     }
     pub(in crate::editor::session) fn remove_watch(&mut self, expression: &str) {
         self.watches.retain(|watch| watch != expression);
+        self.watch_refresh.retain(|watch| watch != expression);
+        self.watch_values.remove(expression);
     }
     pub(in crate::editor::session) fn breakpoint(
         &mut self,
@@ -843,27 +865,28 @@ impl DebugSession {
         for sent in rows.iter() {
             self.breakpoint_states.insert(
                 (row.path.clone(), sent.line),
-                crate::debugger::DapBreakpointState::Requested { accepted: true },
+                if self.disabled_breakpoints.contains(&(row.path.clone(), sent.line)) {
+                    crate::debugger::DapBreakpointState::Disabled
+                } else {
+                    crate::debugger::DapBreakpointState::Requested { accepted: true }
+                },
             );
         }
 
         let result = if self.service.is_running() {
             // A SENT request is not a fact: every row it carries becomes `Requested`, and the
             // path is queued so the adapter's answer can be matched to what was asked.
-            self.service
-                .control(DapControl::SetBreakpoints {
-                    path: row.path.clone(),
-                    breakpoints: rows
-                        .iter()
-                        .filter(|r| {
-                            !self
-                                .disabled_breakpoints
-                                .contains(&(r.path.clone(), r.line))
-                        })
-                        .cloned()
-                        .collect(),
-                })
-                .map_err(|e| e.to_string())
+            let request = DapControl::SetBreakpoints {
+                path: row.path.clone(),
+                breakpoints: rows
+                    .iter()
+                    .filter(|r| {
+                        !self.disabled_breakpoints.contains(&(r.path.clone(), r.line))
+                    })
+                    .cloned()
+                    .collect(),
+            };
+            self.send_control(request).map_err(|e| e.to_string())
         } else {
             Ok(())
         };
@@ -915,6 +938,9 @@ impl DebugSession {
         line: u64,
         disabled: bool,
     ) {
+        if !self.breakpoints.get(path).is_some_and(|rows| rows.iter().any(|row| row.line == line)) {
+            return;
+        }
         let key = (path.to_path_buf(), line);
         if disabled {
             self.disabled_breakpoints.insert(key.clone());
@@ -944,7 +970,7 @@ impl DebugSession {
                 })
                 .cloned()
                 .collect();
-            if let Err(error) = self.service.control(DapControl::SetBreakpoints {
+            if let Err(error) = self.send_control(DapControl::SetBreakpoints {
                 path: path.into(),
                 breakpoints,
             }) {
@@ -1047,7 +1073,9 @@ impl DebugSession {
         let Some(expression) = self.evaluations.pop_front().flatten() else {
             return false;
         };
-        self.watch_values.insert(expression, "not available".into());
+        if self.watches.contains(&expression) {
+            self.watch_values.insert(expression, "not available".into());
+        }
         true
     }
     pub(in crate::editor::session) fn persisted_breakpoints(&self) -> Vec<PersistedBreakpoint> {
@@ -1153,7 +1181,9 @@ impl DebugSession {
         if matches!(response, DapResponse::Evaluate(_))
             && let Some(expression) = self.evaluations.pop_front().flatten()
         {
-            if let DapResponse::Evaluate(value) = response {
+            if let DapResponse::Evaluate(value) = response
+                && self.watches.contains(&expression)
+            {
                 self.watch_values.insert(expression, value.value);
             }
             return DebugResponse::Absorbed;
@@ -1240,22 +1270,10 @@ impl DebugSession {
             }
             DapResponse::Variables(rows) => (
                 "variables",
-                // Every value the adapter reports is STAMPED with the stop it was read at, which
-                // is what lets a later stop refuse to present it.
                 {
-                    // A value whose request was ISSUED at an earlier stop answers THAT stop, not
-                    // this one: it is refused rather than presented as current. A value whose
-                    // request is unrecorded is presented as before, because the session cannot
-                    // prove it belongs to another stop.
+                    // The transport retires responses from earlier stops.
                     let page = self.pending_variable_pages.pop_front();
                     let current = rows;
-                    // Every value that IS current is STAMPED with the stop it was read at.
-                    for row in current.iter() {
-                        self.record_stopped_value(
-                            row.variables_reference,
-                            format!("{} = {}", row.name, row.value),
-                        );
-                    }
                     let open: Vec<i64> = self.expansion.clone();
                     let shown = current.len();
                     let mut values: Vec<(String, String, Choice)> = current
@@ -1443,7 +1461,6 @@ impl DebugSession {
         self.pending_submissions.clear();
         self.issued_stack.clear();
         self.issued_scopes.clear();
-        self.issued_variables.clear();
         self.watch_refresh.clear();
         self.requests.clear();
     }
@@ -1480,7 +1497,6 @@ impl DebugSession {
         self.stop_epoch = self.stop_epoch.wrapping_add(1);
         self.choices = None;
         self.source = None;
-        self.stopped_values.clear();
         // Nothing captured at the stop that has ended is open any more.
         self.threads.clear();
         self.stack.clear();
@@ -1496,7 +1512,6 @@ impl DebugSession {
         self.stop_epoch = self.stop_epoch.wrapping_add(1);
         self.choices = None;
         self.source = None;
-        self.stopped_values.clear();
         // A new stop has its own references; the previous stop's path is not this one's.
         self.threads.clear();
         self.stack.clear();
@@ -1504,25 +1519,6 @@ impl DebugSession {
         self.pending_variable_pages.clear();
         // A new stop has its own frames; the previous frame is not this stop's frame.
         self.console_frame = None;
-    }
-    /// Record a value read at the CURRENT stop.
-    pub(in crate::editor::session) fn record_stopped_value(
-        &mut self,
-        reference: i64,
-        value: String,
-    ) {
-        self.stopped_values
-            .insert(reference, (self.stop_epoch, value));
-    }
-    /// The value for a reference ONLY IF it was captured at the current stop. A value from an
-    /// earlier stop is not returned, which is what makes it unpresentable rather than merely
-    /// outdated.
-    #[cfg(test)]
-    pub(in crate::editor::session) fn current_stopped_value(&self, reference: i64) -> Option<&str> {
-        self.stopped_values
-            .get(&reference)
-            .filter(|(epoch, _)| *epoch == self.stop_epoch)
-            .map(|(_, value)| value.as_str())
     }
     #[cfg(test)]
     #[must_use]

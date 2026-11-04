@@ -1,4 +1,5 @@
 use super::*;
+use crate::editor::session::ViewToggle;
 
 #[test]
 fn saved_theme_restore_rejects_invalid_data_and_cannot_overwrite_newer_interactions() {
@@ -208,6 +209,13 @@ fn theme_picker_previews_cancels_applies_and_never_overwrites_a_newer_reload() {
     assert_eq!(app.configuration.theme(), &original_theme);
     assert!(app.configuration.apply_theme(&old_key).is_err());
     choose(&mut app);
+    // Unrelated view toggles must preserve both the live preview and its selectable rows.
+    app.process_effect(AppEffect::ViewToggle(ViewToggle::Wrap));
+    assert_eq!(app.configuration.theme(), &amber);
+    assert!(app.ui.picker.is_some());
+    app.process_theme_results();
+    assert_eq!(app.configuration.theme(), &amber);
+    app.process_effect(AppEffect::ViewToggle(ViewToggle::Wrap));
     // A query with no selection must stop previewing the previously selected row.
     app.handle_configured_key(KeyEvent::character('z'));
     assert_eq!(app.configuration.theme(), &original_theme);

@@ -253,8 +253,13 @@ fn breakpoint_states_are_session_state_driven_by_the_adapters_own_answer() {
         "a disabled breakpoint stays disabled even when the adapter verified it"
     );
 
+    // Editing another breakpoint must not change disabled state or the next toggle's meaning.
+    owner.breakpoint(at(30), false).unwrap();
+    assert_eq!(owner.breakpoint_state(&path, 10), Some(DapBreakpointState::Disabled));
+    assert!(!owner.startup_breakpoints()[0].1.iter().any(|row| row.line == 10));
     // RE-ENABLING makes it a request again rather than silently verified.
-    owner.set_breakpoint_disabled(&path, 10, false);
+    let disabled = owner.breakpoint_state(&path, 10) == Some(DapBreakpointState::Disabled);
+    owner.set_breakpoint_disabled(&path, 10, !disabled);
     assert_eq!(
         owner.breakpoint_state(&path, 10),
         Some(DapBreakpointState::Requested { accepted: true }),
@@ -347,6 +352,32 @@ fn detaching_and_terminating_are_different_session_facts() {
 }
 
 #[test]
+fn output_chunks_join_partial_lines_and_preserve_blank_lines() {
+    let (mut owner, adapter) = request_fixture();
+    for output in ["hel", "lo\n\n", " \n", "tail\r", "\n"] {
+        adapter.event(0, DapEvent::Output {
+            adapter: "same-name".into(),
+            output: output.into(),
+        });
+        assert!(owner.try_event().is_some());
+    }
+    assert_eq!(owner.console().map(|entry| entry.text.as_str()).collect::<Vec<_>>(),
+        ["hello", "", " ", "tail"]);
+}
+
+#[test]
+fn inspected_values_do_not_consume_console_submissions() {
+    let (mut owner, _) = request_fixture();
+    owner.record_console_command("slow()".into());
+    owner.record_inspected_value("leaf = 7".into());
+    assert_eq!(owner.pending_submissions.len(), 1);
+    assert_eq!(owner.console().last().unwrap().submission, None);
+    owner.record_console_evaluation("answer".into());
+    assert_eq!(owner.console().next().unwrap().result.as_deref(), Some("answer"));
+    assert!(owner.pending_submissions.is_empty());
+}
+
+#[test]
 fn the_console_keeps_program_output_evaluation_and_typed_commands_apart() {
     use crate::debugger::DapConsoleOrigin;
     let root = tempfile::tempdir().unwrap();
@@ -363,7 +394,7 @@ fn the_console_keeps_program_output_evaluation_and_typed_commands_apart() {
     owner.record_console_command("count".into());
     owner.record_console_evaluation("count = 3".into());
     // An adapter Output event is program output; driven through the same path the session uses.
-    owner.record_program_output_for_test("hello".into());
+    owner.record_program_output("adapter", "hello");
 
     let entries = owner.console().cloned().collect::<Vec<_>>();
     assert_eq!(entries.len(), 3, "all three origins are kept: {entries:?}");
@@ -398,66 +429,26 @@ fn the_console_keeps_program_output_evaluation_and_typed_commands_apart() {
 
 #[test]
 fn a_value_from_a_previous_stop_can_never_be_presented_as_current() {
-    // W-24 verbatim: "Continuing, restarting or re-stopping invalidates stopped data and pending
-    // variable references so a previous value can never be presented as current."
-    let root = tempfile::tempdir().unwrap();
-    let state = WorkspaceState::new(
-        WorkspaceId(1),
-        [("root".into(), RootIdentity::capture(root.path()).unwrap())],
-    )
-    .unwrap();
-    let workspace = WorkspaceSession::new(state, root.path().join("trust"), 1, false, false, 1);
-    let policy = DebugConfig::default();
-    let mut owner = DebugSession::new(&policy, workspace.version());
-
-    // A STOP happens and a value is read: it IS current.
-    owner.begin_stop();
-    let first_epoch = owner.stop_epoch();
-    owner.record_stopped_value(42, "count = 1".into());
-    assert_eq!(
-        owner.current_stopped_value(42),
-        Some("count = 1"),
-        "a value read at the current stop is presentable"
-    );
-
-    // CONTINUE: execution runs on, and the value read while stopped is NOT current any more.
-    owner.begin_running();
-    assert_ne!(
-        owner.stop_epoch(),
-        first_epoch,
-        "running advances the stop identity"
-    );
-    assert_eq!(
-        owner.current_stopped_value(42),
-        None,
-        "a value from a previous stop CANNOT be presented as current"
-    );
-
-    // RE-STOP: a NEW stop with fresh data, and the old value is still not presentable.
-    owner.begin_stop();
-    let second_epoch = owner.stop_epoch();
-    assert_ne!(second_epoch, first_epoch, "a re-stop is a different stop");
-    assert_eq!(
-        owner.current_stopped_value(42),
-        None,
-        "the previous stop's value is still unpresentable at the new stop, before anything is read"
-    );
-    // The adapter reports a DIFFERENT value at this stop, which is what makes "fresh" measurable.
-    owner.record_stopped_value(42, "count = 2".into());
-    assert_eq!(
-        owner.current_stopped_value(42),
-        Some("count = 2"),
-        "the value read at THIS stop is current"
-    );
-    assert_ne!(
-        owner.current_stopped_value(42),
-        Some("count = 1"),
-        "and it is not the value from the previous stop"
-    );
-
-    // RESTART is the same rule: it also invalidates.
-    owner.begin_running();
-    assert_eq!(owner.current_stopped_value(42), None);
+    let (mut owner, adapter) = request_fixture();
+    for value in ["1", "2"] {
+        owner.begin_stop();
+        prime_for(&mut owner, &adapter);
+        owner.stop_follow = StopFollow::Variables;
+        assert!(matches!(
+            owner.response(DapResponse::Variables(vec![crate::debugger::DapVariable {
+                name: "count".into(),
+                value: value.into(),
+                type_name: None,
+                variables_reference: 42,
+            }])),
+            DebugResponse::Absorbed
+        ));
+        assert_eq!(owner.variables(), [format!("count = {value}")]);
+        owner.begin_running();
+        assert!(owner.variables().is_empty());
+        owner.begin_stop();
+        assert!(owner.variables().is_empty());
+    }
 }
 
 #[test]
@@ -516,15 +507,12 @@ fn a_variables_answer_to_an_earlier_stop_is_refused_rather_than_presented_as_cur
         .expect("the fake adapter accepts a variables request");
     prime(&mut owner);
     let presented = owner.response(crate::debugger::DapResponse::Variables(vec![variable("1")]));
-    assert_eq!(
-        owner.current_stopped_value(7),
-        Some("count = 1"),
-        "an answer to the stop that asked for it IS current"
-    );
     let DebugResponse::Picker { rows, .. } = &presented else {
         panic!("expected a variables picker, not a retired or bare result")
     };
     assert_eq!(rows.len(), 1, "the current answer IS presented");
+    assert_eq!(rows[0].label, "count = 1");
+    let old_key = rows[0].key.clone();
 
     // (i) EARLIER STOP: the request is issued at one stop, execution RUNS ON, and only then does
     // the answer arrive. It answers the earlier stop, so it can never be presented as current.
@@ -548,7 +536,7 @@ fn a_variables_answer_to_an_earlier_stop_is_refused_rather_than_presented_as_cur
         owner.try_event().is_none(),
         "the transport retires the original stopped request"
     );
-    assert_eq!(owner.current_stopped_value(7), None);
+    assert!(matches!(owner.take_selection(&old_key), Err(DapError::Retired)));
 
     // A RE-STOP then answers for the NEW stop, and that value IS current.
     owner.begin_stop();
@@ -557,15 +545,11 @@ fn a_variables_answer_to_an_earlier_stop_is_refused_rather_than_presented_as_cur
         .expect("the fake adapter accepts a variables request");
     prime(&mut owner);
     let presented = owner.response(crate::debugger::DapResponse::Variables(vec![variable("2")]));
-    assert_eq!(
-        owner.current_stopped_value(7),
-        Some("count = 2"),
-        "a value read at the new stop is current"
-    );
     let DebugResponse::Picker { rows, .. } = &presented else {
         panic!("expected a variables picker, not a retired or bare result")
     };
     assert_eq!(rows.len(), 1, "the fresh answer is presented");
+    assert_eq!(rows[0].label, "count = 2");
 }
 
 #[test]
@@ -814,6 +798,33 @@ fn a_full_page_of_variables_offers_an_exact_continuation_that_carries_the_next_o
 }
 
 #[test]
+fn pagination_at_the_expansion_limit_does_not_open_another_reference() {
+    let (mut owner, adapter) = paginated_owner();
+    let mut continuation = None;
+    for reference in 1..=MAX_EXPANSION_DEPTH as i64 {
+        let request = DapControl::Variables { reference, start: 0, count: 1 };
+        owner.control(request.clone()).unwrap();
+        assert!(adapter.control().is_some());
+        adapter.event(1, DapEvent::Response {
+            adapter: "same-name".into(), stop_generation: 1, request_id: reference as u64,
+            request: Some(request), response: DapResponse::Variables(leaf_variables(1)),
+        });
+        let DapEvent::Response { response, .. } = owner.try_event().unwrap() else { panic!() };
+        let DebugResponse::Picker { rows, .. } = owner.response(response) else {
+            panic!("variables picker");
+        };
+        continuation = Some(rows.last().unwrap().key.clone());
+    }
+    let selection = owner.take_selection(&continuation.unwrap()).unwrap();
+    let Choice::Control(control) = selection.choice else { panic!("continuation") };
+    owner.control(control).unwrap();
+    assert!(matches!(adapter.control(), Some(DapControl::Variables { start: 1, .. })));
+    assert_eq!(owner.expansion.len(), MAX_EXPANSION_DEPTH);
+    owner.control(DapControl::Variables { reference: 100, start: 0, count: 1 }).unwrap();
+    assert!(adapter.control().is_none());
+}
+
+#[test]
 fn a_reference_already_open_is_shown_as_a_reference_and_is_never_requested_again() {
     // W-25: "cyclic and repeated references are shown as bounded expandable references and are
     // never materialized recursively."
@@ -948,6 +959,8 @@ fn evaluation(value: &str) -> DapResponse {
 #[test]
 fn evaluation_answers_follow_the_original_watch_and_console_submission() {
     let (mut owner, adapter) = request_fixture();
+    owner.add_watch("a".into());
+    owner.add_watch("b".into());
     let watch = |expression: &str| DapControl::Evaluate {
         expression: expression.into(),
         frame_id: None,
@@ -1040,14 +1053,12 @@ fn evaluation_answers_follow_the_original_watch_and_console_submission() {
 #[test]
 fn stopped_request_bookkeeping_is_retired_on_continue_and_failure() {
     let (mut owner, _) = request_fixture();
-    owner.note_issued(true, Some(3), Some(7), 0);
+    owner.note_issued(true, Some(3), 0);
     owner.begin_running();
     assert!(
-        owner.issued_stack.is_empty()
-            && owner.issued_scopes.is_empty()
-            && owner.issued_variables.is_empty()
+        owner.issued_stack.is_empty() && owner.issued_scopes.is_empty()
     );
-    owner.note_issued(true, Some(3), Some(7), owner.stop_epoch);
+    owner.note_issued(true, Some(3), owner.stop_epoch);
     owner.prepare_answer(
         1,
         &DapControl::StackTrace {
@@ -1063,7 +1074,6 @@ fn stopped_request_bookkeeping_is_retired_on_continue_and_failure() {
 #[test]
 fn variable_pages_belong_to_the_request_and_picker_activation_keeps_expansion() {
     let (mut owner, adapter) = request_fixture();
-    owner.issued_variables.insert(7, u64::MAX);
     let request = DapControl::Variables {
         reference: 8,
         start: 0,
@@ -1110,6 +1120,59 @@ fn variable_pages_belong_to_the_request_and_picker_activation_keeps_expansion() 
     assert_eq!(owner.expansion, vec![8, 7]);
     assert_eq!(owner.pending_variable_pages.back().unwrap().0, 7);
 }
+#[test]
+fn breakpoint_rejections_update_only_the_latest_requested_rows() {
+    use crate::debugger::DapBreakpointState;
+    let (mut owner, adapter) = request_fixture();
+    let path = PathBuf::from("/source.rs");
+    let at = |line| DapSourceBreakpoint {
+        path: path.clone(), line, column: None,
+        condition: None, hit_condition: None, log_message: None,
+    };
+    owner.set_breakpoint_disabled(&path, 10, true);
+    assert!(owner.disabled_breakpoints.is_empty());
+    assert_eq!(owner.breakpoint_state(&path, 10), None);
+    assert!(adapter.control().is_none());
+    owner.breakpoint(at(10), false).unwrap();
+    let first_id = owner.latest_breakpoints[&path];
+    let first = adapter.control().unwrap();
+    assert!(matches!(&first, DapControl::SetBreakpoints { breakpoints, .. } if breakpoints == &[at(10)]));
+    owner.breakpoint(at(20), false).unwrap();
+    let latest_id = owner.latest_breakpoints[&path];
+    let latest = adapter.control().unwrap();
+    let failure = |request_id, request| DapEvent::RequestFailed {
+        adapter: "same-name".into(), stop_generation: 0, request_seq: 9,
+        request_id, request: Some(request), command: "setBreakpoints".into(),
+        message: "condition rejected".into(),
+    };
+    adapter.event(0, failure(first_id, first.clone()));
+    owner.try_event().unwrap();
+    assert_eq!(owner.breakpoint_state(&path, 10), Some(DapBreakpointState::Requested { accepted: true }));
+    adapter.event(0, failure(latest_id, latest));
+    owner.try_event().unwrap();
+    for line in [10, 20] {
+        assert_eq!(owner.breakpoint_state(&path, line), Some(DapBreakpointState::Requested { accepted: false }));
+    }
+    owner.set_breakpoint_disabled(&path, 20, true);
+    let request_id = owner.latest_breakpoints[&path];
+    let request = adapter.control().unwrap();
+    adapter.event(0, DapEvent::Response {
+        adapter: "same-name".into(), stop_generation: 0, request_id,
+        request: Some(request), response: DapResponse::Breakpoints(vec![(true, Some(12), None)]),
+    });
+    owner.try_event().unwrap();
+    adapter.event(0, DapEvent::Response {
+        adapter: "same-name".into(), stop_generation: 0, request_id: first_id,
+        request: Some(first.clone()), response: DapResponse::Breakpoints(vec![(true, Some(11), None)]),
+    });
+    owner.try_event().unwrap();
+    assert_eq!(owner.breakpoint_state(&path, 10), Some(DapBreakpointState::Verified { line: 12 }));
+    adapter.event(0, failure(first_id, first));
+    owner.try_event().unwrap();
+    assert_eq!(owner.breakpoint_state(&path, 10), Some(DapBreakpointState::Verified { line: 12 }));
+    assert_eq!(owner.breakpoint_state(&path, 20), Some(DapBreakpointState::Disabled));
+}
+
 #[test]
 fn breakpoint_changes_send_only_enabled_rows_and_acknowledge_the_captured_list() {
     let (mut owner, adapter) = request_fixture();
@@ -1169,6 +1232,50 @@ fn breakpoint_changes_send_only_enabled_rows_and_acknowledge_the_captured_list()
         Some(crate::debugger::DapBreakpointState::Verified { line: 21 })
     );
 }
+#[test]
+fn new_watches_without_source_paths_retry_after_backpressure() {
+    let (mut owner, adapter) = request_fixture();
+    owner.begin_stop();
+    owner.console_frame = Some(42);
+    assert!(owner.execution().is_none());
+    while owner.control(DapControl::Threads).is_ok() {}
+    owner.add_watch("fresh".into());
+    assert_eq!(owner.watch_refresh, ["fresh"]);
+    while adapter.control().is_some() {}
+    owner.try_event();
+    assert!(matches!(adapter.control(), Some(DapControl::Evaluate {
+        expression, frame_id: Some(42), context,
+    }) if expression == "fresh" && context == "watch"));
+    assert!(owner.watch_refresh.is_empty());
+}
+
+#[test]
+fn removed_watches_drop_queued_cached_and_late_values() {
+    let (mut owner, adapter) = request_fixture();
+    owner.add_watch("gone".into());
+    let request = DapControl::Evaluate {
+        expression: "gone".into(), frame_id: None, context: "watch".into(),
+    };
+    owner.control(request.clone()).unwrap();
+    owner.watch_refresh.push_back("gone".into());
+    owner.watch_values.insert("gone".into(), "old".into());
+    owner.remove_watch("gone");
+    assert!(owner.watch_refresh.is_empty());
+    assert_eq!(owner.watch_value("gone"), None);
+    adapter.control();
+    adapter.event(0, DapEvent::Response {
+        adapter: "same-name".into(), stop_generation: 0,
+        request_id: 1, request: Some(request.clone()), response: evaluation("late"),
+    });
+    let DapEvent::Response { response, .. } = owner.try_event().unwrap() else { panic!() };
+    assert!(matches!(owner.response(response), DebugResponse::Absorbed));
+    assert_eq!(owner.watch_value("gone"), None);
+    owner.prepare_answer(1, &request, true);
+    assert!(owner.watch_request_failed("evaluate"));
+    assert_eq!(owner.watch_value("gone"), None);
+    assert!(adapter.control().is_none());
+}
+
 #[test]
 fn every_admitted_watch_is_refreshed_after_control_queue_backpressure() {
     let (mut owner, adapter) = request_fixture();
