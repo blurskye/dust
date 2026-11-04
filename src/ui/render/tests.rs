@@ -5040,10 +5040,21 @@ fn side_docked_terminal_keeps_the_debug_inspectors_visible() {
         width: 80,
         height: 39,
     };
+    let layout = super::debug::debug_layout_in(compositor.projection.workspace_bounds)
+        .expect("side-docked debug layout");
+    // Moving the dock also changes the tiled source rectangle and debugger insets.
+    let source_window = ui.editor_window_layout.as_ref().unwrap().bindings[0].window;
+    compositor.projection.windows.iter_mut()
+        .find(|window| window.window == source_window)
+        .expect("source window").rect = layout.source;
     let frame = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 120, 40);
-    let inspector = super::debug::debug_layout_in(
-        ui.compositor_layout.as_ref().unwrap().projection.workspace_bounds,
-    ).unwrap().console.expect("inspector strip");
+    let (x, y) = drawn_at(&frame, "source").expect("source remains visible beside the terminal");
+    assert!(x >= layout.source.x && x + 6 <= layout.source.x + layout.source.width);
+    assert!(y >= layout.source.y && y < layout.source.y + layout.source.height);
+    assert!(frame.cursor.is_some_and(|(x, y, _)|
+        x >= layout.source.x && x < layout.source.x + layout.source.width
+            && y >= layout.source.y && y < layout.source.y + layout.source.height));
+    let inspector = layout.console.expect("inspector strip");
     let (x, y) = drawn_at(&frame, "latest output").expect("selected console content");
     assert!(x >= inspector.x && x + 13 <= inspector.x + inspector.width);
     assert!(y >= inspector.y && y < inspector.y + inspector.height);
