@@ -610,10 +610,11 @@ fn lsp_progress_hides_transport_keys_preserves_begin_titles_and_animates() {
     assert_eq!(progress.percentage, Some(72));
     assert!(!progress.server.contains("root:1"));
     assert!(SPINNER_FRAMES.contains(&"⠇"));
+    let now = Instant::now();
     app.language.fixture_progress_epoch(
-        Instant::now() - Duration::from_millis(SPINNER_INTERVAL_MS * 3 / 2),
+        now - Duration::from_millis(SPINNER_INTERVAL_MS * 3 / 2),
     );
-    app.update_lsp_progress_animation();
+    app.update_lsp_progress_animation(now);
     assert_eq!(app.ui.lsp_progress_frame, 1);
 
     app.update_lsp_progress(
@@ -630,9 +631,9 @@ fn lsp_progress_hides_transport_keys_preserves_begin_titles_and_animates() {
     assert!(completed.done);
     assert_eq!(completed.message, "Finished");
     app.language.fixture_progress_completed(
-        Instant::now() - Duration::from_millis(timeout.saturating_add(1)),
+        now - Duration::from_millis(timeout.saturating_add(1)),
     );
-    app.update_lsp_progress_animation();
+    app.update_lsp_progress_animation(now);
     assert!(app.ui.lsp_progress.is_empty());
     assert!(app.ui.notification.is_none());
 }
@@ -672,7 +673,13 @@ fn lsp_completion_applies_through_one_validated_transaction() {
             detail: "function".into(),
             insert_text: "in".into(),
             text_edit: None,
-            additional_edits: Vec::new(),
+            additional_edits: vec![crate::language::lsp::LspTextEdit {
+                range: crate::language::lsp::LspRange {
+                    start: crate::language::lsp::LspPosition { line: 0, character: 0 },
+                    end: crate::language::lsp::LspPosition { line: 0, character: 0 },
+                },
+                new_text: "// imported\n".into(),
+            }],
             kind: None,
             snippet: false,
             documentation: None,
@@ -692,9 +699,11 @@ fn lsp_completion_applies_through_one_validated_transaction() {
     });
     app.accept_lsp_completion();
     let buffer = app.state.active_buffer_id().expect("buffer");
-    assert_eq!(app.state.buffers[buffer].text.to_string(), "fn main");
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "// imported\nfn main");
     assert!(app.ui.language_completion.is_none());
     assert!(app.state.buffers[buffer].dirty);
+    app.invoke_mapped_command("history.undo");
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "fn ma");
 }
 
 #[test]
@@ -1211,7 +1220,15 @@ fn lsp_tool_menu_hides_missing_noninstallable_compatibility_entries() {
 
 #[test]
 fn enter_installs_a_missing_managed_lsp_instead_of_trying_to_start_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = directory.path().join("tools");
+    let artifact = directory.path().join("fixture-lsp");
+    fs::write(&artifact, "#!/bin/sh\nexit 0\n").unwrap();
+    fs::create_dir(&store).unwrap();
+    // NixOS must also fail locally, before trying to realize a compatibility runtime.
+    fs::write(store.join("nix-lsp-workspace"), "occupied by fixture").unwrap();
     let mut app = app();
+    app.tooling.fixture_installer(store.clone());
     app.tooling
         .fixture_retain(|entry| entry.definition.kind != ToolKind::Lsp);
     app.tooling.fixture_insert(crate::tools::ToolEntry {
@@ -1229,8 +1246,14 @@ fn enter_installs_a_missing_managed_lsp_instead_of_trying_to_start_it() {
             debug_program_policy: crate::tools::DebugProgramPolicy::default(),
             project_root_markers: vec!["install.test".into()],
             project_root_strategy: crate::files::ProjectRootStrategy::Marker,
-            install: Some(crate::tools::ToolInstall::NpmPackage {
-                packages: vec!["example-lsp@1.0.0".into()],
+            // A local URL is deliberately rejected by the HTTPS-only installer after
+            // admission: this test checks the menu action, not artifact downloading.
+            install: Some(crate::tools::ToolInstall::Archive {
+                url: format!("file://{}", artifact.display()),
+                sha256: "0".repeat(64),
+                archive: crate::tools::ToolArchiveFormat::Raw,
+                executable_path: "fixture-lsp".into(),
+                tree: None,
             }),
             pins: Vec::new(),
         },
@@ -1255,6 +1278,23 @@ fn enter_installs_a_missing_managed_lsp_instead_of_trying_to_start_it() {
         "{:?}",
         app.ui.notification
     );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let result = loop {
+        if let Some((_, result)) = app.tooling.poll_install() {
+            break result;
+        }
+        assert!(Instant::now() < deadline, "fixture installation timed out");
+        thread::yield_now();
+    };
+    let (operation, diagnostic) = if is_nixos_host() {
+        (crate::tools::ToolOperation::InstallNix, "cannot create tool store")
+    } else {
+        (crate::tools::ToolOperation::InstallManaged, "HTTPS")
+    };
+    assert_eq!(result.operation, operation);
+    let error = result.result.unwrap_err();
+    assert!(error.contains(diagnostic), "{error}");
+    assert_eq!(fs::read_dir(store).unwrap().count(), 1);
 }
 
 #[test]

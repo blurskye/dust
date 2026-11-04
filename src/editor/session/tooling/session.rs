@@ -86,6 +86,9 @@ pub(in crate::editor::session) const fn tool_kind_key(kind: ToolKind) -> &'stati
 
 #[cfg(test)]
 impl ToolingSession {
+    pub(super) fn fixture_installer(&mut self, root: PathBuf) {
+        self.installer = ToolInstaller::start_at(root);
+    }
     pub(super) fn fixture_retain(&mut self, keep: impl FnMut(&ToolEntry) -> bool) {
         self.entries.retain(keep);
     }

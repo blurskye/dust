@@ -80,7 +80,7 @@ impl SyntaxSession {
     }
 
     /// Returns how many source strings were materialized, for admission-cost checks.
-    /// No source snapshot is created before its revision/debounce checks succeed.
+    /// No source snapshot is created before revision, debounce and queue admission succeed.
     pub(super) fn tick(
         &mut self,
         documents: &[SyntaxDocument<'_>],
@@ -175,7 +175,6 @@ impl SyntaxSession {
                 maximum_folds: 10_000,
                 maximum_indent_rows: 100_000,
             };
-            materialized += 1;
             if self
                 .service
                 .submit(
@@ -183,7 +182,10 @@ impl SyntaxSession {
                     generation,
                     revision.0,
                     language,
-                    doc.text.to_string(),
+                    || {
+                        materialized += 1;
+                        doc.text.to_string()
+                    },
                     policy,
                 )
                 .is_ok()
@@ -191,6 +193,8 @@ impl SyntaxSession {
                 self.submitted
                     .insert(doc.buffer, (revision, generation, language));
                 self.due.remove(&doc.buffer);
+            } else {
+                break;
             }
         }
         while let Ok(Some(event)) = self.service.try_event() {
@@ -349,6 +353,34 @@ mod tests {
             );
             assert!(Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn block_end_rows_keep_indentation_when_a_statement_precedes_the_closer() {
+        let mut ids = SlotMap::<BufferId, ()>::with_key();
+        let buffer = ids.insert(());
+        let config = SyntaxConfig::default();
+        for (source, levels) in [
+            ("fn f() {\n    foo(); }\n", 1),
+            ("fn f() {\n}\n", 0),
+            ("fn f() {\n    if true {\n    } foo(); }\n", 1),
+        ] {
+            let text = TextBuffer::from_text(source);
+            let mut session = SyntaxSession::new(1);
+            let start = Instant::now();
+            let documents = [SyntaxDocument {
+                buffer, text: &text, language: Some(SyntaxLanguage::Rust), enabled: true,
+            }];
+            session.tick(&documents, &config, start, "large");
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while session.result(buffer).is_none() {
+                session.tick(&documents, &config, start + Duration::from_millis(100), "large");
+                assert!(Instant::now() < deadline);
+                std::thread::yield_now();
+            }
+            let line = if source.contains("if true") { 2 } else { 1 };
+            assert_eq!(session.indentation(buffer, text.revision(), SyntaxLanguage::Rust, line), Ok(levels), "{source}");
         }
     }
 

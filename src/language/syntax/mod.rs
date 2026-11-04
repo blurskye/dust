@@ -638,18 +638,26 @@ pub enum SyntaxError {
 pub struct SyntaxService {
     sender: SyncSender<Request>,
     receiver: Receiver<SyntaxEvent>,
+    slots: Receiver<()>,
+    release_slot: SyncSender<()>,
     latest: Arc<Mutex<HashMap<SyntaxDocumentId, u64>>>,
 }
 impl SyntaxService {
     pub fn start(capacity: usize) -> Self {
         let (tx, rx) = mpsc::sync_channel::<Request>(capacity.max(1));
         let (etx, erx) = mpsc::sync_channel(capacity.max(1));
+        let (release_slot, slots) = mpsc::sync_channel(capacity.max(1));
+        for _ in 0..capacity.max(1) {
+            release_slot.try_send(()).expect("initial parser capacity");
+        }
+        let worker_slot = release_slot.clone();
         let latest = Arc::new(Mutex::new(HashMap::new()));
         let worker = latest.clone();
         thread::Builder::new()
             .name("dust-syntax".into())
             .spawn(move || {
                 while let Ok(request) = rx.recv() {
+                    let _ = worker_slot.try_send(());
                     if worker
                         .lock()
                         .ok()
@@ -676,6 +684,8 @@ impl SyntaxService {
         Self {
             sender: tx,
             receiver: erx,
+            slots,
+            release_slot,
             latest,
         }
     }
@@ -685,25 +695,36 @@ impl SyntaxService {
         generation: u64,
         revision: u64,
         language: SyntaxLanguage,
-        source: String,
+        source: impl FnOnce() -> String,
         policy: SyntaxPolicy,
     ) -> Result<(), SyntaxError> {
-        if let Ok(mut latest) = self.latest.lock() {
-            latest.insert(document, generation);
+        // Reserve a queue slot before copying a potentially large document.
+        self.slots.try_recv().map_err(|error| match error {
+            TryRecvError::Empty => SyntaxError::QueueFull,
+            TryRecvError::Disconnected => SyntaxError::Stopped,
+        })?;
+        let request = Request {
+            document,
+            generation,
+            revision,
+            language,
+            source: source(),
+            policy,
+        };
+        let mut latest = self.latest.lock().map_err(|_| SyntaxError::Stopped)?;
+        match self.sender.try_send(request) {
+            Ok(()) => {
+                latest.insert(document, generation);
+                Ok(())
+            }
+            Err(error) => {
+                let _ = self.release_slot.try_send(());
+                Err(match error {
+                    TrySendError::Full(_) => SyntaxError::QueueFull,
+                    TrySendError::Disconnected(_) => SyntaxError::Stopped,
+                })
+            }
         }
-        self.sender
-            .try_send(Request {
-                document,
-                generation,
-                revision,
-                language,
-                source,
-                policy,
-            })
-            .map_err(|error| match error {
-                TrySendError::Full(_) => SyntaxError::QueueFull,
-                TrySendError::Disconnected(_) => SyntaxError::Stopped,
-            })
     }
     pub fn cancel(&self, document: SyntaxDocumentId) {
         if let Ok(mut latest) = self.latest.lock() {
@@ -1215,9 +1236,20 @@ fn query_rows(
             let end_position = capture.node.end_position();
             // A node that swallows its last newline, like a TOML table, ends at the start of
             // the next line, and that line isn't part of the fold.
-            let end = end_position
+            let mut end = end_position
                 .row
                 .saturating_sub(usize::from(end_position.column == 0));
+            if query.capture_names()[capture.index as usize] == "indent"
+                && let Some(closing) = capture.node.child(capture.node.child_count().saturating_sub(1))
+                && closing.start_position().row == end
+                && source[..closing.start_byte()]
+                    .rsplit('\n')
+                    .next()
+                    .is_some_and(|prefix| !prefix.trim().is_empty())
+            {
+                // A statement before the closing delimiter still belongs to this block.
+                end += 1;
+            }
             if end > start && seen.insert((start, end)) {
                 output.push(SyntaxFold {
                     start_row: start,
@@ -1289,6 +1321,30 @@ fn failed(request: &Request, diagnostic: String) -> SyntaxEvent {
 mod tests {
     use super::*;
     #[test]
+    fn full_queue_does_not_materialize_source_or_replace_accepted_generation() {
+        let (sender, _requests) = mpsc::sync_channel(1);
+        let (_events, receiver) = mpsc::sync_channel(1);
+        let (release_slot, slots) = mpsc::sync_channel(1);
+        release_slot.try_send(()).unwrap();
+        let service = SyntaxService {
+            sender,
+            receiver,
+            slots,
+            release_slot,
+            latest: Arc::new(Mutex::new(HashMap::new())),
+        };
+        let document = SyntaxDocumentId(1);
+        service.submit(document, 1, 0, SyntaxLanguage::Rust,
+            || "fn main() {}".into(), SyntaxPolicy::default()).unwrap();
+        for _ in 0..10 {
+            assert!(matches!(service.submit(document, 2, 1, SyntaxLanguage::Rust,
+                || panic!("full queue must not copy source"), SyntaxPolicy::default()),
+                Err(SyntaxError::QueueFull)));
+        }
+        assert_eq!(service.latest.lock().unwrap().get(&document), Some(&1));
+    }
+
+    #[test]
     fn saturated_result_queue_retains_completed_parses() {
         let service = SyntaxService::start(1);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -1299,7 +1355,7 @@ mod tests {
                     1,
                     0,
                     SyntaxLanguage::Rust,
-                    "fn main() {}".into(),
+                    || "fn main() {}".into(),
                     SyntaxPolicy::default(),
                 ) {
                     Ok(()) => break,

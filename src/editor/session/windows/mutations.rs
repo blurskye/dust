@@ -549,6 +549,10 @@ impl WindowSession {
         terminal: WindowPlacement,
     ) -> Result<(), String> {
         self.require_projected_graph()?;
+        let ids = self.core.native.ids_for_target(target).ok_or("native window is unavailable")?;
+        if self.core.graph.window(ids.window).is_some_and(|window| window.placement != WindowPlacement::Hidden) {
+            return Ok(());
+        }
         let mut candidate = self.candidate()?;
         let core = &mut candidate.core;
         let ids = core

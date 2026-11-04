@@ -89,6 +89,7 @@ fn session_restore_retires_plugin_windows_before_replacing_their_tabs() {
                 signature: super::NativeSurfaceSignature {
                     editor_tab: Some(tab),
                     editor_window: None,
+                    focused_plugin: None,
                     explorer_visible: false,
                     explorer_views: std::sync::Arc::from([1]),
                     focused_explorer: None,
@@ -104,6 +105,7 @@ fn session_restore_retires_plugin_windows_before_replacing_their_tabs() {
                     dashboard_visible: false,
                     picker_rect: None,
                     picker_surface: None,
+                    picker_title: "Picker".into(),
                     protected_prompt_height: 0,
                     configuration_generation: 0,
                     screen_bottom: 0,
@@ -168,6 +170,7 @@ fn failed_explorer_reconstruction_does_not_publish_a_partial_graph_or_bridge() {
     let signature = super::bridge::NativeSurfaceSignature {
         editor_tab: None,
         editor_window: None,
+        focused_plugin: None,
         explorer_visible: true,
         explorer_views: (1..=crate::UNIVERSAL_LAYOUT_WINDOW_CEILING as u64)
             .collect::<Vec<_>>()
@@ -185,6 +188,7 @@ fn failed_explorer_reconstruction_does_not_publish_a_partial_graph_or_bridge() {
         dashboard_visible: false,
         picker_rect: None,
         picker_surface: None,
+        picker_title: "Picker".into(),
         protected_prompt_height: 0,
         configuration_generation: 0,
         screen_bottom: 0,
@@ -882,6 +886,7 @@ fn startup_document_and_dashboard_publish_together_only_for_the_accepted_proposa
         signature: super::bridge::NativeSurfaceSignature {
             editor_tab: None,
             editor_window: None,
+            focused_plugin: None,
             explorer_visible: false,
             explorer_views: vec![1].into(),
             focused_explorer: None,
@@ -897,6 +902,7 @@ fn startup_document_and_dashboard_publish_together_only_for_the_accepted_proposa
             dashboard_visible: true,
             picker_rect: None,
             picker_surface: None,
+            picker_title: "Picker".into(),
             protected_prompt_height: 0,
             configuration_generation: 0,
             screen_bottom: 0,

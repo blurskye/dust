@@ -3315,6 +3315,10 @@ fn configured_window_rule_candidate_is_cloned_validated_and_published_atomically
         }
     );
 
+    let visible = app.window_session.graph().clone();
+    app.show_graph_window("explorer").expect("show already-visible explorer");
+    assert_eq!(app.window_session.graph(), &visible);
+
     let hostile = crate::config::WindowsConfig {
         rules: vec![
             crate::config::WindowRuleConfig {

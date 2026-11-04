@@ -2747,10 +2747,10 @@ impl InteractiveApplication {
         }
         self.ui.set(frame, |ui| &mut ui.lsp_progress_frame);
     }
-    pub(in crate::editor::session) fn update_lsp_progress_animation(&mut self) {
+    pub(in crate::editor::session) fn update_lsp_progress_animation(&mut self, now: Instant) {
         self.language.animate_progress(
             &self.configuration.settings().ui.lsp_progress,
-            Instant::now(),
+            now,
         );
         self.project_lsp_progress();
     }

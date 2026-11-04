@@ -1450,6 +1450,10 @@ impl InteractiveApplication {
         NativeSurfaceSignature {
             editor_tab: editor.active_tab(&(&*self.state).into()),
             editor_window: editor.focused_window(&(&*self.state).into()),
+            focused_plugin: match self.window_session.focus() {
+                super::super::windows::FocusTarget::Plugin(window) => Some(window),
+                _ => None,
+            },
             explorer_visible: self.ui.explorer.is_some(),
             explorer_views: self
                 .explorer
@@ -1491,6 +1495,7 @@ impl InteractiveApplication {
                 .as_ref()
                 .filter(|_| picker_rect.is_some())
                 .map(|picker| picker.surface),
+            picker_title: self.ui.picker.as_ref().map_or("Picker", |picker| &picker.title).to_owned(),
             protected_prompt_height: self.input.prompt().map_or(0, |prompt| {
                 let (width, height) = crate::ui::prompt_surface_dimensions(
                     &self.state,

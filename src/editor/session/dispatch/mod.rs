@@ -390,7 +390,7 @@ pub fn run_interactive(
         application.process_lsp_breadcrumbs();
         application.sync_lsp_status_ui();
         application.sync_status_summary_ui();
-        application.update_lsp_progress_animation();
+        application.update_lsp_progress_animation(Instant::now());
         application.flush_keymap_timeout();
         application.update_key_hint_ui();
         application.update_notification_timer();
