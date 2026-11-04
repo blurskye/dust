@@ -439,6 +439,26 @@ fn inline_at_depth(text: &str, base: Option<Highlight>, depth: usize) -> Vec<Seg
             segments.push((std::mem::take(plain), base));
         }
     };
+    // Match labels once: retrying a scan at every unmatched `[` is quadratic.
+    let mut brackets = Vec::new();
+    let mut label_ends = std::collections::HashMap::new();
+    let mut escaped = false;
+    for (index, character) in text.char_indices() {
+        if escaped {
+            escaped = false;
+        } else {
+            match character {
+                '\\' => escaped = true,
+                '[' => brackets.push(index),
+                ']' => {
+                    if let Some(start) = brackets.pop() {
+                        label_ends.insert(start, index);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
     let mut at = 0;
     while let Some(character) = text[at..].chars().next() {
         let rest = &text[at..];
@@ -508,7 +528,8 @@ fn inline_at_depth(text: &str, base: Option<Highlight>, depth: usize) -> Vec<Seg
             '[' | '!' => {
                 let label_start = usize::from(character == '!') + 1;
                 if (character == '[' || rest.starts_with("!["))
-                    && let Some((label, length)) = link(&rest[label_start - 1..])
+                    && let Some(end) = label_ends.get(&(at + label_start - 1))
+                    && let Some((label, length)) = link(&rest[label_start - 1..], end - at - label_start + 1)
                 {
                     flush(&mut segments, &mut plain);
                     segments.extend(inline_at_depth(label, Some(Highlight::LINK), depth + 1));
@@ -593,23 +614,7 @@ fn closing(text: &str, from: usize, marker: &str) -> Option<usize> {
 }
 
 /// The label of a `[label](target)` link at the start of `text`, and the link's length.
-fn link(text: &str) -> Option<(&str, usize)> {
-    let mut depth = 0;
-    let mut label_end = None;
-    for (index, character) in text.char_indices() {
-        match character {
-            '[' => depth += 1,
-            ']' => {
-                depth -= 1;
-                if depth == 0 {
-                    label_end = Some(index);
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    let label_end = label_end?;
+fn link(text: &str, label_end: usize) -> Option<(&str, usize)> {
     let target = text[label_end + 1..].strip_prefix('(')?;
     let mut depth = 0usize;
     let mut escaped = false;
@@ -791,6 +796,18 @@ mod tests {
         out.wrapped("abcdef", None, ("", None), ("long prefix", None), 3);
         assert!(out.text.lines().all(|line| out.width(line) <= 3));
         assert!(out.text.ends_with("f\n"));
+    }
+
+    #[test]
+    fn unmatched_link_openers_are_literal_and_do_not_rescan_the_suffix() {
+        for source in ["[".repeat(50_000), format!("{}]", "[".repeat(50_000))] {
+            let runs = inline(&source, None);
+            assert_eq!(runs, vec![(source, None)]);
+        }
+        assert_eq!(inline("[unclosed [ok](url)", None), vec![
+            ("[unclosed ".into(), None),
+            ("ok".into(), Some(Highlight::LINK)),
+        ]);
     }
 
     #[test]

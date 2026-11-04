@@ -233,7 +233,6 @@ fn apply(intent: PreparedExplorerMutation) -> Result<(), VfsError> {
         .iter()
         .map(|r| r.canonical_path.clone())
         .collect::<Vec<_>>();
-    // Rechecks are not a filesystem lock: concurrent changes after validation remain possible.
     super::vfs::apply_explorer_mutation(&intent.operation, &roots, intent.maximum)
 }
 impl ExplorerIo {
@@ -287,7 +286,8 @@ impl ExplorerIo {
                     Ok((canonical, roots))
                 }) {
                     Ok((path, roots)) => {
-                        let result = super::read_file(&path)
+                        let paths = roots.iter().map(|root| root.canonical_path.clone()).collect::<Vec<_>>();
+                        let result = super::vfs::read_scoped_file(&path, &paths, super::recovery::DOCUMENT_BYTE_CEILING)
                             .and_then(|bytes| roots_current(&roots).map(|()| bytes));
                         ExplorerIoReply::Opened { id, path, result }
                     }

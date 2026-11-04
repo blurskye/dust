@@ -384,6 +384,27 @@ fn deliver(
         thread::sleep(Duration::from_millis(2));
     }
 }
+fn open_working_directory(
+    path: &std::path::Path,
+    root: Option<&crate::workspace::RootIdentity>,
+) -> Result<std::fs::File, PtyError> {
+    use rustix::fs::OFlags;
+    let fail = |error: String| PtyError::Spawn(error);
+    let canonical = path.canonicalize()
+        .map_err(|e| fail(format!("PTY working directory is unavailable: {e}")))?;
+    if let Some(root) = root {
+        let current = crate::workspace::RootIdentity::capture(&root.canonical_path)
+            .map_err(|e| fail(e.to_string()))?;
+        if root != &current || !path.starts_with(&root.canonical_path)
+            || !canonical.starts_with(&root.canonical_path)
+        {
+            return Err(fail("PTY execution root filesystem identity changed".into()));
+        }
+    }
+    crate::files::open_no_symlinks(&canonical, OFlags::PATH | OFlags::DIRECTORY)
+        .map_err(|e| fail(format!("PTY working directory is unavailable: {e}")))
+}
+
 fn run(
     id: PtyId,
     request: PtyRequest,
@@ -399,25 +420,7 @@ fn run(
     if cancel.load(Ordering::Acquire) {
         return Err(fail("PTY cancelled before spawn".into()));
     }
-    if !request.cwd.is_dir() {
-        return Err(fail("PTY working directory is unavailable".into()));
-    }
-    if let Some(root) = root {
-        let current = crate::workspace::RootIdentity::capture(&root.canonical_path)
-            .map_err(|e| fail(e.to_string()))?;
-        let cwd = request
-            .cwd
-            .canonicalize()
-            .map_err(|e| fail(e.to_string()))?;
-        if root != current
-            || !request.cwd.starts_with(&root.canonical_path)
-            || !cwd.starts_with(&root.canonical_path)
-        {
-            return Err(fail(
-                "PTY execution root filesystem identity changed".into(),
-            ));
-        }
-    }
+    let cwd = open_working_directory(&request.cwd, root.as_ref())?;
     let pair = native_pty_system()
         .openpty(PtySize {
             rows: request.rows,
@@ -446,7 +449,10 @@ fn run(
     }
     let mut command = CommandBuilder::new(program);
     command.args(&request.arguments);
-    command.cwd(&request.cwd);
+    // portable-pty substitutes HOME for a missing cwd. This descriptor-backed
+    // path stays valid through spawn, even if the original name is removed.
+    use std::os::fd::AsRawFd;
+    command.cwd(format!("/proc/self/fd/{}", cwd.as_raw_fd()));
     for (key, value) in &request.environment {
         command.env(key, value);
     }
@@ -460,6 +466,7 @@ fn run(
             .map_err(|e| fail(e.to_string()))?,
         reaped: false,
     };
+    drop(cwd);
     drop(pair.slave);
     let mut reader = pair
         .master

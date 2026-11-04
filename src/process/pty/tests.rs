@@ -35,6 +35,54 @@ fn drain(service: &mut PtyService, id: PtyId) -> Vec<PtyEvent> {
         thread::sleep(Duration::from_millis(1));
     }
 }
+#[cfg(target_os = "linux")]
+#[test]
+fn pinned_pty_cwd_cannot_be_retargeted_or_fall_back_to_home() {
+    use std::os::fd::AsRawFd;
+    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+    let root = tempfile::tempdir().unwrap();
+    let original = root.path().join("original");
+    let other = root.path().join("other");
+    let alias = root.path().join("alias");
+    std::fs::create_dir(&original).unwrap();
+    std::fs::create_dir(&other).unwrap();
+    std::os::unix::fs::symlink(&original, &alias).unwrap();
+    let identity = crate::workspace::RootIdentity::capture(root.path()).unwrap();
+    let cwd = open_working_directory(&alias, Some(&identity)).unwrap();
+    let pinned = format!("/proc/self/fd/{}", cwd.as_raw_fd());
+    std::fs::remove_file(&alias).unwrap();
+    std::os::unix::fs::symlink(&other, &alias).unwrap();
+    for removed in [false, true] {
+        if removed {
+            std::fs::remove_dir(&original).unwrap();
+        }
+        // Spawn through portable-pty itself, including its cwd fallback check.
+        let pair = native_pty_system().openpty(PtySize {
+            rows: 8, cols: 80, pixel_width: 0, pixel_height: 0,
+        }).unwrap();
+        let mut command = CommandBuilder::new("/bin/sh");
+        command.args(["-c", "test . -ef \"$1\"", "sh"]);
+        command.arg(format!("/proc/{}/fd/{}", std::process::id(), cwd.as_raw_fd()));
+        command.cwd(&pinned);
+        let mut child = pair.slave.spawn_command(command).unwrap();
+        drop(pair.slave);
+        let deadline = Instant::now() + Duration::from_secs(4);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("cwd probe timed out");
+            }
+            thread::sleep(Duration::from_millis(1));
+        };
+        assert_eq!(status.exit_code(), 0, "spawn left the pinned cwd (removed: {removed})");
+        assert!(std::fs::metadata(&pinned).unwrap().is_dir());
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {

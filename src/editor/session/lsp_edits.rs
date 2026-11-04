@@ -171,14 +171,10 @@ impl LspEditSources {
             .nth(key.index)
             .expect("checked action index"))
     }
-    // Reserve space for the active request's eventual response. Stop draining the
-    // bounded backend event channel rather than dropping critical reply obligations.
+    // Keep draining while replies await acknowledgement: event backpressure must
+    // not stop the worker from reading those replies. Each server already limits
+    // its outstanding applyEdit requests in the protocol handler.
     pub(super) fn poll_event(&self, service: &LspService) -> Option<OwnedLspEvent> {
-        if self.replies.len() + usize::from(self.active.as_ref().is_some_and(|r| r.reply.is_some()))
-            >= 128
-        {
-            return None;
-        }
         service.try_owned_event()
     }
     pub(super) fn flush(&mut self) -> Vec<String> {
@@ -587,6 +583,37 @@ mod tests {
         assert_eq!(plan.files.len(), 1);
         assert!(matches!(plan.files[0], InputFile::Create(_)));
     }
+    #[test]
+    fn pending_edit_replies_do_not_stop_event_delivery() {
+        let mut editor = EditorState::new("/".into());
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("abc"), None);
+        let mut service = LspService::new();
+        let uri = "file:///source.rs";
+        let mut endpoint = service.replace_edit_source_fixture(
+            uri.into(),
+            (buffer, editor.buffers[buffer].text.source_version()),
+            PositionEncoding::Utf8,
+        );
+        let mut sources = LspEditSources::default();
+        for id in 0..128 {
+            assert!(endpoint.request(ServerRequestId::Number(id), LspWorkspaceEdit {
+                documents: Vec::new(), resources: Vec::new(),
+            }));
+            let packet = sources.poll_event(&service).unwrap();
+            sources.reject_reply(packet.reply, "busy".into());
+        }
+        endpoint.publish_diagnostics(uri, None, Vec::new(), &Default::default());
+        assert!(matches!(sources.poll_event(&service).unwrap().event, LspEvent::Diagnostics { .. }));
+        for _ in 0..256 {
+            assert!(sources.flush().is_empty());
+            while endpoint.response().is_some() {}
+            if !sources.pending_replies() {
+                break;
+            }
+        }
+        assert!(!sources.pending_replies());
+    }
+
     #[test]
     fn requesting_edit_origin_preserves_encoding_incarnation_and_acknowledges_only_its_endpoint() {
         let root = tempfile::tempdir().unwrap();
