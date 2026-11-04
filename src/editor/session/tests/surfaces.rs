@@ -6312,6 +6312,34 @@ fn clipped_dirty_close_cannot_save_or_discard() {
 }
 
 #[test]
+fn recovered_missing_file_can_be_saved_without_force() {
+    let mut app = app();
+    app.recovery.skip_maintenance();
+    let path = app.state.workspace_root.join("deleted.txt");
+    let journal = app.recovery.directory().join("deleted.toml");
+    fs::create_dir_all(journal.parent().unwrap()).unwrap();
+    fs::write(&journal, "durable copy").unwrap();
+    app.recovery.fixture_records(vec![(
+        journal.clone(),
+        crate::files::RecoveryRecord::new(Some(&path), 1, "recovered\n".into()),
+    )]);
+    app.open_recovery_picker();
+    app.accept_picker();
+    wait_vfs(&mut app);
+    let buffer = app.state.active_buffer_id().unwrap();
+    assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "recovered\n");
+    assert!(app.state.buffers[buffer].dirty);
+    assert!(app.state.buffers[buffer].new_file);
+    assert!(journal.exists());
+    app.invoke_mapped_command("file.save");
+    wait_vfs(&mut app);
+    assert_eq!(fs::read(&path).unwrap(), b"recovered\n");
+    assert!(!app.state.buffers[buffer].dirty);
+    assert!(!app.state.buffers[buffer].new_file);
+}
+
+#[test]
 fn recovered_scratch_keeps_its_unsaved_baseline_and_durable_journal() {
     let mut app = app();
     app.recovery.skip_maintenance();
