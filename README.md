@@ -2,7 +2,10 @@
 
 A terminal IDE in one Rust binary that feels like LazyVim out of the box: Vim
 editing, file tree, LSP, DAP, Git signs, lazygit, an ACP agent panel and a tool
-installer built in, all rebindable in TOML. Unreleased.
+installer built in, all rebindable in TOML.
+
+Download a static binary, deb, rpm, pacman package, AppImage or Flatpak from the
+[releases](https://github.com/blurskye/dust/releases); see [Linux release](docs/release-linux.md).
 
 - [Product plan](docs/product-plan.md) — what Dust is for and what gets built next
 - [Architecture](ARCHITECTURE.md)

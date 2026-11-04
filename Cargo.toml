@@ -3,6 +3,9 @@ name = "dust"
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
+description = "A terminal IDE with Vim keys, language servers, debugging, git and coding agents"
+repository = "https://github.com/blurskye/dust"
+homepage = "https://github.com/blurskye/dust"
 rust-version = "1.85"
 default-run = "dust"
 
@@ -80,6 +83,10 @@ unicode-segmentation = "1.12.0"
 unicode-width = "0.2.0"
 zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
 zstd = "=0.13.3"
+
+[features]
+# Builds OpenSSL and libgit2 into the binary, for the static release build.
+static = ["git2/vendored-openssl", "git2/vendored-libgit2"]
 
 [dev-dependencies]
 wit-component = "=0.226.0"

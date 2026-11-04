@@ -21,3 +21,4 @@ id_ed25519*
 session-ses_*.md
 pi-session-*.html
 /.dust-build/
+/dist/
