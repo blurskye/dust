@@ -4,7 +4,7 @@ use crate::editor::{
     state::{EditorMode, EditorState, RegisterShape, ReplaceRecord},
     text::{
         ByteOffset, ByteRange, DisplayWidthPolicy, TextEdit, TextEditSet, display_column_at,
-        insertion_at_display_column, next_grapheme_boundary, previous_grapheme_boundary,
+        grapheme_cell_width, insertion_at_display_column, next_grapheme_boundary, previous_grapheme_boundary,
     },
     transaction::{EditorOperation, UndoPolicy},
 };
@@ -13,7 +13,7 @@ use super::{
     super::{CommandError, CommandId, CommandInvocation, CommandOutcome},
     comment::build_comment_toggle,
     motion::{
-        block_start_column, cursor_display_column, motion_target, on_last_character,
+        block_start_column, cursor_display_column, line_content_end, motion_target, on_last_character,
         operator_range, repeat_visual_ranges, visual_ranges,
     },
     multi,
@@ -24,7 +24,7 @@ use super::{
     text_object::text_object,
     transaction::{
         bool_argument, build_indent, build_insert_transition, build_join_lines, build_toggle_case,
-        failed, string_argument, transaction_for,
+        failed, integer_argument, string_argument, transaction_for,
     },
 };
 
@@ -899,15 +899,51 @@ pub(super) fn execute_builtin<E>(
                     "unknown operator `{operator}`"
                 )));
             }
-            let text = ranges
+            let mut rows = ranges
                 .iter()
                 .map(|range| buffer.text.slice(*range).map_err(failed))
-                .collect::<Result<Vec<_>, _>>()?
-                .join(if shape == RegisterShape::Block {
-                    "\n"
+                .collect::<Result<Vec<_>, _>>()?;
+            if shape == RegisterShape::Block {
+                let width_policy = DisplayWidthPolicy {
+                    tab_width: state.policy.tab_width,
+                    ambiguous_wide: state.policy.ambiguous_width_wide,
+                };
+                let mut width = if invocation.id.as_str() == "edit.repeat_visual" {
+                    usize::try_from(integer_argument(invocation, "width")?)
+                        .map_err(|_| CommandError::InvalidArguments("visual repeat width is invalid".into()))?
                 } else {
-                    ""
-                });
+                    let selection = view.selection.ok_or_else(|| {
+                        CommandError::Unavailable("visual selection is missing".into())
+                    })?;
+                    let anchor = cursor_display_column(&buffer.text, selection.anchor, state.policy)?;
+                    let head = cursor_display_column(&buffer.text, selection.head, state.policy)?;
+                    anchor.abs_diff(head).saturating_add(1)
+                };
+                let mut widths = Vec::with_capacity(rows.len());
+                for (row, range) in rows.iter_mut().zip(&ranges) {
+                    let start_column = cursor_display_column(&buffer.text, range.start, state.policy)?;
+                    let mut column = start_column;
+                    let mut expanded = String::new();
+                    for grapheme in row.graphemes(true) {
+                        let cells = grapheme_cell_width(grapheme, column, width_policy);
+                        if grapheme == "\t" {
+                            expanded.push_str(&" ".repeat(cells));
+                        } else {
+                            expanded.push_str(grapheme);
+                        }
+                        column = column.saturating_add(cells);
+                    }
+                    let row_width = column.saturating_sub(start_column);
+                    width = width.max(row_width);
+                    widths.push(row_width);
+                    *row = expanded;
+                }
+                // Store the rectangle itself, including cells past shorter lines.
+                for (row, row_width) in rows.iter_mut().zip(widths) {
+                    row.push_str(&" ".repeat(width.saturating_sub(row_width)));
+                }
+            }
+            let text = rows.join(if shape == RegisterShape::Block { "\n" } else { "" });
             transaction.operations.push(EditorOperation::SetRegister {
                 name: invocation.register.unwrap_or('"'),
                 text,
@@ -968,6 +1004,12 @@ pub(super) fn execute_builtin<E>(
                 });
             } else {
                 transaction.undo_policy = UndoPolicy::Ignore;
+                if matches!(view.mode, EditorMode::VisualChar | EditorMode::VisualLine | EditorMode::VisualBlock) {
+                    transaction.operations.push(EditorOperation::SetCursor {
+                        view: view_id,
+                        position: first_range.start,
+                    });
+                }
             }
             transaction.operations.push(EditorOperation::SetMode {
                 view: view_id,
@@ -1080,7 +1122,9 @@ pub(super) fn execute_builtin<E>(
             let at = match (register.shape, before) {
                 (RegisterShape::Character, true) => view.cursor,
                 (RegisterShape::Character, false) => {
+                    let line = buffer.text.byte_to_line(view.cursor).map_err(failed)?;
                     next_grapheme_boundary(&buffer.text, view.cursor)
+                        .min(line_content_end(&buffer.text, line)?)
                 }
                 (RegisterShape::Line, true) => {
                     let line = buffer.text.byte_to_line(view.cursor).map_err(failed)?;
@@ -1114,29 +1158,40 @@ pub(super) fn execute_builtin<E>(
             } else {
                 text = text.repeat(count);
             }
+            let edit = TextEdit::new(ByteRange::empty(at), text);
+            if register.shape == RegisterShape::Character && !edit.replacement().contains('\n') {
+                let last = edit.replacement().grapheme_indices(true).next_back()
+                    .map_or(0, |(offset, _)| offset);
+                cursor = ByteOffset(at.get().saturating_add(last));
+            }
             transaction.operations.push(EditorOperation::ApplyEdits {
                 buffer: buffer_id,
-                edits: TextEditSet::new(
-                    buffer.text.revision(),
-                    vec![TextEdit::new(ByteRange::empty(at), text)],
-                ),
+                edits: TextEditSet::new(buffer.text.revision(), vec![edit]),
             });
             transaction.operations.push(EditorOperation::SetCursor {
                 view: view_id,
                 position: cursor,
             });
         }
-        "history.undo" => {
+        "history.undo" | "history.redo" => {
             transaction.undo_policy = UndoPolicy::Ignore;
-            transaction
-                .operations
-                .push(EditorOperation::Undo { buffer: buffer_id });
-        }
-        "history.redo" => {
-            transaction.undo_policy = UndoPolicy::Ignore;
-            transaction
-                .operations
-                .push(EditorOperation::Redo { buffer: buffer_id });
+            let undo = invocation.id.as_str() == "history.undo";
+            let mut history = buffer.undo.clone();
+            for step in 0..count {
+                let changes = if undo { history.undo() } else { history.redo() };
+                if changes.is_none() && step > 0 {
+                    break;
+                }
+                transaction.operations.push(if undo {
+                    EditorOperation::Undo { buffer: buffer_id }
+                } else {
+                    EditorOperation::Redo { buffer: buffer_id }
+                });
+                // Preserve the normal empty-history error on the first step.
+                if changes.is_none() {
+                    break;
+                }
+            }
         }
         other => {
             return Err(CommandError::Unknown(CommandId::new(other)?));
