@@ -223,8 +223,8 @@ impl ClipboardSession {
             registers.set('+', value.clone(), enabled, false);
             registers.set('"', value, enabled, false);
             self.synced_text = Some(text);
+            self.synced_generation = registers.generation();
         }
-        self.synced_generation = registers.generation();
     }
 }
 
@@ -358,6 +358,16 @@ mod tests {
         assert_eq!(registers.get('*').unwrap().text, "primary");
         assert_eq!(registers.get('+').unwrap().text, "clipboard");
         assert_eq!(registers.get('"').unwrap().text, "clipboard");
+    }
+
+    #[test]
+    fn primary_reads_do_not_suppress_a_pending_clipboard_yank() {
+        let mut session = ClipboardSession { enabled: true, ..Default::default() };
+        let mut registers = RegisterStore::default();
+        registers.set('"', RegisterValue { text: "new yank".into(), shape: RegisterShape::Character }, true, false);
+        session.import(&mut registers, true, "primary".into(), true);
+        assert_eq!(session.push(&mut registers).as_deref(), Some("new yank"));
+        assert_eq!(registers.get('+').unwrap().text, "new yank");
     }
 
     #[test]

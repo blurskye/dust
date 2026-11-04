@@ -1830,6 +1830,29 @@ fn bundled_upper_h_and_l_cycle_open_buffers_in_normal_mode() {
 }
 
 #[test]
+fn clicking_explorer_cancels_flash_without_swallowing_the_next_key() {
+    let mut app = app();
+    let (_, view) = app.state.open_text(TextBuffer::from_text("abc abc abc"), None);
+    app.set_dashboard_visibility(false);
+    app.open_explorer();
+    app.set_explorer_focus(false);
+    app.reconcile_editor_windows();
+    app.begin_flash();
+    app.handle_event(UiEvent::Key { key: KeyEvent::character('a'), kind: crate::ui::KeyInputKind::Press });
+    assert!(app.flash.is_some());
+    let rect = app.explorer_window_rect().unwrap();
+    app.handle_event(UiEvent::Mouse {
+        key: KeyEvent::mouse(crate::editor::input::KeyCode::MouseLeftDown, Default::default()),
+        column: rect.x + 1, row: rect.y + 1,
+    });
+    app.handle_event(UiEvent::Key { key: KeyEvent::character('j'), kind: crate::ui::KeyInputKind::Press });
+    assert!(app.flash.is_none());
+    assert!(app.ui.flash.is_none());
+    assert!(app.window_session.explorer_focused());
+    assert_eq!(app.state.views[view].cursor, ByteOffset(0));
+}
+
+#[test]
 fn floating_terminal_receives_clicks_above_underlying_buffer_tabs() {
     let mut app = app();
     let (first, _) = app.state.open_text(TextBuffer::from_text("first"), None);

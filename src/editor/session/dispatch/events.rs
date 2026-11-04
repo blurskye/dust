@@ -138,7 +138,13 @@ impl InteractiveApplication {
     }
 
     pub(super) fn sync_flash_ui(&mut self) {
-        if self.flash.as_ref().is_some_and(|flash| self.state.active_view != Some(flash.view)) {
+        if self.flash.as_ref().is_some_and(|flash| {
+            self.state.active_view != Some(flash.view)
+                || self.window_session.graph().focused()
+                    .and_then(|window| self.window_session.editor_ids().pane_for_window(window))
+                    .and_then(|pane| self.state.panes.get(pane))
+                    .is_none_or(|pane| pane.view != flash.view)
+        }) {
             self.flash = None;
         }
         self.ui.flash = self.flash.as_ref().map(|flash| crate::ui::FlashOverlay {
@@ -579,13 +585,16 @@ impl InteractiveApplication {
                 self.sync_explorer_ui();
                 self.ensure_cursor_visible();
             }
-            UiEvent::Key { key, kind } => match kind {
-                KeyInputKind::Press | KeyInputKind::Repeat if self.flash.is_some() => {
-                    self.handle_flash_key(&key);
+            UiEvent::Key { key, kind } => {
+                self.sync_flash_ui();
+                match kind {
+                    KeyInputKind::Press | KeyInputKind::Repeat if self.flash.is_some() => {
+                        self.handle_flash_key(&key);
+                    }
+                    KeyInputKind::Press | KeyInputKind::Repeat => self.handle_configured_key(key),
+                    KeyInputKind::Release => self.handle_key_in_context("key_release", key),
                 }
-                KeyInputKind::Press | KeyInputKind::Repeat => self.handle_configured_key(key),
-                KeyInputKind::Release => self.handle_key_in_context("key_release", key),
-            },
+            }
             UiEvent::Paste(text) => self.handle_configured_paste(text),
             UiEvent::FocusGained => {
                 self.send_terminal_focus_report(true);
@@ -1060,6 +1069,7 @@ impl InteractiveApplication {
     /// Returns false when the context takes no text or a key has none.
     fn type_unmapped(&mut self, context: &str, keys: &[KeyEvent]) -> bool {
         let input = &self.configuration.settings().input;
+        let context = if context == "snippet" { "editor.insert" } else { context };
         let Some(command_id) = input
             .character_fallback_commands
             .get(context)
@@ -1446,10 +1456,7 @@ impl InteractiveApplication {
                 for effect in outcome.effects {
                     self.process_effect(effect);
                 }
-                if self.flash.as_ref().is_some_and(|flash| self.state.active_view != Some(flash.view)) {
-                    self.flash = None;
-                    self.sync_flash_ui();
-                }
+                self.sync_flash_ui();
                 true
             }
             Err(error) => {

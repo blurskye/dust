@@ -300,22 +300,28 @@ impl<'a> VisualRowModel<'a> {
         scroll_column: usize,
     ) -> Vec<ByteRange> {
         let mut ranges: Vec<ByteRange> = Vec::new();
+        let mut previous = None;
         for row in 0..height {
             let Some(anchor) = self.painted_row(start, row) else { break };
+            if previous == Some(anchor) { continue; }
+            previous = Some(anchor);
             let line_start = self.text.line_to_byte(anchor.line).unwrap_or(ByteOffset(0));
-            let slice = self.row_slice(anchor);
-            let (begin, end) = if self.wrap {
+            let line = self.text.line(anchor.line).unwrap_or_default();
+            let content = line.trim_end_matches(['\n', '\r']);
+            let markdown = self.markdown_line(anchor.line);
+            let table = markdown.as_ref().and_then(|markdown| markdown.table.as_ref());
+            let (begin, end) = if table.is_some() {
+                (0, content.len())
+            } else if self.wrap {
+                let slice = self.row_slice(anchor);
                 (slice.byte_start, slice.byte_end)
             } else {
-                let line = self.text.line(anchor.line).unwrap_or_default();
-                let content = line.trim_end_matches(['\n', '\r']);
                 let begin = super::editor::byte_offset_at_display_column(
                     content, scroll_column, self.tab_width, self.ambiguous_width,
                 );
                 let mut column = display_column(&content[..begin], self.tab_width, self.ambiguous_width);
                 let mut used = 0usize;
                 let mut end = begin;
-                let markdown = self.markdown_line(anchor.line);
                 for (relative, grapheme) in content[begin..].grapheme_indices(true) {
                     let at = ByteOffset(line_start.get() + begin + relative);
                     used = used.saturating_add(self.inlay_width(at));
@@ -327,18 +333,24 @@ impl<'a> VisualRowModel<'a> {
                 }
                 (begin, end)
             };
-            let range = ByteRange::new(
-                ByteOffset(line_start.get() + begin), ByteOffset(line_start.get() + end),
-            ).expect("visible text range");
-            if range.start == range.end { continue; }
-            if let Some(last) = ranges.last_mut() {
-                if last.end == range.start {
-                    last.end = range.end;
+            for (relative, grapheme) in content[begin..end].grapheme_indices(true) {
+                let at = ByteOffset(line_start.get() + begin + relative);
+                if markdown.as_ref().is_some_and(|markdown| markdown.at(at).is_some())
+                    || table.is_some_and(|table| table.place(at).is_none_or(|(row, column)| {
+                        row != anchor.wrap_row || column >= self.content_width
+                    }))
+                {
                     continue;
                 }
-                if last.start <= range.start && range.end <= last.end { continue; }
+                let end = ByteOffset(at.get() + grapheme.len());
+                if let Some(last) = ranges.last_mut()
+                    && last.end == at
+                {
+                    last.end = end;
+                } else {
+                    ranges.push(ByteRange::new(at, end).expect("visible text range"));
+                }
             }
-            ranges.push(range);
         }
         ranges
     }
@@ -1044,6 +1056,40 @@ pub fn editor_state_content_width(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn visible_ranges_exclude_hidden_markdown_and_unpainted_table_cells() {
+        use crate::{editor::text::TextBuffer, language::syntax::MarkdownMark, ui::UiMarkdownMark};
+        let source = "cursor\nz hidden\n| a | long text here and more |\n|---|---|\n| b | c |\nlast";
+        let mut state = EditorState::new("/workspace".into());
+        let (buffer, view) = state.open_text(TextBuffer::from_text(source), None);
+        let text = &state.buffers[buffer].text;
+        let revision = text.revision();
+        let mut config = crate::config::load_bundled_config().config;
+        config.editor.line_numbers = LineNumbers::Off;
+        config.editor.git_signs.enabled = false;
+        let mut ui = UiState::default();
+        let mark = |start, end, mark| UiMarkdownMark {
+            buffer, revision, range: ByteRange::new(ByteOffset(start), ByteOffset(end)).unwrap(), mark,
+        };
+        let table_start = source.find('|').unwrap();
+        let table_end = source.find("last").unwrap();
+        ui.markdown_marks = source.match_indices('|')
+            .map(|(at, _)| mark(at, at + 1, MarkdownMark::TablePipe)).collect();
+        ui.markdown_marks.push(mark(7, 15, MarkdownMark::Hide));
+        ui.markdown_marks.push(mark(table_start, table_end, MarkdownMark::Table));
+        ui.markdown_marks.sort_by_key(|mark| mark.range.start);
+        for wrap in [true, false] {
+            let model = VisualRowModel::new_for_state(&state, text, view, &ui, &config, 20, wrap);
+            assert!(model.visible_text_ranges(VisualRowAnchor { line: 1, wrap_row: 0 }, 1, 0).is_empty());
+            let visible = model.visible_text_ranges(VisualRowAnchor { line: 2, wrap_row: 0 }, 2, 0);
+            let painted = visible.iter().map(|range| text.slice(*range).unwrap()).collect::<String>();
+            assert!(painted.contains('a'), "{painted:?}");
+            assert!(painted.contains("long text"), "{painted:?}");
+            assert!(!painted.contains("more"), "{painted:?}");
+            assert!(!painted.contains('|'), "{painted:?}");
+        }
+    }
 
     #[test]
     fn paging_reuses_cached_line_slices() {

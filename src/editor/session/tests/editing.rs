@@ -636,7 +636,7 @@ fn key_hint_timeout_reload_and_pass_through_never_leave_stale_actions() {
 
 #[test]
 fn an_unfinished_insert_mapping_types_its_keys() {
-    for snippet in [false, true] {
+    for (snippet, context, mode) in [(false, "editor", "insert"), (true, "editor", "insert"), (true, "snippet", "")] {
     let mut app = app();
     let clock = std::sync::Arc::new(crate::clock::ManualClock::new(
         std::time::UNIX_EPOCH,
@@ -646,8 +646,8 @@ fn an_unfinished_insert_mapping_types_its_keys() {
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.entries.push(crate::config::KeymapEntry {
         id: "user.test.jk".into(),
-        context: Some("editor".into()),
-        mode: "insert".into(),
+        context: Some(context.into()),
+        mode: mode.into(),
         keys: Some("j k".into()),
         command: Some("input.cancel".into()),
         arguments: BTreeMap::new(),
