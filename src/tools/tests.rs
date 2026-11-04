@@ -1079,6 +1079,24 @@ fn package_activation_identity_is_independent_of_component() {
 }
 
 #[test]
+fn package_commits_preserve_plugin_ownership_and_identity() {
+    let root = tempfile::tempdir().unwrap();
+    let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let (manifest, plugin, bytes) = package_fixture("demo");
+    let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
+    let installed = manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+    let mut renamed = plugin.clone();
+    renamed.id = "other".into();
+    assert!(matches!(manager.commit_prepared(&manifest, &renamed, &object), Err(super::PackageError::Activation(_))));
+    let mut unrelated = manifest.clone();
+    unrelated.name = "other".into();
+    assert!(matches!(manager.commit_prepared(&unrelated, &plugin, &object), Err(super::PackageError::Activation(_))));
+    assert_eq!(manager.read_lock().unwrap(), installed);
+    assert_eq!(manager.activations().unwrap()[0].0.id, "demo");
+    assert!(matches!(manager.rollback(), Err(super::PackageError::NoRollback)));
+}
+
+#[test]
 fn package_commit_accepts_and_normalizes_uppercase_digest() {
     let root = tempfile::tempdir().unwrap();
     let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();

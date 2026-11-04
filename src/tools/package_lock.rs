@@ -361,6 +361,8 @@ pub enum PackageError {
     OutsideScope,
     #[error("package activation failed: {0}")]
     Activation(String),
+    #[error("another package operation is still in progress")]
+    Busy,
     #[error("package service queue is full")]
     QueueFull,
     #[error("package service stopped")]

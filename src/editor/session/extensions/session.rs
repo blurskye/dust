@@ -72,10 +72,13 @@ pub(super) struct ExtensionSession {
     registry_intents: HashMap<u64, bool>,
     pending_registry_artifact: Option<(RegistryPackageMetadata, Vec<u8>)>,
     package_preparing: BTreeSet<u64>,
+    package_aborts: BTreeSet<u64>,
+    package_refresh: bool,
     package_prepared: HashMap<String, (PluginLoadId, u64)>,
     package_commits: HashMap<u64, (String, PluginLoadId)>,
     package_startup_pending: HashMap<String, PluginLoadId>,
     package_managed_plugins: HashMap<String, PluginLoadId>,
+    disabled_plugins: BTreeSet<String>,
     package_startup_request: Option<u64>,
     package_startup_rollback: Option<u64>,
     package_startup_rollback_attempted: bool,
@@ -111,10 +114,13 @@ impl ExtensionSession {
             registry_intents: HashMap::new(),
             pending_registry_artifact: None,
             package_preparing: BTreeSet::new(),
+            package_aborts: BTreeSet::new(),
+            package_refresh: false,
             package_prepared: HashMap::new(),
             package_commits: HashMap::new(),
             package_startup_pending: HashMap::new(),
             package_managed_plugins: HashMap::new(),
+            disabled_plugins: BTreeSet::new(),
             package_startup_request: None,
             package_startup_rollback: None,
             package_startup_rollback_attempted: false,
@@ -153,7 +159,9 @@ impl ExtensionSession {
             .index_from_store(plugin, store, manifest, component, limits)
     }
     pub(super) fn disable(&mut self, plugin: &str) -> Result<(), PluginError> {
-        self.manager.disable(plugin)
+        self.manager.disable(plugin)?;
+        self.disabled_plugins.insert(plugin.into());
+        Ok(())
     }
     pub(super) fn disable_generation(
         &mut self,

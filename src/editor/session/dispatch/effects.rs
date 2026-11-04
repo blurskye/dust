@@ -12457,7 +12457,11 @@ impl InteractiveApplication {
         }
     }
     pub(super) fn process_package_events(&mut self) {
-        let updates = self.extension.poll_packages(self.plugin_limits());
+        let updates = self.extension.poll_packages(
+            self.plugin_limits(),
+            &self.configuration.settings().plugins,
+            self.workspace.safe_mode(),
+        );
         self.apply_extension_updates(updates);
     }
     pub(in crate::editor::session) fn apply_extension_updates(
