@@ -639,7 +639,7 @@ fn new_file_text_uses_one_creation_snapshot_and_one_draft() {
     owner
         .finish_preparation(
             vec![WorkspaceEditDraft {
-                canonical_path: path,
+                canonical_path: path.clone(),
                 expected_revision: None,
                 edits: vec![TextEdit::new(
                     ByteRange::empty(ByteOffset(0)),
@@ -651,7 +651,18 @@ fn new_file_text_uses_one_creation_snapshot_and_one_draft() {
             1,
         )
         .unwrap();
-    assert_eq!(owner.proposal().unwrap().files.len(), 1);
+    let (sources, proposal) = owner.approval(&workspace.version(), 1).unwrap();
+    assert_eq!(proposal.files.len(), 1);
+    assert_eq!(proposal.files[0].proposed_bytes, b"fn main() {}\n");
+    let draft = editor
+        .prepare_workspace_edit(sources, proposal, TransactionId(1))
+        .unwrap();
+    let published = draft.accept(&editor.version()).unwrap();
+    let buffer = published.buffers.iter()
+        .find_map(|(id, buffer)| (buffer.path.as_ref() == Some(&path)).then_some(id))
+        .unwrap();
+    assert_eq!(published.buffers[buffer].text.to_string(), "fn main() {}\n");
+    assert!(published.buffers[buffer].dirty);
 }
 
 #[test]

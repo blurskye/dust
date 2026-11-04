@@ -1,7 +1,7 @@
 use super::{DocumentEvent, DocumentSession};
 use crate::editor::session::windows::NavigationStamp;
 use crate::editor::session::workspace::WorkspaceVersion;
-use crate::editor::text::{BufferRevision, TextBuffer, TextVersion};
+use crate::editor::text::{BufferRevision, FileFormat, TextBuffer, TextVersion};
 use crate::editor::{BufferId, EditorVersion, EditorWindowVersion};
 use crate::files::{RequestId, VfsError, VfsResult, WriteExpectation};
 use std::path::{Path, PathBuf};
@@ -22,7 +22,7 @@ struct Version {
     path: Option<PathBuf>,
     text: TextVersion,
     revision: BufferRevision,
-    snapshot: Option<Arc<str>>,
+    snapshot: Option<Box<(Arc<str>, FileFormat)>>,
 }
 impl DocumentView<'_> {
     fn version(&self) -> Version {
@@ -36,7 +36,7 @@ impl DocumentView<'_> {
     }
     fn save_version(&self) -> Version {
         let mut version = self.version();
-        version.snapshot = Some(self.text.to_string().into());
+        version.snapshot = Some(Box::new((self.text.to_string().into(), self.text.format().clone())));
         version
     }
 }
@@ -144,7 +144,7 @@ pub(in crate::editor::session) enum DocumentChange {
     Saved {
         buffer: BufferId,
         text: TextVersion,
-        snapshot: Arc<str>,
+        snapshot: Box<(Arc<str>, FileFormat)>,
         revision: BufferRevision,
         bytes: Vec<u8>,
         target: PathBuf,
@@ -647,9 +647,39 @@ mod tests {
                 version.revision,
                 bytes,
                 "/workspace/file".into(),
-                version.snapshot.unwrap()
+                *version.snapshot.unwrap()
             ));
             state = draft.accept(&state.version()).unwrap();
+            assert!(!state.buffers[buffer].dirty);
+            assert_eq!(state.buffers[buffer].persisted_bytes(), disk);
+        }
+    }
+
+    #[test]
+    fn line_ending_save_policy_keeps_the_requested_format_snapshot_clean() {
+        for (ending, disk) in [
+            (crate::config::LineEndingPolicy::Lf, b"a\nb\n".as_slice()),
+            (crate::config::LineEndingPolicy::CrLf, b"a\r\nb\r\n".as_slice()),
+            (crate::config::LineEndingPolicy::Cr, b"a\rb\r".as_slice()),
+        ] {
+            let mut state = EditorState::new("/workspace".into());
+            let (buffer, _) = state.open_text(
+                TextBuffer::from_bytes(b"a\r\nb\n").unwrap(),
+                Some("/workspace/file".into()),
+            );
+            let mut config = crate::config::load_bundled_config().config;
+            config.editor.line_endings = ending;
+            let bytes = configured_file_bytes(&state.buffers[buffer].text, &config.editor);
+            assert_eq!(bytes, disk);
+            let version = view(&state, buffer).save_version();
+            let mut draft = state.draft();
+            assert!(draft.save_document(
+                buffer, &version.text, version.revision, bytes,
+                "/workspace/file".into(), *version.snapshot.unwrap(),
+            ));
+            state = draft.accept(&state.version()).unwrap();
+            assert!(!state.buffers[buffer].dirty);
+            state.buffers[buffer].refresh_dirty();
             assert!(!state.buffers[buffer].dirty);
             assert_eq!(state.buffers[buffer].persisted_bytes(), disk);
         }
@@ -849,7 +879,7 @@ mod tests {
             panic!("save")
         };
         let mut candidate = state.draft();
-        assert!(candidate.save_document(buffer, &text, revision, bytes, target, snapshot));
+        assert!(candidate.save_document(buffer, &text, revision, bytes, target, *snapshot));
         state = candidate.accept(&state.version()).unwrap();
         assert!(state.buffers[id].dirty);
         assert_eq!(state.buffers[id].persisted_bytes(), b"old");

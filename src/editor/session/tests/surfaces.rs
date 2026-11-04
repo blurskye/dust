@@ -5162,6 +5162,44 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
 }
 
 #[test]
+fn session_restore_focuses_the_saved_pane_when_panes_share_a_file() {
+    use crate::editor::session::persistence::RestoreContext;
+
+    let mut app = app();
+    let path = app.state.workspace_root.join("shared-panes.txt");
+    std::fs::write(&path, "first\nsecond\n").unwrap();
+    app.start_open(path);
+    wait_vfs(&mut app);
+    let first = app.state.active_view.unwrap();
+    app.state.views[first].cursor = ByteOffset(1);
+    app.state.split_active(crate::editor::Axis::Horizontal, 500).unwrap();
+    let second = app.state.active_view.unwrap();
+    assert_ne!(first, second);
+    app.state.views[second].cursor = ByteOffset(8);
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let session = app.capture_session().unwrap();
+    assert_eq!(session.tabs[0].focused_pane, Some(1));
+    // Exercise serialization as well as capture and asynchronous restoration.
+    let session = serde_json::from_slice(&serde_json::to_vec(&session).unwrap()).unwrap();
+    app.persistence.fixture_restore_source(RestoreContext {
+        editor: &app.state,
+        workspace: &app.workspace,
+        input: &app.input,
+        windows: &app.window_session,
+        configuration: app.configuration.binding_revision(),
+    });
+    app.restore_session(session);
+    wait_vfs(&mut app);
+    assert_eq!(app.ui.config_diagnostic, None);
+    let active = app.state.active_view.unwrap();
+    assert_eq!(app.state.views[active].cursor, ByteOffset(8));
+    assert_eq!(app.state.views.len(), 2);
+    assert!(app.state.views.values().any(|view| view.cursor == ByteOffset(1)));
+    assert_eq!(app.capture_session().unwrap().tabs[0].focused_pane, Some(1));
+}
+
+#[test]
 fn session_restore_keeps_tab_order_after_the_first_tab_was_closed() {
     use crate::editor::session::persistence::RestoreContext;
 
@@ -5381,6 +5419,7 @@ fn startup_plugin_publication_waits_for_session_restoration() {
                 path: path.clone(), cursor: 3, anchor: 3, scroll_line: 0, scroll_column: 0,
             } },
             focused_path: Some(path.clone()),
+            focused_pane: None,
         }],
         active_tab: 0, window_rules: Vec::new(), content_descriptors: Vec::new(), pinned: Vec::new(),
     };
@@ -5447,6 +5486,7 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
                 },
             },
             focused_path: Some(path.clone()),
+            focused_pane: None,
         }],
         active_tab: 0,
         window_rules: Vec::new(),

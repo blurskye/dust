@@ -28,13 +28,15 @@ impl EditorDraft {
             let (layout, panes) = build_layout(&mut self.state, &tab.layout, loaded)
                 .ok_or("session layout is incomplete")?;
             let focused = tab
-                .focused_path
-                .as_ref()
-                .and_then(|path| {
-                    panes
-                        .iter()
-                        .find(|(candidate, _)| candidate == path)
-                        .map(|(_, pane)| *pane)
+                .focused_pane
+                .and_then(|index| panes.get(index).map(|(_, pane)| *pane))
+                .or_else(|| {
+                    tab.focused_path.as_ref().and_then(|path| {
+                        panes
+                            .iter()
+                            .find(|(candidate, _)| candidate == path)
+                            .map(|(_, pane)| *pane)
+                    })
                 })
                 .or_else(|| panes.first().map(|(_, pane)| *pane))
                 .ok_or("session tab is empty")?;

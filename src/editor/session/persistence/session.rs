@@ -484,6 +484,7 @@ impl PersistenceSession {
             let tab_index = tabs.len();
             let mut panes = Vec::new();
             collect_persistable_editor_panes(state, &tab.root, &mut panes);
+            let focused_pane = panes.iter().position(|(pane, _)| *pane == tab.focused);
             let focused_path = panes
                 .iter()
                 .find(|(pane, _)| *pane == tab.focused)
@@ -506,6 +507,7 @@ impl PersistenceSession {
             tabs.push(PersistedTab {
                 layout,
                 focused_path,
+                focused_pane,
             });
         }
 

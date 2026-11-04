@@ -807,7 +807,7 @@ impl EditorDraft {
         revision: BufferRevision,
         bytes: Vec<u8>,
         path: std::path::PathBuf,
-        snapshot: std::sync::Arc<str>,
+        snapshot: (std::sync::Arc<str>, crate::editor::text::FileFormat),
     ) -> bool {
         let changed = self
             .state
@@ -820,7 +820,7 @@ impl EditorDraft {
         {
             return false;
         }
-        self.state.buffers[buffer].set_saved_text(Some(snapshot));
+        self.state.buffers[buffer].set_saved_snapshot(Some(snapshot));
         if changed {
             self.state.set_buffer_dirty(buffer, true);
         }

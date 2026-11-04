@@ -15018,7 +15018,7 @@ impl InteractiveApplication {
                 close,
             } => {
                 let mut candidate = self.state.draft();
-                if !candidate.save_document(buffer, &text, revision, bytes, path.clone(), snapshot)
+                if !candidate.save_document(buffer, &text, revision, bytes, path.clone(), *snapshot)
                 {
                     self.input.clear_pending_stage();
                     if let Some(token) = &close {

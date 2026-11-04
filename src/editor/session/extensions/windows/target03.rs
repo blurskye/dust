@@ -44,7 +44,7 @@ fn tree(tree: wire::Tree) -> Result<PluginUiTree, wire::Failure> {
                 wire::NodeKind::Container => PluginUiNodeKind::Container,
                 wire::NodeKind::Text => PluginUiNodeKind::Text,
                 wire::NodeKind::ListNode => PluginUiNodeKind::List,
-                wire::NodeKind::Button => PluginUiNodeKind::Button,
+                wire::NodeKind::Button if node.enabled => PluginUiNodeKind::Button,
                 _ => {
                     return Err(failure(
                         wire::ErrorCode::Unsupported,
@@ -76,6 +76,34 @@ fn tree(tree: wire::Tree) -> Result<PluginUiTree, wire::Failure> {
         root: tree.root,
         nodes,
     })
+}
+
+#[test]
+fn disabled_target03_buttons_are_rejected_before_conversion() {
+    let button = |enabled| wire::Tree {
+        revision: 1,
+        root: 1,
+        nodes: vec![wire::Node {
+            id: 1,
+            kind: wire::NodeKind::Button,
+            label: String::new(),
+            text: "Run".into(),
+            value: String::new(),
+            value_revision: 0,
+            role: wire::Role::Normal,
+            enabled,
+            required: false,
+            checked: false,
+            action: Some("plugin.demo.open".into()),
+            items: Vec::new(),
+            children: Vec::new(),
+        }],
+    };
+    let error = tree(button(false)).unwrap_err();
+    assert!(matches!(error.code, wire::ErrorCode::Unsupported));
+    let converted = tree(button(true)).unwrap();
+    assert_eq!(converted.nodes[0].kind, PluginUiNodeKind::Button);
+    assert_eq!(converted.nodes[0].action.as_deref(), Some("plugin.demo.open"));
 }
 
 enum TargetPlacement {
@@ -781,15 +809,12 @@ impl PluginWindowHost {
             let revision = private.dimensions_revision.checked_add(1).ok_or_else(|| {
                 failure(wire::ErrorCode::Exhausted, "dimensions revision exhausted")
             })?;
-            let (width, height) = dimensions.ok_or_else(|| {
-                failure(
-                    wire::ErrorCode::Closed,
-                    "private view has no writable geometry",
-                )
-            })?;
-            private.dimensions = Some((width, height));
+            private.dimensions = dimensions;
             private.dimensions_revision = revision;
             private.snapshot = None;
+            let Some((width, height)) = dimensions else {
+                continue;
+            };
             let id = first_event
                 .checked_add(u64::try_from(events.len()).unwrap_or(u64::MAX))
                 .ok_or_else(|| failure(wire::ErrorCode::Exhausted, "event ID exhausted"))?;

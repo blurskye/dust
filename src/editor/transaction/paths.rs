@@ -142,7 +142,7 @@ impl EditorState {
         let mut draft = self.draft();
         for (id, path) in destinations {
             if path.is_none() {
-                draft.state.buffers[id].set_saved_text(None);
+                draft.state.buffers[id].set_saved_snapshot(None);
             }
             let dirty = path.is_none() || draft.state.buffers[id].dirty;
             draft.state.set_buffer_path_and_dirty(id, path, dirty);

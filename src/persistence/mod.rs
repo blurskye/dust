@@ -143,6 +143,8 @@ pub struct PersistedTab {
     pub layout: PersistedLayout,
     #[serde(default, with = "persisted_path::optional")]
     pub focused_path: Option<PathBuf>,
+    #[serde(default)]
+    pub focused_pane: Option<usize>,
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -446,6 +448,9 @@ pub fn validate_content_descriptors(
     for (tab_index, tab) in session.tabs.iter().enumerate() {
         let mut panes = Vec::new();
         collect_layout_paths(&tab.layout, &mut panes, maximum_entries)?;
+        if tab.focused_pane.is_some_and(|index| index >= panes.len()) {
+            return Err(PersistenceError::StaleContentDescriptor);
+        }
         if tab
             .focused_path
             .as_ref()
@@ -1161,6 +1166,7 @@ mod tests {
                         },
                     },
                     focused_path: Some(PathBuf::from("/workspace/main.rs")),
+                    focused_pane: Some(0),
                 }],
                 active_tab: 0,
                 window_rules: vec![PersistedWindowRule {
