@@ -1227,6 +1227,7 @@ impl InteractiveApplication {
         crate::editor::ViewId,
         crate::editor::text::BufferRevision,
         usize,
+        String,
     )> {
         self.state
             .views
@@ -1240,7 +1241,8 @@ impl InteractiveApplication {
                     .slice(ByteRange::new(ByteOffset(0), view.cursor).ok()?)
                     .ok()?;
                 let non_blank = before.chars().filter(|c| !c.is_whitespace()).count();
-                Some((id, text.revision(), non_blank))
+                let content = text.to_string().chars().filter(|c| !c.is_whitespace()).collect();
+                Some((id, text.revision(), non_blank, content))
             })
             .collect()
     }
@@ -1250,9 +1252,10 @@ impl InteractiveApplication {
             crate::editor::ViewId,
             crate::editor::text::BufferRevision,
             usize,
+            String,
         )>,
     ) {
-        for (id, revision, non_blank) in positions {
+        for (id, revision, non_blank, content) in positions {
             let Some(view) = self.state.views.get(id) else {
                 continue;
             };
@@ -1261,6 +1264,11 @@ impl InteractiveApplication {
                 continue;
             }
             let text = text.to_string();
+            // Punctuation and other code changes invalidate the ordinal. In that case keep
+            // the cursor already mapped through the edit by the editor transaction.
+            if !text.chars().filter(|c| !c.is_whitespace()).eq(content.chars()) {
+                continue;
+            }
             let transaction = EditorTransaction::new(self.transaction_id())
                 .with_operation(EditorOperation::SetCursor {
                     view: id,
@@ -2356,6 +2364,7 @@ impl InteractiveApplication {
         let request = match result {
             Ok(request) => request,
             Err(error) => {
+                self.cancel_deferred_workspace_command(&error);
                 self.show_error(error);
                 return;
             }
@@ -2366,6 +2375,7 @@ impl InteractiveApplication {
                 if let Some(draft) = draft
                     && let Err(error) = self.commit_editor_draft(draft, None, false)
                 {
+                    self.cancel_deferred_workspace_command(&error);
                     self.show_error(error);
                     return;
                 }
@@ -2373,13 +2383,28 @@ impl InteractiveApplication {
                     self.record_recent_file(path);
                 }
             }
-            Err(error) => self.show_error(error),
+            Err(error) => {
+                self.cancel_deferred_workspace_command(&error);
+                self.show_error(error);
+                return;
+            }
+        }
+        if !self.workspace_edits.resources_pending()
+            && let Err(error) = self.language.finish_deferred_edit(true, None, &self.state)
+        {
+            self.show_error(error);
         }
     }
 }
 
 impl InteractiveApplication {
+    pub(super) fn cancel_deferred_workspace_command(&mut self, reason: &str) {
+        if let Err(error) = self.language.finish_deferred_edit(false, Some(reason.into()), &self.state) {
+            self.show_error(error);
+        }
+    }
     pub(in crate::editor::session) fn retire_workspace_resources(&mut self, reason: &str) {
+        self.cancel_deferred_workspace_command(reason);
         let (notices, requests) = self.workspace_edits.retire_resources(reason);
         for notice in notices {
             self.show_error(notice);
@@ -2400,6 +2425,7 @@ impl InteractiveApplication {
         &mut self,
         reason: &str,
     ) {
+        self.cancel_deferred_workspace_command(reason);
         for notice in self.workspace_edits.finish_resources(reason) {
             self.show_error(notice);
         }
@@ -3167,7 +3193,8 @@ impl InteractiveApplication {
                     self.refresh_lsp_projection_owner();
                     if !self
                         .language
-                        .accept_result(&server, generation, &method, &uri, version)
+                        .accept_result(&server, generation, &method, &uri, version,
+                            self.state.active_view.and_then(|id| self.state.views.get(id)).map_or(ByteOffset(0), |view| view.cursor))
                     {
                         continue;
                     }
@@ -3758,6 +3785,27 @@ impl InteractiveApplication {
     ) {
         self.ui.lsp_loading = None;
         let server_label = self.lsp_server_label(server);
+        // A null result has the same meaning as an empty list for these features.
+        let result = match (method, result) {
+            ("textDocument/codeAction", LspFeatureResult::Empty) => {
+                LspFeatureResult::CodeActions(Vec::new())
+            }
+            (
+                "textDocument/documentHighlight" | "textDocument/foldingRange"
+                | "textDocument/selectionRange",
+                LspFeatureResult::Empty,
+            ) => LspFeatureResult::Ranges(Vec::new()),
+            ("textDocument/semanticTokens/full", LspFeatureResult::Empty) => {
+                LspFeatureResult::SemanticTokens(crate::language::lsp::LspSemanticTokens {
+                    result_id: None,
+                    data: Vec::new(),
+                })
+            }
+            ("textDocument/inlayHint", LspFeatureResult::Empty) => {
+                LspFeatureResult::InlayHints(Vec::new())
+            }
+            (_, result) => result,
+        };
         match result {
             // Another server on this file already answered.
             LspFeatureResult::Hover(_) if self.hover_is_showing() => {}
@@ -3846,11 +3894,11 @@ impl InteractiveApplication {
                     "textDocument/formatting" | "textDocument/rangeFormatting"
                 ) {
                     // Typing while the server worked moved the text its edits point at.
-                    let edit_is_current = context.as_ref().is_none_or(|context| {
+                    let edit_is_current = context.as_ref().is_some_and(|context| {
                         self.language.edit_context_current(context)
                             && context
                                 .document_source(uri)
-                                .is_none_or(|(buffer, version)| {
+                                .is_some_and(|(buffer, version)| {
                                     self.state.buffers.get(*buffer).is_some_and(|buffer| {
                                         buffer.text.source_version() == *version
                                     })
@@ -4128,7 +4176,7 @@ impl InteractiveApplication {
             }
             LspFeatureResult::Colors(_) => {}
             // Nothing to change is a normal answer from a formatter.
-            LspFeatureResult::Empty if method == "textDocument/formatting" => {
+            LspFeatureResult::Empty if matches!(method, "textDocument/formatting" | "textDocument/rangeFormatting") => {
                 if self.format_on_save.as_ref().is_some_and(|pending| {
                     pending.request.as_ref() == Some(&(server.to_owned(), generation))
                 }) {
@@ -4143,7 +4191,9 @@ impl InteractiveApplication {
             LspFeatureResult::Empty
                 if method == "textDocument/completion"
                     && (self.language.request_pending()
-                        || self.language.completion_automatic()) => {}
+                        || self.language.completion_automatic()
+                        || self.ui.language_completion.is_some()) => {}
+            LspFeatureResult::Empty if method == "workspace/executeCommand" => {}
             LspFeatureResult::Empty => self.show_lsp_no_result(server),
         }
     }
@@ -4217,7 +4267,7 @@ impl InteractiveApplication {
             Err(error) => {
                 let _ = self
                     .language
-                    .finish_edit(&plan.key, false, Some(error.clone()));
+                    .finish_edit(&plan.key, false, Some(error.clone()), &self.state);
                 self.show_error(error);
                 return;
             }
@@ -4371,8 +4421,11 @@ impl InteractiveApplication {
     ) -> Result<(), String> {
         if self.extension.owns_edit(key) {
             self.extension.finish_edit(key)
+        } else if applied && self.workspace_edits.resources_pending() {
+            self.language.defer_edit(key.clone());
+            Ok(())
         } else {
-            self.language.finish_edit(key, applied, reason)
+            self.language.finish_edit(key, applied, reason, &self.state)
         }
     }
     pub(in crate::editor::session) fn abort_workspace_edit(&mut self, reason: String) {
@@ -4446,7 +4499,11 @@ impl InteractiveApplication {
             self.show_error(error);
             return;
         }
-        match self.workspace_edits.accepted(self.state.publication()) {
+        let accepted = self.workspace_edits.accepted(self.state.publication());
+        if accepted.is_ok() {
+            self.close_picker();
+        }
+        match accepted {
             Ok(Some(origin)) => {
                 if let Err(error) = self.finish_workspace_edit_origin(&origin, true, None) {
                     self.show_error(error);
@@ -4459,7 +4516,6 @@ impl InteractiveApplication {
                 return;
             }
         }
-        self.close_picker();
         self.notify_message(self.message("workspace_edit_applied", &[]), false);
     }
     /// Applies an edit whose positions use `encoding`, the encoding of the server that sent it.

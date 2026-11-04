@@ -183,6 +183,37 @@ pub(crate) struct EditSourceFixture {
 }
 #[cfg(test)]
 impl EditSourceFixture {
+    pub(crate) fn context(&self) -> EditContext {
+        self.events.context.clone()
+    }
+    pub(crate) fn publish_result(
+        &self,
+        generation: u64,
+        method: &str,
+        document: &super::model::LspDocument,
+        result: super::model::LspFeatureResult,
+    ) {
+        self.events.send(LspEvent::Result {
+            server: self.events.context.server.to_string(),
+            generation,
+            method: method.into(),
+            uri: document.uri(),
+            version: document.version,
+            result,
+        });
+    }
+    pub(crate) fn synced_document(&self) -> Option<super::model::LspDocument> {
+        match self.commands.try_recv().ok()? {
+            SessionCommand::SyncOwned { document, .. } => Some(document),
+            _ => panic!("expected owned document sync"),
+        }
+    }
+    pub(crate) fn closed_uri(&self) -> Option<String> {
+        while let Ok(command) = self.commands.try_recv() {
+            if let SessionCommand::Close(uri) = command { return Some(uri); }
+        }
+        None
+    }
     pub(crate) fn saved_uri(&self) -> Option<String> {
         while let Ok(command) = self.commands.try_recv() {
             if let SessionCommand::Save(document) = command {

@@ -71,6 +71,29 @@ fn lsp_documentation_popup_preserves_multiline_kind_and_cancels_without_notifica
 }
 
 #[test]
+fn interactive_lsp_results_follow_the_request_cursor() {
+    use crate::language::lsp::{LspFeature, LspFeatureResult, LspHover, LspMarkupContent, LspMarkupKind};
+    for moved in [false, true] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("hover.rs");
+        let (buffer, view) = app.state.open_text(TextBuffer::from_text("first\nsecond"), Some(path));
+        app.set_dashboard_visibility(false);
+        let transport = super::language::fixture_owned_lsp(&mut app, "server", buffer);
+        app.language.select("server");
+        let document = app.active_lsp_document().unwrap().1;
+        app.request_lsp(LspFeature::Hover);
+        if moved { app.state.views[view].cursor = ByteOffset(6); }
+        transport.publish_result(app.language.generation(), "textDocument/hover", &document,
+            LspFeatureResult::Hover(LspHover {
+                range: None,
+                sections: vec![LspMarkupContent { kind: LspMarkupKind::PlainText, value: "first symbol".into() }],
+            }));
+        app.process_lsp_events();
+        assert_eq!(app.ui.documentation_popup.is_some(), !moved);
+    }
+}
+
+#[test]
 fn inlay_hint_results_are_revision_owned_and_projected_at_exact_unicode_offsets() {
     let mut app = app();
     let path = app.state.workspace_root.join("hints.rs");
@@ -395,8 +418,9 @@ fn a_format_result_applies_without_a_review_and_finishes_the_waiting_save() {
         LspDocumentEdit, LspFeatureResult, LspPosition, LspRange, LspTextEdit, LspWorkspaceEdit,
     };
     let (mut app, buffer, path, uri) = app_waiting_to_save_formatted("formatted.txt");
+    let transport = super::language::fixture_owned_lsp(&mut app, "formatter", buffer);
     let position = |character| LspPosition { line: 0, character };
-    app.present_lsp_result(
+    app.present_lsp_result_owned(
         "formatter",
         1,
         "textDocument/formatting",
@@ -415,11 +439,58 @@ fn a_format_result_applies_without_a_review_and_finishes_the_waiting_save() {
                 }],
             }],
         }),
+        Some(transport.context()),
     );
     assert!(app.format_on_save.is_none());
     assert_eq!(app.state.buffers[buffer].text.to_string(), "a b\n");
     super::wait_vfs(&mut app);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "a b\n");
+}
+
+#[test]
+fn formatting_syncs_unsent_edits_before_requesting_the_server() {
+    use crate::language::lsp::LspFeature;
+    let mut app = app();
+    let path = app.state.workspace_root.join("unsynced.rs");
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(path));
+    let transport = super::language::fixture_owned_lsp(&mut app, "formatter", buffer);
+    app.language.select("formatter");
+    app.state.buffers[buffer].text.restore_text("new unsent text").unwrap();
+    app.request_lsp(LspFeature::Formatting);
+    let synced = transport.synced_document().expect("sync precedes formatting");
+    assert_eq!(synced.text, "new unsent text");
+    assert_eq!(synced.version, app.state.buffers[buffer].text.revision().0);
+    assert_eq!(transport.requested_feature(), Some(LspFeature::Formatting));
+}
+
+#[test]
+fn formatting_rejects_missing_and_stale_document_sources() {
+    use crate::language::lsp::*;
+    for ownership in ["missing context", "missing source", "stale source"] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("owned.rs");
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("current"), Some(path.clone()));
+        let source_buffer = if ownership == "missing source" {
+            app.state.open_text(TextBuffer::from_text("other"), Some(path.with_file_name("other.rs"))).0
+        } else { buffer };
+        let transport = super::language::fixture_owned_lsp(&mut app, "formatter", source_buffer);
+        if ownership == "stale source" {
+            app.state.buffers[buffer].text.restore_text("newer").unwrap();
+        }
+        let before = app.state.buffers[buffer].text.to_string();
+        app.present_lsp_result_owned("formatter", 1, "textDocument/formatting", &file_uri(&path),
+            LspFeatureResult::WorkspaceEdit(LspWorkspaceEdit {
+                resources: Vec::new(),
+                documents: vec![LspDocumentEdit { uri: file_uri(&path), version: None,
+                    edits: vec![LspTextEdit { range: LspRange {
+                        start: LspPosition { line: 0, character: 0 },
+                        end: LspPosition { line: 0, character: 5 },
+                    }, new_text: "stale".into() }],
+                }],
+            }),
+            (ownership != "missing context").then(|| transport.context()));
+        assert_eq!(app.state.buffers[buffer].text.to_string(), before, "{ownership}");
+    }
 }
 
 #[test]
@@ -523,6 +594,83 @@ fn code_actions_wait_for_every_server_and_list_them_together() {
 }
 
 #[test]
+fn null_code_actions_finish_aggregation_after_another_server_offers_actions() {
+    use crate::language::lsp::*;
+    let mut app = app();
+    let path = app.state.workspace_root.join("actions.rs");
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("fn main() {}"), Some(path));
+    app.set_dashboard_visibility(false);
+    let first = super::language::fixture_owned_lsp(&mut app, "first", buffer);
+    let second = super::language::fixture_owned_lsp(&mut app, "second", buffer);
+    app.language.select("first");
+    let document = app.active_lsp_document().unwrap().1;
+    let position = LspPosition { line: 0, character: 0 };
+    app.request_lsp(LspFeature::CodeAction { range: LspRange { start: position.clone(), end: position }, diagnostics: Vec::new() });
+    let generation = app.language.generation();
+    first.publish_result(generation, "textDocument/codeAction", &document,
+        LspFeatureResult::CodeActions(vec![LspCodeAction {
+            title: "available action".into(), kind: None, preferred: false,
+            edit: Some(LspWorkspaceEdit::default()), command: None,
+        }]));
+    app.process_lsp_events();
+    assert!(app.ui.picker.is_none());
+    assert!(app.language.request_pending());
+    second.publish_result(generation, "textDocument/codeAction", &document, LspFeatureResult::Empty);
+    app.process_lsp_events();
+    assert!(!app.language.request_pending());
+    assert!(app.ui.picker.as_ref().unwrap().rows.iter().any(|row| row.label == "available action"));
+}
+
+#[test]
+fn null_completion_preserves_other_servers_items_without_an_error() {
+    use crate::language::lsp::*;
+    let mut app = app();
+    let path = app.state.workspace_root.join("completion.rs");
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text(""), Some(path));
+    app.set_dashboard_visibility(false);
+    let first = super::language::fixture_owned_lsp(&mut app, "first", buffer);
+    let second = super::language::fixture_owned_lsp(&mut app, "second", buffer);
+    app.language.select("first");
+    let document = app.active_lsp_document().unwrap().1;
+    app.request_lsp(LspFeature::Completion);
+    let generation = app.language.generation();
+    first.publish_result(generation, "textDocument/completion", &document,
+        LspFeatureResult::Completion { incomplete: false, items: vec![LspCompletionItem {
+            label: "available".into(), insert_text: "available".into(),
+            filter_text: None, sort_text: None, detail: String::new(), text_edit: None,
+            additional_edits: Vec::new(), kind: None, snippet: false,
+            documentation: None, resolve_item: None, resolved: true,
+        }] });
+    app.process_lsp_events();
+    assert!(app.ui.language_completion.is_some());
+    second.publish_result(generation, "textDocument/completion", &document, LspFeatureResult::Empty);
+    app.process_lsp_events();
+    assert_eq!(app.ui.language_completion.as_ref().unwrap().items[0].label, "available");
+    assert!(!app.ui.notification_error);
+}
+
+#[test]
+fn null_projection_results_clear_previous_ranges_and_commands_succeed_quietly() {
+    use crate::language::lsp::*;
+    let mut app = app();
+    let path = app.state.workspace_root.join("highlights.rs");
+    app.state.open_text(TextBuffer::from_text("symbol"), Some(path.clone()));
+    let uri = file_uri(&path);
+    app.present_lsp_result("server", 1, "textDocument/documentHighlight", &uri,
+        LspFeatureResult::Ranges(vec![LspRange {
+            start: LspPosition { line: 0, character: 0 },
+            end: LspPosition { line: 0, character: 6 },
+        }]));
+    assert_eq!(app.ui.lsp_highlight_spans.len(), 1);
+    app.present_lsp_result("server", 2, "textDocument/documentHighlight", &uri, LspFeatureResult::Empty);
+    assert!(app.ui.lsp_highlight_spans.is_empty());
+    app.notify_message("keep this".into(), false);
+    app.present_lsp_result("server", 3, "workspace/executeCommand", &uri, LspFeatureResult::Empty);
+    assert_eq!(app.ui.notification.as_deref(), Some("keep this"));
+    assert!(!app.ui.notification_error);
+}
+
+#[test]
 fn a_format_replacing_the_whole_file_keeps_the_cursor_on_its_line() {
     use crate::language::lsp::{
         LspDocumentEdit, LspFeatureResult, LspPosition, LspRange, LspTextEdit, LspWorkspaceEdit,
@@ -538,7 +686,8 @@ fn a_format_replacing_the_whole_file_keeps_the_cursor_on_its_line() {
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     app.state.views[view].cursor = crate::editor::text::ByteOffset(8);
-    app.present_lsp_result(
+    let transport = super::language::fixture_owned_lsp(&mut app, "formatter", buffer);
+    app.present_lsp_result_owned(
         "formatter",
         1,
         "textDocument/formatting",
@@ -563,6 +712,7 @@ fn a_format_replacing_the_whole_file_keeps_the_cursor_on_its_line() {
                 }],
             }],
         }),
+        Some(transport.context()),
     );
     let text = &app.state.buffers[buffer].text;
     assert_eq!(text.to_string(), "x = 1\ny = 2\nz = 3\n");
@@ -638,6 +788,27 @@ fn formatter_cursor_restoration_keeps_the_visual_head_synchronized() {
         app.state.views[view].selection.unwrap().head,
         app.state.views[view].cursor
     );
+}
+
+#[test]
+fn formatter_code_changes_keep_the_cursor_mapped_by_the_edits() {
+    let mut app = app();
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("foo()\nbar()\n"), None);
+    app.state.views[view].cursor = ByteOffset(6);
+    let positions = app.view_positions(|_| true);
+    let revision = app.state.buffers[buffer].text.revision();
+    let transaction = crate::editor::EditorTransaction::new(app.transaction_id())
+        .with_operation(crate::editor::EditorOperation::ApplyEdits {
+            buffer,
+            edits: crate::editor::text::TextEditSet::new(revision, vec![
+                crate::editor::text::TextEdit::new(ByteRange::empty(ByteOffset(5)), ";"),
+                crate::editor::text::TextEdit::new(ByteRange::empty(ByteOffset(11)), ";"),
+            ]),
+        });
+    app.state.apply_transaction(&transaction).unwrap();
+    app.restore_view_positions(positions);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "foo();\nbar();\n");
+    assert_eq!(app.state.views[view].cursor, ByteOffset(7));
 }
 
 #[test]

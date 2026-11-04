@@ -3247,11 +3247,13 @@ impl InteractiveApplication {
                     Ok(Some(permit)) => self.documents.submit_workspace_resource(permit),
                     Ok(None) => break,
                     Err(error) => {
+                        self.cancel_deferred_workspace_command(&error);
                         self.show_error(error);
                         break;
                     }
                 };
                 if let Err(error) = result {
+                    self.cancel_deferred_workspace_command(&error);
                     self.show_error(error);
                     break;
                 }

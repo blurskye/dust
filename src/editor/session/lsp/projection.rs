@@ -34,6 +34,7 @@ pub(super) struct Projection {
     /// Servers that have not answered the current request; completion asks every one.
     request_servers: Vec<String>,
     requests: HashMap<u64, (LspProjectionOwner, Vec<String>, String)>,
+    request_cursors: HashMap<u64, ByteOffset>,
     breadcrumb_retries: u8,
     breadcrumbs_owner: Option<(String, LspProjectionOwner)>,
     breadcrumbs_asked: Option<(BufferId, u64)>,
@@ -172,6 +173,7 @@ impl LspSession {
         self.projection.request = None;
         self.projection.request_servers.clear();
         self.projection.requests.clear();
+        self.projection.request_cursors.clear();
         self.projection.inlay_request = None;
         self.projection.inlay_retries = 0;
     }
@@ -296,6 +298,9 @@ impl LspSession {
                 .collect(),
             _ => Vec::new(),
         };
+        if !self.synced(server, owner.buffer, &owner.text) {
+            self.sync_owned(server, document.clone(), (owner.buffer, owner.text.clone()))?;
+        }
         self.service.request(
             server,
             self.feature_for_server(&feature, &document, &owner.server, server)?,
@@ -307,6 +312,9 @@ impl LspSession {
         self.projection.request_servers = vec![server.to_owned()];
         // Like VS Code, every attached server answers, e.g. Tailwind classes beside TypeScript.
         for other in others {
+            if !self.synced(&other, owner.buffer, &owner.text) {
+                self.sync_owned(&other, document.clone(), (owner.buffer, owner.text.clone()))?;
+            }
             if self
                 .service
                 .request(
@@ -324,6 +332,17 @@ impl LspSession {
         self.projection
             .requests
             .retain(|_, (_, _, method)| method != feature.method());
+        self.projection.request_cursors.retain(|generation, _| {
+            self.projection.requests.contains_key(generation)
+        });
+        if matches!(feature,
+            LspFeature::Hover | LspFeature::SignatureHelp | LspFeature::Completion
+            | LspFeature::Definition | LspFeature::Declaration | LspFeature::References
+            | LspFeature::Implementation | LspFeature::TypeDefinition | LspFeature::Rename { .. }
+            | LspFeature::CodeAction { .. } | LspFeature::DocumentHighlights | LspFeature::SelectionRanges
+        ) {
+            self.projection.request_cursors.insert(generation, offset);
+        }
         self.projection.requests.insert(
             generation,
             (
@@ -561,7 +580,14 @@ impl LspSession {
         method: &str,
         uri: &str,
         version: u64,
+        cursor: ByteOffset,
     ) -> bool {
+        if self.projection.request_cursors.get(&generation).is_some_and(|asked| *asked != cursor) {
+            self.projection.requests.remove(&generation);
+            self.projection.request_cursors.remove(&generation);
+            self.retire_request(server, generation);
+            return false;
+        }
         if let Some((owner, servers, expected_method)) =
             self.projection.requests.get_mut(&generation)
         {
@@ -576,6 +602,7 @@ impl LspSession {
             servers.retain(|s| s != server);
             if servers.is_empty() {
                 self.projection.requests.remove(&generation);
+                self.projection.request_cursors.remove(&generation);
             }
             if self
                 .projection
@@ -1484,7 +1511,8 @@ mod tests {
             7,
             "textDocument/completion",
             &source.uri,
-            source.revision.0
+            source.revision.0,
+            ByteOffset(0)
         ));
         assert!(owner.completion_items().is_empty());
     }
@@ -1698,7 +1726,7 @@ mod tests {
             owner.refresh_projection(&editor, Some((buffer, &document))),
             super::ProjectionChange::Moved
         );
-        assert!(!owner.accept_result("owned", 0, "textDocument/hover", &document.uri(), 0));
+        assert!(!owner.accept_result("owned", 0, "textDocument/hover", &document.uri(), 0, ByteOffset(0)));
         assert!(owner.completion_items().is_empty());
     }
     #[test]
@@ -1709,7 +1737,7 @@ mod tests {
         owner.projection.request_servers = vec!["owned".into(), "second".into()];
         owner.install_completions("owned", vec![item("first")], false, 3);
         owner.clear_completion();
-        assert!(!owner.accept_result("second", 3, "textDocument/completion", &document.uri(), 0));
+        assert!(!owner.accept_result("second", 3, "textDocument/completion", &document.uri(), 0, ByteOffset(0)));
     }
     #[test]
     fn narrowing_cannot_resolve_into_a_different_row() {
@@ -1743,8 +1771,8 @@ mod tests {
             (source, vec!["owned".into()], "textDocument/hover".into()),
         );
         owner.projection.generation = 2;
-        assert!(owner.accept_result("owned", 2, "textDocument/hover", &document.uri(), 0));
-        assert!(owner.accept_result("owned", 1, "textDocument/formatting", &document.uri(), 0));
+        assert!(owner.accept_result("owned", 2, "textDocument/hover", &document.uri(), 0, ByteOffset(0)));
+        assert!(owner.accept_result("owned", 1, "textDocument/formatting", &document.uri(), 0, ByteOffset(0)));
     }
     #[test]
     fn semantic_splices_use_the_original_array_and_retire_with_the_server() {
@@ -1881,6 +1909,7 @@ mod tests {
                 "textDocument/completion",
                 &source.uri,
                 source.revision.0,
+                ByteOffset(0),
             )
         };
         assert!(accept(&mut owner, "tailwind"));
@@ -1932,7 +1961,8 @@ mod tests {
             7,
             "completionItem/resolve",
             &source.uri,
-            source.revision.0
+            source.revision.0,
+            ByteOffset(0)
         ));
         assert!(owner.projection.request.is_some());
         assert!(owner.accept_result(
@@ -1940,14 +1970,16 @@ mod tests {
             7,
             "completionItem/resolve",
             &source.uri,
-            source.revision.0
+            source.revision.0,
+            ByteOffset(0)
         ));
         assert!(!owner.accept_result(
             "owned",
             7,
             "completionItem/resolve",
             &source.uri,
-            source.revision.0
+            source.revision.0,
+            ByteOffset(0)
         ));
         owner.move_completion(1, 10);
         assert!(!owner.accept_resolved(6, item("stale"), &editor));
@@ -2094,7 +2126,7 @@ mod tests {
         session.projection.request = Some((1, source));
         session.projection.request_servers = vec!["formatter".into()];
         session.retire_request("formatter", 1);
-        assert!(!session.accept_result("formatter", 1, "textDocument/formatting", "uri", 0));
+        assert!(!session.accept_result("formatter", 1, "textDocument/formatting", "uri", 0, ByteOffset(0)));
     }
 }
 

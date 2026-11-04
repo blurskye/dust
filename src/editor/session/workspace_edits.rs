@@ -291,6 +291,9 @@ impl WorkspaceEditSession {
             .and_then(|p| p.origin.as_ref())
             .or_else(|| self.preparing_origin())
     }
+    pub(super) fn resources_pending(&self) -> bool {
+        !self.accepted.is_empty() || !self.applying.is_empty()
+    }
     pub(super) fn resources(&self) -> &[CheckedResourceIntent] {
         self.preview
             .as_ref()

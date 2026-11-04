@@ -1713,7 +1713,7 @@ fn completion_narrows_as_you_type_and_replaces_what_was_typed() {
     assert!(app.ui.language_completion.is_none());
 }
 
-fn fixture_owned_lsp(
+pub(super) fn fixture_owned_lsp(
     app: &mut InteractiveApplication,
     key: &str,
     buffer: crate::editor::BufferId,
@@ -1750,6 +1750,9 @@ fn fixture_owned_lsp(
             capabilities: Some(crate::language::lsp::LspCapabilities {
                 code_action: true,
                 execute_command: true,
+                hover: true,
+                completion: true,
+                formatting: true,
                 ..Default::default()
             }),
             documents: HashMap::from([(buffer, document)]),
@@ -1930,8 +1933,9 @@ fn explicit_lsp_stop_clears_push_and_pull_diagnostic_sources() {
 }
 
 #[test]
-fn code_action_command_waits_for_approval_of_its_edits() {
+fn code_action_command_waits_for_approval_and_closes_the_consumed_preview_on_failure() {
     use crate::language::lsp::*;
+    for disconnect in [false, true] {
     let mut app = app();
     let path = app.state.workspace_root.join("action.rs");
     let (buffer, _) = app
@@ -1977,9 +1981,64 @@ fn code_action_command_waits_for_approval_of_its_edits() {
     );
     app.accept_picker();
     assert_eq!(transport.executed_command(), None);
+    let transport = if disconnect { drop(transport); None } else { Some(transport) };
     app.accept_workspace_proposal();
     assert_eq!(app.state.buffers[buffer].text.to_string(), "new");
-    assert_eq!(transport.executed_command(), Some("finish-action".into()));
+    assert!(app.ui.picker.is_none());
+    if let Some(transport) = transport {
+        assert_eq!(transport.synced_document().unwrap().text, "new");
+        assert_eq!(transport.executed_command(), Some("finish-action".into()));
+    } else {
+        assert!(app.ui.notification_error);
+    }
+    }
+}
+
+#[test]
+fn code_action_command_waits_for_resource_application_and_stops_on_failure() {
+    use crate::language::lsp::*;
+    for fail in [false, true] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("action.rs");
+        let target = path.with_file_name("renamed.rs");
+        fs::write(&path, "old").unwrap();
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(path.clone()));
+        app.set_dashboard_visibility(false);
+        let transport = fixture_owned_lsp(&mut app, "action-server", buffer);
+        app.language.select("action-server");
+        app.present_lsp_result("action-server", 1, "textDocument/codeAction", &file_uri(&path),
+            LspFeatureResult::CodeActions(vec![LspCodeAction {
+                title: "rename and command".into(), kind: None, preferred: false,
+                edit: Some(LspWorkspaceEdit {
+                    documents: Vec::new(),
+                    resources: vec![LspResourceOperation::Rename {
+                        old_uri: file_uri(&path), new_uri: file_uri(&target),
+                        overwrite: false, ignore_if_exists: false,
+                    }],
+                }),
+                command: Some(LspCommand { command: "after-rename".into(), arguments: Vec::new() }),
+            }]));
+        app.accept_picker();
+        wait_vfs(&mut app);
+        app.accept_workspace_proposal();
+        assert!(app.ui.picker.is_none());
+        assert!(path.exists() && !target.exists());
+        assert_eq!(transport.executed_command(), None, "resource is still staged");
+        if fail { fs::write(&target, "conflict").unwrap(); }
+        app.process_effect(AppEffect::WorkspaceResourceApply);
+        wait_vfs(&mut app);
+        if fail {
+            assert!(app.ui.notification_error);
+            assert_eq!(transport.executed_command(), None);
+            assert!(path.exists());
+        } else {
+            assert!(!path.exists());
+            assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&target));
+            assert_eq!(transport.closed_uri(), Some(file_uri(&path)));
+            assert_eq!(transport.synced_document().unwrap().path, target);
+            assert_eq!(transport.executed_command(), Some("after-rename".into()));
+        }
+    }
 }
 
 #[test]

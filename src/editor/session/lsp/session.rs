@@ -136,6 +136,7 @@ pub(super) struct LspSession {
     preparation: launch::Preparation,
     service: LspService,
     edits: LspEditSources,
+    deferred_edit: Option<OriginKey>,
     sessions: HashMap<String, LspRuntimeState>,
     active: Option<String>,
     synced: HashMap<(String, BufferId), TextVersion>,
@@ -344,16 +345,21 @@ impl LspSession {
         key: &OriginKey,
         applied: bool,
         reason: Option<String>,
+        editor: &EditorState,
     ) -> Result<(), String> {
         let command = self.edits.take_command(key);
         self.edits.finish(key, applied, reason)?;
         if applied && let Some((server, command)) = command {
-            let document = self
+            let fallback = self
                 .sessions
                 .get(&server)
                 .and_then(|session| session.documents.values().next())
                 .cloned()
                 .ok_or("code-action server is no longer attached")?;
+            self.sync_edit_documents(editor)?;
+            // executeCommand itself has no document parameter, even when the edit deleted it.
+            let document = self.sessions.get(&server)
+                .and_then(|session| session.documents.values().next()).cloned().unwrap_or(fallback);
             let generation = self
                 .next_generation()
                 .ok_or("language-server request identity exhausted")?;
@@ -366,6 +372,41 @@ impl LspSession {
                     generation,
                 )
                 .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+    fn sync_edit_documents(&mut self, editor: &EditorState) -> Result<(), String> {
+        let documents = self.sessions.iter().flat_map(|(server, session)| {
+            session.documents.iter().map(|(id, document)| (server.clone(), *id, document.clone()))
+        }).collect::<Vec<_>>();
+        for (server, id, mut document) in documents {
+            let current = editor.buffers.get(id).filter(|buffer| buffer.path.is_some());
+            let path_changed = current.is_none_or(|buffer| buffer.path.as_ref() != Some(&document.path));
+            if path_changed {
+                self.close(&server, document.uri()).map_err(|error| error.to_string())?;
+                self.detach(&server, id);
+            }
+            let Some(buffer) = current else { continue; };
+            let version = buffer.text.source_version();
+            if !path_changed && self.synced(&server, id, &version) { continue; }
+            document.path = buffer.path.clone().expect("checked document path");
+            document.version = buffer.text.revision().0;
+            document.text = buffer.text.to_string();
+            self.sync_owned(&server, document, (id, version)).map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+    pub(super) fn defer_edit(&mut self, key: OriginKey) {
+        self.deferred_edit = Some(key);
+    }
+    pub(super) fn finish_deferred_edit(
+        &mut self,
+        applied: bool,
+        reason: Option<String>,
+        editor: &EditorState,
+    ) -> Result<(), String> {
+        if let Some(key) = self.deferred_edit.take() {
+            self.finish_edit(&key, applied, reason, editor)?;
         }
         Ok(())
     }
