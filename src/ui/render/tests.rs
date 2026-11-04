@@ -5130,6 +5130,52 @@ fn a_table_without_blank_lines_around_it_is_still_closed_and_its_borders_follow_
 }
 
 #[test]
+fn a_table_at_the_end_of_a_file_with_a_final_newline_is_closed() {
+    use crate::editor::text::{ByteOffset, ByteRange};
+    use crate::language::syntax::MarkdownMark;
+    let text = "x\n| a | b |\n|---|---|\n| c | d |\n";
+    let mut state = EditorState::new(PathBuf::from("/tmp"));
+    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None);
+    let loaded = crate::config::load_bundled_config();
+    let mut config = loaded.config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.editor.git_signs.enabled = false;
+    config.ui.status_line.enabled = false;
+    state.views[view].cursor = ByteOffset(0);
+    let revision = state.buffers[buffer].text.revision();
+    let mark = |start: usize, end: usize, mark| super::UiMarkdownMark {
+        buffer,
+        revision,
+        range: ByteRange::new(ByteOffset(start), ByteOffset(end)).expect("mark range"),
+        mark,
+    };
+    let mut ui = ui_with_editor_layout(&state);
+    ui.markdown_marks = text
+        .match_indices('|')
+        .map(|(at, _)| mark(at, at + 1, MarkdownMark::TablePipe))
+        .collect();
+    ui.markdown_marks
+        .push(mark(2, text.len(), MarkdownMark::Table));
+    ui.markdown_marks.sort_by_key(|mark| mark.range.start);
+    let frame = render(&state, &ui, &config, &loaded.dashboard, 20, 7);
+    let rows = (0..7)
+        .map(|row| frame.grid.row_text(row).trim_end().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rows,
+        [
+            "x",
+            "┌───┬───┐",
+            "│ a │ b │",
+            "├───┼───┤",
+            "│ c │ d │",
+            "└───┴───┘",
+            "~"
+        ]
+    );
+}
+
+#[test]
 fn a_table_is_drawn_with_its_columns_lined_up_however_its_source_is_aligned() {
     use crate::editor::text::{ByteOffset, ByteRange};
     use crate::language::syntax::MarkdownMark;

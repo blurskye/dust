@@ -369,10 +369,12 @@ impl<'a> MarkdownMarks<'a> {
     /// The table whose border `line` draws when it is blank, and whether that is the table's
     /// bottom: the table above's bottom comes before the table below's top.
     fn blank_border(&self, line: usize) -> Option<(&Table, bool)> {
-        let blank = self
-            .text
-            .line(line)
-            .is_ok_and(|text| text.trim().is_empty());
+        // The empty line after a final newline isn't drawn, so the table closes itself.
+        let blank = line < self.text.visible_lines()
+            && self
+                .text
+                .line(line)
+                .is_ok_and(|text| text.trim().is_empty());
         if !blank {
             return None;
         }
