@@ -890,6 +890,55 @@ fn the_agent_panel_opens_narrow_and_ctrl_arrows_move_by_word_while_typing_and_re
 }
 
 #[test]
+fn half_page_scrolling_and_cursor_follow_include_expanded_diagnostic_rows() {
+    let mut app = app();
+    app.window_session.observe_size((80, 8));
+    {
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.viewport.vertical_margin = 0;
+        fixture.settings.ui.status_line.enabled = false;
+        app.configuration.install_fixture(fixture);
+    }
+    let path = PathBuf::from("/tmp/expanded-diagnostics.rs");
+    let (buffer, view) = app.state.open_text(
+        TextBuffer::from_text("a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl"), Some(path.clone()),
+    );
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let cursor = app.state.buffers[buffer].text.line_to_byte(3).unwrap();
+    app.state.views[view].cursor = cursor;
+    app.ui.diagnostics.push(crate::ui::UiDiagnostic {
+        path: path.clone(),
+        range: ByteRange::empty(cursor),
+        severity: DiagnosticSeverity::Error,
+        source: String::new(),
+        code: None,
+        message: "one\ntwo\nthree\nfour".into(),
+    });
+    app.ui.expanded_diagnostic = Some(crate::ui::ExpandedDiagnosticState {
+        path, line: 3, severities: vec![DiagnosticSeverity::Error],
+    });
+    // Cursor follow must not count the expanded rows as ordinary source lines.
+    app.state.views[view].cursor = app.state.buffers[buffer].text.line_to_byte(6).unwrap();
+    app.ensure_cursor_visible();
+    let assert_visible = |app: &InteractiveApplication| {
+        let viewport = crate::ui::active_editor_pane_viewport(&app.state, &app.ui).unwrap();
+        let model = VisualRowModel::new_for_state(
+            &app.state, &app.state.buffers[buffer].text, view, &app.ui,
+            app.configuration.settings(), viewport.width, false,
+        );
+        let start = VisualRowAnchor { line: app.state.views[view].scroll_line, wrap_row: 0 };
+        assert!(model.screen_row(start, model.cursor_anchor(app.state.views[view].cursor), usize::from(viewport.height)).is_some());
+    };
+    assert_visible(&app);
+    app.state.views[view].cursor = cursor;
+    app.state.views[view].scroll_line = 0;
+    app.scroll_view("half_down", 1);
+    assert_visible(&app);
+    assert!(app.ui.expanded_diagnostic.is_some());
+}
+
+#[test]
 fn half_page_scroll_moves_a_cursor_already_inside_the_new_viewport() {
     let mut app = app();
     app.window_session.observe_size((80, 44));

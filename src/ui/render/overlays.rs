@@ -700,7 +700,7 @@ pub(super) fn render_dashboard(
         center_text(
             &mut grid,
             y,
-            &dashboard_path(root, usize::from(width.saturating_sub(4))),
+            &dashboard_path(root, usize::from(width.saturating_sub(4)), ambiguous),
             Style::Muted,
             ambiguous,
         );
@@ -735,7 +735,11 @@ pub(super) fn truncate_content_title(
         return title.to_owned();
     }
     let ellipsis = "…";
-    let available = maximum_width.saturating_sub(text_width(ellipsis, ambiguous_width));
+    let ellipsis_width = text_width(ellipsis, ambiguous_width);
+    if ellipsis_width > maximum_width {
+        return String::new();
+    }
+    let available = maximum_width - ellipsis_width;
     let mut suffix = Vec::new();
     let mut width = 0usize;
     for grapheme in title.graphemes(true).rev() {
@@ -1037,17 +1041,32 @@ pub(super) fn render_content_tab_line(
 }
 
 /// The workspace path for the dashboard: home as `~`, and the end kept when it is too wide.
-fn dashboard_path(root: &Path, width: usize) -> String {
+fn dashboard_path(root: &Path, width: usize, ambiguous_width: AmbiguousWidth) -> String {
     let mut text = root.display().to_string();
     if let Some(home) = std::env::var_os("HOME").filter(|home| !home.is_empty())
         && let Ok(rest) = root.strip_prefix(&home)
     {
         text = format!("~/{}", rest.display());
     }
-    let count = text.chars().count();
-    if width > 1 && count > width {
-        let tail = text.chars().skip(count + 1 - width).collect::<String>();
-        text = format!("…{tail}");
+    truncate_content_title(&text, width, ambiguous_width)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dashboard_paths_keep_their_suffix_within_display_columns() {
+        for ambiguous in [AmbiguousWidth::Narrow, AmbiguousWidth::Wide] {
+            let path = format!("/tmp/{}e\u{301}.rs", "界".repeat(20));
+            let shown = dashboard_path(Path::new(&path), 36, ambiguous);
+            assert!(shown.starts_with('…'));
+            assert!(shown.ends_with("e\u{301}.rs"));
+            assert!(cell_text_width(&shown, ambiguous) <= 36);
+            for width in 0..4 {
+                let shown = dashboard_path(Path::new(&path), width, ambiguous);
+                assert!(cell_text_width(&shown, ambiguous) <= width);
+            }
+        }
     }
-    text
 }

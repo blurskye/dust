@@ -1320,7 +1320,7 @@ impl InteractiveApplication {
                 .into_iter()
                 .take(32)
                 .map(|hint| {
-                    crate::ui::geometry::text_width(
+                    crate::ui::geometry::cell_text_width(
                         &hint.label,
                         self.configuration.settings().editor.ambiguous_width,
                     )

@@ -4738,6 +4738,71 @@ fn large_diff_rows_share_number_width() {
 }
 
 #[test]
+fn inlay_budgets_include_visible_replacements_for_hints_and_previews() {
+    use crate::editor::text::{ByteOffset, TextBuffer};
+    let mut state = EditorState::new("/tmp".into());
+    let (buffer, view) = state.open_text(TextBuffer::from_text("x"), None);
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.ui.status_line.enabled = false;
+    let mut ui = ui_with_editor_layout(&state);
+    for preview in [false, true] {
+        for ambiguous in [crate::config::AmbiguousWidth::Narrow, crate::config::AmbiguousWidth::Wide] {
+            config.editor.ambiguous_width = ambiguous;
+            let hint = super::UiInlayHint {
+                buffer,
+                revision: state.buffers[buffer].text.revision(),
+                position: ByteOffset(0),
+                label: "a\u{200b}\tb".into(),
+            };
+            ui.lsp_inlay_hints.clear();
+            ui.substitute_preview.clear();
+            if preview {
+                ui.substitute_preview.push(hint);
+            } else {
+                ui.lsp_inlay_hints.push(hint);
+            }
+            for wrap in [false, true] {
+                config.editor.wrap = wrap;
+                let mut expected = crate::ui::CellGrid::new_with_policy(
+                    32, 1, super::CONTROL_CHARACTER_REPLACEMENT, super::ZERO_WIDTH_REPLACEMENT,
+                    ambiguous == crate::config::AmbiguousWidth::Wide,
+                );
+                let end = expected.put_text(0, 0, "a\u{200b}\tb", crate::ui::Style::Muted);
+                expected.put_text(end, 0, "x", crate::ui::Style::Default);
+                let frame = super::editor::render_editor_view(&state, view, &ui, &config, 32, 1);
+                assert_eq!(frame.grid.row_text(0), expected.row_text(0));
+                assert_eq!(frame.cursor.map(|(x, y, _)| (x, y)), Some((end, 0)));
+            }
+        }
+    }
+}
+
+#[test]
+fn wrapped_inlays_reserve_only_the_following_tabs_actual_source_width() {
+    use crate::editor::text::{ByteOffset, TextBuffer};
+    let mut state = EditorState::new("/tmp".into());
+    let (buffer, view) = state.open_text(TextBuffer::from_text("aaa\tz"), None);
+    state.views[view].cursor = ByteOffset(3);
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.editor.tab_width = 4;
+    config.editor.wrap = true;
+    config.ui.status_line.enabled = false;
+    let mut ui = ui_with_editor_layout(&state);
+    ui.lsp_inlay_hints.push(super::UiInlayHint {
+        buffer,
+        revision: state.buffers[buffer].text.revision(),
+        position: ByteOffset(3),
+        label: "123456".into(),
+    });
+    let frame = super::editor::render_editor_view(&state, view, &ui, &config, 8, 2);
+    assert_eq!(frame.grid.row_text(0).trim_end(), "aaa");
+    assert_eq!(frame.grid.row_text(1), "123456 z");
+    assert_eq!(frame.cursor.map(|(x, y, _)| (x, y)), Some((6, 1)));
+}
+
+#[test]
 fn inlay_budgets_survive_wrapped_scrolling_and_leave_source_visible() {
     use crate::editor::text::{ByteOffset, TextBuffer};
     let mut state = EditorState::new("/tmp".into());
@@ -4812,6 +4877,11 @@ fn expanded_diagnostics_share_painted_mouse_rows() {
     let first = super::VisualRowAnchor::default();
     assert_eq!(model.painted_row(first, 1).unwrap().line, 0);
     assert_eq!(model.painted_row(first, 3).unwrap().line, 1);
+    let second = super::VisualRowAnchor { line: 1, wrap_row: 0 };
+    assert_eq!(model.forward(first, 1), first);
+    assert_eq!(model.forward(first, 3), second);
+    assert_eq!(model.backward(second, 1), second);
+    assert_eq!(model.backward(second, 3), first);
     assert_eq!(
         model.screen_row(
             first,
@@ -5224,6 +5294,13 @@ fn a_table_too_wide_for_its_window_wraps_each_cell_inside_its_column_with_or_wit
     // Neovim draws tables to fit the window even when lines don't wrap.
     for wrap in [true, false] {
         config.editor.wrap = wrap;
+        let model = super::VisualRowModel::new_for_state(
+            &state, &state.buffers[buffer].text, view, &ui, &config, 20, wrap,
+        );
+        for (wrap_row, word) in [(0, "long"), (1, "here"), (2, "more")] {
+            let relative = model.byte_at_cell(super::VisualRowAnchor { line: 1, wrap_row }, 6);
+            assert_eq!(&text[1 + relative..1 + relative + word.len()], word);
+        }
         let frame = render(&state, &ui, &config, &loaded.dashboard, 20, 8);
         let rows = (0..8)
             .map(|row| frame.grid.row_text(row).trim_end().to_owned())

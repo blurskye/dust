@@ -62,14 +62,11 @@ pub fn display_spans(text: &str, policy: DisplayWidthPolicy) -> Vec<DisplaySpan>
 #[must_use]
 pub fn display_column_at(text: &str, byte_offset: usize, policy: DisplayWidthPolicy) -> usize {
     let mut column = 0_usize;
-    for span in display_spans(text, policy) {
-        if byte_offset <= span.byte_start {
-            return span.column_start;
+    for (start, grapheme) in text.grapheme_indices(true) {
+        if byte_offset < start.saturating_add(grapheme.len()) {
+            return column;
         }
-        if byte_offset < span.byte_end {
-            return span.column_start;
-        }
-        column = span.column_end;
+        column = column.saturating_add(grapheme_cell_width(grapheme, column, policy));
     }
     column
 }
@@ -124,6 +121,16 @@ mod tests {
         DisplayWidthPolicy, byte_range_for_display_columns, display_column_at,
         insertion_at_display_column,
     };
+
+    #[test]
+    fn display_columns_stream_prefixes_and_snap_inside_graphemes() {
+        let policy = DisplayWidthPolicy::default();
+        let text = format!("\t界e\u{301}{}", "x".repeat(1 << 20));
+        for (offset, column) in [(0, 0), (1, 4), (2, 4), (4, 6), (5, 6), (6, 6), (7, 7)] {
+            assert_eq!(display_column_at(&text, offset, policy), column);
+        }
+        assert_eq!(display_column_at("x", usize::MAX, policy), 1);
+    }
 
     #[test]
     fn display_ranges_never_split_tabs_wide_or_combining_graphemes() {
