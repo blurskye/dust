@@ -335,6 +335,28 @@ fn normal_deletions_stay_on_the_last_remaining_character() {
 }
 
 #[test]
+fn switching_visual_modes_preserves_endpoints_and_updates_the_operator_shape() {
+    use crate::editor::{SelectionKind, text::ByteOffset};
+    let (mut state, buffer, view) = editing("abc\ndef\n", 1);
+    apply(&mut state, "mode.visual_char", &[], 1);
+    apply(&mut state, "view.cursor.move", &[("motion", "right")], 1);
+    for (command, kind) in [
+        ("mode.visual_line", SelectionKind::Line),
+        ("mode.visual_block", SelectionKind::Block),
+        ("mode.visual_char", SelectionKind::Character),
+        ("mode.visual_line", SelectionKind::Line),
+    ] {
+        apply(&mut state, command, &[], 1);
+        let selection = state.views[view].selection.unwrap();
+        assert_eq!(selection.anchor, ByteOffset(1));
+        assert_eq!(selection.head, ByteOffset(2));
+        assert_eq!(selection.kind, kind);
+    }
+    apply(&mut state, "edit.operator", &[("operator", "delete"), ("motion", "visual"), ("linewise", "false")], 1);
+    assert_eq!(state.buffers[buffer].text.to_string(), "def\n");
+}
+
+#[test]
 fn visual_put_repeats_the_register_before_replacing_the_selection() {
     let (mut state, buffer, view) = editing("abc", 1);
     state.registers.set('"', crate::editor::RegisterValue { text: "x".into(), shape: crate::editor::RegisterShape::Character }, true, true);

@@ -468,26 +468,18 @@ fn apply_operation(
                 .ok_or(TransactionError::MissingView)?;
             target.mode = *mode;
             match mode {
-                EditorMode::VisualChar if target.selection.is_none() => {
-                    target.selection = Some(Selection {
+                EditorMode::VisualChar | EditorMode::VisualLine | EditorMode::VisualBlock => {
+                    let kind = match mode {
+                        EditorMode::VisualLine => crate::editor::SelectionKind::Line,
+                        EditorMode::VisualBlock => crate::editor::SelectionKind::Block,
+                        _ => crate::editor::SelectionKind::Character,
+                    };
+                    let selection = target.selection.get_or_insert(Selection {
                         anchor: target.cursor,
                         head: target.cursor,
-                        kind: crate::editor::SelectionKind::Character,
+                        kind,
                     });
-                }
-                EditorMode::VisualLine if target.selection.is_none() => {
-                    target.selection = Some(Selection {
-                        anchor: target.cursor,
-                        head: target.cursor,
-                        kind: crate::editor::SelectionKind::Line,
-                    });
-                }
-                EditorMode::VisualBlock if target.selection.is_none() => {
-                    target.selection = Some(Selection {
-                        anchor: target.cursor,
-                        head: target.cursor,
-                        kind: crate::editor::SelectionKind::Block,
-                    });
+                    selection.kind = kind;
                 }
                 EditorMode::Normal
                 | EditorMode::Insert
@@ -604,6 +596,8 @@ fn apply_operation(
                     for position in &mut view.block_insert {
                         *position = delta.map_offset(*position, Affinity::After);
                     }
+                    view.block_insert.sort();
+                    view.block_insert.dedup();
                     for mark in &mut view.multi_marks {
                         mark.start = delta.map_offset(mark.start, Affinity::Before);
                         mark.end = delta.map_offset(mark.end, Affinity::After);
@@ -619,6 +613,7 @@ fn apply_operation(
                 && let Some(view) = state.views.get_mut(view).filter(|v| v.buffer == *buffer)
             {
                 view.cursor = first.min(ByteOffset(state.buffers[*buffer].text.len_bytes()));
+                view.preferred_column = None;
             }
         }
         EditorOperation::SplitPane { axis, ratio } => {
@@ -861,11 +856,11 @@ impl EditorDraft {
         path: std::path::PathBuf,
         snapshot: std::sync::Arc<str>,
     ) -> bool {
-        let changed = self
-            .state
-            .buffers
-            .get(buffer)
-            .is_some_and(|b| &b.text.source_version() != expected);
+        if self.state.buffers.get(buffer).is_none_or(|b| {
+            !b.text.source_version().same_incarnation(expected)
+        }) {
+            return false;
+        }
         if !self
             .state
             .mark_buffer_saved_as(buffer, revision, bytes, Some(path))
@@ -873,9 +868,6 @@ impl EditorDraft {
             return false;
         }
         self.state.buffers[buffer].set_saved_text(Some(snapshot));
-        if changed {
-            self.state.set_buffer_dirty(buffer, true);
-        }
         true
     }
     pub(crate) fn close_document(
@@ -1128,6 +1120,50 @@ mod tests {
     }
 
     #[test]
+    fn save_acknowledgement_uses_snapshot_contents_after_intervening_edits() {
+        for restore in [false, true] {
+            let mut state = EditorState::new("/workspace".into());
+            let (buffer, _) = state.open_text(TextBuffer::from_text("abc"), None);
+            let expected = state.buffers[buffer].text.source_version();
+            let revision = state.buffers[buffer].text.revision();
+            edit(&mut state, buffer, &[(3, 3, "x")]);
+            if restore {
+                edit(&mut state, buffer, &[(3, 4, "")]);
+            }
+            assert_ne!(state.buffers[buffer].text.source_version(), expected);
+            let mut draft = state.draft();
+            assert!(draft.save_document(buffer, &expected, revision, b"abc".to_vec(), "/workspace/file".into(), "abc".into()));
+            state = draft.accept(&state.version()).unwrap();
+            assert_eq!(state.buffers[buffer].dirty, !restore);
+            assert_eq!(state.buffers[buffer].persisted_bytes(), b"abc");
+        }
+    }
+
+    #[test]
+    fn closing_a_buffer_restores_the_previous_buffers_saved_view() {
+        let mut state = EditorState::new("/workspace".into());
+        let (first, view) = state.open_text(TextBuffer::from_text(&"line\n".repeat(120)), None);
+        state.views[view].cursor = ByteOffset(500);
+        state.views[view].scroll_line = 95;
+        state.views[view].scroll_wrap_row = 2;
+        state.views[view].scroll_column = 3;
+        let (second, view) = state.open_text(TextBuffer::from_text("other"), None);
+        let pane = state.tabs[state.active_tab.unwrap()].focused;
+        let mut draft = state.draft();
+        assert!(draft.close_document(view, second).unwrap());
+        state = draft.accept(&state.version()).unwrap();
+        let restored = &state.views[state.active_view.unwrap()];
+        assert_eq!(restored.buffer, first);
+        assert_eq!(restored.cursor, ByteOffset(500));
+        assert_eq!(restored.scroll_line, 95);
+        assert_eq!(restored.scroll_wrap_row, 2);
+        assert_eq!(restored.scroll_column, 3);
+        assert_eq!(state.tabs[state.active_tab.unwrap()].focused, pane);
+        assert!(!state.buffers.contains_key(second));
+        state.validate_layout().unwrap();
+    }
+
+    #[test]
     fn failed_late_operation_rolls_back_earlier_edit() {
         let mut state = EditorState::new(PathBuf::from("/tmp"));
         let (buffer, _) = state.open_text(TextBuffer::from_text("abc"), None);
@@ -1224,6 +1260,44 @@ mod tests {
         assert_eq!(state.buffers[buffer].text.to_bytes(), original);
         history(&mut state, buffer, false);
         assert_eq!(state.buffers[buffer].text.to_bytes(), b"two\nthree\r");
+    }
+
+    #[test]
+    fn history_clears_the_preferred_column_at_the_change_location() {
+        let mut state = EditorState::new("/workspace".into());
+        let (buffer, view) = state.open_text(TextBuffer::from_text("abc\ndef"), None);
+        edit(&mut state, buffer, &[(0, 0, "x")]);
+        for undo in [true, false] {
+            state.views[view].cursor = ByteOffset(3);
+            state.views[view].preferred_column = Some(20);
+            history(&mut state, buffer, undo);
+            assert_eq!(state.views[view].cursor, ByteOffset(0));
+            assert_eq!(state.views[view].preferred_column, None);
+        }
+    }
+
+    #[test]
+    fn history_deduplicates_collapsed_block_insert_positions() {
+        for undo in [true, false] {
+            let mut state = EditorState::new("/workspace".into());
+            let (buffer, view) = state.open_text(TextBuffer::from_text(""), None);
+            edit(&mut state, buffer, &[(0, 0, "a\nb")]);
+            if !undo {
+                edit(&mut state, buffer, &[(0, 3, "")]);
+                history(&mut state, buffer, true);
+            }
+            state.views[view].mode = crate::editor::EditorMode::Insert;
+            state.views[view].block_insert = vec![ByteOffset(0), ByteOffset(2)];
+            assert_eq!(history(&mut state, buffer, undo), "");
+            assert_eq!(state.views[view].block_insert, [ByteOffset(0)]);
+            let mut registry = crate::editor::CommandRegistry::<()>::default();
+            crate::editor::register_builtin_commands(&mut registry).unwrap();
+            let invocation = crate::editor::CommandInvocation::new("edit.insert_text", crate::editor::InvocationSource::Test)
+                .unwrap().with_argument("text", crate::editor::CommandValue::String("x".into()));
+            let outcome = registry.execute(&state, &invocation).unwrap();
+            state.apply_transaction(&outcome.transaction.unwrap()).unwrap();
+            assert_eq!(state.buffers[buffer].text.to_string(), "x");
+        }
     }
 
     #[test]

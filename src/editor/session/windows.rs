@@ -142,6 +142,7 @@ pub(super) struct WindowSession {
     dashboard: bool,
     terminal_height: u16,
     terminal_shrunk: bool,
+    debugging: bool,
     observed_size: (u16, u16),
     core: WindowCore,
     layout: Option<CompositorLayoutState>,
@@ -153,6 +154,7 @@ impl WindowSession {
     pub(in crate::editor::session) fn observe_size(&mut self, size: (u16, u16)) {
         if self.observed_size != size {
             self.observed_size = size;
+            self.set_debugging(self.debugging);
             self.invalidate();
         }
     }

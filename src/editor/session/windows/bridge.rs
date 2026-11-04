@@ -76,11 +76,15 @@ impl EditorWindowBridge {
             .and_then(|tab| state.tabs().get(tab))
             .and_then(|tab| state.panes().get(tab.focused))
             .map(|pane| pane.view);
-        let retain_plugin_focus = self.focused_view == focused_view
-            && graph
-                .focused()
-                .and_then(|window| graph.window(window))
-                .is_some_and(|window| window.owner.starts_with("plugin."));
+        let retained_plugin = graph.focused().filter(|window| {
+            graph.window(*window).is_some_and(|window| {
+                window.owner.starts_with("plugin.")
+                    && (self.focused_view == focused_view
+                        || self.tabs.iter().any(|(tab, universal)| {
+                            *universal == window.tab && !state.tabs().contains_key(*tab)
+                        }))
+            })
+        });
         // Retire absent hosts first so a still-live view may be rehosted by a
         // replacement pane without ever owning two windows.
         let stale_panes = self
@@ -252,10 +256,15 @@ impl EditorWindowBridge {
                     .ok_or(WindowError::UnknownWorkspaceTab)?,
             )?;
         }
+        if let Some(window) = retained_plugin
+            && graph.can_focus(window)
+        {
+            graph.focus(window)?;
+        }
         if let Some(active_tab) = state.active_tab()
             && let Some(tab) = state.tabs().get(active_tab)
             && let Some(window) = self.panes.get(&tab.focused).copied()
-            && !retain_plugin_focus
+            && retained_plugin.is_none()
             && graph
                 .window(window)
                 .is_some_and(|descriptor| descriptor.placement != WindowPlacement::Hidden)

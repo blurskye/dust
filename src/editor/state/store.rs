@@ -463,7 +463,7 @@ impl EditorState {
             self.buffers
                 .insert(Buffer::new(TextBuffer::from_text(""), None))
         });
-        let view = self.views.insert(View::new(buffer));
+        let view = self.views.insert(self.buffers[buffer].restored_view(buffer));
         let old = std::mem::replace(&mut self.panes[pane].view, view);
         self.views.remove(old);
         self.active_view = Some(view);

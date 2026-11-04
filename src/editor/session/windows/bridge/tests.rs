@@ -270,11 +270,17 @@ fn plugin_focus_survives_metadata_reconciliation_and_tab_close() {
         .reconcile(&(&state).into(), &mut graph, "scratch")
         .unwrap();
     assert_eq!(graph.focused(), Some(panel));
+    state.open_text(TextBuffer::from_text("another file"), None);
+    reconcile(&mut bridge, &mut graph, &state);
+    let pane = state.tabs[state.active_tab.unwrap()].focused;
+    assert_eq!(graph.focused(), bridge.window_for(pane));
+    graph.focus(panel).unwrap();
     state.close_active_tab().unwrap();
     bridge
         .reconcile(&(&state).into(), &mut graph, "scratch")
         .unwrap();
     assert_ne!(graph.window(panel).unwrap().tab, tab);
+    assert_eq!(graph.focused(), Some(panel));
     graph.validate().unwrap();
 }
 
