@@ -656,6 +656,9 @@ def main() -> None:
         (config_home / "config.toml").write_text(
             "\n".join(
                 [
+                    # Whether rust-analyzer is installed must not change the screen under test.
+                    "[lsp]",
+                    "enabled = false",
                     "[tasks.check]",
                     'kind = "linter"',
                     f"executable = {json.dumps(str(linter))}",
