@@ -1481,7 +1481,7 @@ fn tool_row_keys(row: &crate::ui::ToolMenuRow) -> Vec<&'static str> {
     keys
 }
 
-fn prompt_viewport<'a>(
+pub(super) fn prompt_viewport<'a>(
     input: &'a str,
     cursor: usize,
     width: usize,
