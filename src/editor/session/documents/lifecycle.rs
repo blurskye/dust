@@ -645,6 +645,12 @@ mod tests {
             state = draft.accept(&state.version()).unwrap();
             assert!(!state.buffers[buffer].dirty);
             assert_eq!(state.buffers[buffer].persisted_bytes(), disk);
+            assert_eq!(state.buffers[buffer].text.to_bytes(), disk);
+            state.apply_transaction(
+                &crate::editor::EditorTransaction::new(crate::editor::TransactionId(1))
+                    .with_operation(crate::editor::EditorOperation::Undo { buffer }),
+            ).unwrap();
+            assert_eq!(state.buffers[buffer].text.to_string(), source);
         }
     }
 

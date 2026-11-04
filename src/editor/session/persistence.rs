@@ -48,6 +48,8 @@ pub(in crate::editor::session) struct PersistenceSession {
     save_notice: bool,
     saved_notice: bool,
     failure: Option<String>,
+    undo_saves: Vec<std::sync::mpsc::Receiver<Result<(), String>>>,
+    undo_failure: Option<String>,
     closing: bool,
     save_expected: bool,
     saved_on_exit: bool,
@@ -77,12 +79,45 @@ impl PersistenceSession {
             save_notice: false,
             saved_notice: false,
             failure: None,
+            undo_saves: Vec::new(),
+            undo_failure: None,
             closing: false,
             save_expected: false,
             saved_on_exit: false,
             exit_request: None,
             navigation_reads: Default::default(),
         }
+    }
+    pub(in crate::editor::session) fn track_undo_save(
+        &mut self,
+        reply: std::sync::mpsc::Receiver<Result<(), String>>,
+    ) {
+        self.undo_saves.push(reply);
+    }
+    pub(in crate::editor::session) fn undo_pending(&self) -> bool {
+        !self.undo_saves.is_empty()
+    }
+    pub(in crate::editor::session) fn poll_undo_saves(&mut self) -> Vec<String> {
+        let mut errors = Vec::new();
+        self.undo_saves.retain(|reply| {
+            let error = match reply.try_recv() {
+                Ok(Ok(())) => return false,
+                Ok(Err(error)) => error,
+                Err(std::sync::mpsc::TryRecvError::Empty) => return true,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => "undo history worker stopped".into(),
+            };
+            let message = format!("could not save undo history: {error}");
+            self.undo_failure = Some(message.clone());
+            errors.push(message);
+            false
+        });
+        errors
+    }
+    pub(in crate::editor::session) fn undo_shutdown_result(&self) -> Result<(), String> {
+        if self.undo_pending() {
+            return Err("undo history writes did not finish before the exit deadline".into());
+        }
+        self.undo_failure.clone().map_or(Ok(()), Err)
     }
     pub(in crate::editor::session) fn register_navigation_read(
         &mut self,

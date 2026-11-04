@@ -1435,6 +1435,9 @@ impl InteractiveApplication {
     }
 
     pub(super) fn process_persistence_events(&mut self) {
+        for error in self.persistence.poll_undo_saves() {
+            self.show_error(error);
+        }
         self.read_persistence_events();
         // A project with no saved session file finishes loading without any event.
         if self.session_load_requested && !self.persistence.pending() {
@@ -7008,7 +7011,38 @@ impl InteractiveApplication {
         };
         let mut tabstops = Vec::new();
         if snippet {
-            match crate::language::lsp::parse_snippet(&edit.new_text, 1024 * 1024) {
+            let path = &document.path;
+            let current_line = buffer.line(line).unwrap_or_default();
+            let line_start = buffer.line_to_byte(line).unwrap_or(ByteOffset(0)).get();
+            let column = offset.get().saturating_sub(line_start).min(current_line.len());
+            let word_start = current_line[..column].char_indices().rev()
+                .find(|(_, c)| !c.is_alphanumeric() && *c != '_')
+                .map_or(0, |(at, c)| at + c.len_utf8());
+            let word_end = current_line[column..].char_indices()
+                .find(|(_, c)| !c.is_alphanumeric() && *c != '_')
+                .map_or(current_line.len(), |(at, _)| column + at);
+            let selected = self.state.active_view
+                .and_then(|view| self.state.views[view].selection)
+                .and_then(|selection| {
+                    let start = selection.anchor.min(selection.head);
+                    let end = selection.anchor.max(selection.head);
+                    buffer.slice(ByteRange::new(start, end).ok()?).ok()
+                }).unwrap_or_default();
+            let variables = std::collections::HashMap::from([
+                ("TM_FILENAME".into(), path.file_name().unwrap_or_default().to_string_lossy().into_owned()),
+                ("TM_FILENAME_BASE".into(), path.file_stem().unwrap_or_default().to_string_lossy().into_owned()),
+                ("TM_DIRECTORY".into(), path.parent().unwrap_or(path).to_string_lossy().into_owned()),
+                ("TM_FILEPATH".into(), path.to_string_lossy().into_owned()),
+                ("RELATIVE_FILEPATH".into(), path.strip_prefix(&self.state.workspace_root).unwrap_or(path).to_string_lossy().into_owned()),
+                ("WORKSPACE_NAME".into(), self.state.workspace_root.file_name().unwrap_or_default().to_string_lossy().into_owned()),
+                ("WORKSPACE_FOLDER".into(), self.state.workspace_root.to_string_lossy().into_owned()),
+                ("TM_LINE_INDEX".into(), line.to_string()),
+                ("TM_LINE_NUMBER".into(), (line + 1).to_string()),
+                ("TM_CURRENT_WORD".into(), current_line[word_start..word_end].into()),
+                ("TM_CURRENT_LINE".into(), current_line.trim_end_matches('\n').into()),
+                ("TM_SELECTED_TEXT".into(), selected),
+            ]);
+            match crate::language::lsp::parse_snippet_with_variables(&edit.new_text, 1024 * 1024, &variables) {
                 Ok(parsed) => {
                     edit.new_text = parsed.text;
                     tabstops = parsed.tabstops;
@@ -14788,13 +14822,13 @@ impl InteractiveApplication {
                 let buffer_state = &self.state.buffers[buffer];
                 let still_dirty = buffer_state.dirty;
                 if let (Some(directory), false) = (&self.state.undo_directory, still_dirty) {
-                    crate::editor::save_undo_history(
+                    self.persistence.track_undo_save(crate::editor::save_undo_history(
                         directory.clone(),
                         path.clone(),
                         buffer_state.text.clone(),
                         buffer_state.undo.clone(),
                         self.state.undo_maximum_bytes,
-                    );
+                    ));
                 }
                 let lsp_document = buffer_state.path.clone().and_then(|path| {
                     Some(LspDocument {

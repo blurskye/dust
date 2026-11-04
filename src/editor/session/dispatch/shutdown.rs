@@ -113,12 +113,24 @@ impl InteractiveApplication {
         if !incomplete && Instant::now() < deadline {
             self.save_persistence();
         }
-        while (self.persistence.pending() || !self.documents.worker_finished())
+        while (self.persistence.pending()
+            || self.persistence.undo_pending()
+            || !self.documents.worker_finished())
             && Instant::now() < deadline
         {
             self.process_persistence_events();
             std::thread::sleep(Duration::from_millis(2));
         }
+        for error in self.persistence.poll_undo_saves() {
+            self.show_error(error);
+        }
+        self.persistence.undo_shutdown_result().map_err(|message| {
+            InteractiveError::Vfs(VfsError::Io {
+                operation: "finish undo history shutdown",
+                path: self.state.workspace_root.clone(),
+                source: std::io::Error::other(message),
+            })
+        })?;
         if self.language.pending_replies() {
             return Err(InteractiveError::Vfs(VfsError::Io {
                 operation: "finish requesting-server edit responses",

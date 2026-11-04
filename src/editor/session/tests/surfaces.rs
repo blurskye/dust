@@ -1,4 +1,5 @@
 use super::*;
+use crate::editor::{EditorOperation, EditorState, EditorTransaction, TransactionId};
 use crate::ui::render::overlays::{CUSTOM_ICON, SCRATCH_ICON, VIRTUAL_ICON};
 
 #[test]
@@ -1297,6 +1298,67 @@ fn saved_line_ending_policy_updates_the_live_buffer_without_losing_new_edits() {
         assert_eq!(fs::read(&path).unwrap(), expected);
         assert!(!app.state.buffers[buffer].dirty);
     }
+}
+
+#[test]
+fn shutdown_saves_normalized_text_with_resumable_undo_history() {
+    for (source, policy, saved) in [
+        ("base", crate::config::FinalNewlinePolicy::Insert, "Xbase\n"),
+        ("base\n\n", crate::config::FinalNewlinePolicy::Remove, "Xbase"),
+    ] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("normalized.txt");
+        fs::write(&path, source).unwrap();
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text(source), Some(path.clone()));
+        app.set_dashboard_visibility(false);
+        let directory = app.persistence.undo_directory();
+        app.state.undo_directory = Some(directory.clone());
+        app.state.undo_maximum_bytes = 1 << 20;
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.final_newline = policy;
+        app.configuration.install_fixture(fixture);
+        app.invoke_insert_text("X".into());
+        app.start_save(true, None, false);
+        app.finish_shutdown_before(Instant::now() + Duration::from_secs(5)).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), saved);
+        assert_eq!(app.state.buffers[buffer].text.to_string(), saved);
+        assert!(!app.persistence.undo_pending());
+        let mut reopened = EditorState::new(app.state.workspace_root.clone());
+        reopened.undo_directory = Some(directory);
+        reopened.undo_maximum_bytes = 1 << 20;
+        let (id, _) = reopened.open_text(TextBuffer::from_text(saved), Some(path));
+        for expected in [format!("X{source}"), source.into()] {
+            reopened.apply_transaction(
+                &EditorTransaction::new(TransactionId(1))
+                    .with_operation(EditorOperation::Undo { buffer: id }),
+            ).unwrap();
+            assert_eq!(reopened.buffers[id].text.to_string(), expected);
+        }
+    }
+}
+
+#[test]
+fn undo_history_failures_are_notified_and_fail_shutdown() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("history.txt");
+    fs::write(&path, "base").unwrap();
+    app.state.open_text(TextBuffer::from_text("base"), Some(path));
+    app.set_dashboard_visibility(false);
+    let invalid = app.state.workspace_root.join("not-a-directory");
+    fs::write(&invalid, "occupied").unwrap();
+    app.state.undo_directory = Some(invalid);
+    app.state.undo_maximum_bytes = 1 << 20;
+    app.invoke_insert_text("X".into());
+    app.start_save(false, None, false);
+    wait_vfs(&mut app);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.persistence.undo_pending() {
+        app.process_persistence_events();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert!(app.ui.notification.as_ref().is_some_and(|text| text.contains("could not save undo history")));
+    assert!(app.finish_shutdown_before(deadline).is_err());
 }
 
 #[test]

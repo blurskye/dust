@@ -814,13 +814,38 @@ impl EditorDraft {
             .buffers
             .get(buffer)
             .is_some_and(|b| &b.text.source_version() != expected);
+        let Ok(saved) = TextBuffer::from_bytes(&bytes) else {
+            return false;
+        };
+        let saved_text = saved.to_string();
+        let mut saved_revision = revision;
+        if !changed && saved_text != snapshot.as_ref() {
+            // Save policy only changes the trailing newlines. Record that edit so the
+            // live text and persistent undo both describe the bytes just written.
+            let start = snapshot.trim_end_matches('\n').len();
+            if !saved_text.starts_with(&snapshot[..start]) {
+                return false;
+            }
+            let edits = TextEditSet::new(revision, vec![TextEdit::new(
+                ByteRange::new(ByteOffset(start), ByteOffset(snapshot.len())).expect("save suffix"),
+                &saved_text[start..],
+            )]);
+            if apply_operation(
+                &mut self.state,
+                &EditorOperation::ApplyEdits { buffer, edits },
+                UndoPolicy::Boundary,
+            ).is_err() {
+                return false;
+            }
+            self.state.buffers[buffer].undo.boundary();
+            saved_revision = self.state.buffers[buffer].text.revision();
+        }
         if !self
             .state
-            .mark_buffer_saved_as(buffer, revision, bytes, Some(path))
+            .mark_buffer_saved_as(buffer, saved_revision, bytes, Some(path))
         {
             return false;
         }
-        self.state.buffers[buffer].set_saved_text(Some(snapshot));
         if changed {
             self.state.set_buffer_dirty(buffer, true);
         }
@@ -1168,6 +1193,19 @@ mod tests {
         assert_eq!(state.views[view].buffer, buffer);
         assert_eq!(state.buffers[buffer].text.to_string(), "héllo refreshed");
         assert!(state.buffers[buffer].is_virtual_read_only());
+    }
+
+    #[test]
+    fn unchanged_text_with_changed_line_endings_is_undoable() {
+        let mut state = EditorState::new("/workspace".into());
+        let original = b"a\r\nb\n";
+        let (buffer, _) = state.open_text(TextBuffer::from_bytes(original).unwrap(), None);
+        edit(&mut state, buffer, &[(0, 4, "a\nb\n")]);
+        assert_eq!(state.buffers[buffer].text.to_bytes(), b"a\nb\n");
+        history(&mut state, buffer, true);
+        assert_eq!(state.buffers[buffer].text.to_bytes(), original);
+        history(&mut state, buffer, false);
+        assert_eq!(state.buffers[buffer].text.to_bytes(), b"a\nb\n");
     }
 
     #[test]
