@@ -56,6 +56,7 @@ pub(in crate::editor::session) struct TaskOutputRecord {
 }
 pub(in crate::editor::session) struct RunningTask {
     output: Vec<u8>,
+    cancelled: bool,
     key: RunKey,
     diagnostic_source: Option<TaskDiagnosticRun>,
     requested: String,
@@ -208,9 +209,16 @@ impl TaskSession {
             .collect();
         self.linters
             .retire("task source configuration/workspace retired");
+        for status in self.statuses.values_mut() {
+            if status == "queued" || status.starts_with("starting:") || status.starts_with("running:") {
+                *status = "cancelled".into();
+            }
+        }
         self.keys.clear();
         self.plans.clear();
-        for id in self.running.keys() {
+        self.preflights.clear();
+        for (id, task) in &mut self.running {
+            task.cancelled = true;
             let _ = self.jobs.cancel(*id);
         }
     }
@@ -449,7 +457,7 @@ impl TaskSession {
         };
         let diagnostic_source = if matches!(step.adapter, AdapterContext::Linter { .. }) {
             Some(TaskDiagnosticRun::capture(
-                &step.requested,
+                &step.name,
                 editor,
                 workspace,
                 configuration,
@@ -492,6 +500,7 @@ impl TaskSession {
             id,
             RunningTask {
                 output: Vec::new(),
+                cancelled: false,
                 key: step.key,
                 requested: step.requested,
                 name: step.name,
@@ -549,18 +558,23 @@ impl TaskSession {
     }
     pub(super) fn stop(&mut self, name: &str) -> Result<Option<DiagnosticProducer>, String> {
         let pending = self.launch_pending(name);
-        self.preflights.retain(|_, step| step.requested != name);
-        let current = self.keys.remove(name);
+        let current = self.keys.get(name).cloned();
         let mut producer = current.as_ref().and_then(|key| self.linters.stop_run(key));
-        self.plans.remove(name);
         let mut found = pending || producer.is_some();
-        for (id, task) in &self.running {
+        if !found && !self.running.values().any(|task| task.requested == name) {
+            return Err("task is not running".into());
+        }
+        self.preflights.retain(|_, step| step.requested != name);
+        self.keys.remove(name);
+        self.plans.remove(name);
+        for (id, task) in &mut self.running {
             if task.requested == name {
                 match self.jobs.cancel(*id) {
                     Ok(()) | Err(crate::process::JobError::Unknown(_)) => {}
                     Err(error) => return Err(error.to_string()),
                 }
                 found = true;
+                task.cancelled = true;
                 if current
                     .as_ref()
                     .is_some_and(|key| Arc::ptr_eq(&key.epoch, &task.key.epoch))
@@ -585,7 +599,8 @@ impl TaskSession {
             .retire("task source configuration/workspace retired");
         self.keys.clear();
         self.plans.clear();
-        for id in self.running.keys() {
+        for (id, task) in &mut self.running {
+            task.cancelled = true;
             let _ = self.jobs.cancel(*id);
         }
         self.rows.clear();
@@ -600,6 +615,9 @@ impl TaskSession {
             .retire("task source configuration/workspace retired");
         self.keys.clear();
         self.plans.clear();
+        for task in self.running.values_mut() {
+            task.cancelled = true;
+        }
         self.jobs.begin_shutdown();
     }
     pub(super) fn abandon(&mut self) -> usize {
@@ -656,12 +674,25 @@ impl TaskSession {
                     }
                     if !formatter_stderr {
                         task.output.extend_from_slice(accepted);
+                        // Job output events contain complete records, including an unterminated
+                        // last record on each stream. Keep those records separate for matchers.
+                        if !matches!(task.adapter, AdapterContext::Formatter { .. })
+                            && !accepted.is_empty()
+                            && !accepted.ends_with(b"\n")
+                        {
+                            if task.output.len() < self.maximum_output {
+                                task.output.push(b'\n');
+                            } else {
+                                self.truncated.insert(job);
+                            }
+                        }
                     }
                     let rows = self.rows.entry(task.requested.clone()).or_default();
                     for line in String::from_utf8_lossy(accepted).lines().take(1024) {
                         rows.push(TaskOutputRecord {
                             stream,
                             text: line
+                                .replace('\t', "    ")
                                 .chars()
                                 .filter(|c| !c.is_control())
                                 .take(4096)
@@ -737,11 +768,7 @@ impl TaskSession {
                     self.truncated.remove(&job);
                     if !self.current(&task, workspace, configuration) {
                         // Stopping a task can end its output early; that isn't a failure.
-                        if self
-                            .statuses
-                            .get(&task.requested)
-                            .is_some_and(|status| status == "cancelled")
-                        {
+                        if task.cancelled {
                             continue;
                         }
                         return Some(TaskUpdate::Failed {
@@ -929,6 +956,7 @@ impl TaskSession {
             job,
             RunningTask {
                 output: output.into(),
+                cancelled: false,
                 key,
                 diagnostic_source: None,
                 requested: name.into(),
@@ -988,6 +1016,73 @@ mod tests {
         };
         assert_eq!(task.output, b"formatted");
     }
+    fn fixture() -> (tempfile::TempDir, EditorState, WorkspaceSession, TaskSession) {
+        let root = tempfile::tempdir().unwrap();
+        let scope = WorkspaceState::new(
+            WorkspaceId(1),
+            [("root".into(), RootIdentity::capture(root.path()).unwrap())],
+        ).unwrap();
+        let workspace = WorkspaceSession::new(scope, root.path().join("trust"), 1, false, false, 1);
+        let mut editor = EditorState::new(root.path().into());
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("text"), None);
+        let mut tasks = TaskSession::new(&Config::default());
+        tasks.fixture_formatter_result("task", buffer, b"text", &editor, &workspace, 1);
+        (root, editor, workspace, tasks)
+    }
+    #[test]
+    fn configuration_retirement_cancels_pending_statuses_but_keeps_finished_ones() {
+        let (_root, _editor, workspace, mut tasks) = fixture();
+        tasks.statuses.insert("task".into(), "running:task".into());
+        tasks.statuses.insert("queued".into(), "queued".into());
+        tasks.statuses.insert("starting".into(), "starting:build".into());
+        tasks.statuses.insert("finished".into(), "succeeded".into());
+        tasks.configure(&Config::default());
+        for name in ["task", "queued", "starting"] {
+            assert_eq!(tasks.statuses[name], "cancelled");
+        }
+        assert_eq!(tasks.statuses["finished"], "succeeded");
+        assert!(tasks.next_update(&workspace, 1).is_none());
+        assert_eq!(tasks.task_items().iter().filter(|item| item.detail == "cancelled").count(), 3);
+    }
+    #[test]
+    fn stopping_a_finished_task_keeps_its_test_results_current() {
+        let (root, _editor, workspace, mut tasks) = fixture();
+        assert!(matches!(tasks.next_update(&workspace, 1), Some(TaskUpdate::Finished { .. })));
+        tasks.tests.insert("task".into(), vec![TestCaseResult {
+            name: "test".into(), status: "failed".into(), duration: String::new(),
+            message: "failure".into(), source: Some((root.path().join("source"), 0, 0)),
+        }]);
+        let key = tasks.test_items("task")[0].1.clone();
+        assert!(tasks.stop("task").is_err());
+        assert_eq!(tasks.test_items("task").len(), 1);
+        assert_eq!(tasks.failed_tests().len(), 1);
+        assert_eq!(tasks.resolve_test(&key), Some((root.path().join("source"), 0, 0)));
+    }
+    #[test]
+    fn restarted_task_suppresses_the_cancelled_runs_launch_failure() {
+        let (_root, editor, workspace, mut tasks) = fixture();
+        tasks.events.clear();
+        tasks.stop("task").unwrap();
+        let buffer = editor.buffers.iter().next().unwrap().0;
+        tasks.fixture_formatter_result("task", buffer, b"new", &editor, &workspace, 1);
+        tasks.statuses.insert("task".into(), "starting:task".into());
+        tasks.events.push_front(JobEvent::Failed { job: JobId(1000), message: "cancelled before launch".into() });
+        assert!(matches!(tasks.next_update(&workspace, 1), Some(TaskUpdate::Finished { .. })));
+        assert_eq!(tasks.statuses["task"], "process exited");
+    }
+    #[test]
+    fn output_tabs_expand_without_altering_the_matcher_payload() {
+        let (_root, _editor, workspace, mut tasks) = fixture();
+        tasks.running.get_mut(&JobId(1000)).unwrap().adapter = AdapterContext::Plain;
+        tasks.running.get_mut(&JobId(1000)).unwrap().output.clear();
+        tasks.events.push_front(JobEvent::Output {
+            job: JobId(1000), stream: JobStream::Stdout,
+            bytes: b"A\tB".to_vec(), truncated: false,
+        });
+        assert!(matches!(tasks.next_update(&workspace, 1), Some(TaskUpdate::Output)));
+        assert_eq!(tasks.output_items("task")[0].label, "A    B");
+        assert_eq!(tasks.running[&JobId(1000)].output, b"A\tB\n");
+    }
     #[test]
     fn stopping_with_a_buffered_terminal_event_still_finalizes_cancellation() {
         let root = tempfile::tempdir().unwrap();
@@ -1027,6 +1122,7 @@ mod tests {
             owner.keys.insert("format".into(), key.clone());
             let task = RunningTask {
                 output: bytes.to_vec(),
+                cancelled: false,
                 key,
                 diagnostic_source: None,
                 requested: "format".into(),

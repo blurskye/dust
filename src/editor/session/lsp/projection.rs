@@ -1071,7 +1071,11 @@ impl LspSession {
             generation,
         )?;
         self.projection.request = Some((generation, owner.clone()));
-        self.projection.request_servers = vec![server];
+        self.projection.request_servers = vec![server.clone()];
+        self.projection.requests.insert(
+            generation,
+            (owner.clone(), vec![server], "completionItem/resolve".into()),
+        );
         self.projection.resolve = Some((generation, owner, selected, offset));
         Ok(())
     }
@@ -1085,7 +1089,6 @@ impl LspSession {
             return false;
         };
         if generation != *expected
-            || generation != self.projection.generation
             || self.projection.owner.as_ref() != Some(owner)
             || *index >= self.projection.completion_items.len()
         {
@@ -1185,6 +1188,35 @@ impl LspSession {
     pub(in crate::editor::session) fn retire_projection_server(&mut self, server: &str) {
         self.projection.semantic.retain(|(key, _), _| key != server);
         self.projection.pull_ids.retain(|(key, _), _| key != server);
+        self.projection.request_servers.retain(|key| key != server);
+        self.projection.requests.retain(|_, (_, servers, _)| {
+            servers.retain(|key| key != server);
+            !servers.is_empty()
+        });
+        if self.projection.request_servers.is_empty() {
+            self.projection.request = None;
+        }
+        let retained_index = |index: usize| {
+            (self.projection.completion_servers.get(index).is_some_and(|key| key != server))
+                .then(|| self.projection.completion_servers[..index].iter().filter(|key| *key != server).count())
+        };
+        if let Some((_, _, index, _)) = &mut self.projection.resolve {
+            if let Some(retained) = retained_index(*index) {
+                *index = retained;
+            } else {
+                self.projection.resolve = None;
+            }
+        }
+        self.projection.completion_selected = retained_index(self.projection.completion_selected).unwrap_or(0);
+        let mut index = 0;
+        self.projection.completion_items.retain(|_| {
+            let keep = self.projection.completion_servers[index] != server;
+            index += 1;
+            keep
+        });
+        self.projection.completion_servers.retain(|key| key != server);
+        self.projection.completion_all.retain(|(key, _)| key != server);
+        self.projection.completion_scroll = self.projection.completion_scroll.min(self.projection.completion_selected);
     }
     pub(in crate::editor::session) fn retire_projection_document(
         &mut self,
@@ -1653,6 +1685,55 @@ mod tests {
         owner.install_completions("owned", vec![item("first")], false, 3);
         owner.clear_completion();
         assert!(!owner.accept_result("second", 3, "textDocument/completion", &document.uri(), 0));
+    }
+    #[test]
+    fn completion_resolve_survives_an_unrelated_request() {
+        let (editor, buffer, document, mut owner) = fixture();
+        let _endpoint = owner.service.replace_edit_source_fixture_for(
+            "owned", document.uri(), (buffer, editor.buffers[buffer].text.source_version()),
+            crate::editor::text::PositionEncoding::Utf16, 4,
+        );
+        let mut unresolved = item("foo");
+        unresolved.resolve_item = Some(serde_json::json!({"label": "foo"}));
+        unresolved.resolved = false;
+        owner.install_completions("owned", vec![unresolved], false, 0);
+        owner.resolve_completion(0, document.clone(), ByteOffset(0)).unwrap();
+        let generation = owner.generation();
+        assert!(owner.projection.requests.contains_key(&generation));
+        owner.next_generation().unwrap();
+        let source = owner.projection.owner.clone().unwrap();
+        owner.projection.request = Some((owner.generation(), source));
+        owner.projection.request_servers = vec!["owned".into()];
+        assert!(owner.accept_result("owned", generation, "completionItem/resolve", &document.uri(), 0));
+        assert!(owner.accept_resolved(generation, item("resolved foo"), &editor));
+        assert_eq!(owner.completion_items()[0].label, "resolved foo");
+    }
+    #[test]
+    fn retiring_a_secondary_server_removes_its_items_and_resolve_data() {
+        let (editor, _, document, mut owner) = fixture();
+        let source = owner.projection.owner.clone().unwrap();
+        owner.install_completions("second", vec![item("retired")], false, 0);
+        owner.install_completions("owned", vec![item("kept")], false, 0);
+        owner.move_completion(1, 10);
+        owner.projection.resolve = Some((1, source.clone(), 1, ByteOffset(0)));
+        owner.projection.requests.insert(1, (source.clone(), vec!["owned".into()], "completionItem/resolve".into()));
+        owner.projection.requests.insert(2, (source.clone(), vec!["second".into()], "textDocument/completion".into()));
+        owner.stopped("second");
+        assert_eq!(owner.completion_items(), &[item("kept")]);
+        assert_eq!(owner.projection.completion_all, vec![("owned".into(), item("kept"))]);
+        assert!(!owner.accept_result("second", 2, "textDocument/completion", &document.uri(), 0));
+        assert_eq!(owner.completion_position().0, 0);
+        assert!(owner.accept_resolved(1, item("resolved kept"), &editor));
+
+        owner.install_completions("second", vec![item("new process")], false, 0);
+        owner.move_completion(1, 10);
+        owner.projection.resolve = Some((3, source.clone(), 1, ByteOffset(0)));
+        owner.projection.requests.insert(3, (source, vec!["second".into()], "completionItem/resolve".into()));
+        owner.stopped("second");
+        assert!(owner.projection.resolve.is_none());
+        assert!(!owner.accept_result("second", 3, "completionItem/resolve", &document.uri(), 0));
+        assert!(!owner.accept_resolved(3, item("stale resolve"), &editor));
+        assert_eq!(owner.completion_server(0), Some("owned"));
     }
     #[test]
     fn narrowing_keeps_a_resolve_on_its_original_item() {
@@ -2160,8 +2241,8 @@ fn starts_at_a_word(query: &str, target: &str) -> bool {
             !previous.is_alphanumeric()
                 || (chars[index].is_uppercase() && (previous.is_lowercase() || next_is_lower))
         };
-        word_start && chars[index].to_lowercase().eq(first.to_lowercase()) && {
-            let mut remaining = chars[index + 1..].iter().flat_map(|c| c.to_lowercase());
+        let mut remaining = chars[index..].iter().flat_map(|c| c.to_lowercase());
+        word_start && remaining.next() == Some(first) && {
             rest.iter().all(|letter| remaining.any(|c| c == *letter))
         }
     })
@@ -2192,6 +2273,9 @@ mod completion_filter_tests {
             ("str", "toString"),
             ("bar", "foo_bar"),
             ("el", "SVGRectElement"),
+            ("İ", "İtem"),
+            ("İt", "İtem"),
+            ("İ", "some_İtem"),
             ("", "anything"),
         ] {
             assert!(starts_at_a_word(query, target), "{query} {target}");
@@ -2201,6 +2285,7 @@ mod completion_filter_tests {
             ("greet", "ProgressEvent"),
             ("greet", "HTMLProgressElement"),
             ("ing", "toString"),
+            ("İ", "xitem"),
         ] {
             assert!(!starts_at_a_word(query, target), "{query} {target}");
         }

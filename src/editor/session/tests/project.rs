@@ -2422,6 +2422,15 @@ fn linter_job_and_vfs_publish_only_original_source_then_recover() {
 
 #[test]
 fn a_task_with_a_matcher_puts_what_it_matched_in_problems() {
+    check_task_diagnostics(false);
+}
+
+#[test]
+fn successful_dependency_diagnostics_keep_separate_stream_records() {
+    check_task_diagnostics(true);
+}
+
+fn check_task_diagnostics(with_dependency: bool) {
     let root = tempdir().unwrap();
     let state_dir = tempdir().unwrap();
     fs::write(root.path().join("notes.txt"), "one\ntwo\n").unwrap();
@@ -2455,6 +2464,14 @@ fn a_task_with_a_matcher_puts_what_it_matched_in_problems() {
             }),
         },
     );
+    if with_dependency {
+        let mut dependency = loaded.config.tasks["build"].clone();
+        dependency.arguments = vec!["-c".into(), "printf 'notes.txt:1:1: warning: stdout'; exec 1>&-; printf 'notes.txt:2:1: warning: stderr' >&2".into()];
+        loaded.config.tasks.insert("check".into(), dependency);
+        let build = loaded.config.tasks.get_mut("build").unwrap();
+        build.dependencies = vec!["check".into()];
+        build.arguments = vec!["-c".into(), "printf 'notes.txt:2:1: warning: main task\\n'".into()];
+    }
     let mut app = InteractiveApplication::new(
         StartupTarget::Dashboard {
             root: root.path().into(),
@@ -2477,7 +2494,10 @@ fn a_task_with_a_matcher_puts_what_it_matched_in_problems() {
     app.reconcile_workspace_trust();
     app.process_effect(AppEffect::TaskRun("build".into()));
     let deadline = Instant::now() + Duration::from_secs(3);
-    while app.diagnostics.choices().count() == 0 && Instant::now() < deadline {
+    let expected = if with_dependency { 3 } else { 1 };
+    while (app.diagnostics.choices().count() < expected || app.tasks.is_running("build"))
+        && Instant::now() < deadline
+    {
         app.process_execution_preflight();
         app.process_job_events();
         app.process_vfs_results();
@@ -2485,17 +2505,24 @@ fn a_task_with_a_matcher_puts_what_it_matched_in_problems() {
     }
     assert_eq!(
         app.diagnostics.choices().count(),
-        1,
+        expected,
         "{:?}",
         app.notices.history().collect::<Vec<_>>()
     );
     // A build that exits 1 still failed, unlike a linter reporting findings.
+    let status = if with_dependency { "succeeded" } else { "failed" };
     assert!(
         app.tasks
             .task_items()
             .iter()
-            .any(|item| item.label == "build" && item.detail == "failed")
+            .any(|item| item.label == "build" && item.detail == status)
     );
+    if with_dependency {
+        let messages = app.diagnostics.choices().map(|(_, diagnostic, _)| diagnostic.message.as_str()).collect::<Vec<_>>();
+        assert!(messages.contains(&"stdout"));
+        assert!(messages.contains(&"stderr"));
+        assert!(messages.contains(&"main task"));
+    }
 }
 
 #[test]

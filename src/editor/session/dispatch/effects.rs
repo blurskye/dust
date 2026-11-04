@@ -6229,9 +6229,8 @@ impl InteractiveApplication {
                     ) {
                         continue;
                     }
-                    if next {
-                        self.start_task_step(task.requested().clone());
-                    } else {
+                    let next_step = next.then(|| task.requested().clone());
+                    if !next {
                         if code == Some(0) && !truncated {
                             self.apply_formatter_result(&task);
                         } else if truncated
@@ -6248,13 +6247,8 @@ impl InteractiveApplication {
                         {
                             self.finish_format_on_save();
                         }
-                        // Linters exit 1 when they have findings; that is not a failure. Other
-                        // tasks with a matcher publish what they matched however they exit.
-                        let (matched, lint) = match task.adapter() {
-                            AdapterContext::Linter { lint, .. } => (true, *lint),
-                            _ => (false, false),
-                        };
-                        let linter_ran = lint && matches!(code, Some(0 | 1));
+                        let linter_ran = matches!(task.adapter(), AdapterContext::Linter { lint: true, .. })
+                            && matches!(code, Some(0 | 1));
                         if !linter_ran
                             && (!matches!(task.adapter(), AdapterContext::Formatter { .. })
                                 || code != Some(0))
@@ -6273,23 +6267,32 @@ impl InteractiveApplication {
                                 code != Some(0),
                             );
                         }
-                        if truncated && matches!(task.adapter(), AdapterContext::Linter { .. }) {
-                            self.show_error("linter output truncated; diagnostics not published");
-                        }
-                        if matched
-                            && (linter_ran || !lint)
-                            && !truncated
-                            && let Err(error) = self.tasks.begin_linter(
-                                *task,
-                                &self.state,
-                                &self.workspace,
-                                self.configuration.binding_revision(),
-                                &self.diagnostics,
-                                (MAXIMUM_DIAGNOSTICS, SEARCH_MAXIMUM_FILE_BYTES as u64),
-                            )
-                        {
-                            self.show_error(error);
-                        }
+                    }
+                    // Interpret dependency output too, before advancing to the next step.
+                    let (matched, lint) = match task.adapter() {
+                        AdapterContext::Linter { lint, .. } => (true, *lint),
+                        _ => (false, false),
+                    };
+                    let linter_ran = lint && matches!(code, Some(0 | 1));
+                    if truncated && matches!(task.adapter(), AdapterContext::Linter { .. }) {
+                        self.show_error("linter output truncated; diagnostics not published");
+                    }
+                    if matched
+                        && (linter_ran || !lint)
+                        && !truncated
+                        && let Err(error) = self.tasks.begin_linter(
+                            *task,
+                            &self.state,
+                            &self.workspace,
+                            self.configuration.binding_revision(),
+                            &self.diagnostics,
+                            (MAXIMUM_DIAGNOSTICS, SEARCH_MAXIMUM_FILE_BYTES as u64),
+                        )
+                    {
+                        self.show_error(error);
+                    }
+                    if let Some(name) = next_step {
+                        self.start_task_step(name);
                     }
                 }
                 crate::editor::session::tasks::TaskUpdate::Failed { source, message } => {
