@@ -9296,20 +9296,20 @@ impl InteractiveApplication {
                     .find(|(path, _)| *path == journal)
                     .map(|(_, record)| crate::ui::PickerPreview {
                         title: label,
-                        body: crate::ui::PickerPreviewBody::Text(crate::ui::PickerTextPreview {
-                            lines: record
+                        body: crate::ui::PickerPreviewBody::Text(crate::ui::PickerTextPreview::new(
+                            record
                                 .content
                                 .lines()
                                 .take(RECOVERY_PREVIEW_LINES)
                                 .map(str::to_owned)
                                 .collect(),
-                            first_line: 0,
-                            highlight_line: None,
-                            language: record
+                            0,
+                            None,
+                            record
                                 .path()
                                 .as_deref()
                                 .and_then(crate::language::syntax::language_for_path),
-                        }),
+                        )),
                     });
                 match preview {
                     Some(preview) => {

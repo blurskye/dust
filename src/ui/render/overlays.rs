@@ -219,7 +219,7 @@ pub(super) fn render_documentation_popup(
         }
     }
     let (horizontal, vertical, top_left, top_right, bottom_left, bottom_right) =
-        BorderStyle::Rounded.glyphs();
+        frame.grid.border_glyphs(BorderStyle::Rounded);
     for x in left.saturating_add(1)..right.saturating_sub(1) {
         frame
             .grid

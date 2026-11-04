@@ -43,7 +43,10 @@ pub(super) fn ellipsized(
         };
     }
     let mut kept = String::new();
-    let mut width = 1;
+    let mut width = text_width("…", ambiguous);
+    if width > maximum {
+        return kept;
+    }
     for grapheme in text.graphemes(true) {
         width += text_width(grapheme, ambiguous).max(1);
         if width > maximum {
@@ -189,13 +192,17 @@ fn paint_diff_row(frame: &mut Frame, _config: &Config, x: u16, y: u16, right: u1
             .spans
             .iter()
             .any(|span| span.start < at + grapheme.len() && span.end > at);
-        cursor_x = frame.grid.put_text_clipped(
+        let next_x = frame.grid.put_text_clipped(
             cursor_x,
             y,
             grapheme,
             if changed { Style::Search } else { style },
             right,
         );
+        if next_x == cursor_x {
+            break;
+        }
+        cursor_x = next_x;
     }
 }
 
@@ -365,9 +372,11 @@ pub(super) fn render_private_surface(
         let x = rect.x.saturating_add(cell.x);
         let y = rect.y.saturating_add(cell.y);
         if x < right && y < bottom {
-            frame
-                .grid
-                .put_text_clipped(x, y, &cell.grapheme, cell.style, right);
+            // Private snapshots use narrow Unicode widths for their fixed coordinates.
+            let width = unicode_width::UnicodeWidthStr::width(cell.grapheme.as_str()).clamp(1, 2);
+            if usize::from(x) + width <= usize::from(right) {
+                frame.grid.set_cell_with_width(x, y, &cell.grapheme, cell.style, width);
+            }
         }
     }
     if surface.focused {
@@ -431,7 +440,7 @@ pub(super) fn render_picker(
         }
     }
     let (horizontal, vertical, top_left, top_right, bottom_left, bottom_right) =
-        BorderStyle::Single.glyphs();
+        frame.grid.border_glyphs(BorderStyle::Single);
     for x in left..left + width {
         frame
             .grid
@@ -766,9 +775,7 @@ pub(super) fn render_picker(
                 let first_visible_offset = highlighted_offset.map_or(0, |offset| {
                     offset.saturating_add(1).saturating_sub(available_rows)
                 });
-                let line_spans = text.language.map_or_else(Vec::new, |language| {
-                    preview_line_spans(language, &text.lines)
-                });
+                let line_spans = &text.spans;
                 for (visible_offset, (offset, line)) in text
                     .lines
                     .iter()
@@ -877,48 +884,6 @@ pub(super) fn render_picker(
     ));
 }
 
-/// Syntax colours for preview lines, as byte ranges within each line. Captures can nest; the
-/// first one that covers a byte wins, as in markdown code blocks.
-fn preview_line_spans(
-    language: crate::language::syntax::SyntaxLanguage,
-    lines: &[String],
-) -> Vec<Vec<(std::ops::Range<usize>, crate::language::syntax::Highlight)>> {
-    let source = lines.join("\n");
-    if source.len() > 512 * 1024 {
-        return Vec::new();
-    }
-    let mut spans = crate::language::syntax::highlight(language, &source);
-    spans.sort_by_key(|span| (span.start, std::cmp::Reverse(span.end)));
-    let mut per_line = vec![Vec::new(); lines.len()];
-    let mut line = 0;
-    let mut line_start = 0;
-    let mut covered = 0;
-    for span in spans {
-        if span.start < covered || span.start >= span.end {
-            continue;
-        }
-        covered = span.end;
-        let mut start = span.start;
-        while start < span.end && line < lines.len() {
-            let line_end = line_start + lines[line].len();
-            if start > line_end {
-                line_start = line_end + 1;
-                line += 1;
-                continue;
-            }
-            let end = span.end.min(line_end);
-            if start < end {
-                per_line[line].push((start - line_start..end - line_start, span.role));
-            }
-            if span.end <= line_end {
-                break;
-            }
-            start = line_end + 1;
-        }
-    }
-    per_line
-}
-
 pub(super) fn render_tool_menu(
     frame: &mut Frame,
     menu: &ToolMenuState,
@@ -957,7 +922,7 @@ pub(super) fn render_tool_menu(
         }
     }
     let (horizontal, vertical, top_left, top_right, bottom_left, bottom_right) =
-        BorderStyle::Single.glyphs();
+        frame.grid.border_glyphs(BorderStyle::Single);
     for x in left..left + width {
         frame
             .grid
@@ -1000,7 +965,7 @@ pub(super) fn render_tool_menu(
             )
         },
     );
-    frame.grid.put_text(left + 2, top, &title, Style::Accent);
+    frame.grid.put_text_clipped(left + 2, top, &title, Style::Accent, left + width - 1);
     let content_left = left + 2;
     let content_width = width.saturating_sub(4);
     let ambiguous = config.editor.ambiguous_width;
@@ -1015,6 +980,12 @@ pub(super) fn render_tool_menu(
     let mut y = top + 1;
 
     if let Some(picker) = &menu.runtime_picker {
+        // Keep the help, header, two-row option and details in separate regions.
+        if height < 11 {
+            frame.grid.put_text_clipped(content_left, y, "Resize to choose a build", Style::Muted, left + width - 1);
+            frame.cursor = None;
+            return;
+        }
         for (row, help) in wrapped_key_help(
             "j/k move · Enter use this build · i install · u uninstall · r refresh · Esc back",
             usize::from(content_width),
@@ -1197,8 +1168,12 @@ pub(super) fn render_tool_menu(
         } else {
             Style::Status
         };
-        frame.grid.put_text(tab_x, y, &text, style);
-        tab_x = tab_x.saturating_add(u16::try_from(text.chars().count()).unwrap_or(0) + 1);
+        let right = content_left.saturating_add(content_width);
+        let next_x = frame.grid.put_text_clipped(tab_x, y, &text, style, right);
+        if usize::from(next_x.saturating_sub(tab_x)) < text_width(&text, ambiguous) {
+            break;
+        }
+        tab_x = next_x.saturating_add(1);
     }
     y += 2;
     let name_x = content_left.saturating_add(2);
@@ -1451,7 +1426,7 @@ fn tool_row_keys(row: &crate::ui::ToolMenuRow) -> Vec<&'static str> {
     }
     if row.installed {
         if row.lsp {
-            if state == "installed" || state == "crashed" {
+            if matches!(state, "installed" | "crashed" | "not working") {
                 keys.push(if row.can_start {
                     "Enter start"
                 } else {
@@ -1607,7 +1582,7 @@ pub(super) fn render_prompt(
         return;
     }
     let (horizontal, vertical, top_left, top_right, bottom_left, bottom_right) =
-        BorderStyle::Single.glyphs();
+        frame.grid.border_glyphs(BorderStyle::Single);
     let show_help = prompt.confirmation.is_none()
         && prompt.error.is_none()
         && prompt.help.is_some()
@@ -1892,6 +1867,20 @@ pub(super) fn render_prompt(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn emphasized_diff_stops_at_a_wide_grapheme_that_cannot_fit() {
+        let config = crate::config::load_bundled_config().config;
+        let mut frame = Frame { grid: CellGrid::new(4, 1), cursor: None };
+        frame.grid.set_cell(3, 0, "|", Style::Border);
+        paint_diff_row(&mut frame, &config, 0, 0, 3, &DiffRow {
+            kind: DiffRowKind::Added,
+            text: "ab界z".into(),
+            spans: vec![super::super::DiffSpan { start: 0, end: 6 }],
+        });
+        assert_eq!(frame.grid.row_text(0), "ab |");
+        assert_eq!(frame.grid.get(0, 0).unwrap().style, Style::Search);
+    }
 
     #[test]
     fn prompt_viewport_keeps_the_grapheme_caret_visible() {

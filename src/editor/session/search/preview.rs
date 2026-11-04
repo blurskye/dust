@@ -120,12 +120,12 @@ impl SearchSession {
         self.preview_scope = Some((scope, configuration));
         self.preview = Some(PickerPreview {
             title,
-            body: PickerPreviewBody::Text(PickerTextPreview {
-                lines: vec![loading],
-                first_line: 0,
-                highlight_line: None,
-                language: crate::language::syntax::language_for_path(&path),
-            }),
+            body: PickerPreviewBody::Text(PickerTextPreview::new(
+                vec![loading],
+                0,
+                None,
+                crate::language::syntax::language_for_path(&path),
+            )),
         });
         self.preview_path = Some(path);
         (retired, Some(PreviewTicket(self.preview_epoch.clone())))
@@ -151,6 +151,7 @@ impl SearchSession {
             && let Some(text) = self.preview.as_mut().and_then(PickerPreview::as_text_mut)
         {
             text.lines = vec![format!("preview unavailable: {error}")];
+            text.prepare_highlighting();
         }
     }
     pub(in crate::editor::session) fn accept_preview(
@@ -188,6 +189,7 @@ impl SearchSession {
                     text.lines.first().map_or("", String::as_str),
                 );
             }
+            text.prepare_highlighting();
         }
         true
     }
@@ -235,12 +237,12 @@ pub(super) fn search_picker_preview(
     first_line = first_line.saturating_add(first_visible_offset);
     PickerPreview {
         title: found.relative_path.display().to_string(),
-        body: PickerPreviewBody::Text(PickerTextPreview {
+        body: PickerPreviewBody::Text(PickerTextPreview::new(
             lines,
             first_line,
-            highlight_line: Some(found.line),
-            language: crate::language::syntax::language_for_path(&found.relative_path),
-        }),
+            Some(found.line),
+            crate::language::syntax::language_for_path(&found.relative_path),
+        )),
     }
 }
 

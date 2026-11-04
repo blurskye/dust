@@ -2259,12 +2259,12 @@ fn generic_picker_is_centered_filtered_presentation_with_configured_markers() {
             loading: false,
             preview: Some(super::PickerPreview::text(
                 "health.rs",
-                super::PickerTextPreview {
-                    lines: vec!["fn health() {}".to_string()],
-                    first_line: 0,
-                    highlight_line: Some(0),
-                    language: None,
-                },
+                super::PickerTextPreview::new(
+                    vec!["fn health() {}".to_string()],
+                    0,
+                    Some(0),
+                    None,
+                ),
             )),
         }),
         ..UiState::default()
@@ -2275,6 +2275,34 @@ fn generic_picker_is_centered_filtered_presentation_with_configured_markers() {
     assert!((0..30).any(|row| frame.grid.row_text(row).contains("fn health() {}")));
     assert!((0..30).any(|row| frame.grid.row_text(row).contains("1/1")));
     assert!(frame.cursor.is_some());
+}
+
+#[test]
+fn picker_preview_highlighting_is_prepared_before_paint_and_replaced_with_its_text() {
+    let text = super::PickerTextPreview::new(
+        vec!["fn cached() {}".into()], 0, None,
+        Some(crate::language::syntax::SyntaxLanguage::Rust),
+    );
+    assert!(!text.spans[0].is_empty());
+    let spans = text.spans.clone();
+    let loaded = crate::config::load_bundled_config();
+    let mut picker = diff_picker(crate::ui::diff::parse_unified_patch("", "test")).picker.unwrap();
+    picker.preview = Some(super::PickerPreview::text("cached.rs", text));
+    let allocation = picker.preview.as_ref().unwrap().as_text().unwrap().spans.as_ptr();
+    let rect = crate::ui::window::WindowRect { x: 0, y: 0, width: 100, height: 24 };
+    let mut frame = super::Frame { grid: crate::ui::CellGrid::new(100, 24), cursor: None };
+    for query in ["", "cached"] {
+        picker.query = query.into();
+        super::surfaces::render_picker(&mut frame, &picker, &loaded.config, rect, None);
+        assert!((0..24).any(|y| (0..100).any(|x| matches!(frame.grid.get(x, y).unwrap().style, crate::ui::Style::Syntax(_)))));
+        let text = picker.preview.as_ref().unwrap().as_text().unwrap();
+        assert_eq!(text.spans, spans);
+        assert_eq!(text.spans.as_ptr(), allocation);
+    }
+    let text = picker.preview.as_mut().unwrap().as_text_mut().unwrap();
+    text.lines = vec![String::new()];
+    text.prepare_highlighting();
+    assert!(text.spans.iter().all(Vec::is_empty));
 }
 
 #[test]
@@ -2301,14 +2329,14 @@ fn picker_stacks_preview_when_two_readable_columns_do_not_fit() {
             loading: false,
             preview: Some(super::PickerPreview::text(
                 "src/long.rs",
-                super::PickerTextPreview {
-                    lines: (300..320)
+                super::PickerTextPreview::new(
+                    (300..320)
                         .map(|line| format!("preview line {line} {long}"))
                         .collect(),
-                    first_line: 300,
-                    highlight_line: Some(308),
-                    language: None,
-                },
+                    300,
+                    Some(308),
+                    None,
+                ),
             )),
         }),
         ..UiState::default()
@@ -2559,7 +2587,7 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
 #[test]
 fn private_surface_cells_and_cursor_are_local_and_strictly_clipped() {
     let mut frame = super::Frame {
-        grid: crate::ui::CellGrid::new(10, 4),
+        grid: crate::ui::CellGrid::new_with_policy(10, 4, "�", "◌", true),
         cursor: None,
     };
     let surface = super::PrivateSurfaceUiState {
@@ -2582,6 +2610,20 @@ fn private_surface_cells_and_cursor_are_local_and_strictly_clipped() {
                 y: 0,
                 grapheme: String::new(),
                 continuation: true,
+                style: crate::ui::Style::Accent,
+            },
+            super::PrivateSurfaceCell {
+                x: 0,
+                y: 1,
+                grapheme: "·".into(),
+                continuation: false,
+                style: crate::ui::Style::Accent,
+            },
+            super::PrivateSurfaceCell {
+                x: 1,
+                y: 1,
+                grapheme: "a".into(),
+                continuation: false,
                 style: crate::ui::Style::Accent,
             },
             super::PrivateSurfaceCell {
@@ -2613,6 +2655,9 @@ fn private_surface_cells_and_cursor_are_local_and_strictly_clipped() {
             .expect("wide continuation")
             .continuation
     );
+    assert_eq!(frame.grid.get(2, 2).expect("narrow private cell").symbol, "·");
+    assert_eq!(frame.grid.get(3, 2).expect("adjacent private cell").symbol, "a");
+    assert!(!frame.grid.get(3, 2).unwrap().continuation);
     assert_eq!(frame.grid.get(6, 2).expect("outside right").symbol, " ");
     assert!(frame.cursor.is_some_and(|(x, y, _)| (x, y) == (5, 2)));
 
@@ -4357,6 +4402,21 @@ fn indent_guides_inside_a_multiline_string_keep_the_guide_colour() {
 }
 
 #[test]
+fn ellipsized_text_reserves_the_measured_ellipsis_width() {
+    use crate::config::AmbiguousWidth::{Narrow, Wide};
+    for policy in [Narrow, Wide] {
+        for maximum in 0..8 {
+            let text = super::surfaces::ellipsized("abcdef", maximum, policy);
+            assert!(crate::ui::geometry::text_width(&text, policy) <= maximum);
+        }
+    }
+    assert_eq!(super::surfaces::ellipsized("abcdef", 4, Wide), "ab…");
+    assert_eq!(super::surfaces::ellipsized("abcdef", 1, Wide), "");
+    assert_eq!(super::surfaces::ellipsized("abcdef", 2, Wide), "…");
+    assert_eq!(super::surfaces::ellipsized("abcdef", 4, Narrow), "abc…");
+}
+
+#[test]
 fn a_long_path_in_a_picker_row_keeps_its_end() {
     let ambiguous = crate::config::load_bundled_config()
         .config
@@ -4724,6 +4784,62 @@ fn diff_tabs_and_combining_marks_keep_text_and_emphasis_aligned() {
     assert!(!(0..30).any(|row| frame.grid.row_text(row).contains('◌')));
 }
 
+fn tool_menu_for_render() -> super::ToolMenuState {
+    super::ToolMenuState {
+        category: "lsp".into(), selected: 0, scroll: 0, query: String::new(), searching: false,
+        runtime_picker: None,
+        rows: vec![super::ToolMenuRow {
+            id: "rust-analyzer".into(), name: "Rust Analyzer".into(), kind: "lsp".into(),
+            languages: "rust".into(), version: String::new(), release: String::new(),
+            runtime: "PATH".into(), lifecycle: "not working".into(), session_state: String::new(),
+            executable: "/bin/rust-analyzer".into(), note: "Version probe failed".into(), sessions: Vec::new(),
+            lsp: true, installed: true, can_start: true, can_install: false, can_uninstall: false, update: None,
+        }],
+    }
+}
+
+#[test]
+fn tool_menu_title_and_wide_categories_stay_inside_the_modal() {
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.ambiguous_width = crate::config::AmbiguousWidth::Wide;
+    config.ui.tool_manager.categories.insert("all".into(), "语言".into());
+    config.ui.tool_manager.categories.insert("lsp".into(), "服务".into());
+    config.ui.tool_manager.categories.insert("dap".into(), "界".repeat(100));
+    let mut menu = tool_menu_for_render();
+    menu.query = "q".repeat(200);
+    let mut frame = super::Frame { grid: crate::ui::CellGrid::new_with_policy(100, 30, "�", "◌", true), cursor: None };
+    super::surfaces::render_tool_menu(&mut frame, &menu, &config, 100, 30);
+    // The 82-column modal begins at x=9 and ends at x=90.
+    assert_eq!(frame.grid.get(90, 2).unwrap().symbol, "+");
+    assert_eq!(frame.grid.get(91, 2).unwrap().symbol, " ");
+    assert_eq!(frame.grid.get(11, 5).unwrap().symbol, " ");
+    assert_eq!(frame.grid.get(12, 5).unwrap().symbol, "语");
+    assert_eq!(frame.grid.get(18, 5).unwrap().symbol, " ");
+    assert_eq!(frame.grid.get(19, 5).unwrap().symbol, "服");
+    assert_eq!(frame.grid.get(90, 5).unwrap().symbol, "|");
+    assert_eq!(frame.grid.get(91, 5).unwrap().symbol, " ");
+    for x in 9..=90 {
+        assert!(!frame.grid.get(x, 26).unwrap().continuation);
+        assert_eq!(frame.grid.get(x, 26).unwrap().symbol, if x == 9 || x == 90 { "+" } else { "-" });
+    }
+}
+
+#[test]
+fn tool_menu_failed_probe_offers_start_instead_of_stop_and_restart() {
+    let config = crate::config::load_bundled_config().config;
+    let mut menu = tool_menu_for_render();
+    for can_start in [true, false] {
+        menu.rows[0].can_start = can_start;
+        let mut frame = super::Frame { grid: crate::ui::CellGrid::new(120, 40), cursor: None };
+        super::surfaces::render_tool_menu(&mut frame, &menu, &config, 120, 40);
+        let screen = (0..40).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>().join("\n");
+        assert!(screen.contains("not working"));
+        assert!(screen.contains(if can_start { "Enter start" } else { "open a matching file to start" }));
+        assert!(!screen.contains("x stop"));
+        assert!(!screen.contains("R restart"));
+    }
+}
+
 #[test]
 fn runtime_picker_keeps_selection_visible_when_navigation_used_a_taller_screen() {
     let loaded = crate::config::load_bundled_config();
@@ -4762,6 +4878,12 @@ fn runtime_picker_keeps_selection_visible_when_navigation_used_a_taller_screen()
     };
     super::surfaces::render_tool_menu(&mut frame, &menu, &loaded.config, 80, 24);
     assert!((0..24).any(|y| frame.grid.row_text(y).contains("VERSION5")));
+    for height in 6..=10 {
+        let mut frame = super::Frame { grid: crate::ui::CellGrid::new(80, height), cursor: None };
+        super::surfaces::render_tool_menu(&mut frame, &menu, &loaded.config, 80, height);
+        assert!((0..height).any(|y| frame.grid.row_text(y).contains("Resize to choose a build")));
+        assert!(!(0..height).any(|y| frame.grid.row_text(y).contains("VERSION5")));
+    }
 }
 
 #[test]

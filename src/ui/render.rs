@@ -568,6 +568,60 @@ pub struct PickerTextPreview {
     pub highlight_line: Option<usize>,
     /// The language the lines are coloured as, when the previewed file has a grammar.
     pub language: Option<crate::language::syntax::SyntaxLanguage>,
+    spans: Vec<Vec<(std::ops::Range<usize>, crate::language::syntax::Highlight)>>,
+}
+
+impl PickerTextPreview {
+    #[must_use]
+    pub fn new(
+        lines: Vec<String>,
+        first_line: usize,
+        highlight_line: Option<usize>,
+        language: Option<crate::language::syntax::SyntaxLanguage>,
+    ) -> Self {
+        let mut preview = Self { lines, first_line, highlight_line, language, spans: Vec::new() };
+        preview.prepare_highlighting();
+        preview
+    }
+
+    pub(crate) fn prepare_highlighting(&mut self) {
+        self.spans.clear();
+        let Some(language) = self.language else { return };
+        if self.lines.iter().map(|line| line.len().saturating_add(1)).sum::<usize>() > 512 * 1024 {
+            return;
+        }
+        let source = self.lines.join("\n");
+        let mut spans = crate::language::syntax::highlight(language, &source);
+        spans.sort_by_key(|span| (span.start, std::cmp::Reverse(span.end)));
+        let mut per_line = vec![Vec::new(); self.lines.len()];
+        let mut line = 0;
+        let mut line_start = 0;
+        let mut covered = 0;
+        for span in spans {
+            if span.start < covered || span.start >= span.end {
+                continue;
+            }
+            covered = span.end;
+            let mut start = span.start;
+            while start < span.end && line < self.lines.len() {
+                let line_end = line_start + self.lines[line].len();
+                if start > line_end {
+                    line_start = line_end + 1;
+                    line += 1;
+                    continue;
+                }
+                let end = span.end.min(line_end);
+                if start < end {
+                    per_line[line].push((start - line_start..end - line_start, span.role));
+                }
+                if span.end <= line_end {
+                    break;
+                }
+                start = line_end + 1;
+            }
+        }
+        self.spans = per_line;
+    }
 }
 
 /// How a diff line relates to the comparison.

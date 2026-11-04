@@ -168,7 +168,20 @@ impl CellGrid {
         }
         let safe = self.sanitize_grapheme(symbol);
         let display_width = self.display_width(&safe).clamp(1, 2);
-        if x.saturating_add(u16::try_from(display_width).unwrap_or(1)) > self.width {
+        self.set_cell_with_width(x, y, &safe, style, display_width);
+    }
+
+    /// Write a validated cell whose column width is owned by its source protocol.
+    pub(crate) fn set_cell_with_width(
+        &mut self,
+        x: u16,
+        y: u16,
+        symbol: &str,
+        style: Style,
+        display_width: usize,
+    ) {
+        let display_width = display_width.clamp(1, 2);
+        if y >= self.height || x.saturating_add(display_width as u16) > self.width {
             return;
         }
         let index = self.index(x, y);
@@ -186,7 +199,7 @@ impl CellGrid {
             }
         }
         self.cells[index] = Cell {
-            symbol: safe,
+            symbol: symbol.into(),
             style,
             continuation: false,
         };
@@ -263,6 +276,18 @@ impl CellGrid {
         }
     }
 
+    pub(crate) fn border_glyphs(
+        &self,
+        style: crate::config::BorderStyle,
+    ) -> (char, char, char, char, char, char) {
+        let glyphs = style.glyphs();
+        if self.display_width(&glyphs.0.to_string()) == 1 {
+            glyphs
+        } else {
+            ('-', '|', '+', '+', '+', '+')
+        }
+    }
+
     pub(crate) fn confirmation_grapheme(&self, grapheme: &str) -> String {
         if grapheme == "\t" {
             "\\t".into()
@@ -312,6 +337,20 @@ mod tests {
         wide.put_text(0, 0, "·x", Style::Default);
         assert!(wide.get(1, 0).expect("ambiguous continuation").continuation);
         assert_eq!(wide.get(2, 0).expect("following cell").symbol, "x");
+    }
+
+    #[test]
+    fn border_glyphs_fit_one_column_under_both_width_policies() {
+        for wide in [false, true] {
+            let grid = CellGrid::new_with_policy(8, 1, "�", "◌", wide);
+            for style in [crate::config::BorderStyle::Single, crate::config::BorderStyle::Double, crate::config::BorderStyle::Rounded] {
+                let (h, v, tl, tr, bl, br) = grid.border_glyphs(style);
+                for glyph in [h, v, tl, tr, bl, br] {
+                    assert_eq!(grid.display_width(&glyph.to_string()), 1);
+                }
+                assert_eq!(h, if wide { '-' } else { style.glyphs().0 });
+            }
+        }
     }
 
     #[test]

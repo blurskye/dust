@@ -22,7 +22,6 @@ pub(crate) const KEY_HINT_MAX_WIDTH: u16 = 96;
 pub(crate) const KEY_HINT_PADDING: u16 = 1;
 pub(crate) const KEY_HINT_COLUMN_GAP: u16 = 2;
 pub(crate) const KEY_HINT_FALLBACK_LABEL: &str = "Action";
-pub(crate) const TERMINAL_PANEL_DIVIDER: &str = "─";
 pub(crate) const TERMINAL_TAB_SEPARATOR: &str = " │ ";
 pub(crate) const TERMINAL_NORMAL_LABEL: &str = "NORMAL";
 pub(crate) const TERMINAL_VISUAL_LABEL: &str = "VISUAL";
@@ -149,7 +148,8 @@ pub(super) fn dock_terminal_panel(
                 continue;
             };
             if !cell.continuation {
-                grid.set_cell(x, y, &cell.symbol, cell.style);
+                let cell_width = if workspace.grid.get(x + 1, y).is_some_and(|next| next.continuation) { 2 } else { 1 };
+                grid.set_cell_with_width(x, y, &cell.symbol, cell.style, cell_width);
             }
         }
     }
@@ -160,19 +160,20 @@ pub(super) fn dock_terminal_panel(
             grid.set_cell(x, y, " ", Style::TerminalBackground);
         }
     }
+    let (horizontal, vertical, top_left, _, _, _) = grid.border_glyphs(crate::config::BorderStyle::Single);
     for x in geometry.x..right {
         grid.set_cell(
             x,
             geometry.top,
-            TERMINAL_PANEL_DIVIDER,
+            &horizontal.to_string(),
             Style::TerminalBorder,
         );
     }
     if geometry.left_border {
         let x = geometry.x.saturating_sub(1);
         for y in geometry.top..bottom {
-            let symbol = if y == geometry.top { "┌" } else { "│" };
-            grid.set_cell(x, y, symbol, Style::TerminalBorder);
+            let symbol = if y == geometry.top { top_left } else { vertical };
+            grid.set_cell(x, y, &symbol.to_string(), Style::TerminalBorder);
         }
     }
     let mut title_x = geometry.x.saturating_add(1);
@@ -346,7 +347,7 @@ pub(super) fn render_key_hints(
         }
     }
     let (horizontal, vertical, top_left, top_right, bottom_left, bottom_right) =
-        crate::config::BorderStyle::Rounded.glyphs();
+        frame.grid.border_glyphs(crate::config::BorderStyle::Rounded);
     for x in left.saturating_add(1)..right.saturating_sub(1) {
         frame
             .grid
