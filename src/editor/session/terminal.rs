@@ -1288,6 +1288,38 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn real_pty_stream_failure_reports_incomplete_output_instead_of_exit_status_or_unknown() {
+        let (root, workspace, mut session) = fixture();
+        let pty = session.service.open(PtyRequest {
+            program: "/bin/sh".into(), argv0: None,
+            arguments: vec!["-c".into(), "printf 123456789".into()],
+            cwd: root.path().into(), environment: BTreeMap::new(),
+            columns: 10, rows: 4, root_revision: workspace.root_revision(),
+            policy: PtyPolicy { maximum_output_bytes: 4, ..PtyPolicy::default() },
+        }).unwrap();
+        session.tabs.get_mut(&PtyId(1)).unwrap().pty = Some(pty);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut updates = Vec::new();
+        while !session.tabs[&PtyId(1)].io_complete {
+            updates.extend(session.drain(&workspace, |_| None));
+            assert!(std::time::Instant::now() < deadline, "{updates:?}");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let message = "PTY output limit exceeded; stream is incomplete";
+        assert!(updates.contains(&TerminalUpdate::IoComplete(PtyId(1))));
+        assert!(updates.contains(&TerminalUpdate::Failed(PtyId(1), message.into())));
+        let tab = &session.tabs[&PtyId(1)];
+        assert_eq!(tab.failure.as_deref(), Some(message));
+        assert!(tab.exited);
+        assert!(tab.unknown.is_none());
+        let panel = session.projection(PtyId(1), true, 4).unwrap();
+        assert!(panel.truncated);
+        assert_eq!(panel.tabs[0].phase, crate::ui::TerminalPhase::Failed);
+        assert_eq!(session.descriptions()[0].2, ContentLifecycle::Failed);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn terminal_replies_wait_for_input_capacity_and_retry_failed_submissions() {
         let (root, workspace, mut session) = fixture();
         launch_shell(root.path(), &workspace, &mut session);

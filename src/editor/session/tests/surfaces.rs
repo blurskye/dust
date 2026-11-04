@@ -220,10 +220,18 @@ fn dashboard_and_picker_are_stable_graph_overlays_with_projected_geometry() {
 #[test]
 fn notifications_expire_but_remain_available_in_bounded_history() {
     let mut app = app();
+    let clock = std::sync::Arc::new(crate::clock::ManualClock::new(
+        std::time::UNIX_EPOCH, Instant::now(),
+    ));
+    app.clock = clock.clone();
     app.notify_message("first".into(), false);
     app.update_notification_timer();
     app.notify_message("second".into(), true);
     app.update_notification_timer();
+    assert_eq!(app.ui.notification.as_deref(), Some("second"));
+    clock.advance(Duration::from_secs(5));
+    app.update_notification_timer();
+    assert!(app.ui.notification.is_none());
     app.invoke_mapped_command("application.notifications.open");
     let picker = app.ui.picker.as_ref().expect("notification history");
     assert_eq!(picker.title, "Notifications");
@@ -231,6 +239,16 @@ fn notifications_expire_but_remain_available_in_bounded_history() {
     assert_eq!(picker.rows[0].label, "second");
     assert_eq!(picker.rows[0].detail, "error");
     assert_eq!(picker.rows[1].label, "first");
+
+    app.close_picker();
+    for index in 0..205 {
+        app.notify_message(format!("notice {index}"), false);
+    }
+    app.invoke_mapped_command("application.notifications.open");
+    let picker = app.ui.picker.as_ref().expect("bounded notification history");
+    assert_eq!(picker.rows.len(), 200);
+    assert_eq!(picker.rows.first().unwrap().label, "notice 204");
+    assert_eq!(picker.rows.last().unwrap().label, "notice 5");
 }
 
 #[test]
@@ -762,6 +780,13 @@ fn accepted_virtual_snapshot_publishes_through_the_tiled_editor_bridge() {
     );
     *app.state = draft.accept(&app.state.version()).unwrap();
     app.reconcile_editor_windows();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), refresh.text);
+    assert_eq!(app.state.buffers[buffer].origin, crate::editor::BufferOrigin::VirtualReadOnly {
+        owner: refresh.plugin.clone(),
+        generation: refresh.load.0,
+        document: refresh.document,
+        revision: refresh.revision,
+    });
     assert_eq!(
         (app.state.active_view, app.window_session.graph().focused()),
         ids
@@ -1116,14 +1141,17 @@ fn virtual_read_only_origin_never_queues_save_reload_or_recovery_io() {
         document: 9,
         revision: 1,
     };
-    let before = app.documents.legacy_count();
-    app.start_save(
-        false,
-        Some(app.state.workspace_root.join("forbidden")),
-        false,
-    );
+    let path = app.state.workspace_root.join("forbidden");
+    fs::write(&path, b"unchanged").unwrap();
+    app.state.buffers[buffer].path = Some(path.clone());
+    let before = app.documents.pending_count();
+    app.start_save(false, Some(path.clone()), false);
+    assert_eq!(app.documents.pending_count(), before);
     app.start_reload(true);
-    assert_eq!(app.documents.legacy_count(), before);
+    assert_eq!(app.documents.pending_count(), before);
+    wait_vfs(&mut app);
+    assert_eq!(fs::read(&path).unwrap(), b"unchanged");
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "virtual");
     app.state.buffers[buffer].dirty = true;
     {
         let mut fixture = app.configuration.fixture_snapshot();
@@ -1140,13 +1168,21 @@ fn virtual_read_only_origin_never_queues_save_reload_or_recovery_io() {
 
 #[test]
 fn configured_file_format_policy_is_applied_at_save_boundary() {
+    let mut app = app();
+    let mut fixture = app.configuration.fixture_snapshot();
+    fixture.settings.editor.line_endings = crate::config::LineEndingPolicy::Lf;
+    fixture.settings.editor.final_newline = crate::config::FinalNewlinePolicy::Insert;
+    app.configuration.install_fixture(fixture);
     let text = crate::editor::text::TextBuffer::from_bytes(b"a\r\nb").expect("CRLF text");
-    let configured = crate::config::EditorConfig {
-        line_endings: crate::config::LineEndingPolicy::Lf,
-        final_newline: crate::config::FinalNewlinePolicy::Insert,
-        ..crate::config::EditorConfig::default()
-    };
-    assert_eq!(super::configured_file_bytes(&text, &configured), b"a\nb\n");
+    let (buffer, _) = app.state.open_text(text, None);
+    app.set_dashboard_visibility(false);
+    let path = app.state.workspace_root.join("formatted.txt");
+    app.start_save(false, Some(path.clone()), false);
+    assert_eq!(app.documents.pending_count(), 1);
+    wait_vfs(&mut app);
+    assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
+    assert!(!app.state.buffers[buffer].dirty);
+    assert_eq!(fs::read(path).unwrap(), b"a\nb\n");
 }
 
 #[test]
@@ -4716,7 +4752,7 @@ fn terminal_preflight_close_and_capture_keep_original_pty_and_geometry() {
 
 #[cfg(unix)]
 #[test]
-fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
+fn real_pty_reports_nonzero_exit_and_shared_deadline_unknown_distinctly() {
     use super::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.terminals.profiles.insert(
@@ -4752,6 +4788,8 @@ fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
         Some(crate::ui::TerminalPhase::Failed)
     );
     assert_eq!(driver.terminal_exit_code(), Some(7));
+    assert!(!driver.projection().terminal_panel.as_ref().unwrap().truncated);
+    assert!(driver.notification().is_some_and(|message| message.contains("status Some(7)")));
 
     loaded.config.terminals.profiles.insert(
         "stale-close".into(),
@@ -4759,7 +4797,7 @@ fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
             program: "/bin/sh".into(),
             arguments: vec![
                 "-c".into(),
-                "i=0; while [ $i -lt 100000 ]; do i=$((i+1)); done; exit 7".into(),
+                "read -r release; exit 7".into(),
             ],
             cwd: None,
             environment: Default::default(),
@@ -4780,6 +4818,7 @@ fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
         thread::sleep(Duration::from_millis(2));
     }
     stale.terminal_begin_close();
+    stale.terminal_send("release\n");
     while stale.terminal_phase() != Some(crate::ui::TerminalPhase::Failed) {
         stale.pump_terminal();
         assert!(Instant::now() < deadline);
@@ -5336,15 +5375,16 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
     assert_eq!(app.persistence.recent_files()[0], live);
 }
 
-#[test]
-fn a_stop_fills_the_panes_and_makes_room_for_them_without_opening_anything() {
-    use super::driver::TestSession;
+fn logging_adapter_fixture(
+    request: crate::config::DebugRequestKind,
+) -> (tempfile::TempDir, PathBuf, super::driver::TestSession) {
     let files = tempfile::tempdir().unwrap();
     let adapter = files.path().join("logging-adapter.py");
+    // The adapter runs in the workspace, not in the fixture directory.
     let log_path = files.path().join("requests.log");
     let source = crate::debugger::TEST_LOGGING_ADAPTER
         .replace("'requests.log'", &serde_json::to_string(&log_path).unwrap());
-    std::fs::write(&adapter, source).unwrap();
+    fs::write(&adapter, source).unwrap();
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.debug.adapters.insert(
         "logging".into(),
@@ -5354,22 +5394,34 @@ fn a_stop_fills_the_panes_and_makes_room_for_them_without_opening_anything() {
             environment: Default::default(),
         },
     );
+    let attach = matches!(request, crate::config::DebugRequestKind::Attach);
     loaded.config.debug.sessions.insert(
-        "logging".into(),
+        if attach { "attached" } else { "logging" }.into(),
         crate::config::DebugSessionConfig {
-            adapter: "logging".into(),
-            request: crate::config::DebugRequestKind::Launch,
-            cwd: None,
-            program: Some("debuggee".into()),
+            adapter: "logging".into(), request, cwd: None,
+            program: (!attach).then(|| "debuggee".into()),
             run_in_terminal_profile: None,
-            arguments: Default::default(),
+            arguments: if attach {
+                BTreeMap::from([("processId".into(), serde_json::json!(4242))])
+            } else {
+                BTreeMap::new()
+            },
             path_maps: Default::default(),
         },
     );
-    let mut driver = TestSession::new(loaded);
+    let mut driver = super::driver::TestSession::new(loaded);
     driver.new_buffer();
-    driver.debug_program_fixture();
+    if !attach {
+        driver.debug_program_fixture();
+    }
     driver.trust_owned_terminal_fixture();
+    (files, log_path, driver)
+}
+
+#[test]
+fn a_stop_fills_the_panes_and_makes_room_for_them_without_opening_anything() {
+    use super::driver::TestSession;
+    let (_files, _log_path, mut driver) = logging_adapter_fixture(crate::config::DebugRequestKind::Launch);
     driver.resize(120, 40);
     let tiled = |driver: &TestSession| {
         driver
@@ -5426,40 +5478,7 @@ fn hiding_an_inspector_sends_no_disconnect_and_leaves_the_session_running() {
     // The stronger half is MEASURED: the adapter itself records every request it receives, so the
     // test can show that hiding sent no disconnect and no terminate, which "still looks alive"
     // could never distinguish.
-    use super::driver::TestSession;
-    let files = tempfile::tempdir().unwrap();
-    let adapter = files.path().join("logging-adapter.py");
-    // The adapter runs with the WORKSPACE as its working directory, so the log path is written
-    // into the script as an absolute path rather than left relative.
-    let log_path = files.path().join("requests.log");
-    let source = crate::debugger::TEST_LOGGING_ADAPTER
-        .replace("'requests.log'", &serde_json::to_string(&log_path).unwrap());
-    std::fs::write(&adapter, source).unwrap();
-    let mut loaded = crate::config::load_bundled_config();
-    loaded.config.debug.adapters.insert(
-        "logging".into(),
-        crate::config::DebugAdapterConfig {
-            program: crate::debugger::test_python(),
-            arguments: vec!["-u".into(), adapter.display().to_string()],
-            environment: Default::default(),
-        },
-    );
-    loaded.config.debug.sessions.insert(
-        "logging".into(),
-        crate::config::DebugSessionConfig {
-            adapter: "logging".into(),
-            request: crate::config::DebugRequestKind::Launch,
-            cwd: None,
-            program: Some("debuggee".into()),
-            run_in_terminal_profile: None,
-            arguments: Default::default(),
-            path_maps: Default::default(),
-        },
-    );
-    let mut driver = TestSession::new(loaded);
-    driver.new_buffer();
-    driver.debug_program_fixture();
-    driver.trust_owned_terminal_fixture();
+    let (_files, log_path, mut driver) = logging_adapter_fixture(crate::config::DebugRequestKind::Launch);
 
     // The start sequence the passing debugger test uses: start, then PUMP until the adapter's
     // answer arrives as a picker.
@@ -5505,41 +5524,7 @@ fn hiding_an_inspector_sends_no_disconnect_and_leaves_the_session_running() {
 
 #[test]
 fn a_started_session_makes_the_debug_arrangement_appear_with_its_own_identity() {
-    // A layout that renders correctly when handed a state is not implemented until something shows
-    // it APPEARS when its trigger happens. This starts a real session through the app driver and
-    // asserts the projected panes are present and carry the session's OWN identity.
-    use super::driver::TestSession;
-    let files = tempfile::tempdir().unwrap();
-    let adapter = files.path().join("logging-adapter.py");
-    let log_path = files.path().join("requests.log");
-    let source = crate::debugger::TEST_LOGGING_ADAPTER
-        .replace("'requests.log'", &serde_json::to_string(&log_path).unwrap());
-    std::fs::write(&adapter, source).unwrap();
-    let mut loaded = crate::config::load_bundled_config();
-    loaded.config.debug.adapters.insert(
-        "logging".into(),
-        crate::config::DebugAdapterConfig {
-            program: crate::debugger::test_python(),
-            arguments: vec!["-u".into(), adapter.display().to_string()],
-            environment: Default::default(),
-        },
-    );
-    loaded.config.debug.sessions.insert(
-        "logging".into(),
-        crate::config::DebugSessionConfig {
-            adapter: "logging".into(),
-            request: crate::config::DebugRequestKind::Launch,
-            cwd: None,
-            program: Some("debuggee".into()),
-            run_in_terminal_profile: None,
-            arguments: Default::default(),
-            path_maps: Default::default(),
-        },
-    );
-    let mut driver = TestSession::new(loaded);
-    driver.new_buffer();
-    driver.debug_program_fixture();
-    driver.trust_owned_terminal_fixture();
+    let (_files, _log_path, mut driver) = logging_adapter_fixture(crate::config::DebugRequestKind::Launch);
 
     assert!(
         driver.application().ui.debug_panes.is_none(),
@@ -5614,40 +5599,7 @@ fn an_attached_session_names_the_target_it_was_given_in_its_status() {
     // W-24's residual: the attach status was wired but unasserted. The launch counter-case lives
     // in `a_started_session_makes_the_debug_arrangement_appear_with_its_own_identity`, so a single
     // branch cannot satisfy both.
-    use super::driver::TestSession;
-    let files = tempfile::tempdir().unwrap();
-    let adapter = files.path().join("logging-adapter.py");
-    let log_path = files.path().join("requests.log");
-    let source = crate::debugger::TEST_LOGGING_ADAPTER
-        .replace("'requests.log'", &serde_json::to_string(&log_path).unwrap());
-    std::fs::write(&adapter, source).unwrap();
-    let mut loaded = crate::config::load_bundled_config();
-    loaded.config.debug.adapters.insert(
-        "logging".into(),
-        crate::config::DebugAdapterConfig {
-            program: crate::debugger::test_python(),
-            arguments: vec!["-u".into(), adapter.display().to_string()],
-            environment: Default::default(),
-        },
-    );
-    loaded.config.debug.sessions.insert(
-        "attached".into(),
-        crate::config::DebugSessionConfig {
-            adapter: "logging".into(),
-            request: crate::config::DebugRequestKind::Attach,
-            cwd: None,
-            program: None,
-            run_in_terminal_profile: None,
-            arguments: std::collections::BTreeMap::from([(
-                "processId".into(),
-                serde_json::json!(4242),
-            )]),
-            path_maps: Default::default(),
-        },
-    );
-    let mut driver = TestSession::new(loaded);
-    driver.new_buffer();
-    driver.trust_owned_terminal_fixture();
+    let (_files, _log_path, mut driver) = logging_adapter_fixture(crate::config::DebugRequestKind::Attach);
     driver.debug_start("attached");
     driver.open_debug_threads_after_stop();
 

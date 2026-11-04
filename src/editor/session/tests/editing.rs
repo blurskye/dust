@@ -2,24 +2,32 @@ use super::*;
 
 #[test]
 fn first_frame_renders_before_startup_file_is_queued_and_vfs_then_opens_it() {
-    let mut app = app();
-    let path = app.state.workspace_root.join("startup.txt");
+    let root = tempdir().unwrap();
+    let state = tempdir().unwrap();
+    let path = root.path().join("startup.txt");
     fs::write(&path, b"startup\n").expect("startup file");
-    app.set_dashboard_visibility(false);
-    app.documents.enqueue_startup_fixture(path.clone(), true);
-    let frame = crate::ui::render(
-        &app.state,
-        &app.ui,
-        app.configuration.settings(),
-        app.configuration.dashboard(),
-        80,
-        24,
-    );
-    assert_eq!(frame.grid.width(), 80);
-    assert_eq!(app.documents.legacy_count(), 0);
-    assert!(app.state.buffers.is_empty());
-
-    app.queue_startup_reads();
+    let mut app = InteractiveApplication::new(
+        StartupTarget::File {
+            workspace_root: root.path().into(), path: path.clone(), additional_files: Vec::new(),
+        },
+        crate::config::load_bundled_config(), false, state.path().into(), false, false,
+        std::sync::Arc::new(crate::clock::SystemClock),
+    ).unwrap();
+    app.window_session.observe_size((80, 24));
+    assert!(app.documents.has_startup_work());
+    assert!(!app.ui.dashboard);
+    // This is the same draw/admission boundary used by run_interactive.
+    let painted = app.draw_before_startup_reads(|app| {
+        assert_eq!(app.documents.pending_count(), 0);
+        assert!(app.state.buffers.is_empty());
+        let frame = crate::ui::render(
+            &app.state, &app.ui, app.configuration.settings(),
+            app.configuration.dashboard(), 80, 24,
+        );
+        assert_eq!(frame.grid.width(), 80);
+        Ok(true)
+    }).unwrap();
+    assert!(painted);
     assert_eq!(app.documents.startup_pending(), 1);
     wait_vfs(&mut app);
     let buffer = app.state.active_buffer_id().expect("startup buffer");
@@ -63,18 +71,10 @@ fn deferred_startup_additional_files_restore_the_primary_buffer() {
 fn path_completion_is_bounded_async_and_rejects_stale_generations() {
     let mut app = app();
     fs::write(app.state.workspace_root.join("alpha.txt"), b"a").expect("alpha");
-    app.open_prompt(crate::ui::PromptKind::Command, "e a".into());
     wait_vfs(&mut app);
-    assert!(
-        app.ui
-            .prompt
-            .as_ref()
-            .expect("prompt")
-            .completions
-            .iter()
-            .any(|item| item.label == "alpha.txt")
-    );
-
+    app.open_prompt(crate::ui::PromptKind::Command, "e a".into());
+    assert_eq!(app.documents.pending_count(), 1);
+    // Leave the old listing outstanding while invalidating its query.
     app.prompt_insert("z");
     wait_vfs(&mut app);
     assert!(
@@ -85,6 +85,25 @@ fn path_completion_is_bounded_async_and_rejects_stale_generations() {
             .completions
             .is_empty()
     );
+    app.open_prompt(crate::ui::PromptKind::Command, "e a".into());
+    wait_vfs(&mut app);
+    assert!(app.ui.prompt.as_ref().expect("prompt").completions.iter()
+        .any(|item| item.label == "alpha.txt"));
+}
+
+#[test]
+fn path_completion_limits_matching_entries() {
+    use crate::editor::session::input::COMPLETION_LIMIT;
+    let mut app = app();
+    for index in 0..COMPLETION_LIMIT + 10 {
+        fs::write(app.state.workspace_root.join(format!("match-{index:04}.txt")), b"")
+            .expect("completion entry");
+    }
+    app.open_prompt(crate::ui::PromptKind::Command, "e match-".into());
+    wait_vfs(&mut app);
+    let completions = &app.ui.prompt.as_ref().expect("prompt").completions;
+    assert_eq!(completions.len(), COMPLETION_LIMIT);
+    assert!(completions.iter().all(|item| item.label.starts_with("match-")));
 }
 
 #[test]
@@ -140,7 +159,11 @@ fn command_completion_accepts_registry_items_and_preserves_invalid_input() {
     );
     // Enter on a chosen command runs it.
     app.submit_prompt();
-    assert!(app.ui.prompt.is_none(), "the chosen command ran");
+    assert!(app.ui.prompt.is_none());
+    assert!(!app.ui.notification_error);
+    assert!(app.ui.notification.as_deref().is_some_and(|message| {
+        message.starts_with("Dust health —") && message.contains("terminal test")
+    }), "health command result: {:?}", app.ui.notification);
     app.open_prompt(crate::ui::PromptKind::Command, "health-not-real".into());
     app.submit_prompt();
     let prompt = app.ui.prompt.as_ref().expect("invalid prompt stays open");
@@ -260,12 +283,11 @@ fn normalized_blockwise_change_repeats_without_a_stale_selection() {
 #[test]
 fn normalized_block_repeat_pads_new_ragged_and_empty_rows_by_display_column() {
     let mut app = app();
-    app.state.open_text(
-        crate::editor::text::TextBuffer::from_text("abcd\nx\npqrs\n----\ny\n----"),
+    let (buffer, view) = app.state.open_text(
+        crate::editor::text::TextBuffer::from_text("abcd\nx\npqrs\né---\n\n界--"),
         None,
     );
     app.set_dashboard_visibility(false);
-    let view = app.state.active_view.expect("view");
     app.state.views[view].cursor = ByteOffset(10);
     app.state.views[view].mode = crate::editor::EditorMode::VisualBlock;
     app.state.views[view].selection = Some(crate::editor::Selection {
@@ -280,13 +302,15 @@ fn normalized_block_repeat_pads_new_ragged_and_empty_rows_by_display_column() {
     ] {
         app.handle_configured_key(key);
     }
-    app.state.views[view].cursor = ByteOffset(14);
+    // Repeat the two-column block at display column two, after é and one dash.
+    let destination = app.state.buffers[buffer].text.to_string().find("é-").unwrap() + "é-".len();
+    app.state.views[view].cursor = ByteOffset(destination);
     app.state.views[view].selection = None;
     app.handle_configured_key(KeyEvent::character('.'));
     let buffer = app.state.active_buffer_id().expect("buffer");
     assert_eq!(
         app.state.buffers[buffer].text.to_string(),
-        "abZ\nx Z\npqZ\n--Z\ny Z\n--Z"
+        "abZ\nx Z\npqZ\né-Z\n  Z\n界Z"
     );
 }
 
@@ -727,10 +751,7 @@ fn the_line_after_a_final_newline_is_never_a_normal_mode_line() {
 #[test]
 fn tutor_moves_on_when_each_step_is_done() {
     fn press(app: &mut InteractiveApplication, key: &str) {
-        app.handle_event(UiEvent::Key {
-            key: key.parse().unwrap(),
-            kind: crate::ui::KeyInputKind::Press,
-        });
+        self::press(app, key);
         app.tutor_tick();
     }
     fn title(app: &InteractiveApplication) -> String {
@@ -892,12 +913,6 @@ fn tutor_moves_on_when_each_step_is_done() {
 
 #[test]
 fn j_and_k_keep_their_column_across_shorter_lines() {
-    fn press(app: &mut InteractiveApplication, key: &str) {
-        app.handle_event(UiEvent::Key {
-            key: key.parse().unwrap(),
-            kind: crate::ui::KeyInputKind::Press,
-        });
-    }
     let mut app = app();
     app.set_dashboard_visibility(false);
     let (_, view) = app
@@ -913,12 +928,16 @@ fn j_and_k_keep_their_column_across_shorter_lines() {
     assert_eq!(app.state.views[view].cursor, ByteOffset(9));
 }
 
+fn press(app: &mut InteractiveApplication, key: &str) {
+    app.handle_event(UiEvent::Key {
+        key: key.parse().unwrap(),
+        kind: crate::ui::KeyInputKind::Press,
+    });
+}
+
 fn press_keys(app: &mut InteractiveApplication, keys: &[&str]) {
     for key in keys {
-        app.handle_event(UiEvent::Key {
-            key: key.parse().unwrap(),
-            kind: crate::ui::KeyInputKind::Press,
-        });
+        press(app, key);
     }
 }
 

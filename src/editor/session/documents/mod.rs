@@ -14,8 +14,6 @@ use crate::files::{
     CheckedResourceIntent, ExplorerMutation, RecoveryRecord, RequestId, VfsError, VfsResult,
     VfsWorker,
 };
-#[cfg(test)]
-pub(in crate::editor::session) use lifecycle::configured_file_bytes;
 pub(in crate::editor::session) use lifecycle::{
     DocumentChange, DocumentFailure, DocumentView, FileReply, SaveRequest,
 };
