@@ -1022,6 +1022,22 @@ fn highlight_groups_resolve_like_neovim() {
 }
 
 #[test]
+fn theme_defined_language_captures_are_selected_and_inherit_in_other_themes() {
+    use crate::language::syntax::{Highlight, SyntaxLanguage, highlight};
+    // This theme's cache predates the custom group's registration.
+    let fallback = super::themes::bundled_named("dust").unwrap().theme;
+    let expected = fallback.highlight(Highlight::FUNCTION).unwrap().clone();
+    let mut value = serde_json::to_value(&fallback).unwrap();
+    value["highlights"]["@function.rust"] = serde_json::json!({ "fg": "#123456" });
+    let theme: super::ThemeConfig = serde_json::from_value(value).unwrap();
+    let group = Highlight::named("@function.rust").unwrap();
+    let spans = highlight(SyntaxLanguage::Rust, "fn custom() {}\n");
+    assert!(spans.iter().any(|span| span.role == group));
+    assert_eq!(theme.highlight(group).unwrap().foreground, super::ThemeColor::Rgb(0x12, 0x34, 0x56));
+    assert_eq!(fallback.highlight(group), Some(&expected));
+}
+
+#[test]
 fn a_saved_bundled_theme_restores_from_this_build() {
     let (reply, receiver) = std::sync::mpsc::sync_channel(1);
     // Saved by an older build, with a style field that no longer exists.

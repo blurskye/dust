@@ -13,7 +13,8 @@ use std::{
         net::{UnixListener, UnixStream},
     },
     path::{Path, PathBuf},
-    sync::mpsc,
+    net::Shutdown,
+    sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}, mpsc},
     thread,
     time::Duration,
 };
@@ -79,6 +80,9 @@ pub enum RemoteRequest {
 pub struct RemoteServer {
     path: PathBuf,
     requests: mpsc::Receiver<RemoteRequest>,
+    stopping: Arc<AtomicBool>,
+    reading: Arc<Mutex<Option<UnixStream>>>,
+    workers: Vec<thread::JoinHandle<()>>,
 }
 
 impl RemoteServer {
@@ -91,18 +95,36 @@ impl RemoteServer {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
         let (sender, requests) = mpsc::channel();
         let (replies, pending) = mpsc::sync_channel(8);
-        thread::Builder::new()
+        let stopping = Arc::new(AtomicBool::new(false));
+        let reading = Arc::new(Mutex::new(None));
+        let reply_stop = stopping.clone();
+        let reply_worker = thread::Builder::new()
             .name("dust-remote-replies".into())
             .spawn(move || {
-                while let Ok((stream, answer)) = pending.recv() {
-                    // Failed delivery closes the socket and lets the next answer proceed.
-                    let _ = send_reply(stream, answer);
+                while !reply_stop.load(Ordering::Acquire) {
+                    match pending.recv_timeout(Duration::from_millis(100)) {
+                        Ok((stream, answer)) => {
+                            // Failed delivery closes the socket and lets the next answer proceed.
+                            let _ = send_reply(stream, answer);
+                        }
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    }
                 }
             })?;
-        thread::Builder::new()
+        let listener_stop = stopping.clone();
+        let listener_reading = reading.clone();
+        let listener_worker = thread::Builder::new()
             .name("dust-remote".into())
             .spawn(move || {
                 for stream in listener.incoming().flatten() {
+                    {
+                        let mut reading = listener_reading.lock().unwrap();
+                        if listener_stop.load(Ordering::Acquire) {
+                            break;
+                        }
+                        *reading = stream.try_clone().ok();
+                    }
                     // A client that never writes must not hold up the next one.
                     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
                     let Ok(reader) = stream.try_clone() else {
@@ -133,9 +155,19 @@ impl RemoteServer {
                             break;
                         }
                     }
+                    *listener_reading.lock().unwrap() = None;
                 }
-            })?;
-        Ok(Self { path, requests })
+            });
+        let listener_worker = match listener_worker {
+            Ok(worker) => worker,
+            Err(error) => {
+                stopping.store(true, Ordering::Release);
+                let _ = reply_worker.join();
+                let _ = fs::remove_file(&path);
+                return Err(error);
+            }
+        };
+        Ok(Self { path, requests, stopping, reading, workers: vec![listener_worker, reply_worker] })
     }
 
     #[must_use]
@@ -151,6 +183,15 @@ impl RemoteServer {
 
 impl Drop for RemoteServer {
     fn drop(&mut self) {
+        self.stopping.store(true, Ordering::Release);
+        if let Some(stream) = self.reading.lock().unwrap().as_ref() {
+            let _ = stream.shutdown(Shutdown::Both);
+        }
+        // Wake an idle accept; an active read is interrupted by shutdown above.
+        let _ = UnixStream::connect(&self.path);
+        for worker in self.workers.drain(..) {
+            let _ = worker.join();
+        }
         let _ = fs::remove_file(&self.path);
     }
 }
@@ -204,23 +245,28 @@ pub fn ask_agent(server: &Path, request: &Value) -> io::Result<Value> {
 
 /// Ask the Dust at `server` to open `paths`; `line` applies to the first.
 pub fn send(server: &Path, paths: &[PathBuf], line: Option<usize>) -> io::Result<()> {
-    let mut stream = UnixStream::connect(server)?;
     let mut message = String::new();
     for (index, path) in paths.iter().enumerate() {
         let line = if index == 0 { line.unwrap_or(0) } else { 0 };
         let path = std::path::absolute(path)?;
         let encoded =
             serde_json::to_string(path.as_os_str().as_bytes()).map_err(io::Error::other)?;
-        message.push_str(&format!("{line}\t{encoded}\n"));
+        let entry = format!("{line}\t{encoded}\n");
+        if message.len().saturating_add(entry.len()) > REQUEST_BYTE_CEILING as usize {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "remote request exceeds 1 MiB"));
+        }
+        message.push_str(&entry);
     }
+    let mut stream = UnixStream::connect(server)?;
     stream.write_all(message.as_bytes())
 }
 
 /// Write a lazygit config whose edit keys open files in this Dust, and return the
 /// `LG_CONFIG_FILE` value that layers it over the user's own lazygit config.
 pub fn lazygit_config(directory: &Path, dust: &Path) -> io::Result<String> {
-    let program = format!("\"{}\"", dust.display()).replace('\'', "''");
-    let overlay = directory.join("lazygit.yml");
+    let program = format!("'{}'", dust.display().to_string().replace('\'', "'\\''"))
+        .replace('\'', "''");
+    let overlay = directory.join(format!("lazygit-{}.yml", std::process::id()));
     fs::write(
         &overlay,
         format!(
@@ -289,6 +335,75 @@ mod tests {
             ]
         );
         assert!(parse("3\trelative.rs").is_none());
+    }
+
+    #[test]
+    fn dropping_the_server_stops_idle_and_reading_workers() {
+        for active in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let server = RemoteServer::start(directory.path()).unwrap();
+            let workers = Arc::downgrade(&server.stopping);
+            let path = server.path().to_owned();
+            let _client = active.then(|| {
+                let mut stream = UnixStream::connect(&path).unwrap();
+                stream.write_all(b"unfinished").unwrap();
+                let deadline = std::time::Instant::now() + Duration::from_secs(3);
+                while server.reading.lock().unwrap().is_none() {
+                    assert!(std::time::Instant::now() < deadline);
+                    thread::sleep(Duration::from_millis(1));
+                }
+                stream
+            });
+            drop(server);
+            assert!(workers.upgrade().is_none(), "both workers released their stop flag");
+            assert!(!path.exists());
+        }
+    }
+
+    #[test]
+    fn oversized_bulk_requests_are_rejected_before_connecting() {
+        let paths = vec![PathBuf::from(format!("/{}", "a".repeat(1024))); 400];
+        let error = send(Path::new("/no-such-dust.sock"), &paths, None).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn lazygit_commands_quote_shell_paths_separately_from_yaml() {
+        let directory = tempfile::tempdir().unwrap();
+        let dust = directory.path().join("dust '\"$HOME`echo expanded`\\binary");
+        fs::write(&dust, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
+        fs::set_permissions(&dust, fs::Permissions::from_mode(0o700)).unwrap();
+        lazygit_config(directory.path(), &dust).unwrap();
+        let overlay = directory.path().join(format!("lazygit-{}.yml", std::process::id()));
+        let yaml = fs::read_to_string(overlay).unwrap();
+        let command = yaml.lines().find_map(|line| line.trim().strip_prefix("edit: '")).unwrap()
+            .strip_suffix('\'').unwrap().replace("''", "'")
+            .replace("{{filename}}", "sample.rs");
+        let output = std::process::Command::new("sh").args(["-c", &command]).output().unwrap();
+        assert!(output.status.success(), "{:?}", output.stderr);
+        assert_eq!(output.stdout, b"--remote\nsample.rs\n");
+    }
+
+    #[test]
+    fn lazygit_overlays_are_per_process() {
+        const CHILD_DIRECTORY: &str = "DUST_TEST_LAZYGIT_DIRECTORY";
+        if let Some(directory) = std::env::var_os(CHILD_DIRECTORY) {
+            lazygit_config(Path::new(&directory), Path::new("/second/dust")).unwrap();
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        lazygit_config(directory.path(), Path::new("/first/dust")).unwrap();
+        let first = directory.path().join(format!("lazygit-{}.yml", std::process::id()));
+        let original = fs::read_to_string(&first).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "remote::tests::lazygit_overlays_are_per_process"])
+            .env(CHILD_DIRECTORY, directory.path())
+            .status().unwrap();
+        assert!(status.success());
+        let overlays: Vec<_> = fs::read_dir(directory.path()).unwrap().map(Result::unwrap).collect();
+        assert_eq!(overlays.len(), 2);
+        assert_eq!(fs::read_to_string(first).unwrap(), original);
+        assert!(overlays.iter().any(|entry| fs::read_to_string(entry.path()).unwrap().contains("/second/dust")));
     }
 
     #[test]

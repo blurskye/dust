@@ -806,7 +806,7 @@ impl InteractiveApplication {
                     };
                     match self.terminal_session.send(
                         id,
-                        TerminalInput::Mouse(event, column, row, rect),
+                        TerminalInput::Mouse(event, key.modifiers, column, row, rect),
                         &self.workspace,
                     ) {
                         Ok(true) => return,

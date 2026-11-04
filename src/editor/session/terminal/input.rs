@@ -41,9 +41,10 @@ impl TerminalSession {
             TerminalInput::Key(key) => {
                 Some(crate::ui::encode_key(key, tab.screen.application_cursor()).to_vec())
             }
-            TerminalInput::Mouse(event, column, row, rect) => {
+            TerminalInput::Mouse(event, modifiers, column, row, rect) => {
                 crate::ui::encode_terminal_mouse_event(crate::ui::TerminalMouseEncoding {
                     event,
+                    modifiers,
                     column,
                     row,
                     left: rect.x,
@@ -301,6 +302,7 @@ pub(in crate::editor::session) enum TerminalInput<'a> {
     Key(crate::ui::PtyInputKey),
     Mouse(
         crate::editor::input::TerminalMouseInput,
+        crate::editor::input::Modifiers,
         u16,
         u16,
         crate::ui::window::WindowRect,

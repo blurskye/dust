@@ -3,7 +3,7 @@
 //! `ThemeConfig::highlight`.
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::OnceLock,
+    sync::{OnceLock, RwLock},
 };
 
 use serde::Deserialize;
@@ -55,7 +55,7 @@ impl Highlight {
 
     #[must_use]
     pub fn named(name: &str) -> Option<Self> {
-        registry().ids.get(name).copied().map(Self)
+        registry().groups.read().unwrap().ids.get(name).copied().map(Self)
     }
 
     /// The group for a tree-sitter capture: `function.method.call` is `@function.method.call`
@@ -72,6 +72,13 @@ impl Highlight {
         }
     }
 
+    pub(crate) fn register(name: &str) -> Option<Self> {
+        if let Some(group) = Self::named(name) {
+            return Some(group);
+        }
+        registry().groups.write().unwrap().insert(name)
+    }
+
     /// The group for a semantic token type, as Neovim names it.
     #[must_use]
     pub fn for_semantic_token(kind: &str) -> Option<Self> {
@@ -80,7 +87,7 @@ impl Highlight {
 
     #[must_use]
     pub fn name(self) -> &'static str {
-        &registry().names[usize::from(self.0)]
+        registry().groups.read().unwrap().names[usize::from(self.0)]
     }
 
     #[must_use]
@@ -89,7 +96,8 @@ impl Highlight {
     }
 
     pub fn all() -> impl Iterator<Item = Self> {
-        (0..registry().names.len()).map(|index| Self(u16::try_from(index).unwrap_or(u16::MAX)))
+        let count = registry().groups.read().unwrap().names.len();
+        (0..count).map(|index| Self(u16::try_from(index).unwrap_or(u16::MAX)))
     }
 
     /// Neovim's own definition of a group, used when a theme doesn't define it.
@@ -106,9 +114,28 @@ struct DefaultsFile {
 }
 
 struct Registry {
-    names: Vec<String>,
-    ids: HashMap<String, u16>,
+    groups: RwLock<Groups>,
     defaults: BTreeMap<String, HighlightDefinition>,
+}
+
+#[derive(Default)]
+struct Groups {
+    names: Vec<&'static str>,
+    ids: HashMap<&'static str, u16>,
+}
+
+impl Groups {
+    fn insert(&mut self, name: &str) -> Option<Highlight> {
+        if let Some(id) = self.ids.get(name) {
+            return Some(Highlight(*id));
+        }
+        let id = u16::try_from(self.names.len()).ok()?;
+        // IDs and their names live for the process lifetime, bounded by the u16 ID space.
+        let name = Box::leak(name.to_owned().into_boxed_str());
+        self.ids.insert(name, id);
+        self.names.push(name);
+        Some(Highlight(id))
+    }
 }
 
 fn registry() -> &'static Registry {
@@ -116,11 +143,7 @@ fn registry() -> &'static Registry {
     REGISTRY.get_or_init(|| {
         let file: DefaultsFile =
             toml::from_str(DEFAULTS).expect("bundled highlight defaults must remain valid");
-        let mut registry = Registry {
-            names: Vec::new(),
-            ids: HashMap::new(),
-            defaults: BTreeMap::new(),
-        };
+        let mut groups = Groups::default();
         let links = file
             .defaults
             .values()
@@ -131,14 +154,12 @@ fn registry() -> &'static Registry {
             .chain(file.defaults.keys().map(String::as_str))
             .chain(links)
         {
-            if !registry.ids.contains_key(name) {
-                let id = u16::try_from(registry.names.len()).expect("highlight groups fit in u16");
-                registry.ids.insert(name.to_owned(), id);
-                registry.names.push(name.to_owned());
-            }
+            groups.insert(name).expect("highlight groups fit in u16");
         }
-        registry.defaults = file.defaults;
-        registry
+        Registry {
+            groups: RwLock::new(groups),
+            defaults: file.defaults,
+        }
     })
 }
 
